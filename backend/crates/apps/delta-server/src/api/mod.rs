@@ -52,7 +52,7 @@ pub(crate) async fn list_threads(
     Ok(Json(ThreadsResponse { threads }))
 }
 
-/// `GET /api/threads/:id/messages` — a thread's messages for drill-down.
+/// `GET /api/threads/{id}/messages` — a thread's messages for drill-down.
 pub(crate) async fn thread_messages(
     State(state): State<AppState>,
     Path(thread_id): Path<i64>,

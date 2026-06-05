@@ -149,7 +149,7 @@ List the thread tree for the navigator, ordered by creation (ascending `id`).
 
   Returns an empty list when no session is registered.
 
-### `GET /api/threads/:id/messages`
+### `GET /api/threads/{id}/messages`
 
 Return a thread's messages, ordered by `seq`.
 

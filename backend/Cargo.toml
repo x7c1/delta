@@ -20,7 +20,7 @@ delta-wire = { path = "crates/libs/delta-wire" }
 # Shared third-party dependencies
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 portable-pty = "0.8"
 rusqlite = { version = "0.32", features = ["bundled"] }

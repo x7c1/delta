@@ -31,7 +31,7 @@ async fn pump_events(mut socket: WebSocket, state: AppState) {
                         continue;
                     }
                 };
-                if socket.send(Message::Text(payload)).await.is_err() {
+                if socket.send(Message::Text(payload.into())).await.is_err() {
                     break; // client disconnected
                 }
             }

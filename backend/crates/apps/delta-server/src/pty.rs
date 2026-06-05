@@ -87,9 +87,9 @@ async fn run_bridge(socket: WebSocket, pane: String) -> anyhow::Result<()> {
     // Socket -> PTY input.
     let input_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
-            let bytes = match msg {
-                Message::Binary(b) => b,
-                Message::Text(t) => t.into_bytes(),
+            let bytes: Vec<u8> = match msg {
+                Message::Binary(b) => b.into(),
+                Message::Text(t) => t.as_bytes().to_vec(),
                 Message::Close(_) => break,
                 _ => continue,
             };
@@ -101,7 +101,7 @@ async fn run_bridge(socket: WebSocket, pane: String) -> anyhow::Result<()> {
 
     // PTY output -> socket.
     while let Some(chunk) = out_rx.recv().await {
-        if sink.send(Message::Binary(chunk)).await.is_err() {
+        if sink.send(Message::Binary(chunk.into())).await.is_err() {
             break;
         }
     }
