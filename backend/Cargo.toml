@@ -7,3 +7,28 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
 repository = "https://github.com/x7c1/delta"
+
+[workspace.dependencies]
+# Internal crates
+delta-model = { path = "crates/domain/delta-model" }
+delta-usecase = { path = "crates/domain/delta-usecase" }
+delta-sqlite = { path = "crates/gateway/delta-sqlite" }
+delta-transcript = { path = "crates/gateway/delta-transcript" }
+tmux-driver = { path = "crates/gateway/tmux-driver" }
+delta-wire = { path = "crates/libs/delta-wire" }
+
+# Shared third-party dependencies
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.7", features = ["ws"] }
+futures-util = "0.3"
+portable-pty = "0.8"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }

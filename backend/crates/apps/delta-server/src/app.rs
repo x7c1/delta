@@ -1,0 +1,130 @@
+//! Router assembly.
+
+use axum::routing::{get, post};
+use axum::Router;
+
+use crate::hooks;
+use crate::pty;
+use crate::state::AppState;
+use crate::ws;
+
+/// Build the application router with all routes wired to shared state.
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        // Control plane: Claude Code HTTP hooks.
+        .route("/hooks/user-prompt-submit", post(hooks::user_prompt_submit))
+        .route("/hooks/stop", post(hooks::stop))
+        .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
+        // Browser event stream.
+        .route("/ws", get(ws::ws_handler))
+        // Terminal bridge to the tmux pane.
+        .route("/pty", get(pty::pty_handler))
+        .with_state(state)
+}
+
+async fn health() -> &'static str {
+    "ok"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::{to_bytes, Body};
+    use axum::http::{Request, StatusCode};
+    use delta_wire::Config;
+    use tower::ServiceExt;
+
+    fn test_state() -> AppState {
+        AppState::build(&Config {
+            database_path: ":memory:".into(),
+            tmux_pane: "delta:0.0".into(),
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn health_returns_ok() {
+        let response = router(test_state())
+            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn user_prompt_submit_hook_registers_and_responds() {
+        let body = serde_json::json!({
+            "prompt": "hello",
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/does-not-exist.jsonl",
+            "cwd": "/work"
+        })
+        .to_string();
+
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/user-prompt-submit")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        // No pending send queued, so no additionalContext is returned.
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(json.get("additionalContext").is_none());
+    }
+
+    #[tokio::test]
+    async fn pre_tool_use_hook_returns_ok() {
+        let body = serde_json::json!({
+            "session_id": "sess-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"}
+        })
+        .to_string();
+
+        // Register the session first so the foreign key is satisfied.
+        let state = test_state();
+        let app = router(state);
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/user-prompt-submit")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "prompt": "seed",
+                            "session_id": "sess-1",
+                            "transcript_path": "/tmp/none.jsonl",
+                            "cwd": "/work"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/pre-tool-use")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+}
