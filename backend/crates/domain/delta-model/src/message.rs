@@ -3,8 +3,20 @@
 use serde::{Deserialize, Serialize};
 
 use crate::content::ContentBlock;
-use crate::ids::{MessageUuid, PromptId, SessionId, ThreadId};
+use crate::newtype::string_newtype;
 use crate::role::Role;
+use crate::session::SessionId;
+use crate::thread::ThreadId;
+
+string_newtype! {
+    /// A transcript line uuid; the internal handle for a message.
+    MessageUuid
+}
+
+string_newtype! {
+    /// Claude Code's `promptId`, shared by all lines of one turn.
+    PromptId
+}
 
 /// A single message in the reconstructed thread graph.
 ///

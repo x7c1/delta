@@ -1,12 +1,12 @@
-//! Strongly-typed identifiers.
+//! Helper for declaring transparent string newtypes.
 //!
-//! Claude Code assigns each transcript line a `uuid`; Delta uses that uuid as
-//! the internal handle for a message. There is no separate human-readable
-//! sequence layer. Threads are an overlay Delta owns, so their ids are plain
-//! integers issued by the store.
+//! Several identifiers are thin wrappers over Claude Code's string ids and
+//! share the same conversions. Each id is defined alongside the model it
+//! identifies (e.g. `SessionId` in `session`, `MessageUuid` in `message`); this
+//! macro keeps the shared boilerplate in one place rather than repeating it.
 
 /// Declares a transparent string newtype with the common conversions and
-/// `Display`. Each id below lives in its own module and invokes this once.
+/// `Display`.
 macro_rules! string_newtype {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -41,11 +41,4 @@ macro_rules! string_newtype {
     };
 }
 
-mod message_uuid;
-pub use message_uuid::MessageUuid;
-mod prompt_id;
-pub use prompt_id::PromptId;
-mod session_id;
-pub use session_id::SessionId;
-mod thread_id;
-pub use thread_id::ThreadId;
+pub(crate) use string_newtype;

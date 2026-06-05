@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::SessionId;
 use crate::permission_status::PermissionStatus;
+use crate::session::SessionId;
 
 /// A recorded tool-permission request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

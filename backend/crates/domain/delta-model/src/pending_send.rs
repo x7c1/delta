@@ -7,8 +7,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{MessageUuid, SessionId, ThreadId};
+use crate::message::MessageUuid;
 use crate::pending_send_status::PendingSendStatus;
+use crate::session::SessionId;
+use crate::thread::ThreadId;
 
 /// A queued user input awaiting correlation with the transcript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
