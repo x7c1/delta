@@ -1,0 +1,11 @@
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Local env
+.env
+.env.local
+
+# OS / editor
+.DS_Store
