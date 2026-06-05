@@ -100,12 +100,26 @@ pub trait TmuxDriver: Send + Sync {
     async fn send_line(&self, text: &str) -> Result<()>;
 }
 
+#[async_trait]
+impl TmuxDriver for Box<dyn TmuxDriver> {
+    async fn send_line(&self, text: &str) -> Result<()> {
+        (**self).send_line(text).await
+    }
+}
+
 /// Reads and parses the Claude Code JSONL transcript.
 #[async_trait]
 pub trait Transcript: Send + Sync {
     /// Read all currently available lines from the transcript at `path`,
     /// skipping the first `from_seq` lines already seen.
     async fn read_from(&self, path: &str, from_seq: usize) -> Result<Vec<TranscriptMessage>>;
+}
+
+#[async_trait]
+impl Transcript for Box<dyn Transcript> {
+    async fn read_from(&self, path: &str, from_seq: usize) -> Result<Vec<TranscriptMessage>> {
+        (**self).read_from(path, from_seq).await
+    }
 }
 
 /// Persists and queries Delta's thread overlay.
@@ -173,4 +187,89 @@ pub trait SessionStore: Send + Sync {
         tool_name: &str,
         tool_input_json: &str,
     ) -> Result<PermissionRequest>;
+}
+
+#[async_trait]
+impl SessionStore for Box<dyn SessionStore> {
+    async fn register_session(&self, new: NewSession) -> Result<(Session, ThreadId)> {
+        (**self).register_session(new).await
+    }
+
+    async fn current_session(&self) -> Result<Option<Session>> {
+        (**self).current_session().await
+    }
+
+    async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
+        (**self).main_thread_id(session_id).await
+    }
+
+    async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {
+        (**self).thread(id).await
+    }
+
+    async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>> {
+        (**self).list_threads(session_id).await
+    }
+
+    async fn create_thread(
+        &self,
+        session_id: &SessionId,
+        title: &str,
+        parent_thread_id: Option<ThreadId>,
+        root_message_uuid: Option<&MessageUuid>,
+    ) -> Result<Thread> {
+        (**self)
+            .create_thread(session_id, title, parent_thread_id, root_message_uuid)
+            .await
+    }
+
+    async fn enqueue_send(
+        &self,
+        session_id: &SessionId,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+        text: &str,
+        locator_quote: Option<&str>,
+    ) -> Result<PendingSend> {
+        (**self)
+            .enqueue_send(
+                session_id,
+                thread_id,
+                semantic_parent_uuid,
+                text,
+                locator_quote,
+            )
+            .await
+    }
+
+    async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
+        (**self).head_pending_send(session_id).await
+    }
+
+    async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
+        (**self).mark_send_matched(id, matched_uuid).await
+    }
+
+    async fn upsert_messages(&self, messages: &[Message]) -> Result<()> {
+        (**self).upsert_messages(messages).await
+    }
+
+    async fn message_count(&self, session_id: &SessionId) -> Result<usize> {
+        (**self).message_count(session_id).await
+    }
+
+    async fn thread_messages(&self, thread_id: ThreadId) -> Result<Vec<Message>> {
+        (**self).thread_messages(thread_id).await
+    }
+
+    async fn record_permission_request(
+        &self,
+        session_id: &SessionId,
+        tool_name: &str,
+        tool_input_json: &str,
+    ) -> Result<PermissionRequest> {
+        (**self)
+            .record_permission_request(session_id, tool_name, tool_input_json)
+            .await
+    }
 }

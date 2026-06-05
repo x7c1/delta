@@ -24,12 +24,25 @@ impl AppState {
     /// Build the shared state from configuration, wiring the Interactor.
     pub fn build(config: &Config) -> anyhow::Result<Self> {
         let interactor = delta_wire::build(config)?;
+        Ok(Self::from_interactor(
+            interactor,
+            config.tmux_pane.clone(),
+        ))
+    }
+
+    /// Build the shared state from an already-wired Interactor.
+    ///
+    /// The Interactor's gateways are type-erased (see [`AppInteractor`]), so
+    /// integration tests can inject fakes (an in-memory store, a temp-file
+    /// transcript, a no-op tmux driver) and still produce this exact
+    /// [`AppState`] type — no generics leak into the transport layer.
+    pub fn from_interactor(interactor: AppInteractor, tmux_pane: String) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
-        Ok(Self {
+        Self {
             interactor: Arc::new(interactor),
             events,
-            tmux_pane: config.tmux_pane.clone(),
-        })
+            tmux_pane,
+        }
     }
 
     /// The wired Interactor.

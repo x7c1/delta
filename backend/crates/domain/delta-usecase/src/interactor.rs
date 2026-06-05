@@ -9,13 +9,27 @@ use crate::ports::{
 
 /// Holds the injected capabilities and exposes Delta's use cases.
 ///
-/// Generic over the three ports so the composition root can inject concrete
-/// gateway types without boxing. Each method maps to one coherent operation.
+/// Generic over the three ports so callers can inject any implementation. The
+/// composition root and the application share a single concrete type through
+/// the [`BoxedInteractor`] alias, which erases the gateways behind trait
+/// objects; this keeps the transport layer's shared state non-generic while
+/// still allowing tests to substitute fakes.
 pub struct Interactor<T, X, S> {
     tmux: T,
     transcript: X,
     store: S,
 }
+
+/// An [`Interactor`] with its three ports type-erased behind trait objects.
+///
+/// Both the production composition root and integration tests build this exact
+/// type, so the transport layer's shared state stays non-generic regardless of
+/// which gateways are wired in.
+pub type BoxedInteractor = Interactor<
+    Box<dyn TmuxDriver>,
+    Box<dyn Transcript>,
+    Box<dyn SessionStore>,
+>;
 
 impl<T, X, S> Interactor<T, X, S>
 where

@@ -13,7 +13,7 @@ mod interactor;
 mod ports;
 
 pub use error::{Error, Result};
-pub use interactor::Interactor;
+pub use interactor::{BoxedInteractor, Interactor};
 pub use ports::{
     NewSession, SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript,
     TranscriptMessage, UserPromptSubmitHook,

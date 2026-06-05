@@ -20,7 +20,7 @@ pub fn router(state: AppState) -> Router {
         // Browser REST surface: queries and commands.
         .route("/api/session", get(api::get_session))
         .route("/api/threads", get(api::list_threads))
-        .route("/api/threads/{id}/messages", get(api::thread_messages))
+        .route("/api/threads/:id/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
         // Browser event stream.
         .route("/ws", get(ws::ws_handler))

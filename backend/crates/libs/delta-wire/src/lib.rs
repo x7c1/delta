@@ -12,11 +12,15 @@ pub use error::{Error, Result};
 
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::Interactor;
+use delta_usecase::{BoxedInteractor, Interactor};
 use tmux_driver::Tmux;
 
-/// The fully-wired Interactor with Delta's concrete gateways.
-pub type AppInteractor = Interactor<Tmux, JsonlTranscript, SqliteStore>;
+/// The fully-wired Interactor.
+///
+/// The gateways are type-erased behind trait objects so the transport layer's
+/// shared state is a single non-generic type, shared between this production
+/// wiring and the integration tests that substitute fakes.
+pub type AppInteractor = BoxedInteractor;
 
 /// Runtime configuration for the composition root.
 #[derive(Debug, Clone)]
@@ -35,7 +39,11 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
     let store = SqliteStore::open(&config.database_path)?;
     let transcript = JsonlTranscript::new();
     let tmux = Tmux::new(config.tmux_pane.clone());
-    Ok(Interactor::new(tmux, transcript, store))
+    Ok(Interactor::new(
+        Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
+        Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
+        Box::new(store) as Box<dyn delta_usecase::SessionStore>,
+    ))
 }
 
 #[cfg(test)]
