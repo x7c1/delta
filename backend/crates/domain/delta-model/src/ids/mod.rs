@@ -19,11 +19,6 @@ macro_rules! string_newtype {
             pub fn as_str(&self) -> &str {
                 &self.0
             }
-
-            /// Consume into the underlying string.
-            pub fn into_string(self) -> String {
-                self.0
-            }
         }
 
         impl From<String> for $name {

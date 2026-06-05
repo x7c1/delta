@@ -52,7 +52,7 @@ pub(crate) async fn list_threads(
     Ok(Json(ThreadsResponse { threads }))
 }
 
-/// `GET /api/threads/{id}/messages` — a thread's trunk for drill-down.
+/// `GET /api/threads/:id/messages` — a thread's messages for drill-down.
 pub(crate) async fn thread_messages(
     State(state): State<AppState>,
     Path(thread_id): Path<i64>,
@@ -62,7 +62,8 @@ pub(crate) async fn thread_messages(
 }
 
 /// `POST /api/sends` — enqueue a send (a branch send when a semantic parent is
-/// given), broadcasting nothing here: turn confirmation arrives via the hook.
+/// given). No event is broadcast here; turn confirmation arrives later via the
+/// `UserPromptSubmit` hook.
 pub(crate) async fn create_send(
     State(state): State<AppState>,
     Json(req): Json<CreateSendRequest>,

@@ -344,6 +344,21 @@ async fn branch_send_creates_child_thread() {
 }
 
 #[tokio::test]
+async fn enqueue_send_to_unknown_thread_is_thread_not_found() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+
+    // A thread id that was never created (stale/wrong id from the browser).
+    let err = ix
+        .enqueue_send(ThreadId(999), "hello", None, None)
+        .await
+        .expect_err("unknown thread must be rejected");
+    assert!(matches!(err, Error::ThreadNotFound(999)));
+}
+
+#[tokio::test]
 async fn pre_tool_use_records_request_and_notifies() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();

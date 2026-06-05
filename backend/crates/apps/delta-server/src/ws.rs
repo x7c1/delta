@@ -1,8 +1,8 @@
 //! Browser event WebSocket.
 //!
 //! Each connected browser subscribes to the process-wide event stream and
-//! receives JSON-encoded [`SessionEvent`]s: new messages, turn started/
-//! completed, permission requested, and pending-send state changes.
+//! receives JSON-encoded [`SessionEvent`]s: session registered, turn started,
+//! external input, turn completed, and permission requested.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;

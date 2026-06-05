@@ -39,7 +39,7 @@ pub trait SessionStore: Send + Sync {
         root_message_uuid: Option<&MessageUuid>,
     ) -> Result<Thread>;
 
-    /// Enqueue a send into the FIFO and return the created row id.
+    /// Enqueue a send into the FIFO and return the created row.
     async fn enqueue_send(
         &self,
         session_id: &SessionId,
@@ -65,7 +65,7 @@ pub trait SessionStore: Send + Sync {
     /// All messages for a thread, ordered by `seq`.
     async fn thread_messages(&self, thread_id: ThreadId) -> Result<Vec<Message>>;
 
-    /// Record a tool-permission request and return the created row id.
+    /// Record a tool-permission request and return the created row.
     async fn record_permission_request(
         &self,
         session_id: &SessionId,

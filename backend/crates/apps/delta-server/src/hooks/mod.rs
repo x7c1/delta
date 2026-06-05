@@ -61,7 +61,6 @@ pub async fn stop(
     let hook = StopHook {
         session_id: SessionId::from(payload.session_id),
         stop_reason: payload.stop_reason,
-        last_assistant_message: payload.last_assistant_message,
     };
 
     match state.interactor().on_stop(hook).await {

@@ -193,7 +193,8 @@ Response:
   { "send": { /* PendingSend */ } }
   ```
 
-- **404** — no session registered.
+- **404** — no session registered, or no thread (or branch parent thread) with
+  the given `thread_id`.
 
 ## Browser live channels
 
@@ -287,13 +288,12 @@ Request:
 ```json
 {
   "session_id": "sess-1",
-  "stop_reason": null,
-  "last_assistant_message": null
+  "stop_reason": null
 }
 ```
 
-`stop_reason` and `last_assistant_message` are optional. Response: **200 OK**
-with an empty body.
+`stop_reason` is optional. Any additional fields Claude Code sends (such as
+`last_assistant_message`) are ignored. Response: **200 OK** with an empty body.
 
 ### `POST /hooks/pre-tool-use`
 

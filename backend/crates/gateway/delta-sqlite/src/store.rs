@@ -365,6 +365,15 @@ impl SessionStore for SqliteStore {
         let tx = conn.transaction().map_err(Error::from)?;
         for m in messages {
             let content_json = serde_json::to_string(&m.content).unwrap_or_else(|_| "[]".into());
+            // The API contract promises an ISO-8601 `created_at`. A transcript
+            // line may omit its timestamp, which surfaces here as an empty
+            // string; fall back to the ingest time so the stored (and served)
+            // value is always a valid timestamp rather than `""`.
+            let created_at = if m.created_at.is_empty() {
+                now_iso8601()
+            } else {
+                m.created_at.clone()
+            };
             tx.execute(
                 &format!(
                     "INSERT INTO message ({MESSAGE_COLS}) VALUES
@@ -390,7 +399,7 @@ impl SessionStore for SqliteStore {
                     m.seq,
                     m.content_text,
                     content_json,
-                    m.created_at,
+                    created_at,
                 ],
             )
             .map_err(Error::from)?;

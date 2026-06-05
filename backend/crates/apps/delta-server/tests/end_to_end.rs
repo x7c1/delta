@@ -15,7 +15,7 @@
 //! 4. The matching `UserPromptSubmit` hook correlates against the FIFO head:
 //!    the send is marked matched, the locator quote is returned as
 //!    `additionalContext`, and the transcript line is ingested.
-//! 5. `GET /api/threads` and `GET /api/threads/{id}/messages` reflect the
+//! 5. `GET /api/threads` and `GET /api/threads/:id/messages` reflect the
 //!    resulting thread and message state.
 
 use std::io::Write;
@@ -221,7 +221,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     assert_eq!(threads[0]["id"].as_i64(), Some(main_thread_id));
     assert_eq!(threads[0]["title"], "main");
 
-    // GET /api/threads/{id}/messages reflects the ingested, correlated message.
+    // GET /api/threads/:id/messages reflects the ingested, correlated message.
     let (status, body) = get(&app, &format!("/api/threads/{main_thread_id}/messages")).await;
     assert_eq!(status, StatusCode::OK);
     let messages = body["messages"].as_array().expect("messages array");

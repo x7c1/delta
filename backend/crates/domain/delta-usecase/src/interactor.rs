@@ -73,6 +73,13 @@ where
     ) -> Result<PendingSend> {
         let session = self.require_session().await?;
 
+        // The caller-supplied thread must exist: for a plain send it is the
+        // send target, for a branch send it is the parent the new child hangs
+        // off. Validating here turns a stale/wrong id from the browser into a
+        // clean `ThreadNotFound` (404) instead of an opaque foreign-key 500,
+        // matching the read path's behaviour in `thread_view`.
+        self.require_thread(thread_id).await?;
+
         let (target_thread, semantic_parent) = match branch_from {
             Some(parent) => {
                 let thread = self
@@ -235,9 +242,7 @@ where
 
     /// Assemble a thread's transcript view (its messages ordered by `seq`).
     pub async fn thread_view(&self, thread_id: ThreadId) -> Result<Vec<Message>> {
-        if self.store.thread(thread_id).await?.is_none() {
-            return Err(Error::ThreadNotFound(thread_id.value()));
-        }
+        self.require_thread(thread_id).await?;
         self.store.thread_messages(thread_id).await
     }
 
@@ -278,6 +283,15 @@ where
 
     async fn require_session(&self) -> Result<delta_model::Session> {
         self.store.current_session().await?.ok_or(Error::NoSession)
+    }
+
+    /// Ensure a thread exists, turning a stale/wrong id into a clean
+    /// `ThreadNotFound` instead of an opaque foreign-key error downstream.
+    async fn require_thread(&self, thread_id: ThreadId) -> Result<()> {
+        if self.store.thread(thread_id).await?.is_none() {
+            return Err(Error::ThreadNotFound(thread_id.value()));
+        }
+        Ok(())
     }
 }
 

@@ -92,6 +92,40 @@ async fn message_upsert_and_thread_view() {
 }
 
 #[tokio::test]
+async fn upsert_fills_missing_created_at() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // A transcript line without a timestamp arrives with an empty `created_at`.
+    let msg = Message {
+        uuid: MessageUuid::from("u-no-ts"),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("hello".into()),
+        content: vec![ContentBlock::Text {
+            text: "hello".into(),
+        }],
+        created_at: String::new(),
+    };
+    store.upsert_messages(&[msg]).await.unwrap();
+
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    // The contract promises an ISO-8601 timestamp, never an empty string.
+    let stored = &view[0].created_at;
+    assert!(!stored.is_empty(), "created_at must be filled in");
+    assert!(
+        stored.ends_with('Z') && stored.contains('T'),
+        "created_at must be ISO-8601, got {stored:?}"
+    );
+}
+
+#[tokio::test]
 async fn branch_thread_records_parent_and_root() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
