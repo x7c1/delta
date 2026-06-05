@@ -104,6 +104,18 @@ impl SessionStore for FakeStore {
             .cloned())
     }
 
+    async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>> {
+        let g = self.inner.lock().unwrap();
+        let mut out: Vec<Thread> = g
+            .threads
+            .iter()
+            .filter(|t| &t.session_id == session_id)
+            .cloned()
+            .collect();
+        out.sort_by_key(|t| t.id);
+        Ok(out)
+    }
+
     async fn create_thread(
         &self,
         session_id: &SessionId,

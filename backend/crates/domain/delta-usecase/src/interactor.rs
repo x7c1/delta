@@ -195,6 +195,30 @@ where
         }])
     }
 
+    /// The current session and the id of its `main` thread, for hydration.
+    ///
+    /// Returns `None` until the first `UserPromptSubmit` hook registers the
+    /// session (Claude Code never fires `SessionStart`).
+    pub async fn current_session(&self) -> Result<Option<(delta_model::Session, ThreadId)>> {
+        match self.store.current_session().await? {
+            Some(session) => {
+                let main = self.store.main_thread_id(&session.id).await?;
+                Ok(Some((session, main)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// The thread tree for the current session, ordered by creation.
+    ///
+    /// Returns an empty list when no session has been registered yet.
+    pub async fn threads(&self) -> Result<Vec<Thread>> {
+        match self.store.current_session().await? {
+            Some(session) => self.store.list_threads(&session.id).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Assemble a thread's transcript view (its messages ordered by `seq`).
     pub async fn thread_view(&self, thread_id: ThreadId) -> Result<Vec<Message>> {
         if self.store.thread(thread_id).await?.is_none() {

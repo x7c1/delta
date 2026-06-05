@@ -230,6 +230,26 @@ impl SessionStore for SqliteStore {
         }
     }
 
+    async fn list_threads(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Vec<Thread>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {THREAD_COLS} FROM thread WHERE session_id = ?1 ORDER BY id"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![session_id.as_str()], |r| Ok(thread_from_row(r)))
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)??);
+        }
+        Ok(out)
+    }
+
     async fn create_thread(
         &self,
         session_id: &SessionId,

@@ -21,5 +21,7 @@ pub use ports::{
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for
-// these identifiers.
-pub use delta_model::{MessageUuid, SessionId, ThreadId};
+// these identifiers and value types.
+pub use delta_model::{
+    Message, MessageUuid, PendingSend, Session, SessionId, Thread, ThreadId,
+};

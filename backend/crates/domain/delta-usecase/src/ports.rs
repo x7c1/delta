@@ -128,6 +128,9 @@ pub trait SessionStore: Send + Sync {
     /// Look up a thread by id.
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>>;
 
+    /// All threads for a session, ordered by creation (ascending `id`).
+    async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>>;
+
     /// Create a new child thread branching off `root_message_uuid`.
     async fn create_thread(
         &self,

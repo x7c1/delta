@@ -3,6 +3,7 @@
 use axum::routing::{get, post};
 use axum::Router;
 
+use crate::api;
 use crate::hooks;
 use crate::pty;
 use crate::state::AppState;
@@ -16,6 +17,11 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/user-prompt-submit", post(hooks::user_prompt_submit))
         .route("/hooks/stop", post(hooks::stop))
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
+        // Browser REST surface: queries and commands.
+        .route("/api/session", get(api::get_session))
+        .route("/api/threads", get(api::list_threads))
+        .route("/api/threads/{id}/messages", get(api::thread_messages))
+        .route("/api/sends", post(api::create_send))
         // Browser event stream.
         .route("/ws", get(ws::ws_handler))
         // Terminal bridge to the tmux pane.

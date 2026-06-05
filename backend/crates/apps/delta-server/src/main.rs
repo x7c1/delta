@@ -1,20 +1,15 @@
 //! Delta server binary.
 //!
-//! Hosts the control plane (Claude Code HTTP hooks), a browser event WebSocket,
-//! and a PTY bridge that attaches an xterm.js terminal to the tmux pane. It
-//! binds to `127.0.0.1` only — Delta is a local tool and never listens on a
-//! public interface.
-
-mod app;
-mod hooks;
-mod pty;
-mod state;
-mod ws;
+//! A thin wrapper around [`delta_server`]: it builds configuration from the
+//! environment, constructs the shared [`AppState`], and serves the [`router`] on
+//! `127.0.0.1` only — Delta is a local tool and never listens on a public
+//! interface. All testable logic lives in the library crate.
 
 use std::net::{Ipv4Addr, SocketAddr};
 
 use tracing_subscriber::EnvFilter;
 
+use delta_server::{router, AppState};
 use delta_wire::Config;
 
 #[tokio::main]
@@ -26,15 +21,15 @@ async fn main() -> anyhow::Result<()> {
     let config = config_from_env();
     let port = env_port();
 
-    let state = state::AppState::build(&config)?;
-    let router = app::router(state);
+    let state = AppState::build(&config)?;
+    let app = router(state);
 
     // Bind to loopback only.
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "delta-server listening (loopback only)");
 
-    axum::serve(listener, router).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 
