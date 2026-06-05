@@ -51,7 +51,9 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          # Single source of truth: the pnpm version comes from the
+          # "packageManager" field in frontend/package.json. Do not also set
+          # "version" here or action-setup errors on the conflict.
           package_json_file: frontend/package.json
 
       - name: Setup Node

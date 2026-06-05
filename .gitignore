@@ -4,6 +4,9 @@ dist/
 .vite/
 *.tsbuildinfo
 
+# Scratch / agent progress logs
+.tmp/
+
 # Local env
 .env
 .env.local
