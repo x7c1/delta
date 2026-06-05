@@ -23,6 +23,9 @@ follow.
 
 The server binds to `127.0.0.1` only.
 
+The browser↔server contract (REST, WebSocket, and hook endpoints) is documented
+in [docs/guides/api.md](docs/guides/api.md).
+
 ## Development
 
 To be filled in once the build is wired up.
