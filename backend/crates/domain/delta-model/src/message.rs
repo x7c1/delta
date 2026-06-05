@@ -1,60 +1,10 @@
-//! Messages and their roles.
+//! A single message in the reconstructed thread graph.
 
 use serde::{Deserialize, Serialize};
 
 use crate::content::ContentBlock;
-use crate::error::{Error, Result};
 use crate::ids::{MessageUuid, PromptId, SessionId, ThreadId};
-
-/// The author role of a message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    User,
-    Assistant,
-    System,
-    /// A transcript line whose kind Delta does not classify (e.g. summaries).
-    Other,
-}
-
-impl Role {
-    /// Parse a transcript `type` string into a role.
-    ///
-    /// Unknown kinds map to [`Role::Other`] rather than failing, because linear
-    /// parent chains can include line kinds Delta does not model.
-    pub fn from_transcript_type(value: &str) -> Self {
-        match value {
-            "user" => Role::User,
-            "assistant" => Role::Assistant,
-            "system" => Role::System,
-            _ => Role::Other,
-        }
-    }
-
-    /// The canonical lowercase label stored in the database.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Role::User => "user",
-            Role::Assistant => "assistant",
-            Role::System => "system",
-            Role::Other => "other",
-        }
-    }
-
-    /// Parse a stored role label back into a [`Role`].
-    pub fn parse(value: &str) -> Result<Self> {
-        match value {
-            "user" => Ok(Role::User),
-            "assistant" => Ok(Role::Assistant),
-            "system" => Ok(Role::System),
-            "other" => Ok(Role::Other),
-            other => Err(Error::InvalidVariant {
-                kind: "Role",
-                value: other.to_owned(),
-            }),
-        }
-    }
-}
+use crate::role::Role;
 
 /// A single message in the reconstructed thread graph.
 ///
@@ -102,5 +52,29 @@ impl Message {
         } else {
             Some(out)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flatten_text_joins_text_and_thinking_blocks() {
+        let blocks = vec![
+            ContentBlock::Thinking {
+                thinking: "hmm".into(),
+            },
+            ContentBlock::Text {
+                text: "hello".into(),
+            },
+            ContentBlock::ToolUse {
+                id: "t1".into(),
+                name: "Bash".into(),
+                input: serde_json::json!({"command": "ls"}),
+            },
+        ];
+        assert_eq!(Message::flatten_text(&blocks).as_deref(), Some("hmm\nhello"));
+        assert_eq!(Message::flatten_text(&[]), None);
     }
 }

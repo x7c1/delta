@@ -10,51 +10,23 @@
 //! - `PreToolUse` fires when a permission prompt is imminent; Delta only
 //!   notifies the browser and records the request — the TUI decides allow/deny.
 
+mod pre_tool_use_payload;
+pub use pre_tool_use_payload::PreToolUsePayload;
+mod stop_payload;
+pub use stop_payload::StopPayload;
+mod user_prompt_submit_payload;
+pub use user_prompt_submit_payload::UserPromptSubmitPayload;
+mod user_prompt_submit_response;
+pub use user_prompt_submit_response::UserPromptSubmitResponse;
+
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
 use delta_usecase::{SessionId, StopHook, UserPromptSubmitHook};
 
 use crate::state::AppState;
-
-/// `UserPromptSubmit` payload.
-#[derive(Debug, Deserialize)]
-pub struct UserPromptSubmitPayload {
-    pub prompt: String,
-    pub session_id: String,
-    pub transcript_path: String,
-    pub cwd: String,
-}
-
-/// `UserPromptSubmit` response. When present, `additional_context` is injected
-/// into this prompt only.
-#[derive(Debug, Default, Serialize)]
-pub struct UserPromptSubmitResponse {
-    #[serde(rename = "additionalContext", skip_serializing_if = "Option::is_none")]
-    pub additional_context: Option<String>,
-}
-
-/// `Stop` payload.
-#[derive(Debug, Deserialize)]
-pub struct StopPayload {
-    pub session_id: String,
-    #[serde(default)]
-    pub stop_reason: Option<String>,
-    #[serde(default)]
-    pub last_assistant_message: Option<String>,
-}
-
-/// `PreToolUse` payload.
-#[derive(Debug, Deserialize)]
-pub struct PreToolUsePayload {
-    pub session_id: String,
-    pub tool_name: String,
-    #[serde(default)]
-    pub tool_input: serde_json::Value,
-}
 
 /// Map a use-case error to a 500 with a logged reason.
 fn internal_error(err: delta_usecase::Error) -> (StatusCode, String) {

@@ -7,42 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
 use crate::ids::{MessageUuid, SessionId, ThreadId};
-
-/// Correlation status of a queued send.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum PendingSendStatus {
-    /// Queued, awaiting a matching `UserPromptSubmit`.
-    Pending,
-    /// Matched to a transcript message uuid.
-    Matched,
-    /// Abandoned (e.g. superseded or timed out).
-    Cancelled,
-}
-
-impl PendingSendStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PendingSendStatus::Pending => "pending",
-            PendingSendStatus::Matched => "matched",
-            PendingSendStatus::Cancelled => "cancelled",
-        }
-    }
-
-    pub fn parse(value: &str) -> Result<Self> {
-        match value {
-            "pending" => Ok(PendingSendStatus::Pending),
-            "matched" => Ok(PendingSendStatus::Matched),
-            "cancelled" => Ok(PendingSendStatus::Cancelled),
-            other => Err(Error::InvalidVariant {
-                kind: "PendingSendStatus",
-                value: other.to_owned(),
-            }),
-        }
-    }
-}
+use crate::pending_send_status::PendingSendStatus;
 
 /// A queued user input awaiting correlation with the transcript.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

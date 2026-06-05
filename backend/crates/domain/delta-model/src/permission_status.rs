@@ -1,13 +1,8 @@
-//! Tool permission requests.
-//!
-//! When a `PreToolUse` hook fires, a permission prompt is imminent in the TUI.
-//! Delta does not decide allow/deny — the TUI handles that — but it records the
-//! request so the browser can show state and keep an audit trail.
+//! Disposition of a recorded permission request.
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::ids::SessionId;
 
 /// Disposition of a recorded permission request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,18 +36,18 @@ impl PermissionStatus {
     }
 }
 
-/// A recorded tool-permission request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PermissionRequest {
-    pub id: i64,
-    pub session_id: SessionId,
-    pub tool_name: String,
-    /// The tool input, serialized as JSON text.
-    pub tool_input_json: String,
-    pub status: PermissionStatus,
-    pub decision_reason: Option<String>,
-    /// ISO-8601 timestamp.
-    pub created_at: String,
-    /// ISO-8601 timestamp once decided.
-    pub decided_at: Option<String>,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_enum_round_trips() {
+        for s in [
+            PermissionStatus::Pending,
+            PermissionStatus::Allowed,
+            PermissionStatus::Denied,
+        ] {
+            assert_eq!(PermissionStatus::parse(s.as_str()).unwrap(), s);
+        }
+    }
 }

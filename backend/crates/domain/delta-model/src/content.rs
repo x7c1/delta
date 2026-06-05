@@ -43,3 +43,27 @@ impl ContentBlock {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_block_unknown_type_parses_as_other() {
+        let block: ContentBlock =
+            serde_json::from_str(r#"{"type":"image","source":{"x":1}}"#).unwrap();
+        assert_eq!(block, ContentBlock::Other);
+    }
+
+    #[test]
+    fn content_block_tool_result_parses() {
+        let block: ContentBlock = serde_json::from_str(
+            r#"{"type":"tool_result","tool_use_id":"abc","content":"done","is_error":false}"#,
+        )
+        .unwrap();
+        match block {
+            ContentBlock::ToolResult { tool_use_id, .. } => assert_eq!(tool_use_id, "abc"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+}

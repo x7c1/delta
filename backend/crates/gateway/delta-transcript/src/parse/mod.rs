@@ -1,38 +1,14 @@
 //! Parsing a single JSONL transcript line into a [`TranscriptMessage`].
 
-use serde::Deserialize;
+mod raw_content;
+mod raw_line;
+mod raw_message;
 
 use delta_model::{ContentBlock, MessageUuid, PromptId, Role};
 use delta_usecase::TranscriptMessage;
 
-/// The subset of a transcript line Delta reads. Unknown fields are ignored.
-#[derive(Debug, Deserialize)]
-struct RawLine {
-    uuid: Option<String>,
-    #[serde(rename = "parentUuid")]
-    parent_uuid: Option<String>,
-    #[serde(rename = "type")]
-    line_type: Option<String>,
-    #[serde(rename = "promptId")]
-    prompt_id: Option<String>,
-    timestamp: Option<String>,
-    message: Option<RawMessage>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RawMessage {
-    #[allow(dead_code)]
-    role: Option<String>,
-    content: Option<RawContent>,
-}
-
-/// Content is either a bare string (user prompts) or an array of typed blocks.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum RawContent {
-    Text(String),
-    Blocks(Vec<ContentBlock>),
-}
+use raw_content::RawContent;
+use raw_line::RawLine;
 
 /// Parse one JSONL line. Returns `Ok(None)` for blank lines.
 pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::Error> {

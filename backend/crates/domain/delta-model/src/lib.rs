@@ -11,17 +11,26 @@
 //! here — that belongs to the gateway crates.
 
 mod content;
-mod error;
-mod ids;
-mod message;
-mod pending_send;
-mod permission;
-mod thread;
-
 pub use content::ContentBlock;
+mod error;
 pub use error::{Error, Result};
+mod ids;
 pub use ids::{MessageUuid, PromptId, SessionId, ThreadId};
-pub use message::{Message, Role};
-pub use pending_send::{PendingSend, PendingSendStatus};
-pub use permission::{PermissionRequest, PermissionStatus};
-pub use thread::{Session, SessionStatus, Thread};
+mod message;
+pub use message::Message;
+mod pending_send;
+pub use pending_send::PendingSend;
+mod pending_send_status;
+pub use pending_send_status::PendingSendStatus;
+mod permission_request;
+pub use permission_request::PermissionRequest;
+mod permission_status;
+pub use permission_status::PermissionStatus;
+mod role;
+pub use role::Role;
+mod session;
+pub use session::Session;
+mod session_status;
+pub use session_status::SessionStatus;
+mod thread;
+pub use thread::Thread;
