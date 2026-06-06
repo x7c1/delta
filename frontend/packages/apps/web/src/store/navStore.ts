@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { ThreadId } from '@delta/model';
 
 /** Default terminal pane width in pixels (matches the former Tailwind w-96). */
@@ -29,8 +30,7 @@ export interface NavState {
   /** Whether the terminal pane is shown (persistent pane on large screens, or
    *  the slide-in overlay on small screens). */
   terminalOpen: boolean;
-  /** Width of the persistent terminal pane in pixels (large screens only).
-   *  Session-only; not persisted. */
+  /** Width of the persistent terminal pane in pixels (large screens only). */
   terminalWidth: number;
 
   setActiveThread: (threadId: ThreadId) => void;
@@ -40,13 +40,44 @@ export interface NavState {
   setTerminalWidth: (width: number) => void;
 }
 
-export const useNavStore = create<NavState>((set) => ({
-  activeThreadId: null,
-  terminalOpen: false,
-  terminalWidth: DEFAULT_TERMINAL_WIDTH,
+/** localStorage key for the persisted layout state. */
+export const NAV_STORAGE_KEY = 'delta-nav';
 
-  setActiveThread: (threadId) => set({ activeThreadId: threadId }),
-  setTerminalOpen: (open) => set({ terminalOpen: open }),
-  toggleTerminal: () => set((state) => ({ terminalOpen: !state.terminalOpen })),
-  setTerminalWidth: (width) => set({ terminalWidth: clampTerminalWidth(width) }),
-}));
+/**
+ * Navigation/layout store. The active thread, terminal visibility, and terminal
+ * width are **persisted to localStorage** so a browser reload restores the same
+ * layout instead of snapping back to a closed terminal on `main`. A restored
+ * active thread that no longer exists is reconciled to `main` by the workspace
+ * (see `WorkspaceScreen`).
+ */
+export const useNavStore = create<NavState>()(
+  persist(
+    (set) => ({
+      activeThreadId: null,
+      terminalOpen: false,
+      terminalWidth: DEFAULT_TERMINAL_WIDTH,
+
+      setActiveThread: (threadId) => set({ activeThreadId: threadId }),
+      setTerminalOpen: (open) => set({ terminalOpen: open }),
+      toggleTerminal: () =>
+        set((state) => ({ terminalOpen: !state.terminalOpen })),
+      setTerminalWidth: (width) => set({ terminalWidth: clampTerminalWidth(width) }),
+    }),
+    {
+      name: NAV_STORAGE_KEY,
+      storage: createJSONStorage(() => localStorage),
+      // Persist only the layout values, never the action functions.
+      partialize: (state) => ({
+        activeThreadId: state.activeThreadId,
+        terminalOpen: state.terminalOpen,
+        terminalWidth: state.terminalWidth,
+      }),
+      // Re-clamp the restored width in case the viewport shrank since last time.
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.terminalWidth = clampTerminalWidth(state.terminalWidth);
+        }
+      },
+    },
+  ),
+);
