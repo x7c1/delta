@@ -30,21 +30,9 @@ Never duplicate content across files.
 
 ## Code Quality
 
-After changing backend code, run from `backend/`:
-
-```bash
-cargo build && cargo test && cargo clippy --all-targets -- -D warnings
-```
-
-After changing frontend code, run from `frontend/`:
-
-```bash
-pnpm install && pnpm -r build && pnpm -r test && pnpm -r lint
-```
-
-(The exact frontend scripts are finalized as the workspace is wired up.)
-
-Fix any issues before considering the task complete.
+Build, test, lint, and run commands for both parts live in @docs/guides/development.md.
+After changing code, run the quality gate for the area you touched and fix any
+issues before considering the task complete.
 
 ### Fix issues as you find them
 

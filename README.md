@@ -28,4 +28,5 @@ in [docs/guides/api.md](docs/guides/api.md).
 
 ## Development
 
-To be filled in once the build is wired up.
+Build, test, lint, and run commands are in
+[docs/guides/development.md](docs/guides/development.md).
