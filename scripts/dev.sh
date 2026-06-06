@@ -50,7 +50,9 @@ warn() { printf '\033[1;33m[delta]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[delta]\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  # Print the leading comment block (everything up to the first blank,
+  # non-comment line), stripping the leading "# ".
+  awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
 # Tear everything down: stop the server, then kill the tmux session.
