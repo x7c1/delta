@@ -16,7 +16,7 @@ pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor};
 pub use ports::{
     NewSession, SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript,
-    TranscriptMessage, UserPromptSubmitHook,
+    TranscriptMessage, TranscriptRead, UserPromptSubmitHook,
 };
 
 // Re-export the domain types the transport layer needs, so the server can

@@ -3,18 +3,22 @@
 use async_trait::async_trait;
 use tokio::fs;
 
-use delta_usecase::{Transcript, TranscriptMessage};
+use delta_usecase::{Transcript, TranscriptRead};
 
 use crate::error::Error;
 use crate::parse::parse_line;
 
 /// Reads Claude Code JSONL transcripts from the filesystem.
 ///
-/// `read_from` re-reads the file and skips lines already seen by line index.
-/// For a local single-session tool the transcript is small, so a full read on
-/// each hook is simple and correct; callers that want true streaming can poll
-/// this on an interval. Non-blank lines that fail to parse are skipped rather
-/// than aborting the whole read, so one malformed line cannot stall ingestion.
+/// `read_from` re-reads the file and skips lines already seen by their 0-based
+/// line index. For a local single-session tool the transcript is small, so a
+/// full read on each hook is simple and correct; callers that want true
+/// streaming can poll this on an interval. Lines that produce no message —
+/// blank, no-uuid (e.g. `file-history-snapshot`), or unparsable — still advance
+/// the line index, so the reported `total_lines` and each message's `seq` track
+/// the file's true position and the caller's line cursor reads each line exactly
+/// once. Unparsable non-blank lines are skipped (with a warning) rather than
+/// aborting the whole read, so one malformed line cannot stall ingestion.
 #[derive(Debug, Default, Clone)]
 pub struct JsonlTranscript;
 
@@ -29,26 +33,43 @@ impl Transcript for JsonlTranscript {
     async fn read_from(
         &self,
         path: &str,
-        from_seq: usize,
-    ) -> std::result::Result<Vec<TranscriptMessage>, delta_usecase::Error> {
+        from_line: usize,
+    ) -> std::result::Result<TranscriptRead, delta_usecase::Error> {
         let contents = match fs::read_to_string(path).await {
             Ok(c) => c,
             // A not-yet-created transcript is not an error: nothing to read.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(TranscriptRead {
+                    messages: Vec::new(),
+                    total_lines: 0,
+                })
+            }
             Err(e) => return Err(Error::from(e).into()),
         };
 
-        let mut out = Vec::new();
-        for line in contents.lines().skip(from_seq) {
+        let mut messages = Vec::new();
+        let mut total_lines = 0;
+        for (idx, line) in contents.lines().enumerate() {
+            total_lines = idx + 1;
+            if idx < from_line {
+                continue;
+            }
             match parse_line(line) {
-                Ok(Some(msg)) => out.push(msg),
+                Ok(Some(mut msg)) => {
+                    // The message's absolute line index is its persisted `seq`.
+                    msg.seq = idx as i64;
+                    messages.push(msg);
+                }
                 Ok(None) => {}
                 Err(err) => {
                     tracing::warn!(error = %err, "skipping unparsable transcript line");
                 }
             }
         }
-        Ok(out)
+        Ok(TranscriptRead {
+            messages,
+            total_lines,
+        })
     }
 }
 
@@ -75,18 +96,25 @@ mod tests {
 
         let t = JsonlTranscript::new();
         let all = t.read_from(&path, 0).await.unwrap();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.messages.len(), 2);
+        assert_eq!(all.total_lines, 2);
+        // Each message carries its absolute 0-based line index as its seq.
+        assert_eq!(all.messages[0].seq, 0);
+        assert_eq!(all.messages[1].seq, 1);
 
         let tail = t.read_from(&path, 1).await.unwrap();
-        assert_eq!(tail.len(), 1);
-        assert_eq!(tail[0].flatten_text().as_deref(), Some("b"));
+        assert_eq!(tail.messages.len(), 1);
+        assert_eq!(tail.total_lines, 2);
+        assert_eq!(tail.messages[0].flatten_text().as_deref(), Some("b"));
+        assert_eq!(tail.messages[0].seq, 1);
     }
 
     #[tokio::test]
     async fn missing_file_is_empty_not_error() {
         let t = JsonlTranscript::new();
         let out = t.read_from("/nonexistent/transcript.jsonl", 0).await.unwrap();
-        assert!(out.is_empty());
+        assert!(out.messages.is_empty());
+        assert_eq!(out.total_lines, 0);
     }
 
     #[tokio::test]
@@ -102,7 +130,40 @@ mod tests {
         let path = file.path().to_str().unwrap().to_owned();
 
         let out = JsonlTranscript::new().read_from(&path, 0).await.unwrap();
-        assert_eq!(out.len(), 1);
+        assert_eq!(out.messages.len(), 1);
+        // The skipped malformed line still counts toward total_lines and shifts
+        // the parsed message's seq to its true index.
+        assert_eq!(out.total_lines, 2);
+        assert_eq!(out.messages[0].seq, 1);
+    }
+
+    /// A no-uuid line (e.g. Claude Code's `file-history-snapshot`) interleaved
+    /// between two real turns must not consume a message's line index: the
+    /// surrounding messages keep their true file positions as `seq`, and
+    /// `total_lines` counts every line. This is the file-position invariant the
+    /// line-based cursor relies on to read each line exactly once.
+    #[tokio::test]
+    async fn no_uuid_line_advances_index_without_a_message() {
+        let mut file = tempfile_jsonl();
+        writeln!(
+            file,
+            r#"{{"uuid":"u1","type":"user","message":{{"content":"q","role":"user"}}}}"#
+        )
+        .unwrap();
+        writeln!(file, r#"{{"type":"file-history-snapshot","messageId":"x"}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"uuid":"a1","type":"assistant","message":{{"content":"r","role":"assistant"}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let out = JsonlTranscript::new().read_from(&path, 0).await.unwrap();
+        assert_eq!(out.messages.len(), 2, "only the two uuid-bearing lines parse");
+        assert_eq!(out.total_lines, 3, "the no-uuid line still counts");
+        assert_eq!(out.messages[0].seq, 0);
+        assert_eq!(out.messages[1].seq, 2, "assistant sits after the skipped line");
     }
 
     /// A minimal temp-file helper avoiding an extra dependency.

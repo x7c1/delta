@@ -42,6 +42,9 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         prompt_id: raw.prompt_id.map(PromptId::from),
         content,
         created_at: raw.timestamp,
+        // The reader assigns the real line index; a standalone parse defaults to
+        // 0 since it has no file position.
+        seq: 0,
     }))
 }
 

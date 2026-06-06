@@ -304,10 +304,24 @@ where
     async fn sync_transcript(&self, transcript_path: &str) -> Result<Vec<Message>> {
         let session = self.require_session().await?;
         let main_thread = self.store.main_thread_id(&session.id).await?;
-        let already = self.store.message_count(&session.id).await?;
 
-        let lines = self.transcript.read_from(transcript_path, already).await?;
-        if lines.is_empty() {
+        // Resume from the line-based cursor so each transcript line is read
+        // exactly once. This is the file line index, not a message count: lines
+        // that parse to nothing (blank, no-uuid such as Claude Code's
+        // `file-history-snapshot`, or unparsable) still advance it, so the
+        // cursor never lags behind the file and already-ingested lines are never
+        // reprocessed.
+        let from = self.store.transcript_lines_read(&session.id).await?;
+        let read = self.transcript.read_from(transcript_path, from).await?;
+
+        // Always advance the cursor to the file's true line count, even when no
+        // new messages parsed, so skipped trailing lines are not re-read next
+        // time.
+        self.store
+            .set_transcript_lines_read(&session.id, read.total_lines)
+            .await?;
+
+        if read.messages.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -319,9 +333,8 @@ where
             .await?
             .unwrap_or(main_thread);
 
-        let mut messages = Vec::with_capacity(lines.len());
-        for (offset, line) in lines.into_iter().enumerate() {
-            let seq = (already + offset) as i64;
+        let mut messages = Vec::with_capacity(read.messages.len());
+        for line in read.messages {
             let content_text = Message::flatten_text(&line.content);
 
             let (thread_id, semantic_parent_uuid) =
@@ -350,7 +363,9 @@ where
                 linear_parent_uuid: line.linear_parent_uuid,
                 semantic_parent_uuid,
                 prompt_id: line.prompt_id,
-                seq,
+                // Persist the message's own transcript line index as its `seq`,
+                // so ordering follows true file position with no drift.
+                seq: line.seq,
                 content_text,
                 content: line.content,
                 created_at: line.created_at.unwrap_or_default(),

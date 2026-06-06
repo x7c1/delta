@@ -17,6 +17,12 @@ pub struct TranscriptMessage {
     pub content: Vec<ContentBlock>,
     /// ISO-8601 timestamp from the transcript line, if present.
     pub created_at: Option<String>,
+    /// The message's absolute 0-based line index in the transcript file.
+    ///
+    /// Used as the persisted `seq`, so it reflects the line's true file
+    /// position even when earlier lines were skipped (blank, no-uuid, or
+    /// unparsable). The reader assigns this; the Interactor persists it.
+    pub seq: i64,
 }
 
 impl TranscriptMessage {

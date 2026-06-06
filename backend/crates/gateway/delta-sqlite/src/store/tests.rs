@@ -139,6 +139,25 @@ async fn message_upsert_and_thread_view() {
 }
 
 #[tokio::test]
+async fn transcript_lines_read_defaults_to_zero_and_persists_updates() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _main) = store.register_session(new_session()).await.unwrap();
+
+    // A freshly registered session starts with an empty line cursor.
+    assert_eq!(store.transcript_lines_read(&session.id).await.unwrap(), 0);
+
+    store
+        .set_transcript_lines_read(&session.id, 7)
+        .await
+        .unwrap();
+    assert_eq!(store.transcript_lines_read(&session.id).await.unwrap(), 7);
+
+    // Re-registering must not reset the cursor (INSERT OR IGNORE).
+    store.register_session(new_session()).await.unwrap();
+    assert_eq!(store.transcript_lines_read(&session.id).await.unwrap(), 7);
+}
+
+#[tokio::test]
 async fn upsert_fills_missing_created_at() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

@@ -479,6 +479,35 @@ impl SessionStore for SqliteStore {
         Ok(count as usize)
     }
 
+    async fn transcript_lines_read(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<usize, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let lines: i64 = conn
+            .query_row(
+                "SELECT transcript_lines_read FROM session WHERE id = ?1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(Error::from)?;
+        Ok(lines as usize)
+    }
+
+    async fn set_transcript_lines_read(
+        &self,
+        session_id: &SessionId,
+        lines: usize,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE session SET transcript_lines_read = ?2 WHERE id = ?1",
+            params![session_id.as_str(), lines as i64],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
     async fn thread_messages(
         &self,
         thread_id: ThreadId,

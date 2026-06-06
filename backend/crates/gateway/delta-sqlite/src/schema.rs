@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS session (
   transcript_path TEXT NOT NULL,
   title TEXT,
   status TEXT NOT NULL DEFAULT 'active',
+  transcript_lines_read INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
