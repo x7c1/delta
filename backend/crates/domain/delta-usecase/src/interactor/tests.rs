@@ -18,11 +18,17 @@ use crate::Interactor;
 #[derive(Default)]
 struct FakeTmux {
     sent: Mutex<Vec<String>>,
+    /// When set, `send_line` fails instead of recording the line, simulating a
+    /// dispatch failure into the pane.
+    fail: bool,
 }
 
 #[async_trait]
 impl TmuxDriver for FakeTmux {
     async fn send_line(&self, text: &str) -> Result<()> {
+        if self.fail {
+            return Err(crate::error::Error::Tmux("dispatch failed".into()));
+        }
         self.sent.lock().unwrap().push(text.to_owned());
         Ok(())
     }
@@ -180,6 +186,14 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
+    async fn cancel_send(&self, id: i64) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
+            s.status = PendingSendStatus::Cancelled;
+        }
+        Ok(())
+    }
+
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         for m in messages {
@@ -245,6 +259,18 @@ fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
 
 fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore> {
     Interactor::new(FakeTmux::default(), FakeTranscript::default(), FakeStore::default())
+}
+
+/// An interactor whose tmux dispatch always fails.
+fn interactor_with_failing_tmux() -> Interactor<FakeTmux, FakeTranscript, FakeStore> {
+    Interactor::new(
+        FakeTmux {
+            fail: true,
+            ..Default::default()
+        },
+        FakeTranscript::default(),
+        FakeStore::default(),
+    )
 }
 
 fn submit(text: &str) -> UserPromptSubmitHook {
@@ -356,6 +382,28 @@ async fn enqueue_send_to_unknown_thread_is_thread_not_found() {
         .await
         .expect_err("unknown thread must be rejected");
     assert!(matches!(err, Error::ThreadNotFound(999)));
+}
+
+#[tokio::test]
+async fn failed_dispatch_rolls_back_pending_send_and_returns_error() {
+    use crate::error::Error;
+
+    let ix = interactor_with_failing_tmux();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // The dispatch fails, so the use case must surface the tmux error...
+    let err = ix
+        .enqueue_send(main, "never delivered", None, None)
+        .await
+        .expect_err("a failed dispatch must propagate the error");
+    assert!(matches!(err, Error::Tmux(_)));
+
+    // ...and the just-written row must not block the FIFO head: it was rolled
+    // back to `cancelled`, so the head is clear for future correlation.
+    let head = ix.store().head_pending_send(&session).await.unwrap();
+    assert!(head.is_none(), "the cancelled row must not remain the FIFO head");
 }
 
 #[tokio::test]

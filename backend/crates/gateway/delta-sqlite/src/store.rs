@@ -357,6 +357,16 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
+    async fn cancel_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE pending_send SET status = 'cancelled' WHERE id = ?1",
+            params![id],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
     async fn upsert_messages(
         &self,
         messages: &[Message],
