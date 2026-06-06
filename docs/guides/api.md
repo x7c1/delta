@@ -191,8 +191,9 @@ Request:
 
 - `thread_id` (required) — the target thread, or the parent thread for a branch.
 - `text` (required) — the text to send.
-- `locator_quote` (optional) — injected as `additionalContext` on the matching
-  turn so the model can locate the referenced text.
+- `locator_quote` (optional) — framed and injected as `additionalContext` on the
+  matching turn so the model can locate the referenced text (see the
+  `user-prompt-submit` hook below for the framing).
 - `semantic_parent_uuid` (optional) — when set, makes this a branch send.
 
 Response:
@@ -298,16 +299,20 @@ Response (200):
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "the main channel"
+    "additionalContext": "The user is replying to this passage they selected from earlier in the conversation:\n\"the main channel\""
   }
 }
 ```
 
 Claude Code consumes injected context for `UserPromptSubmit` only from the
 `hookSpecificOutput` envelope (a flat `additionalContext` is ignored), so the
-locator quote is always wrapped there. This body is returned only when the
-matched send carried a `locator_quote`; it is injected into this prompt only.
-Otherwise the response is an empty `200 OK` with no body.
+framed quote is always wrapped there. The matched send's `locator_quote` is not
+injected verbatim: it is wrapped in a short, authorship-neutral frame (shown
+above) so the model treats it as provenance for the current message rather than
+new content. This body is returned only when the matched send carried a non-empty
+`locator_quote`, and it is injected into this prompt only. A blank or
+whitespace-only quote is not framed, so the response is an empty `200 OK` with no
+body.
 
 ### `POST /hooks/stop`
 

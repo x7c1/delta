@@ -216,9 +216,13 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         body["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit",
         "the envelope names the originating hook event"
     );
+    // The quote is not injected verbatim: it is wrapped in a short frame so the
+    // model recognises it as a passage the user selected from earlier in the
+    // conversation, anchoring the current message.
     assert_eq!(
-        body["hookSpecificOutput"]["additionalContext"], "the main channel",
-        "matched send injects its locator quote as additionalContext"
+        body["hookSpecificOutput"]["additionalContext"],
+        "The user is replying to this passage they selected from earlier in the conversation:\n\"the main channel\"",
+        "matched send injects its locator quote, framed, as additionalContext"
     );
 
     // 5. GET /api/threads exposes the main thread for the navigator.

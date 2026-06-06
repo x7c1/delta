@@ -199,7 +199,10 @@ where
             .store
             .match_pending_send(&hook.session_id, hook.prompt.trim())
             .await?;
-        let additional_context = pending.as_ref().and_then(|p| p.locator_quote.clone());
+        let additional_context = pending
+            .as_ref()
+            .and_then(|p| p.locator_quote.as_deref())
+            .and_then(frame_locator_context);
 
         // Ingest new transcript lines. This matches each user line to its queued
         // send and attributes it (plus the assistant lines that follow it) to
@@ -435,6 +438,33 @@ fn provisional_branch_title(locator_quote: Option<&str>) -> String {
         return "untitled".to_owned();
     }
     trimmed.chars().take(PROVISIONAL_TITLE_MAX_CHARS).collect()
+}
+
+/// Frame a locator quote for injection as `additionalContext`.
+///
+/// The locator quote is a passage the user selected from earlier in the
+/// conversation to anchor their current message. Injecting it verbatim gives
+/// the model no provenance, so it may read the bare text as new content or a
+/// fresh instruction. This wraps it in a short frame that supplies that missing
+/// provenance, with the quote delimited so the frame and the quote stay
+/// distinguishable.
+///
+/// The frame is authorship-neutral: the selected passage may come from either an
+/// assistant or a user message, so it does not claim who said it. An empty or
+/// whitespace-only quote carries no content to anchor, so it yields `None` and
+/// nothing is injected.
+///
+/// Isolated deliberately so the exact wording is easy to tune. This affects only
+/// the model-facing `additionalContext`; it never changes the on-screen message
+/// or any stored field.
+fn frame_locator_context(quote: &str) -> Option<String> {
+    let quote = quote.trim();
+    if quote.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "The user is replying to this passage they selected from earlier in the conversation:\n\"{quote}\""
+    ))
 }
 
 /// Find the transcript uuid for the user line carrying this prompt.
