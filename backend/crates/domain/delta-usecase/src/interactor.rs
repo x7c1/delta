@@ -445,15 +445,14 @@ fn provisional_branch_title(locator_quote: Option<&str>) -> String {
 /// The locator quote is a passage the user selected from earlier in the
 /// conversation to anchor their current message. Injecting it verbatim gives
 /// the model no provenance, so it may read the bare text as new content or a
-/// fresh instruction. This wraps it in a short frame carrying all three signals
-/// the model needs: it is a verbatim quote from *this* conversation (not new
-/// info), the *user* selected it, and the current message is a reply anchored
-/// to it. The quote is delimited so the frame and the quote stay distinguishable.
+/// fresh instruction. This wraps it in a short frame that supplies that missing
+/// provenance, with the quote delimited so the frame and the quote stay
+/// distinguishable.
 ///
 /// The frame is authorship-neutral: the selected passage may come from either an
 /// assistant or a user message, so it does not claim who said it. An empty or
-/// whitespace-only quote yields `None` — nothing is injected — matching the
-/// effective behaviour of injecting a bare quote that carries no content.
+/// whitespace-only quote carries no content to anchor, so it yields `None` and
+/// nothing is injected.
 ///
 /// Isolated deliberately so the exact wording is easy to tune. This affects only
 /// the model-facing `additionalContext`; it never changes the on-screen message
