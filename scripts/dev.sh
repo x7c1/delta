@@ -42,8 +42,12 @@ TMUX_PANE="delta:0.0"
 DELTA_PORT="7878"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
 
-# delta-server logs to this file when started in the background.
-SERVER_LOG="$REPO_ROOT/.tmp/delta-server.log"
+# delta-server logs to a per-run timestamped file so a new run never clobbers a
+# previous run's log. A stable `delta-server.log` symlink always points at the
+# most recent run for convenience.
+LOG_DIR="$REPO_ROOT/.tmp"
+SERVER_LOG="$LOG_DIR/delta-server-$(date +%Y%m%d-%H%M%S).log"
+SERVER_LOG_LATEST="$LOG_DIR/delta-server.log"
 
 log()  { printf '\033[1;36m[delta]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[delta]\033[0m %s\n' "$*" >&2; }
@@ -74,6 +78,20 @@ require() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"
 }
 
+# Whether something is already listening on 127.0.0.1:$1. Best-effort: tries the
+# common tools and reports "not listening" if none are available.
+port_in_use() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  elif command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
+  fi
+  return 1
+}
+
 up() {
   local workdir="${1:-$DEFAULT_WORKDIR}"
 
@@ -86,6 +104,13 @@ up() {
 
   if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     die "A tmux session named '$TMUX_SESSION' already exists. Run 'scripts/dev.sh --down' (or 'tmux kill-session -t $TMUX_SESSION') first."
+  fi
+
+  # A running server already owns the port; starting a second one would fail
+  # with "Address already in use" partway through. Abort cleanly up front and
+  # point at --down rather than clobbering the running server's state.
+  if port_in_use "$DELTA_PORT"; then
+    die "A server is already listening on 127.0.0.1:$DELTA_PORT. Run 'scripts/dev.sh --down' first (or stop whatever owns the port)."
   fi
 
   # --- 1. Working directory + per-session hook settings. ---
@@ -101,8 +126,10 @@ up() {
 
   # --- 3. delta-server, pointed at the tmux pane. ---
   mkdir -p "$(dirname "$SERVER_LOG")"
+  # Point the stable symlink at this run's fresh log without touching prior logs.
+  ln -sf "$(basename "$SERVER_LOG")" "$SERVER_LOG_LATEST"
   log "Starting delta-server (DELTA_PORT=$DELTA_PORT, DELTA_TMUX_PANE=$TMUX_PANE) ..."
-  log "Server log: $SERVER_LOG"
+  log "Server log: $SERVER_LOG (latest -> $SERVER_LOG_LATEST)"
   (
     cd "$BACKEND_DIR"
     DELTA_PORT="$DELTA_PORT" DELTA_TMUX_PANE="$TMUX_PANE" \

@@ -186,6 +186,29 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
+    async fn assign_message_thread(
+        &self,
+        uuid: &MessageUuid,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(m) = g.messages.iter_mut().find(|m| &m.uuid == uuid) {
+            m.thread_id = thread_id;
+            m.semantic_parent_uuid = semantic_parent_uuid.cloned();
+        }
+        Ok(())
+    }
+
+    async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.messages
+            .iter()
+            .filter(|m| &m.session_id == session_id && matches!(m.role, Role::User))
+            .max_by_key(|m| m.seq)
+            .map(|m| m.thread_id))
+    }
+
     async fn cancel_send(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
@@ -250,6 +273,17 @@ fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         uuid: MessageUuid::from(uuid),
         role: Role::User,
+        linear_parent_uuid: None,
+        prompt_id: None,
+        content: vec![ContentBlock::Text { text: text.into() }],
+        created_at: Some("2026-01-01T00:00:00Z".into()),
+    }
+}
+
+fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        uuid: MessageUuid::from(uuid),
+        role: Role::Assistant,
         linear_parent_uuid: None,
         prompt_id: None,
         content: vec![ContentBlock::Text { text: text.into() }],
@@ -367,6 +401,89 @@ async fn branch_send_creates_child_thread() {
     let child = ix.store().thread(pending.thread_id).await.unwrap().unwrap();
     assert_eq!(child.parent_thread_id, Some(main));
     assert_eq!(child.root_message_uuid, Some(parent));
+}
+
+#[tokio::test]
+async fn plain_send_attributes_user_and_assistant_to_main() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    let pending = ix
+        .enqueue_send(main, "hello world", None, None)
+        .await
+        .unwrap();
+    assert_eq!(pending.thread_id, main);
+
+    // The matching user line is ingested + correlated.
+    ix.transcript_fake().push(user_line("u-1", "hello world"));
+    ix.on_user_prompt_submit(submit("hello world")).await.unwrap();
+
+    // The assistant response arrives and is ingested at Stop.
+    ix.transcript_fake().push(assistant_line("a-1", "hi there"));
+    ix.on_stop(crate::ports::StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    let view = ix.thread_view(main).await.unwrap();
+    let uuids: Vec<&str> = view.iter().map(|m| m.uuid.as_str()).collect();
+    assert!(uuids.contains(&"u-1"), "user message lands on main");
+    assert!(uuids.contains(&"a-1"), "assistant message lands on main");
+}
+
+#[tokio::test]
+async fn branch_send_attributes_user_and_assistant_to_child() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // Branch off some existing message and queue the first branch send.
+    let parent = MessageUuid::from("uuid-parent");
+    let pending = ix
+        .enqueue_send(main, "branch text", None, Some(&parent))
+        .await
+        .unwrap();
+    let child = pending.thread_id;
+    assert_ne!(child, main);
+
+    // The matching user line is ingested onto `main` then re-attributed to the
+    // child by the correlation step.
+    ix.transcript_fake().push(user_line("u-b", "branch text"));
+    ix.on_user_prompt_submit(submit("branch text")).await.unwrap();
+
+    // The assistant response is ingested at Stop and must carry forward to the
+    // child thread (the thread of the latest user message).
+    ix.transcript_fake().push(assistant_line("a-b", "branch reply"));
+    ix.on_stop(crate::ports::StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    // Both land on the child, not main.
+    let child_view = ix.thread_view(child).await.unwrap();
+    let child_uuids: Vec<&str> = child_view.iter().map(|m| m.uuid.as_str()).collect();
+    assert!(child_uuids.contains(&"u-b"), "user message lands on child");
+    assert!(
+        child_uuids.contains(&"a-b"),
+        "assistant message lands on child"
+    );
+
+    // The matched user message also carries the branch semantic parent.
+    let user_msg = child_view.iter().find(|m| m.uuid.as_str() == "u-b").unwrap();
+    assert_eq!(user_msg.semantic_parent_uuid, Some(parent));
+
+    // And neither leaked onto main.
+    let main_view = ix.thread_view(main).await.unwrap();
+    let main_uuids: Vec<&str> = main_view.iter().map(|m| m.uuid.as_str()).collect();
+    assert!(!main_uuids.contains(&"u-b"));
+    assert!(!main_uuids.contains(&"a-b"));
 }
 
 #[tokio::test]

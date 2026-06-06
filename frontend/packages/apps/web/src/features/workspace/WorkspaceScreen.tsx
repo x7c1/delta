@@ -58,9 +58,10 @@ export function WorkspaceScreen() {
   if (sessionQuery.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
-        <p>No session is registered yet.</p>
+        <p>No session yet.</p>
         <p className="text-xs text-slate-400">
-          Start a Claude Code session through Delta to begin.
+          Send your first message to Claude in the terminal
+          (<code>tmux attach -t delta</code>) to begin.
         </p>
       </div>
     );

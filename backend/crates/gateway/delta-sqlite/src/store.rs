@@ -357,6 +357,43 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
+    async fn assign_message_thread(
+        &self,
+        uuid: &MessageUuid,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE message SET thread_id = ?2, semantic_parent_uuid = ?3 WHERE uuid = ?1",
+            params![
+                uuid.as_str(),
+                thread_id.value(),
+                semantic_parent_uuid.map(MessageUuid::as_str),
+            ],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
+    async fn latest_user_thread(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<ThreadId>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let id: Option<i64> = conn
+            .query_row(
+                "SELECT thread_id FROM message
+                 WHERE session_id = ?1 AND role = 'user'
+                 ORDER BY seq DESC LIMIT 1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(id.map(ThreadId))
+    }
+
     async fn cancel_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(

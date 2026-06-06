@@ -5,6 +5,7 @@ import { useApiClient } from '../../data/apiContext';
 import { useCreateSendMutation } from '@delta/api-client';
 import { useComposerStore } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
+import { useNavStore } from '../../store/navStore';
 
 export interface ComposerProps {
   activeThread: Thread;
@@ -30,6 +31,7 @@ export function Composer({ activeThread }: ComposerProps) {
   const enqueueSend = useLiveStore((state) => state.enqueueSend);
   const attachSendId = useLiveStore((state) => state.attachSendId);
   const failSend = useLiveStore((state) => state.failSend);
+  const setActiveThread = useNavStore((state) => state.setActiveThread);
 
   const branching =
     branchOrigin !== null && branchOrigin.parentThreadId === activeThread.id;
@@ -69,6 +71,11 @@ export function Composer({ activeThread }: ComposerProps) {
         });
         attachSendId(localId, send.id);
         if (branching) {
+          // The backend created a fresh child thread for this branch send and
+          // returns its id on the send. Drill into it so the user lands in the
+          // new branch (the threads query is invalidated by the mutation, so
+          // the navigator will render it), and clear the branch origin.
+          setActiveThread(send.thread_id);
           setBranchOrigin(null);
         }
       } catch {
@@ -85,6 +92,7 @@ export function Composer({ activeThread }: ComposerProps) {
       mutation,
       attachSendId,
       setBranchOrigin,
+      setActiveThread,
       failSend,
     ],
   );

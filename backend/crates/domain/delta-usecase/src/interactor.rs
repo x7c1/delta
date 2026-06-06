@@ -180,6 +180,17 @@ where
                 let matched_uuid = match_uuid_for_prompt(&new_messages, &hook.prompt);
                 if let Some(uuid) = matched_uuid {
                     self.store.mark_send_matched(pending.id, &uuid).await?;
+                    // The line was ingested onto the `main` placeholder; move it
+                    // onto the send's target thread (the new child for a branch
+                    // send) so the turn — and the assistant lines that follow it
+                    // via carry-forward — land in the right thread.
+                    self.store
+                        .assign_message_thread(
+                            &uuid,
+                            pending.thread_id,
+                            pending.semantic_parent_uuid.as_ref(),
+                        )
+                        .await?;
                     events.push(SessionEvent::TurnStarted {
                         session_id: hook.session_id.clone(),
                         pending_send_id: pending.id,
@@ -261,8 +272,20 @@ where
     }
 
     /// Pull new transcript lines from disk and persist them as messages,
-    /// attaching the active thread (currently the session's `main` thread) and
-    /// the next sequence numbers. Returns the newly ingested messages.
+    /// attaching the right thread and the next sequence numbers. Returns the
+    /// newly ingested messages.
+    ///
+    /// Thread attribution carries forward from the latest already-persisted user
+    /// message: a non-user line (assistant/tool/system) follows the thread of
+    /// the turn it belongs to, which — after the correlation step in
+    /// [`Self::on_user_prompt_submit`] re-attributes the matched user line — is
+    /// the branch thread for a branch turn. A user line is ingested onto `main`
+    /// as a placeholder; the correlation step moves the matched one onto its
+    /// send's target thread, while an unmatched user line (external input) stays
+    /// on `main` for now. The carry-forward thread is intentionally *not*
+    /// advanced on a placeholder user line within this batch: the assistant
+    /// lines of a turn are ingested in a later sync (at `Stop`), by which point
+    /// that user message already holds its correct thread.
     async fn sync_transcript(&self, transcript_path: &str) -> Result<Vec<Message>> {
         let session = self.require_session().await?;
         let main_thread = self.store.main_thread_id(&session.id).await?;
@@ -273,13 +296,26 @@ where
             return Ok(Vec::new());
         }
 
+        // The thread to attribute following non-user lines to: the thread of the
+        // most recent persisted user message, defaulting to `main`.
+        let carry_thread = self
+            .store
+            .latest_user_thread(&session.id)
+            .await?
+            .unwrap_or(main_thread);
+
         let mut messages = Vec::with_capacity(lines.len());
         for (offset, line) in lines.into_iter().enumerate() {
             let seq = (already + offset) as i64;
+            let thread_id = if matches!(line.role, delta_model::Role::User) {
+                main_thread
+            } else {
+                carry_thread
+            };
             messages.push(Message {
                 uuid: line.uuid,
                 session_id: session.id.clone(),
-                thread_id: main_thread,
+                thread_id,
                 role: line.role,
                 linear_parent_uuid: line.linear_parent_uuid,
                 semantic_parent_uuid: None,

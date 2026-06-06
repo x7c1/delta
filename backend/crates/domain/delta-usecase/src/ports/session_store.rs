@@ -55,6 +55,23 @@ pub trait SessionStore: Send + Sync {
     /// Mark a pending send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
 
+    /// Re-attribute a single message to a thread and semantic parent.
+    ///
+    /// Used by the correlation step to move a matched user message off the
+    /// `main` placeholder it was ingested onto and onto the thread of the
+    /// pending send it correlates with (the new child thread for a branch send).
+    async fn assign_message_thread(
+        &self,
+        uuid: &MessageUuid,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+    ) -> Result<()>;
+
+    /// The thread of the latest already-persisted **user** message in a
+    /// session, used as the carry-forward thread for following non-user lines.
+    /// Returns `None` when the session has no user message yet.
+    async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>>;
+
     /// Cancel a queued send by marking the row `cancelled`.
     ///
     /// The row is kept (rather than deleted) for audit, and because
@@ -141,6 +158,21 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         (**self).mark_send_matched(id, matched_uuid).await
+    }
+
+    async fn assign_message_thread(
+        &self,
+        uuid: &MessageUuid,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+    ) -> Result<()> {
+        (**self)
+            .assign_message_thread(uuid, thread_id, semantic_parent_uuid)
+            .await
+    }
+
+    async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {
+        (**self).latest_user_thread(session_id).await
     }
 
     async fn cancel_send(&self, id: i64) -> Result<()> {
