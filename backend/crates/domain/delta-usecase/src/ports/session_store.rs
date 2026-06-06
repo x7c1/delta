@@ -55,17 +55,19 @@ pub trait SessionStore: Send + Sync {
     /// Mark a pending send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
 
-    /// Re-attribute a single message to a thread and semantic parent.
+    /// Find the oldest still-`pending` send for a session whose trimmed text
+    /// equals `trimmed_text`, if any.
     ///
-    /// Used by the correlation step to move a matched user message off the
-    /// `main` placeholder it was ingested onto and onto the thread of the
-    /// pending send it correlates with (the new child thread for a branch send).
-    async fn assign_message_thread(
+    /// Drives thread attribution during ingestion: a user transcript line is
+    /// matched to its queued send by text, so it is attributed to that send's
+    /// thread regardless of which hook triggered the sync or whether the line
+    /// was present when `UserPromptSubmit` fired. `trimmed_text` is expected to
+    /// be already trimmed by the caller.
+    async fn match_pending_send(
         &self,
-        uuid: &MessageUuid,
-        thread_id: ThreadId,
-        semantic_parent_uuid: Option<&MessageUuid>,
-    ) -> Result<()>;
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> Result<Option<PendingSend>>;
 
     /// The thread of the latest already-persisted **user** message in a
     /// session, used as the carry-forward thread for following non-user lines.
@@ -160,15 +162,12 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).mark_send_matched(id, matched_uuid).await
     }
 
-    async fn assign_message_thread(
+    async fn match_pending_send(
         &self,
-        uuid: &MessageUuid,
-        thread_id: ThreadId,
-        semantic_parent_uuid: Option<&MessageUuid>,
-    ) -> Result<()> {
-        (**self)
-            .assign_message_thread(uuid, thread_id, semantic_parent_uuid)
-            .await
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> Result<Option<PendingSend>> {
+        (**self).match_pending_send(session_id, trimmed_text).await
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {

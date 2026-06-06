@@ -82,9 +82,14 @@ where
 
         let (target_thread, semantic_parent) = match branch_from {
             Some(parent) => {
+                // Give the new branch child a provisional title derived from the
+                // locator quote so the navigator shows something meaningful
+                // until it is renamed. Fall back to "untitled" when there is no
+                // quote.
+                let title = provisional_branch_title(locator_quote);
                 let thread = self
                     .store
-                    .create_thread(&session.id, "untitled", Some(thread_id), Some(parent))
+                    .create_thread(&session.id, &title, Some(thread_id), Some(parent))
                     .await?;
                 (thread.id, Some(parent.clone()))
             }
@@ -141,10 +146,18 @@ where
     /// Handle a `UserPromptSubmit` hook.
     ///
     /// The first such hook registers the session (SessionStart never fires).
-    /// The prompt is matched against the FIFO head of `pending_send`: on a hit
-    /// the send is marked matched and a [`SessionEvent::TurnStarted`] is
-    /// returned, optionally carrying the locator quote to inject as
-    /// `additionalContext`; on a miss it is treated as external input.
+    ///
+    /// The locator quote to inject as `additionalContext` is resolved *before*
+    /// syncing, by matching the prompt text against the FIFO head of
+    /// `pending_send`. This is timing-independent: the quote is returned even
+    /// when the user's transcript line has not been written to the JSONL yet.
+    ///
+    /// The actual message→thread attribution (and `mark_send_matched`) happens
+    /// inside [`Self::sync_transcript`], keyed by matching each ingested user
+    /// line to its queued send. A [`SessionEvent::TurnStarted`] is emitted when
+    /// the user line for this prompt was attributed in this sync; otherwise the
+    /// later `TurnCompleted` triggers the UI refetch. [`SessionEvent::ExternalInput`]
+    /// is emitted only when no queued send matched this prompt at all.
     ///
     /// Returns the events to broadcast and, when a locator quote should be
     /// injected, the `additionalContext` string for the hook response.
@@ -168,38 +181,35 @@ where
             });
         }
 
-        // Ingest any new transcript lines so the matched uuid is available.
+        // Resolve the locator quote from the FIFO head *before* syncing, so the
+        // `additionalContext` is returned even when the user line has not been
+        // ingested yet. This is purely text-based, hence timing-independent.
+        let head = self.store.head_pending_send(&hook.session_id).await?;
+        let matched_head = head.filter(|p| prompt_matches(&p.text, &hook.prompt));
+        let additional_context = matched_head.as_ref().and_then(|p| p.locator_quote.clone());
+
+        // Ingest new transcript lines. This matches each user line to its queued
+        // send and attributes it (plus the assistant lines that follow it) to
+        // the right thread, marking the send matched as a side effect.
         let new_messages = self.sync_transcript(&hook.transcript_path).await?;
 
-        // Correlate against the FIFO head.
-        let head = self.store.head_pending_send(&hook.session_id).await?;
-        let mut additional_context = None;
-
-        match head {
-            Some(pending) if prompt_matches(&pending.text, &hook.prompt) => {
-                let matched_uuid = match_uuid_for_prompt(&new_messages, &hook.prompt);
-                if let Some(uuid) = matched_uuid {
-                    self.store.mark_send_matched(pending.id, &uuid).await?;
-                    // The line was ingested onto the `main` placeholder; move it
-                    // onto the send's target thread (the new child for a branch
-                    // send) so the turn — and the assistant lines that follow it
-                    // via carry-forward — land in the right thread.
-                    self.store
-                        .assign_message_thread(
-                            &uuid,
-                            pending.thread_id,
-                            pending.semantic_parent_uuid.as_ref(),
-                        )
-                        .await?;
+        match matched_head {
+            Some(pending) => {
+                // A queued send matches this prompt. If its user line was
+                // attributed in this very sync, announce the turn now; otherwise
+                // the line was not in the JSONL yet (the common timing case) and
+                // the later `Stop` sync attributes it, with `TurnCompleted`
+                // driving the UI refetch.
+                if let Some(uuid) = match_uuid_for_prompt(&new_messages, &hook.prompt) {
                     events.push(SessionEvent::TurnStarted {
                         session_id: hook.session_id.clone(),
                         pending_send_id: pending.id,
                         matched_uuid: uuid,
                     });
                 }
-                additional_context = pending.locator_quote.clone();
             }
-            _ => {
+            None => {
+                // No queued send matched this prompt at all: external input.
                 events.push(SessionEvent::ExternalInput {
                     session_id: hook.session_id.clone(),
                     prompt: hook.prompt.clone(),
@@ -272,20 +282,21 @@ where
     }
 
     /// Pull new transcript lines from disk and persist them as messages,
-    /// attaching the right thread and the next sequence numbers. Returns the
-    /// newly ingested messages.
+    /// attributing each to the right thread as it is ingested.
     ///
-    /// Thread attribution carries forward from the latest already-persisted user
-    /// message: a non-user line (assistant/tool/system) follows the thread of
-    /// the turn it belongs to, which — after the correlation step in
-    /// [`Self::on_user_prompt_submit`] re-attributes the matched user line — is
-    /// the branch thread for a branch turn. A user line is ingested onto `main`
-    /// as a placeholder; the correlation step moves the matched one onto its
-    /// send's target thread, while an unmatched user line (external input) stays
-    /// on `main` for now. The carry-forward thread is intentionally *not*
-    /// advanced on a placeholder user line within this batch: the assistant
-    /// lines of a turn are ingested in a later sync (at `Stop`), by which point
-    /// that user message already holds its correct thread.
+    /// Attribution is driven by matching a user line's trimmed text to a queued
+    /// `pending_send`, so it is robust regardless of which hook triggered the
+    /// sync or whether the line was present when `UserPromptSubmit` fired.
+    /// Lines are processed in order while maintaining `carry_thread`, the thread
+    /// of the current turn:
+    ///
+    /// - A **user** line that matches a still-`pending` send is attributed to
+    ///   that send's thread (the new child thread for a branch send), the send
+    ///   is marked matched, and `carry_thread` advances to it. A user line with
+    ///   no matching send is external input and lands on `main`, resetting
+    ///   `carry_thread` to `main`.
+    /// - A **non-user** line (assistant/tool/system) follows `carry_thread` —
+    ///   the thread of the turn it belongs to.
     async fn sync_transcript(&self, transcript_path: &str) -> Result<Vec<Message>> {
         let session = self.require_session().await?;
         let main_thread = self.store.main_thread_id(&session.id).await?;
@@ -296,9 +307,9 @@ where
             return Ok(Vec::new());
         }
 
-        // The thread to attribute following non-user lines to: the thread of the
-        // most recent persisted user message, defaulting to `main`.
-        let carry_thread = self
+        // The turn in progress when this batch starts: the thread of the most
+        // recent persisted user message, defaulting to `main`.
+        let mut carry_thread = self
             .store
             .latest_user_thread(&session.id)
             .await?
@@ -307,21 +318,36 @@ where
         let mut messages = Vec::with_capacity(lines.len());
         for (offset, line) in lines.into_iter().enumerate() {
             let seq = (already + offset) as i64;
-            let thread_id = if matches!(line.role, delta_model::Role::User) {
-                main_thread
-            } else {
-                carry_thread
-            };
+            let content_text = Message::flatten_text(&line.content);
+
+            let (thread_id, semantic_parent_uuid) =
+                if matches!(line.role, delta_model::Role::User) {
+                    let trimmed = content_text.as_deref().unwrap_or("").trim();
+                    match self.store.match_pending_send(&session.id, trimmed).await? {
+                        Some(pending) => {
+                            self.store.mark_send_matched(pending.id, &line.uuid).await?;
+                            carry_thread = pending.thread_id;
+                            (pending.thread_id, pending.semantic_parent_uuid)
+                        }
+                        None => {
+                            carry_thread = main_thread;
+                            (main_thread, None)
+                        }
+                    }
+                } else {
+                    (carry_thread, None)
+                };
+
             messages.push(Message {
                 uuid: line.uuid,
                 session_id: session.id.clone(),
                 thread_id,
                 role: line.role,
                 linear_parent_uuid: line.linear_parent_uuid,
-                semantic_parent_uuid: None,
+                semantic_parent_uuid,
                 prompt_id: line.prompt_id,
                 seq,
-                content_text: Message::flatten_text(&line.content),
+                content_text,
                 content: line.content,
                 created_at: line.created_at.unwrap_or_default(),
             });
@@ -343,6 +369,21 @@ where
         }
         Ok(())
     }
+}
+
+/// Maximum length of a provisional branch title, in characters.
+const PROVISIONAL_TITLE_MAX_CHARS: usize = 40;
+
+/// Derive a provisional branch-thread title from a locator quote.
+///
+/// The quote is trimmed and truncated to [`PROVISIONAL_TITLE_MAX_CHARS`]
+/// characters; an absent or blank quote falls back to `"untitled"`.
+fn provisional_branch_title(locator_quote: Option<&str>) -> String {
+    let trimmed = locator_quote.map(str::trim).unwrap_or("");
+    if trimmed.is_empty() {
+        return "untitled".to_owned();
+    }
+    trimmed.chars().take(PROVISIONAL_TITLE_MAX_CHARS).collect()
 }
 
 /// Whether a hook prompt corresponds to a queued send.

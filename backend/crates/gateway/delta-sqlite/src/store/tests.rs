@@ -51,6 +51,53 @@ async fn pending_send_fifo_and_match() {
 }
 
 #[tokio::test]
+async fn match_pending_send_finds_oldest_pending_by_trimmed_text() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // Two pending sends with the same trimmed text; the oldest must win.
+    let first = store
+        .enqueue_send(&session.id, main, None, "  hello world\n", None)
+        .await
+        .unwrap();
+    let _second = store
+        .enqueue_send(&session.id, main, None, "hello world", None)
+        .await
+        .unwrap();
+    let _other = store
+        .enqueue_send(&session.id, main, None, "different", None)
+        .await
+        .unwrap();
+
+    // Trimmed comparison ignores surrounding whitespace on the stored text.
+    let matched = store
+        .match_pending_send(&session.id, "hello world")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(matched.id, first.id, "returns the oldest matching pending");
+
+    // Marking it matched removes it from the candidate set.
+    store
+        .mark_send_matched(first.id, &MessageUuid::from("u-1"))
+        .await
+        .unwrap();
+    let matched = store
+        .match_pending_send(&session.id, "hello world")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(matched.id, _second.id, "skips the already-matched send");
+
+    // No pending send for a foreign text.
+    assert!(store
+        .match_pending_send(&session.id, "nope")
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
 async fn message_upsert_and_thread_view() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

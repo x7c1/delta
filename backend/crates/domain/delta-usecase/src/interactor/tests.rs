@@ -186,18 +186,21 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn assign_message_thread(
+    async fn match_pending_send(
         &self,
-        uuid: &MessageUuid,
-        thread_id: ThreadId,
-        semantic_parent_uuid: Option<&MessageUuid>,
-    ) -> Result<()> {
-        let mut g = self.inner.lock().unwrap();
-        if let Some(m) = g.messages.iter_mut().find(|m| &m.uuid == uuid) {
-            m.thread_id = thread_id;
-            m.semantic_parent_uuid = semantic_parent_uuid.cloned();
-        }
-        Ok(())
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> Result<Option<PendingSend>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.sends
+            .iter()
+            .filter(|s| {
+                &s.session_id == session_id
+                    && s.status == PendingSendStatus::Pending
+                    && s.text.trim() == trimmed_text
+            })
+            .min_by_key(|s| s.id)
+            .cloned())
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {
@@ -451,8 +454,8 @@ async fn branch_send_attributes_user_and_assistant_to_child() {
     let child = pending.thread_id;
     assert_ne!(child, main);
 
-    // The matching user line is ingested onto `main` then re-attributed to the
-    // child by the correlation step.
+    // The matching user line is present at submit time, so it is matched to the
+    // pending send and attributed to the child during this sync.
     ix.transcript_fake().push(user_line("u-b", "branch text"));
     ix.on_user_prompt_submit(submit("branch text")).await.unwrap();
 
@@ -484,6 +487,120 @@ async fn branch_send_attributes_user_and_assistant_to_child() {
     let main_uuids: Vec<&str> = main_view.iter().map(|m| m.uuid.as_str()).collect();
     assert!(!main_uuids.contains(&"u-b"));
     assert!(!main_uuids.contains(&"a-b"));
+}
+
+/// Reproduces the thread-attribution timing bug: the `UserPromptSubmit` hook
+/// fires before the user line is written to the JSONL, so nothing is attributed
+/// in that sync. Both the user line and the assistant reply arrive together in a
+/// later sync (as happens at `Stop`) and must still land on the branch thread.
+#[tokio::test]
+async fn branch_send_attributes_late_arriving_lines_to_child() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // Queue a branch send. The user line is NOT in the transcript yet.
+    let parent = MessageUuid::from("uuid-parent");
+    let pending = ix
+        .enqueue_send(main, "branch text", Some("quoted line"), Some(&parent))
+        .await
+        .unwrap();
+    let child = pending.thread_id;
+    assert_ne!(child, main);
+
+    // The hook fires before the user line is flushed to the JSONL. The locator
+    // quote is still returned (text-based), but nothing is attributed yet.
+    let (events, additional) = ix.on_user_prompt_submit(submit("branch text")).await.unwrap();
+    assert_eq!(additional.as_deref(), Some("quoted line"));
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::TurnStarted { .. })),
+        "no turn started while the user line is absent"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
+        "a queued send matched, so this is not external input"
+    );
+    // Still pending: nothing was matched yet.
+    let head = ix.store().head_pending_send(&session).await.unwrap();
+    assert_eq!(head.map(|p| p.id), Some(pending.id));
+
+    // Later (at Stop) BOTH the user line and the assistant reply arrive in one
+    // sync. Attribution must key off the pending send, not the hook timing.
+    ix.transcript_fake().push(user_line("u-b", "branch text"));
+    ix.transcript_fake().push(assistant_line("a-b", "branch reply"));
+    ix.on_stop(crate::ports::StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    // Both messages land on the child thread.
+    let child_view = ix.thread_view(child).await.unwrap();
+    let child_uuids: Vec<&str> = child_view.iter().map(|m| m.uuid.as_str()).collect();
+    assert!(child_uuids.contains(&"u-b"), "user message lands on child");
+    assert!(
+        child_uuids.contains(&"a-b"),
+        "assistant message lands on child"
+    );
+
+    // The user message carries the branch semantic parent.
+    let user_msg = child_view.iter().find(|m| m.uuid.as_str() == "u-b").unwrap();
+    assert_eq!(user_msg.semantic_parent_uuid, Some(parent));
+
+    // The pending send is now matched (to the user line uuid).
+    let send = ix
+        .store()
+        .inner
+        .lock()
+        .unwrap()
+        .sends
+        .iter()
+        .find(|s| s.id == pending.id)
+        .cloned()
+        .unwrap();
+    assert_eq!(send.status, PendingSendStatus::Matched);
+    assert_eq!(send.matched_uuid, Some(MessageUuid::from("u-b")));
+
+    // Neither leaked onto main.
+    let main_view = ix.thread_view(main).await.unwrap();
+    let main_uuids: Vec<&str> = main_view.iter().map(|m| m.uuid.as_str()).collect();
+    assert!(!main_uuids.contains(&"u-b"));
+    assert!(!main_uuids.contains(&"a-b"));
+}
+
+/// A branch send creates the child thread with a provisional title derived from
+/// the locator quote, instead of the placeholder "untitled".
+#[tokio::test]
+async fn branch_send_titles_child_from_locator_quote() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let main = ix
+        .store()
+        .main_thread_id(&SessionId::from("sess-1"))
+        .await
+        .unwrap();
+
+    let parent = MessageUuid::from("uuid-parent");
+    let pending = ix
+        .enqueue_send(main, "branch text", Some("  the quoted source line  "), Some(&parent))
+        .await
+        .unwrap();
+    let child = ix.store().thread(pending.thread_id).await.unwrap().unwrap();
+    assert_eq!(child.title, "the quoted source line");
+
+    // With no quote, the title falls back to "untitled".
+    let pending2 = ix
+        .enqueue_send(main, "branch text 2", None, Some(&parent))
+        .await
+        .unwrap();
+    let child2 = ix.store().thread(pending2.thread_id).await.unwrap().unwrap();
+    assert_eq!(child2.title, "untitled");
 }
 
 #[tokio::test]

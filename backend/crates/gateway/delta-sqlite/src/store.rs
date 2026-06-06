@@ -357,23 +357,32 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
-    async fn assign_message_thread(
+    async fn match_pending_send(
         &self,
-        uuid: &MessageUuid,
-        thread_id: ThreadId,
-        semantic_parent_uuid: Option<&MessageUuid>,
-    ) -> std::result::Result<(), delta_usecase::Error> {
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> std::result::Result<Option<PendingSend>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        conn.execute(
-            "UPDATE message SET thread_id = ?2, semantic_parent_uuid = ?3 WHERE uuid = ?1",
-            params![
-                uuid.as_str(),
-                thread_id.value(),
-                semantic_parent_uuid.map(MessageUuid::as_str),
-            ],
-        )
-        .map_err(Error::from)?;
-        Ok(())
+        // SQLite's `TRIM` only strips spaces (not all Unicode whitespace such as
+        // `\n`), so to match Rust's `str::trim` semantics we scan the pending
+        // sends in FIFO order and compare trimmed text in Rust.
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {PENDING_COLS} FROM pending_send
+                 WHERE session_id = ?1 AND status = 'pending'
+                 ORDER BY id"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![session_id.as_str()], |r| Ok(pending_send_from_row(r)))
+            .map_err(Error::from)?;
+        for row in rows {
+            let send = row.map_err(Error::from)??;
+            if send.text.trim() == trimmed_text {
+                return Ok(Some(send));
+            }
+        }
+        Ok(None)
     }
 
     async fn latest_user_thread(
