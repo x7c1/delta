@@ -232,6 +232,10 @@ text frames, one event per frame. Each event is a tagged union keyed on `kind`:
   "session_id": "sess-1",
   "request_id": 1,
   "tool_name": "Bash" }
+
+{ "kind": "transcript_updated",
+  "session_id": "sess-1",
+  "thread_ids": [1, 4] }
 ```
 
 - `session_registered` — emitted on the first `UserPromptSubmit`.
@@ -240,6 +244,13 @@ text frames, one event per frame. Each event is a tagged union keyed on `kind`:
   the pane).
 - `turn_completed` — a response finished (from the `Stop` hook).
 - `permission_requested` — a tool permission prompt is imminent.
+- `transcript_updated` — the background tail ingested new transcript lines
+  between hooks. Claude Code often flushes the final assistant line to the JSONL
+  *after* the `Stop` hook fires, so the hook sync misses it; a ~500ms poll picks
+  it up and emits this so the browser refetches the affected `thread_ids`. Unlike
+  `turn_completed`/`external_input` it carries no turn semantics — clients must
+  only refetch those threads, never mutate the pending-send FIFO or unread
+  badges.
 
 The stream is process-wide: every connected browser receives every event. There
 is no client→server message protocol on this socket.
@@ -301,7 +312,10 @@ Otherwise the response is an empty `200 OK` with no body.
 ### `POST /hooks/stop`
 
 Fires when a response completes. Delta ingests any final transcript lines and
-broadcasts `turn_completed`.
+broadcasts `turn_completed`. Claude Code may flush the last assistant line to the
+JSONL just after this hook fires; the background transcript tail (see
+`transcript_updated` under `/ws`) catches those late lines and refetches them, so
+the reply still appears without waiting for the next hook.
 
 Request:
 

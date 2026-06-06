@@ -18,6 +18,14 @@ pub struct Interactor<T, X, S> {
     tmux: T,
     transcript: X,
     store: S,
+    /// Serializes [`Self::sync_transcript`] across callers.
+    ///
+    /// Both the hook handlers and the background transcript tail can sync
+    /// concurrently. The read-cursor → read-file → ingest → set-cursor sequence
+    /// is not atomic, so without this lock two interleaved syncs could read the
+    /// same lines from the same starting cursor and double-ingest, or race the
+    /// cursor write. Holding this for the whole sequence makes ingestion serial.
+    sync_lock: tokio::sync::Mutex<()>,
 }
 
 /// An [`Interactor`] with its three ports type-erased behind trait objects.
@@ -43,6 +51,7 @@ where
             tmux,
             transcript,
             store,
+            sync_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -236,6 +245,24 @@ where
         }])
     }
 
+    /// Poll the registered session's transcript for newly-written lines.
+    ///
+    /// Drives the continuous background tail: Claude Code often flushes the final
+    /// assistant line to the JSONL *after* the `Stop` hook fires, so the hook's
+    /// sync misses it and the reply never reaches the browser until the next
+    /// hook. Polling on an interval ingests those late lines and returns them so
+    /// the caller can announce the transcript growth.
+    ///
+    /// Reuses [`Self::sync_transcript`] (cursor, attribution, the serialization
+    /// lock), so it is safe to call concurrently with the hook handlers. Returns
+    /// an empty list when no session has been registered yet.
+    pub async fn poll_transcript(&self) -> Result<Vec<Message>> {
+        match self.store.current_session().await? {
+            Some(session) => self.sync_transcript(&session.transcript_path).await,
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Handle a `PreToolUse` hook: record the request for UI/audit and notify
     /// the browser. Delta never returns allow/deny — the TUI owns that.
     pub async fn on_pre_tool_use(
@@ -302,6 +329,11 @@ where
     /// - A **non-user** line (assistant/tool/system) follows `carry_thread` —
     ///   the thread of the turn it belongs to.
     async fn sync_transcript(&self, transcript_path: &str) -> Result<Vec<Message>> {
+        // Serialize the whole cursor → read → ingest → cursor sequence so the
+        // hook handlers and the background tail cannot interleave and
+        // double-ingest or race the cursor (see `sync_lock`).
+        let _guard = self.sync_lock.lock().await;
+
         let session = self.require_session().await?;
         let main_thread = self.store.main_thread_id(&session.id).await?;
 

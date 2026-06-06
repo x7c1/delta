@@ -20,6 +20,22 @@ describe('parseSessionEvent', () => {
     });
   });
 
+  it('parses a transcript_updated event', () => {
+    const event = parseSessionEvent(
+      JSON.stringify({
+        kind: 'transcript_updated',
+        session_id: 'sess-1',
+        thread_ids: [1, 4],
+      }),
+    );
+
+    expect(event).toEqual({
+      kind: 'transcript_updated',
+      session_id: 'sess-1',
+      thread_ids: [1, 4],
+    });
+  });
+
   it('returns null for an unknown kind', () => {
     expect(parseSessionEvent(JSON.stringify({ kind: 'bogus' }))).toBeNull();
   });
