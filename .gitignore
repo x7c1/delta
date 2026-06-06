@@ -1,6 +1,7 @@
 # Node / frontend
 node_modules/
 dist/
+dist-types/
 .vite/
 *.tsbuildinfo
 

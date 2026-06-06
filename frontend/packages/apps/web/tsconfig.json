@@ -2,14 +2,16 @@
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist",
+    "outDir": "dist-types",
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
   "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"],
   "references": [
     { "path": "../../domain/model" },
     { "path": "../../ui/ui-kit" },
-    { "path": "../../gateway/api-client" }
+    { "path": "../../gateway/api-client" },
+    { "path": "../../testing/api-mocks" }
   ]
 }

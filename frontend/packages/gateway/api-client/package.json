@@ -18,9 +18,13 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@delta/model": "workspace:*",
     "@tanstack/react-query": "^5.62.7"
   },
   "peerDependencies": {
     "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18"
   }
 }

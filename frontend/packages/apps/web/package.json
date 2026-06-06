@@ -8,20 +8,36 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "lint": "eslint .",
+    "lint": "eslint . && pnpm run lint:deps",
+    "lint:deps": "pnpm --dir ../../.. exec depcruise --config .dependency-cruiser.cjs packages",
     "preview": "vite preview"
   },
   "dependencies": {
     "@delta/api-client": "workspace:*",
     "@delta/model": "workspace:*",
     "@delta/ui-kit": "workspace:*",
+    "@tanstack/react-query": "^5.62.7",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
+    "@delta/api-mocks": "workspace:*",
+    "@testing-library/jest-dom": "^6.6.3",
+    "dependency-cruiser": "^16.8.0",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "jsdom": "^25.0.1",
+    "msw": "^2.7.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
     "vite": "^6.0.5"
   }
 }
