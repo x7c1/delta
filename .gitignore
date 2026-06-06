@@ -5,6 +5,10 @@ dist-types/
 .vite/
 *.tsbuildinfo
 
+# Playwright (end-to-end) artifacts
+test-results/
+playwright-report/
+
 # Rust / backend
 /backend/target/
 # Local SQLite database created by a dev run.

@@ -61,6 +61,29 @@ pnpm -r build                                   # build workspace libs first
 VITE_API_MOCK=1 pnpm --filter @delta/web dev    # → http://localhost:5173
 ```
 
+### End-to-end UI tests (headless, mock mode)
+
+A headless Playwright suite drives the real browser DOM against mock mode and
+asserts functional, structural behavior (message send, branch drill-in, the
+pending/running indicator lifecycle, layout restore after reload, terminal
+resize). It lives in `@delta/web` (`packages/apps/web/e2e/`), separate from the
+vitest unit tests.
+
+Build the workspace libraries first (the dev server resolves them from built
+output), install the browser once, then run the suite — Playwright starts the
+mock-mode dev server itself:
+
+```bash
+pnpm -r build
+pnpm --filter @delta/web exec playwright install --with-deps chromium
+pnpm --filter @delta/web e2e
+```
+
+The suite puts the fake event source under manual control (no auto-replay) and
+feeds events explicitly, so every run is fast and deterministic. If the bundled
+Chromium does not target your OS, run against a locally installed Google Chrome
+instead: `E2E_CHROME_CHANNEL=chrome pnpm --filter @delta/web e2e`.
+
 ### Run the UI against the real backend
 
 Start the server (see Backend), then:

@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { WsEventSource, type SessionEventSource } from '@delta/api-client';
-import { FakeEventSource } from '@delta/api-mocks';
 import { isMockMode, wsUrl } from '../config';
 import { useLiveStore } from '../store/liveStore';
 import { useNavStore } from '../store/navStore';
 import { applySessionEvent } from './applySessionEvent';
+import { createMockEventSource } from './mockEventControl';
 
 /**
  * Open the live event source (the real `/ws` client, or the dev fake in mock
@@ -18,7 +18,7 @@ export function useSessionEvents(): void {
 
   useEffect(() => {
     const source: SessionEventSource = isMockMode()
-      ? new FakeEventSource()
+      ? createMockEventSource()
       : new WsEventSource({ url: wsUrl('/ws') });
 
     const offEvent = source.onEvent((event) => {

@@ -19,6 +19,14 @@ export interface FakeEventSourceOptions {
   script?: SessionEvent[];
   /** Injectable timer, primarily for tests. Defaults to `setTimeout`. */
   scheduler?: (callback: () => void, ms: number) => void;
+  /**
+   * Whether to auto-replay the script on the interval. Defaults to `true`.
+   * When `false`, the source still performs the connection handshake (emits
+   * `open`) but never schedules the script; events are then driven manually via
+   * {@link FakeEventSource.emit}. This lets an external driver (e.g. an
+   * end-to-end test) interleave events with user actions deterministically.
+   */
+  autoPlay?: boolean;
 }
 
 /** The default scripted sequence demonstrating each event variant. */
@@ -52,6 +60,7 @@ export class FakeEventSource {
   private readonly script: SessionEvent[];
   private readonly intervalMs: number;
   private readonly scheduler: (callback: () => void, ms: number) => void;
+  private readonly autoPlay: boolean;
   private index = 0;
   private closed = false;
 
@@ -63,13 +72,17 @@ export class FakeEventSource {
       ((callback, ms) => {
         setTimeout(callback, ms);
       });
-    // Mimic a connection handshake, then start replaying events.
+    this.autoPlay = options.autoPlay ?? true;
+    // Mimic a connection handshake, then start replaying events (unless an
+    // external driver is in control).
     queueMicrotask(() => {
       if (this.closed) {
         return;
       }
       this.emitStatus('open');
-      this.scheduleNext();
+      if (this.autoPlay) {
+        this.scheduleNext();
+      }
     });
   }
 
@@ -91,6 +104,18 @@ export class FakeEventSource {
     for (const listener of this.eventListeners) {
       listener(event);
     }
+  }
+
+  /**
+   * Emit a single event to all subscribers. Intended for `autoPlay: false`
+   * mode, where an external driver feeds events one at a time. No-op once the
+   * source is closed.
+   */
+  emit(event: SessionEvent): void {
+    if (this.closed) {
+      return;
+    }
+    this.emitEvent(event);
   }
 
   private emitStatus(status: FakeStatus): void {
