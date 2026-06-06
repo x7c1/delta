@@ -77,3 +77,9 @@ jobs:
 
       - name: Lint
         run: pnpm -r lint
+
+      - name: Install Playwright browser
+        run: pnpm --filter @delta/web exec playwright install --with-deps chromium
+
+      - name: E2E (mock mode)
+        run: pnpm --filter @delta/web e2e

@@ -19,5 +19,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // The Playwright end-to-end specs under `e2e/` use Playwright's own runner
+    // (`pnpm e2e`); keep them out of the vitest unit-test run.
+    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**'],
   },
 });
