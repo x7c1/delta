@@ -8,7 +8,6 @@ dist-types/
 # Playwright (end-to-end) artifacts
 test-results/
 playwright-report/
-.playwright/
 
 # Rust / backend
 /backend/target/

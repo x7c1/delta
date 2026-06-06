@@ -1,6 +1,9 @@
 import type { Page } from '@playwright/test';
 import type { SessionEvent } from '@delta/model';
-import { MOCK_EVENT_CONTROL_KEY } from '../../src/data/mockEventControl';
+import {
+  MOCK_EVENT_CONTROL_KEY,
+  MOCK_EVENT_SOURCE_KEY,
+} from '../../src/data/mockEventControl';
 
 /**
  * End-to-end support helpers.
@@ -32,15 +35,16 @@ export async function emitEvent(
   page: Page,
   event: SessionEvent,
 ): Promise<void> {
-  await page.evaluate((evt) => {
-    const source = (
-      window as unknown as {
-        __deltaMockEventSource?: { emit(e: unknown): void };
+  await page.evaluate(
+    ([key, evt]) => {
+      const source = (
+        window as unknown as Record<string, { emit(e: unknown): void } | undefined>
+      )[key];
+      if (!source) {
+        throw new Error('mock event source is not available yet');
       }
-    ).__deltaMockEventSource;
-    if (!source) {
-      throw new Error('mock event source is not available yet');
-    }
-    source.emit(evt);
-  }, event);
+      source.emit(evt);
+    },
+    [MOCK_EVENT_SOURCE_KEY, event] as const,
+  );
 }
