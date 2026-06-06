@@ -12,22 +12,6 @@ Delta has two top-level parts, treated as equals:
   and are split by layer: `apps/`, `ui/`, `gateway/`, `domain/`, `testing/`.
   Dependency direction is enforced by dependency-cruiser.
 
-### Frontend file organization
-
-Split TypeScript sources by concern: one file holds a single main type plus its
-closely related logic (helpers, conversions, constants) and the id type aliases
-that identify it. Do not pile unrelated concerns into one file.
-
-- A comment-section divider (e.g. `// --- session ---`, `// === ... ===`) that
-  chapters unrelated concerns within a file is the signal to split: make each
-  section its own file named after the concern.
-- The re-export barrel belongs only at each package's entry `src/index.ts` (the
-  file `package.json` `exports`/`main` points to). Do not add barrels in
-  internal subdirectories — import concern files directly
-  (e.g. `import { Session } from './session'`). TS files are modules already.
-- Tests live in a sibling `*.test.ts` next to the concern they exercise, not in
-  one combined test file.
-
 ## Documentation
 
 **DRY Principle**: Write each piece of information in ONE place only.
