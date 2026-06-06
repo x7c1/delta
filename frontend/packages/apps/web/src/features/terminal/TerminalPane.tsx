@@ -20,6 +20,7 @@ export function TerminalPane() {
     if (isMockMode() || !containerRef.current) {
       return;
     }
+    const container = containerRef.current;
     const term = new Terminal({
       convertEol: true,
       fontFamily: 'monospace',
@@ -28,7 +29,7 @@ export function TerminalPane() {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.open(containerRef.current);
+    term.open(container);
     fit.fit();
 
     const decoder = new TextDecoder();
@@ -39,11 +40,27 @@ export function TerminalPane() {
     });
     term.onData((data) => connection?.send(data));
 
-    const onResize = () => fit.fit();
-    window.addEventListener('resize', onResize);
+    // Reflow the terminal whenever its container changes size — covers the
+    // resizable pane drag as well as window resizes. Coalesce bursts onto a
+    // single animation frame to avoid thrashing fit() during a drag.
+    let rafId = 0;
+    const scheduleFit = () => {
+      if (rafId !== 0) {
+        return;
+      }
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        fit.fit();
+      });
+    };
+    const observer = new ResizeObserver(scheduleFit);
+    observer.observe(container);
 
     return () => {
-      window.removeEventListener('resize', onResize);
+      if (rafId !== 0) {
+        window.cancelAnimationFrame(rafId);
+      }
+      observer.disconnect();
       connection?.close();
       term.dispose();
     };
