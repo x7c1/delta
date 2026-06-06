@@ -116,9 +116,14 @@ export const useLiveStore = create<LiveState>((set) => ({
           return { pending };
         }
         case 'turn_completed': {
-          // Mark the in-progress send done and drop it from the visible FIFO.
+          // Drop the oldest active send from the visible FIFO. It may still be
+          // `queued` rather than `in_progress`: `turn_started` only fires when
+          // the user line was ingested in the same `UserPromptSubmit` sync,
+          // which often does not happen, so a completed turn must clear a still-
+          // queued send too — otherwise it stays "waiting" forever.
           const idx = state.pending.findIndex(
-            (item) => item.status === 'in_progress',
+            (item) =>
+              item.status === 'in_progress' || item.status === 'queued',
           );
           if (idx === -1) {
             return state;

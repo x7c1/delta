@@ -44,6 +44,27 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().pending).toHaveLength(0);
   });
 
+  it('drops a still-queued send on turn_completed when turn_started never fired', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 1,
+      threadId: 1,
+      text: 'これはテスト送信です',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    // No turn_started (the common timing case: the user line was not ingested
+    // in the UserPromptSubmit sync). The completed turn must still clear it.
+    useLiveStore.getState().applyEvent(
+      { kind: 'turn_completed', session_id: 'sess-1', stop_reason: null },
+      1,
+    );
+    expect(useLiveStore.getState().pending).toHaveLength(0);
+  });
+
   it('records a permission notice and clears it on dismiss', () => {
     useLiveStore.getState().applyEvent(
       {
