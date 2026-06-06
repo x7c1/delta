@@ -91,13 +91,15 @@ export function TranscriptPane({ threads, activeThread }: TranscriptPaneProps) {
               }
             />
             {children.length > 0 && (
+              // One chip per child thread branching from this message; the chip
+              // set itself conveys how many branches there are.
               <div className="flex flex-wrap gap-1.5 px-3 pb-2">
                 {children.map((child) => (
                   <Chip
                     key={child.id}
                     onClick={() => setActiveThread(child.id)}
                   >
-                    ⤷ {child.title} ({children.length})
+                    ⤷ {child.title}
                     <span className="font-medium">[enter →]</span>
                   </Chip>
                 ))}

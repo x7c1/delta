@@ -9,7 +9,9 @@ export interface ThreadTreeProps {
 
 /**
  * The thread navigator tree (named nodes only, no messages). Clicking a node
- * sets it active and clears its unread badge. Siblings keep creation order.
+ * sets it active; activation clears the thread's unread badge (handled centrally
+ * by the workspace, so every activation path clears it). Siblings keep creation
+ * order.
  */
 export function ThreadTree({ threads }: ThreadTreeProps) {
   const roots = buildThreadTree(threads);
@@ -26,7 +28,6 @@ function ThreadTreeNode({ node, depth }: { node: ThreadNode; depth: number }) {
   const activeThreadId = useNavStore((state) => state.activeThreadId);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const unread = useLiveStore((state) => state.unread[node.thread.id] ?? 0);
-  const clearUnread = useLiveStore((state) => state.clearUnread);
 
   const isActive = activeThreadId === node.thread.id;
 
@@ -34,10 +35,7 @@ function ThreadTreeNode({ node, depth }: { node: ThreadNode; depth: number }) {
     <li>
       <button
         type="button"
-        onClick={() => {
-          setActiveThread(node.thread.id);
-          clearUnread(node.thread.id);
-        }}
+        onClick={() => setActiveThread(node.thread.id)}
         style={{ paddingLeft: `${0.5 + depth * 0.85}rem` }}
         className={cn(
           'flex w-full items-center justify-between gap-2 py-1 pr-2 text-left text-sm hover:bg-slate-100',

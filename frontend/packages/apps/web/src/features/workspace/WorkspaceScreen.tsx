@@ -4,6 +4,7 @@ import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
 import { useNavStore } from '../../store/navStore';
+import { useLiveStore } from '../../store/liveStore';
 import { NavigatorPane } from '../navigator/NavigatorPane';
 import { TranscriptPane } from '../transcript/TranscriptPane';
 import { TerminalPane } from '../terminal/TerminalPane';
@@ -26,6 +27,7 @@ export function WorkspaceScreen() {
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
+  const clearUnread = useLiveStore((state) => state.clearUnread);
 
   // Default the active thread to the main thread once it is known.
   useEffect(() => {
@@ -33,6 +35,14 @@ export function WorkspaceScreen() {
       setActiveThread(sessionQuery.data.main_thread_id);
     }
   }, [activeThreadId, sessionQuery.data, setActiveThread]);
+
+  // Clear the unread badge whenever a thread becomes active, regardless of how
+  // it was activated (tree click, breadcrumb, branch chip, or the default).
+  useEffect(() => {
+    if (activeThreadId !== null) {
+      clearUnread(activeThreadId);
+    }
+  }, [activeThreadId, clearUnread]);
 
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;

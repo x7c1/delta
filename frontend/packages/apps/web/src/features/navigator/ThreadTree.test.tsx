@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { Thread } from '@delta/model';
 import { ThreadTree } from './ThreadTree';
 import { useNavStore } from '../../store/navStore';
@@ -40,13 +40,18 @@ describe('ThreadTree', () => {
     expect(useNavStore.getState().activeThreadId).toBe(2);
   });
 
-  it('shows an unread badge for inactive threads and clears it on activation', () => {
+  it('shows an unread badge for inactive threads and hides it for the active one', () => {
     useLiveStore.setState({ unread: { 2: 3 } });
-    render(<ThreadTree threads={threads} />);
+    const { rerender } = render(<ThreadTree threads={threads} />);
 
     expect(screen.getByText('3')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('branch one'));
-    expect(useLiveStore.getState().unread[2]).toBeUndefined();
+    // Activation hides the badge on the active thread. (Clearing the stored
+    // count is centralized in the workspace, not the tree.)
+    act(() => {
+      useNavStore.setState({ activeThreadId: 2 });
+    });
+    rerender(<ThreadTree threads={threads} />);
+    expect(screen.queryByText('3')).not.toBeInTheDocument();
   });
 });

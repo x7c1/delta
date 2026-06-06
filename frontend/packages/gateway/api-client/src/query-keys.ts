@@ -8,4 +8,6 @@ export const queryKeys = {
   session: ['session'] as const,
   threads: ['threads'] as const,
   messages: (threadId: ThreadId) => ['messages', threadId] as const,
+  /** Placeholder key used while no thread is selected (query disabled). */
+  messagesNone: ['messages', 'none'] as const,
 };

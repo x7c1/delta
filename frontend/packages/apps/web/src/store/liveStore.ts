@@ -1,10 +1,5 @@
 import { create } from 'zustand';
-import type {
-  MessageUuid,
-  PendingSend,
-  SessionEvent,
-  ThreadId,
-} from '@delta/model';
+import type { MessageUuid, SessionEvent, ThreadId } from '@delta/model';
 import type { ConnectionStatus } from '@delta/api-client';
 
 /**
@@ -153,19 +148,3 @@ export const useLiveStore = create<LiveState>((set) => ({
       }
     }),
 }));
-
-/** Build an optimistic {@link PendingItem} from a created {@link PendingSend}. */
-export function pendingItemFromSend(
-  localId: string,
-  send: PendingSend,
-): PendingItem {
-  return {
-    localId,
-    sendId: send.id,
-    threadId: send.thread_id,
-    text: send.text,
-    semanticParentUuid: send.semantic_parent_uuid,
-    status: 'queued',
-    createdAt: Date.now(),
-  };
-}

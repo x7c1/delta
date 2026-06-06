@@ -39,7 +39,8 @@ export function useThreadMessagesQuery(
   threadId: ThreadId | null,
 ): UseQueryResult<MessagesResponse> {
   return useQuery({
-    queryKey: threadId === null ? ['messages', 'none'] : queryKeys.messages(threadId),
+    queryKey:
+      threadId === null ? queryKeys.messagesNone : queryKeys.messages(threadId),
     queryFn: () => client.getThreadMessages(threadId as ThreadId),
     enabled: threadId !== null,
   });
