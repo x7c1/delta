@@ -45,6 +45,21 @@ export function applySessionEvent(
         store.bumpUnread(activeThreadId);
       }
       break;
+    case 'transcript_updated':
+      // The continuous tail ingested new lines (e.g. the assistant reply Claude
+      // Code flushed after `Stop`). Pure refetch: invalidate every affected
+      // thread plus the active one, with no FIFO/unread mutation.
+      for (const threadId of event.thread_ids) {
+        invalidateThreadMessages(queryClient, threadId);
+      }
+      if (
+        activeThreadId !== null &&
+        !event.thread_ids.includes(activeThreadId)
+      ) {
+        invalidateThreadMessages(queryClient, activeThreadId);
+      }
+      invalidateThreads(queryClient);
+      break;
     case 'session_registered':
       invalidateThreads(queryClient);
       break;

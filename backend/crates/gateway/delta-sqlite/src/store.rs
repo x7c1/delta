@@ -357,6 +357,52 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
+    async fn match_pending_send(
+        &self,
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> std::result::Result<Option<PendingSend>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // SQLite's `TRIM` only strips spaces (not all Unicode whitespace such as
+        // `\n`), so to match Rust's `str::trim` semantics we scan the pending
+        // sends in FIFO order and compare trimmed text in Rust.
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {PENDING_COLS} FROM pending_send
+                 WHERE session_id = ?1 AND status = 'pending'
+                 ORDER BY id"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![session_id.as_str()], |r| Ok(pending_send_from_row(r)))
+            .map_err(Error::from)?;
+        for row in rows {
+            let send = row.map_err(Error::from)??;
+            if send.text.trim() == trimmed_text {
+                return Ok(Some(send));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn latest_user_thread(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<ThreadId>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let id: Option<i64> = conn
+            .query_row(
+                "SELECT thread_id FROM message
+                 WHERE session_id = ?1 AND role = 'user'
+                 ORDER BY seq DESC LIMIT 1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(id.map(ThreadId))
+    }
+
     async fn cancel_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(
@@ -431,6 +477,35 @@ impl SessionStore for SqliteStore {
             )
             .map_err(Error::from)?;
         Ok(count as usize)
+    }
+
+    async fn transcript_lines_read(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<usize, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let lines: i64 = conn
+            .query_row(
+                "SELECT transcript_lines_read FROM session WHERE id = ?1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(Error::from)?;
+        Ok(lines as usize)
+    }
+
+    async fn set_transcript_lines_read(
+        &self,
+        session_id: &SessionId,
+        lines: usize,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE session SET transcript_lines_read = ?2 WHERE id = ?1",
+            params![session_id.as_str(), lines as i64],
+        )
+        .map_err(Error::from)?;
+        Ok(())
     }
 
     async fn thread_messages(

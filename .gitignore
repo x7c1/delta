@@ -5,6 +5,13 @@ dist-types/
 .vite/
 *.tsbuildinfo
 
+# Rust / backend
+/backend/target/
+# Local SQLite database created by a dev run.
+*.db
+*.db-shm
+*.db-wal
+
 # Scratch / agent progress logs
 .tmp/
 

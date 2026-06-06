@@ -81,3 +81,72 @@ port — keep them in sync if you set `DELTA_PORT`).
   hot-reloads directly.
 - `esbuild` and `msw` build scripts are allow-listed in `pnpm-workspace.yaml`
   (`allowBuilds`); pnpm does not run dependency build scripts by default.
+
+## Run the whole thing locally (walking skeleton)
+
+This brings up the full loop end to end: type in the browser, a real `claude`
+TUI (running in tmux) receives it via `send-keys`, and its response flows back
+through the JSONL transcript and Claude Code's HTTP hooks to the browser. This
+is the minimal wiring — permission prompts are answered in the TUI, and
+robustness and edge-cases come later.
+
+### Prerequisites
+
+- `tmux` on your PATH (it hosts the `claude` session).
+- An authenticated Claude Code (`claude`). Run `claude` once on its own to
+  complete OAuth login if you have not already.
+- The Rust toolchain (`cargo`) and pnpm (via `corepack enable`).
+
+### Launch
+
+```bash
+scripts/dev.sh           # default session workdir: .tmp/session
+scripts/dev.sh ~/scratch # or pass your own working directory for claude
+```
+
+`scripts/dev.sh`:
+
+1. Creates the session working directory and copies
+   `scripts/claude-settings.json` to `<workdir>/.claude/settings.json`, so the
+   session's native HTTP hooks point at the local server
+   (`http://127.0.0.1:7878/hooks/...`).
+2. Starts a tmux session named `delta` with `claude` in pane `delta:0.0`.
+3. Starts `delta-server` with `DELTA_TMUX_PANE=delta:0.0` and `DELTA_PORT=7878`
+   (logging to `.tmp/delta-server.log`).
+4. Prints the command to start the frontend against the real backend.
+
+Then, in a second terminal, start the UI against the real backend:
+
+```bash
+cd frontend
+pnpm install            # first run only
+pnpm -r build           # build workspace libs first
+pnpm --filter @delta/web dev
+```
+
+Open <http://localhost:5173>.
+
+### First run: attach to the TUI
+
+On the first run you usually need to attach to the `claude` pane to finish OAuth
+login and to answer permission prompts as they appear:
+
+```bash
+tmux attach -t delta     # detach again with Ctrl-b then d
+```
+
+### Happy-path check
+
+Type a message in the browser. It is dispatched into the tmux pane via
+`send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
+the browser. When a tool needs permission, switch to the TUI
+(`tmux attach -t delta`) and answer the prompt there.
+
+### Shut down
+
+```bash
+scripts/dev.sh --down    # or: scripts/stop.sh
+```
+
+This stops `delta-server` and kills the `delta` tmux session. Stop the frontend
+dev server with Ctrl-C in its terminal.

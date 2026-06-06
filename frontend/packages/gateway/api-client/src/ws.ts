@@ -29,6 +29,7 @@ const EVENT_KINDS: ReadonlySet<string> = new Set([
   'external_input',
   'turn_completed',
   'permission_requested',
+  'transcript_updated',
 ]);
 
 /** Parse a raw text frame into a `SessionEvent`, or `null` if unrecognised. */

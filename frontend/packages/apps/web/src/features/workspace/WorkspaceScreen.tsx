@@ -5,9 +5,11 @@ import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
 import { useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { NavigatorPane } from '../navigator/NavigatorPane';
 import { TranscriptPane } from '../transcript/TranscriptPane';
 import { TerminalPane } from '../terminal/TerminalPane';
+import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
 
 /**
  * The top-level two-pane workspace with a responsive terminal third pane:
@@ -27,7 +29,12 @@ export function WorkspaceScreen() {
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
+  const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
+
+  // At `lg`+ the terminal is a static, resizable pane; below it is a fixed-width
+  // slide-in overlay with no resizer. Matches Tailwind's `lg` breakpoint.
+  const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
   // Default the active thread to the main thread once it is known.
   useEffect(() => {
@@ -58,9 +65,10 @@ export function WorkspaceScreen() {
   if (sessionQuery.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
-        <p>No session is registered yet.</p>
+        <p>No session yet.</p>
         <p className="text-xs text-slate-400">
-          Start a Claude Code session through Delta to begin.
+          Send your first message to Claude in the terminal
+          (<code>tmux attach -t delta</code>) to begin.
         </p>
       </div>
     );
@@ -93,12 +101,23 @@ export function WorkspaceScreen() {
         </div>
       )}
 
-      {/* Right: terminal — persistent pane on lg, slide-in overlay below lg */}
-      {terminalOpen && (
-        <div className="absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl lg:static lg:w-96 lg:shadow-none">
-          <TerminalPane />
-        </div>
-      )}
+      {/* Right: terminal — persistent resizable pane on lg, slide-in overlay
+          below lg. Only the static lg pane gets the inline pixel width and the
+          drag handle; the overlay keeps its fixed responsive width. */}
+      {terminalOpen &&
+        (isLargeScreen ? (
+          <div
+            className="relative z-20 shrink-0"
+            style={{ width: terminalWidth }}
+          >
+            <TerminalResizeHandle />
+            <TerminalPane />
+          </div>
+        ) : (
+          <div className="absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl">
+            <TerminalPane />
+          </div>
+        ))}
     </div>
   );
 }

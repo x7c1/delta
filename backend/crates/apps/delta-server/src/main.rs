@@ -22,6 +22,11 @@ async fn main() -> anyhow::Result<()> {
     let port = env_port();
 
     let state = AppState::build(&config)?;
+
+    // Continuously tail the transcript so assistant replies that Claude Code
+    // flushes after the `Stop` hook still reach the browser within ~0.5s.
+    state.spawn_transcript_tail();
+
     let app = router(state);
 
     // Bind to loopback only.

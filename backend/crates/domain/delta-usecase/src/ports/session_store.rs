@@ -55,6 +55,25 @@ pub trait SessionStore: Send + Sync {
     /// Mark a pending send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
 
+    /// Find the oldest still-`pending` send for a session whose trimmed text
+    /// equals `trimmed_text`, if any.
+    ///
+    /// Drives thread attribution during ingestion: a user transcript line is
+    /// matched to its queued send by text, so it is attributed to that send's
+    /// thread regardless of which hook triggered the sync or whether the line
+    /// was present when `UserPromptSubmit` fired. `trimmed_text` is expected to
+    /// be already trimmed by the caller.
+    async fn match_pending_send(
+        &self,
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> Result<Option<PendingSend>>;
+
+    /// The thread of the latest already-persisted **user** message in a
+    /// session, used as the carry-forward thread for following non-user lines.
+    /// Returns `None` when the session has no user message yet.
+    async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>>;
+
     /// Cancel a queued send by marking the row `cancelled`.
     ///
     /// The row is kept (rather than deleted) for audit, and because
@@ -66,9 +85,22 @@ pub trait SessionStore: Send + Sync {
     /// Upsert a batch of messages (content cache + overlay columns).
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()>;
 
-    /// The number of messages already stored for a session (used as the
-    /// transcript read offset / next `seq`).
+    /// The number of messages already stored for a session.
     async fn message_count(&self, session_id: &SessionId) -> Result<usize>;
+
+    /// The number of transcript lines already consumed for a session: the
+    /// line-based ingestion cursor. The next read starts at this index, so each
+    /// transcript line is processed exactly once regardless of how many of them
+    /// parsed into messages.
+    async fn transcript_lines_read(&self, session_id: &SessionId) -> Result<usize>;
+
+    /// Advance the line-based ingestion cursor to `lines` (the transcript's
+    /// total line count after the latest read).
+    async fn set_transcript_lines_read(
+        &self,
+        session_id: &SessionId,
+        lines: usize,
+    ) -> Result<()>;
 
     /// All messages for a thread, ordered by `seq`.
     async fn thread_messages(&self, thread_id: ThreadId) -> Result<Vec<Message>>;
@@ -143,6 +175,18 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).mark_send_matched(id, matched_uuid).await
     }
 
+    async fn match_pending_send(
+        &self,
+        session_id: &SessionId,
+        trimmed_text: &str,
+    ) -> Result<Option<PendingSend>> {
+        (**self).match_pending_send(session_id, trimmed_text).await
+    }
+
+    async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {
+        (**self).latest_user_thread(session_id).await
+    }
+
     async fn cancel_send(&self, id: i64) -> Result<()> {
         (**self).cancel_send(id).await
     }
@@ -153,6 +197,18 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn message_count(&self, session_id: &SessionId) -> Result<usize> {
         (**self).message_count(session_id).await
+    }
+
+    async fn transcript_lines_read(&self, session_id: &SessionId) -> Result<usize> {
+        (**self).transcript_lines_read(session_id).await
+    }
+
+    async fn set_transcript_lines_read(
+        &self,
+        session_id: &SessionId,
+        lines: usize,
+    ) -> Result<()> {
+        (**self).set_transcript_lines_read(session_id, lines).await
     }
 
     async fn thread_messages(&self, thread_id: ThreadId) -> Result<Vec<Message>> {

@@ -18,6 +18,14 @@ pub struct Interactor<T, X, S> {
     tmux: T,
     transcript: X,
     store: S,
+    /// Serializes [`Self::sync_transcript`] across callers.
+    ///
+    /// Both the hook handlers and the background transcript tail can sync
+    /// concurrently. The read-cursor → read-file → ingest → set-cursor sequence
+    /// is not atomic, so without this lock two interleaved syncs could read the
+    /// same lines from the same starting cursor and double-ingest, or race the
+    /// cursor write. Holding this for the whole sequence makes ingestion serial.
+    sync_lock: tokio::sync::Mutex<()>,
 }
 
 /// An [`Interactor`] with its three ports type-erased behind trait objects.
@@ -43,6 +51,7 @@ where
             tmux,
             transcript,
             store,
+            sync_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -82,9 +91,14 @@ where
 
         let (target_thread, semantic_parent) = match branch_from {
             Some(parent) => {
+                // Give the new branch child a provisional title derived from the
+                // locator quote so the navigator shows something meaningful
+                // until it is renamed. Fall back to "untitled" when there is no
+                // quote.
+                let title = provisional_branch_title(locator_quote);
                 let thread = self
                     .store
-                    .create_thread(&session.id, "untitled", Some(thread_id), Some(parent))
+                    .create_thread(&session.id, &title, Some(thread_id), Some(parent))
                     .await?;
                 (thread.id, Some(parent.clone()))
             }
@@ -141,10 +155,18 @@ where
     /// Handle a `UserPromptSubmit` hook.
     ///
     /// The first such hook registers the session (SessionStart never fires).
-    /// The prompt is matched against the FIFO head of `pending_send`: on a hit
-    /// the send is marked matched and a [`SessionEvent::TurnStarted`] is
-    /// returned, optionally carrying the locator quote to inject as
-    /// `additionalContext`; on a miss it is treated as external input.
+    ///
+    /// The locator quote to inject as `additionalContext` is resolved *before*
+    /// syncing, by matching the prompt text against the queued `pending_send`
+    /// (by text, not FIFO position). This is timing-independent: the quote is
+    /// returned even when the user's transcript line has not been written yet.
+    ///
+    /// The actual message→thread attribution (and `mark_send_matched`) happens
+    /// inside [`Self::sync_transcript`], keyed by matching each ingested user
+    /// line to its queued send. A [`SessionEvent::TurnStarted`] is emitted when
+    /// the user line for this prompt was attributed in this sync; otherwise the
+    /// later `TurnCompleted` triggers the UI refetch. [`SessionEvent::ExternalInput`]
+    /// is emitted only when no queued send matched this prompt at all.
     ///
     /// Returns the events to broadcast and, when a locator quote should be
     /// injected, the `additionalContext` string for the hook response.
@@ -168,27 +190,39 @@ where
             });
         }
 
-        // Ingest any new transcript lines so the matched uuid is available.
+        // Resolve this prompt's queued send *before* syncing, so the locator
+        // quote is returned as `additionalContext` even when the user line has
+        // not been ingested yet (the common timing case). Match by text — not by
+        // FIFO head — so a stale send stuck at the head cannot suppress the quote
+        // or misfire external-input detection.
+        let pending = self
+            .store
+            .match_pending_send(&hook.session_id, hook.prompt.trim())
+            .await?;
+        let additional_context = pending.as_ref().and_then(|p| p.locator_quote.clone());
+
+        // Ingest new transcript lines. This matches each user line to its queued
+        // send and attributes it (plus the assistant lines that follow it) to
+        // the right thread, marking the send matched as a side effect.
         let new_messages = self.sync_transcript(&hook.transcript_path).await?;
 
-        // Correlate against the FIFO head.
-        let head = self.store.head_pending_send(&hook.session_id).await?;
-        let mut additional_context = None;
-
-        match head {
-            Some(pending) if prompt_matches(&pending.text, &hook.prompt) => {
-                let matched_uuid = match_uuid_for_prompt(&new_messages, &hook.prompt);
-                if let Some(uuid) = matched_uuid {
-                    self.store.mark_send_matched(pending.id, &uuid).await?;
+        match pending {
+            Some(pending) => {
+                // A queued send matches this prompt. If its user line was
+                // attributed in this very sync, announce the turn now; otherwise
+                // the line was not in the JSONL yet (the common timing case) and
+                // the later `Stop` sync attributes it, with `TurnCompleted`
+                // driving the UI refetch.
+                if let Some(uuid) = match_uuid_for_prompt(&new_messages, &hook.prompt) {
                     events.push(SessionEvent::TurnStarted {
                         session_id: hook.session_id.clone(),
                         pending_send_id: pending.id,
                         matched_uuid: uuid,
                     });
                 }
-                additional_context = pending.locator_quote.clone();
             }
-            _ => {
+            None => {
+                // No queued send matched this prompt at all: external input.
                 events.push(SessionEvent::ExternalInput {
                     session_id: hook.session_id.clone(),
                     prompt: hook.prompt.clone(),
@@ -209,6 +243,24 @@ where
             session_id: hook.session_id,
             stop_reason: hook.stop_reason,
         }])
+    }
+
+    /// Poll the registered session's transcript for newly-written lines.
+    ///
+    /// Drives the continuous background tail: Claude Code often flushes the final
+    /// assistant line to the JSONL *after* the `Stop` hook fires, so the hook's
+    /// sync misses it and the reply never reaches the browser until the next
+    /// hook. Polling on an interval ingests those late lines and returns them so
+    /// the caller can announce the transcript growth.
+    ///
+    /// Reuses [`Self::sync_transcript`] (cursor, attribution, the serialization
+    /// lock), so it is safe to call concurrently with the hook handlers. Returns
+    /// an empty list when no session has been registered yet.
+    pub async fn poll_transcript(&self) -> Result<Vec<Message>> {
+        match self.store.current_session().await? {
+            Some(session) => self.sync_transcript(&session.transcript_path).await,
+            None => Ok(Vec::new()),
+        }
     }
 
     /// Handle a `PreToolUse` hook: record the request for UI/audit and notify
@@ -261,31 +313,92 @@ where
     }
 
     /// Pull new transcript lines from disk and persist them as messages,
-    /// attaching the active thread (currently the session's `main` thread) and
-    /// the next sequence numbers. Returns the newly ingested messages.
+    /// attributing each to the right thread as it is ingested.
+    ///
+    /// Attribution is driven by matching a user line's trimmed text to a queued
+    /// `pending_send`, so it is robust regardless of which hook triggered the
+    /// sync or whether the line was present when `UserPromptSubmit` fired.
+    /// Lines are processed in order while maintaining `carry_thread`, the thread
+    /// of the current turn:
+    ///
+    /// - A **user** line that matches a still-`pending` send is attributed to
+    ///   that send's thread (the new child thread for a branch send), the send
+    ///   is marked matched, and `carry_thread` advances to it. A user line with
+    ///   no matching send is external input and lands on `main`, resetting
+    ///   `carry_thread` to `main`.
+    /// - A **non-user** line (assistant/tool/system) follows `carry_thread` —
+    ///   the thread of the turn it belongs to.
     async fn sync_transcript(&self, transcript_path: &str) -> Result<Vec<Message>> {
+        // Serialize the whole cursor → read → ingest → cursor sequence so the
+        // hook handlers and the background tail cannot interleave and
+        // double-ingest or race the cursor (see `sync_lock`).
+        let _guard = self.sync_lock.lock().await;
+
         let session = self.require_session().await?;
         let main_thread = self.store.main_thread_id(&session.id).await?;
-        let already = self.store.message_count(&session.id).await?;
 
-        let lines = self.transcript.read_from(transcript_path, already).await?;
-        if lines.is_empty() {
+        // Resume from the line-based cursor so each transcript line is read
+        // exactly once. This is the file line index, not a message count: lines
+        // that parse to nothing (blank, no-uuid such as Claude Code's
+        // `file-history-snapshot`, or unparsable) still advance it, so the
+        // cursor never lags behind the file and already-ingested lines are never
+        // reprocessed.
+        let from = self.store.transcript_lines_read(&session.id).await?;
+        let read = self.transcript.read_from(transcript_path, from).await?;
+
+        // Always advance the cursor to the file's true line count, even when no
+        // new messages parsed, so skipped trailing lines are not re-read next
+        // time.
+        self.store
+            .set_transcript_lines_read(&session.id, read.total_lines)
+            .await?;
+
+        if read.messages.is_empty() {
             return Ok(Vec::new());
         }
 
-        let mut messages = Vec::with_capacity(lines.len());
-        for (offset, line) in lines.into_iter().enumerate() {
-            let seq = (already + offset) as i64;
+        // The turn in progress when this batch starts: the thread of the most
+        // recent persisted user message, defaulting to `main`.
+        let mut carry_thread = self
+            .store
+            .latest_user_thread(&session.id)
+            .await?
+            .unwrap_or(main_thread);
+
+        let mut messages = Vec::with_capacity(read.messages.len());
+        for line in read.messages {
+            let content_text = Message::flatten_text(&line.content);
+
+            let (thread_id, semantic_parent_uuid) =
+                if matches!(line.role, delta_model::Role::User) {
+                    let trimmed = content_text.as_deref().unwrap_or("").trim();
+                    match self.store.match_pending_send(&session.id, trimmed).await? {
+                        Some(pending) => {
+                            self.store.mark_send_matched(pending.id, &line.uuid).await?;
+                            carry_thread = pending.thread_id;
+                            (pending.thread_id, pending.semantic_parent_uuid)
+                        }
+                        None => {
+                            carry_thread = main_thread;
+                            (main_thread, None)
+                        }
+                    }
+                } else {
+                    (carry_thread, None)
+                };
+
             messages.push(Message {
                 uuid: line.uuid,
                 session_id: session.id.clone(),
-                thread_id: main_thread,
+                thread_id,
                 role: line.role,
                 linear_parent_uuid: line.linear_parent_uuid,
-                semantic_parent_uuid: None,
+                semantic_parent_uuid,
                 prompt_id: line.prompt_id,
-                seq,
-                content_text: Message::flatten_text(&line.content),
+                // Persist the message's own transcript line index as its `seq`,
+                // so ordering follows true file position with no drift.
+                seq: line.seq,
+                content_text,
                 content: line.content,
                 created_at: line.created_at.unwrap_or_default(),
             });
@@ -309,11 +422,19 @@ where
     }
 }
 
-/// Whether a hook prompt corresponds to a queued send.
+/// Maximum length of a provisional branch title, in characters.
+const PROVISIONAL_TITLE_MAX_CHARS: usize = 40;
+
+/// Derive a provisional branch-thread title from a locator quote.
 ///
-/// Claude Code may trim trailing whitespace, so compare on the trimmed text.
-fn prompt_matches(pending_text: &str, hook_prompt: &str) -> bool {
-    pending_text.trim() == hook_prompt.trim()
+/// The quote is trimmed and truncated to [`PROVISIONAL_TITLE_MAX_CHARS`]
+/// characters; an absent or blank quote falls back to `"untitled"`.
+fn provisional_branch_title(locator_quote: Option<&str>) -> String {
+    let trimmed = locator_quote.map(str::trim).unwrap_or("");
+    if trimmed.is_empty() {
+        return "untitled".to_owned();
+    }
+    trimmed.chars().take(PROVISIONAL_TITLE_MAX_CHARS).collect()
 }
 
 /// Find the transcript uuid for the user line carrying this prompt.

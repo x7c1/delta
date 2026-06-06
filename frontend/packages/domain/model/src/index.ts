@@ -44,6 +44,7 @@ export type {
   ExternalInputEvent,
   TurnCompletedEvent,
   PermissionRequestedEvent,
+  TranscriptUpdatedEvent,
   SessionEvent,
   SessionEventKind,
 } from './session-event';

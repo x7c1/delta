@@ -32,7 +32,20 @@ export function TranscriptPane({ threads, activeThread }: TranscriptPaneProps) {
   const externalInput = useLiveStore((state) => state.externalInput);
 
   const messagesQuery = useThreadMessagesQuery(client, activeThread.id);
-  const messages: Message[] = messagesQuery.data?.messages ?? [];
+  const allMessages: Message[] = messagesQuery.data?.messages ?? [];
+
+  // The transcript persists non-conversational lines (system, attachment, mode,
+  // skill listings, etc.) ingested as empty `system`/`other` rows so the
+  // incremental read offset stays correct, but they have nothing to show. Render
+  // only user and assistant turns. (Assistant turns that carry only tool or
+  // thinking blocks still render via MessageItem's collapsed summary.)
+  const messages = useMemo(
+    () =>
+      allMessages.filter(
+        (m) => m.role === 'user' || m.role === 'assistant',
+      ),
+    [allMessages],
+  );
 
   const ancestry = useMemo(
     () => threadAncestry(threads, activeThread.id),

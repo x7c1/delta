@@ -18,5 +18,7 @@ mod transcript;
 pub use transcript::Transcript;
 mod transcript_message;
 pub use transcript_message::TranscriptMessage;
+mod transcript_read;
+pub use transcript_read::TranscriptRead;
 mod user_prompt_submit_hook;
 pub use user_prompt_submit_hook::UserPromptSubmitHook;

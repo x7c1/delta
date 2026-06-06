@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-use delta_model::{MessageUuid, SessionId};
+use delta_model::{MessageUuid, SessionId, ThreadId};
 
 /// An event the Interactor emits for the browser to render.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -25,6 +25,18 @@ pub enum SessionEvent {
     TurnCompleted {
         session_id: SessionId,
         stop_reason: Option<String>,
+    },
+    /// The transcript grew between hooks (continuous tail).
+    ///
+    /// Emitted by the background poll when new lines were ingested, so the
+    /// browser refetches the affected threads. Unlike [`Self::TurnCompleted`]
+    /// and [`Self::ExternalInput`], this carries no turn semantics and must not
+    /// mutate the pending-send FIFO or unread badges — it is a pure
+    /// "refetch these threads" signal. `thread_ids` are the distinct threads of
+    /// the newly-ingested messages.
+    TranscriptUpdated {
+        session_id: SessionId,
+        thread_ids: Vec<ThreadId>,
     },
     /// A tool permission prompt is imminent.
     PermissionRequested {
