@@ -4,8 +4,9 @@
 //! they form Delta's control plane:
 //!
 //! - `UserPromptSubmit` fires just before a prompt is processed. Delta matches
-//!   it against the pending-send FIFO to confirm a turn start, and may return
-//!   `additionalContext` to inject a locator quote into that prompt only.
+//!   it against the pending-send FIFO to confirm a turn start, and may return a
+//!   `hookSpecificOutput.additionalContext` to inject a locator quote into that
+//!   prompt only.
 //! - `Stop` fires when a response completes.
 //! - `PreToolUse` fires when a permission prompt is imminent; Delta only
 //!   notifies the browser and records the request — the TUI decides allow/deny.
@@ -48,7 +49,13 @@ pub async fn user_prompt_submit(
     match state.interactor().on_user_prompt_submit(hook).await {
         Ok((events, additional_context)) => {
             state.broadcast(events);
-            Json(UserPromptSubmitResponse { additional_context }).into_response()
+            match additional_context {
+                // Only emit a body when there is a locator quote to inject;
+                // Claude Code consumes it solely from the `hookSpecificOutput`
+                // envelope. With nothing to inject, a plain 200 is enough.
+                Some(context) => Json(UserPromptSubmitResponse::inject(context)).into_response(),
+                None => StatusCode::OK.into_response(),
+            }
         }
         Err(err) => internal_error(err).into_response(),
     }

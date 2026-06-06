@@ -13,8 +13,9 @@
 //! 2. `GET /api/session` hydrates the session and its `main` thread id.
 //! 3. `POST /api/sends` enqueues a send (with a locator quote).
 //! 4. The matching `UserPromptSubmit` hook correlates against the FIFO head:
-//!    the send is marked matched, the locator quote is returned as
-//!    `additionalContext`, and the transcript line is ingested.
+//!    the send is marked matched, the locator quote is returned inside the
+//!    `hookSpecificOutput.additionalContext` envelope, and the transcript line
+//!    is ingested.
 //! 5. `GET /api/threads` and `GET /api/threads/{id}/messages` reflect the
 //!    resulting thread and message state.
 
@@ -195,7 +196,8 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     }
 
     // The matching UserPromptSubmit fires: the FIFO head matches, the locator
-    // quote is returned as additionalContext, and the line is ingested.
+    // quote is returned in the hookSpecificOutput envelope, and the line is
+    // ingested.
     let (status, body) = post_json(
         &app,
         "/hooks/user-prompt-submit",
@@ -208,8 +210,14 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // Claude Code only consumes injected context from the `hookSpecificOutput`
+    // envelope, so the matched quote must surface nested there.
     assert_eq!(
-        body["additionalContext"], "the main channel",
+        body["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit",
+        "the envelope names the originating hook event"
+    );
+    assert_eq!(
+        body["hookSpecificOutput"]["additionalContext"], "the main channel",
         "matched send injects its locator quote as additionalContext"
     );
 

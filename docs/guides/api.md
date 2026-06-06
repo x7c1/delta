@@ -284,12 +284,19 @@ Request:
 Response (200):
 
 ```json
-{ "additionalContext": "the main channel" }
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "the main channel"
+  }
+}
 ```
 
-`additionalContext` is present only when the matched send carried a
-`locator_quote`; it is injected into this prompt only. The field is omitted
-otherwise.
+Claude Code consumes injected context for `UserPromptSubmit` only from the
+`hookSpecificOutput` envelope (a flat `additionalContext` is ignored), so the
+locator quote is always wrapped there. This body is returned only when the
+matched send carried a `locator_quote`; it is injected into this prompt only.
+Otherwise the response is an empty `200 OK` with no body.
 
 ### `POST /hooks/stop`
 
