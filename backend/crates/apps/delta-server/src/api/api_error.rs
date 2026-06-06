@@ -25,8 +25,6 @@ impl IntoResponse for ApiError {
             // No session yet means nothing to act on for the caller.
             Error::NoSession => StatusCode::NOT_FOUND,
             Error::ThreadNotFound(_) => StatusCode::NOT_FOUND,
-            // Bad domain values coming over the wire are the caller's fault.
-            Error::Model(_) => StatusCode::BAD_REQUEST,
             // Everything else is an internal failure.
             Error::Tmux(_) | Error::Transcript(_) | Error::Store(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR

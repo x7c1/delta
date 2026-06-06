@@ -28,10 +28,6 @@ pub enum Error {
     /// A persistence failure.
     #[error("store error: {0}")]
     Store(String),
-
-    /// An invalid domain value surfaced from the model layer.
-    #[error("model error: {0}")]
-    Model(#[from] delta_model::Error),
 }
 
 /// Convenience result alias for this crate.
