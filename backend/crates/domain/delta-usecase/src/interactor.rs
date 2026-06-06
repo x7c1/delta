@@ -102,7 +102,21 @@ where
             )
             .await?;
 
-        self.tmux.send_line(text).await?;
+        // If the keystrokes never reach the pane, the row we just wrote would
+        // sit at the head of the FIFO forever and block all future
+        // `UserPromptSubmit` correlation. Roll it back to `cancelled` so the
+        // head clears, then surface the original dispatch error.
+        //
+        // Best-effort: if the rollback itself fails we keep the dispatch error
+        // (the caller's actionable failure) rather than masking it with a store
+        // error. We do *not* roll back the just-created branch child thread: an
+        // empty, unnamed thread is harmless overlay data and may legitimately be
+        // reused by a retry, whereas the FIFO-blocking pending row is the actual
+        // hazard this guard exists to clear.
+        if let Err(dispatch_err) = self.tmux.send_line(text).await {
+            let _ = self.store.cancel_send(pending.id).await;
+            return Err(dispatch_err);
+        }
         Ok(pending)
     }
 

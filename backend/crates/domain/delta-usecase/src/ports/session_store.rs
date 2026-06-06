@@ -55,6 +55,14 @@ pub trait SessionStore: Send + Sync {
     /// Mark a pending send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
 
+    /// Cancel a queued send by marking the row `cancelled`.
+    ///
+    /// The row is kept (rather than deleted) for audit, and because
+    /// [`Self::head_pending_send`] only considers `pending` rows, a cancelled
+    /// row no longer blocks the FIFO head. Used to roll back a `pending` row
+    /// whose keystrokes were never delivered (e.g. a failed tmux dispatch).
+    async fn cancel_send(&self, id: i64) -> Result<()>;
+
     /// Upsert a batch of messages (content cache + overlay columns).
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()>;
 
@@ -133,6 +141,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         (**self).mark_send_matched(id, matched_uuid).await
+    }
+
+    async fn cancel_send(&self, id: i64) -> Result<()> {
+        (**self).cancel_send(id).await
     }
 
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()> {

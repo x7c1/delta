@@ -25,9 +25,18 @@ types).
 - All timestamps are ISO-8601 strings.
 - `thread_id` is an integer issued by the server. `session_id`, message `uuid`,
   and `prompt_id` are strings.
-- Errors carry a JSON body `{ "error": "<message>" }`. Status codes:
-  - `400 Bad Request` — a malformed domain value in the request.
+- Errors carry a JSON body `{ "error": "<message>" }`, except request-decoding
+  failures rejected before a handler runs (the `400`/`415`/`422` cases below),
+  which carry a plain-text body from the framework. Status codes:
+  - `400 Bad Request` — a malformed request: a syntactically invalid JSON body,
+    a missing `Content-Type: application/json` header, or a path/query segment
+    that cannot be parsed (e.g. a non-integer thread id).
   - `404 Not Found` — no session registered yet, or an unknown thread.
+  - `415 Unsupported Media Type` — a request body sent with a non-JSON
+    `Content-Type`.
+  - `422 Unprocessable Entity` — a syntactically valid JSON body that does not
+    match the endpoint's schema (a missing required field or a field of the
+    wrong type).
   - `500 Internal Server Error` — a store, transcript, or tmux failure.
 
 ## Shared JSON shapes
@@ -159,6 +168,7 @@ Return a thread's messages, ordered by `seq`.
   { "messages": [ /* Message, ... */ ] }
   ```
 
+- **400** — the `{id}` path segment is not an integer.
 - **404** — no thread with that id.
 
 ### `POST /api/sends`
@@ -195,6 +205,9 @@ Response:
 
 - **404** — no session registered, or no thread (or branch parent thread) with
   the given `thread_id`.
+- **400 / 415 / 422** — the request body could not be decoded into the schema
+  above (malformed JSON, wrong or missing `Content-Type`, or a missing/wrong-typed
+  field such as an absent `text`).
 
 ## Browser live channels
 
