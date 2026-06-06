@@ -62,10 +62,14 @@ module.exports = {
     ),
     {
       name: 'no-circular',
-      comment: 'Circular dependencies are forbidden.',
+      comment:
+        'Runtime circular dependencies are forbidden. Type-only cycles are ' +
+        'allowed: they are erased at compile time and let an id type alias ' +
+        'live alongside the model it identifies even when two models ' +
+        'reference each other (e.g. Thread <-> Message).',
       severity: 'error',
       from: {},
-      to: { circular: true },
+      to: { circular: true, dependencyTypesNot: ['type-only'] },
     },
   ],
   options: {

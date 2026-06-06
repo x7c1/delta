@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildThreadTree, threadAncestry, type Thread } from './index';
+import { buildThreadTree, threadAncestry } from './thread-tree';
+import type { Thread } from './thread';
 
 function thread(id: number, parent: number | null): Thread {
   return {

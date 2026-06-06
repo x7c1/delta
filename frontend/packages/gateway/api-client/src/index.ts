@@ -14,13 +14,15 @@ export {
   type PtyConnection,
   type PtyConnectionOptions,
 } from './pty';
+export { queryKeys } from './query-keys';
 export {
-  appendMessage,
-  invalidateThreadMessages,
-  invalidateThreads,
-  queryKeys,
   useCreateSendMutation,
   useSessionQuery,
   useThreadMessagesQuery,
   useThreadsQuery,
-} from './queries';
+} from './query-hooks';
+export {
+  appendMessage,
+  invalidateThreadMessages,
+  invalidateThreads,
+} from './cache';
