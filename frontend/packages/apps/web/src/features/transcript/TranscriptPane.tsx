@@ -97,7 +97,7 @@ export function TranscriptPane({ threads, activeThread }: TranscriptPaneProps) {
                     key={child.id}
                     onClick={() => setActiveThread(child.id)}
                   >
-                    ⤷ {child.title} ({childMap.get(message.uuid)?.length ?? 0})
+                    ⤷ {child.title} ({children.length})
                     <span className="font-medium">[enter →]</span>
                   </Chip>
                 ))}
