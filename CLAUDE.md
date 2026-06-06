@@ -63,6 +63,12 @@ Fix any issues before considering the task complete.
 Documentation, code comments, commit messages, and pull-request descriptions
 are written in English.
 
+## Commit and PR messages
+
+Commit messages and pull-request descriptions must be self-contained. Do not
+reference external planning labels (milestone or sub-plan identifiers) or any
+private/internal repository or document.
+
 ## Git
 
 - Do not push directly to `main`. Always create a branch and open a pull

@@ -4,3 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[dependencies]
+delta-model = { workspace = true }
+delta-usecase = { workspace = true }
+delta-sqlite = { workspace = true }
+delta-transcript = { workspace = true }
+tmux-driver = { workspace = true }
+thiserror = { workspace = true }
