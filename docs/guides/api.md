@@ -298,16 +298,20 @@ Response (200):
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "the main channel"
+    "additionalContext": "The user is replying to this passage they selected from earlier in the conversation:\n\"the main channel\""
   }
 }
 ```
 
 Claude Code consumes injected context for `UserPromptSubmit` only from the
 `hookSpecificOutput` envelope (a flat `additionalContext` is ignored), so the
-locator quote is always wrapped there. This body is returned only when the
-matched send carried a `locator_quote`; it is injected into this prompt only.
-Otherwise the response is an empty `200 OK` with no body.
+framed quote is always wrapped there. The matched send's `locator_quote` is not
+injected verbatim: it is wrapped in a short, authorship-neutral frame so the
+model recognises it as a verbatim passage the user selected from earlier in this
+conversation and treats the current message as a reply anchored to it. A
+blank/whitespace-only quote is framed to nothing. This body is returned only when
+the matched send carried a non-empty `locator_quote`; it is injected into this
+prompt only. Otherwise the response is an empty `200 OK` with no body.
 
 ### `POST /hooks/stop`
 

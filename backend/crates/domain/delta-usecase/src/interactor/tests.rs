@@ -386,7 +386,7 @@ async fn fifo_head_matches_and_marks_send() {
     ix.transcript_fake().push(user_line("uuid-1", "hello world"));
 
     let (events, additional) = ix.on_user_prompt_submit(submit("hello world")).await.unwrap();
-    assert_eq!(additional.as_deref(), Some("[quote]"));
+    assert_eq!(additional, super::frame_locator_context("[quote]"));
     let started = events
         .iter()
         .find_map(|e| match e {
@@ -550,7 +550,7 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
     // The hook fires before the user line is flushed to the JSONL. The locator
     // quote is still returned (text-based), but nothing is attributed yet.
     let (events, additional) = ix.on_user_prompt_submit(submit("branch text")).await.unwrap();
-    assert_eq!(additional.as_deref(), Some("quoted line"));
+    assert_eq!(additional, super::frame_locator_context("quoted line"));
     assert!(
         !events
             .iter()
@@ -825,6 +825,35 @@ async fn poll_transcript_without_session_is_empty() {
     let ix = interactor();
     let polled = ix.poll_transcript().await.unwrap();
     assert!(polled.is_empty());
+}
+
+/// `frame_locator_context` wraps a non-empty quote with provenance framing and
+/// the quote delimited so the frame and the quote stay distinguishable.
+#[test]
+fn frame_locator_context_frames_a_quote() {
+    let framed = super::frame_locator_context("the main channel")
+        .expect("a non-empty quote is framed");
+    assert_eq!(
+        framed,
+        "The user is replying to this passage they selected from earlier in the conversation:\n\"the main channel\""
+    );
+}
+
+/// Surrounding whitespace is trimmed before the quote is framed.
+#[test]
+fn frame_locator_context_trims_the_quote() {
+    let framed = super::frame_locator_context("  spaced  ").expect("a non-blank quote is framed");
+    assert_eq!(
+        framed,
+        "The user is replying to this passage they selected from earlier in the conversation:\n\"spaced\""
+    );
+}
+
+/// An empty or whitespace-only quote yields `None`, so nothing is injected.
+#[test]
+fn frame_locator_context_returns_none_for_blank_quote() {
+    assert!(super::frame_locator_context("").is_none());
+    assert!(super::frame_locator_context("   \n\t ").is_none());
 }
 
 // Helper accessor used only in tests to push transcript lines onto the fake.
