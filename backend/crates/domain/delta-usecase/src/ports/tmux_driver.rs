@@ -18,9 +18,6 @@ pub trait TmuxDriver: Send + Sync {
     /// first); this always attempts to create.
     async fn create_session(&self, workdir: &str, command: &str) -> Result<()>;
 
-    /// Kill the target tmux session if it exists.
-    async fn kill_session(&self) -> Result<()>;
-
     /// Send the given text to the target pane and submit it (Enter).
     async fn send_line(&self, text: &str) -> Result<()>;
 }
@@ -33,10 +30,6 @@ impl TmuxDriver for Box<dyn TmuxDriver> {
 
     async fn create_session(&self, workdir: &str, command: &str) -> Result<()> {
         (**self).create_session(workdir, command).await
-    }
-
-    async fn kill_session(&self) -> Result<()> {
-        (**self).kill_session().await
     }
 
     async fn send_line(&self, text: &str) -> Result<()> {

@@ -70,12 +70,23 @@ down() {
   # delta-server binds 127.0.0.1:$DELTA_PORT; match the listener and kill it.
   if command -v pkill >/dev/null 2>&1; then
     pkill -f "delta-server" 2>/dev/null || true
-    # Stop the frontend dev server (vite on $FRONTEND_PORT). Match the vite
-    # process for the web package rather than every node process.
-    log "Stopping frontend dev server (port $FRONTEND_PORT) ..."
-    pkill -f "vite.*@delta/web" 2>/dev/null || true
+  fi
+  # Belt-and-suspenders: also free the port in case the listener's argv did not
+  # match (e.g. it is still the `cargo run` parent that has not exec'd the
+  # binary yet).
+  kill_port "$DELTA_PORT"
+
+  # Stop the frontend dev server. `pnpm --filter @delta/web dev` execs `vite`,
+  # whose own argv contains neither "@delta/web" nor "dev", so a name-based
+  # pkill misses the actual port holder and leaves it orphaned. Kill by port —
+  # whatever is listening on $FRONTEND_PORT is the dev server — which also
+  # catches vite's child esbuild service.
+  log "Stopping frontend dev server (port $FRONTEND_PORT) ..."
+  if command -v pkill >/dev/null 2>&1; then
+    # Best-effort: also reap the pnpm parent so it does not respawn the child.
     pkill -f "@delta/web.*dev" 2>/dev/null || true
   fi
+  kill_port "$FRONTEND_PORT"
 
   if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     log "Killing tmux session '$TMUX_SESSION' ..."
@@ -100,6 +111,26 @@ port_in_use() {
     netstat -ltn 2>/dev/null | grep -qE "[:.]$port[[:space:]]" && return 0
   fi
   return 1
+}
+
+# Kill whatever is listening on 127.0.0.1:$1. Used by teardown so a process whose
+# argv does not match a name-based pkill (notably vite, which holds the frontend
+# port) is still stopped reliably. Best-effort: needs lsof or fuser; if neither
+# is present it logs a hint and leaves the port-based kill to the name match.
+kill_port() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+    fi
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser -k "$port/tcp" >/dev/null 2>&1 || true
+  else
+    warn "Cannot free port $port (no lsof/fuser). If something is still listening, kill it manually."
+  fi
 }
 
 up() {

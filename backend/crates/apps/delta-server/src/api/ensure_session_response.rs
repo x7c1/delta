@@ -24,7 +24,6 @@ impl From<SessionLifecycle> for SessionState {
     }
 }
 
-/// Response for `POST /api/session`.
 #[derive(Debug, Serialize)]
 pub struct EnsureSessionResponse {
     pub status: SessionState,

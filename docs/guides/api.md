@@ -37,7 +37,8 @@ types).
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not
     match the endpoint's schema (a missing required field or a field of the
     wrong type).
-  - `500 Internal Server Error` — a store, transcript, or tmux failure.
+  - `500 Internal Server Error` — a store, transcript, tmux, or workspace
+    failure.
 
 ## Shared JSON shapes
 

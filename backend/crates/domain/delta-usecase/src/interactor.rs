@@ -10,7 +10,7 @@ use crate::ports::{
 
 /// Holds the injected capabilities and exposes Delta's use cases.
 ///
-/// Generic over the three ports so callers can inject any implementation. The
+/// Generic over the four ports so callers can inject any implementation. The
 /// composition root and the application share a single concrete type through
 /// the [`BoxedInteractor`] alias, which erases the gateways behind trait
 /// objects; this keeps the transport layer's shared state non-generic while
@@ -30,7 +30,7 @@ pub struct Interactor<T, X, S, W> {
     sync_lock: tokio::sync::Mutex<()>,
 }
 
-/// An [`Interactor`] with its three ports type-erased behind trait objects.
+/// An [`Interactor`] with its four ports type-erased behind trait objects.
 ///
 /// Both the production composition root and integration tests build this exact
 /// type, so the transport layer's shared state stays non-generic regardless of

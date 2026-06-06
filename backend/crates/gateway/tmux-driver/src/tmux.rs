@@ -17,7 +17,7 @@ const SESSION_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_mill
 /// keystrokes to as `<session>:0.0` — the first pane of the first window, which
 /// is where `tmux new-session` places the launched command. Keeping the session
 /// name (rather than a bare pane string) lets the driver manage the session
-/// lifecycle (`has`/`create`/`kill`) in addition to driving the pane.
+/// lifecycle (`has_session`/`create_session`) in addition to driving the pane.
 #[derive(Debug, Clone)]
 pub struct Tmux {
     /// The tmux session name, e.g. `delta`.
@@ -100,17 +100,6 @@ impl TmuxDriver for Tmux {
         // remains visible/answerable in the embedded terminal.
         tokio::time::sleep(SESSION_SETTLE_DELAY).await;
         Ok(())
-    }
-
-    async fn kill_session(&self) -> std::result::Result<(), delta_usecase::Error> {
-        // Killing a session that is already gone is a no-op success: teardown
-        // must be idempotent.
-        if !self.has_session().await? {
-            return Ok(());
-        }
-        self.run(&["kill-session", "-t", &self.session])
-            .await
-            .map_err(delta_usecase::Error::from)
     }
 
     async fn send_line(&self, text: &str) -> std::result::Result<(), delta_usecase::Error> {

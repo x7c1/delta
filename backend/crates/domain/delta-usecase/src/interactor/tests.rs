@@ -26,8 +26,6 @@ struct FakeTmux {
     has_session: Mutex<bool>,
     /// The `(workdir, command)` pairs `create_session` was called with.
     created: Mutex<Vec<(String, String)>>,
-    /// How many times `kill_session` was called.
-    killed: Mutex<usize>,
 }
 
 #[async_trait]
@@ -42,12 +40,6 @@ impl TmuxDriver for FakeTmux {
             .unwrap()
             .push((workdir.to_owned(), command.to_owned()));
         *self.has_session.lock().unwrap() = true;
-        Ok(())
-    }
-
-    async fn kill_session(&self) -> Result<()> {
-        *self.killed.lock().unwrap() += 1;
-        *self.has_session.lock().unwrap() = false;
         Ok(())
     }
 

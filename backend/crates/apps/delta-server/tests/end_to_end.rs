@@ -56,11 +56,6 @@ impl TmuxDriver for FakeTmux {
         Ok(())
     }
 
-    async fn kill_session(&self) -> delta_usecase::Result<()> {
-        self.has_session.store(false, Ordering::SeqCst);
-        Ok(())
-    }
-
     async fn send_line(&self, _text: &str) -> delta_usecase::Result<()> {
         self.sent.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -79,10 +74,6 @@ impl TmuxDriver for SharedTmux {
 
     async fn create_session(&self, workdir: &str, command: &str) -> delta_usecase::Result<()> {
         self.0.create_session(workdir, command).await
-    }
-
-    async fn kill_session(&self) -> delta_usecase::Result<()> {
-        self.0.kill_session().await
     }
 
     async fn send_line(&self, text: &str) -> delta_usecase::Result<()> {
@@ -313,6 +304,26 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
 
     // The matched send id remained stable across the flow.
     assert!(pending_send_id > 0);
+
+    let _ = std::fs::remove_file(&transcript_path);
+}
+
+#[tokio::test]
+async fn ensure_session_endpoint_reports_starting_then_ready() {
+    let (app, tmux, transcript_path) = build_app();
+
+    // No session exists yet, so the first POST /api/session creates it and the
+    // route serializes the lifecycle as "starting".
+    let (status, body) = post_json(&app, "/api/session", json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "starting", "a freshly created session is starting");
+    assert!(tmux.has_session().await.unwrap(), "the session was created");
+
+    // A second POST finds the session already up: idempotent reuse, reported as
+    // "ready" with no recreate.
+    let (status, body) = post_json(&app, "/api/session", json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ready", "a reused session is ready");
 
     let _ = std::fs::remove_file(&transcript_path);
 }
