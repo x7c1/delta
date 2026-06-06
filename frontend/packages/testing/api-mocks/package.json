@@ -18,6 +18,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@delta/model": "workspace:*",
     "msw": "^2.7.0"
   }
 }
