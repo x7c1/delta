@@ -148,9 +148,9 @@ where
     /// The first such hook registers the session (SessionStart never fires).
     ///
     /// The locator quote to inject as `additionalContext` is resolved *before*
-    /// syncing, by matching the prompt text against the FIFO head of
-    /// `pending_send`. This is timing-independent: the quote is returned even
-    /// when the user's transcript line has not been written to the JSONL yet.
+    /// syncing, by matching the prompt text against the queued `pending_send`
+    /// (by text, not FIFO position). This is timing-independent: the quote is
+    /// returned even when the user's transcript line has not been written yet.
     ///
     /// The actual message→thread attribution (and `mark_send_matched`) happens
     /// inside [`Self::sync_transcript`], keyed by matching each ingested user
@@ -181,19 +181,23 @@ where
             });
         }
 
-        // Resolve the locator quote from the FIFO head *before* syncing, so the
-        // `additionalContext` is returned even when the user line has not been
-        // ingested yet. This is purely text-based, hence timing-independent.
-        let head = self.store.head_pending_send(&hook.session_id).await?;
-        let matched_head = head.filter(|p| prompt_matches(&p.text, &hook.prompt));
-        let additional_context = matched_head.as_ref().and_then(|p| p.locator_quote.clone());
+        // Resolve this prompt's queued send *before* syncing, so the locator
+        // quote is returned as `additionalContext` even when the user line has
+        // not been ingested yet (the common timing case). Match by text — not by
+        // FIFO head — so a stale send stuck at the head cannot suppress the quote
+        // or misfire external-input detection.
+        let pending = self
+            .store
+            .match_pending_send(&hook.session_id, hook.prompt.trim())
+            .await?;
+        let additional_context = pending.as_ref().and_then(|p| p.locator_quote.clone());
 
         // Ingest new transcript lines. This matches each user line to its queued
         // send and attributes it (plus the assistant lines that follow it) to
         // the right thread, marking the send matched as a side effect.
         let new_messages = self.sync_transcript(&hook.transcript_path).await?;
 
-        match matched_head {
+        match pending {
             Some(pending) => {
                 // A queued send matches this prompt. If its user line was
                 // attributed in this very sync, announce the turn now; otherwise
@@ -384,13 +388,6 @@ fn provisional_branch_title(locator_quote: Option<&str>) -> String {
         return "untitled".to_owned();
     }
     trimmed.chars().take(PROVISIONAL_TITLE_MAX_CHARS).collect()
-}
-
-/// Whether a hook prompt corresponds to a queued send.
-///
-/// Claude Code may trim trailing whitespace, so compare on the trimmed text.
-fn prompt_matches(pending_text: &str, hook_prompt: &str) -> bool {
-    pending_text.trim() == hook_prompt.trim()
 }
 
 /// Find the transcript uuid for the user line carrying this prompt.
