@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
-use delta_usecase::SessionEvent;
-use delta_wire::{AppInteractor, Config};
+use delta_usecase::{SessionEvent, SessionLifecycle};
+use delta_wire::{AppInteractor, Config, SESSION_COMMAND};
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -27,6 +27,8 @@ pub struct AppState {
     interactor: Arc<AppInteractor>,
     events: broadcast::Sender<SessionEvent>,
     tmux_pane: String,
+    session_workdir: String,
+    session_settings_json: String,
 }
 
 impl AppState {
@@ -35,7 +37,9 @@ impl AppState {
         let interactor = delta_wire::build(config)?;
         Ok(Self::from_interactor(
             interactor,
-            config.tmux_pane.clone(),
+            config.tmux_pane(),
+            config.session_workdir.clone(),
+            config.session_settings_json(),
         ))
     }
 
@@ -45,12 +49,19 @@ impl AppState {
     /// integration tests can inject fakes (an in-memory store, a temp-file
     /// transcript, a no-op tmux driver) and still produce this exact
     /// [`AppState`] type — no generics leak into the transport layer.
-    pub fn from_interactor(interactor: AppInteractor, tmux_pane: String) -> Self {
+    pub fn from_interactor(
+        interactor: AppInteractor,
+        tmux_pane: String,
+        session_workdir: String,
+        session_settings_json: String,
+    ) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
             interactor: Arc::new(interactor),
             events,
             tmux_pane,
+            session_workdir,
+            session_settings_json,
         }
     }
 
@@ -62,6 +73,21 @@ impl AppState {
     /// The tmux pane the session lives in (used by the PTY bridge).
     pub fn tmux_pane(&self) -> &str {
         &self.tmux_pane
+    }
+
+    /// Ensure the Claude Code session is up, creating it lazily if absent.
+    ///
+    /// Delegates to the use case with this server's configured working directory,
+    /// launch command, and rendered hook settings. Idempotent: an existing
+    /// session is reused.
+    pub async fn ensure_session(&self) -> delta_usecase::Result<SessionLifecycle> {
+        self.interactor
+            .ensure_session(
+                &self.session_workdir,
+                SESSION_COMMAND,
+                &self.session_settings_json,
+            )
+            .await
     }
 
     /// Subscribe to the event stream (one receiver per browser connection).

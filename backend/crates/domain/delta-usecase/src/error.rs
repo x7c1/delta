@@ -28,6 +28,10 @@ pub enum Error {
     /// A persistence failure.
     #[error("store error: {0}")]
     Store(String),
+
+    /// Preparing the session working directory failed.
+    #[error("workspace error: {0}")]
+    Workspace(String),
 }
 
 /// Convenience result alias for this crate.

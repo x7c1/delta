@@ -18,7 +18,10 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/stop", post(hooks::stop))
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
         // Browser REST surface: queries and commands.
-        .route("/api/session", get(api::get_session))
+        .route(
+            "/api/session",
+            get(api::get_session).post(api::ensure_session),
+        )
         .route("/api/threads", get(api::list_threads))
         .route("/api/threads/{id}/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
@@ -44,7 +47,9 @@ mod tests {
     fn test_state() -> AppState {
         AppState::build(&Config {
             database_path: ":memory:".into(),
-            tmux_pane: "delta:0.0".into(),
+            tmux_session: "delta".into(),
+            session_workdir: "/tmp/delta-test-session".into(),
+            port: 7878,
         })
         .unwrap()
     }

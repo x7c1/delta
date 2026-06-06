@@ -33,17 +33,34 @@ use tower::ServiceExt;
 use delta_server::{router, AppState};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{Interactor, TmuxDriver};
+use delta_usecase::{Interactor, TmuxDriver, Workspace};
 
 /// A `TmuxDriver` that records the lines it would have sent instead of touching
-/// a real tmux pane, so the test can assert the keystrokes were dispatched.
+/// a real tmux pane, so the test can assert the keystrokes were dispatched. It
+/// also models the session lifecycle in memory so `ensure_session` works without
+/// a real tmux.
 #[derive(Default)]
 struct FakeTmux {
     sent: AtomicUsize,
+    has_session: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
 impl TmuxDriver for FakeTmux {
+    async fn has_session(&self) -> delta_usecase::Result<bool> {
+        Ok(self.has_session.load(Ordering::SeqCst))
+    }
+
+    async fn create_session(&self, _workdir: &str, _command: &str) -> delta_usecase::Result<()> {
+        self.has_session.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn kill_session(&self) -> delta_usecase::Result<()> {
+        self.has_session.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
     async fn send_line(&self, _text: &str) -> delta_usecase::Result<()> {
         self.sent.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -56,8 +73,34 @@ struct SharedTmux(Arc<FakeTmux>);
 
 #[async_trait]
 impl TmuxDriver for SharedTmux {
+    async fn has_session(&self) -> delta_usecase::Result<bool> {
+        self.0.has_session().await
+    }
+
+    async fn create_session(&self, workdir: &str, command: &str) -> delta_usecase::Result<()> {
+        self.0.create_session(workdir, command).await
+    }
+
+    async fn kill_session(&self) -> delta_usecase::Result<()> {
+        self.0.kill_session().await
+    }
+
     async fn send_line(&self, text: &str) -> delta_usecase::Result<()> {
         self.0.send_line(text).await
+    }
+}
+
+/// A no-op `Workspace` so `ensure_session` does not touch the real filesystem.
+struct NoopWorkspace;
+
+#[async_trait]
+impl Workspace for NoopWorkspace {
+    async fn write_session_settings(
+        &self,
+        _workdir: &str,
+        _settings_json: &str,
+    ) -> delta_usecase::Result<()> {
+        Ok(())
     }
 }
 
@@ -80,9 +123,15 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf) {
         Box::new(SharedTmux(tmux.clone())) as Box<dyn TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
+        Box::new(NoopWorkspace) as Box<dyn delta_usecase::Workspace>,
     );
 
-    let state = AppState::from_interactor(interactor, "delta:0.0".into());
+    let state = AppState::from_interactor(
+        interactor,
+        "delta:0.0".into(),
+        "/tmp/delta-e2e-session".into(),
+        "{}".into(),
+    );
     (router(state), tmux, transcript_path)
 }
 

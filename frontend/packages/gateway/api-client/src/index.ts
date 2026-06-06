@@ -17,6 +17,7 @@ export {
 export { queryKeys } from './query-keys';
 export {
   useCreateSendMutation,
+  useEnsureSessionQuery,
   useSessionQuery,
   useThreadMessagesQuery,
   useThreadsQuery,

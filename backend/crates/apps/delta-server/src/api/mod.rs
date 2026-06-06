@@ -14,6 +14,8 @@ mod create_send_request;
 pub use create_send_request::CreateSendRequest;
 mod create_send_response;
 pub use create_send_response::CreateSendResponse;
+mod ensure_session_response;
+pub use ensure_session_response::EnsureSessionResponse;
 mod error_body;
 mod messages_response;
 pub use messages_response::MessagesResponse;
@@ -30,6 +32,21 @@ use axum::Json;
 use delta_usecase::ThreadId;
 
 use crate::state::AppState;
+
+/// `POST /api/session` — ensure the Claude Code session is up.
+///
+/// Lazily creates the tmux + `claude` session if absent, reusing it if present
+/// (idempotent). Called by the browser on load so opening the UI is the only
+/// action needed to bring the loop up. Returns the lifecycle state so the UI can
+/// show a "starting" indicator until the session is usable.
+pub(crate) async fn ensure_session(
+    State(state): State<AppState>,
+) -> Result<Json<EnsureSessionResponse>, ApiError> {
+    let status = state.ensure_session().await?;
+    Ok(Json(EnsureSessionResponse {
+        status: status.into(),
+    }))
+}
 
 /// `GET /api/session` — the current session for hydration.
 pub(crate) async fn get_session(State(state): State<AppState>) -> Result<Response, ApiError> {

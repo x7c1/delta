@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
-import { useThreadsQuery, useSessionQuery } from '@delta/api-client';
+import {
+  useEnsureSessionQuery,
+  useThreadsQuery,
+  useSessionQuery,
+} from '@delta/api-client';
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
@@ -19,6 +23,11 @@ import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
  */
 export function WorkspaceScreen() {
   const client = useApiClient();
+
+  // On load, ask the server to bring the Claude Code session up (idempotent).
+  // Opening the browser is the only manual step; tmux is a hidden detail.
+  const ensureQuery = useEnsureSessionQuery(client);
+
   useSessionEvents();
 
   const sessionQuery = useSessionQuery(client);
@@ -64,6 +73,32 @@ export function WorkspaceScreen() {
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;
 
+  // Gate the whole workspace on bringing the session up. Until the ensure call
+  // resolves, show an explicit "starting" state; if it fails, show an explicit
+  // error with guidance rather than an infinite spinner.
+  if (ensureQuery.isPending) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+        Starting the session…
+      </div>
+    );
+  }
+
+  if (ensureQuery.isError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
+        <p>Could not start the session.</p>
+        <p className="text-xs text-slate-400">
+          Make sure <code>claude</code> is installed and authenticated, then
+          reload. You can also open the terminal to inspect the session.
+        </p>
+        <Button size="sm" variant="secondary" onClick={() => ensureQuery.refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   if (sessionQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -77,8 +112,7 @@ export function WorkspaceScreen() {
       <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
         <p>No session yet.</p>
         <p className="text-xs text-slate-400">
-          Send your first message to Claude in the terminal
-          (<code>tmux attach -t delta</code>) to begin.
+          The session is running — send your first message to Claude to begin.
         </p>
       </div>
     );

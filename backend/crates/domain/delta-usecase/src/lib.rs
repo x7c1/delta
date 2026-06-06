@@ -15,8 +15,8 @@ mod ports;
 pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor};
 pub use ports::{
-    NewSession, SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript,
-    TranscriptMessage, TranscriptRead, UserPromptSubmitHook,
+    NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver, Transcript,
+    TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
 
 // Re-export the domain types the transport layer needs, so the server can

@@ -4,7 +4,8 @@ use delta_model::{Message, MessageUuid, PendingSend, Thread, ThreadId};
 
 use crate::error::{Error, Result};
 use crate::ports::{
-    NewSession, SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, UserPromptSubmitHook,
+    NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver, Transcript,
+    UserPromptSubmitHook, Workspace,
 };
 
 /// Holds the injected capabilities and exposes Delta's use cases.
@@ -14,10 +15,11 @@ use crate::ports::{
 /// the [`BoxedInteractor`] alias, which erases the gateways behind trait
 /// objects; this keeps the transport layer's shared state non-generic while
 /// still allowing tests to substitute fakes.
-pub struct Interactor<T, X, S> {
+pub struct Interactor<T, X, S, W> {
     tmux: T,
     transcript: X,
     store: S,
+    workspace: W,
     /// Serializes [`Self::sync_transcript`] across callers.
     ///
     /// Both the hook handlers and the background transcript tail can sync
@@ -37,20 +39,23 @@ pub type BoxedInteractor = Interactor<
     Box<dyn TmuxDriver>,
     Box<dyn Transcript>,
     Box<dyn SessionStore>,
+    Box<dyn Workspace>,
 >;
 
-impl<T, X, S> Interactor<T, X, S>
+impl<T, X, S, W> Interactor<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
+    W: Workspace,
 {
-    /// Construct an Interactor from the three injected ports.
-    pub fn new(tmux: T, transcript: X, store: S) -> Self {
+    /// Construct an Interactor from the four injected ports.
+    pub fn new(tmux: T, transcript: X, store: S, workspace: W) -> Self {
         Self {
             tmux,
             transcript,
             store,
+            workspace,
             sync_lock: tokio::sync::Mutex::new(()),
         }
     }
@@ -63,6 +68,47 @@ where
     #[cfg(test)]
     pub(crate) fn transcript(&self) -> &X {
         &self.transcript
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tmux(&self) -> &T {
+        &self.tmux
+    }
+
+    #[cfg(test)]
+    pub(crate) fn workspace(&self) -> &W {
+        &self.workspace
+    }
+
+    /// Ensure the Claude Code session is up, creating it lazily if absent.
+    ///
+    /// Idempotent: if the tmux session already exists it is reused and
+    /// [`SessionLifecycle::Ready`] is returned with no side effects. Otherwise
+    /// the working directory is prepared — `<workdir>/.claude/settings.json` is
+    /// written so Claude Code's hooks point back at this server — and the tmux
+    /// session is created running `command` (e.g. `claude`) in `workdir`,
+    /// returning [`SessionLifecycle::Starting`].
+    ///
+    /// `settings_json` is rendered by the caller (the server) so the hook URLs
+    /// always match the running port; the use case stays agnostic to its shape.
+    ///
+    /// This drives only the tmux/process lifecycle. The conversational session
+    /// is still registered later by the first `UserPromptSubmit` hook, so a
+    /// freshly created session has no `Session` row yet — that is expected.
+    pub async fn ensure_session(
+        &self,
+        workdir: &str,
+        command: &str,
+        settings_json: &str,
+    ) -> Result<SessionLifecycle> {
+        if self.tmux.has_session().await? {
+            return Ok(SessionLifecycle::Ready);
+        }
+        self.workspace
+            .write_session_settings(workdir, settings_json)
+            .await?;
+        self.tmux.create_session(workdir, command).await?;
+        Ok(SessionLifecycle::Starting)
     }
 
     /// Enqueue a user input to be sent into the session.
