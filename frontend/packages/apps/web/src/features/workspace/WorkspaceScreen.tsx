@@ -36,12 +36,22 @@ export function WorkspaceScreen() {
   // slide-in overlay with no resizer. Matches Tailwind's `lg` breakpoint.
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
-  // Default the active thread to the main thread once it is known.
+  // Resolve the active thread once the session and threads are known. Default
+  // to main when none is set, and fall back to main when a thread persisted
+  // from a previous reload no longer exists (e.g. a new session).
   useEffect(() => {
-    if (activeThreadId === null && sessionQuery.data) {
-      setActiveThread(sessionQuery.data.main_thread_id);
+    if (!sessionQuery.data) {
+      return;
     }
-  }, [activeThreadId, sessionQuery.data, setActiveThread]);
+    const main = sessionQuery.data.main_thread_id;
+    if (activeThreadId === null) {
+      setActiveThread(main);
+      return;
+    }
+    if (threads.length > 0 && !threads.some((thread) => thread.id === activeThreadId)) {
+      setActiveThread(main);
+    }
+  }, [activeThreadId, sessionQuery.data, threads, setActiveThread]);
 
   // Clear the unread badge whenever a thread becomes active, regardless of how
   // it was activated (tree click, breadcrumb, branch chip, or the default).

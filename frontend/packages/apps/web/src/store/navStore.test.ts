@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TERMINAL_WIDTH,
+  NAV_STORAGE_KEY,
   clampTerminalWidth,
   useNavStore,
 } from './navStore';
@@ -42,5 +43,21 @@ describe('navStore.setTerminalWidth', () => {
 
     useNavStore.getState().setTerminalWidth(450);
     expect(useNavStore.getState().terminalWidth).toBe(450);
+  });
+});
+
+describe('navStore persistence', () => {
+  it('writes the active thread and terminal layout to localStorage', () => {
+    vi.stubGlobal('window', { innerWidth: 2000 });
+    useNavStore.getState().setActiveThread(7);
+    useNavStore.getState().setTerminalOpen(true);
+    useNavStore.getState().setTerminalWidth(500);
+
+    const raw = localStorage.getItem(NAV_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string).state;
+    expect(persisted.activeThreadId).toBe(7);
+    expect(persisted.terminalOpen).toBe(true);
+    expect(persisted.terminalWidth).toBe(500);
   });
 });
