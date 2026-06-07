@@ -532,6 +532,42 @@ async fn ensure_session_is_idempotent_while_a_spawn_is_live() {
     );
 }
 
+/// `ensure_session` is idempotent against a *bound* session too, not only a
+/// pending spawn: once a hook has bound the spawn to a session id, a further
+/// `ensure_session` reuses it (`Ready`) without spawning a second pane. This
+/// pins the `bound` half of `has_any_live`, which the pending-only idempotency
+/// test above does not exercise.
+#[tokio::test]
+async fn ensure_session_is_idempotent_while_a_session_is_bound() {
+    let ix = interactor();
+
+    // Spawn, then bind it to a session id via a hook in its workdir.
+    ix.ensure_session().await.unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-B",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    assert!(
+        ix.pane_for_session(&SessionId::from("sess-B"))
+            .await
+            .is_some(),
+        "the spawn is now bound"
+    );
+
+    // A further ensure_session finds the bound session live: reuse, no re-spawn.
+    let status = ix.ensure_session().await.unwrap();
+    assert_eq!(status, SessionLifecycle::Ready);
+    assert_eq!(
+        ix.tmux_fake().created.lock().unwrap().len(),
+        1,
+        "a bound session must not be re-spawned"
+    );
+}
+
 #[tokio::test]
 async fn first_submit_registers_session() {
     let ix = interactor();
@@ -1288,6 +1324,16 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     assert_eq!(created[0].name, "delta-1");
     assert_eq!(created[0].workdir, "/work/delta-1");
 
+    // The deferred first prompt was actually typed into the spawned pane up
+    // front (otherwise Claude would sit idle and never fire the hook that binds
+    // the spawn).
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert_eq!(
+        sent,
+        vec![("delta-1:0.0".to_owned(), "first message".to_owned())],
+        "the first prompt is dispatched into the fresh pane"
+    );
+
     // The first UserPromptSubmit arrives in the spawn's workdir. It binds the
     // spawn to the now-known session id, registers the session, and writes the
     // deferred pending_send BEFORE attribution — so the user line correlates.
@@ -1333,6 +1379,50 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
         .await
         .unwrap()
         .is_none());
+}
+
+/// When the composer-first spawn cannot type its first prompt into the new
+/// pane, the use case surfaces the dispatch error AND rolls the half-spawned
+/// pane out of `pending`, so a later, unrelated `UserPromptSubmit` arriving in
+/// that workdir is not mis-bound to it (it registers as external instead).
+#[tokio::test]
+async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
+    use crate::error::Error;
+
+    let ix = interactor_with_failing_tmux();
+
+    // No session yet: the composer-first send spawns, then fails to type the
+    // prompt into the pane. The error propagates.
+    let err = ix
+        .enqueue_send(ThreadId(1), "first message", None, None)
+        .await
+        .expect_err("a failed first-prompt dispatch must propagate");
+    assert!(matches!(err, Error::Tmux(_)));
+
+    // The spawn was rolled back: a hook later arriving in that same workdir
+    // finds no pending spawn and is treated as an external, closed session
+    // rather than binding to the abandoned pane.
+    let (events, _) = ix
+        .on_user_prompt_submit(submit_in(
+            "sess-late",
+            "/work/delta-1/t.jsonl",
+            "/work/delta-1",
+            "typed in claude",
+        ))
+        .await
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
+        "no pending spawn remained, so the hook is external input"
+    );
+    assert!(
+        ix.pane_for_session(&SessionId::from("sess-late"))
+            .await
+            .is_none(),
+        "the rolled-back spawn must not bind a later session"
+    );
 }
 
 /// A `UserPromptSubmit` for an unknown session id whose cwd matches a pending
@@ -1460,6 +1550,62 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
     );
 }
 
+/// `enqueue_send` against a known-but-*closed* session resumes it as part of the
+/// send (the documented "Closed" branch): `ensure_open` finds no live pane, so
+/// it spawns `claude --resume <id>` and then dispatches the message into the
+/// freshly-resumed pane on the normal path — all within the single
+/// `enqueue_send` call, with no prior explicit `open_session`. This pins the
+/// resume-within-send wiring, which the test above only exercises after a
+/// separate `open_session` (the already-open branch of `ensure_open`).
+#[tokio::test]
+async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
+    let ix = interactor();
+    // Register a known-but-closed session (an external claude in /elsewhere):
+    // it has a store row but no live pane.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+
+    let main = ix.store().main_thread_id(&id).await.unwrap();
+    let pending = ix
+        .enqueue_send(main, "after resume", None, None)
+        .await
+        .unwrap();
+    assert_ne!(pending.id, 0, "a real pending_send row was written");
+
+    // The send resumed the session: a `claude --resume sess-R` spawn was
+    // recorded in the stored cwd, with no prior explicit open_session call.
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    let resume = created
+        .iter()
+        .find(|c| c.command.iter().any(|a| a == "--resume"))
+        .expect("the send resumed the closed session");
+    assert_eq!(
+        resume.command,
+        vec![
+            "claude".to_owned(),
+            "--resume".to_owned(),
+            "sess-R".to_owned()
+        ],
+    );
+    assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
+
+    // The session is now open and the message was dispatched into its pane.
+    let pane = ix.pane_for_session(&id).await.expect("now open after send");
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert!(
+        sent.iter().any(|(p, t)| p == &pane && t == "after resume"),
+        "the send dispatched into the resumed pane"
+    );
+}
+
 /// Opening an already-open session does not spawn a second pane (double-open
 /// guard): it routes to the existing one.
 #[tokio::test]
@@ -1486,6 +1632,63 @@ async fn open_session_is_a_noop_when_already_open() {
         ix.tmux_fake().created.lock().unwrap().len(),
         created_after_first,
         "no second pane spawned for an already-open session"
+    );
+}
+
+/// Opening a session id that does not exist in the store is rejected with
+/// `SessionNotFound` (the variant the API layer maps to 404), and no pane is
+/// spawned. This is the only code path that produces `SessionNotFound`, so it
+/// pins both the error and the reason its 404 mapping exists.
+#[tokio::test]
+async fn open_session_unknown_id_is_session_not_found() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    let err = ix
+        .open_session(&SessionId::from("ghost"))
+        .await
+        .expect_err("opening a non-existent session must be rejected");
+    assert!(
+        matches!(err, Error::SessionNotFound(id) if id == "ghost"),
+        "the missing id is surfaced as SessionNotFound"
+    );
+    assert!(
+        ix.tmux_fake().created.lock().unwrap().is_empty(),
+        "a rejected open must not spawn a pane"
+    );
+}
+
+/// A branch send with no session at all is rejected with `NoSession`: there is
+/// no message to branch from, so it must not silently fall through to spawning a
+/// fresh session and dropping the branch intent.
+#[tokio::test]
+async fn branch_send_without_session_is_no_session() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    let parent = MessageUuid::from("uuid-parent");
+    let err = ix
+        .enqueue_send(ThreadId(1), "branch text", None, Some(&parent))
+        .await
+        .expect_err("a branch send needs an existing session");
+    assert!(matches!(err, Error::NoSession));
+    assert!(
+        ix.tmux_fake().created.lock().unwrap().is_empty(),
+        "a rejected branch send must not spawn a session"
+    );
+}
+
+/// Closing a session that is not open is a no-op: no pane is killed and no error
+/// is raised, so a stale close from the browser is harmless.
+#[tokio::test]
+async fn close_session_not_open_is_a_noop() {
+    let ix = interactor();
+    ix.close_session(&SessionId::from("never-open"))
+        .await
+        .expect("closing a non-open session is a no-op, not an error");
+    assert!(
+        ix.tmux_fake().killed.lock().unwrap().is_empty(),
+        "no pane is killed when nothing was open"
     );
 }
 

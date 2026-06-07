@@ -67,11 +67,6 @@ impl OpenSessions {
         !self.bound.is_empty() || !self.pending.is_empty()
     }
 
-    /// Whether a session is currently open (bound to a live pane).
-    pub fn is_open(&self, id: &SessionId) -> bool {
-        self.bound.contains_key(id)
-    }
-
     /// The open handle for a session, if it is currently open.
     pub fn handle(&self, id: &SessionId) -> Option<&OpenHandle> {
         self.bound.get(id)
@@ -94,6 +89,15 @@ impl OpenSessions {
     pub fn take_pending_for_workdir(&mut self, cwd: &str) -> Option<PendingSpawn> {
         let idx = self.pending.iter().position(|p| p.workdir == cwd)?;
         Some(self.pending.remove(idx))
+    }
+
+    /// Drop the pending spawn with this token, if present.
+    ///
+    /// Used to roll back a spawn whose post-registration dispatch failed, so a
+    /// half-spawned pane is not left in `pending` where a later, unrelated
+    /// `UserPromptSubmit` could mis-bind to it.
+    pub fn remove_pending_for_token(&mut self, token: &PaneToken) {
+        self.pending.retain(|p| &p.token != token);
     }
 
     /// Remove a session from the bound map (closing it), returning its handle.

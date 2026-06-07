@@ -8,9 +8,9 @@
 //! Delta owns, not the conversation id.
 //!
 //! Tokens are minted by [`PaneTokenMinter`], which hands out `delta-<n>` for a
-//! monotonically increasing `n`. The counter lives behind the registry mutex,
-//! so minting is collision-free without relying on randomness or wall-clock
-//! seeds. `delta-<n>` is always a valid tmux session name (no `.` or `:`).
+//! monotonically increasing `n`. The counter is atomic, so minting is
+//! collision-free without relying on randomness or wall-clock seeds.
+//! `delta-<n>` is always a valid tmux session name (no `.` or `:`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -33,9 +33,8 @@ impl std::fmt::Display for PaneToken {
 
 /// Mints unique [`PaneToken`]s as `delta-<n>` with a monotonic counter.
 ///
-/// The counter is atomic so the minter needs no external lock, but in practice
-/// it is only reached while the registry mutex is held, which also serializes
-/// the "mint → spawn → record pending" sequence.
+/// The counter is atomic, so minting is collision-free without any external
+/// lock — a fresh spawn mints its token before taking the registry mutex.
 #[derive(Debug, Default)]
 pub struct PaneTokenMinter {
     next: AtomicU64,

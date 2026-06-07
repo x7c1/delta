@@ -158,10 +158,11 @@ which brings the `claude` session up if it is not already running.
 
 If `claude` is not yet authenticated, the session will not become usable and the
 UI shows an explicit error. Run `claude` once on its own to finish login, or
-attach to the pane to log in and to answer permission prompts as they appear:
+attach to a spawned pane to log in and to answer permission prompts as they
+appear (each spawn is named `delta-<n>`; the first is `delta-1`):
 
 ```bash
-tmux attach -t delta     # detach again with Ctrl-b then d
+tmux attach -t delta-1     # detach again with Ctrl-b then d
 ```
 
 ### Happy-path check
@@ -169,7 +170,7 @@ tmux attach -t delta     # detach again with Ctrl-b then d
 Type a message in the browser. It is dispatched into the tmux pane via
 `send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
 the browser. When a tool needs permission, answer it in the embedded terminal or
-in the TUI (`tmux attach -t delta`).
+in the TUI (`tmux attach -t delta-1`).
 
 ### Shut down
 
@@ -177,5 +178,5 @@ in the TUI (`tmux attach -t delta`).
 scripts/dev.sh --down    # or: scripts/stop.sh
 ```
 
-This stops `delta-server`, the frontend dev server (port 5173), and the `delta`
-tmux session.
+This stops `delta-server`, the frontend dev server (port 5173), and every
+`delta-<n>` tmux session the server spawned.

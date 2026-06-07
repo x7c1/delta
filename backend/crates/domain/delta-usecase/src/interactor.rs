@@ -224,15 +224,25 @@ where
         Ok(())
     }
 
-    /// Spawn a fresh session, optionally deferring a first send.
+    /// Spawn a fresh session, optionally dispatching a first prompt.
     ///
     /// Mints a token, creates the unique `<base>/<token>` workdir with settings
     /// written, launches `claude` there, and records a [`PendingSpawn`] carrying
-    /// `first_prompt`. Returns the minted token.
+    /// `first_prompt`. When a `first_prompt` is present (a composer-initiated
+    /// New), it is typed into the freshly-created pane so Claude actually
+    /// receives the message and fires the `UserPromptSubmit` hook that binds this
+    /// spawn — the hook then writes the deferred `pending_send` row that lets the
+    /// first user line correlate. Returns the minted token.
+    ///
+    /// The registry lock is taken only for the brief record/rollback steps, never
+    /// across the tmux/workspace I/O (which includes the create-session settle
+    /// delay), so a spawn does not serialize concurrent registry readers (hooks,
+    /// the PTY bridge) for the whole spawn duration. The `PendingSpawn` is
+    /// recorded *before* the first prompt is dispatched, so the
+    /// `UserPromptSubmit` that prompt triggers always finds a spawn to bind
+    /// rather than racing ahead and being misread as external input.
     async fn spawn_fresh(&self, first_prompt: Option<String>) -> Result<PaneToken> {
-        // Mint and record the pending spawn under the registry lock so the
-        // token counter and the pending list advance together.
-        let mut registry = self.open_sessions.lock().await;
+        // The minter is atomic, so token uniqueness needs no lock here.
         let token = self.minter.mint();
         let workdir = self.workdir_for(&token);
         let pane = pane_for(token.as_str());
@@ -245,12 +255,28 @@ where
             .create_session(token.as_str(), &workdir, &command)
             .await?;
 
-        registry.push_pending(PendingSpawn {
+        // Record the spawn before dispatching the first prompt, so the hook the
+        // prompt triggers can bind it. (A failed create above returns early with
+        // nothing recorded, so no dangling pending spawn is left behind.)
+        self.open_sessions.lock().await.push_pending(PendingSpawn {
             token: token.clone(),
-            pane,
+            pane: pane.clone(),
             workdir,
-            first_prompt,
+            first_prompt: first_prompt.clone(),
         });
+
+        // Type the deferred first prompt into the new pane. If it never reaches
+        // the pane the spawn would sit idle forever (Claude never fires the hook
+        // that binds it), so roll the pending spawn back and surface the error.
+        if let Some(text) = first_prompt {
+            if let Err(dispatch_err) = self.tmux.send_line(&pane, &text).await {
+                self.open_sessions
+                    .lock()
+                    .await
+                    .remove_pending_for_token(&token);
+                return Err(dispatch_err);
+            }
+        }
         Ok(token)
     }
 

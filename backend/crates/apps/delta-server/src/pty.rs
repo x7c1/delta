@@ -1,8 +1,9 @@
 //! PTY bridge between the browser terminal and the tmux pane.
 //!
 //! The browser runs an xterm.js terminal and connects here over a WebSocket.
-//! The server spawns `tmux attach-session` against the configured pane inside a
-//! pseudo-terminal and bridges bytes both ways: PTY output is streamed to the
+//! The server resolves the open session's pane from the registry, spawns
+//! `tmux attach-session` against it inside a pseudo-terminal, and bridges bytes
+//! both ways: PTY output is streamed to the
 //! browser as binary frames, and browser input frames are written back into the
 //! PTY. This is a deliberately minimal attach; resize negotiation and richer
 //! control messages can be layered on later without changing the route.
