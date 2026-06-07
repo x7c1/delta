@@ -115,6 +115,10 @@ where
     /// (typically `main`). The send is written to the FIFO *before* the
     /// keystrokes are dispatched, so the correlation head is in place when the
     /// `UserPromptSubmit` hook fires.
+    ///
+    /// Temporary single-session shim: targets the single session via
+    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
+    /// surface lands.
     pub async fn enqueue_send(
         &self,
         thread_id: ThreadId,
@@ -180,6 +184,10 @@ where
     }
 
     /// Create a named branch off an existing message without sending anything.
+    ///
+    /// Temporary single-session shim: targets the single session via
+    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
+    /// surface lands.
     pub async fn create_branch(
         &self,
         parent_thread_id: ThreadId,
@@ -202,7 +210,9 @@ where
 
     /// Handle a `UserPromptSubmit` hook.
     ///
-    /// The first such hook registers the session (SessionStart never fires).
+    /// The first hook for a given `session_id` registers that session
+    /// (SessionStart never fires); routing by id lets several Claude Code
+    /// sessions register independently.
     ///
     /// The locator quote to inject as `additionalContext` is resolved *before*
     /// syncing, by matching the prompt text against the queued `pending_send`
@@ -315,8 +325,10 @@ where
     ///
     /// Each session is synced independently and the result is grouped by session:
     /// one entry per session that ingested new messages, in registration order.
-    /// A closed or quiet session simply yields no new lines and is omitted. This
-    /// lets the caller emit one transcript-growth notification per session.
+    /// A closed or quiet session simply yields no new lines and is omitted, so
+    /// every returned group is non-empty — callers may index `group[0]` for the
+    /// group's session id. This lets the caller emit one transcript-growth
+    /// notification per session.
     ///
     /// Reuses [`Self::sync_transcript`] (cursor, attribution, the serialization
     /// lock), so it is safe to call concurrently with the hook handlers. Returns

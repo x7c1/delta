@@ -662,6 +662,46 @@ async fn poll_transcript_groups_new_lines_per_session() {
     assert!(ix.poll_transcript().await.unwrap().is_empty());
 }
 
+/// The temporary single-session shim behind the still-single REST surface
+/// (`current_session` / `threads`) collapses the multi-session store down to the
+/// most-recently-created session. With several registered, it must resolve to
+/// the last one, not the first — pinning `resolve_single_session`'s choice so a
+/// `.last()` → `.first()` slip is caught. With none registered it returns `None`.
+#[tokio::test]
+async fn single_session_shim_resolves_most_recently_created() {
+    let ix = interactor();
+
+    // No session yet: the shim resolves cleanly to nothing.
+    assert!(ix.current_session().await.unwrap().is_none());
+    assert!(ix.threads().await.unwrap().is_empty());
+
+    // Register two sessions in order; sess-2 is the most-recently-created.
+    ix.on_user_prompt_submit(submit_for("sess-1", "/tmp/s1.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-2", "/tmp/s2.jsonl", "seed"))
+        .await
+        .unwrap();
+
+    let (session, _main) = ix
+        .current_session()
+        .await
+        .unwrap()
+        .expect("a session resolves once one is registered");
+    assert_eq!(
+        session.id.as_str(),
+        "sess-2",
+        "the shim resolves to the most-recently-created session"
+    );
+
+    // `threads` is scoped to that same resolved session: only its `main` thread.
+    let threads = ix.threads().await.unwrap();
+    assert!(
+        threads.iter().all(|t| t.session_id.as_str() == "sess-2"),
+        "threads must belong to the resolved (most-recent) session only"
+    );
+}
+
 #[tokio::test]
 async fn fifo_head_matches_and_marks_send() {
     let ix = interactor();
