@@ -98,6 +98,22 @@ describe('applySessionEvent', () => {
     expect(messageInvalidations).toHaveLength(1);
   });
 
+  it('invalidates the session and threads queries on session_registered', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      { kind: 'session_registered', session_id: 'sess-1' },
+      queryClient,
+      null,
+    );
+
+    // The session query was 404/errored during the bootstrap state; refetching
+    // it lets the UI leave the no-session bootstrap automatically.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['session'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['threads'] });
+  });
+
   it('routes a permission request to the store as a notice', () => {
     const queryClient = new QueryClient();
     applySessionEvent(

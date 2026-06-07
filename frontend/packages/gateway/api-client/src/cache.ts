@@ -38,6 +38,16 @@ export function invalidateThreads(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.threads });
 }
 
+/**
+ * Mark the session query stale so it refetches from the server. Used when the
+ * first message registers the session: `GET /api/session` was 404 before the
+ * session row existed, so the cached query is errored — invalidating it lets
+ * the UI transition out of the no-session bootstrap state automatically.
+ */
+export function invalidateSession(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+}
+
 /** Mark a single thread's transcript stale so it refetches. */
 export function invalidateThreadMessages(
   queryClient: QueryClient,

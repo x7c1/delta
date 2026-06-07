@@ -1,6 +1,10 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { SessionEvent, ThreadId } from '@delta/model';
-import { invalidateThreadMessages, invalidateThreads } from '@delta/api-client';
+import {
+  invalidateSession,
+  invalidateThreadMessages,
+  invalidateThreads,
+} from '@delta/api-client';
 import { useLiveStore } from '../store/liveStore';
 
 /**
@@ -61,6 +65,10 @@ export function applySessionEvent(
       invalidateThreads(queryClient);
       break;
     case 'session_registered':
+      // The first message just created the session row. Refetch the session
+      // query (it was 404/errored during the bootstrap state) so the UI leaves
+      // the no-session bootstrap and renders the normal workspace.
+      invalidateSession(queryClient);
       invalidateThreads(queryClient);
       break;
     case 'permission_requested':

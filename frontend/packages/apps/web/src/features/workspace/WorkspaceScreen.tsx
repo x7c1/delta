@@ -107,13 +107,29 @@ export function WorkspaceScreen() {
     );
   }
 
+  // First-run bootstrap: the session row does not exist yet (the server creates
+  // it on the first `UserPromptSubmit` hook), so `GET /api/session` 404s and the
+  // query is errored. The composer can't send the first message because it
+  // requires an existing session, so the only pre-session input channel is the
+  // embedded terminal (PTY → tmux pane). Render it with a clear instruction.
+  // Once the first message registers the session, `session_registered`
+  // invalidates the session query and this screen transitions to the normal
+  // workspace automatically.
   if (sessionQuery.isError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
-        <p>No session yet.</p>
-        <p className="text-xs text-slate-400">
-          The session is running — send your first message to Claude to begin.
-        </p>
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="shrink-0 px-6 py-5">
+          <h1 className="text-lg font-semibold text-slate-700">
+            Start the conversation
+          </h1>
+          <p className="mt-1 text-sm text-slate-400">
+            The Claude session is running. Type your first message in the
+            terminal below — it will appear here once the session starts.
+          </p>
+        </div>
+        <div className="min-h-0 flex-1">
+          <TerminalPane />
+        </div>
       </div>
     );
   }

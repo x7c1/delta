@@ -24,6 +24,7 @@ export {
 } from './query-hooks';
 export {
   appendMessage,
+  invalidateSession,
   invalidateThreadMessages,
   invalidateThreads,
 } from './cache';
