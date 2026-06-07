@@ -186,7 +186,7 @@ where
             return Ok(handle.token.clone());
         }
 
-        let token = self.minter.mint();
+        let token = self.mint_free_token().await?;
         let workdir = session.cwd.clone();
         // Settings must already be present from the original spawn, but re-write
         // them defensively in case the port is fresh or the file was lost.
@@ -254,7 +254,7 @@ where
     /// rather than racing ahead and being misread as external input.
     async fn spawn_fresh(&self, first_prompt: Option<String>) -> Result<PaneToken> {
         // The minter is atomic, so token uniqueness needs no lock here.
-        let token = self.minter.mint();
+        let token = self.mint_free_token().await?;
         let workdir = self.workdir_for(&token);
         let pane = pane_for(token.as_str());
 
@@ -289,6 +289,25 @@ where
             }
         }
         Ok(token)
+    }
+
+    /// Mint a pane token whose tmux session name is not already in use.
+    ///
+    /// The minter's counter resets on each server start, but `delta-<n>` tmux
+    /// sessions from a previous run can survive a restart — they are detached,
+    /// so stopping the server does not kill them. Creating a tmux session with a
+    /// name that already exists fails with "duplicate session", which would 500
+    /// a spawn. So skip any minted name whose tmux session is still alive and
+    /// advance to the next free one. The monotonic counter guarantees this
+    /// terminates (there are finitely many surviving sessions) and that two
+    /// concurrent spawns never contend for the same name.
+    async fn mint_free_token(&self) -> Result<PaneToken> {
+        loop {
+            let token = self.minter.mint();
+            if !self.tmux.has_session(token.as_str()).await? {
+                return Ok(token);
+            }
+        }
     }
 
     /// The unique working directory for a spawn: `<base>/<token>`.
