@@ -16,15 +16,17 @@ export {
 } from './pty';
 export { queryKeys } from './query-keys';
 export {
+  useSessionsQuery,
+  useSessionThreadsQuery,
+  useNewSessionMutation,
+  useOpenSessionMutation,
+  useCloseSessionMutation,
   useCreateSendMutation,
-  useEnsureSessionQuery,
-  useSessionQuery,
   useThreadMessagesQuery,
-  useThreadsQuery,
 } from './query-hooks';
 export {
   appendMessage,
-  invalidateSession,
+  invalidateSessions,
+  invalidateSessionThreads,
   invalidateThreadMessages,
-  invalidateThreads,
 } from './cache';

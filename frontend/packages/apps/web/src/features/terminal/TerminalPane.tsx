@@ -2,22 +2,37 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { connectPty, type PtyConnection } from '@delta/api-client';
+import type { SessionId } from '@delta/model';
 import { Button, Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
 import { useNavStore } from '../../store/navStore';
 
+export interface TerminalPaneProps {
+  /**
+   * The focused session whose PTY pane to attach to. Null for a not-yet-bound
+   * New session (no pane exists), in which case the terminal is disabled.
+   */
+  sessionId: SessionId | null;
+  /** Whether the focused session is open (its pane is attachable). */
+  attachable: boolean;
+}
+
 /**
- * The embedded xterm.js terminal attached to `/pty`. It is the access path for
- * answering permission prompts in the real TUI. In mock mode the PTY socket is
- * not available, so it renders an informational placeholder instead.
+ * The embedded xterm.js terminal attached to the focused session's `/pty` pane.
+ * It is the access path for answering permission prompts in the real TUI. In
+ * mock mode the PTY socket is not available, so it renders an informational
+ * placeholder; it is also disabled when the focused session is closed or a
+ * not-yet-registered New session (no pane to attach).
  */
-export function TerminalPane() {
+export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
 
+  const canAttach = !isMockMode() && attachable && sessionId !== null;
+
   useEffect(() => {
-    if (isMockMode() || !containerRef.current) {
+    if (!canAttach || sessionId === null || !containerRef.current) {
       return;
     }
     const container = containerRef.current;
@@ -36,6 +51,7 @@ export function TerminalPane() {
     let connection: PtyConnection | null = null;
     connection = connectPty({
       url: wsUrl('/pty'),
+      sessionId,
       onData: (chunk) => term.write(decoder.decode(chunk)),
     });
     term.onData((data) => connection?.send(data));
@@ -64,7 +80,17 @@ export function TerminalPane() {
       connection?.close();
       term.dispose();
     };
-  }, []);
+    // Reattach when the focused session changes or it becomes (un)attachable.
+  }, [canAttach, sessionId]);
+
+  // Message shown instead of the live terminal when no pane can be attached.
+  const unavailableNote = isMockMode()
+    ? 'The terminal attaches to the live PTY bridge. It is unavailable in mock mode (no backend). Run against the Delta server to use it for answering permission prompts in the TUI.'
+    : sessionId === null
+      ? 'No session is attached yet. Start a session, then its terminal appears here.'
+      : !attachable
+        ? 'This session is closed. Resume it to attach its terminal.'
+        : null;
 
   return (
     <Panel
@@ -84,12 +110,8 @@ export function TerminalPane() {
       }
       bodyClassName="bg-slate-900"
     >
-      {isMockMode() ? (
-        <p className="p-3 text-xs text-slate-300">
-          The terminal attaches to the live PTY bridge. It is unavailable in
-          mock mode (no backend). Run against the Delta server to use it for
-          answering permission prompts in the TUI.
-        </p>
+      {unavailableNote ? (
+        <p className="p-3 text-xs text-slate-300">{unavailableNote}</p>
       ) : (
         <div ref={containerRef} className="h-full w-full" />
       )}

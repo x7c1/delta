@@ -1,28 +1,53 @@
 import { useCallback, type FormEvent } from 'react';
-import type { Thread, ThreadId } from '@delta/model';
+import type { SendRequest, Thread, ThreadId } from '@delta/model';
 import { Badge, Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useCreateSendMutation } from '@delta/api-client';
-import { useComposerStore } from '../../store/composerStore';
+import {
+  NEW_SESSION_DRAFT_KEY,
+  useComposerStore,
+} from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 
+/**
+ * Send target for the composer:
+ *
+ * - `new-session`: spawns a brand-new session (`{ new_session: true, text }`).
+ *   There is no thread or session id yet; drafts key off a stable sentinel.
+ * - `thread`: targets the focused session's active thread. When the session is
+ *   closed (`readOnly`), the first Send resumes it (targeting its main thread);
+ *   when open, a branch origin turns it into a branch send.
+ */
+export type ComposerMode =
+  | { kind: 'new-session' }
+  | {
+      kind: 'thread';
+      activeThread: Thread;
+      readOnly: boolean;
+      sessionMainThreadId?: ThreadId;
+    };
+
 export interface ComposerProps {
-  activeThread: Thread;
+  mode: ComposerMode;
 }
 
 /**
- * The bottom composer: text input bound to a per-thread draft, an optional
- * branch-origin notice, and submit wired to `POST /api/sends`. A branch origin
- * turns the send into a branch send (semantic parent + locator quote).
+ * The bottom composer: text input bound to a per-thread draft and submit wired
+ * to `POST /api/sends`. The send target depends on {@link ComposerMode}.
  */
-export function Composer({ activeThread }: ComposerProps) {
+export function Composer({ mode }: ComposerProps) {
   const client = useApiClient();
   const mutation = useCreateSendMutation(client);
 
-  const draft = useComposerStore(
-    (state) => state.drafts[activeThread.id] ?? '',
-  );
+  const isNew = mode.kind === 'new-session';
+  const activeThread = mode.kind === 'thread' ? mode.activeThread : null;
+  const readOnly = mode.kind === 'thread' ? mode.readOnly : false;
+  const draftKey: ThreadId = activeThread
+    ? activeThread.id
+    : NEW_SESSION_DRAFT_KEY;
+
+  const draft = useComposerStore((state) => state.drafts[draftKey] ?? '');
   const setDraft = useComposerStore((state) => state.setDraft);
   const clearDraft = useComposerStore((state) => state.clearDraft);
   const branchOrigin = useComposerStore((state) => state.branchOrigin);
@@ -31,10 +56,22 @@ export function Composer({ activeThread }: ComposerProps) {
   const enqueueSend = useLiveStore((state) => state.enqueueSend);
   const attachSendId = useLiveStore((state) => state.attachSendId);
   const failSend = useLiveStore((state) => state.failSend);
+  const markResuming = useLiveStore((state) => state.markResuming);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
+  // A closed session resumes by sending to its main thread (falling back to the
+  // active thread if the main id was not supplied).
+  const resumeThreadId: ThreadId | null =
+    mode.kind === 'thread'
+      ? mode.sessionMainThreadId ?? mode.activeThread.id
+      : null;
+
+  // Branching only applies to an open session's active thread.
   const branching =
-    branchOrigin !== null && branchOrigin.parentThreadId === activeThread.id;
+    !readOnly &&
+    activeThread !== null &&
+    branchOrigin !== null &&
+    branchOrigin.parentThreadId === activeThread.id;
 
   const submit = useCallback(
     async (event: FormEvent) => {
@@ -44,23 +81,39 @@ export function Composer({ activeThread }: ComposerProps) {
         return;
       }
       const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const targetThread: ThreadId = activeThread.id;
 
-      // Optimistic FIFO entry shown immediately.
+      // The optimistic FIFO entry is keyed by the thread the pending queue
+      // renders under. A resume targets the session's main thread; a new-session
+      // send has no thread yet, so it uses the sentinel key.
+      const optimisticThread: ThreadId = !activeThread
+        ? NEW_SESSION_DRAFT_KEY
+        : readOnly && resumeThreadId !== null
+          ? resumeThreadId
+          : activeThread.id;
+
       enqueueSend({
         localId,
         sendId: null,
-        threadId: targetThread,
+        threadId: optimisticThread,
         text,
         semanticParentUuid: branching ? branchOrigin.semanticParentUuid : null,
         status: 'queued',
         createdAt: Date.now(),
       });
-      clearDraft(activeThread.id);
+      clearDraft(draftKey);
 
-      try {
-        const { send } = await mutation.mutateAsync({
-          thread_id: targetThread,
+      // Build the send target.
+      let body: SendRequest;
+      if (isNew) {
+        body = { new_session: true, text };
+      } else if (readOnly && activeThread && resumeThreadId !== null) {
+        // Resume a closed session: send to its main thread; the backend
+        // auto-resumes. Mark it resuming until session_opened lands.
+        body = { thread_id: resumeThreadId, text };
+        markResuming(activeThread.session_id);
+      } else {
+        body = {
+          thread_id: activeThread!.id,
           text,
           ...(branching
             ? {
@@ -68,13 +121,15 @@ export function Composer({ activeThread }: ComposerProps) {
                 locator_quote: branchOrigin.locatorQuote,
               }
             : {}),
-        });
+        };
+      }
+
+      try {
+        const { send } = await mutation.mutateAsync(body);
         attachSendId(localId, send.id);
         if (branching) {
           // The backend created a fresh child thread for this branch send and
-          // returns its id on the send. Drill into it so the user lands in the
-          // new branch (the threads query is invalidated by the mutation, so
-          // the navigator will render it), and clear the branch origin.
+          // returns its id; drill into it and clear the branch origin.
           setActiveThread(send.thread_id);
           setBranchOrigin(null);
         }
@@ -84,18 +139,31 @@ export function Composer({ activeThread }: ComposerProps) {
     },
     [
       draft,
-      activeThread.id,
+      draftKey,
+      isNew,
+      readOnly,
+      resumeThreadId,
+      activeThread,
       branching,
       branchOrigin,
       enqueueSend,
       clearDraft,
       mutation,
       attachSendId,
+      markResuming,
       setBranchOrigin,
       setActiveThread,
       failSend,
     ],
   );
+
+  const placeholder = isNew
+    ? 'Message to start a new session…'
+    : readOnly
+      ? 'Send to resume this closed session…'
+      : branching
+        ? 'Ask a follow-up on the selected text…'
+        : `Message ${activeThread?.title ?? ''}…`;
 
   return (
     <form onSubmit={submit} className="space-y-2">
@@ -107,7 +175,7 @@ export function Composer({ activeThread }: ComposerProps) {
               from selected text
             </span>
             <span className="line-clamp-2 italic text-slate-600">
-              “{branchOrigin.locatorQuote}”
+              “{branchOrigin?.locatorQuote}”
             </span>
           </span>
           <Button
@@ -123,12 +191,8 @@ export function Composer({ activeThread }: ComposerProps) {
       <div className="flex items-end gap-2">
         <textarea
           value={draft}
-          onChange={(event) => setDraft(activeThread.id, event.target.value)}
-          placeholder={
-            branching
-              ? 'Ask a follow-up on the selected text…'
-              : `Message ${activeThread.title}…`
-          }
+          onChange={(event) => setDraft(draftKey, event.target.value)}
+          placeholder={placeholder}
           rows={2}
           className="min-h-[2.5rem] flex-1 resize-y rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
           onKeyDown={(event) => {

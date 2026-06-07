@@ -32,16 +32,21 @@ export type {
   PendingSend,
 } from './pending-send';
 export type {
-  SessionResponse,
+  SessionListItem,
+  SessionsResponse,
   SessionLifecycle,
   EnsureSessionResponse,
   ThreadsResponse,
   MessagesResponse,
   SendResponse,
+  SendToThread,
+  SendToNewSession,
   SendRequest,
 } from './responses';
 export type {
   SessionRegisteredEvent,
+  SessionOpenedEvent,
+  SessionClosedEvent,
   TurnStartedEvent,
   ExternalInputEvent,
   TurnCompletedEvent,

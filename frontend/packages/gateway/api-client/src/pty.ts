@@ -1,3 +1,5 @@
+import type { SessionId } from '@delta/model';
+
 /**
  * The `/pty` terminal bridge client. Confines the raw binary WebSocket here so
  * the UI layer only deals with byte callbacks. Server frames are binary PTY
@@ -6,6 +8,12 @@
 
 export interface PtyConnectionOptions {
   url: string;
+  /**
+   * The session whose pane to attach to. Appended as `?session_id=<id>` so the
+   * bridge targets that session's PTY. The socket closes cleanly if the session
+   * is not open.
+   */
+  sessionId: SessionId;
   /** Called with each chunk of PTY output. */
   onData: (chunk: Uint8Array) => void;
   /** Called when the socket opens / closes. */
@@ -19,10 +27,16 @@ export interface PtyConnection {
   close(): void;
 }
 
+/** Append the `session_id` query parameter to the base `/pty` URL. */
+function withSessionId(url: string, sessionId: SessionId): string {
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}session_id=${encodeURIComponent(sessionId)}`;
+}
+
 export function connectPty(options: PtyConnectionOptions): PtyConnection {
   const factory =
     options.socketFactory ?? ((url: string) => new WebSocket(url));
-  const socket = factory(options.url);
+  const socket = factory(withSessionId(options.url, options.sessionId));
   socket.binaryType = 'arraybuffer';
 
   socket.addEventListener('open', () => options.onStatus?.('open'));

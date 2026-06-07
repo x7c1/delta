@@ -3,6 +3,8 @@ import { QueryClient } from '@tanstack/react-query';
 import { applySessionEvent } from './applySessionEvent';
 import { useLiveStore } from '../store/liveStore';
 
+const FOCUSED = 'sess-1';
+
 describe('applySessionEvent', () => {
   beforeEach(() => {
     useLiveStore.setState({
@@ -11,34 +13,59 @@ describe('applySessionEvent', () => {
       permission: null,
       unread: {},
       externalInput: null,
+      resuming: {},
     });
   });
 
-  it('invalidates the active thread messages on turn_started', () => {
+  it('invalidates the focused active thread and its session threads on turn_started', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
     applySessionEvent(
       {
         kind: 'turn_started',
-        session_id: 'sess-1',
+        session_id: FOCUSED,
         pending_send_id: 1,
         matched_uuid: 'uuid-1',
       },
       queryClient,
       5,
+      FOCUSED,
     );
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 5] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['threads'] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-threads', FOCUSED],
+    });
   });
 
-  it('badges the active thread on external_input', () => {
+  it('ignores a turn event for a non-focused session', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      {
+        kind: 'turn_started',
+        session_id: 'other-session',
+        pending_send_id: 1,
+        matched_uuid: 'uuid-1',
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    // No transcript/thread invalidation for a session the user is not viewing.
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
+  });
+
+  it('badges the focused active thread on external_input', () => {
     const queryClient = new QueryClient();
     applySessionEvent(
-      { kind: 'external_input', session_id: 'sess-1', prompt: 'typed' },
+      { kind: 'external_input', session_id: FOCUSED, prompt: 'typed' },
       queryClient,
       9,
+      FOCUSED,
     );
 
     expect(useLiveStore.getState().unread[9]).toBe(1);
@@ -49,7 +76,6 @@ describe('applySessionEvent', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
-    // Seed a queued send and an unread badge to prove neither is mutated.
     useLiveStore.getState().enqueueSend({
       localId: 'l1',
       sendId: 1,
@@ -62,16 +88,18 @@ describe('applySessionEvent', () => {
     useLiveStore.getState().bumpUnread(2);
 
     applySessionEvent(
-      { kind: 'transcript_updated', session_id: 'sess-1', thread_ids: [2, 7] },
+      { kind: 'transcript_updated', session_id: FOCUSED, thread_ids: [2, 7] },
       queryClient,
       5,
+      FOCUSED,
     );
 
-    // Every reported thread, plus the active thread, plus the tree are refetched.
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 2] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 7] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 5] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['threads'] });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-threads', FOCUSED],
+    });
 
     // No FIFO / unread mutation for this event.
     expect(useLiveStore.getState().pending).toHaveLength(1);
@@ -84,9 +112,10 @@ describe('applySessionEvent', () => {
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
     applySessionEvent(
-      { kind: 'transcript_updated', session_id: 'sess-1', thread_ids: [5] },
+      { kind: 'transcript_updated', session_id: FOCUSED, thread_ids: [5] },
       queryClient,
       5,
+      FOCUSED,
     );
 
     const messageInvalidations = invalidate.mock.calls.filter(
@@ -98,20 +127,38 @@ describe('applySessionEvent', () => {
     expect(messageInvalidations).toHaveLength(1);
   });
 
-  it('invalidates the session and threads queries on session_registered', () => {
-    const queryClient = new QueryClient();
-    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+  it('invalidates the session list on the lifecycle events', () => {
+    for (const kind of [
+      'session_registered',
+      'session_opened',
+      'session_closed',
+    ] as const) {
+      const queryClient = new QueryClient();
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+      applySessionEvent(
+        { kind, session_id: FOCUSED },
+        queryClient,
+        null,
+        FOCUSED,
+      );
+
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
+    }
+  });
+
+  it('clears a resuming marker when the session opens', () => {
+    useLiveStore.getState().markResuming(FOCUSED);
+    expect(useLiveStore.getState().resuming[FOCUSED]).toBe(true);
 
     applySessionEvent(
-      { kind: 'session_registered', session_id: 'sess-1' },
-      queryClient,
+      { kind: 'session_opened', session_id: FOCUSED },
+      new QueryClient(),
       null,
+      FOCUSED,
     );
 
-    // The session query was 404/errored during the bootstrap state; refetching
-    // it lets the UI leave the no-session bootstrap automatically.
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['session'] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['threads'] });
+    expect(useLiveStore.getState().resuming[FOCUSED]).toBeUndefined();
   });
 
   it('routes a permission request to the store as a notice', () => {
@@ -119,12 +166,13 @@ describe('applySessionEvent', () => {
     applySessionEvent(
       {
         kind: 'permission_requested',
-        session_id: 'sess-1',
+        session_id: FOCUSED,
         request_id: 2,
         tool_name: 'Edit',
       },
       queryClient,
       1,
+      FOCUSED,
     );
 
     expect(useLiveStore.getState().permission).toEqual({

@@ -1,9 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { SessionEvent, ThreadId } from '@delta/model';
+import type { SessionEvent, SessionId, ThreadId } from '@delta/model';
 import {
-  invalidateSession,
+  invalidateSessions,
+  invalidateSessionThreads,
   invalidateThreadMessages,
-  invalidateThreads,
 } from '@delta/api-client';
 import { useLiveStore } from '../store/liveStore';
 
@@ -12,64 +12,86 @@ import { useLiveStore } from '../store/liveStore';
  *
  * - **Query cache** (`@tanstack/react-query`): incremental REST-resource growth.
  *   The `/ws` events do not carry message bodies, so we patch the cache by
- *   invalidating the affected `messages`/`threads` queries, which refetches the
- *   freshly-ingested transcript lines. (When the backend later streams message
- *   payloads, `appendMessage` from `@delta/api-client` can patch in place
- *   without a round-trip — the seam is already in place.)
+ *   invalidating the affected `messages`/`session-threads` queries, which
+ *   refetches the freshly-ingested transcript lines. Lifecycle events
+ *   (`session_registered`/`session_opened`/`session_closed`) invalidate the
+ *   session list so a newly-spawned, resumed, or closed session's presence and
+ *   open flag stay in sync.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
- *   — the pending-send FIFO, permission notice, unread badges, external input.
+ *   — the pending-send FIFO, permission notice, unread badges, external input,
+ *   and the per-session resuming marker.
  *
- * `activeThreadId` is needed both to decide which transcript to refetch and to
- * attribute unread/external-input markers.
+ * Transcript/turn events are scoped to the focused session: `activeThreadId`
+ * selects which transcript to refetch and which thread to badge, and
+ * `focusedSessionId` selects whose thread tree to refresh. Events for a
+ * non-focused session still refresh the session list but never touch the
+ * focused transcript.
  */
 export function applySessionEvent(
   event: SessionEvent,
   queryClient: QueryClient,
   activeThreadId: ThreadId | null,
+  focusedSessionId: SessionId | null,
 ): void {
   const store = useLiveStore.getState();
 
   // Ephemeral signals always go to the store.
   store.applyEvent(event, activeThreadId);
 
+  const isFocused = focusedSessionId !== null && event.session_id === focusedSessionId;
+
+  const refreshFocusedThreads = () => {
+    if (focusedSessionId !== null) {
+      invalidateSessionThreads(queryClient, focusedSessionId);
+    }
+  };
+
   switch (event.kind) {
     case 'turn_started':
     case 'turn_completed':
-      // Transcript grew: refetch the active thread's messages.
-      if (activeThreadId !== null) {
+      // Transcript grew on the focused session: refetch the active thread.
+      if (isFocused && activeThreadId !== null) {
         invalidateThreadMessages(queryClient, activeThreadId);
       }
       // A branch send may have created a new thread; keep the tree fresh.
-      invalidateThreads(queryClient);
+      if (isFocused) {
+        refreshFocusedThreads();
+      }
       break;
     case 'external_input':
-      // Direct-pane input lands on the last active thread; refetch + badge it.
-      if (activeThreadId !== null) {
+      // Direct-pane input lands on the focused session's active thread.
+      if (isFocused && activeThreadId !== null) {
         invalidateThreadMessages(queryClient, activeThreadId);
         store.bumpUnread(activeThreadId);
       }
       break;
     case 'transcript_updated':
-      // The continuous tail ingested new lines (e.g. the assistant reply Claude
-      // Code flushed after `Stop`). Pure refetch: invalidate every affected
-      // thread plus the active one, with no FIFO/unread mutation.
+      // The continuous tail ingested new lines. Pure refetch: invalidate every
+      // affected thread plus the focused active one, with no FIFO/unread change.
       for (const threadId of event.thread_ids) {
         invalidateThreadMessages(queryClient, threadId);
       }
       if (
+        isFocused &&
         activeThreadId !== null &&
         !event.thread_ids.includes(activeThreadId)
       ) {
         invalidateThreadMessages(queryClient, activeThreadId);
       }
-      invalidateThreads(queryClient);
+      if (isFocused) {
+        refreshFocusedThreads();
+      }
       break;
     case 'session_registered':
-      // The first message just created the session row. Refetch the session
-      // query (it was 404/errored during the bootstrap state) so the UI leaves
-      // the no-session bootstrap and renders the normal workspace.
-      invalidateSession(queryClient);
-      invalidateThreads(queryClient);
+    case 'session_opened':
+    case 'session_closed':
+      // A session was spawned/bound, resumed, or closed. Refresh the session
+      // list so its presence and open flag update, and refresh the focused
+      // session's threads if it is the one affected.
+      invalidateSessions(queryClient);
+      if (isFocused) {
+        refreshFocusedThreads();
+      }
       break;
     case 'permission_requested':
       // Pure UI notice; already handled by the store.

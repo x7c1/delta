@@ -6,15 +6,23 @@ import type {
 } from '@delta/model';
 
 /**
- * A small but representative seed dataset so the UI is fully developable with
- * no backend: a trunk `main` thread with a multi-turn conversation (including a
- * tool call and a thinking block to exercise the collapsible blocks) and one
- * child branch thread sprouting from an assistant message.
+ * A small but representative multi-session seed so the UI is fully developable
+ * with no backend. Two sessions in distinct lifecycle states exercise the
+ * session list, the open/closed indicator, focusing a closed (view-only)
+ * session, and the per-session thread tree:
+ *
+ * - `sess-mock-1` — **open**. A trunk `main` thread with a multi-turn
+ *   conversation (a tool call and a thinking block to exercise the collapsible
+ *   blocks) plus one child branch thread sprouting from an assistant message.
+ * - `sess-mock-2` — **closed**. A separate session with its own `main` thread
+ *   and a short transcript, used to verify a closed session renders read-only.
  */
 
 export const SESSION_ID = 'sess-mock-1';
+export const SESSION_ID_2 = 'sess-mock-2';
 export const MAIN_THREAD_ID = 1;
 export const BRANCH_THREAD_ID = 2;
+export const SESSION_2_MAIN_THREAD_ID = 3;
 
 export const mockSession: Session = {
   id: SESSION_ID,
@@ -23,6 +31,15 @@ export const mockSession: Session = {
   title: null,
   status: 'active',
   created_at: '2026-01-01T00:00:00Z',
+};
+
+export const mockSession2: Session = {
+  id: SESSION_ID_2,
+  cwd: '/work/scratch',
+  transcript_path: '/tmp/transcript-2.jsonl',
+  title: 'scratch notes',
+  status: 'ended',
+  created_at: '2026-01-02T00:00:00Z',
 };
 
 export const mockThreads: Thread[] = [
@@ -41,6 +58,17 @@ export const mockThreads: Thread[] = [
     parent_thread_id: MAIN_THREAD_ID,
     root_message_uuid: 'uuid-a1',
     created_at: '2026-01-01T00:05:00Z',
+  },
+];
+
+export const mockThreads2: Thread[] = [
+  {
+    id: SESSION_2_MAIN_THREAD_ID,
+    session_id: SESSION_ID_2,
+    title: 'main',
+    parent_thread_id: null,
+    root_message_uuid: null,
+    created_at: '2026-01-02T00:00:00Z',
   },
 ];
 
@@ -154,23 +182,76 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       created_at: '2026-01-01T00:05:02Z',
     },
   ],
+  [SESSION_2_MAIN_THREAD_ID]: [
+    {
+      uuid: 'uuid-s2-u1',
+      session_id: SESSION_ID_2,
+      thread_id: SESSION_2_MAIN_THREAD_ID,
+      role: 'user',
+      linear_parent_uuid: null,
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-s2-1',
+      seq: 0,
+      content_text: 'Remind me what scratch is for.',
+      content: [{ type: 'text', text: 'Remind me what scratch is for.' }],
+      created_at: '2026-01-02T00:00:01Z',
+    },
+    {
+      uuid: 'uuid-s2-a1',
+      session_id: SESSION_ID_2,
+      thread_id: SESSION_2_MAIN_THREAD_ID,
+      role: 'assistant',
+      linear_parent_uuid: 'uuid-s2-u1',
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-s2-1',
+      seq: 1,
+      content_text: 'It is a throwaway working directory for experiments.',
+      content: [
+        {
+          type: 'text',
+          text: 'It is a throwaway working directory for experiments.',
+        },
+      ],
+      created_at: '2026-01-02T00:00:02Z',
+    },
+  ],
 };
 
-/** Build a fresh deep copy of the seed data so handlers can mutate freely. */
-export function seedData(): {
-  session: Session;
-  threads: Thread[];
+/** In-memory store shape shared by the MSW handlers within one render. */
+export interface MockStore {
+  /** Sessions keyed by id, each with its open flag, threads, and main thread. */
+  sessions: {
+    session: Session;
+    open: boolean;
+    mainThreadId: number;
+    threads: Thread[];
+  }[];
   messagesByThread: Record<number, Message[]>;
   sends: PendingSend[];
   nextThreadId: number;
   nextSendId: number;
-} {
+}
+
+/** Build a fresh deep copy of the seed data so handlers can mutate freely. */
+export function seedData(): MockStore {
   return {
-    session: structuredClone(mockSession),
-    threads: structuredClone(mockThreads),
+    sessions: [
+      {
+        session: structuredClone(mockSession),
+        open: true,
+        mainThreadId: MAIN_THREAD_ID,
+        threads: structuredClone(mockThreads),
+      },
+      {
+        session: structuredClone(mockSession2),
+        open: false,
+        mainThreadId: SESSION_2_MAIN_THREAD_ID,
+        threads: structuredClone(mockThreads2),
+      },
+    ],
     messagesByThread: structuredClone(mockMessagesByThread),
     sends: [],
-    nextThreadId: 3,
+    nextThreadId: 4,
     nextSendId: 1,
   };
 }

@@ -36,6 +36,20 @@ describe('parseSessionEvent', () => {
     });
   });
 
+  it('parses the session_opened and session_closed lifecycle events', () => {
+    expect(
+      parseSessionEvent(
+        JSON.stringify({ kind: 'session_opened', session_id: 'sess-1' }),
+      ),
+    ).toEqual({ kind: 'session_opened', session_id: 'sess-1' });
+
+    expect(
+      parseSessionEvent(
+        JSON.stringify({ kind: 'session_closed', session_id: 'sess-1' }),
+      ),
+    ).toEqual({ kind: 'session_closed', session_id: 'sess-1' });
+  });
+
   it('returns null for an unknown kind', () => {
     expect(parseSessionEvent(JSON.stringify({ kind: 'bogus' }))).toBeNull();
   });

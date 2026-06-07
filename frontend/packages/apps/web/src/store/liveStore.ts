@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import type { MessageUuid, SessionEvent, ThreadId } from '@delta/model';
+import type {
+  MessageUuid,
+  SessionEvent,
+  SessionId,
+  ThreadId,
+} from '@delta/model';
 import type { ConnectionStatus } from '@delta/api-client';
 
 /**
@@ -43,6 +48,13 @@ export interface LiveState {
   unread: Record<ThreadId, number>;
   /** The most recent external (direct-pane) input, shown on the last active thread. */
   externalInput: ExternalInputMarker | null;
+  /**
+   * Sessions awaiting a resume confirmation, keyed by session id. Set when a
+   * Send is dispatched to a closed session (the backend auto-resumes); cleared
+   * once the session announces `session_opened`/`session_registered`. The UI
+   * shows a `resuming…` marker while true.
+   */
+  resuming: Record<SessionId, boolean>;
 
   setConnection: (status: ConnectionStatus) => void;
   enqueueSend: (item: PendingItem) => void;
@@ -51,6 +63,8 @@ export interface LiveState {
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
   dismissPermission: () => void;
+  /** Mark a session as resuming until it announces it is open. */
+  markResuming: (sessionId: SessionId) => void;
   /** Apply a live session event, mutating only ephemeral state. */
   applyEvent: (event: SessionEvent, activeThreadId: ThreadId | null) => void;
 }
@@ -61,8 +75,14 @@ export const useLiveStore = create<LiveState>((set) => ({
   permission: null,
   unread: {},
   externalInput: null,
+  resuming: {},
 
   setConnection: (status) => set({ connection: status }),
+
+  markResuming: (sessionId) =>
+    set((state) => ({
+      resuming: { ...state.resuming, [sessionId]: true },
+    })),
 
   enqueueSend: (item) =>
     set((state) => ({ pending: [...state.pending, item] })),
@@ -147,6 +167,17 @@ export const useLiveStore = create<LiveState>((set) => ({
             },
           };
         case 'session_registered':
+        case 'session_opened': {
+          // The session is live: clear any pending resume marker for it.
+          if (!state.resuming[event.session_id]) {
+            return state;
+          }
+          const resuming = { ...state.resuming };
+          delete resuming[event.session_id];
+          return { resuming };
+        }
+        case 'session_closed':
+          // Closed state is reflected by the sessions query, not ephemeral here.
           return state;
         default:
           return state;

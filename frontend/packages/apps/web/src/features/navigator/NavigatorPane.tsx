@@ -1,11 +1,18 @@
-import type { Thread } from '@delta/model';
+import type { SessionListItem, Thread } from '@delta/model';
 import { Button, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
-import type { ConnectionStatus } from '@delta/api-client';
+import {
+  useCloseSessionMutation,
+  type ConnectionStatus,
+} from '@delta/api-client';
+import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
-import { useNavStore } from '../../store/navStore';
-import { ThreadTree } from './ThreadTree';
+import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import { SessionNode } from './SessionNode';
 
 export interface NavigatorPaneProps {
+  /** Every session, ordered by creation. */
+  sessions: SessionListItem[];
+  /** The focused session's thread tree (empty when none is focused). */
   threads: Thread[];
 }
 
@@ -16,39 +23,56 @@ const CONNECTION_TONE: Record<ConnectionStatus, DotTone> = {
 };
 
 /**
- * The left pane: the thread tree plus the permission notice, a running
- * indicator, and the live connection status.
+ * The left pane: a session → thread nested tree, plus a "New" affordance, the
+ * open-session count, the permission notice, a running indicator, and the live
+ * connection status. Top-level nodes are sessions; expanding the focused session
+ * reveals its thread tree.
  */
-export function NavigatorPane({ threads }: NavigatorPaneProps) {
+export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
+  const client = useApiClient();
+  const closeSession = useCloseSessionMutation(client);
+
   const connection = useLiveStore((state) => state.connection);
   const permission = useLiveStore((state) => state.permission);
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
+  const resuming = useLiveStore((state) => state.resuming);
   const hasInProgress = useLiveStore((state) =>
     state.pending.some((item) => item.status === 'in_progress'),
   );
+
+  const focusedSessionId = useNavStore((state) => state.focusedSessionId);
+  const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+
+  const openCount = sessions.filter((item) => item.open).length;
 
   return (
     <Panel
       className="border-r border-slate-200"
       header={
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-slate-700">Threads</span>
-          <StatusDot tone={CONNECTION_TONE[connection]} label={connection} />
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-slate-700">
+            Sessions
+          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="text-xs text-slate-500"
+              data-testid="open-session-count"
+            >
+              open: {openCount}
+            </span>
+            <StatusDot tone={CONNECTION_TONE[connection]} label={connection} />
+          </div>
         </div>
       }
-      footer={
-        hasInProgress ? <Spinner label="running" /> : undefined
-      }
+      footer={hasInProgress ? <Spinner label="running" /> : undefined}
     >
       {permission && (
         <div className="space-y-1 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs">
           <p className="font-medium text-amber-800">
             Permission requested: {permission.toolName}
           </p>
-          <p className="text-slate-600">
-            Answer the prompt in the terminal.
-          </p>
+          <p className="text-slate-600">Answer the prompt in the terminal.</p>
           <div className="flex gap-2">
             <Button size="sm" onClick={() => setTerminalOpen(true)}>
               Open terminal
@@ -59,7 +83,44 @@ export function NavigatorPane({ threads }: NavigatorPaneProps) {
           </div>
         </div>
       )}
-      <ThreadTree threads={threads} />
+
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-xs uppercase tracking-wide text-slate-400">
+          Conversations
+        </span>
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
+        >
+          New
+        </Button>
+      </div>
+
+      {focusedSessionId === NEW_SESSION_FOCUS && (
+        <div
+          className="mx-3 mb-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-700"
+          data-testid="new-session-node"
+        >
+          New session — send the first message to start it.
+        </div>
+      )}
+
+      <ul className="pb-2">
+        {sessions.map((item) => (
+          <SessionNode
+            key={item.session.id}
+            item={item}
+            isFocused={focusedSessionId === item.session.id}
+            resuming={resuming[item.session.id] ?? false}
+            threads={
+              focusedSessionId === item.session.id ? threads : undefined
+            }
+            onFocus={() => setFocusedSession(item.session.id)}
+            onClose={() => closeSession.mutate(item.session.id)}
+          />
+        ))}
+      </ul>
     </Panel>
   );
 }

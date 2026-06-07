@@ -8,7 +8,11 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  useNavStore.setState({ terminalWidth: DEFAULT_TERMINAL_WIDTH });
+  useNavStore.setState({
+    terminalWidth: DEFAULT_TERMINAL_WIDTH,
+    focusedSessionId: null,
+    activeThreadId: null,
+  });
 });
 
 describe('clampTerminalWidth', () => {
@@ -47,8 +51,9 @@ describe('navStore.setTerminalWidth', () => {
 });
 
 describe('navStore persistence', () => {
-  it('writes the active thread and terminal layout to localStorage', () => {
+  it('writes the focused session, active thread, and terminal layout to localStorage', () => {
     vi.stubGlobal('window', { innerWidth: 2000 });
+    useNavStore.getState().setFocusedSession('sess-9');
     useNavStore.getState().setActiveThread(7);
     useNavStore.getState().setTerminalOpen(true);
     useNavStore.getState().setTerminalWidth(500);
@@ -56,8 +61,25 @@ describe('navStore persistence', () => {
     const raw = localStorage.getItem(NAV_STORAGE_KEY);
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string).state;
+    expect(persisted.focusedSessionId).toBe('sess-9');
     expect(persisted.activeThreadId).toBe(7);
     expect(persisted.terminalOpen).toBe(true);
     expect(persisted.terminalWidth).toBe(500);
+  });
+});
+
+describe('navStore.setFocusedSession', () => {
+  it('clears the active thread when switching to a different session', () => {
+    useNavStore.getState().setFocusedSession('sess-a');
+    useNavStore.getState().setActiveThread(7);
+    useNavStore.getState().setFocusedSession('sess-b');
+    expect(useNavStore.getState().activeThreadId).toBeNull();
+  });
+
+  it('leaves the active thread intact when re-focusing the same session', () => {
+    useNavStore.getState().setFocusedSession('sess-a');
+    useNavStore.getState().setActiveThread(7);
+    useNavStore.getState().setFocusedSession('sess-a');
+    expect(useNavStore.getState().activeThreadId).toBe(7);
   });
 });

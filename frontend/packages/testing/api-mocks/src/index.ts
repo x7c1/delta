@@ -10,9 +10,14 @@ export {
 export {
   BRANCH_THREAD_ID,
   MAIN_THREAD_ID,
+  SESSION_2_MAIN_THREAD_ID,
   SESSION_ID,
+  SESSION_ID_2,
   mockMessagesByThread,
   mockSession,
+  mockSession2,
   mockThreads,
+  mockThreads2,
   seedData,
+  type MockStore,
 } from './fixtures';

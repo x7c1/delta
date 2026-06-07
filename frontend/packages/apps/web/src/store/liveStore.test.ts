@@ -8,6 +8,7 @@ function reset() {
     permission: null,
     unread: {},
     externalInput: null,
+    resuming: {},
   });
 }
 
@@ -102,5 +103,25 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().unread[2]).toBe(2);
     store.clearUnread(2);
     expect(useLiveStore.getState().unread[2]).toBeUndefined();
+  });
+
+  it('marks a session resuming and clears it when the session opens', () => {
+    useLiveStore.getState().markResuming('sess-1');
+    expect(useLiveStore.getState().resuming['sess-1']).toBe(true);
+
+    useLiveStore.getState().applyEvent(
+      { kind: 'session_opened', session_id: 'sess-1' },
+      null,
+    );
+    expect(useLiveStore.getState().resuming['sess-1']).toBeUndefined();
+  });
+
+  it('clears a resuming marker on session_registered too', () => {
+    useLiveStore.getState().markResuming('sess-2');
+    useLiveStore.getState().applyEvent(
+      { kind: 'session_registered', session_id: 'sess-2' },
+      null,
+    );
+    expect(useLiveStore.getState().resuming['sess-2']).toBeUndefined();
   });
 });

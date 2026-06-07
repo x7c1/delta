@@ -35,7 +35,14 @@ function renderComposer(activeThread: Thread = mainThread) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <Composer activeThread={activeThread} />
+        <Composer
+          mode={{
+            kind: 'thread',
+            activeThread,
+            readOnly: false,
+            sessionMainThreadId: MAIN_THREAD_ID,
+          }}
+        />
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -44,7 +51,12 @@ function renderComposer(activeThread: Thread = mainThread) {
 describe('Composer', () => {
   beforeEach(() => {
     useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
-    useLiveStore.setState({ pending: [], externalInput: null, unread: {} });
+    useLiveStore.setState({
+      pending: [],
+      externalInput: null,
+      unread: {},
+      resuming: {},
+    });
     useComposerStore.setState({ drafts: {}, branchOrigin: null });
   });
 
@@ -86,5 +98,59 @@ describe('Composer', () => {
       expect(useLiveStore.getState().pending.length).toBe(1);
     });
     expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
+  });
+
+  it('marks the session resuming on a closed (read-only) send', async () => {
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              readOnly: true,
+              sessionMainThreadId: MAIN_THREAD_ID,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'resume please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(useLiveStore.getState().resuming[mainThread.session_id]).toBe(true);
+    });
+  });
+
+  it('targets a new session when in new-session mode', async () => {
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    // The optimistic send is enqueued; the synthetic id:0 attaches on success.
+    await waitFor(() => {
+      const pending = useLiveStore.getState().pending;
+      expect(pending.length).toBe(1);
+      expect(pending[0].text).toBe('start fresh');
+    });
   });
 });
