@@ -356,6 +356,8 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     // Open/close/threads on an unknown session id are 404.
     let (status, _) = post_json(&app, "/api/sessions/ghost/open", json!({})).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "open of unknown id is 404");
+    let (status, _) = post_json(&app, "/api/sessions/ghost/close", json!({})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "close of unknown id is 404");
     let (status, _) = get(&app, "/api/sessions/ghost/threads").await;
     assert_eq!(
         status,

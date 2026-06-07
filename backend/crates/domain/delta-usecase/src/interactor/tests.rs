@@ -791,6 +791,48 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
     assert!(matches!(err, crate::error::Error::SessionNotFound(_)));
 }
 
+/// The `open` flag tracks live state: a session with a bound pane lists as
+/// `open: true`, and once closed it lists as `open: false` while still present.
+/// The annotated-as-closed test above only pins the closed side, so this pins
+/// the open side (and the open→closed transition) that the API surfaces.
+#[tokio::test]
+async fn list_sessions_marks_a_bound_session_open_and_a_closed_one_not() {
+    let ix = interactor();
+
+    // Spawn and bind a session: it now has a live pane.
+    ix.new_session().await.unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-open",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-open");
+    assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
+
+    let open_state = |listings: &[crate::SessionListing]| {
+        listings
+            .iter()
+            .find(|l| l.session.id == id)
+            .map(|l| l.open)
+            .expect("the session is listed")
+    };
+
+    assert!(
+        open_state(&ix.list_sessions().await.unwrap()),
+        "a bound session lists as open"
+    );
+
+    // Closing tears the pane down but keeps the row: it now lists as closed.
+    ix.close_session(&id).await.unwrap();
+    assert!(
+        !open_state(&ix.list_sessions().await.unwrap()),
+        "a closed session still lists, now as not open"
+    );
+}
+
 #[tokio::test]
 async fn fifo_head_matches_and_marks_send() {
     let ix = interactor();
@@ -1709,17 +1751,53 @@ async fn branch_send_to_unknown_thread_is_thread_not_found() {
     );
 }
 
-/// Closing a session that is not open is a no-op: no pane is killed and no error
-/// is raised, so a stale close from the browser is harmless.
+/// Closing a *known* session that is not open is a no-op: no pane is killed and
+/// no error is raised, so a stale close from the browser is harmless.
 #[tokio::test]
-async fn close_session_not_open_is_a_noop() {
+async fn close_session_known_but_not_open_is_a_noop() {
     let ix = interactor();
-    ix.close_session(&SessionId::from("never-open"))
+    // Register a known-but-closed session (an external claude): it has a store
+    // row but no live pane.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-closed",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-closed");
+    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+
+    ix.close_session(&id)
         .await
-        .expect("closing a non-open session is a no-op, not an error");
+        .expect("closing a known non-open session is a no-op, not an error");
     assert!(
         ix.tmux_fake().killed.lock().unwrap().is_empty(),
         "no pane is killed when nothing was open"
+    );
+}
+
+/// Closing an *unknown* session id is rejected with `SessionNotFound` (the
+/// variant the API layer maps to 404), symmetric with `open_session`. This keeps
+/// "already closed" distinguishable from "no such session" so a stale id does not
+/// silently succeed, and no pane is killed.
+#[tokio::test]
+async fn close_session_unknown_id_is_session_not_found() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    let err = ix
+        .close_session(&SessionId::from("ghost"))
+        .await
+        .expect_err("closing a non-existent session must be rejected");
+    assert!(
+        matches!(err, Error::SessionNotFound(id) if id == "ghost"),
+        "the missing id is surfaced as SessionNotFound"
+    );
+    assert!(
+        ix.tmux_fake().killed.lock().unwrap().is_empty(),
+        "a rejected close must not kill a pane"
     );
 }
 

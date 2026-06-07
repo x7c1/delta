@@ -216,8 +216,15 @@ where
     /// Close an open session: kill its pane and drop it from the registry.
     ///
     /// The conversational data remains in the store; only the live pane and the
-    /// `claude` process are torn down. A session that is not open is a no-op.
+    /// `claude` process are torn down. Closing a known session that is not open
+    /// is a no-op (it has no live pane to tear down), but an *unknown* id is a
+    /// clean `SessionNotFound` (404) — the same rejection [`Self::open_session`]
+    /// gives — so the browser can tell "already closed" apart from "no such
+    /// session" rather than having a stale id silently succeed.
     pub async fn close_session(&self, id: &SessionId) -> Result<()> {
+        if self.store.session(id).await?.is_none() {
+            return Err(Error::SessionNotFound(id.as_str().to_owned()));
+        }
         let handle = {
             let mut registry = self.open_sessions.lock().await;
             registry.remove(id)
@@ -358,6 +365,13 @@ where
                 // No session yet: spawn one with the text deferred as its first
                 // prompt. The real `pending_send` row is written when the first
                 // `UserPromptSubmit` binds the spawn.
+                //
+                // `locator_quote` is intentionally dropped here, not forwarded to
+                // the spawn: a brand-new session has no earlier passage to anchor,
+                // so there is nothing to locate. It is still echoed in the
+                // synthetic response below as a courtesy to the caller, but the
+                // deferred first prompt (and the row written at bind time) carry
+                // no quote.
                 self.spawn_fresh(Some(text.to_owned())).await?;
                 Ok(deferred_pending_send(text, locator_quote))
             }

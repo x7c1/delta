@@ -26,6 +26,8 @@ pub enum SendTarget {
     ///
     /// No thread (and no session) exists yet: a session is spawned with the text
     /// deferred as its first prompt, and the conversational id is learned when
-    /// the first `UserPromptSubmit` hook binds the spawn.
+    /// the first `UserPromptSubmit` hook binds the spawn. Any `locator_quote` is
+    /// ignored — a brand-new session has no earlier passage to anchor — so the
+    /// deferred first prompt carries no quote.
     NewSession,
 }

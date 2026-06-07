@@ -1,4 +1,4 @@
-//! Response for `POST /api/session`.
+//! Response for `POST /api/sessions`.
 
 use serde::Serialize;
 

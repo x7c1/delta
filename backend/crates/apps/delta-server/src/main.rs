@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
 /// defaults so the server runs without setup during development.
 ///
 /// The server boots fine when no tmux session exists yet: the session is created
-/// lazily on the first `POST /api/session`, so none of these need a live session
+/// lazily on the first `POST /api/sessions`, so none of these need a live session
 /// at startup.
 fn config_from_env() -> Config {
     Config {

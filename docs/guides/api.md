@@ -281,7 +281,9 @@ Request (new session):
 - `text` (required) — the text to send.
 - `locator_quote` (optional) — framed and injected as `additionalContext` on the
   matching turn so the model can locate the referenced text (see the
-  `user-prompt-submit` hook below for the framing).
+  `user-prompt-submit` hook below for the framing). Ignored for a `new_session`
+  send: a brand-new session has no earlier passage to anchor, so the quote is
+  dropped rather than carried onto the first prompt.
 - `semantic_parent_uuid` (optional) — when set, makes this a branch send (only
   valid with `thread_id`).
 
@@ -296,7 +298,9 @@ Response:
   For a `new_session` send the returned `PendingSend` is synthetic: no row exists
   yet (the session id it would reference is unknown until the spawn binds), so its
   `id` is `0`, `session_id` is empty, and `thread_id` is `0`. The real,
-  correlatable row is written on the new session's `main` thread at bind time.
+  correlatable row is written on the new session's `main` thread at bind time. Its
+  `locator_quote` echoes the request only as a courtesy; it is not anchored to the
+  first prompt (see the field note above), so the persisted row carries no quote.
 
 - **400** — the target is ambiguous or contradictory (a JSON body): neither
   `thread_id` nor `new_session` given, both given, or `new_session` combined with
