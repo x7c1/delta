@@ -39,12 +39,14 @@ interface PaneEntry {
  * placeholder; it is also disabled for a closed or not-yet-registered session.
  *
  * Each session gets its own xterm instance, created on first view and **kept
- * attached** while the terminal stays open — switching sessions only shows a
- * different instance, it never detaches and re-attaches. tmux injects a stray
- * blank line into the pane's program (Claude's input) every time a client
- * detaches, so re-attaching on every session switch made those blank lines pile
- * up and corrupt the next message. Holding one persistent attach per session,
- * exactly as a normal `tmux attach` would, keeps the input clean.
+ * attached** while the terminal stays open — switching between *open* sessions
+ * only shows a different instance, it never detaches and re-attaches. tmux
+ * delivers a focus-out report to the pane's program (Claude's input) every time
+ * a client detaches, which Claude renders as a stray blank line, so re-attaching
+ * on every session switch made those blank lines pile up. Holding one persistent
+ * attach per open session, exactly as a normal `tmux attach` would, keeps the
+ * input clean. The one exception is a session that gets **closed**: its entry is
+ * disposed so a later resume rebuilds against the fresh pane (see the effect).
  */
 export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -58,7 +60,21 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
     const entries = entriesRef.current;
     const parent = containerRef.current;
     if (!canAttach || sessionId === null || !parent) {
-      // Nothing to show right now; leave existing entries attached.
+      // The focused session is known but not attachable — it was closed. Drop
+      // its live entry now so a later resume (a Send or the open button)
+      // rebuilds against the freshly-resumed pane. Relying on the bridge
+      // socket's async `closed` flag races with the resume: if the close event
+      // lands after this effect re-runs, the dead entry is reused and the
+      // terminal stays blank until a manual reload. Other early-return reasons
+      // (mock mode, a New session with no pane, the container not yet mounted)
+      // keep their entries hidden.
+      if (sessionId !== null && !attachable && !isMockMode()) {
+        const closedEntry = entries.get(sessionId);
+        if (closedEntry) {
+          disposeEntry(closedEntry);
+          entries.delete(sessionId);
+        }
+      }
       for (const entry of entries.values()) {
         entry.el.style.display = 'none';
       }
