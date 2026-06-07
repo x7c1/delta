@@ -72,6 +72,10 @@ impl TmuxDriver for FakeTmux {
         Ok(())
     }
 
+    async fn clear_input(&self, _pane: &str) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
     async fn kill_session(&self, _name: &str) -> delta_usecase::Result<()> {
         Ok(())
     }
@@ -98,6 +102,10 @@ impl TmuxDriver for SharedTmux {
 
     async fn send_line(&self, pane: &str, text: &str) -> delta_usecase::Result<()> {
         self.0.send_line(pane, text).await
+    }
+
+    async fn clear_input(&self, pane: &str) -> delta_usecase::Result<()> {
+        self.0.clear_input(pane).await
     }
 
     async fn kill_session(&self, name: &str) -> delta_usecase::Result<()> {

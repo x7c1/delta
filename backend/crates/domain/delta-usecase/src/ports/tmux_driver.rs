@@ -32,6 +32,16 @@ pub trait TmuxDriver: Send + Sync {
     /// from a session name with [`crate::ports::tmux_driver::pane_for`].
     async fn send_line(&self, pane: &str, text: &str) -> Result<()>;
 
+    /// Wipe the pane program's current input without submitting anything.
+    ///
+    /// Clears the input line (via `C-u`) so any residual content is removed.
+    /// Used right before a fresh PTY attach so a stray blank line a prior
+    /// client's detach left behind does not linger: when the PTY bridge tears
+    /// down, tmux delivers a focus-out report (`ESC[O`) to the pane program,
+    /// which Claude renders as a blank line in its input box. `pane` is a
+    /// fully-qualified tmux target such as `<name>:0.0`.
+    async fn clear_input(&self, pane: &str) -> Result<()>;
+
     /// Kill the named tmux session, terminating its `claude` process.
     ///
     /// Used to close a session: the conversational data persists in the store,
@@ -60,6 +70,10 @@ impl TmuxDriver for Box<dyn TmuxDriver> {
 
     async fn send_line(&self, pane: &str, text: &str) -> Result<()> {
         (**self).send_line(pane, text).await
+    }
+
+    async fn clear_input(&self, pane: &str) -> Result<()> {
+        (**self).clear_input(pane).await
     }
 
     async fn kill_session(&self, name: &str) -> Result<()> {
