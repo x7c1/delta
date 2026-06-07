@@ -10,80 +10,92 @@ import { useNavStore } from '../../store/navStore';
 
 export interface TerminalPaneProps {
   /**
-   * The focused session whose PTY pane to attach to. Null for a not-yet-bound
-   * New session (no pane exists), in which case the terminal is disabled.
+   * The focused session whose PTY pane to show. Null for a not-yet-bound New
+   * session (no pane exists), in which case the terminal is disabled.
    */
   sessionId: SessionId | null;
   /** Whether the focused session is open (its pane is attachable). */
   attachable: boolean;
 }
 
+/** A live xterm instance bound to one session's `/pty` pane, kept alive while
+ * the terminal is open even when another session is focused. */
+interface PaneEntry {
+  el: HTMLDivElement;
+  term: Terminal;
+  fit: FitAddon;
+  connection: PtyConnection;
+  observer: ResizeObserver;
+  rafId: number;
+  /** Set once the bridge socket closes (session closed or server gone) so a
+   * later refocus rebuilds the entry instead of reusing a dead socket. */
+  closed: boolean;
+}
+
 /**
- * The embedded xterm.js terminal attached to the focused session's `/pty` pane.
- * It is the access path for answering permission prompts in the real TUI. In
- * mock mode the PTY socket is not available, so it renders an informational
- * placeholder; it is also disabled when the focused session is closed or a
- * not-yet-registered New session (no pane to attach).
+ * The embedded xterm.js terminal for the focused session's `/pty` pane. It is
+ * the access path for answering permission prompts in the real TUI. In mock
+ * mode the PTY socket is not available, so it renders an informational
+ * placeholder; it is also disabled for a closed or not-yet-registered session.
+ *
+ * Each session gets its own xterm instance, created on first view and **kept
+ * attached** while the terminal stays open — switching sessions only shows a
+ * different instance, it never detaches and re-attaches. tmux injects a stray
+ * blank line into the pane's program (Claude's input) every time a client
+ * detaches, so re-attaching on every session switch made those blank lines pile
+ * up and corrupt the next message. Holding one persistent attach per session,
+ * exactly as a normal `tmux attach` would, keeps the input clean.
  */
 export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
 
   const canAttach = !isMockMode() && attachable && sessionId !== null;
 
+  // Show the focused session's pane, keeping the others attached but hidden.
   useEffect(() => {
-    if (!canAttach || sessionId === null || !containerRef.current) {
+    const entries = entriesRef.current;
+    const parent = containerRef.current;
+    if (!canAttach || sessionId === null || !parent) {
+      // Nothing to show right now; leave existing entries attached.
+      for (const entry of entries.values()) {
+        entry.el.style.display = 'none';
+      }
       return;
     }
-    const container = containerRef.current;
-    const term = new Terminal({
-      convertEol: true,
-      fontFamily: 'monospace',
-      fontSize: 13,
-      theme: { background: '#0f172a' },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(container);
-    fit.fit();
 
-    const decoder = new TextDecoder();
-    let connection: PtyConnection | null = null;
-    connection = connectPty({
-      url: wsUrl('/pty'),
-      sessionId,
-      onData: (chunk) => term.write(decoder.decode(chunk)),
-    });
-    term.onData((data) => connection?.send(data));
+    let entry = entries.get(sessionId);
+    if (entry && entry.closed) {
+      // The session's previous bridge socket died (it was closed and resumed);
+      // drop the stale instance so it is rebuilt against the fresh pane.
+      disposeEntry(entry);
+      entries.delete(sessionId);
+      entry = undefined;
+    }
+    if (!entry) {
+      entry = createEntry(sessionId, parent);
+      entries.set(sessionId, entry);
+    }
 
-    // Reflow the terminal whenever its container changes size — covers the
-    // resizable pane drag as well as window resizes. Coalesce bursts onto a
-    // single animation frame to avoid thrashing fit() during a drag.
-    let rafId = 0;
-    const scheduleFit = () => {
-      if (rafId !== 0) {
-        return;
-      }
-      rafId = window.requestAnimationFrame(() => {
-        rafId = 0;
-        fit.fit();
-      });
-    };
-    const observer = new ResizeObserver(scheduleFit);
-    observer.observe(container);
-
-    return () => {
-      if (rafId !== 0) {
-        window.cancelAnimationFrame(rafId);
-      }
-      observer.disconnect();
-      connection?.close();
-      term.dispose();
-    };
-    // Reattach when the focused session changes or it becomes (un)attachable.
+    for (const [id, current] of entries) {
+      current.el.style.display = id === sessionId ? 'block' : 'none';
+    }
+    entry.fit.fit();
   }, [canAttach, sessionId]);
 
-  // Message shown instead of the live terminal when no pane can be attached.
+  // Detach everything only when the terminal itself closes (this unmounts).
+  useEffect(() => {
+    const entries = entriesRef.current;
+    return () => {
+      for (const entry of entries.values()) {
+        disposeEntry(entry);
+      }
+      entries.clear();
+    };
+  }, []);
+
+  // Message shown instead of the live terminal when no pane can be shown.
   const unavailableNote = isMockMode()
     ? 'The terminal attaches to the live PTY bridge. It is unavailable in mock mode (no backend). Run against the Delta server to use it for answering permission prompts in the TUI.'
     : sessionId === null
@@ -110,11 +122,77 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
       }
       bodyClassName="bg-slate-900"
     >
-      {unavailableNote ? (
-        <p className="p-3 text-xs text-slate-300">{unavailableNote}</p>
-      ) : (
-        <div ref={containerRef} className="h-full w-full" />
-      )}
+      {/* The per-session xterm elements are appended into this container; the
+          note overlays it only while no pane is attachable. */}
+      <div ref={containerRef} className="relative h-full w-full">
+        {unavailableNote && (
+          <p className="p-3 text-xs text-slate-300">{unavailableNote}</p>
+        )}
+      </div>
     </Panel>
   );
+}
+
+/** Build a live xterm bound to `sessionId`'s pane, appended into `parent`. */
+function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
+  const el = document.createElement('div');
+  el.className = 'absolute inset-0';
+  parent.appendChild(el);
+
+  const term = new Terminal({
+    convertEol: true,
+    fontFamily: 'monospace',
+    fontSize: 13,
+    theme: { background: '#0f172a' },
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+  fit.fit();
+
+  const decoder = new TextDecoder();
+  const entry: PaneEntry = {
+    el,
+    term,
+    fit,
+    connection: connectPty({
+      url: wsUrl('/pty'),
+      sessionId,
+      onData: (chunk) => term.write(decoder.decode(chunk)),
+      onStatus: (status) => {
+        if (status === 'closed') {
+          entry.closed = true;
+        }
+      },
+    }),
+    observer: undefined as unknown as ResizeObserver,
+    rafId: 0,
+    closed: false,
+  };
+  term.onData((data) => entry.connection.send(data));
+
+  // Reflow on container resize (pane drag / window resize), coalesced onto one
+  // animation frame to avoid thrashing fit() during a drag.
+  entry.observer = new ResizeObserver(() => {
+    if (entry.rafId !== 0) {
+      return;
+    }
+    entry.rafId = window.requestAnimationFrame(() => {
+      entry.rafId = 0;
+      entry.fit.fit();
+    });
+  });
+  entry.observer.observe(el);
+  return entry;
+}
+
+/** Tear down a pane entry's socket, terminal, observer, and DOM node. */
+function disposeEntry(entry: PaneEntry): void {
+  if (entry.rafId !== 0) {
+    window.cancelAnimationFrame(entry.rafId);
+  }
+  entry.observer.disconnect();
+  entry.connection.close();
+  entry.term.dispose();
+  entry.el.remove();
 }

@@ -143,7 +143,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf) {
         "{}",
     );
 
-    let state = AppState::from_interactor(interactor);
+    let state = AppState::from_interactor(interactor, "delta-e2e");
     (router(state), tmux, transcript_path)
 }
 

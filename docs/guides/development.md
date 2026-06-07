@@ -27,10 +27,12 @@ variables, all with local-friendly defaults:
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
 | `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
+| `DELTA_TMUX_SOCKET` | `delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
-session present and lazily spawns one the first time the browser calls
-`POST /api/session`. Each spawn gets its own tmux session, named after a
+session present and spawns nothing on startup or page load. A session is spawned
+lazily when first needed — the composer's first Send, a New action, or
+`POST /api/sessions`. Each spawn gets its own tmux session, named after a
 Delta-minted token (`delta-<n>`), running `claude` in its own working directory
 (`<base>/<token>`) with Claude Code hooks pointed back at this server. Naming the
 tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
@@ -171,7 +173,7 @@ appear (each spawn is named `delta-<n>`; the first Send of a run spawns
 `delta-1`):
 
 ```bash
-tmux attach -t delta-1     # detach again with Ctrl-b then d
+tmux -L delta attach -t delta-1     # detach again with Ctrl-b then d
 ```
 
 ### Happy-path check
@@ -179,7 +181,7 @@ tmux attach -t delta-1     # detach again with Ctrl-b then d
 Type a message in the browser. It is dispatched into the tmux pane via
 `send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
 the browser. When a tool needs permission, answer it in the embedded terminal or
-in the TUI (`tmux attach -t delta-1`).
+in the TUI (`tmux -L delta attach -t delta-1`).
 
 ### Shut down
 
