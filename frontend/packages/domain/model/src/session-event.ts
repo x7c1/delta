@@ -8,6 +8,18 @@ export interface SessionRegisteredEvent {
   session_id: SessionId;
 }
 
+/** A closed session was resumed (or a new session bound its pane and is live). */
+export interface SessionOpenedEvent {
+  kind: 'session_opened';
+  session_id: SessionId;
+}
+
+/** A session was closed; its pane/PTY is no longer attachable until reopened. */
+export interface SessionClosedEvent {
+  kind: 'session_closed';
+  session_id: SessionId;
+}
+
 export interface TurnStartedEvent {
   kind: 'turn_started';
   session_id: SessionId;
@@ -47,6 +59,8 @@ export interface TranscriptUpdatedEvent {
 
 export type SessionEvent =
   | SessionRegisteredEvent
+  | SessionOpenedEvent
+  | SessionClosedEvent
   | TurnStartedEvent
   | ExternalInputEvent
   | TurnCompletedEvent

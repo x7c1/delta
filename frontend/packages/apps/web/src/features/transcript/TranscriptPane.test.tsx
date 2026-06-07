@@ -31,7 +31,11 @@ function renderPane() {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <TranscriptPane threads={mockThreads} activeThread={main} />
+        <TranscriptPane
+          threads={mockThreads}
+          activeThread={main}
+          readOnly={false}
+        />
       </ApiProvider>
     </QueryClientProvider>,
   );

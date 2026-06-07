@@ -25,6 +25,8 @@ export interface SessionEventSource {
 
 const EVENT_KINDS: ReadonlySet<string> = new Set([
   'session_registered',
+  'session_opened',
+  'session_closed',
   'turn_started',
   'external_input',
   'turn_completed',

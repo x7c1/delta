@@ -1,5 +1,10 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { Message, MessagesResponse, ThreadId } from '@delta/model';
+import type {
+  Message,
+  MessagesResponse,
+  SessionId,
+  ThreadId,
+} from '@delta/model';
 import { queryKeys } from './query-keys';
 
 /**
@@ -33,19 +38,23 @@ export function appendMessage(
   );
 }
 
-/** Mark the session/threads queries stale so they refetch from the server. */
-export function invalidateThreads(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.threads });
+/**
+ * Mark the session list stale so it refetches. Used on lifecycle events
+ * (`session_registered`/`session_opened`/`session_closed`) so a newly-spawned,
+ * resumed, or closed session's open flag and presence stay in sync with the UI.
+ */
+export function invalidateSessions(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
 }
 
-/**
- * Mark the session query stale so it refetches from the server. Used when the
- * first message registers the session: `GET /api/session` was 404 before the
- * session row existed, so the cached query is errored — invalidating it lets
- * the UI transition out of the no-session bootstrap state automatically.
- */
-export function invalidateSession(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.session });
+/** Mark a single session's thread tree stale so it refetches. */
+export function invalidateSessionThreads(
+  queryClient: QueryClient,
+  sessionId: SessionId,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.sessionThreads(sessionId),
+  });
 }
 
 /** Mark a single thread's transcript stale so it refetches. */

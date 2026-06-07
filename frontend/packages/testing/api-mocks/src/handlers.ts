@@ -1,43 +1,82 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
-  EnsureSessionResponse,
   MessagesResponse,
+  NewSessionResponse,
   PendingSend,
   SendRequest,
   SendResponse,
-  SessionResponse,
+  SendToNewSession,
+  SendToThread,
+  SessionsResponse,
   Thread,
   ThreadsResponse,
 } from '@delta/model';
-import { seedData } from './fixtures';
+import { seedData, type MockStore } from './fixtures';
+
+/** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
+function isNewSessionSend(body: SendRequest): body is SendToNewSession {
+  return 'new_session' in body && body.new_session === true;
+}
 
 /**
- * MSW handlers backing the REST surface. They share a small in-memory store so
- * that a `POST /api/sends` that branches actually creates a thread the
- * navigator can then list — making the mock feel like a real session.
+ * MSW handlers backing the multi-session REST surface. They share a small
+ * in-memory store (one per {@link createHandlers} call) so a `POST /api/sends`
+ * that branches actually creates a thread the navigator can then list, and the
+ * open/close endpoints flip a session's live flag — making the mock feel like a
+ * real multi-session backend.
  */
 export function createHandlers(): RequestHandler[] {
-  const store = seedData();
+  const store: MockStore = seedData();
+
+  const findSessionByThread = (threadId: number) =>
+    store.sessions.find((entry) =>
+      entry.threads.some((t) => t.id === threadId),
+    );
 
   return [
-    // The session is always considered already up in mock mode, so the app's
-    // on-load ensure-session call resolves immediately and the workspace renders
-    // without any backend.
-    http.post('*/api/session', () => {
-      const body: EnsureSessionResponse = { status: 'ready' };
-      return HttpResponse.json(body);
-    }),
-
-    http.get('*/api/session', () => {
-      const body: SessionResponse = {
-        session: store.session,
-        main_thread_id: store.threads[0].id,
+    http.get('*/api/sessions', () => {
+      const body: SessionsResponse = {
+        sessions: store.sessions.map((entry) => ({
+          session: entry.session,
+          open: entry.open,
+          main_thread_id: entry.mainThreadId,
+        })),
       };
       return HttpResponse.json(body);
     }),
 
-    http.get('*/api/threads', () => {
-      const body: ThreadsResponse = { threads: store.threads };
+    // Eager spawn. In mock mode the session is considered ready immediately; it
+    // does not get added to the list (a real spawn only appears after its first
+    // hook binds it via `session_registered`).
+    http.post('*/api/sessions', () => {
+      const body: NewSessionResponse = { status: 'ready' };
+      return HttpResponse.json(body);
+    }),
+
+    http.post('*/api/sessions/:id/open', ({ params }) => {
+      const entry = store.sessions.find((s) => s.session.id === params.id);
+      if (!entry) {
+        return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
+      }
+      entry.open = true;
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    http.post('*/api/sessions/:id/close', ({ params }) => {
+      const entry = store.sessions.find((s) => s.session.id === params.id);
+      if (!entry) {
+        return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
+      }
+      entry.open = false;
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    http.get('*/api/sessions/:id/threads', ({ params }) => {
+      const entry = store.sessions.find((s) => s.session.id === params.id);
+      if (!entry) {
+        return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
+      }
+      const body: ThreadsResponse = { threads: entry.threads };
       return HttpResponse.json(body);
     }),
 
@@ -63,29 +102,56 @@ export function createHandlers(): RequestHandler[] {
         );
       }
 
-      let threadId = payload.thread_id;
-      // A branch send creates a new unnamed child thread off the parent message.
-      if (payload.semantic_parent_uuid) {
-        const child: Thread = {
-          id: store.nextThreadId++,
-          session_id: store.session.id,
-          title: 'new branch',
-          parent_thread_id: payload.thread_id,
-          root_message_uuid: payload.semantic_parent_uuid,
+      // New-session target: the spawn has no thread yet, so the server returns a
+      // synthetic placeholder send (id 0, empty session id, thread 0) until the
+      // session registers. `locator_quote` is ignored for this target.
+      if (isNewSessionSend(payload)) {
+        const send: PendingSend = {
+          id: 0,
+          session_id: '',
+          thread_id: 0,
+          semantic_parent_uuid: null,
+          text: payload.text,
+          locator_quote: null,
+          status: 'pending',
+          matched_uuid: null,
           created_at: new Date().toISOString(),
         };
-        store.threads.push(child);
+        store.sends.push(send);
+        const body: SendResponse = { send };
+        return HttpResponse.json(body, { status: 201 });
+      }
+
+      // Past the new-session guard the target is a thread send.
+      const target: SendToThread = payload;
+      const session = findSessionByThread(target.thread_id);
+      if (!session) {
+        return HttpResponse.json({ error: 'unknown thread' }, { status: 404 });
+      }
+
+      let threadId = target.thread_id;
+      // A branch send creates a new unnamed child thread off the parent message.
+      if (target.semantic_parent_uuid) {
+        const child: Thread = {
+          id: store.nextThreadId++,
+          session_id: session.session.id,
+          title: 'new branch',
+          parent_thread_id: target.thread_id,
+          root_message_uuid: target.semantic_parent_uuid,
+          created_at: new Date().toISOString(),
+        };
+        session.threads.push(child);
         store.messagesByThread[child.id] = [];
         threadId = child.id;
       }
 
       const send: PendingSend = {
         id: store.nextSendId++,
-        session_id: store.session.id,
+        session_id: session.session.id,
         thread_id: threadId,
-        semantic_parent_uuid: payload.semantic_parent_uuid ?? null,
-        text: payload.text,
-        locator_quote: payload.locator_quote ?? null,
+        semantic_parent_uuid: target.semantic_parent_uuid ?? null,
+        text: target.text,
+        locator_quote: target.locator_quote ?? null,
         status: 'pending',
         matched_uuid: null,
         created_at: new Date().toISOString(),

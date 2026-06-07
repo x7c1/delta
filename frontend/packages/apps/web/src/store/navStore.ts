@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
-import type { ThreadId } from '@delta/model';
+import type { SessionId, ThreadId } from '@delta/model';
 
 /** Default terminal pane width in pixels (matches the former Tailwind w-96). */
 export const DEFAULT_TERMINAL_WIDTH = 384;
@@ -24,8 +24,23 @@ export function clampTerminalWidth(
   return Math.min(Math.max(width, MIN_TERMINAL_WIDTH), max);
 }
 
-/** Navigation/layout state: the active thread and terminal pane visibility. */
+/**
+ * The id of the focused session, or a sentinel for the cold-start / "New"
+ * composer state that has no session id yet (a fresh spawn has no id until its
+ * first hook binds it — see the multi-session design notes in the workspace).
+ */
+export const NEW_SESSION_FOCUS = '__new__';
+export type FocusedSession = SessionId | typeof NEW_SESSION_FOCUS | null;
+
+/**
+ * Navigation/layout state: the focused session, the active thread within it, and
+ * terminal pane visibility. Focus is purely client-side — the server emits no
+ * focus event.
+ */
 export interface NavState {
+  /** Focused session id, the new-session sentinel, or null before load. */
+  focusedSessionId: FocusedSession;
+  /** Active thread within the focused session (scoped to it). */
   activeThreadId: ThreadId | null;
   /** Whether the terminal pane is shown (persistent pane on large screens, or
    *  the slide-in overlay on small screens). */
@@ -33,6 +48,12 @@ export interface NavState {
   /** Width of the persistent terminal pane in pixels (large screens only). */
   terminalWidth: number;
 
+  /**
+   * Focus a session. Switching to a different session clears the active thread
+   * (the workspace reconciles it to that session's main); re-focusing the same
+   * session leaves the active thread untouched.
+   */
+  setFocusedSession: (sessionId: FocusedSession) => void;
   setActiveThread: (threadId: ThreadId) => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
@@ -44,19 +65,27 @@ export interface NavState {
 export const NAV_STORAGE_KEY = 'delta-nav';
 
 /**
- * Navigation/layout store. The active thread, terminal visibility, and terminal
- * width are **persisted to localStorage** so a browser reload restores the same
- * layout instead of snapping back to a closed terminal on `main`. A restored
- * active thread that no longer exists is reconciled to `main` by the workspace
- * (see `WorkspaceScreen`).
+ * Navigation/layout store. The focused session, active thread, terminal
+ * visibility, and terminal width are **persisted to localStorage** so a browser
+ * reload restores the same layout instead of snapping back to a closed terminal
+ * on `main`. A restored focused session that no longer exists, or an active
+ * thread outside the focused session, is reconciled by the workspace (see
+ * `WorkspaceScreen`).
  */
 export const useNavStore = create<NavState>()(
   persist(
     (set) => ({
+      focusedSessionId: null,
       activeThreadId: null,
       terminalOpen: false,
       terminalWidth: DEFAULT_TERMINAL_WIDTH,
 
+      setFocusedSession: (sessionId) =>
+        set((state) =>
+          state.focusedSessionId === sessionId
+            ? state
+            : { focusedSessionId: sessionId, activeThreadId: null },
+        ),
       setActiveThread: (threadId) => set({ activeThreadId: threadId }),
       setTerminalOpen: (open) => set({ terminalOpen: open }),
       toggleTerminal: () =>
@@ -68,6 +97,7 @@ export const useNavStore = create<NavState>()(
       storage: createJSONStorage(() => localStorage),
       // Persist only the layout values, never the action functions.
       partialize: (state) => ({
+        focusedSessionId: state.focusedSessionId,
         activeThreadId: state.activeThreadId,
         terminalOpen: state.terminalOpen,
         terminalWidth: state.terminalWidth,

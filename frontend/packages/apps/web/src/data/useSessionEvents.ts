@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { WsEventSource, type SessionEventSource } from '@delta/api-client';
 import { isMockMode, wsUrl } from '../config';
 import { useLiveStore } from '../store/liveStore';
-import { useNavStore } from '../store/navStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../store/navStore';
 import { applySessionEvent } from './applySessionEvent';
 import { createMockEventSource } from './mockEventControl';
 
@@ -22,9 +22,19 @@ export function useSessionEvents(): void {
       : new WsEventSource({ url: wsUrl('/ws') });
 
     const offEvent = source.onEvent((event) => {
-      // Read the latest active thread at event time, not at subscribe time.
-      const activeThreadId = useNavStore.getState().activeThreadId;
-      applySessionEvent(event, queryClient, activeThreadId);
+      // Read the latest focus at event time, not at subscribe time. The
+      // new-session sentinel has no real id yet, so map it to null for routing.
+      const { activeThreadId, focusedSessionId } = useNavStore.getState();
+      const focusedRealSessionId =
+        focusedSessionId === null || focusedSessionId === NEW_SESSION_FOCUS
+          ? null
+          : focusedSessionId;
+      applySessionEvent(
+        event,
+        queryClient,
+        activeThreadId,
+        focusedRealSessionId,
+      );
     });
     const offStatus = source.onStatus((status) => setConnection(status));
 

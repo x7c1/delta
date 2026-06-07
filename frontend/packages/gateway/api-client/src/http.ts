@@ -1,9 +1,10 @@
 import type {
-  EnsureSessionResponse,
   MessagesResponse,
+  NewSessionResponse,
   SendRequest,
   SendResponse,
-  SessionResponse,
+  SessionId,
+  SessionsResponse,
   ThreadId,
   ThreadsResponse,
 } from '@delta/model';
@@ -62,27 +63,55 @@ export class ApiClient {
     return (await response.json()) as T;
   }
 
+  /** Like {@link request} but for endpoints that reply `204 No Content`. */
+  private async requestNoContent(
+    path: string,
+    init?: RequestInit,
+  ): Promise<void> {
+    const response = await this.fetchFn(`${this.baseUrl}${path}`, init);
+    if (!response.ok) {
+      throw new ApiError(response.status, await readError(response));
+    }
+  }
+
+  /** `GET /api/sessions` — every session with its open flag and main thread. */
+  getSessions(): Promise<SessionsResponse> {
+    return this.request<SessionsResponse>('/api/sessions');
+  }
+
   /**
-   * `POST /api/session` — ensure the Claude Code session is up.
+   * `POST /api/sessions` — eagerly spawn a brand-new session.
    *
-   * Idempotent: the server starts the session if absent and reuses it if
-   * present. The browser calls this on load so opening the UI is the only action
-   * needed to bring the session up.
+   * The session does not appear in `GET /api/sessions` until its first hook
+   * binds it (announced via `session_registered`).
    */
-  ensureSession(): Promise<EnsureSessionResponse> {
-    return this.request<EnsureSessionResponse>('/api/session', {
+  newSession(): Promise<NewSessionResponse> {
+    return this.request<NewSessionResponse>('/api/sessions', {
       method: 'POST',
     });
   }
 
-  /** `GET /api/session` — hydrate the current session and its trunk thread. */
-  getSession(): Promise<SessionResponse> {
-    return this.request<SessionResponse>('/api/session');
+  /** `POST /api/sessions/{id}/open` — resume a closed session (204). */
+  openSession(sessionId: SessionId): Promise<void> {
+    return this.requestNoContent(
+      `/api/sessions/${encodeURIComponent(sessionId)}/open`,
+      { method: 'POST' },
+    );
   }
 
-  /** `GET /api/threads` — the thread tree, ordered by creation. */
-  getThreads(): Promise<ThreadsResponse> {
-    return this.request<ThreadsResponse>('/api/threads');
+  /** `POST /api/sessions/{id}/close` — close an open session (204). */
+  closeSession(sessionId: SessionId): Promise<void> {
+    return this.requestNoContent(
+      `/api/sessions/${encodeURIComponent(sessionId)}/close`,
+      { method: 'POST' },
+    );
+  }
+
+  /** `GET /api/sessions/{id}/threads` — a session's thread tree, by creation. */
+  getSessionThreads(sessionId: SessionId): Promise<ThreadsResponse> {
+    return this.request<ThreadsResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/threads`,
+    );
   }
 
   /** `GET /api/threads/{id}/messages` — a thread's messages, ordered by seq. */
@@ -92,7 +121,11 @@ export class ApiClient {
     );
   }
 
-  /** `POST /api/sends` — enqueue a send (a branch send when a parent uuid is set). */
+  /**
+   * `POST /api/sends` — enqueue a send against an existing thread or spawn a new
+   * session. The body is the discriminated {@link SendRequest} target; a branch
+   * send sets `semantic_parent_uuid` on a {@link SendToThread} target.
+   */
   createSend(body: SendRequest): Promise<SendResponse> {
     return this.request<SendResponse>('/api/sends', {
       method: 'POST',

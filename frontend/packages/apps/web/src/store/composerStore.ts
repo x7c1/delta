@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import type { MessageUuid, ThreadId } from '@delta/model';
 
 /**
+ * Stable draft / pending-queue key for the new-session composer state, which has
+ * no real thread id yet (a fresh spawn has no thread until its first hook
+ * binds). Negative so it never collides with a server-issued thread id.
+ */
+export const NEW_SESSION_DRAFT_KEY = -1 as ThreadId;
+
+/**
  * Composer state: per-thread draft text (kept while switching threads) and the
  * pending branch origin selected via "branch from here". Session-only.
  */

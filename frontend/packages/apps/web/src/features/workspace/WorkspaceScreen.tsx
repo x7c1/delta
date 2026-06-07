@@ -1,13 +1,17 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import {
-  useEnsureSessionQuery,
-  useThreadsQuery,
-  useSessionQuery,
+  useSessionsQuery,
+  useSessionThreadsQuery,
 } from '@delta/api-client';
+import type { SessionListItem } from '@delta/model';
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
-import { useNavStore } from '../../store/navStore';
+import {
+  NEW_SESSION_FOCUS,
+  useNavStore,
+  type FocusedSession,
+} from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { NavigatorPane } from '../navigator/NavigatorPane';
@@ -16,69 +20,140 @@ import { TerminalPane } from '../terminal/TerminalPane';
 import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
 
 /**
- * The top-level two-pane workspace with a responsive terminal third pane:
- * navigator | transcript | terminal. On small screens the terminal slides in
- * from the right as an overlay; on large screens it is a persistent collapsible
- * pane.
+ * Pick the session to focus on cold load from the session list: prefer the
+ * most-recently-created open session, else the most-recently-created session,
+ * else the new-session sentinel when the list is empty. The list is ordered by
+ * creation (ascending), so "most recent" is the last element.
+ */
+function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
+  if (sessions.length === 0) {
+    return NEW_SESSION_FOCUS;
+  }
+  const open = sessions.filter((item) => item.open);
+  const pool = open.length > 0 ? open : sessions;
+  return pool[pool.length - 1].session.id;
+}
+
+/**
+ * The top-level session-centric workspace: navigator (session → thread tree) |
+ * transcript | terminal. On load it lists every session and focuses one; the
+ * composer drives the conversation (new session on cold start, resume on a
+ * closed session), so the terminal is no longer required to begin. A focused
+ * closed session renders read-only.
  */
 export function WorkspaceScreen() {
   const client = useApiClient();
-
-  // On load, ask the server to bring the Claude Code session up (idempotent).
-  // Opening the browser is the only manual step; tmux is a hidden detail.
-  const ensureQuery = useEnsureSessionQuery(client);
-
   useSessionEvents();
 
-  const sessionQuery = useSessionQuery(client);
-  const threadsQuery = useThreadsQuery(client);
-  const threads = threadsQuery.data?.threads ?? [];
+  const sessionsQuery = useSessionsQuery(client);
+  const sessions = useMemo(
+    () => sessionsQuery.data?.sessions ?? [],
+    [sessionsQuery.data],
+  );
 
+  const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const activeThreadId = useNavStore((state) => state.activeThreadId);
+  const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
 
-  // At `lg`+ the terminal is a static, resizable pane; below it is a fixed-width
-  // slide-in overlay with no resizer. Matches Tailwind's `lg` breakpoint.
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
-  // Resolve the active thread once the session and threads are known. Default
-  // to main when none is set, and fall back to main when a thread persisted
-  // from a previous reload no longer exists (e.g. a new session).
+  const isNewSessionFocus = focusedSessionId === NEW_SESSION_FOCUS;
+  const focusedItem =
+    focusedSessionId === null || isNewSessionFocus
+      ? null
+      : sessions.find((item) => item.session.id === focusedSessionId) ?? null;
+
+  // The focused session's id for the thread query (null for new/none/unknown).
+  const focusedRealSessionId = focusedItem?.session.id ?? null;
+  const threadsQuery = useSessionThreadsQuery(client, focusedRealSessionId);
+  const threads = useMemo(
+    () => threadsQuery.data?.threads ?? [],
+    [threadsQuery.data],
+  );
+
+  // Snapshot the session ids present when the new-session state was entered, so
+  // the registration of the just-spawned session can be detected as "a new id
+  // that was not in the baseline" and focused automatically.
+  const newSessionBaselineRef = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (!sessionQuery.data) {
+    if (isNewSessionFocus) {
+      if (newSessionBaselineRef.current === null) {
+        newSessionBaselineRef.current = new Set(
+          sessions.map((item) => item.session.id),
+        );
+      }
+    } else {
+      newSessionBaselineRef.current = null;
+    }
+  }, [isNewSessionFocus, sessions]);
+
+  // Resolve focus once the session list loads.
+  useEffect(() => {
+    if (!sessionsQuery.isSuccess) {
       return;
     }
-    const main = sessionQuery.data.main_thread_id;
+    if (isNewSessionFocus) {
+      // The new-session send spawned a session; when it registers it appears in
+      // the list as an id absent from the baseline. Focus it and leave the
+      // new-session state. (A fresh New has no id until its first hook binds.)
+      const baseline = newSessionBaselineRef.current;
+      if (baseline) {
+        const registered = sessions.find(
+          (item) => !baseline.has(item.session.id),
+        );
+        if (registered) {
+          setFocusedSession(registered.session.id);
+        }
+      }
+      return;
+    }
+    const stillExists =
+      focusedSessionId !== null &&
+      sessions.some((item) => item.session.id === focusedSessionId);
+    if (!stillExists) {
+      setFocusedSession(pickInitialFocus(sessions));
+    }
+  }, [
+    sessionsQuery.isSuccess,
+    sessions,
+    focusedSessionId,
+    isNewSessionFocus,
+    setFocusedSession,
+  ]);
+
+  // Reconcile the active thread against the focused session's threads. Default
+  // to the session's main when none is set; fall back to main when a persisted
+  // active thread does not belong to this session. Skip while the threads query
+  // is in flight so a freshly-branched child (not yet refetched) is not reverted.
+  useEffect(() => {
+    if (!focusedItem || threadsQuery.isFetching) {
+      return;
+    }
+    const main = focusedItem.main_thread_id;
     if (activeThreadId === null) {
       setActiveThread(main);
       return;
     }
-    // Do not run the existence-based fallback while the threads query is still
-    // in flight. A branch send creates a child thread and immediately switches
-    // to it, but the threads query (invalidated by the send mutation) is still
-    // refetching and does not yet contain the new thread. Running the fallback
-    // now would misfire and revert to main before the refetch lands. Only treat
-    // a missing thread as genuinely gone once the query has settled.
-    if (threadsQuery.isFetching) {
-      return;
-    }
-    if (threads.length > 0 && !threads.some((thread) => thread.id === activeThreadId)) {
+    if (
+      threads.length > 0 &&
+      !threads.some((thread) => thread.id === activeThreadId)
+    ) {
       setActiveThread(main);
     }
   }, [
-    activeThreadId,
-    sessionQuery.data,
+    focusedItem,
     threads,
     threadsQuery.isFetching,
+    activeThreadId,
     setActiveThread,
   ]);
 
-  // Clear the unread badge whenever a thread becomes active, regardless of how
-  // it was activated (tree click, breadcrumb, branch chip, or the default).
+  // Clear the unread badge whenever a thread becomes active.
   useEffect(() => {
     if (activeThreadId !== null) {
       clearUnread(activeThreadId);
@@ -88,81 +163,56 @@ export function WorkspaceScreen() {
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;
 
-  // Gate the whole workspace on bringing the session up. Until the ensure call
-  // resolves, show an explicit "starting" state; if it fails, show an explicit
-  // error with guidance rather than an infinite spinner.
-  if (ensureQuery.isPending) {
+  if (sessionsQuery.isPending) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-400">
-        Starting the session…
+        Loading sessions…
       </div>
     );
   }
 
-  if (ensureQuery.isError) {
+  if (sessionsQuery.isError) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
-        <p>Could not start the session.</p>
+        <p>Could not load sessions.</p>
         <p className="text-xs text-slate-400">
-          Make sure <code>claude</code> is installed and authenticated, then
-          reload. You can also open the terminal to inspect the session.
+          Make sure the Delta server is running, then reload.
         </p>
-        <Button size="sm" variant="secondary" onClick={() => ensureQuery.refetch()}>
+        <Button size="sm" variant="secondary" onClick={() => sessionsQuery.refetch()}>
           Retry
         </Button>
       </div>
     );
   }
 
-  if (sessionQuery.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-400">
-        Connecting to the session…
-      </div>
-    );
-  }
-
-  // First-run bootstrap: the session row does not exist yet (the server creates
-  // it on the first `UserPromptSubmit` hook), so `GET /api/session` 404s and the
-  // query is errored. The composer can't send the first message because it
-  // requires an existing session, so the only pre-session input channel is the
-  // embedded terminal (PTY → tmux pane). Render it with a clear instruction.
-  // Once the first message registers the session, `session_registered`
-  // invalidates the session query and this screen transitions to the normal
-  // workspace automatically.
-  if (sessionQuery.isError) {
-    return (
-      <div className="flex h-full flex-col overflow-hidden">
-        <div className="shrink-0 px-6 py-5">
-          <h1 className="text-lg font-semibold text-slate-700">
-            Start the conversation
-          </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            The Claude session is running. Type your first message in the
-            terminal below — it will appear here once the session starts.
-          </p>
-        </div>
-        <div className="min-h-0 flex-1">
-          <TerminalPane />
-        </div>
-      </div>
-    );
-  }
+  const focusedOpen = focusedItem?.open ?? false;
 
   return (
     <div className="relative flex h-full overflow-hidden">
-      {/* Left: navigator */}
-      <div className="w-64 shrink-0">
-        <NavigatorPane threads={threads} />
+      {/* Left: navigator (session → thread tree) */}
+      <div className="w-72 shrink-0">
+        <NavigatorPane sessions={sessions} threads={threads} />
       </div>
 
-      {/* Center: transcript */}
+      {/* Center: transcript, or the cold-start / new-session composer state */}
       <div className="min-w-0 flex-1">
-        {activeThread ? (
-          <TranscriptPane threads={threads} activeThread={activeThread} />
+        {isNewSessionFocus ? (
+          <TranscriptPane
+            threads={[]}
+            activeThread={null}
+            newSession
+            readOnly={false}
+          />
+        ) : activeThread ? (
+          <TranscriptPane
+            threads={threads}
+            activeThread={activeThread}
+            readOnly={!focusedOpen}
+            sessionMainThreadId={focusedItem?.main_thread_id}
+          />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-400">
-            Select a thread, or send the first message in main.
+            Select a session to view its conversation.
           </div>
         )}
       </div>
@@ -176,9 +226,7 @@ export function WorkspaceScreen() {
         </div>
       )}
 
-      {/* Right: terminal — persistent resizable pane on lg, slide-in overlay
-          below lg. Only the static lg pane gets the inline pixel width and the
-          drag handle; the overlay keeps its fixed responsive width. */}
+      {/* Right: terminal — attaches to the focused session's pane. */}
       {terminalOpen &&
         (isLargeScreen ? (
           <div
@@ -186,11 +234,17 @@ export function WorkspaceScreen() {
             style={{ width: terminalWidth }}
           >
             <TerminalResizeHandle />
-            <TerminalPane />
+            <TerminalPane
+              sessionId={focusedRealSessionId}
+              attachable={focusedOpen}
+            />
           </div>
         ) : (
           <div className="absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl">
-            <TerminalPane />
+            <TerminalPane
+              sessionId={focusedRealSessionId}
+              attachable={focusedOpen}
+            />
           </div>
         ))}
     </div>

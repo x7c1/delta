@@ -3,7 +3,8 @@ import { Badge, Spinner } from '@delta/ui-kit';
 import { useLiveStore, type PendingItem } from '../../store/liveStore';
 
 export interface PendingQueueProps {
-  threadId: ThreadId;
+  /** The thread whose pending sends to show, or null to render nothing. */
+  threadId: ThreadId | null;
 }
 
 const STATUS_LABEL: Record<PendingItem['status'], string> = {
@@ -19,7 +20,10 @@ const STATUS_LABEL: Record<PendingItem['status'], string> = {
  */
 export function PendingQueue({ threadId }: PendingQueueProps) {
   const allPending = useLiveStore((state) => state.pending);
-  const pending = allPending.filter((item) => item.threadId === threadId);
+  const pending =
+    threadId === null
+      ? []
+      : allPending.filter((item) => item.threadId === threadId);
 
   if (pending.length === 0) {
     return null;

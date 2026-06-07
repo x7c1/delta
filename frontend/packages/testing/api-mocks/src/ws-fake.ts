@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@delta/model';
-import { SESSION_ID } from './fixtures';
+import { SESSION_ID, SESSION_ID_2 } from './fixtures';
 
 /**
  * A dev/test fake event source. MSW cannot mock WebSockets, so in mock mode the
@@ -51,6 +51,10 @@ export function defaultScript(): SessionEvent[] {
       session_id: SESSION_ID,
       prompt: 'typed directly into the pane',
     },
+    // Resume the second (closed) session, then close it again, demonstrating the
+    // open/close lifecycle the navigator's indicator reflects.
+    { kind: 'session_opened', session_id: SESSION_ID_2 },
+    { kind: 'session_closed', session_id: SESSION_ID_2 },
   ];
 }
 
