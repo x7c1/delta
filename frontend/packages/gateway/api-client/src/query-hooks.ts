@@ -6,8 +6,8 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import type {
-  EnsureSessionResponse,
   MessagesResponse,
+  NewSessionResponse,
   SendRequest,
   SendResponse,
   SessionId,
@@ -60,10 +60,20 @@ export function useThreadMessagesQuery(
   });
 }
 
-/** Spawn a brand-new session (`POST /api/sessions`); refresh the session list. */
+/**
+ * Spawn a brand-new session (`POST /api/sessions`); refresh the session list.
+ *
+ * Library surface for an explicit "New session" affordance. The current UI does
+ * not use it: New starts an empty composer and the first Send (`new_session:
+ * true`) spawns the session, so the optimistic pending item reconciles in one
+ * round-trip. Likewise `useOpenSessionMutation` exists for an explicit Resume,
+ * but the UI resumes a closed session by sending to its main thread (the backend
+ * auto-resumes). Only `useCloseSessionMutation` is currently wired (the
+ * navigator Close button).
+ */
 export function useNewSessionMutation(
   client: ApiClient,
-): UseMutationResult<EnsureSessionResponse, Error, void> {
+): UseMutationResult<NewSessionResponse, Error, void> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => client.newSession(),

@@ -122,6 +122,45 @@ describe('ApiClient', () => {
     expect(JSON.parse(init.body)).toEqual({ thread_id: 1, text: 'hello' });
   });
 
+  it('serializes a branch send with its semantic parent and locator quote', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          send: {
+            id: 8,
+            session_id: 'sess-1',
+            thread_id: 1,
+            semantic_parent_uuid: 'uuid-42',
+            text: 'branch from here',
+            locator_quote: 'the quoted line',
+            status: 'pending',
+            matched_uuid: null,
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        },
+        201,
+      ),
+    );
+    const client = new ApiClient({ fetchFn });
+
+    await client.createSend({
+      thread_id: 1,
+      text: 'branch from here',
+      semantic_parent_uuid: 'uuid-42',
+      locator_quote: 'the quoted line',
+    });
+
+    // The branch fields must survive serialization; dropping either silently
+    // turns a branch send into a plain trunk send.
+    const [, init] = fetchFn.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      thread_id: 1,
+      text: 'branch from here',
+      semantic_parent_uuid: 'uuid-42',
+      locator_quote: 'the quoted line',
+    });
+  });
+
   it('posts a new-session send with the new_session target', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse(

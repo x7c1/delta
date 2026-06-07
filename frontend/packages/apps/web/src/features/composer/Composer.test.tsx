@@ -9,6 +9,7 @@ import {
 } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { MAIN_THREAD_ID, createHandlers, mockThreads } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
@@ -127,6 +128,49 @@ describe('Composer', () => {
     await waitFor(() => {
       expect(useLiveStore.getState().resuming[mainThread.session_id]).toBe(true);
     });
+  });
+
+  it('clears the resuming marker when the resume request fails', async () => {
+    // Force the send to fail so the resume never starts.
+    server.use(
+      http.post('*/api/sends', () =>
+        HttpResponse.json({ error: 'boom' }, { status: 500 }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              readOnly: true,
+              sessionMainThreadId: MAIN_THREAD_ID,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'resume please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    // The send is marked failed and the resuming marker must NOT stick — a
+    // failed resume never opens the session, so the event that would clear it
+    // never arrives.
+    await waitFor(() => {
+      const pending = useLiveStore.getState().pending;
+      expect(pending[0]?.status).toBe('failed');
+    });
+    expect(
+      useLiveStore.getState().resuming[mainThread.session_id],
+    ).toBeUndefined();
   });
 
   it('targets a new session when in new-session mode', async () => {

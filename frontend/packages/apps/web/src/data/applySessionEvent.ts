@@ -35,8 +35,9 @@ export function applySessionEvent(
 ): void {
   const store = useLiveStore.getState();
 
-  // Ephemeral signals always go to the store.
-  store.applyEvent(event, activeThreadId);
+  // Session-scoped ephemeral signals (pending FIFO, permission, resuming) always
+  // go to the store; focus-dependent signals are handled below under a guard.
+  store.applyEvent(event);
 
   const isFocused = focusedSessionId !== null && event.session_id === focusedSessionId;
 
@@ -59,10 +60,13 @@ export function applySessionEvent(
       }
       break;
     case 'external_input':
-      // Direct-pane input lands on the focused session's active thread.
+      // Direct-pane input lands on the focused session's active thread. The
+      // marker is recorded only for the focused session so a background
+      // session's typing never surfaces on the transcript the user is viewing.
       if (isFocused && activeThreadId !== null) {
         invalidateThreadMessages(queryClient, activeThreadId);
         store.bumpUnread(activeThreadId);
+        store.noteExternalInput(activeThreadId, event.prompt);
       }
       break;
     case 'transcript_updated':

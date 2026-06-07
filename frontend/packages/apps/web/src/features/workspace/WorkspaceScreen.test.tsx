@@ -8,7 +8,7 @@ import {
   it,
   vi,
 } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -112,6 +112,37 @@ describe('WorkspaceScreen multi-session', () => {
       expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS),
     );
     expect(screen.getByTestId('new-session-empty')).toBeInTheDocument();
+  });
+
+  it('flips the focused session to read-only after its Close button is clicked', async () => {
+    renderScreen();
+
+    // sess-mock-1 is open and auto-focused, so its transcript starts editable.
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('open-session-count')).toHaveTextContent(
+        'open: 1',
+      ),
+    );
+    expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
+
+    // Only the open session exposes a Close affordance.
+    fireEvent.click(screen.getByRole('button', { name: /^Close/ }));
+
+    // The mock flips the session closed; the refetched list drops the open
+    // count and the still-focused session re-renders read-only.
+    await waitFor(() =>
+      expect(screen.getByTestId('open-session-count')).toHaveTextContent(
+        'open: 0',
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('readonly-notice')).toBeInTheDocument(),
+    );
+    // Focus stays on the now-closed session rather than snapping elsewhere.
+    expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
   });
 
   it('renders a closed focused session read-only', async () => {

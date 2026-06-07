@@ -20,6 +20,12 @@ export interface PendingItem {
   localId: string;
   /** Server id once `POST /api/sends` resolves. */
   sendId: number | null;
+  /**
+   * The session this send belongs to, or `null` for a new-session send whose
+   * id is not bound yet. Turn events are scoped to their `session_id` so a turn
+   * completing in one session never drains another session's queued send.
+   */
+  sessionId: SessionId | null;
   threadId: ThreadId;
   text: string;
   semanticParentUuid: MessageUuid | null;
@@ -62,11 +68,49 @@ export interface LiveState {
   failSend: (localId: string) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
+  /** Record an external (direct-pane) input marker on a thread. */
+  noteExternalInput: (threadId: ThreadId, prompt: string) => void;
   dismissPermission: () => void;
   /** Mark a session as resuming until it announces it is open. */
   markResuming: (sessionId: SessionId) => void;
-  /** Apply a live session event, mutating only ephemeral state. */
-  applyEvent: (event: SessionEvent, activeThreadId: ThreadId | null) => void;
+  /**
+   * Clear a session's resuming marker without waiting for an open event — used
+   * when the resume request itself fails, so the `resuming…` marker does not
+   * stick forever on a session that never actually started opening.
+   */
+  clearResuming: (sessionId: SessionId) => void;
+  /**
+   * Apply a live session event, mutating only session-scoped ephemeral state
+   * (the pending FIFO, permission notice, resuming marker). Focus-dependent
+   * signals (the external-input marker, unread badges) are recorded by the
+   * router under a focus guard, not here.
+   */
+  applyEvent: (event: SessionEvent) => void;
+}
+
+/**
+ * Find the FIFO index of the oldest pending item that (a) belongs to
+ * `sessionId` and (b) satisfies `predicate`. Turn events carry a `session_id`,
+ * so matching is scoped to that session to keep one session's turn from
+ * draining another's queue. An unbound new-session item (`sessionId === null`)
+ * has no id to compare yet, so it is accepted only as a fallback when no
+ * exact-session item matches — that is the event that finally clears it once
+ * its session has bound.
+ */
+function matchPendingIndex(
+  pending: PendingItem[],
+  sessionId: SessionId,
+  predicate: (item: PendingItem) => boolean,
+): number {
+  const exact = pending.findIndex(
+    (item) => item.sessionId === sessionId && predicate(item),
+  );
+  if (exact !== -1) {
+    return exact;
+  }
+  return pending.findIndex(
+    (item) => item.sessionId === null && predicate(item),
+  );
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
@@ -83,6 +127,16 @@ export const useLiveStore = create<LiveState>((set) => ({
     set((state) => ({
       resuming: { ...state.resuming, [sessionId]: true },
     })),
+
+  clearResuming: (sessionId) =>
+    set((state) => {
+      if (!state.resuming[sessionId]) {
+        return state;
+      }
+      const resuming = { ...state.resuming };
+      delete resuming[sessionId];
+      return { resuming };
+    }),
 
   enqueueSend: (item) =>
     set((state) => ({ pending: [...state.pending, item] })),
@@ -116,14 +170,22 @@ export const useLiveStore = create<LiveState>((set) => ({
       return { unread: next };
     }),
 
+  noteExternalInput: (threadId, prompt) =>
+    set({ externalInput: { threadId, prompt, at: Date.now() } }),
+
   dismissPermission: () => set({ permission: null }),
 
-  applyEvent: (event, activeThreadId) =>
+  applyEvent: (event) =>
     set((state) => {
       switch (event.kind) {
         case 'turn_started': {
-          // Promote the head queued send to in-progress (FIFO order).
-          const idx = state.pending.findIndex(
+          // Promote the head queued send for THIS session to in-progress (FIFO
+          // order). Scoping by session keeps a turn in one session from touching
+          // another session's queue. An unbound new-session item (sessionId
+          // null) matches only when no exact-session item does.
+          const idx = matchPendingIndex(
+            state.pending,
+            event.session_id,
             (item) =>
               item.status === 'queued' &&
               (item.sendId === event.pending_send_id || item.sendId === null),
@@ -136,12 +198,16 @@ export const useLiveStore = create<LiveState>((set) => ({
           return { pending };
         }
         case 'turn_completed': {
-          // Drop the oldest active send from the visible FIFO. It may still be
-          // `queued` rather than `in_progress`: `turn_started` only fires when
-          // the user line was ingested in the same `UserPromptSubmit` sync,
-          // which often does not happen, so a completed turn must clear a still-
-          // queued send too — otherwise it stays "waiting" forever.
-          const idx = state.pending.findIndex(
+          // Drop the oldest active send for THIS session from the visible FIFO.
+          // It may still be `queued` rather than `in_progress`: `turn_started`
+          // only fires when the user line was ingested in the same
+          // `UserPromptSubmit` sync, which often does not happen, so a completed
+          // turn must clear a still-queued send too — otherwise it stays
+          // "waiting" forever. Scoped by session so a turn in one session never
+          // drains another session's queue.
+          const idx = matchPendingIndex(
+            state.pending,
+            event.session_id,
             (item) =>
               item.status === 'in_progress' || item.status === 'queued',
           );
@@ -159,13 +225,10 @@ export const useLiveStore = create<LiveState>((set) => ({
             },
           };
         case 'external_input':
-          return {
-            externalInput: {
-              threadId: activeThreadId ?? 0,
-              prompt: event.prompt,
-              at: Date.now(),
-            },
-          };
+          // The external-input marker is session-scoped and only meaningful for
+          // the focused session, so the router (`applySessionEvent`) records it
+          // via `noteExternalInput` under a focus guard. Nothing to do here.
+          return state;
         case 'session_registered':
         case 'session_opened': {
           // The session is live: clear any pending resume marker for it.

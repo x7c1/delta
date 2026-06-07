@@ -1,7 +1,7 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
-  EnsureSessionResponse,
   MessagesResponse,
+  NewSessionResponse,
   PendingSend,
   SendRequest,
   SendResponse,
@@ -49,7 +49,7 @@ export function createHandlers(): RequestHandler[] {
     // does not get added to the list (a real spawn only appears after its first
     // hook binds it via `session_registered`).
     http.post('*/api/sessions', () => {
-      const body: EnsureSessionResponse = { status: 'ready' };
+      const body: NewSessionResponse = { status: 'ready' };
       return HttpResponse.json(body);
     }),
 

@@ -19,11 +19,11 @@ export interface SessionsResponse {
   sessions: SessionListItem[];
 }
 
-/** Lifecycle state of a Claude Code session after a `new`/`ensure` spawn. */
+/** Lifecycle state of a Claude Code session after a `new` spawn. */
 export type SessionLifecycle = 'ready' | 'starting';
 
 /** Response body for `POST /api/sessions` (eager spawn of a new session). */
-export interface EnsureSessionResponse {
+export interface NewSessionResponse {
   status: SessionLifecycle;
 }
 

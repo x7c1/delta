@@ -1,6 +1,6 @@
 import type {
-  EnsureSessionResponse,
   MessagesResponse,
+  NewSessionResponse,
   SendRequest,
   SendResponse,
   SessionId,
@@ -85,8 +85,8 @@ export class ApiClient {
    * The session does not appear in `GET /api/sessions` until its first hook
    * binds it (announced via `session_registered`).
    */
-  newSession(): Promise<EnsureSessionResponse> {
-    return this.request<EnsureSessionResponse>('/api/sessions', {
+  newSession(): Promise<NewSessionResponse> {
+    return this.request<NewSessionResponse>('/api/sessions', {
       method: 'POST',
     });
   }

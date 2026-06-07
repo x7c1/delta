@@ -43,12 +43,23 @@ describe('applySessionEvent', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
+    // The focused session has a queued send in the FIFO.
+    useLiveStore.getState().enqueueSend({
+      localId: 'focused1',
+      sendId: 1,
+      sessionId: FOCUSED,
+      threadId: 5,
+      text: 'mine',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
     applySessionEvent(
       {
-        kind: 'turn_started',
+        kind: 'turn_completed',
         session_id: 'other-session',
-        pending_send_id: 1,
-        matched_uuid: 'uuid-1',
+        stop_reason: null,
       },
       queryClient,
       5,
@@ -57,6 +68,9 @@ describe('applySessionEvent', () => {
 
     // No transcript/thread invalidation for a session the user is not viewing.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
+    // And the foreign turn must not drain the focused session's queue.
+    expect(useLiveStore.getState().pending).toHaveLength(1);
+    expect(useLiveStore.getState().pending[0].localId).toBe('focused1');
   });
 
   it('badges the focused active thread on external_input', () => {
@@ -72,6 +86,21 @@ describe('applySessionEvent', () => {
     expect(useLiveStore.getState().externalInput?.prompt).toBe('typed');
   });
 
+  it('ignores external_input for a non-focused session', () => {
+    const queryClient = new QueryClient();
+    applySessionEvent(
+      { kind: 'external_input', session_id: 'other-session', prompt: 'typed' },
+      queryClient,
+      9,
+      FOCUSED,
+    );
+
+    // A background session's typing must not badge or surface on the focused
+    // transcript (regression: the marker used to be set unconditionally).
+    expect(useLiveStore.getState().unread[9]).toBeUndefined();
+    expect(useLiveStore.getState().externalInput).toBeNull();
+  });
+
   it('invalidates the affected threads on transcript_updated without touching the FIFO', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
@@ -79,6 +108,7 @@ describe('applySessionEvent', () => {
     useLiveStore.getState().enqueueSend({
       localId: 'l1',
       sendId: 1,
+      sessionId: FOCUSED,
       threadId: 2,
       text: 'hi',
       semanticParentUuid: null,

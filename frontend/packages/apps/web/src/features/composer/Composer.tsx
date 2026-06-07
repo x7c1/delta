@@ -1,5 +1,5 @@
 import { useCallback, type FormEvent } from 'react';
-import type { SendRequest, Thread, ThreadId } from '@delta/model';
+import type { SendRequest, SessionId, Thread, ThreadId } from '@delta/model';
 import { Badge, Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useCreateSendMutation } from '@delta/api-client';
@@ -57,6 +57,7 @@ export function Composer({ mode }: ComposerProps) {
   const attachSendId = useLiveStore((state) => state.attachSendId);
   const failSend = useLiveStore((state) => state.failSend);
   const markResuming = useLiveStore((state) => state.markResuming);
+  const clearResuming = useLiveStore((state) => state.clearResuming);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
   // A closed session resumes by sending to its main thread (falling back to the
@@ -94,6 +95,9 @@ export function Composer({ mode }: ComposerProps) {
       enqueueSend({
         localId,
         sendId: null,
+        // A new-session send has no bound session yet; turn events for the
+        // session it spawns reconcile this once it registers.
+        sessionId: activeThread ? activeThread.session_id : null,
         threadId: optimisticThread,
         text,
         semanticParentUuid: branching ? branchOrigin.semanticParentUuid : null,
@@ -104,12 +108,16 @@ export function Composer({ mode }: ComposerProps) {
 
       // Build the send target.
       let body: SendRequest;
+      // The session marked resuming by this send, so its marker can be cleared
+      // if the request fails (otherwise `resuming…` would stick forever).
+      let resumingSessionId: SessionId | null = null;
       if (isNew) {
         body = { new_session: true, text };
       } else if (readOnly && activeThread && resumeThreadId !== null) {
         // Resume a closed session: send to its main thread; the backend
         // auto-resumes. Mark it resuming until session_opened lands.
         body = { thread_id: resumeThreadId, text };
+        resumingSessionId = activeThread.session_id;
         markResuming(activeThread.session_id);
       } else {
         body = {
@@ -135,6 +143,10 @@ export function Composer({ mode }: ComposerProps) {
         }
       } catch {
         failSend(localId);
+        // The resume never started: drop the marker so it does not stick.
+        if (resumingSessionId !== null) {
+          clearResuming(resumingSessionId);
+        }
       }
     },
     [
@@ -151,6 +163,7 @@ export function Composer({ mode }: ComposerProps) {
       mutation,
       attachSendId,
       markResuming,
+      clearResuming,
       setBranchOrigin,
       setActiveThread,
       failSend,

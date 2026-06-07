@@ -35,7 +35,7 @@ export type {
   SessionListItem,
   SessionsResponse,
   SessionLifecycle,
-  EnsureSessionResponse,
+  NewSessionResponse,
   ThreadsResponse,
   MessagesResponse,
   SendResponse,
