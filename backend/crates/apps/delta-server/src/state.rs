@@ -72,6 +72,17 @@ impl AppState {
         self.interactor.pane_for_session(id).await
     }
 
+    /// Wipe the residual input of a session's open pane, for the PTY bridge.
+    ///
+    /// Delegates to the use case. A no-op when the session is not open (there is
+    /// no live pane to clear).
+    pub async fn clear_session_input(
+        &self,
+        id: &delta_usecase::SessionId,
+    ) -> delta_usecase::Result<()> {
+        self.interactor.clear_session_input(id).await
+    }
+
     /// Ensure a Claude Code session is up, spawning one lazily if absent.
     ///
     /// Delegates to the use case, which mints a fresh tmux session in its own

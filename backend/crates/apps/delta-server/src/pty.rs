@@ -40,6 +40,27 @@ pub async fn pty_handler(
     let session_id = SessionId::from(query.session_id);
     let pane = state.pane_for_session(&session_id).await;
     let tmux_socket = state.tmux_socket().to_owned();
+
+    // Clear any residual input before the fresh attach. When the previous PTY
+    // bridge tore down (e.g. a browser reload detached the attach client), tmux
+    // delivered a focus-out report (`ESC[O`) to the pane program, which Claude
+    // renders as a stray blank line in its input box. Wiping it here means a
+    // reconnect shows a clean input. This only fires on a real (re)attach, so a
+    // normal hidden->shown session switch — which keeps its persistent
+    // connection and does not reconnect — is unaffected. Clear-on-send remains
+    // the guarantee for message integrity; this is the complementary
+    // clear-on-attach. A failed clear must never block the attach, so it is
+    // logged and ignored rather than propagated.
+    if pane.is_some() {
+        if let Err(err) = state.clear_session_input(&session_id).await {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %err,
+                "failed to clear pane input before attach; continuing"
+            );
+        }
+    }
+
     upgrade.on_upgrade(move |socket| bridge(socket, session_id, pane, tmux_socket))
 }
 

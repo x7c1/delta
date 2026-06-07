@@ -130,6 +130,14 @@ impl TmuxDriver for Tmux {
         Ok(())
     }
 
+    async fn clear_input(&self, pane: &str) -> std::result::Result<(), delta_usecase::Error> {
+        let args = clear_input_commands(pane);
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&borrowed)
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
+
     async fn kill_session(&self, name: &str) -> std::result::Result<(), delta_usecase::Error> {
         self.run(&["kill-session", "-t", name])
             .await
@@ -155,33 +163,52 @@ fn new_session_args(name: &str, workdir: &str, command: &[String]) -> Vec<String
     args
 }
 
-/// How many leading `BSpace` keystrokes to send before typing, to wipe any
-/// blank lines that accumulated above the cursor. `C-u` only kills the current
-/// line, so stray blank lines stacked above it survive and would be prepended to
-/// the message. tmux injects one such blank line into the pane's program each
-/// time a terminal client detaches; the embedded terminal holds a persistent
-/// attach per session to avoid that, but a residual line can still appear (e.g.
-/// when the terminal pane is closed, detaching every session). This bound is far
-/// above any realistic accumulation, and deleting past the start of the input is
-/// a harmless no-op, so it reliably leaves the input empty before typing.
+/// How many `BSpace` keystrokes the shared clear sends after `C-u`, to wipe any
+/// blank lines stacked above the cursor. `C-u` only kills the current line, so
+/// stray blank lines above it survive and would be prepended to the next
+/// message. Such a blank line appears when the PTY bridge tears down: tmux does
+/// not inject anything itself, but it delivers a focus-out report (`ESC[O`) to
+/// the pane program — the embedded terminal enables focus tracking — and
+/// Claude's TUI renders that as a stray blank line in its input. This bound is
+/// far above any realistic accumulation, and deleting past the start of the
+/// input is a harmless no-op, so the clear reliably leaves the input empty.
 const INPUT_CLEAR_BACKSPACES: usize = 64;
+
+/// Build the single `tmux send-keys` invocation that wipes the pane program's
+/// input: `C-u` kills the current line and a run of `BSpace` (see
+/// [`INPUT_CLEAR_BACKSPACES`]) deletes any blank lines stacked above it.
+///
+/// Two paths need exactly this wipe, so it lives here as one source of truth:
+///
+/// - Before a programmatic [`send_line_commands`], so a stray newline left by a
+///   prior submit cannot prepend to the next message.
+/// - On a fresh PTY (re)attach (see [`TmuxDriver::clear_input`]): when the PTY
+///   bridge tears down, tmux delivers a focus-out report (`ESC[O`) to the pane
+///   program, which Claude renders as a stray blank line in its input. Wiping on
+///   the next attach keeps the input box clean across browser reloads.
+fn clear_input_commands(pane: &str) -> Vec<String> {
+    let mut args = vec!["send-keys".into(), "-t".into(), pane.into(), "C-u".into()];
+    args.extend(std::iter::repeat_n(
+        "BSpace".to_owned(),
+        INPUT_CLEAR_BACKSPACES,
+    ));
+    args
+}
 
 /// Build the ordered `tmux send-keys` invocations that submit a single line to
 /// `pane`.
 ///
 /// The sequence is clear → literal text → Enter:
-/// 1. `C-u` kills the current input line, then a run of `BSpace` deletes any
-///    blank lines stacked above it (see [`INPUT_CLEAR_BACKSPACES`]). Together
-///    they leave the input empty so a prior submit's leftovers are never
-///    prepended to this message, making each programmatic send deterministic.
+/// 1. The shared [`clear_input_commands`] wipe (`C-u` then a run of `BSpace`,
+///    see [`INPUT_CLEAR_BACKSPACES`]) clears the current line and any blank
+///    lines stacked above it, so a prior submit's leftovers are never prepended
+///    to this message and each programmatic send starts from an empty input.
 /// 2. `-l <text>` sends the text literally so it is not interpreted as tmux key
 ///    names.
 /// 3. `Enter` submits it as a separate keystroke.
 fn send_line_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
-    let mut clear = vec!["send-keys".into(), "-t".into(), pane.into(), "C-u".into()];
-    clear.extend(std::iter::repeat_n("BSpace".to_owned(), INPUT_CLEAR_BACKSPACES));
     vec![
-        clear,
+        clear_input_commands(pane),
         vec![
             "send-keys".into(),
             "-t".into(),
@@ -266,6 +293,26 @@ mod tests {
                 vec!["send-keys", "-t", "delta-1:0.0", "-l", "hi"],
                 vec!["send-keys", "-t", "delta-1:0.0", "Enter"],
             ],
+        );
+    }
+
+    #[test]
+    fn clear_input_commands_wipes_the_input_line_of_the_pane() {
+        // The standalone clear is `C-u` followed by a run of `BSpace` (deleting
+        // blank lines stacked above the cursor), all targeting the passed pane.
+        let mut expected = vec!["send-keys", "-t", "delta-1:0.0", "C-u"];
+        expected.extend(std::iter::repeat_n("BSpace", INPUT_CLEAR_BACKSPACES));
+        assert_eq!(clear_input_commands("delta-1:0.0"), expected);
+    }
+
+    #[test]
+    fn send_line_reuses_the_shared_clear_sequence() {
+        // The clear step of a send is the exact same invocation as the
+        // standalone clear, so the two paths share one source of truth.
+        let pane = "delta-1:0.0";
+        assert_eq!(
+            send_line_commands(pane, "hi")[0],
+            clear_input_commands(pane)
         );
     }
 }

@@ -110,6 +110,29 @@ where
             .map(|h| h.pane.clone())
     }
 
+    /// Wipe the residual input of a session's pane, if it is open.
+    ///
+    /// Resolves the session's live pane from the registry exactly like
+    /// [`Self::pane_for_session`] does. When the session is open the pane's
+    /// current input is cleared via the driver; when it is not open there is no
+    /// live pane to clear, so this is a no-op returning `Ok(())`.
+    ///
+    /// Intended for use right before a fresh PTY attach: a prior client's detach
+    /// leaves a focus-out (`ESC[O`) that Claude renders as a stray blank line, so
+    /// clearing on the next attach keeps the input box clean across reconnects.
+    pub async fn clear_session_input(&self, id: &SessionId) -> Result<()> {
+        let pane = self
+            .open_sessions
+            .lock()
+            .await
+            .handle(id)
+            .map(|h| h.pane.clone());
+        if let Some(pane) = pane {
+            self.tmux.clear_input(&pane).await?;
+        }
+        Ok(())
+    }
+
     /// Whether a session is currently open (driven by a live pane).
     ///
     /// Open/closed is process-runtime state held by the registry, so this is the
