@@ -26,6 +26,14 @@ use workspace_fs::FsWorkspace;
 /// wiring and the integration tests that substitute fakes.
 pub type AppInteractor = BoxedInteractor;
 
+/// Default name of Delta's dedicated tmux socket (`tmux -L <socket>`).
+///
+/// Delta runs its sessions on their own tmux server so they are isolated from
+/// the user's default tmux server — no clutter in the user's `tmux ls`, and
+/// Delta can set server-wide options (e.g. `focus-events off`) without changing
+/// the user's other sessions.
+pub const DEFAULT_TMUX_SOCKET: &str = "delta";
+
 /// Runtime configuration for the composition root.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -35,6 +43,8 @@ pub struct Config {
     /// runs in its own `<base>/<token>` subdirectory, so the `cwd ↔ spawn`
     /// mapping is 1:1 and the hook-binding correlation is exact.
     pub session_workdir_base: String,
+    /// The dedicated tmux socket Delta's sessions live on (`tmux -L <socket>`).
+    pub tmux_socket: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
     pub port: u16,
 }
@@ -56,7 +66,7 @@ impl Config {
 pub fn build(config: &Config) -> Result<AppInteractor> {
     let store = SqliteStore::open(&config.database_path)?;
     let transcript = JsonlTranscript::new();
-    let tmux = Tmux::new();
+    let tmux = Tmux::new(config.tmux_socket.clone());
     let workspace = FsWorkspace::new();
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
@@ -76,6 +86,7 @@ mod tests {
         Config {
             database_path: ":memory:".into(),
             session_workdir_base: "/tmp/delta-session".into(),
+            tmux_socket: DEFAULT_TMUX_SOCKET.into(),
             port: 7878,
         }
     }

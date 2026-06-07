@@ -50,6 +50,8 @@ fn config_from_env() -> Config {
         database_path: std::env::var("DELTA_DB_PATH").unwrap_or_else(|_| "delta.db".to_owned()),
         session_workdir_base: std::env::var("DELTA_SESSION_WORKDIR")
             .unwrap_or_else(|_| ".tmp/session".to_owned()),
+        tmux_socket: std::env::var("DELTA_TMUX_SOCKET")
+            .unwrap_or_else(|_| delta_wire::DEFAULT_TMUX_SOCKET.to_owned()),
         port: env_port(),
     }
 }

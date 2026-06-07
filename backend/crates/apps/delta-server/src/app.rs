@@ -50,6 +50,7 @@ mod tests {
         AppState::build(&Config {
             database_path: ":memory:".into(),
             session_workdir_base: "/tmp/delta-test-session".into(),
+            tmux_socket: "delta-test".into(),
             port: 7878,
         })
         .unwrap()

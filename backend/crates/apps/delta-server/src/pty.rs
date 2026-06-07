@@ -39,14 +39,20 @@ pub async fn pty_handler(
     // attaching to a non-existent pane.
     let session_id = SessionId::from(query.session_id);
     let pane = state.pane_for_session(&session_id).await;
-    upgrade.on_upgrade(move |socket| bridge(socket, session_id, pane))
+    let tmux_socket = state.tmux_socket().to_owned();
+    upgrade.on_upgrade(move |socket| bridge(socket, session_id, pane, tmux_socket))
 }
 
 /// Bridge a browser WebSocket to a tmux pane through a PTY.
 ///
 /// When the named session is not open (`pane` is `None`) there is nothing to
 /// attach to: log it and let the socket close.
-async fn bridge(mut socket: WebSocket, session_id: SessionId, pane: Option<String>) {
+async fn bridge(
+    mut socket: WebSocket,
+    session_id: SessionId,
+    pane: Option<String>,
+    tmux_socket: String,
+) {
     let Some(pane) = pane else {
         tracing::warn!(
             session_id = %session_id,
@@ -55,12 +61,12 @@ async fn bridge(mut socket: WebSocket, session_id: SessionId, pane: Option<Strin
         let _ = socket.close().await;
         return;
     };
-    if let Err(err) = run_bridge(socket, pane).await {
+    if let Err(err) = run_bridge(socket, pane, &tmux_socket).await {
         tracing::error!(error = %err, "pty bridge terminated with error");
     }
 }
 
-async fn run_bridge(socket: WebSocket, pane: String) -> anyhow::Result<()> {
+async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyhow::Result<()> {
     let pty_system = portable_pty::native_pty_system();
     let pair = pty_system.openpty(PtySize {
         rows: 24,
@@ -69,8 +75,12 @@ async fn run_bridge(socket: WebSocket, pane: String) -> anyhow::Result<()> {
         pixel_height: 0,
     })?;
 
-    // Attach to the existing tmux session/pane in read-write mode.
+    // Attach to the existing tmux session/pane in read-write mode, on Delta's
+    // dedicated tmux server (`-L <socket>`) — the same server the sessions are
+    // created on.
     let mut cmd = CommandBuilder::new("tmux");
+    cmd.arg("-L");
+    cmd.arg(tmux_socket);
     cmd.arg("attach-session");
     cmd.arg("-t");
     cmd.arg(&pane);

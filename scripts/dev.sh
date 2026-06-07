@@ -12,18 +12,20 @@
 #
 # What it does:
 #   1. Starts `delta-server` (DELTA_PORT=7878). The server owns the claude
-#      session lifecycle: it lazily creates the tmux session running `claude`
-#      (and writes its `.claude/settings.json` so the hooks point back at the
-#      server) the first time the browser asks for it.
+#      session lifecycle: spawning a session creates a tmux session running
+#      `claude` (and writes its `.claude/settings.json` so the hooks point back
+#      at the server). No session is spawned on startup or on page load.
 #   2. Starts the frontend dev server against the real backend.
 #
-# Opening the browser is the only manual step: when the web UI loads it asks the
-# server to bring the session up, so tmux is a hidden implementation detail.
+# Opening the browser is the only manual step. On load the UI shows the session
+# list (empty on a fresh database) — it does not auto-start anything. The first
+# Send from the composer (or a New action) spawns a fresh `claude` session;
+# Sending to a closed session resumes it. tmux is a hidden implementation detail.
 #
 # Authentication is assumed: the server relies on a cached Claude Code token (or
 # CLAUDE_CODE_OAUTH_TOKEN) and does not run interactive OAuth. If `claude` is not
 # yet authenticated, run `claude` once on its own (or attach to a spawned pane
-# with `tmux attach -t delta-1`) to complete login, then reload the browser.
+# with `tmux -L delta attach -t delta-1`) to complete login, then reload the browser.
 #
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
@@ -41,10 +43,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
-# The server mints a unique tmux session per spawn, all named `delta-<n>`. The
-# script never names a session itself; it only uses this prefix to reap them on
-# teardown.
-TMUX_SESSION_PREFIX="delta-"
+# Delta runs its sessions on a dedicated tmux server (socket `delta`), separate
+# from the user's default tmux server. The server mints a unique session per
+# spawn (`delta-<n>`) on this socket; teardown just kills the whole socket.
+DELTA_TMUX_SOCKET="${DELTA_TMUX_SOCKET:-delta}"
 DELTA_PORT="7878"
 FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
@@ -99,15 +101,14 @@ down() {
   fi
   kill_port "$FRONTEND_PORT"
 
-  # The server mints one tmux session per spawn (`delta-<n>`), so kill every
-  # session whose name starts with the prefix rather than a single fixed name.
+  # All Delta sessions live on their own tmux server (socket `$DELTA_TMUX_SOCKET`),
+  # so killing that server tears down every spawned session at once without
+  # touching the user's default tmux server.
   if command -v tmux >/dev/null 2>&1; then
-    tmux list-sessions -F '#{session_name}' 2>/dev/null \
-      | grep -E "^${TMUX_SESSION_PREFIX}" \
-      | while read -r session; do
-          log "Killing tmux session '$session' ..."
-          tmux kill-session -t "$session" 2>/dev/null || true
-        done
+    if tmux -L "$DELTA_TMUX_SOCKET" has-session 2>/dev/null; then
+      log "Killing Delta's tmux server (socket '$DELTA_TMUX_SOCKET') ..."
+    fi
+    tmux -L "$DELTA_TMUX_SOCKET" kill-server 2>/dev/null || true
   fi
   log "Down."
 }
@@ -200,6 +201,7 @@ up() {
     cd "$BACKEND_DIR"
     DELTA_PORT="$DELTA_PORT" \
       DELTA_SESSION_WORKDIR="$workdir" \
+      DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
   ) &
 
@@ -211,7 +213,11 @@ up() {
     cd "$FRONTEND_DIR"
     pnpm install >"$FRONTEND_LOG" 2>&1
     pnpm -r build >>"$FRONTEND_LOG" 2>&1
-    pnpm --filter @delta/web dev >>"$FRONTEND_LOG" 2>&1
+    # `--force` re-optimizes deps so the dev server always serves the libraries
+    # just built above. Without it, Vite can keep serving a stale pre-bundled
+    # `@delta/*` from its `node_modules/.vite` cache, so a freshly-built library
+    # change (e.g. a fix in `@delta/api-client`) silently does not take effect.
+    pnpm --filter @delta/web dev -- --force >>"$FRONTEND_LOG" 2>&1
   ) &
 
   cat <<EOF
@@ -226,12 +232,14 @@ The only manual step: open the browser.
 
   Open:  http://localhost:$FRONTEND_PORT
 
-When the UI loads it asks the server to start the claude session, so there is
-nothing else to launch. Authentication is assumed (cached token /
-CLAUDE_CODE_OAUTH_TOKEN). If claude is not yet authenticated, run 'claude' once
-on its own — or attach to a spawned pane — to complete login, then reload:
+On load the UI shows the session list (empty on a fresh database); nothing
+auto-starts. The first Send from the composer (or a New action) spawns a fresh
+claude session, and Sending to a closed session resumes it. Authentication is
+assumed (cached token / CLAUDE_CODE_OAUTH_TOKEN). If claude is not yet
+authenticated, run 'claude' once on its own — or attach to a spawned pane — to
+complete login, then reload:
 
-       tmux attach -t ${TMUX_SESSION_PREFIX}1      # detach with Ctrl-b then d
+       tmux -L $DELTA_TMUX_SOCKET attach -t delta-1   # detach with Ctrl-b then d
 
 When done, shut everything down (server + frontend + tmux sessions):
 

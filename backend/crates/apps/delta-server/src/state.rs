@@ -26,13 +26,16 @@ const TRANSCRIPT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub struct AppState {
     interactor: Arc<AppInteractor>,
     events: broadcast::Sender<SessionEvent>,
+    /// Delta's dedicated tmux socket, so the PTY bridge attaches on the same
+    /// server the sessions live on (`tmux -L <socket> attach-session`).
+    tmux_socket: Arc<str>,
 }
 
 impl AppState {
     /// Build the shared state from configuration, wiring the Interactor.
     pub fn build(config: &Config) -> anyhow::Result<Self> {
         let interactor = delta_wire::build(config)?;
-        Ok(Self::from_interactor(interactor))
+        Ok(Self::from_interactor(interactor, &config.tmux_socket))
     }
 
     /// Build the shared state from an already-wired Interactor.
@@ -42,12 +45,18 @@ impl AppState {
     /// transcript, a no-op tmux driver) and still produce this exact
     /// [`AppState`] type — no generics leak into the transport layer. The spawn
     /// configuration (base workdir, hook settings) lives inside the Interactor.
-    pub fn from_interactor(interactor: AppInteractor) -> Self {
+    pub fn from_interactor(interactor: AppInteractor, tmux_socket: &str) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
             interactor: Arc::new(interactor),
             events,
+            tmux_socket: Arc::from(tmux_socket),
         }
+    }
+
+    /// Delta's dedicated tmux socket name (`tmux -L <socket>`).
+    pub fn tmux_socket(&self) -> &str {
+        &self.tmux_socket
     }
 
     /// The wired Interactor.

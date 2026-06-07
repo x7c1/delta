@@ -27,10 +27,12 @@ variables, all with local-friendly defaults:
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
 | `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
+| `DELTA_TMUX_SOCKET` | `delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
-session present and lazily spawns one the first time the browser calls
-`POST /api/session`. Each spawn gets its own tmux session, named after a
+session present and spawns nothing on startup or page load. A session is spawned
+lazily when first needed — the composer's first Send, a New action, or
+`POST /api/sessions`. Each spawn gets its own tmux session, named after a
 Delta-minted token (`delta-<n>`), running `claude` in its own working directory
 (`<base>/<token>`) with Claude Code hooks pointed back at this server. Naming the
 tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
@@ -121,8 +123,10 @@ TUI (running in tmux) receives it via `send-keys`, and its response flows back
 through the JSONL transcript and Claude Code's HTTP hooks to the browser.
 
 Opening the browser is the only manual step. `scripts/dev.sh` starts both the
-server and the frontend dev server; the server then starts the `claude` session
-lazily the first time the UI loads, so there is nothing else to launch.
+server and the frontend dev server. The server owns the `claude` session
+lifecycle but does not spawn anything on startup or on page load: on load the UI
+shows the session list (empty on a fresh database), and the first Send from the
+composer (or a New action) spawns a session, so there is nothing else to launch.
 
 ### Prerequisites
 
@@ -142,27 +146,34 @@ scripts/dev.sh ~/scratch # or pass your own working directory for claude
 `scripts/dev.sh`:
 
 1. Starts `delta-server` (`DELTA_PORT=7878`), passing the session working
-   directory. The server owns the `claude` session: it lazily creates the tmux
-   session and writes `<workdir>/.claude/settings.json` (so the hooks point at
-   `http://127.0.0.1:7878/hooks/...`) the first time the browser asks for it.
+   directory. The server owns the `claude` session lifecycle: when a session is
+   spawned (first Send / New) it creates the tmux session and writes that
+   spawn's `.claude/settings.json` (so the hooks point at
+   `http://127.0.0.1:7878/hooks/...`). Nothing is spawned on startup.
 2. Installs and builds the frontend workspace libraries, then starts the web dev
    server against the real backend (port 5173).
 
 Both run as managed background processes, logging to `.tmp/` (a stable
 `delta-server.log` / `delta-frontend.log` symlink points at the latest run).
 
-Then open <http://localhost:5173>. On load the UI calls `POST /api/session`,
-which brings the `claude` session up if it is not already running.
+Then open <http://localhost:5173>. On load the UI fetches the session list and
+shows it (empty on a fresh database); opening the browser does not spawn
+anything. From the composer, the first Send (or a New action) spawns a fresh
+`claude` session. Existing sessions show as open or closed: a closed session is
+view-only — you can read its history with no process running — and the first
+Send to it resumes it (`claude --resume`). After a server restart every prior
+session shows as closed until it is resumed via Send.
 
 ### First run / answering prompts
 
-If `claude` is not yet authenticated, the session will not become usable and the
-UI shows an explicit error. Run `claude` once on its own to finish login, or
+If `claude` is not yet authenticated, the first spawn will not become usable and
+the UI shows an explicit error. Run `claude` once on its own to finish login, or
 attach to a spawned pane to log in and to answer permission prompts as they
-appear (each spawn is named `delta-<n>`; the first is `delta-1`):
+appear (each spawn is named `delta-<n>`; the first Send of a run spawns
+`delta-1`):
 
 ```bash
-tmux attach -t delta-1     # detach again with Ctrl-b then d
+tmux -L delta attach -t delta-1     # detach again with Ctrl-b then d
 ```
 
 ### Happy-path check
@@ -170,7 +181,7 @@ tmux attach -t delta-1     # detach again with Ctrl-b then d
 Type a message in the browser. It is dispatched into the tmux pane via
 `send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
 the browser. When a tool needs permission, answer it in the embedded terminal or
-in the TUI (`tmux attach -t delta-1`).
+in the TUI (`tmux -L delta attach -t delta-1`).
 
 ### Shut down
 
