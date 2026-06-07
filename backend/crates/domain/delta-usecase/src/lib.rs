@@ -13,6 +13,8 @@ mod interactor;
 mod open_sessions;
 mod pane_token;
 mod ports;
+mod send_target;
+mod session_listing;
 
 pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor};
@@ -22,6 +24,8 @@ pub use ports::{
     pane_for, NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver,
     Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
+pub use send_target::SendTarget;
+pub use session_listing::SessionListing;
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for

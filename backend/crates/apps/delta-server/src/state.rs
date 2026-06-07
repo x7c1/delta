@@ -55,12 +55,12 @@ impl AppState {
         &self.interactor
     }
 
-    /// The tmux pane of a currently-open session, for the PTY bridge.
+    /// The tmux pane driving a specific open session, for the PTY bridge.
     ///
-    /// Returns `None` when no session is open, so the bridge can close cleanly
-    /// rather than attach to a non-existent pane.
-    pub async fn focused_pane(&self) -> Option<String> {
-        self.interactor.focused_pane().await
+    /// Returns `None` when that session is not open, so the bridge can refuse the
+    /// attach rather than bind to a non-existent pane.
+    pub async fn pane_for_session(&self, id: &delta_usecase::SessionId) -> Option<String> {
+        self.interactor.pane_for_session(id).await
     }
 
     /// Ensure a Claude Code session is up, spawning one lazily if absent.

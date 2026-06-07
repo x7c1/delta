@@ -10,14 +10,18 @@
 //! The flow exercised end to end:
 //!
 //! 1. The first `UserPromptSubmit` hook registers the session.
-//! 2. `GET /api/session` hydrates the session and its `main` thread id.
-//! 3. `POST /api/sends` enqueues a send (with a locator quote).
+//! 2. `GET /api/sessions` lists it, annotated with its open state and `main`
+//!    thread id.
+//! 3. `POST /api/sends` enqueues a send into that thread (with a locator quote),
+//!    which routes to the thread's owning session.
 //! 4. The matching `UserPromptSubmit` hook correlates against the FIFO head:
 //!    the send is marked matched, the locator quote is returned inside the
 //!    `hookSpecificOutput.additionalContext` envelope, and the transcript line
 //!    is ingested.
-//! 5. `GET /api/threads` and `GET /api/threads/{id}/messages` reflect the
-//!    resulting thread and message state.
+//! 5. `GET /api/sessions/{id}/threads` and `GET /api/threads/{id}/messages`
+//!    reflect the resulting thread and message state.
+//! 6. `POST /api/sessions/{id}/close` tears the pane down; the session then
+//!    lists as closed, and open/close/threads on an unknown id are `404`.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -204,12 +208,22 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         "no pending send queued yet, so no additionalContext"
     );
 
-    // 2. GET /api/session hydrates the registered session and its main thread.
-    let (status, body) = get(&app, "/api/session").await;
+    // 2. GET /api/sessions lists the registered session, annotated with its open
+    //    state and main thread id. It registered via a hook (not a Delta spawn),
+    //    so it is a known-but-closed data session.
+    let (status, body) = get(&app, "/api/sessions").await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["session"]["id"], session_id);
-    assert_eq!(body["session"]["cwd"], "/work/delta");
-    let main_thread_id = body["main_thread_id"].as_i64().expect("main thread id");
+    let sessions = body["sessions"].as_array().expect("sessions array");
+    assert_eq!(sessions.len(), 1, "exactly the one registered session");
+    assert_eq!(sessions[0]["session"]["id"], session_id);
+    assert_eq!(sessions[0]["session"]["cwd"], "/work/delta");
+    assert_eq!(
+        sessions[0]["open"], false,
+        "a hook-registered (external) session has no live pane"
+    );
+    let main_thread_id = sessions[0]["main_thread_id"]
+        .as_i64()
+        .expect("main thread id");
 
     // 3. POST /api/sends enqueues a send into the main thread, with a locator
     //    quote that must surface as additionalContext on the matching turn.
@@ -282,8 +296,9 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         "matched send injects its locator quote, framed, as additionalContext"
     );
 
-    // 5. GET /api/threads exposes the main thread for the navigator.
-    let (status, body) = get(&app, "/api/threads").await;
+    // 5. GET /api/sessions/{id}/threads exposes the main thread for the
+    //    navigator, scoped to this session.
+    let (status, body) = get(&app, &format!("/api/sessions/{session_id}/threads")).await;
     assert_eq!(status, StatusCode::OK);
     let threads = body["threads"].as_array().expect("threads array");
     assert_eq!(threads.len(), 1, "only the main thread exists");
@@ -322,16 +337,89 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     // The matched send id remained stable across the flow.
     assert!(pending_send_id > 0);
 
+    // 6. Close the session: the pane is torn down (here a no-op, since this
+    //    external session never had a live pane) but the data is kept. It still
+    //    lists, now as closed.
+    let (status, _) = post_json(
+        &app,
+        &format!("/api/sessions/{session_id}/close"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = body["sessions"].as_array().expect("sessions array");
+    assert_eq!(sessions.len(), 1, "closing keeps the session in the store");
+    assert_eq!(sessions[0]["open"], false, "the session lists as closed");
+
+    // Open/close/threads on an unknown session id are 404.
+    let (status, _) = post_json(&app, "/api/sessions/ghost/open", json!({})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "open of unknown id is 404");
+    let (status, _) = get(&app, "/api/sessions/ghost/threads").await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "threads of unknown id is 404"
+    );
+
+    let _ = std::fs::remove_file(&transcript_path);
+}
+
+/// A new-session send (`new_session: true`, no thread) spawns a fresh session
+/// and defers the first prompt onto its `main` thread. The synthetic response
+/// carries no persisted row yet (the real one is written when the spawn binds).
+#[tokio::test]
+async fn new_session_send_spawns_and_defers_first_prompt() {
+    let (app, tmux, transcript_path) = build_app();
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "new_session": true, "text": "kick off a new conversation" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["send"]["text"], "kick off a new conversation");
+    assert_eq!(body["send"]["status"], "pending");
+    assert_eq!(
+        body["send"]["id"].as_i64(),
+        Some(0),
+        "no row is persisted until the spawn binds to a session id"
+    );
+    // A fresh tmux session was spawned and the first prompt typed into its pane.
+    assert_eq!(
+        tmux.created.load(Ordering::SeqCst),
+        1,
+        "one session spawned"
+    );
+    assert_eq!(
+        tmux.sent.load(Ordering::SeqCst),
+        1,
+        "first prompt dispatched"
+    );
+
+    let _ = std::fs::remove_file(&transcript_path);
+}
+
+/// A send that names neither a thread nor a new session is a malformed request.
+#[tokio::test]
+async fn send_without_a_target_is_bad_request() {
+    let (app, _tmux, transcript_path) = build_app();
+
+    let (status, _) = post_json(&app, "/api/sends", json!({ "text": "no target" })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
     let _ = std::fs::remove_file(&transcript_path);
 }
 
 #[tokio::test]
-async fn ensure_session_endpoint_reports_starting_then_ready() {
+async fn create_session_endpoint_reports_starting_then_ready() {
     let (app, tmux, transcript_path) = build_app();
 
-    // No session exists yet, so the first POST /api/session spawns one and the
+    // No session exists yet, so the first POST /api/sessions spawns one and the
     // route serializes the lifecycle as "starting".
-    let (status, body) = post_json(&app, "/api/session", json!({})).await;
+    let (status, body) = post_json(&app, "/api/sessions", json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         body["status"], "starting",
@@ -345,7 +433,7 @@ async fn ensure_session_endpoint_reports_starting_then_ready() {
 
     // A second POST finds a live spawn already in the registry: idempotent
     // reuse, reported as "ready" with no second spawn.
-    let (status, body) = post_json(&app, "/api/session", json!({})).await;
+    let (status, body) = post_json(&app, "/api/sessions", json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ready", "a reused session is ready");
     assert_eq!(

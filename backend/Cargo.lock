@@ -252,6 +252,7 @@ dependencies = [
  "async-trait",
  "delta-model",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
  "tracing",

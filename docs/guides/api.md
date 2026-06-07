@@ -2,14 +2,16 @@
 
 ## Overview
 
-The Delta server is a local process that wraps a single Claude Code session and
-exposes it to a browser UI. It serves three kinds of traffic:
+The Delta server is a local process that wraps one or more Claude Code sessions
+and exposes them to a browser UI. It serves three kinds of traffic:
 
 - **Browser REST surface** (`/api/*`) — request/response queries and commands
-  the browser issues to hydrate state and enqueue sends.
+  the browser issues to hydrate state and enqueue sends. Sessions are listed,
+  created, opened, and closed by id, and threads and sends are routed to a
+  specific session.
 - **Browser live channels** — a WebSocket event stream (`/ws`) carrying
-  `SessionEvent`s, and a PTY bridge (`/pty`) attaching an xterm.js terminal to
-  the tmux pane.
+  `SessionEvent`s, and a PTY bridge (`/pty?session_id=<id>`) attaching an
+  xterm.js terminal to a named session's tmux pane.
 - **Control plane** (`/hooks/*`) — HTTP hooks Claude Code fires during a
   session. Delta correlates them with queued sends and broadcasts events.
 
@@ -26,12 +28,15 @@ types).
 - `thread_id` is an integer issued by the server. `session_id`, message `uuid`,
   and `prompt_id` are strings.
 - Errors carry a JSON body `{ "error": "<message>" }`, except request-decoding
-  failures rejected before a handler runs (the `400`/`415`/`422` cases below),
-  which carry a plain-text body from the framework. Status codes:
-  - `400 Bad Request` — a malformed request: a syntactically invalid JSON body,
-    a missing `Content-Type: application/json` header, or a path/query segment
-    that cannot be parsed (e.g. a non-integer thread id).
-  - `404 Not Found` — no session registered yet, or an unknown thread.
+  failures rejected before a handler runs (the framework-level `400`/`415`/`422`
+  cases below), which carry a plain-text body from the framework. Status codes:
+  - `400 Bad Request` — a malformed request. Either rejected before the handler
+    (a syntactically invalid JSON body, a missing `Content-Type:
+    application/json` header, a missing required query parameter, or a path/query
+    segment that cannot be parsed such as a non-integer thread id — plain-text
+    body), or rejected by a handler for a structurally valid body whose target is
+    ambiguous or contradictory (see `POST /api/sends` — JSON body).
+  - `404 Not Found` — an unknown session id, or an unknown thread.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not
@@ -131,18 +136,46 @@ the send is correlated with a transcript message.
 
 ## Browser REST surface
 
-### `POST /api/session`
+Sessions are addressed by id. Open/closed is process-runtime state held by the
+server (rebuilt empty on restart): a session that exists in the store but has no
+live pane is *closed* and must be reopened before it can receive a send.
 
-Ensure the Claude Code session is up, creating it lazily if absent. The browser
-calls this on load so opening the UI is the only action needed to bring the loop
-up: the server starts a tmux session running `claude` in the configured working
-directory (writing its `.claude/settings.json` so Claude Code's hooks point back
-at this server) if one is not already running, and reuses it otherwise. The call
-is idempotent — a second call with the session already up is a no-op.
+### `GET /api/sessions`
+
+List every known session, ordered by creation, each annotated with its live
+state and trunk thread. This is the browser's hydration surface: it shows every
+conversation — open or closed — so the navigator can route into any of them.
+
+- **200**:
+
+  ```json
+  {
+    "sessions": [
+      {
+        "session": { /* Session */ },
+        "open": true,
+        "main_thread_id": 1
+      }
+    ]
+  }
+  ```
+
+  `open` is `true` when the session currently has a live pane (resumable without
+  `--resume`). Returns an empty list until the first `UserPromptSubmit` hook
+  registers a session.
+
+### `POST /api/sessions`
+
+Spawn a fresh session eagerly. Used by cold start (an empty session list) and the
+"New" button: the server starts a tmux session running `claude` in a fresh
+per-spawn working directory (writing its `.claude/settings.json` so Claude Code's
+hooks point back at this server).
 
 This drives only the tmux/process lifecycle; the conversational session is still
 registered later by the first `UserPromptSubmit` hook, so a freshly created
-session has no `Session` row yet (`GET /api/session` returns `404` until then).
+session has no `Session` row yet (it appears in `GET /api/sessions` once
+registered). The call is idempotent while a spawn is still live: a second call
+with a session already coming up reuses it.
 
 Authentication is assumed: the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and does not perform interactive OAuth. If the session
@@ -159,25 +192,29 @@ never becomes usable, the user answers prompts in the embedded terminal (`/pty`)
 
 - **500** — preparing the working directory or starting the tmux session failed.
 
-### `GET /api/session`
+### `POST /api/sessions/{id}/open`
 
-Hydrate the current session and its trunk thread.
+Resume a closed, known session: re-launch `claude --resume <id>` and bind the new
+pane. Broadcasts `session_opened`. Re-opening an already-open session is a no-op.
 
-- **200** — the session exists:
+- **204 No Content** — the session is now open.
+- **404** — no session with that id.
+- **500** — preparing the working directory or starting the tmux session failed.
 
-  ```json
-  {
-    "session": { /* Session */ },
-    "main_thread_id": 1
-  }
-  ```
+### `POST /api/sessions/{id}/close`
 
-- **404** — no session has been registered yet (the first `UserPromptSubmit`
-  hook registers it).
+Tear down an open session's pane, keeping its data. Kills the live pane and drops
+it from the registry; the conversation remains in the store and can be reopened.
+Broadcasts `session_closed`. Closing a session that is not open is a no-op.
 
-### `GET /api/threads`
+- **204 No Content** — the session is closed (or already was).
+- **404** — no session with that id.
+- **500** — killing the tmux session failed.
 
-List the thread tree for the navigator, ordered by creation (ascending `id`).
+### `GET /api/sessions/{id}/threads`
+
+List a session's thread tree for the navigator, ordered by creation (ascending
+`id`).
 
 - **200**:
 
@@ -185,11 +222,12 @@ List the thread tree for the navigator, ordered by creation (ascending `id`).
   { "threads": [ /* Thread, ... */ ] }
   ```
 
-  Returns an empty list when no session is registered.
+- **404** — no session with that id.
 
 ### `GET /api/threads/{id}/messages`
 
-Return a thread's messages, ordered by `seq`.
+Return a thread's messages, ordered by `seq`. Thread ids are globally unique, so
+this is not scoped by session.
 
 - **200**:
 
@@ -202,12 +240,20 @@ Return a thread's messages, ordered by `seq`.
 
 ### `POST /api/sends`
 
-Enqueue a send into the session. The send is written to the correlation FIFO
-and then dispatched into the tmux pane as keystrokes. When
-`semantic_parent_uuid` is present this is a branch send: a new unnamed child
-thread is created off that message and the send is attributed to it.
+Enqueue a send. The send is written to a session's correlation FIFO and dispatched
+into its tmux pane as keystrokes. The session is determined by the request, not by
+an implicit "current" session — the send either continues an existing session or
+starts a new one:
 
-Request:
+- **Existing session** — set `thread_id`. The session is derived from the thread
+  (threads belong to a session). When `semantic_parent_uuid` is also set this is a
+  branch send: a new unnamed child thread is created off that message and the send
+  is attributed to it. If the session is closed it is resumed first.
+- **New session** — set `new_session: true` and omit `thread_id`. A fresh session
+  is spawned and the text is deferred as its first prompt, landing on the new
+  session's `main` thread once the spawn binds.
+
+Request (existing session):
 
 ```json
 {
@@ -218,12 +264,26 @@ Request:
 }
 ```
 
-- `thread_id` (required) — the target thread, or the parent thread for a branch.
+Request (new session):
+
+```json
+{
+  "new_session": true,
+  "text": "start a fresh conversation"
+}
+```
+
+- `thread_id` (optional) — the target thread, or the parent thread for a branch.
+  Required unless `new_session` is set; mutually exclusive with it.
+- `new_session` (optional, default `false`) — start a fresh session and land the
+  message on its `main` thread. Cannot be combined with `thread_id` or
+  `semantic_parent_uuid`.
 - `text` (required) — the text to send.
 - `locator_quote` (optional) — framed and injected as `additionalContext` on the
   matching turn so the model can locate the referenced text (see the
   `user-prompt-submit` hook below for the framing).
-- `semantic_parent_uuid` (optional) — when set, makes this a branch send.
+- `semantic_parent_uuid` (optional) — when set, makes this a branch send (only
+  valid with `thread_id`).
 
 Response:
 
@@ -233,11 +293,17 @@ Response:
   { "send": { /* PendingSend */ } }
   ```
 
-- **404** — no session registered, or no thread (or branch parent thread) with
-  the given `thread_id`.
-- **400 / 415 / 422** — the request body could not be decoded into the schema
-  above (malformed JSON, wrong or missing `Content-Type`, or a missing/wrong-typed
-  field such as an absent `text`).
+  For a `new_session` send the returned `PendingSend` is synthetic: no row exists
+  yet (the session id it would reference is unknown until the spawn binds), so its
+  `id` is `0`, `session_id` is empty, and `thread_id` is `0`. The real,
+  correlatable row is written on the new session's `main` thread at bind time.
+
+- **400** — the target is ambiguous or contradictory (a JSON body): neither
+  `thread_id` nor `new_session` given, both given, or `new_session` combined with
+  a branch (`semantic_parent_uuid`). Also the framework-level decode failures
+  (malformed JSON, wrong/missing `Content-Type`, or a missing/wrong-typed field
+  such as an absent `text`) reported as `400 / 415 / 422` with a plain-text body.
+- **404** — no thread (or branch parent thread) with the given `thread_id`.
 
 ## Browser live channels
 
@@ -248,6 +314,10 @@ text frames, one event per frame. Each event is a tagged union keyed on `kind`:
 
 ```json
 { "kind": "session_registered", "session_id": "sess-1" }
+
+{ "kind": "session_opened", "session_id": "sess-1" }
+
+{ "kind": "session_closed", "session_id": "sess-1" }
 
 { "kind": "turn_started",
   "session_id": "sess-1",
@@ -268,7 +338,15 @@ text frames, one event per frame. Each event is a tagged union keyed on `kind`:
   "thread_ids": [1, 4] }
 ```
 
-- `session_registered` — emitted on the first `UserPromptSubmit`.
+- `session_registered` — emitted on the first `UserPromptSubmit` for a session
+  id. This also doubles as the "opened" signal for a freshly-spawned session: a
+  new spawn has no `session_id` until its first hook binds it, so its first
+  liveness signal is this registration rather than a separate `session_opened`.
+- `session_opened` — a known, previously-closed session became live again
+  (resumed by id via `POST /api/sessions/{id}/open`). A brand-new session never
+  emits this.
+- `session_closed` — an open session was closed (`POST /api/sessions/{id}/close`);
+  its pane was torn down but its data remains.
 - `turn_started` — a queued send was correlated with a transcript message.
 - `external_input` — a prompt with no matching queued send (typed directly into
   the pane).
@@ -282,13 +360,17 @@ text frames, one event per frame. Each event is a tagged union keyed on `kind`:
   only refetch those threads, never mutate the pending-send FIFO or unread
   badges.
 
-The stream is process-wide: every connected browser receives every event. There
-is no client→server message protocol on this socket.
+The stream is process-wide: every connected browser receives every event, and
+every event carries the `session_id` it concerns so the browser can route it to
+the right session. Which session the user is looking at (focus) is purely
+client-side; the server emits no focus event. There is no client→server message
+protocol on this socket.
 
-### `GET /pty` (WebSocket)
+### `GET /pty?session_id=<id>` (WebSocket)
 
-A raw terminal bridge. After upgrade the server runs `tmux attach-session`
-against the configured pane inside a pseudo-terminal and shuttles bytes both
+A raw terminal bridge for a specific session. The `session_id` query parameter
+names the session to attach to; the server resolves that session's pane and runs
+`tmux attach-session` against it inside a pseudo-terminal, shuttling bytes both
 ways:
 
 - **Server → browser**: PTY output as binary frames.
@@ -297,6 +379,11 @@ ways:
 Used by the embedded xterm.js terminal, primarily so the user can answer
 permission prompts in the TUI. This is a minimal attach; resize negotiation is
 not yet modelled.
+
+If the named session is not open (no live pane — it was never opened, or it is
+closed), there is nothing to attach to: the server accepts the upgrade and then
+closes the socket cleanly without attaching. The client should open the session
+(`POST /api/sessions/{id}/open`) before connecting.
 
 ## Control plane (`/hooks/*`)
 

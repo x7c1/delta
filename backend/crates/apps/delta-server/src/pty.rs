@@ -1,42 +1,57 @@
 //! PTY bridge between the browser terminal and the tmux pane.
 //!
-//! The browser runs an xterm.js terminal and connects here over a WebSocket.
-//! The server resolves the open session's pane from the registry, spawns
-//! `tmux attach-session` against it inside a pseudo-terminal, and bridges bytes
-//! both ways: PTY output is streamed to the
-//! browser as binary frames, and browser input frames are written back into the
-//! PTY. This is a deliberately minimal attach; resize negotiation and richer
-//! control messages can be layered on later without changing the route.
+//! The browser runs an xterm.js terminal and connects here over a WebSocket,
+//! naming the session to attach to via the `session_id` query parameter
+//! (`/pty?session_id=<id>`). The server resolves that session's pane from the
+//! registry, spawns `tmux attach-session` against it inside a pseudo-terminal,
+//! and bridges bytes both ways: PTY output is streamed to the browser as binary
+//! frames, and browser input frames are written back into the PTY. This is a
+//! deliberately minimal attach; resize negotiation and richer control messages
+//! can be layered on later without changing the route.
 
 use std::io::{Read, Write};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use portable_pty::{CommandBuilder, PtySize};
+use serde::Deserialize;
 use tokio::sync::mpsc;
+
+use delta_usecase::SessionId;
 
 use crate::state::AppState;
 
+/// Query parameters for the PTY bridge: the session to attach to.
+#[derive(Debug, Deserialize)]
+pub struct PtyQuery {
+    session_id: String,
+}
+
 pub async fn pty_handler(
     State(state): State<AppState>,
+    Query(query): Query<PtyQuery>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    // Resolve the open session's pane up front. With no session open there is
+    // Resolve the named session's pane up front. If it is not open there is
     // nothing to attach to, so the bridge closes the socket cleanly instead of
     // attaching to a non-existent pane.
-    let pane = state.focused_pane().await;
-    upgrade.on_upgrade(move |socket| bridge(socket, pane))
+    let session_id = SessionId::from(query.session_id);
+    let pane = state.pane_for_session(&session_id).await;
+    upgrade.on_upgrade(move |socket| bridge(socket, session_id, pane))
 }
 
 /// Bridge a browser WebSocket to a tmux pane through a PTY.
 ///
-/// With no open session (`pane` is `None`) there is nothing to attach to: log it
-/// and let the socket close.
-async fn bridge(mut socket: WebSocket, pane: Option<String>) {
+/// When the named session is not open (`pane` is `None`) there is nothing to
+/// attach to: log it and let the socket close.
+async fn bridge(mut socket: WebSocket, session_id: SessionId, pane: Option<String>) {
     let Some(pane) = pane else {
-        tracing::warn!("pty bridge requested with no open session; closing");
+        tracing::warn!(
+            session_id = %session_id,
+            "pty bridge requested for a session that is not open; closing"
+        );
         let _ = socket.close().await;
         return;
     };

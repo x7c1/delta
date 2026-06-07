@@ -72,6 +72,11 @@ impl OpenSessions {
         self.bound.get(id)
     }
 
+    /// Whether a specific session is currently open (has a live, bound pane).
+    pub fn is_open(&self, id: &SessionId) -> bool {
+        self.bound.contains_key(id)
+    }
+
     /// Bind a freshly-spawned pane to a now-known session id.
     pub fn bind(&mut self, id: SessionId, handle: OpenHandle) {
         self.bound.insert(id, handle);
@@ -103,15 +108,5 @@ impl OpenSessions {
     /// Remove a session from the bound map (closing it), returning its handle.
     pub fn remove(&mut self, id: &SessionId) -> Option<OpenHandle> {
         self.bound.remove(id)
-    }
-
-    /// One currently-open session's pane, for the still-single PTY bridge.
-    ///
-    /// The single-session server has at most one open session, so this returns
-    /// that pane. With several open it returns an arbitrary one; the
-    /// multi-session transport that lands next routes the PTY by session id
-    /// instead and will not rely on this.
-    pub fn any_open_pane(&self) -> Option<String> {
-        self.bound.values().next().map(|h| h.pane.clone())
     }
 }
