@@ -57,10 +57,25 @@ export function WorkspaceScreen() {
       setActiveThread(main);
       return;
     }
+    // Do not run the existence-based fallback while the threads query is still
+    // in flight. A branch send creates a child thread and immediately switches
+    // to it, but the threads query (invalidated by the send mutation) is still
+    // refetching and does not yet contain the new thread. Running the fallback
+    // now would misfire and revert to main before the refetch lands. Only treat
+    // a missing thread as genuinely gone once the query has settled.
+    if (threadsQuery.isFetching) {
+      return;
+    }
     if (threads.length > 0 && !threads.some((thread) => thread.id === activeThreadId)) {
       setActiveThread(main);
     }
-  }, [activeThreadId, sessionQuery.data, threads, setActiveThread]);
+  }, [
+    activeThreadId,
+    sessionQuery.data,
+    threads,
+    threadsQuery.isFetching,
+    setActiveThread,
+  ]);
 
   // Clear the unread badge whenever a thread becomes active, regardless of how
   // it was activated (tree click, breadcrumb, branch chip, or the default).

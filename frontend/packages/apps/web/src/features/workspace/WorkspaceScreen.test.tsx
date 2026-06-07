@@ -10,7 +10,7 @@ import {
 } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
@@ -97,5 +97,63 @@ describe('WorkspaceScreen first-run bootstrap', () => {
     expect(
       screen.queryByText(/send your first message to Claude to begin/),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('WorkspaceScreen active-thread fallback timing', () => {
+  // The default `main_thread_id` (thread 1) the mocks report, and a thread id
+  // that is absent from the listing — standing in for a freshly branched child
+  // thread the navigator has switched to before the invalidated threads query
+  // has refetched it.
+  const MAIN_THREAD_ID = 1;
+  const ABSENT_THREAD_ID = 999;
+
+  beforeEach(() => {
+    useNavStore.setState({
+      activeThreadId: ABSENT_THREAD_ID,
+      terminalOpen: false,
+    });
+  });
+
+  it('does not revert to main while the threads query is still in flight', async () => {
+    // Hold the threads response open so the query stays `isFetching` after the
+    // component mounts. The active thread is absent from the (not-yet-arrived)
+    // listing, but the existence-based fallback must NOT fire yet, mirroring a
+    // branch send whose new child thread has not been refetched.
+    // The listing contains main (thread 1) but never the absent active thread,
+    // so the existence check (which requires a non-empty listing) can fire once
+    // the query settles.
+    server.use(
+      http.get('*/api/threads', async () => {
+        await delay(150);
+        return HttpResponse.json({
+          threads: [
+            {
+              id: MAIN_THREAD_ID,
+              session_id: 'sess-mock-1',
+              title: 'main',
+              parent_thread_id: null,
+              root_message_uuid: null,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          ],
+        });
+      }),
+    );
+
+    renderScreen();
+
+    // Wait until the normal workspace has mounted (session resolved).
+    await waitFor(() =>
+      expect(screen.queryByText('Connecting to the session…')).toBeNull(),
+    );
+    // While fetching, the absent active thread must be left untouched.
+    expect(useNavStore.getState().activeThreadId).toBe(ABSENT_THREAD_ID);
+
+    // Once the query settles with the thread still absent, the legitimate
+    // fallback reconciles the stale active thread to main.
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
   });
 });
