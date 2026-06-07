@@ -22,8 +22,8 @@
 #
 # Authentication is assumed: the server relies on a cached Claude Code token (or
 # CLAUDE_CODE_OAUTH_TOKEN) and does not run interactive OAuth. If `claude` is not
-# yet authenticated, run `claude` once on its own (or attach to the pane with
-# `tmux attach -t delta`) to complete login, then reload the browser.
+# yet authenticated, run `claude` once on its own (or attach to a spawned pane
+# with `tmux attach -t delta-1`) to complete login, then reload the browser.
 #
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
@@ -41,7 +41,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
-TMUX_SESSION="delta"
+# The server mints a unique tmux session per spawn, all named `delta-<n>`. The
+# script never names a session itself; it only uses this prefix to reap them on
+# teardown.
+TMUX_SESSION_PREFIX="delta-"
 DELTA_PORT="7878"
 FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
@@ -96,9 +99,15 @@ down() {
   fi
   kill_port "$FRONTEND_PORT"
 
-  if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    log "Killing tmux session '$TMUX_SESSION' ..."
-    tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+  # The server mints one tmux session per spawn (`delta-<n>`), so kill every
+  # session whose name starts with the prefix rather than a single fixed name.
+  if command -v tmux >/dev/null 2>&1; then
+    tmux list-sessions -F '#{session_name}' 2>/dev/null \
+      | grep -E "^${TMUX_SESSION_PREFIX}" \
+      | while read -r session; do
+          log "Killing tmux session '$session' ..."
+          tmux kill-session -t "$session" 2>/dev/null || true
+        done
   fi
   log "Down."
 }
@@ -161,9 +170,9 @@ up() {
   require cargo "Install the Rust toolchain (https://rustup.rs)."
   require pnpm  "Enable corepack ('corepack enable') so pnpm is on PATH."
 
-  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    die "A tmux session named '$TMUX_SESSION' already exists. Run 'scripts/dev.sh --down' (or 'tmux kill-session -t $TMUX_SESSION') first."
-  fi
+  # The server mints a unique tmux session per spawn (`delta-<n>`), so there is
+  # no fixed name to collide with up front. Any leftover `delta-*` sessions from
+  # a previous run are reaped by teardown ('scripts/dev.sh --down').
 
   # A running server already owns the port; starting a second one would fail
   # with "Address already in use" partway through. Abort cleanly up front and
@@ -175,10 +184,11 @@ up() {
     die "Something is already listening on 127.0.0.1:$FRONTEND_PORT (the frontend dev server). Run 'scripts/dev.sh --down' first."
   fi
 
-  # The server creates this on demand; resolve it to an absolute path so the
-  # server's `claude` session and our teardown agree on the location.
+  # The base working directory for spawns; resolve it to an absolute path. The
+  # server creates a per-spawn `<base>/<token>` subdirectory under it on demand
+  # and provisions that subdirectory's .claude/settings.json.
   workdir="$(mkdir -p "$workdir" && cd "$workdir" && pwd)"
-  log "Session workdir: $workdir (the server provisions .claude/settings.json here)"
+  log "Session workdir base: $workdir (the server provisions <base>/<token>/.claude/settings.json per spawn)"
 
   mkdir -p "$LOG_DIR"
 
@@ -188,7 +198,7 @@ up() {
   log "Server log: $SERVER_LOG (latest -> $SERVER_LOG_LATEST)"
   (
     cd "$BACKEND_DIR"
-    DELTA_PORT="$DELTA_PORT" DELTA_TMUX_SESSION="$TMUX_SESSION" \
+    DELTA_PORT="$DELTA_PORT" \
       DELTA_SESSION_WORKDIR="$workdir" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
   ) &
@@ -219,11 +229,11 @@ The only manual step: open the browser.
 When the UI loads it asks the server to start the claude session, so there is
 nothing else to launch. Authentication is assumed (cached token /
 CLAUDE_CODE_OAUTH_TOKEN). If claude is not yet authenticated, run 'claude' once
-on its own — or attach to the pane — to complete login, then reload:
+on its own — or attach to a spawned pane — to complete login, then reload:
 
-       tmux attach -t $TMUX_SESSION      # detach with Ctrl-b then d
+       tmux attach -t ${TMUX_SESSION_PREFIX}1      # detach with Ctrl-b then d
 
-When done, shut everything down (server + frontend + tmux session):
+When done, shut everything down (server + frontend + tmux sessions):
 
        scripts/dev.sh --down      # or: scripts/stop.sh
 

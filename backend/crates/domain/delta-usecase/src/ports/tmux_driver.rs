@@ -1,38 +1,68 @@
-//! Driving the Claude Code session by sending keystrokes to a tmux pane.
+//! Driving Claude Code sessions by sending keystrokes to tmux panes.
 
 use async_trait::async_trait;
 
 use crate::error::Result;
 
-/// Drives the Claude Code session: manages its tmux session lifecycle and sends
-/// keystrokes to its pane.
+/// Drives Claude Code sessions: manages tmux session lifecycles and sends
+/// keystrokes to their panes.
+///
+/// The trait is stateless with respect to any particular session: every method
+/// takes the target session name (or pane) explicitly, so a single driver can
+/// manage any number of concurrent sessions. The session name is a Delta-minted
+/// identifier (never Claude's `session_id`), so resuming a conversation under a
+/// fresh name never collides with an existing one.
 #[async_trait]
 pub trait TmuxDriver: Send + Sync {
-    /// Whether the target tmux session currently exists.
-    async fn has_session(&self) -> Result<bool>;
+    /// Whether the named tmux session currently exists.
+    async fn has_session(&self, name: &str) -> Result<bool>;
 
-    /// Create the target tmux session, running `command` detached in `workdir`.
+    /// Create the named tmux session, running `command` detached in `workdir`.
     ///
-    /// Equivalent to `tmux new-session -d -s <session> -c <workdir> <command>`.
-    /// The caller is responsible for idempotency (checking [`Self::has_session`]
-    /// first); this always attempts to create.
-    async fn create_session(&self, workdir: &str, command: &str) -> Result<()>;
+    /// Equivalent to `tmux new-session -d -s <name> -c <workdir> <command...>`.
+    /// `command` is passed as an argv vector (not a single shell string), so
+    /// arguments such as `claude --resume <id>` are forwarded without
+    /// shell-quoting hazards. The caller is responsible for idempotency
+    /// (checking [`Self::has_session`] first); this always attempts to create.
+    async fn create_session(&self, name: &str, workdir: &str, command: &[String]) -> Result<()>;
 
-    /// Send the given text to the target pane and submit it (Enter).
-    async fn send_line(&self, text: &str) -> Result<()>;
+    /// Send the given text to `pane` and submit it (Enter).
+    ///
+    /// `pane` is a fully-qualified tmux target such as `<name>:0.0`; derive it
+    /// from a session name with [`crate::ports::tmux_driver::pane_for`].
+    async fn send_line(&self, pane: &str, text: &str) -> Result<()>;
+
+    /// Kill the named tmux session, terminating its `claude` process.
+    ///
+    /// Used to close a session: the conversational data persists in the store,
+    /// but the live pane and process are gone.
+    async fn kill_session(&self, name: &str) -> Result<()>;
+}
+
+/// Derive the pane a session's launched command runs in: `<name>:0.0`.
+///
+/// `tmux new-session` places the launched command in the first pane of the
+/// first window, addressed as `<session>:0.0`. The registry and the PTY bridge
+/// reuse this so the derivation lives in exactly one place.
+pub fn pane_for(name: &str) -> String {
+    format!("{name}:0.0")
 }
 
 #[async_trait]
 impl TmuxDriver for Box<dyn TmuxDriver> {
-    async fn has_session(&self) -> Result<bool> {
-        (**self).has_session().await
+    async fn has_session(&self, name: &str) -> Result<bool> {
+        (**self).has_session(name).await
     }
 
-    async fn create_session(&self, workdir: &str, command: &str) -> Result<()> {
-        (**self).create_session(workdir, command).await
+    async fn create_session(&self, name: &str, workdir: &str, command: &[String]) -> Result<()> {
+        (**self).create_session(name, workdir, command).await
     }
 
-    async fn send_line(&self, text: &str) -> Result<()> {
-        (**self).send_line(text).await
+    async fn send_line(&self, pane: &str, text: &str) -> Result<()> {
+        (**self).send_line(pane, text).await
+    }
+
+    async fn kill_session(&self, name: &str) -> Result<()> {
+        (**self).kill_session(name).await
     }
 }

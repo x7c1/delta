@@ -10,6 +10,7 @@ delta-model = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 # Only the async Mutex used to serialize transcript ingestion; the runtime and
 # the rest of tokio come from the binary crate.
 tokio = { workspace = true, features = ["sync"] }

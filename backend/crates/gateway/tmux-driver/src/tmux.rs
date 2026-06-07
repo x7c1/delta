@@ -11,35 +11,20 @@ use crate::error::Error;
 /// let the Claude TUI finish initializing so the first `send-keys` is not lost.
 const SESSION_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(750);
 
-/// Drives a Claude Code session living in a tmux session.
+/// Drives Claude Code sessions living in tmux.
 ///
-/// The driver owns a session *name* (e.g. `delta`) and derives the pane it sends
-/// keystrokes to as `<session>:0.0` — the first pane of the first window, which
-/// is where `tmux new-session` places the launched command. Keeping the session
-/// name (rather than a bare pane string) lets the driver manage the session
-/// lifecycle (`has_session`/`create_session`) in addition to driving the pane.
-#[derive(Debug, Clone)]
-pub struct Tmux {
-    /// The tmux session name, e.g. `delta`.
-    session: String,
-    /// The derived target pane, `<session>:0.0`.
-    target_pane: String,
-}
+/// The driver is stateless with respect to any particular session: every method
+/// takes the target session name (or pane) explicitly, so one driver instance
+/// manages any number of concurrent sessions. Session names are minted by the
+/// caller (Delta's registry), never derived from Claude's `session_id`, so
+/// resuming a conversation under a fresh name never collides with a live one.
+#[derive(Debug, Clone, Default)]
+pub struct Tmux;
 
 impl Tmux {
-    /// Create a driver managing the tmux session with the given name.
-    pub fn new(session: impl Into<String>) -> Self {
-        let session = session.into();
-        let target_pane = format!("{session}:0.0");
-        Self {
-            session,
-            target_pane,
-        }
-    }
-
-    /// The pane this driver sends keystrokes to and attaches the PTY bridge to.
-    pub fn target_pane(&self) -> &str {
-        &self.target_pane
+    /// Create a stateless driver.
+    pub fn new() -> Self {
+        Self
     }
 
     /// Run `tmux <args>`, returning the captured output for inspection.
@@ -63,12 +48,12 @@ impl Tmux {
 
 #[async_trait]
 impl TmuxDriver for Tmux {
-    async fn has_session(&self) -> std::result::Result<bool, delta_usecase::Error> {
+    async fn has_session(&self, name: &str) -> std::result::Result<bool, delta_usecase::Error> {
         // `tmux has-session` exits 0 when the session exists and non-zero when it
         // does not (or the server is not running). A non-zero exit here is the
         // expected "absent" signal, not an error to propagate.
         let output = self
-            .output(&["has-session", "-t", &self.session])
+            .output(&["has-session", "-t", name])
             .await
             .map_err(delta_usecase::Error::from)?;
         Ok(output.status.success())
@@ -76,20 +61,15 @@ impl TmuxDriver for Tmux {
 
     async fn create_session(
         &self,
+        name: &str,
         workdir: &str,
-        command: &str,
+        command: &[String],
     ) -> std::result::Result<(), delta_usecase::Error> {
-        self.run(&[
-            "new-session",
-            "-d",
-            "-s",
-            &self.session,
-            "-c",
-            workdir,
-            command,
-        ])
-        .await
-        .map_err(delta_usecase::Error::from)?;
+        let args = new_session_args(name, workdir, command);
+        let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+        self.run(&borrowed)
+            .await
+            .map_err(delta_usecase::Error::from)?;
 
         // Settle delay: immediately after `tmux new-session ... claude`, the
         // Claude TUI has not finished initializing its terminal, so the very
@@ -102,8 +82,12 @@ impl TmuxDriver for Tmux {
         Ok(())
     }
 
-    async fn send_line(&self, text: &str) -> std::result::Result<(), delta_usecase::Error> {
-        for args in self.send_line_commands(text) {
+    async fn send_line(
+        &self,
+        pane: &str,
+        text: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        for args in send_line_commands(pane, text) {
             let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
             self.run(&borrowed)
                 .await
@@ -111,44 +95,110 @@ impl TmuxDriver for Tmux {
         }
         Ok(())
     }
+
+    async fn kill_session(&self, name: &str) -> std::result::Result<(), delta_usecase::Error> {
+        self.run(&["kill-session", "-t", name])
+            .await
+            .map_err(delta_usecase::Error::from)
+    }
 }
 
-impl Tmux {
-    /// Build the ordered `tmux send-keys` invocations that submit a single line.
-    ///
-    /// The sequence is clear → literal text → Enter:
-    /// 1. `C-u` clears the input line first. Claude's TUI input box can retain
-    ///    stray content from a prior submit (e.g. a leftover newline), which
-    ///    would otherwise be prepended to this message. Killing the line makes
-    ///    each programmatic send start from an empty input and be deterministic.
-    /// 2. `-l <text>` sends the text literally so it is not interpreted as tmux
-    ///    key names.
-    /// 3. `Enter` submits it as a separate keystroke.
-    fn send_line_commands(&self, text: &str) -> Vec<Vec<String>> {
-        let pane = self.target_pane.as_str();
+/// Build the `tmux new-session` argv that launches `command` detached.
+///
+/// The launched command is appended as a separate argv tail (not a shell
+/// string), so arguments such as `claude --resume <id>` reach the process
+/// without shell-quoting hazards.
+fn new_session_args(name: &str, workdir: &str, command: &[String]) -> Vec<String> {
+    let mut args: Vec<String> = vec![
+        "new-session".into(),
+        "-d".into(),
+        "-s".into(),
+        name.into(),
+        "-c".into(),
+        workdir.into(),
+    ];
+    args.extend(command.iter().cloned());
+    args
+}
+
+/// Build the ordered `tmux send-keys` invocations that submit a single line to
+/// `pane`.
+///
+/// The sequence is clear → literal text → Enter:
+/// 1. `C-u` clears the input line first. Claude's TUI input box can retain
+///    stray content from a prior submit (e.g. a leftover newline), which would
+///    otherwise be prepended to this message. Killing the line makes each
+///    programmatic send start from an empty input and be deterministic.
+/// 2. `-l <text>` sends the text literally so it is not interpreted as tmux key
+///    names.
+/// 3. `Enter` submits it as a separate keystroke.
+fn send_line_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
+    vec![
+        vec!["send-keys".into(), "-t".into(), pane.into(), "C-u".into()],
         vec![
-            vec!["send-keys".into(), "-t".into(), pane.into(), "C-u".into()],
-            vec![
-                "send-keys".into(),
-                "-t".into(),
-                pane.into(),
-                "-l".into(),
-                text.into(),
-            ],
-            vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()],
-        ]
-    }
+            "send-keys".into(),
+            "-t".into(),
+            pane.into(),
+            "-l".into(),
+            text.into(),
+        ],
+        vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()],
+    ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use delta_usecase::pane_for;
 
     #[test]
-    fn derives_pane_from_session_name() {
-        let t = Tmux::new("delta");
-        assert_eq!(t.session, "delta");
-        assert_eq!(t.target_pane(), "delta:0.0");
+    fn pane_for_derives_first_pane_of_session() {
+        assert_eq!(pane_for("delta-1"), "delta-1:0.0");
+    }
+
+    #[test]
+    fn new_session_args_appends_command_as_argv() {
+        // A plain spawn forwards just the launch command.
+        assert_eq!(
+            new_session_args("delta-1", "/work/delta-1", &["claude".to_owned()]),
+            vec![
+                "new-session",
+                "-d",
+                "-s",
+                "delta-1",
+                "-c",
+                "/work/delta-1",
+                "claude",
+            ],
+        );
+    }
+
+    #[test]
+    fn new_session_args_forwards_resume_arguments_unquoted() {
+        // A resume forwards `claude --resume <id>` as separate argv entries, so
+        // the id never needs shell quoting.
+        assert_eq!(
+            new_session_args(
+                "delta-2",
+                "/work/conv",
+                &[
+                    "claude".to_owned(),
+                    "--resume".to_owned(),
+                    "abc 123".to_owned()
+                ],
+            ),
+            vec![
+                "new-session",
+                "-d",
+                "-s",
+                "delta-2",
+                "-c",
+                "/work/conv",
+                "claude",
+                "--resume",
+                "abc 123",
+            ],
+        );
     }
 
     #[test]
@@ -156,15 +206,14 @@ mod tests {
         // The input line must be cleared (`C-u`) before the literal text so a
         // stray newline left by a prior submit cannot prepend to this message.
         // Expected sequence: clear → literal text → Enter, all targeting the
-        // session's first pane.
-        let t = Tmux::new("delta");
-        let commands = t.send_line_commands("hi");
+        // passed pane.
+        let commands = send_line_commands("delta-1:0.0", "hi");
         assert_eq!(
             commands,
             vec![
-                vec!["send-keys", "-t", "delta:0.0", "C-u"],
-                vec!["send-keys", "-t", "delta:0.0", "-l", "hi"],
-                vec!["send-keys", "-t", "delta:0.0", "Enter"],
+                vec!["send-keys", "-t", "delta-1:0.0", "C-u"],
+                vec!["send-keys", "-t", "delta-1:0.0", "-l", "hi"],
+                vec!["send-keys", "-t", "delta-1:0.0", "Enter"],
             ],
         );
     }

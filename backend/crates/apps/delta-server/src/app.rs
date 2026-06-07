@@ -47,8 +47,7 @@ mod tests {
     fn test_state() -> AppState {
         AppState::build(&Config {
             database_path: ":memory:".into(),
-            tmux_session: "delta".into(),
-            session_workdir: "/tmp/delta-test-session".into(),
+            session_workdir_base: "/tmp/delta-test-session".into(),
             port: 7878,
         })
         .unwrap()
@@ -57,7 +56,12 @@ mod tests {
     #[tokio::test]
     async fn health_returns_ok() {
         let response = router(test_state())
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);

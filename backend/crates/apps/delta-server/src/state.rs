@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use delta_usecase::{SessionEvent, SessionLifecycle};
-use delta_wire::{AppInteractor, Config, SESSION_COMMAND};
+use delta_wire::{AppInteractor, Config};
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -26,21 +26,13 @@ const TRANSCRIPT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub struct AppState {
     interactor: Arc<AppInteractor>,
     events: broadcast::Sender<SessionEvent>,
-    tmux_pane: String,
-    session_workdir: String,
-    session_settings_json: String,
 }
 
 impl AppState {
     /// Build the shared state from configuration, wiring the Interactor.
     pub fn build(config: &Config) -> anyhow::Result<Self> {
         let interactor = delta_wire::build(config)?;
-        Ok(Self::from_interactor(
-            interactor,
-            config.tmux_pane(),
-            config.session_workdir.clone(),
-            config.session_settings_json(),
-        ))
+        Ok(Self::from_interactor(interactor))
     }
 
     /// Build the shared state from an already-wired Interactor.
@@ -48,20 +40,13 @@ impl AppState {
     /// The Interactor's gateways are type-erased (see [`AppInteractor`]), so
     /// integration tests can inject fakes (an in-memory store, a temp-file
     /// transcript, a no-op tmux driver) and still produce this exact
-    /// [`AppState`] type — no generics leak into the transport layer.
-    pub fn from_interactor(
-        interactor: AppInteractor,
-        tmux_pane: String,
-        session_workdir: String,
-        session_settings_json: String,
-    ) -> Self {
+    /// [`AppState`] type — no generics leak into the transport layer. The spawn
+    /// configuration (base workdir, hook settings) lives inside the Interactor.
+    pub fn from_interactor(interactor: AppInteractor) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         Self {
             interactor: Arc::new(interactor),
             events,
-            tmux_pane,
-            session_workdir,
-            session_settings_json,
         }
     }
 
@@ -70,24 +55,21 @@ impl AppState {
         &self.interactor
     }
 
-    /// The tmux pane the session lives in (used by the PTY bridge).
-    pub fn tmux_pane(&self) -> &str {
-        &self.tmux_pane
+    /// The tmux pane of a currently-open session, for the PTY bridge.
+    ///
+    /// Returns `None` when no session is open, so the bridge can close cleanly
+    /// rather than attach to a non-existent pane.
+    pub async fn focused_pane(&self) -> Option<String> {
+        self.interactor.focused_pane().await
     }
 
-    /// Ensure the Claude Code session is up, creating it lazily if absent.
+    /// Ensure a Claude Code session is up, spawning one lazily if absent.
     ///
-    /// Delegates to the use case with this server's configured working directory,
-    /// launch command, and rendered hook settings. Idempotent: an existing
-    /// session is reused.
+    /// Delegates to the use case, which mints a fresh tmux session in its own
+    /// working directory with the rendered hook settings. Idempotent: an
+    /// existing open session keeps the server reporting `Ready`.
     pub async fn ensure_session(&self) -> delta_usecase::Result<SessionLifecycle> {
-        self.interactor
-            .ensure_session(
-                &self.session_workdir,
-                SESSION_COMMAND,
-                &self.session_settings_json,
-            )
-            .await
+        self.interactor.ensure_session().await
     }
 
     /// Subscribe to the event stream (one receiver per browser connection).

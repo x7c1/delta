@@ -26,15 +26,19 @@ variables, all with local-friendly defaults:
 |----------|---------|---------|
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
-| `DELTA_TMUX_SESSION` | `delta` | tmux session name; the driven pane is `<session>:0.0` |
-| `DELTA_SESSION_WORKDIR` | `.tmp/session` | working directory the `claude` session runs in |
+| `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
-session present and lazily creates one (running `claude` in the working
-directory, with Claude Code hooks pointed back at it) the first time the browser
-calls `POST /api/session`. Authentication is assumed — the server relies on a
-cached Claude Code token (or `CLAUDE_CODE_OAUTH_TOKEN`) and never runs
-interactive OAuth.
+session present and lazily spawns one the first time the browser calls
+`POST /api/session`. Each spawn gets its own tmux session, named after a
+Delta-minted token (`delta-<n>`), running `claude` in its own working directory
+(`<base>/<token>`) with Claude Code hooks pointed back at this server. Naming the
+tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
+a closed conversation be resumed (`claude --resume <id>`) under a fresh tmux
+session without a name collision. Open/closed is in-memory only: after a restart
+every persisted conversation is "closed" until it is resumed. Authentication is
+assumed — the server relies on a cached Claude Code token (or
+`CLAUDE_CODE_OAUTH_TOKEN`) and never runs interactive OAuth.
 
 ## Frontend (`frontend/`)
 

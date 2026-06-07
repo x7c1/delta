@@ -15,7 +15,9 @@ use delta_wire::Config;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let config = config_from_env();
@@ -46,8 +48,7 @@ async fn main() -> anyhow::Result<()> {
 fn config_from_env() -> Config {
     Config {
         database_path: std::env::var("DELTA_DB_PATH").unwrap_or_else(|_| "delta.db".to_owned()),
-        tmux_session: std::env::var("DELTA_TMUX_SESSION").unwrap_or_else(|_| "delta".to_owned()),
-        session_workdir: std::env::var("DELTA_SESSION_WORKDIR")
+        session_workdir_base: std::env::var("DELTA_SESSION_WORKDIR")
             .unwrap_or_else(|_| ".tmp/session".to_owned()),
         port: env_port(),
     }

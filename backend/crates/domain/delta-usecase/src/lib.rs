@@ -10,18 +10,20 @@
 
 mod error;
 mod interactor;
+mod open_sessions;
+mod pane_token;
 mod ports;
 
 pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor};
+pub use open_sessions::{OpenHandle, OpenSessions, PendingSpawn};
+pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver, Transcript,
-    TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
+    pane_for, NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver,
+    Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for
 // these identifiers and value types.
-pub use delta_model::{
-    Message, MessageUuid, PendingSend, Session, SessionId, Thread, ThreadId,
-};
+pub use delta_model::{Message, MessageUuid, PendingSend, Session, SessionId, Thread, ThreadId};
