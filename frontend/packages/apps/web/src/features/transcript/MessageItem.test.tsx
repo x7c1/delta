@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import type { Message, MessageRole } from '@delta/model';
+import { MessageItem } from './MessageItem';
+
+function makeMessage(role: MessageRole, text: string): Message {
+  return {
+    uuid: 'm-1',
+    session_id: 's',
+    thread_id: 't',
+    role,
+    linear_parent_uuid: null,
+    semantic_parent_uuid: null,
+    prompt_id: null,
+    seq: 0,
+    content_text: text,
+    content: [{ type: 'text', text }],
+    created_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+describe('MessageItem', () => {
+  it('renders user text verbatim, preserving newlines and literal Markdown', () => {
+    render(<MessageItem message={makeMessage('user', 'line one\nline two *x*')} />);
+
+    // The exact text — including the newline and the literal `*x*` — is
+    // rendered as a single text node, i.e. not run through Markdown.
+    // `normalizer: (s) => s` keeps the newline instead of collapsing it.
+    const node = screen.getByText('line one\nline two *x*', {
+      normalizer: (s) => s,
+    });
+    expect(node).toHaveClass('whitespace-pre-wrap');
+    // `*x*` stays literal: no emphasis element is produced for user text.
+    expect(node.querySelector('em')).toBeNull();
+  });
+
+  it('renders assistant text through Markdown', () => {
+    render(<MessageItem message={makeMessage('assistant', 'hello **bold**')} />);
+
+    const strong = screen.getByText('bold');
+    expect(strong.tagName).toBe('STRONG');
+  });
+});

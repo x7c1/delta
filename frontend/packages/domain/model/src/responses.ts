@@ -8,6 +8,14 @@ export interface SessionResponse {
   main_thread_id: ThreadId;
 }
 
+/** Lifecycle state of the Claude Code session after an `ensure` call. */
+export type SessionLifecycle = 'ready' | 'starting';
+
+/** Response body for `POST /api/session`. */
+export interface EnsureSessionResponse {
+  status: SessionLifecycle;
+}
+
 export interface ThreadsResponse {
   threads: Thread[];
 }

@@ -19,8 +19,10 @@ const ROLE_LABEL: Record<Message['role'], string> = {
 
 /**
  * Renders a single transcript message. Assistant text is foregrounded and
- * Markdown-rendered; `thinking` and tool blocks are collapsed by default with a
- * one-line summary. Selecting a text range emits the quote for branching.
+ * Markdown-rendered; user text is rendered verbatim so newlines and any
+ * Markdown-like characters the user typed are preserved as plain text.
+ * `thinking` and tool blocks are collapsed by default with a one-line summary.
+ * Selecting a text range emits the quote for branching.
  */
 export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
   const handleMouseUp = useCallback(() => {
@@ -49,7 +51,17 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
         {message.content.map((block, index) => {
           switch (block.type) {
             case 'text':
-              return (
+              // User text is what the person typed, not authored Markdown.
+              // Render it verbatim with preserved whitespace so single
+              // newlines survive and characters like `*` stay literal.
+              return message.role === 'user' ? (
+                <div
+                  key={index}
+                  className="whitespace-pre-wrap text-slate-800"
+                >
+                  {block.text}
+                </div>
+              ) : (
                 <div key={index} className="markdown-body text-slate-800">
                   <ReactMarkdown>{block.text}</ReactMarkdown>
                 </div>

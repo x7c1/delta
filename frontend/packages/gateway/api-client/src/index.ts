@@ -17,12 +17,14 @@ export {
 export { queryKeys } from './query-keys';
 export {
   useCreateSendMutation,
+  useEnsureSessionQuery,
   useSessionQuery,
   useThreadMessagesQuery,
   useThreadsQuery,
 } from './query-hooks';
 export {
   appendMessage,
+  invalidateSession,
   invalidateThreadMessages,
   invalidateThreads,
 } from './cache';

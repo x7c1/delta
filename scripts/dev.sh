@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# dev.sh — bring up Delta's local walking skeleton.
+# dev.sh — bring up Delta's local loop.
 #
 # Wires the whole loop together so you can type in the browser and watch a real
 # `claude` TUI (running in tmux) answer, with the response flowing back through
@@ -11,21 +11,26 @@
 #      └──── WebSocket ──────┴──── hooks (HTTP) ◀───────────┘
 #
 # What it does:
-#   1. Prepares a working directory for the `claude` session and drops a
-#      `.claude/settings.json` there so the session's hooks point at the local
-#      server.
-#   2. Starts a tmux session named `delta` with `claude` in pane `delta:0.0`.
-#   3. Starts `delta-server` (DELTA_TMUX_PANE=delta:0.0, DELTA_PORT=7878).
-#   4. Prints the exact command to start the frontend dev server against the
-#      real backend, plus how to attach to the TUI and how to shut everything
-#      down.
+#   1. Starts `delta-server` (DELTA_PORT=7878). The server owns the claude
+#      session lifecycle: it lazily creates the tmux session running `claude`
+#      (and writes its `.claude/settings.json` so the hooks point back at the
+#      server) the first time the browser asks for it.
+#   2. Starts the frontend dev server against the real backend.
 #
-# This is the minimal wiring: permission prompts are answered in the TUI
-# (`tmux attach -t delta`); robustness and edge-cases come later.
+# Opening the browser is the only manual step: when the web UI loads it asks the
+# server to bring the session up, so tmux is a hidden implementation detail.
+#
+# Authentication is assumed: the server relies on a cached Claude Code token (or
+# CLAUDE_CODE_OAUTH_TOKEN) and does not run interactive OAuth. If `claude` is not
+# yet authenticated, run `claude` once on its own (or attach to the pane with
+# `tmux attach -t delta`) to complete login, then reload the browser.
 #
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
 #   scripts/dev.sh --down      # tear the loop down (same as scripts/stop.sh)
+#   scripts/dev.sh --reset     # tear down, then delete the SQLite database so the
+#                              # next start recreates an empty schema (same as
+#                              # scripts/reset.sh). Honors DELTA_DB_PATH.
 #   scripts/dev.sh --help
 
 set -euo pipefail
@@ -35,19 +40,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
-SETTINGS_TEMPLATE="$SCRIPT_DIR/claude-settings.json"
 
 TMUX_SESSION="delta"
-TMUX_PANE="delta:0.0"
 DELTA_PORT="7878"
+FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
 
-# delta-server logs to a per-run timestamped file so a new run never clobbers a
-# previous run's log. A stable `delta-server.log` symlink always points at the
-# most recent run for convenience.
+# The SQLite database delta-server opens. The server defaults to `delta.db`
+# relative to its cwd (the backend dir); honor DELTA_DB_PATH if the developer
+# overrode it. `--reset` deletes this so the next start recreates empty schema.
+DELTA_DB="${DELTA_DB_PATH:-$BACKEND_DIR/delta.db}"
+
+# delta-server and the frontend dev server each log to a per-run timestamped file
+# so a new run never clobbers a previous run's log. A stable `*.log` symlink
+# always points at the most recent run for convenience.
 LOG_DIR="$REPO_ROOT/.tmp"
-SERVER_LOG="$LOG_DIR/delta-server-$(date +%Y%m%d-%H%M%S).log"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+SERVER_LOG="$LOG_DIR/delta-server-$STAMP.log"
 SERVER_LOG_LATEST="$LOG_DIR/delta-server.log"
+FRONTEND_LOG="$LOG_DIR/delta-frontend-$STAMP.log"
+FRONTEND_LOG_LATEST="$LOG_DIR/delta-frontend.log"
 
 log()  { printf '\033[1;36m[delta]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[delta]\033[0m %s\n' "$*" >&2; }
@@ -59,19 +71,47 @@ usage() {
   awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
 }
 
-# Tear everything down: stop the server, then kill the tmux session.
+# Tear everything down: stop the server, the frontend dev server, and the tmux
+# session the server created for `claude`.
 down() {
   log "Stopping delta-server (port $DELTA_PORT) ..."
   # delta-server binds 127.0.0.1:$DELTA_PORT; match the listener and kill it.
   if command -v pkill >/dev/null 2>&1; then
     pkill -f "delta-server" 2>/dev/null || true
   fi
+  # Belt-and-suspenders: also free the port in case the listener's argv did not
+  # match (e.g. it is still the `cargo run` parent that has not exec'd the
+  # binary yet).
+  kill_port "$DELTA_PORT"
+
+  # Stop the frontend dev server. `pnpm --filter @delta/web dev` execs `vite`,
+  # whose own argv contains neither "@delta/web" nor "dev", so a name-based
+  # pkill misses the actual port holder and leaves it orphaned. Kill by port —
+  # whatever is listening on $FRONTEND_PORT is the dev server — which also
+  # catches vite's child esbuild service.
+  log "Stopping frontend dev server (port $FRONTEND_PORT) ..."
+  if command -v pkill >/dev/null 2>&1; then
+    # Best-effort: also reap the pnpm parent so it does not respawn the child.
+    pkill -f "@delta/web.*dev" 2>/dev/null || true
+  fi
+  kill_port "$FRONTEND_PORT"
 
   if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     log "Killing tmux session '$TMUX_SESSION' ..."
     tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
   fi
   log "Down."
+}
+
+# Tear everything down, then delete the SQLite database (and its WAL/SHM
+# sidecars) so the next start recreates an empty schema. The server applies the
+# schema on open via `CREATE TABLE/INDEX IF NOT EXISTS`, so a fresh file is all
+# it takes. The server must be stopped first (down) so it is not still writing.
+reset() {
+  down
+  log "Deleting SQLite database: $DELTA_DB ..."
+  rm -f "$DELTA_DB" "$DELTA_DB-wal" "$DELTA_DB-shm"
+  log "Database reset. The next 'scripts/dev.sh' will recreate an empty schema."
 }
 
 require() {
@@ -92,6 +132,26 @@ port_in_use() {
   return 1
 }
 
+# Kill whatever is listening on 127.0.0.1:$1. Used by teardown so a process whose
+# argv does not match a name-based pkill (notably vite, which holds the frontend
+# port) is still stopped reliably. Best-effort: needs lsof or fuser; if neither
+# is present it logs a hint and leaves the port-based kill to the name match.
+kill_port() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "$pids" ]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+    fi
+  elif command -v fuser >/dev/null 2>&1; then
+    fuser -k "$port/tcp" >/dev/null 2>&1 || true
+  else
+    warn "Cannot free port $port (no lsof/fuser). If something is still listening, kill it manually."
+  fi
+}
+
 up() {
   local workdir="${1:-$DEFAULT_WORKDIR}"
 
@@ -100,7 +160,6 @@ up() {
   require claude "Install Claude Code and authenticate it first (run 'claude' once)."
   require cargo "Install the Rust toolchain (https://rustup.rs)."
   require pnpm  "Enable corepack ('corepack enable') so pnpm is on PATH."
-  [ -f "$SETTINGS_TEMPLATE" ] || die "Settings template not found: $SETTINGS_TEMPLATE"
 
   if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     die "A tmux session named '$TMUX_SESSION' already exists. Run 'scripts/dev.sh --down' (or 'tmux kill-session -t $TMUX_SESSION') first."
@@ -112,56 +171,59 @@ up() {
   if port_in_use "$DELTA_PORT"; then
     die "A server is already listening on 127.0.0.1:$DELTA_PORT. Run 'scripts/dev.sh --down' first (or stop whatever owns the port)."
   fi
+  if port_in_use "$FRONTEND_PORT"; then
+    die "Something is already listening on 127.0.0.1:$FRONTEND_PORT (the frontend dev server). Run 'scripts/dev.sh --down' first."
+  fi
 
-  # --- 1. Working directory + per-session hook settings. ---
+  # The server creates this on demand; resolve it to an absolute path so the
+  # server's `claude` session and our teardown agree on the location.
   workdir="$(mkdir -p "$workdir" && cd "$workdir" && pwd)"
-  mkdir -p "$workdir/.claude"
-  cp "$SETTINGS_TEMPLATE" "$workdir/.claude/settings.json"
-  log "Session workdir: $workdir"
-  log "Hooks installed:  $workdir/.claude/settings.json (-> 127.0.0.1:$DELTA_PORT)"
+  log "Session workdir: $workdir (the server provisions .claude/settings.json here)"
 
-  # --- 2. tmux session running claude. ---
-  log "Starting tmux session '$TMUX_SESSION' with claude in pane '$TMUX_PANE' ..."
-  tmux new-session -d -s "$TMUX_SESSION" -c "$workdir" claude
+  mkdir -p "$LOG_DIR"
 
-  # --- 3. delta-server, pointed at the tmux pane. ---
-  mkdir -p "$(dirname "$SERVER_LOG")"
-  # Point the stable symlink at this run's fresh log without touching prior logs.
+  # --- 1. delta-server. It owns the claude session lifecycle. ---
   ln -sf "$(basename "$SERVER_LOG")" "$SERVER_LOG_LATEST"
-  log "Starting delta-server (DELTA_PORT=$DELTA_PORT, DELTA_TMUX_PANE=$TMUX_PANE) ..."
+  log "Starting delta-server (DELTA_PORT=$DELTA_PORT) ..."
   log "Server log: $SERVER_LOG (latest -> $SERVER_LOG_LATEST)"
   (
     cd "$BACKEND_DIR"
-    DELTA_PORT="$DELTA_PORT" DELTA_TMUX_PANE="$TMUX_PANE" \
+    DELTA_PORT="$DELTA_PORT" DELTA_TMUX_SESSION="$TMUX_SESSION" \
+      DELTA_SESSION_WORKDIR="$workdir" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
+  ) &
+
+  # --- 2. Frontend dev server against the real backend. ---
+  ln -sf "$(basename "$FRONTEND_LOG")" "$FRONTEND_LOG_LATEST"
+  log "Building frontend workspace libraries and starting the dev server (port $FRONTEND_PORT) ..."
+  log "Frontend log: $FRONTEND_LOG (latest -> $FRONTEND_LOG_LATEST)"
+  (
+    cd "$FRONTEND_DIR"
+    pnpm install >"$FRONTEND_LOG" 2>&1
+    pnpm -r build >>"$FRONTEND_LOG" 2>&1
+    pnpm --filter @delta/web dev >>"$FRONTEND_LOG" 2>&1
   ) &
 
   cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
-Delta walking skeleton is coming up.
+Delta is coming up.
 
-Next steps:
+  • delta-server  → http://127.0.0.1:$DELTA_PORT  (owns the claude session)
+  • frontend      → http://localhost:$FRONTEND_PORT  (building libs first; give it a moment)
 
-  1. Start the frontend dev server against the REAL backend (separate terminal):
+The only manual step: open the browser.
 
-       cd "$FRONTEND_DIR"
-       pnpm install            # first run only
-       pnpm -r build           # build workspace libs first
-       pnpm --filter @delta/web dev
+  Open:  http://localhost:$FRONTEND_PORT
 
-     Then open:  http://localhost:5173
-
-  2. Attach to the claude TUI to complete first-run OAuth login and to answer
-     permission prompts as they appear:
+When the UI loads it asks the server to start the claude session, so there is
+nothing else to launch. Authentication is assumed (cached token /
+CLAUDE_CODE_OAUTH_TOKEN). If claude is not yet authenticated, run 'claude' once
+on its own — or attach to the pane — to complete login, then reload:
 
        tmux attach -t $TMUX_SESSION      # detach with Ctrl-b then d
 
-  3. Type a message in the browser. It is sent into the tmux pane via
-     send-keys; claude's reply flows back through the transcript + hooks and
-     appears in the browser.
-
-When done, shut everything down:
+When done, shut everything down (server + frontend + tmux session):
 
        scripts/dev.sh --down      # or: scripts/stop.sh
 
@@ -172,6 +234,7 @@ EOF
 main() {
   case "${1:-}" in
     --down|down)   down ;;
+    --reset|reset) reset ;;
     -h|--help|help) usage ;;
     *)             up "${1:-}" ;;
   esac

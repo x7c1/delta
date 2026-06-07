@@ -26,10 +26,15 @@ variables, all with local-friendly defaults:
 |----------|---------|---------|
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
-| `DELTA_TMUX_PANE` | `delta:0.0` | tmux pane to drive via `send-keys` |
+| `DELTA_TMUX_SESSION` | `delta` | tmux session name; the driven pane is `<session>:0.0` |
+| `DELTA_SESSION_WORKDIR` | `.tmp/session` | working directory the `claude` session runs in |
 
-To be useful the server needs a tmux session running `claude` and Claude Code
-hooks pointed at it; that wiring is not part of running the server alone.
+The server owns the `claude` session lifecycle: it boots fine with no tmux
+session present and lazily creates one (running `claude` in the working
+directory, with Claude Code hooks pointed back at it) the first time the browser
+calls `POST /api/session`. Authentication is assumed — the server relies on a
+cached Claude Code token (or `CLAUDE_CODE_OAUTH_TOKEN`) and never runs
+interactive OAuth.
 
 ## Frontend (`frontend/`)
 
@@ -105,19 +110,22 @@ port — keep them in sync if you set `DELTA_PORT`).
 - `esbuild` and `msw` build scripts are allow-listed in `pnpm-workspace.yaml`
   (`allowBuilds`); pnpm does not run dependency build scripts by default.
 
-## Run the whole thing locally (walking skeleton)
+## Run the whole thing locally
 
 This brings up the full loop end to end: type in the browser, a real `claude`
 TUI (running in tmux) receives it via `send-keys`, and its response flows back
-through the JSONL transcript and Claude Code's HTTP hooks to the browser. This
-is the minimal wiring — permission prompts are answered in the TUI, and
-robustness and edge-cases come later.
+through the JSONL transcript and Claude Code's HTTP hooks to the browser.
+
+Opening the browser is the only manual step. `scripts/dev.sh` starts both the
+server and the frontend dev server; the server then starts the `claude` session
+lazily the first time the UI loads, so there is nothing else to launch.
 
 ### Prerequisites
 
-- `tmux` on your PATH (it hosts the `claude` session).
-- An authenticated Claude Code (`claude`). Run `claude` once on its own to
-  complete OAuth login if you have not already.
+- `tmux` on your PATH (it hosts the `claude` session the server creates).
+- An authenticated Claude Code (`claude`). Authentication is assumed — the
+  server relies on a cached token (or `CLAUDE_CODE_OAUTH_TOKEN`) and does not run
+  interactive OAuth. If you have not logged in yet, run `claude` once on its own.
 - The Rust toolchain (`cargo`) and pnpm (via `corepack enable`).
 
 ### Launch
@@ -129,30 +137,24 @@ scripts/dev.sh ~/scratch # or pass your own working directory for claude
 
 `scripts/dev.sh`:
 
-1. Creates the session working directory and copies
-   `scripts/claude-settings.json` to `<workdir>/.claude/settings.json`, so the
-   session's native HTTP hooks point at the local server
-   (`http://127.0.0.1:7878/hooks/...`).
-2. Starts a tmux session named `delta` with `claude` in pane `delta:0.0`.
-3. Starts `delta-server` with `DELTA_TMUX_PANE=delta:0.0` and `DELTA_PORT=7878`
-   (logging to `.tmp/delta-server.log`).
-4. Prints the command to start the frontend against the real backend.
+1. Starts `delta-server` (`DELTA_PORT=7878`), passing the session working
+   directory. The server owns the `claude` session: it lazily creates the tmux
+   session and writes `<workdir>/.claude/settings.json` (so the hooks point at
+   `http://127.0.0.1:7878/hooks/...`) the first time the browser asks for it.
+2. Installs and builds the frontend workspace libraries, then starts the web dev
+   server against the real backend (port 5173).
 
-Then, in a second terminal, start the UI against the real backend:
+Both run as managed background processes, logging to `.tmp/` (a stable
+`delta-server.log` / `delta-frontend.log` symlink points at the latest run).
 
-```bash
-cd frontend
-pnpm install            # first run only
-pnpm -r build           # build workspace libs first
-pnpm --filter @delta/web dev
-```
+Then open <http://localhost:5173>. On load the UI calls `POST /api/session`,
+which brings the `claude` session up if it is not already running.
 
-Open <http://localhost:5173>.
+### First run / answering prompts
 
-### First run: attach to the TUI
-
-On the first run you usually need to attach to the `claude` pane to finish OAuth
-login and to answer permission prompts as they appear:
+If `claude` is not yet authenticated, the session will not become usable and the
+UI shows an explicit error. Run `claude` once on its own to finish login, or
+attach to the pane to log in and to answer permission prompts as they appear:
 
 ```bash
 tmux attach -t delta     # detach again with Ctrl-b then d
@@ -162,8 +164,8 @@ tmux attach -t delta     # detach again with Ctrl-b then d
 
 Type a message in the browser. It is dispatched into the tmux pane via
 `send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
-the browser. When a tool needs permission, switch to the TUI
-(`tmux attach -t delta`) and answer the prompt there.
+the browser. When a tool needs permission, answer it in the embedded terminal or
+in the TUI (`tmux attach -t delta`).
 
 ### Shut down
 
@@ -171,5 +173,5 @@ the browser. When a tool needs permission, switch to the TUI
 scripts/dev.sh --down    # or: scripts/stop.sh
 ```
 
-This stops `delta-server` and kills the `delta` tmux session. Stop the frontend
-dev server with Ctrl-C in its terminal.
+This stops `delta-server`, the frontend dev server (port 5173), and the `delta`
+tmux session.

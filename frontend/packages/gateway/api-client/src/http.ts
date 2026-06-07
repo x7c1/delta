@@ -1,4 +1,5 @@
 import type {
+  EnsureSessionResponse,
   MessagesResponse,
   SendRequest,
   SendResponse,
@@ -59,6 +60,19 @@ export class ApiClient {
       throw new ApiError(response.status, await readError(response));
     }
     return (await response.json()) as T;
+  }
+
+  /**
+   * `POST /api/session` — ensure the Claude Code session is up.
+   *
+   * Idempotent: the server starts the session if absent and reuses it if
+   * present. The browser calls this on load so opening the UI is the only action
+   * needed to bring the session up.
+   */
+  ensureSession(): Promise<EnsureSessionResponse> {
+    return this.request<EnsureSessionResponse>('/api/session', {
+      method: 'POST',
+    });
   }
 
   /** `GET /api/session` — hydrate the current session and its trunk thread. */

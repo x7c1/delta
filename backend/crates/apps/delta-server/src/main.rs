@@ -19,7 +19,6 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = config_from_env();
-    let port = env_port();
 
     let state = AppState::build(&config)?;
 
@@ -30,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     let app = router(state);
 
     // Bind to loopback only.
-    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "delta-server listening (loopback only)");
 
@@ -40,10 +39,17 @@ async fn main() -> anyhow::Result<()> {
 
 /// Build configuration from environment variables, with local-friendly
 /// defaults so the server runs without setup during development.
+///
+/// The server boots fine when no tmux session exists yet: the session is created
+/// lazily on the first `POST /api/session`, so none of these need a live session
+/// at startup.
 fn config_from_env() -> Config {
     Config {
         database_path: std::env::var("DELTA_DB_PATH").unwrap_or_else(|_| "delta.db".to_owned()),
-        tmux_pane: std::env::var("DELTA_TMUX_PANE").unwrap_or_else(|_| "delta:0.0".to_owned()),
+        tmux_session: std::env::var("DELTA_TMUX_SESSION").unwrap_or_else(|_| "delta".to_owned()),
+        session_workdir: std::env::var("DELTA_SESSION_WORKDIR")
+            .unwrap_or_else(|_| ".tmp/session".to_owned()),
+        port: env_port(),
     }
 }
 

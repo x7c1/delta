@@ -37,7 +37,8 @@ types).
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not
     match the endpoint's schema (a missing required field or a field of the
     wrong type).
-  - `500 Internal Server Error` — a store, transcript, or tmux failure.
+  - `500 Internal Server Error` — a store, transcript, tmux, or workspace
+    failure.
 
 ## Shared JSON shapes
 
@@ -129,6 +130,34 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
 the send is correlated with a transcript message.
 
 ## Browser REST surface
+
+### `POST /api/session`
+
+Ensure the Claude Code session is up, creating it lazily if absent. The browser
+calls this on load so opening the UI is the only action needed to bring the loop
+up: the server starts a tmux session running `claude` in the configured working
+directory (writing its `.claude/settings.json` so Claude Code's hooks point back
+at this server) if one is not already running, and reuses it otherwise. The call
+is idempotent — a second call with the session already up is a no-op.
+
+This drives only the tmux/process lifecycle; the conversational session is still
+registered later by the first `UserPromptSubmit` hook, so a freshly created
+session has no `Session` row yet (`GET /api/session` returns `404` until then).
+
+Authentication is assumed: the server relies on a cached Claude Code token (or
+`CLAUDE_CODE_OAUTH_TOKEN`) and does not perform interactive OAuth. If the session
+never becomes usable, the user answers prompts in the embedded terminal (`/pty`).
+
+- **200** — the session is up:
+
+  ```json
+  { "status": "ready" }
+  ```
+
+  `status` is `ready` when an existing session was reused, or `starting` when the
+  session was just created and may still be coming up.
+
+- **500** — preparing the working directory or starting the tmux session failed.
 
 ### `GET /api/session`
 

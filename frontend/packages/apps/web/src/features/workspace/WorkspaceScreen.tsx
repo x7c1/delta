@@ -1,5 +1,9 @@
 import { useEffect } from 'react';
-import { useThreadsQuery, useSessionQuery } from '@delta/api-client';
+import {
+  useEnsureSessionQuery,
+  useThreadsQuery,
+  useSessionQuery,
+} from '@delta/api-client';
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
@@ -19,6 +23,11 @@ import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
  */
 export function WorkspaceScreen() {
   const client = useApiClient();
+
+  // On load, ask the server to bring the Claude Code session up (idempotent).
+  // Opening the browser is the only manual step; tmux is a hidden detail.
+  const ensureQuery = useEnsureSessionQuery(client);
+
   useSessionEvents();
 
   const sessionQuery = useSessionQuery(client);
@@ -48,10 +57,25 @@ export function WorkspaceScreen() {
       setActiveThread(main);
       return;
     }
+    // Do not run the existence-based fallback while the threads query is still
+    // in flight. A branch send creates a child thread and immediately switches
+    // to it, but the threads query (invalidated by the send mutation) is still
+    // refetching and does not yet contain the new thread. Running the fallback
+    // now would misfire and revert to main before the refetch lands. Only treat
+    // a missing thread as genuinely gone once the query has settled.
+    if (threadsQuery.isFetching) {
+      return;
+    }
     if (threads.length > 0 && !threads.some((thread) => thread.id === activeThreadId)) {
       setActiveThread(main);
     }
-  }, [activeThreadId, sessionQuery.data, threads, setActiveThread]);
+  }, [
+    activeThreadId,
+    sessionQuery.data,
+    threads,
+    threadsQuery.isFetching,
+    setActiveThread,
+  ]);
 
   // Clear the unread badge whenever a thread becomes active, regardless of how
   // it was activated (tree click, breadcrumb, branch chip, or the default).
@@ -64,6 +88,32 @@ export function WorkspaceScreen() {
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;
 
+  // Gate the whole workspace on bringing the session up. Until the ensure call
+  // resolves, show an explicit "starting" state; if it fails, show an explicit
+  // error with guidance rather than an infinite spinner.
+  if (ensureQuery.isPending) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+        Starting the session…
+      </div>
+    );
+  }
+
+  if (ensureQuery.isError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
+        <p>Could not start the session.</p>
+        <p className="text-xs text-slate-400">
+          Make sure <code>claude</code> is installed and authenticated, then
+          reload. You can also open the terminal to inspect the session.
+        </p>
+        <Button size="sm" variant="secondary" onClick={() => ensureQuery.refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   if (sessionQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -72,14 +122,29 @@ export function WorkspaceScreen() {
     );
   }
 
+  // First-run bootstrap: the session row does not exist yet (the server creates
+  // it on the first `UserPromptSubmit` hook), so `GET /api/session` 404s and the
+  // query is errored. The composer can't send the first message because it
+  // requires an existing session, so the only pre-session input channel is the
+  // embedded terminal (PTY → tmux pane). Render it with a clear instruction.
+  // Once the first message registers the session, `session_registered`
+  // invalidates the session query and this screen transitions to the normal
+  // workspace automatically.
   if (sessionQuery.isError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
-        <p>No session yet.</p>
-        <p className="text-xs text-slate-400">
-          Send your first message to Claude in the terminal
-          (<code>tmux attach -t delta</code>) to begin.
-        </p>
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="shrink-0 px-6 py-5">
+          <h1 className="text-lg font-semibold text-slate-700">
+            Start the conversation
+          </h1>
+          <p className="mt-1 text-sm text-slate-400">
+            The Claude session is running. Type your first message in the
+            terminal below — it will appear here once the session starts.
+          </p>
+        </div>
+        <div className="min-h-0 flex-1">
+          <TerminalPane />
+        </div>
       </div>
     );
   }

@@ -1,5 +1,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
+  EnsureSessionResponse,
   MessagesResponse,
   PendingSend,
   SendRequest,
@@ -19,6 +20,14 @@ export function createHandlers(): RequestHandler[] {
   const store = seedData();
 
   return [
+    // The session is always considered already up in mock mode, so the app's
+    // on-load ensure-session call resolves immediately and the workspace renders
+    // without any backend.
+    http.post('*/api/session', () => {
+      const body: EnsureSessionResponse = { status: 'ready' };
+      return HttpResponse.json(body);
+    }),
+
     http.get('*/api/session', () => {
       const body: SessionResponse = {
         session: store.session,

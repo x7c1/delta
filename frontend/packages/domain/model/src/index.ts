@@ -33,6 +33,8 @@ export type {
 } from './pending-send';
 export type {
   SessionResponse,
+  SessionLifecycle,
+  EnsureSessionResponse,
   ThreadsResponse,
   MessagesResponse,
   SendResponse,

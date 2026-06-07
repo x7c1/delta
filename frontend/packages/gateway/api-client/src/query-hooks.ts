@@ -6,6 +6,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import type {
+  EnsureSessionResponse,
   MessagesResponse,
   SendRequest,
   SendResponse,
@@ -15,6 +16,24 @@ import type {
 } from '@delta/model';
 import type { ApiClient } from './http';
 import { queryKeys } from './query-keys';
+
+/**
+ * Ensure the Claude Code session is up. Runs once on app load; the server starts
+ * the session lazily if absent and reuses it if present. A bounded retry covers
+ * a transient failure while the server is still coming up, but does not spin
+ * forever — a persistent failure surfaces as an error the UI can show.
+ */
+export function useEnsureSessionQuery(
+  client: ApiClient,
+): UseQueryResult<EnsureSessionResponse> {
+  return useQuery({
+    queryKey: queryKeys.ensureSession,
+    queryFn: () => client.ensureSession(),
+    retry: 2,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+}
 
 export function useSessionQuery(
   client: ApiClient,

@@ -35,6 +35,20 @@ describe('ApiClient', () => {
     );
   });
 
+  it('posts to ensure the session and returns its lifecycle status', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ status: 'ready' }));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.ensureSession();
+
+    expect(result.status).toBe('ready');
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/session');
+    expect(init.method).toBe('POST');
+  });
+
   it('posts a send with a JSON content type and returns the pending send', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse(

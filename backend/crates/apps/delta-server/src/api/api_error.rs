@@ -26,7 +26,7 @@ impl IntoResponse for ApiError {
             Error::NoSession => StatusCode::NOT_FOUND,
             Error::ThreadNotFound(_) => StatusCode::NOT_FOUND,
             // Everything else is an internal failure.
-            Error::Tmux(_) | Error::Transcript(_) | Error::Store(_) => {
+            Error::Tmux(_) | Error::Transcript(_) | Error::Store(_) | Error::Workspace(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         };

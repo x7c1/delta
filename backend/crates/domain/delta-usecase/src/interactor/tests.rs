@@ -10,8 +10,8 @@ use delta_model::{
 
 use crate::error::Result;
 use crate::ports::{
-    NewSession, SessionEvent, SessionStore, TmuxDriver, Transcript, TranscriptMessage,
-    TranscriptRead, UserPromptSubmitHook,
+    NewSession, SessionEvent, SessionLifecycle, SessionStore, TmuxDriver, Transcript,
+    TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
 use crate::Interactor;
 
@@ -21,15 +21,51 @@ struct FakeTmux {
     /// When set, `send_line` fails instead of recording the line, simulating a
     /// dispatch failure into the pane.
     fail: bool,
+    /// Whether a session currently "exists" for `has_session`. Toggled to true
+    /// by `create_session`.
+    has_session: Mutex<bool>,
+    /// The `(workdir, command)` pairs `create_session` was called with.
+    created: Mutex<Vec<(String, String)>>,
 }
 
 #[async_trait]
 impl TmuxDriver for FakeTmux {
+    async fn has_session(&self) -> Result<bool> {
+        Ok(*self.has_session.lock().unwrap())
+    }
+
+    async fn create_session(&self, workdir: &str, command: &str) -> Result<()> {
+        self.created
+            .lock()
+            .unwrap()
+            .push((workdir.to_owned(), command.to_owned()));
+        *self.has_session.lock().unwrap() = true;
+        Ok(())
+    }
+
     async fn send_line(&self, text: &str) -> Result<()> {
         if self.fail {
             return Err(crate::error::Error::Tmux("dispatch failed".into()));
         }
         self.sent.lock().unwrap().push(text.to_owned());
+        Ok(())
+    }
+}
+
+/// Records the session settings written, so tests can assert the workdir and the
+/// rendered JSON the server passed in.
+#[derive(Default)]
+struct FakeWorkspace {
+    written: Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait]
+impl Workspace for FakeWorkspace {
+    async fn write_session_settings(&self, workdir: &str, settings_json: &str) -> Result<()> {
+        self.written
+            .lock()
+            .unwrap()
+            .push((workdir.to_owned(), settings_json.to_owned()));
         Ok(())
     }
 }
@@ -332,12 +368,17 @@ fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
     }
 }
 
-fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore> {
-    Interactor::new(FakeTmux::default(), FakeTranscript::default(), FakeStore::default())
+fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+    Interactor::new(
+        FakeTmux::default(),
+        FakeTranscript::default(),
+        FakeStore::default(),
+        FakeWorkspace::default(),
+    )
 }
 
 /// An interactor whose tmux dispatch always fails.
-fn interactor_with_failing_tmux() -> Interactor<FakeTmux, FakeTranscript, FakeStore> {
+fn interactor_with_failing_tmux() -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
     Interactor::new(
         FakeTmux {
             fail: true,
@@ -345,6 +386,7 @@ fn interactor_with_failing_tmux() -> Interactor<FakeTmux, FakeTranscript, FakeSt
         },
         FakeTranscript::default(),
         FakeStore::default(),
+        FakeWorkspace::default(),
     )
 }
 
@@ -355,6 +397,49 @@ fn submit(text: &str) -> UserPromptSubmitHook {
         transcript_path: "/tmp/t.jsonl".into(),
         cwd: "/work".into(),
     }
+}
+
+#[tokio::test]
+async fn ensure_session_creates_and_writes_settings_when_absent() {
+    let ix = interactor();
+
+    let status = ix
+        .ensure_session("/work/session", "claude", r#"{"hooks":{}}"#)
+        .await
+        .unwrap();
+
+    // A fresh session reports `Starting`, was created with the given workdir and
+    // command, and had its settings written first.
+    assert_eq!(status, SessionLifecycle::Starting);
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    assert_eq!(created, vec![("/work/session".to_owned(), "claude".to_owned())]);
+    let written = ix.workspace_fake().written.lock().unwrap().clone();
+    assert_eq!(
+        written,
+        vec![("/work/session".to_owned(), r#"{"hooks":{}}"#.to_owned())]
+    );
+}
+
+#[tokio::test]
+async fn ensure_session_reuses_existing_session_idempotently() {
+    let ix = interactor();
+
+    // First call creates the session.
+    ix.ensure_session("/work/session", "claude", "{}").await.unwrap();
+    // Second call finds it already up: reuse, no second create, no second write.
+    let status = ix.ensure_session("/work/session", "claude", "{}").await.unwrap();
+
+    assert_eq!(status, SessionLifecycle::Ready);
+    assert_eq!(
+        ix.tmux_fake().created.lock().unwrap().len(),
+        1,
+        "an existing session must not be recreated"
+    );
+    assert_eq!(
+        ix.workspace_fake().written.lock().unwrap().len(),
+        1,
+        "settings must not be rewritten when the session is reused"
+    );
 }
 
 #[tokio::test]
@@ -871,10 +956,18 @@ fn frame_locator_context_embeds_quotes_and_newlines_verbatim() {
     );
 }
 
-// Helper accessor used only in tests to push transcript lines onto the fake.
-impl Interactor<FakeTmux, FakeTranscript, FakeStore> {
+// Helper accessors used only in tests to reach into the fakes the interactor owns.
+impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
     fn transcript_fake(&self) -> &FakeTranscript {
         self.transcript()
+    }
+
+    fn tmux_fake(&self) -> &FakeTmux {
+        self.tmux()
+    }
+
+    fn workspace_fake(&self) -> &FakeWorkspace {
+        self.workspace()
     }
 }
 

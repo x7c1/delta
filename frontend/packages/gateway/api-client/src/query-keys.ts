@@ -5,6 +5,8 @@ import type { ThreadId } from '@delta/model';
  * hooks and the WebSocket-driven cache patchers address the same cache entries.
  */
 export const queryKeys = {
+  /** Lazy ensure-session call made once on app load. */
+  ensureSession: ['ensure-session'] as const,
   session: ['session'] as const,
   threads: ['threads'] as const,
   messages: (threadId: ThreadId) => ['messages', threadId] as const,
