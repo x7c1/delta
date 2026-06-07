@@ -103,15 +103,40 @@ impl TmuxDriver for Tmux {
     }
 
     async fn send_line(&self, text: &str) -> std::result::Result<(), delta_usecase::Error> {
-        // Send the text literally so it is not interpreted as tmux key names,
-        // then submit it with a separate Enter keystroke.
-        self.run(&["send-keys", "-t", &self.target_pane, "-l", text])
-            .await
-            .map_err(delta_usecase::Error::from)?;
-        self.run(&["send-keys", "-t", &self.target_pane, "Enter"])
-            .await
-            .map_err(delta_usecase::Error::from)?;
+        for args in self.send_line_commands(text) {
+            let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+            self.run(&borrowed)
+                .await
+                .map_err(delta_usecase::Error::from)?;
+        }
         Ok(())
+    }
+}
+
+impl Tmux {
+    /// Build the ordered `tmux send-keys` invocations that submit a single line.
+    ///
+    /// The sequence is clear → literal text → Enter:
+    /// 1. `C-u` clears the input line first. Claude's TUI input box can retain
+    ///    stray content from a prior submit (e.g. a leftover newline), which
+    ///    would otherwise be prepended to this message. Killing the line makes
+    ///    each programmatic send start from an empty input and be deterministic.
+    /// 2. `-l <text>` sends the text literally so it is not interpreted as tmux
+    ///    key names.
+    /// 3. `Enter` submits it as a separate keystroke.
+    fn send_line_commands(&self, text: &str) -> Vec<Vec<String>> {
+        let pane = self.target_pane.as_str();
+        vec![
+            vec!["send-keys".into(), "-t".into(), pane.into(), "C-u".into()],
+            vec![
+                "send-keys".into(),
+                "-t".into(),
+                pane.into(),
+                "-l".into(),
+                text.into(),
+            ],
+            vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()],
+        ]
     }
 }
 
@@ -124,5 +149,23 @@ mod tests {
         let t = Tmux::new("delta");
         assert_eq!(t.session, "delta");
         assert_eq!(t.target_pane(), "delta:0.0");
+    }
+
+    #[test]
+    fn send_line_clears_the_input_before_typing() {
+        // The input line must be cleared (`C-u`) before the literal text so a
+        // stray newline left by a prior submit cannot prepend to this message.
+        // Expected sequence: clear → literal text → Enter, all targeting the
+        // session's first pane.
+        let t = Tmux::new("delta");
+        let commands = t.send_line_commands("hi");
+        assert_eq!(
+            commands,
+            vec![
+                vec!["send-keys", "-t", "delta:0.0", "C-u"],
+                vec!["send-keys", "-t", "delta:0.0", "-l", "hi"],
+                vec!["send-keys", "-t", "delta:0.0", "Enter"],
+            ],
+        );
     }
 }
