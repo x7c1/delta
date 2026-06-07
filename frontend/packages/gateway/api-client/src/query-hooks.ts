@@ -115,11 +115,22 @@ export function useCreateSendMutation(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: SendRequest) => client.createSend(body),
-    onSuccess: () => {
-      // A branch send creates a thread server-side, and a new-session send
-      // eventually adds a session; refresh the session list so the tree picks
-      // up the change once the affected session's threads are refetched.
+    onSuccess: ({ send }) => {
+      // A branch send creates a child thread server-side, and a new-session
+      // send eventually adds a session; refresh the session list so the tree
+      // picks up the change.
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+      // Also refresh the affected session's thread tree so a freshly-branched
+      // child appears immediately. Without this the new thread is absent from
+      // the cached list, and the workspace reverts the active thread back to
+      // main instead of drilling into the new branch. A new-session send has
+      // no bound session yet (synthetic id 0 / empty session id), so it only
+      // refreshes once the session registers via the list.
+      if (send.session_id) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.sessionThreads(send.session_id),
+        });
+      }
     },
   });
 }
