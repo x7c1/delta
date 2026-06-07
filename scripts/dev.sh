@@ -28,6 +28,9 @@
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
 #   scripts/dev.sh --down      # tear the loop down (same as scripts/stop.sh)
+#   scripts/dev.sh --reset     # tear down, then delete the SQLite database so the
+#                              # next start recreates an empty schema (same as
+#                              # scripts/reset.sh). Honors DELTA_DB_PATH.
 #   scripts/dev.sh --help
 
 set -euo pipefail
@@ -42,6 +45,11 @@ TMUX_SESSION="delta"
 DELTA_PORT="7878"
 FRONTEND_PORT="5173"
 DEFAULT_WORKDIR="$REPO_ROOT/.tmp/session"
+
+# The SQLite database delta-server opens. The server defaults to `delta.db`
+# relative to its cwd (the backend dir); honor DELTA_DB_PATH if the developer
+# overrode it. `--reset` deletes this so the next start recreates empty schema.
+DELTA_DB="${DELTA_DB_PATH:-$BACKEND_DIR/delta.db}"
 
 # delta-server and the frontend dev server each log to a per-run timestamped file
 # so a new run never clobbers a previous run's log. A stable `*.log` symlink
@@ -93,6 +101,17 @@ down() {
     tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
   fi
   log "Down."
+}
+
+# Tear everything down, then delete the SQLite database (and its WAL/SHM
+# sidecars) so the next start recreates an empty schema. The server applies the
+# schema on open via `CREATE TABLE/INDEX IF NOT EXISTS`, so a fresh file is all
+# it takes. The server must be stopped first (down) so it is not still writing.
+reset() {
+  down
+  log "Deleting SQLite database: $DELTA_DB ..."
+  rm -f "$DELTA_DB" "$DELTA_DB-wal" "$DELTA_DB-shm"
+  log "Database reset. The next 'scripts/dev.sh' will recreate an empty schema."
 }
 
 require() {
@@ -215,6 +234,7 @@ EOF
 main() {
   case "${1:-}" in
     --down|down)   down ;;
+    --reset|reset) reset ;;
     -h|--help|help) usage ;;
     *)             up "${1:-}" ;;
   esac
