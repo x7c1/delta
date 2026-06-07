@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 
-use delta_model::{Message, MessageUuid, PendingSend, PermissionRequest, Session, SessionId, Thread, ThreadId};
+use delta_model::{
+    Message, MessageUuid, PendingSend, PermissionRequest, Session, SessionId, Thread, ThreadId,
+};
 
 use crate::error::Result;
 use crate::ports::new_session::NewSession;
@@ -18,8 +20,11 @@ pub trait SessionStore: Send + Sync {
     /// return the session and the id of its `main` thread.
     async fn register_session(&self, new: NewSession) -> Result<(Session, ThreadId)>;
 
-    /// Fetch the (single) registered session, if any.
-    async fn current_session(&self) -> Result<Option<Session>>;
+    /// All registered sessions, ordered by creation (ascending `created_at`).
+    async fn list_sessions(&self) -> Result<Vec<Session>>;
+
+    /// Look up a session by id, if it exists.
+    async fn session(&self, id: &SessionId) -> Result<Option<Session>>;
 
     /// The id of a session's trunk (`main`) thread.
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId>;
@@ -96,11 +101,7 @@ pub trait SessionStore: Send + Sync {
 
     /// Advance the line-based ingestion cursor to `lines` (the transcript's
     /// total line count after the latest read).
-    async fn set_transcript_lines_read(
-        &self,
-        session_id: &SessionId,
-        lines: usize,
-    ) -> Result<()>;
+    async fn set_transcript_lines_read(&self, session_id: &SessionId, lines: usize) -> Result<()>;
 
     /// All messages for a thread, ordered by `seq`.
     async fn thread_messages(&self, thread_id: ThreadId) -> Result<Vec<Message>>;
@@ -120,8 +121,12 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).register_session(new).await
     }
 
-    async fn current_session(&self) -> Result<Option<Session>> {
-        (**self).current_session().await
+    async fn list_sessions(&self) -> Result<Vec<Session>> {
+        (**self).list_sessions().await
+    }
+
+    async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
+        (**self).session(id).await
     }
 
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
@@ -203,11 +208,7 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).transcript_lines_read(session_id).await
     }
 
-    async fn set_transcript_lines_read(
-        &self,
-        session_id: &SessionId,
-        lines: usize,
-    ) -> Result<()> {
+    async fn set_transcript_lines_read(&self, session_id: &SessionId, lines: usize) -> Result<()> {
         (**self).set_transcript_lines_read(session_id, lines).await
     }
 

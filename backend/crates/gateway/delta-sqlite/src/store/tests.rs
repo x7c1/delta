@@ -1,4 +1,4 @@
-use delta_model::{ContentBlock, Message, MessageUuid, Role};
+use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId};
 use delta_usecase::{NewSession, SessionStore};
 
 use super::SqliteStore;
@@ -9,6 +9,60 @@ fn new_session() -> NewSession {
         cwd: "/work".into(),
         transcript_path: "/tmp/t.jsonl".into(),
     }
+}
+
+fn new_session_with(id: &str) -> NewSession {
+    NewSession {
+        id: id.into(),
+        cwd: "/work".into(),
+        transcript_path: format!("/tmp/{id}.jsonl"),
+    }
+}
+
+#[tokio::test]
+async fn list_sessions_returns_all_in_creation_order() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    store
+        .register_session(new_session_with("sess-1"))
+        .await
+        .unwrap();
+    store
+        .register_session(new_session_with("sess-2"))
+        .await
+        .unwrap();
+
+    // Both registered sessions appear, ordered by creation (ascending).
+    let sessions = store.list_sessions().await.unwrap();
+    let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["sess-1", "sess-2"]);
+
+    // No sessions yet on a fresh store.
+    let empty = SqliteStore::open_in_memory().unwrap();
+    assert!(empty.list_sessions().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn session_looks_up_by_id() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    store
+        .register_session(new_session_with("sess-1"))
+        .await
+        .unwrap();
+
+    let found = store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .expect("registered session is found by id");
+    assert_eq!(found.id.as_str(), "sess-1");
+    assert_eq!(found.transcript_path, "/tmp/sess-1.jsonl");
+
+    // An unknown id resolves to None.
+    assert!(store
+        .session(&SessionId::from("nope"))
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

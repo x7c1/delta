@@ -1,6 +1,6 @@
 //! The [`Interactor`]: orchestrates the ports into Delta's use cases.
 
-use delta_model::{Message, MessageUuid, PendingSend, Thread, ThreadId};
+use delta_model::{Message, MessageUuid, PendingSend, Session, Thread, ThreadId};
 
 use crate::error::{Error, Result};
 use crate::ports::{
@@ -35,12 +35,8 @@ pub struct Interactor<T, X, S, W> {
 /// Both the production composition root and integration tests build this exact
 /// type, so the transport layer's shared state stays non-generic regardless of
 /// which gateways are wired in.
-pub type BoxedInteractor = Interactor<
-    Box<dyn TmuxDriver>,
-    Box<dyn Transcript>,
-    Box<dyn SessionStore>,
-    Box<dyn Workspace>,
->;
+pub type BoxedInteractor =
+    Interactor<Box<dyn TmuxDriver>, Box<dyn Transcript>, Box<dyn SessionStore>, Box<dyn Workspace>>;
 
 impl<T, X, S, W> Interactor<T, X, S, W>
 where
@@ -119,6 +115,10 @@ where
     /// (typically `main`). The send is written to the FIFO *before* the
     /// keystrokes are dispatched, so the correlation head is in place when the
     /// `UserPromptSubmit` hook fires.
+    ///
+    /// Temporary single-session shim: targets the single session via
+    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
+    /// surface lands.
     pub async fn enqueue_send(
         &self,
         thread_id: ThreadId,
@@ -126,7 +126,10 @@ where
         locator_quote: Option<&str>,
         branch_from: Option<&MessageUuid>,
     ) -> Result<PendingSend> {
-        let session = self.require_session().await?;
+        let session = self
+            .resolve_single_session()
+            .await?
+            .ok_or(Error::NoSession)?;
 
         // The caller-supplied thread must exist: for a plain send it is the
         // send target, for a branch send it is the parent the new child hangs
@@ -181,13 +184,20 @@ where
     }
 
     /// Create a named branch off an existing message without sending anything.
+    ///
+    /// Temporary single-session shim: targets the single session via
+    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
+    /// surface lands.
     pub async fn create_branch(
         &self,
         parent_thread_id: ThreadId,
         root_message_uuid: &MessageUuid,
         title: &str,
     ) -> Result<Thread> {
-        let session = self.require_session().await?;
+        let session = self
+            .resolve_single_session()
+            .await?
+            .ok_or(Error::NoSession)?;
         self.store
             .create_thread(
                 &session.id,
@@ -200,7 +210,9 @@ where
 
     /// Handle a `UserPromptSubmit` hook.
     ///
-    /// The first such hook registers the session (SessionStart never fires).
+    /// The first hook for a given `session_id` registers that session
+    /// (SessionStart never fires); routing by id lets several Claude Code
+    /// sessions register independently.
     ///
     /// The locator quote to inject as `additionalContext` is resolved *before*
     /// syncing, by matching the prompt text against the queued `pending_send`
@@ -222,19 +234,26 @@ where
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let mut events = Vec::new();
 
-        let existing = self.store.current_session().await?;
-        if existing.is_none() {
-            self.store
-                .register_session(NewSession {
-                    id: hook.session_id.clone(),
-                    cwd: hook.cwd.clone(),
-                    transcript_path: hook.transcript_path.clone(),
-                })
-                .await?;
-            events.push(SessionEvent::SessionRegistered {
-                session_id: hook.session_id.clone(),
-            });
-        }
+        // Register on first contact for THIS session id (Claude Code never fires
+        // SessionStart). Routing by id lets several Claude Code sessions register
+        // independently rather than assuming a single global one.
+        let session = match self.store.session(&hook.session_id).await? {
+            Some(session) => session,
+            None => {
+                let (session, _main) = self
+                    .store
+                    .register_session(NewSession {
+                        id: hook.session_id.clone(),
+                        cwd: hook.cwd.clone(),
+                        transcript_path: hook.transcript_path.clone(),
+                    })
+                    .await?;
+                events.push(SessionEvent::SessionRegistered {
+                    session_id: hook.session_id.clone(),
+                });
+                session
+            }
+        };
 
         // Resolve this prompt's queued send *before* syncing, so the locator
         // quote is returned as `additionalContext` even when the user line has
@@ -253,7 +272,7 @@ where
         // Ingest new transcript lines. This matches each user line to its queued
         // send and attributes it (plus the assistant lines that follow it) to
         // the right thread, marking the send matched as a side effect.
-        let new_messages = self.sync_transcript(&hook.transcript_path).await?;
+        let new_messages = self.sync_transcript(&session).await?;
 
         match pending {
             Some(pending) => {
@@ -285,8 +304,10 @@ where
     /// Handle a `Stop` hook: ingest the final transcript lines and report the
     /// turn as completed.
     pub async fn on_stop(&self, hook: StopHook) -> Result<Vec<SessionEvent>> {
-        if let Some(session) = self.store.current_session().await? {
-            self.sync_transcript(&session.transcript_path).await?;
+        // Route by the hook's own session id so the right session's transcript is
+        // synced, even when several sessions are registered.
+        if let Some(session) = self.store.session(&hook.session_id).await? {
+            self.sync_transcript(&session).await?;
         }
         Ok(vec![SessionEvent::TurnCompleted {
             session_id: hook.session_id,
@@ -294,7 +315,7 @@ where
         }])
     }
 
-    /// Poll the registered session's transcript for newly-written lines.
+    /// Poll every registered session's transcript for newly-written lines.
     ///
     /// Drives the continuous background tail: Claude Code often flushes the final
     /// assistant line to the JSONL *after* the `Stop` hook fires, so the hook's
@@ -302,14 +323,25 @@ where
     /// hook. Polling on an interval ingests those late lines and returns them so
     /// the caller can announce the transcript growth.
     ///
+    /// Each session is synced independently and the result is grouped by session:
+    /// one entry per session that ingested new messages, in registration order.
+    /// A closed or quiet session simply yields no new lines and is omitted, so
+    /// every returned group is non-empty — callers may index `group[0]` for the
+    /// group's session id. This lets the caller emit one transcript-growth
+    /// notification per session.
+    ///
     /// Reuses [`Self::sync_transcript`] (cursor, attribution, the serialization
     /// lock), so it is safe to call concurrently with the hook handlers. Returns
     /// an empty list when no session has been registered yet.
-    pub async fn poll_transcript(&self) -> Result<Vec<Message>> {
-        match self.store.current_session().await? {
-            Some(session) => self.sync_transcript(&session.transcript_path).await,
-            None => Ok(Vec::new()),
+    pub async fn poll_transcript(&self) -> Result<Vec<Vec<Message>>> {
+        let mut groups = Vec::new();
+        for session in self.store.list_sessions().await? {
+            let messages = self.sync_transcript(&session).await?;
+            if !messages.is_empty() {
+                groups.push(messages);
+            }
         }
+        Ok(groups)
     }
 
     /// Handle a `PreToolUse` hook: record the request for UI/audit and notify
@@ -333,10 +365,14 @@ where
 
     /// The current session and the id of its `main` thread, for hydration.
     ///
-    /// Returns `None` until the first `UserPromptSubmit` hook registers the
+    /// Returns `None` until the first `UserPromptSubmit` hook registers a
     /// session (Claude Code never fires `SessionStart`).
-    pub async fn current_session(&self) -> Result<Option<(delta_model::Session, ThreadId)>> {
-        match self.store.current_session().await? {
+    ///
+    /// Temporary single-session shim: resolves to the single session via
+    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
+    /// surface lands.
+    pub async fn current_session(&self) -> Result<Option<(Session, ThreadId)>> {
+        match self.resolve_single_session().await? {
             Some(session) => {
                 let main = self.store.main_thread_id(&session.id).await?;
                 Ok(Some((session, main)))
@@ -348,8 +384,12 @@ where
     /// The thread tree for the current session, ordered by creation.
     ///
     /// Returns an empty list when no session has been registered yet.
+    ///
+    /// Temporary single-session shim: resolves to the single session via
+    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
+    /// surface lands.
     pub async fn threads(&self) -> Result<Vec<Thread>> {
-        match self.store.current_session().await? {
+        match self.resolve_single_session().await? {
             Some(session) => self.store.list_threads(&session.id).await,
             None => Ok(Vec::new()),
         }
@@ -377,13 +417,13 @@ where
     ///   `carry_thread` to `main`.
     /// - A **non-user** line (assistant/tool/system) follows `carry_thread` —
     ///   the thread of the turn it belongs to.
-    async fn sync_transcript(&self, transcript_path: &str) -> Result<Vec<Message>> {
+    async fn sync_transcript(&self, session: &Session) -> Result<Vec<Message>> {
         // Serialize the whole cursor → read → ingest → cursor sequence so the
         // hook handlers and the background tail cannot interleave and
         // double-ingest or race the cursor (see `sync_lock`).
         let _guard = self.sync_lock.lock().await;
 
-        let session = self.require_session().await?;
+        let transcript_path = &session.transcript_path;
         let main_thread = self.store.main_thread_id(&session.id).await?;
 
         // Resume from the line-based cursor so each transcript line is read
@@ -418,23 +458,23 @@ where
         for line in read.messages {
             let content_text = Message::flatten_text(&line.content);
 
-            let (thread_id, semantic_parent_uuid) =
-                if matches!(line.role, delta_model::Role::User) {
-                    let trimmed = content_text.as_deref().unwrap_or("").trim();
-                    match self.store.match_pending_send(&session.id, trimmed).await? {
-                        Some(pending) => {
-                            self.store.mark_send_matched(pending.id, &line.uuid).await?;
-                            carry_thread = pending.thread_id;
-                            (pending.thread_id, pending.semantic_parent_uuid)
-                        }
-                        None => {
-                            carry_thread = main_thread;
-                            (main_thread, None)
-                        }
+            let (thread_id, semantic_parent_uuid) = if matches!(line.role, delta_model::Role::User)
+            {
+                let trimmed = content_text.as_deref().unwrap_or("").trim();
+                match self.store.match_pending_send(&session.id, trimmed).await? {
+                    Some(pending) => {
+                        self.store.mark_send_matched(pending.id, &line.uuid).await?;
+                        carry_thread = pending.thread_id;
+                        (pending.thread_id, pending.semantic_parent_uuid)
                     }
-                } else {
-                    (carry_thread, None)
-                };
+                    None => {
+                        carry_thread = main_thread;
+                        (main_thread, None)
+                    }
+                }
+            } else {
+                (carry_thread, None)
+            };
 
             messages.push(Message {
                 uuid: line.uuid,
@@ -457,8 +497,16 @@ where
         Ok(messages)
     }
 
-    async fn require_session(&self) -> Result<delta_model::Session> {
-        self.store.current_session().await?.ok_or(Error::NoSession)
+    /// Resolve "the" session for the still-single-session server surface.
+    ///
+    /// Temporary single-session shim: the browser-facing REST API
+    /// (`GET /api/session`, `GET /api/threads`, `POST /api/sends`) is still
+    /// single-session, so the methods backing it collapse the multi-session
+    /// store down to one session — the most-recently-created one — preserving
+    /// today's observable behaviour. Returns `None` when no session exists yet.
+    /// Remove this once the multi-session REST surface routes by session id.
+    async fn resolve_single_session(&self) -> Result<Option<Session>> {
+        Ok(self.store.list_sessions().await?.into_iter().last())
     }
 
     /// Ensure a thread exists, turning a stale/wrong id into a clean
