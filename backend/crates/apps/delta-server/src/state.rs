@@ -107,12 +107,12 @@ impl AppState {
 
     /// Spawn the continuous transcript tail.
     ///
-    /// Every [`TRANSCRIPT_POLL_INTERVAL`], poll the registered session's
-    /// transcript for newly-written lines. When any were ingested, broadcast a
-    /// [`SessionEvent::TranscriptUpdated`] carrying the distinct threads they
-    /// landed on so browsers refetch them. This catches the assistant reply that
-    /// Claude Code flushes to the JSONL *after* the `Stop` hook fires, which the
-    /// hook sync misses.
+    /// Every [`TRANSCRIPT_POLL_INTERVAL`], poll every registered session's
+    /// transcript for newly-written lines. For each session that ingested new
+    /// lines, broadcast a [`SessionEvent::TranscriptUpdated`] carrying the
+    /// distinct threads they landed on so browsers refetch them. This catches the
+    /// assistant reply that Claude Code flushes to the JSONL *after* the `Stop`
+    /// hook fires, which the hook sync misses.
     ///
     /// The task clones the `Arc`-shared interactor and the broadcast sender, so
     /// it stays alive independently of any request. A poll error is logged and
@@ -125,22 +125,25 @@ impl AppState {
             loop {
                 ticker.tick().await;
                 match interactor.poll_transcript().await {
-                    Ok(messages) if messages.is_empty() => {}
-                    Ok(messages) => {
-                        let session_id = messages[0].session_id.clone();
-                        let thread_ids: Vec<_> = messages
-                            .iter()
-                            .map(|m| m.thread_id)
-                            .collect::<BTreeSet<_>>()
-                            .into_iter()
-                            .collect();
-                        // A send error only means there are no subscribers; that
-                        // is fine. We use the raw sender (not `broadcast`) because
-                        // `&self` is not available inside the task.
-                        let _ = events.send(SessionEvent::TranscriptUpdated {
-                            session_id,
-                            thread_ids,
-                        });
+                    Ok(groups) => {
+                        // One non-empty group per session that ingested new lines.
+                        for messages in groups {
+                            let session_id = messages[0].session_id.clone();
+                            let thread_ids: Vec<_> = messages
+                                .iter()
+                                .map(|m| m.thread_id)
+                                .collect::<BTreeSet<_>>()
+                                .into_iter()
+                                .collect();
+                            // A send error only means there are no subscribers;
+                            // that is fine. We use the raw sender (not
+                            // `broadcast`) because `&self` is not available inside
+                            // the task.
+                            let _ = events.send(SessionEvent::TranscriptUpdated {
+                                session_id,
+                                thread_ids,
+                            });
+                        }
                     }
                     Err(err) => {
                         tracing::warn!(error = %err, "transcript tail poll failed");

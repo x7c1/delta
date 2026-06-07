@@ -44,8 +44,9 @@ impl SqliteStore {
     }
 }
 
-fn map_session(row: &Row<'_>) -> rusqlite::Result<(SessionId, String, String, Option<String>, String, String)>
-{
+fn map_session(
+    row: &Row<'_>,
+) -> rusqlite::Result<(SessionId, String, String, Option<String>, String, String)> {
     Ok((
         SessionId::from(row.get::<_, String>(0)?),
         row.get(1)?,
@@ -120,6 +121,22 @@ fn message_from_row(row: &Row<'_>) -> Result<Message> {
     })
 }
 
+/// Look up a single session row by id, mapping it into a [`Session`].
+fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Session>> {
+    let parts = conn
+        .query_row(
+            &format!("SELECT {SESSION_COLS} FROM session WHERE id = ?1"),
+            params![id.as_str()],
+            map_session,
+        )
+        .optional()
+        .map_err(Error::from)?;
+    match parts {
+        Some(p) => Ok(Some(session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5)?)),
+        None => Ok(None),
+    }
+}
+
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at";
 const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, root_message_uuid, created_at";
 const PENDING_COLS: &str =
@@ -143,14 +160,8 @@ impl SessionStore for SqliteStore {
         )
         .map_err(Error::from)?;
 
-        let session = conn
-            .query_row(
-                &format!("SELECT {SESSION_COLS} FROM session WHERE id = ?1"),
-                params![new.id.as_str()],
-                map_session,
-            )
-            .map_err(Error::from)
-            .and_then(|p| session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5))?;
+        let session = query_session_by_id(&conn, &new.id)?
+            .expect("session row exists after INSERT OR IGNORE");
 
         // Ensure a main thread exists.
         let main_id: Option<i64> = conn
@@ -178,22 +189,28 @@ impl SessionStore for SqliteStore {
         Ok((session, ThreadId(main_id)))
     }
 
-    async fn current_session(
+    async fn list_sessions(&self) -> std::result::Result<Vec<Session>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {SESSION_COLS} FROM session ORDER BY created_at"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt.query_map([], map_session).map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let p = row.map_err(Error::from)?;
+            out.push(session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5)?);
+        }
+        Ok(out)
+    }
+
+    async fn session(
         &self,
+        id: &SessionId,
     ) -> std::result::Result<Option<Session>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        let parts = conn
-            .query_row(
-                &format!("SELECT {SESSION_COLS} FROM session ORDER BY created_at LIMIT 1"),
-                [],
-                map_session,
-            )
-            .optional()
-            .map_err(Error::from)?;
-        match parts {
-            Some(p) => Ok(Some(session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5)?)),
-            None => Ok(None),
-        }
+        Ok(query_session_by_id(&conn, id)?)
     }
 
     async fn main_thread_id(
@@ -374,7 +391,9 @@ impl SessionStore for SqliteStore {
             ))
             .map_err(Error::from)?;
         let rows = stmt
-            .query_map(params![session_id.as_str()], |r| Ok(pending_send_from_row(r)))
+            .query_map(params![session_id.as_str()], |r| {
+                Ok(pending_send_from_row(r))
+            })
             .map_err(Error::from)?;
         for row in rows {
             let send = row.map_err(Error::from)??;
