@@ -139,6 +139,77 @@ async fn message_upsert_and_thread_view() {
 }
 
 #[tokio::test]
+async fn upsert_preserves_thread_overlay_on_reingest() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let root = MessageUuid::from("u-root");
+    let branch = store
+        .create_thread(&session.id, "branch", Some(main), Some(&root))
+        .await
+        .unwrap();
+    let semantic_parent = MessageUuid::from("u-root");
+
+    // First ingest: the line is correctly attributed to the branch thread,
+    // mirroring `match_pending_send` attaching it on its first (pending) hit.
+    let msg = Message {
+        uuid: MessageUuid::from("u-1"),
+        session_id: session.id.clone(),
+        thread_id: branch.id,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: Some(semantic_parent.clone()),
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("hello".into()),
+        content: vec![ContentBlock::Text {
+            text: "hello".into(),
+        }],
+        created_at: "2026-01-01T00:00:00Z".into(),
+    };
+    store
+        .upsert_messages(std::slice::from_ref(&msg))
+        .await
+        .unwrap();
+
+    // Second ingest of the SAME uuid: a re-sync fell back to main (the pending
+    // is now `matched`, so it can only recompute `(main, None)`) but carries
+    // refreshed content.
+    let reingest = Message {
+        thread_id: main,
+        semantic_parent_uuid: None,
+        content_text: Some("hello again".into()),
+        content: vec![ContentBlock::Text {
+            text: "hello again".into(),
+        }],
+        ..msg.clone()
+    };
+    store.upsert_messages(&[reingest]).await.unwrap();
+
+    // The overlay (thread_id + semantic_parent_uuid) survives the re-ingest, so
+    // the message stays on the branch thread...
+    let branch_view = store.thread_messages(branch.id).await.unwrap();
+    assert_eq!(branch_view.len(), 1, "message stays on the branch thread");
+    assert_eq!(branch_view[0].thread_id, branch.id);
+    assert_eq!(
+        branch_view[0].semantic_parent_uuid.as_ref(),
+        Some(&semantic_parent),
+        "semantic parent overlay is preserved"
+    );
+    // ...and was NOT clobbered back to main.
+    assert!(
+        store.thread_messages(main).await.unwrap().is_empty(),
+        "re-ingest must not move the message back to main"
+    );
+    // Content columns still refresh on conflict.
+    assert_eq!(
+        branch_view[0].content_text.as_deref(),
+        Some("hello again"),
+        "content columns still update on conflict"
+    );
+}
+
+#[tokio::test]
 async fn transcript_lines_read_defaults_to_zero_and_persists_updates() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, _main) = store.register_session(new_session()).await.unwrap();

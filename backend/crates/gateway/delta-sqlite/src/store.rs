@@ -432,13 +432,27 @@ impl SessionStore for SqliteStore {
             };
             tx.execute(
                 &format!(
+                    // `thread_id` and `semantic_parent_uuid` form the thread
+                    // overlay: they are authoritative once assigned on the
+                    // FIRST ingest of a line and must NOT be overwritten on a
+                    // re-ingest. Branch attribution only ever happens on the
+                    // first ingest, because the pending send is enqueued before
+                    // the keystrokes are dispatched, so by the time the user
+                    // line appears in the transcript its pending send is still
+                    // `pending` and `match_pending_send` attaches it to the
+                    // branch thread. A second ingest of the same line (e.g.
+                    // hook-sync racing the background tail, or a re-sync) finds
+                    // the pending already `matched`, so `sync_transcript` falls
+                    // back to the external-input branch and recomputes
+                    // `(thread_id, semantic_parent) = (main, None)`. Overwriting
+                    // here would clobber the correct branch attribution back to
+                    // main and leave branch threads empty. The remaining columns
+                    // are transcript-derived cache and may keep refreshing.
                     "INSERT INTO message ({MESSAGE_COLS}) VALUES
                      (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                      ON CONFLICT(uuid) DO UPDATE SET
-                       thread_id = excluded.thread_id,
                        role = excluded.role,
                        linear_parent_uuid = excluded.linear_parent_uuid,
-                       semantic_parent_uuid = excluded.semantic_parent_uuid,
                        prompt_id = excluded.prompt_id,
                        seq = excluded.seq,
                        content_text = excluded.content_text,
