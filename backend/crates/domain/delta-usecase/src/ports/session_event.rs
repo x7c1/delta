@@ -9,7 +9,21 @@ use delta_model::{MessageUuid, SessionId, ThreadId};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionEvent {
     /// The session was registered (first `UserPromptSubmit`).
+    ///
+    /// This doubles as the "opened" signal for a freshly-spawned session: a new
+    /// spawn has no `session_id` until its first hook binds it, so its first
+    /// liveness signal is this registration rather than a separate
+    /// [`Self::SessionOpened`].
     SessionRegistered { session_id: SessionId },
+    /// A known, previously-closed session became live again (resumed).
+    ///
+    /// Emitted when a session is reopened by id (e.g. `claude --resume`). A
+    /// brand-new session never emits this — its first liveness signal is
+    /// [`Self::SessionRegistered`]. Focus is purely client-side; this only says
+    /// the session now has a live pane.
+    SessionOpened { session_id: SessionId },
+    /// An open session was closed: its pane was torn down but its data remains.
+    SessionClosed { session_id: SessionId },
     /// A queued send was confirmed as a turn start.
     TurnStarted {
         session_id: SessionId,
@@ -44,4 +58,39 @@ pub enum SessionEvent {
         request_id: i64,
         tool_name: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json(event: &SessionEvent) -> serde_json::Value {
+        serde_json::to_value(event).unwrap()
+    }
+
+    #[test]
+    fn open_and_closed_serialize_as_id_routed_tagged_events() {
+        assert_eq!(
+            json(&SessionEvent::SessionOpened {
+                session_id: SessionId::from("sess-1"),
+            }),
+            serde_json::json!({ "kind": "session_opened", "session_id": "sess-1" }),
+        );
+        assert_eq!(
+            json(&SessionEvent::SessionClosed {
+                session_id: SessionId::from("sess-1"),
+            }),
+            serde_json::json!({ "kind": "session_closed", "session_id": "sess-1" }),
+        );
+    }
+
+    #[test]
+    fn registered_keeps_its_wire_shape() {
+        assert_eq!(
+            json(&SessionEvent::SessionRegistered {
+                session_id: SessionId::from("sess-1"),
+            }),
+            serde_json::json!({ "kind": "session_registered", "session_id": "sess-1" }),
+        );
+    }
 }

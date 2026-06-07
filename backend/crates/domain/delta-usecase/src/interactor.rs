@@ -9,6 +9,8 @@ use crate::ports::{
     pane_for, NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver,
     Transcript, UserPromptSubmitHook, Workspace,
 };
+use crate::send_target::SendTarget;
+use crate::session_listing::SessionListing;
 
 /// The command Delta launches in each tmux session.
 const SESSION_COMMAND: &str = "claude";
@@ -95,23 +97,25 @@ where
         &self.store
     }
 
-    /// The pane of a currently-open session, for the still-single PTY bridge.
-    ///
-    /// The single-session server drives at most one open pane, so this returns
-    /// it (or `None` when nothing is open yet, so the PTY can fail cleanly rather
-    /// than attach to a non-existent pane). The multi-session transport that
-    /// lands next routes the PTY by session id via [`Self::pane_for_session`].
-    pub async fn focused_pane(&self) -> Option<String> {
-        self.open_sessions.lock().await.any_open_pane()
-    }
-
     /// The pane driving a specific open session, if it is open.
+    ///
+    /// The PTY bridge routes by session id: with no live pane for `id` this
+    /// returns `None` so the bridge can refuse the attach rather than bind to a
+    /// non-existent pane.
     pub async fn pane_for_session(&self, id: &SessionId) -> Option<String> {
         self.open_sessions
             .lock()
             .await
             .handle(id)
             .map(|h| h.pane.clone())
+    }
+
+    /// Whether a session is currently open (driven by a live pane).
+    ///
+    /// Open/closed is process-runtime state held by the registry, so this is the
+    /// authority the session-list endpoint annotates each stored session with.
+    pub async fn is_session_open(&self, id: &SessionId) -> bool {
+        self.open_sessions.lock().await.is_open(id)
     }
 
     #[cfg(test)]
@@ -212,8 +216,15 @@ where
     /// Close an open session: kill its pane and drop it from the registry.
     ///
     /// The conversational data remains in the store; only the live pane and the
-    /// `claude` process are torn down. A session that is not open is a no-op.
+    /// `claude` process are torn down. Closing a known session that is not open
+    /// is a no-op (it has no live pane to tear down), but an *unknown* id is a
+    /// clean `SessionNotFound` (404) — the same rejection [`Self::open_session`]
+    /// gives — so the browser can tell "already closed" apart from "no such
+    /// session" rather than having a stale id silently succeed.
     pub async fn close_session(&self, id: &SessionId) -> Result<()> {
+        if self.store.session(id).await?.is_none() {
+            return Err(Error::SessionNotFound(id.as_str().to_owned()));
+        }
         let handle = {
             let mut registry = self.open_sessions.lock().await;
             registry.remove(id)
@@ -288,61 +299,81 @@ where
             .into_owned()
     }
 
-    /// Enqueue a user input to be sent into the session, ensuring it is open.
+    /// Enqueue a user input, routing it to the session the target names.
     ///
-    /// The send target is resolved to the single session (temporary shim). The
-    /// session is then ensured open before the text is dispatched:
+    /// The session is determined by the [`SendTarget`], never by a global
+    /// "current" session:
     ///
-    /// - **Open** (a live pane is bound): the text is dispatched immediately on
-    ///   the normal path — the `pending_send` row is written *before* the
-    ///   keystrokes, so the correlation head is in place when the
-    ///   `UserPromptSubmit` hook fires, with the cancel-on-dispatch-failure
-    ///   rollback below.
-    /// - **Closed** (a session exists in the store but no live pane): it is
-    ///   resumed via [`Self::open_session`] (`claude --resume <id>`), then the
-    ///   normal path runs.
-    /// - **None** (no session yet — a composer-first message): a fresh session
+    /// - [`SendTarget::Thread`] — an existing conversation. The session is
+    ///   derived from the thread (threads belong to a session), then ensured
+    ///   open before the text is dispatched:
+    ///   - **Open** (a live pane is bound): the text is dispatched immediately on
+    ///     the normal path — the `pending_send` row is written *before* the
+    ///     keystrokes, so the correlation head is in place when the
+    ///     `UserPromptSubmit` hook fires, with the cancel-on-dispatch-failure
+    ///     rollback below.
+    ///   - **Closed** (the session exists in the store but no live pane): it is
+    ///     resumed via [`Self::open_session`] (`claude --resume <id>`), then the
+    ///     normal path runs.
+    /// - [`SendTarget::NewSession`] — a composer-first message. A fresh session
     ///   is spawned with the text deferred as its `first_prompt`. The
     ///   `pending_send` row cannot be written yet (it references a session id
     ///   that does not exist), so it is held on the spawn and written when the
     ///   first `UserPromptSubmit` binds the spawn. A synthetic, not-yet-persisted
-    ///   [`PendingSend`] is returned so the REST surface has a response.
+    ///   [`PendingSend`] is returned so the REST surface has a response, carrying
+    ///   the still-unknown target thread as `0` (the real id is assigned at bind
+    ///   time on the new session's `main`).
     ///
-    /// If `branch_from` is set, this is the first message of a new branch: an
-    /// unnamed child thread is created off that message and the send is
-    /// attributed to it. A branch send requires an existing session (there must
-    /// be a message to branch from), so it is rejected when there is no session.
+    /// A branch send (the `branch_from` arm of [`SendTarget::Thread`]) requires
+    /// an existing session — there must be a message to branch from — which the
+    /// thread target inherently provides.
     pub async fn enqueue_send(
         &self,
-        thread_id: ThreadId,
+        target: SendTarget,
         text: &str,
         locator_quote: Option<&str>,
-        branch_from: Option<&MessageUuid>,
     ) -> Result<PendingSend> {
-        match self.resolve_single_session().await? {
-            Some(session) => {
-                // Ensure the resolved session is open: resume it if it is a known
-                // but closed session (no live pane). Once open we have a pane to
-                // dispatch to and the normal pre-dispatch path applies.
-                let pane = self.ensure_open(&session.id).await?;
+        match target {
+            SendTarget::Thread {
+                thread_id,
+                branch_from,
+            } => {
+                // Derive the owning session from the target thread. A stale or
+                // wrong id becomes a clean `ThreadNotFound` (404) rather than an
+                // opaque failure downstream.
+                let thread = self
+                    .store
+                    .thread(thread_id)
+                    .await?
+                    .ok_or_else(|| Error::ThreadNotFound(thread_id.value()))?;
+                let session_id = thread.session_id;
+                // Ensure the session is open: resume it if it is known but closed
+                // (no live pane). Once open we have a pane to dispatch to and the
+                // normal pre-dispatch path applies.
+                let pane = self.ensure_open(&session_id).await?;
                 self.enqueue_into_open(
-                    &session.id,
+                    &session_id,
                     &pane,
                     thread_id,
                     text,
                     locator_quote,
-                    branch_from,
+                    branch_from.as_ref(),
                 )
                 .await
             }
-            None => {
-                // No session at all: a composer-first message. There is nothing
-                // to branch from yet, so reject branch sends.
-                if branch_from.is_some() {
-                    return Err(Error::NoSession);
-                }
+            SendTarget::NewSession => {
+                // No session yet: spawn one with the text deferred as its first
+                // prompt. The real `pending_send` row is written when the first
+                // `UserPromptSubmit` binds the spawn.
+                //
+                // `locator_quote` is intentionally dropped here, not forwarded to
+                // the spawn: a brand-new session has no earlier passage to anchor,
+                // so there is nothing to locate. It is still echoed in the
+                // synthetic response below as a courtesy to the caller, but the
+                // deferred first prompt (and the row written at bind time) carry
+                // no quote.
                 self.spawn_fresh(Some(text.to_owned())).await?;
-                Ok(deferred_pending_send(thread_id, text, locator_quote))
+                Ok(deferred_pending_send(text, locator_quote))
             }
         }
     }
@@ -359,13 +390,9 @@ where
         locator_quote: Option<&str>,
         branch_from: Option<&MessageUuid>,
     ) -> Result<PendingSend> {
-        // The caller-supplied thread must exist: for a plain send it is the
-        // send target, for a branch send it is the parent the new child hangs
-        // off. Validating here turns a stale/wrong id from the browser into a
-        // clean `ThreadNotFound` (404) instead of an opaque foreign-key 500,
-        // matching the read path's behaviour in `thread_view`.
-        self.require_thread(thread_id).await?;
-
+        // The target thread was already loaded by the caller to derive the
+        // session, so its existence is established here (a stale/wrong id surfaced
+        // as `ThreadNotFound` before reaching this point).
         let (target_thread, semantic_parent) = match branch_from {
             Some(parent) => {
                 // Give the new branch child a provisional title derived from the
@@ -429,31 +456,6 @@ where
             .handle(id)
             .map(|h| h.pane.clone())
             .ok_or_else(|| Error::SessionNotFound(id.as_str().to_owned()))
-    }
-
-    /// Create a named branch off an existing message without sending anything.
-    ///
-    /// Temporary single-session shim: targets the single session via
-    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
-    /// surface lands.
-    pub async fn create_branch(
-        &self,
-        parent_thread_id: ThreadId,
-        root_message_uuid: &MessageUuid,
-        title: &str,
-    ) -> Result<Thread> {
-        let session = self
-            .resolve_single_session()
-            .await?
-            .ok_or(Error::NoSession)?;
-        self.store
-            .create_thread(
-                &session.id,
-                title,
-                Some(parent_thread_id),
-                Some(root_message_uuid),
-            )
-            .await
     }
 
     /// Register a session on the first `UserPromptSubmit` for its id, binding it
@@ -686,36 +688,39 @@ where
         }])
     }
 
-    /// The current session and the id of its `main` thread, for hydration.
+    /// Every registered session, annotated with its live state and `main` thread.
     ///
-    /// Returns `None` until the first `UserPromptSubmit` hook registers a
+    /// Lists all sessions from the store (ordered by creation) and tags each with
+    /// whether the registry currently holds a live pane for it, plus its trunk
+    /// thread id. This is the browser's hydration surface: it shows every known
+    /// conversation — open or closed — so the navigator can route into any of
+    /// them. Returns an empty list until the first `UserPromptSubmit` registers a
     /// session (Claude Code never fires `SessionStart`).
-    ///
-    /// Temporary single-session shim: resolves to the single session via
-    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
-    /// surface lands.
-    pub async fn current_session(&self) -> Result<Option<(Session, ThreadId)>> {
-        match self.resolve_single_session().await? {
-            Some(session) => {
-                let main = self.store.main_thread_id(&session.id).await?;
-                Ok(Some((session, main)))
-            }
-            None => Ok(None),
+    pub async fn list_sessions(&self) -> Result<Vec<SessionListing>> {
+        let sessions = self.store.list_sessions().await?;
+        let mut out = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            let main_thread_id = self.store.main_thread_id(&session.id).await?;
+            let open = self.is_session_open(&session.id).await;
+            out.push(SessionListing {
+                session,
+                open,
+                main_thread_id,
+            });
         }
+        Ok(out)
     }
 
-    /// The thread tree for the current session, ordered by creation.
+    /// The thread tree for a specific session, ordered by creation.
     ///
-    /// Returns an empty list when no session has been registered yet.
-    ///
-    /// Temporary single-session shim: resolves to the single session via
-    /// [`Self::resolve_single_session`]. Remove when the multi-session REST
-    /// surface lands.
-    pub async fn threads(&self) -> Result<Vec<Thread>> {
-        match self.resolve_single_session().await? {
-            Some(session) => self.store.list_threads(&session.id).await,
-            None => Ok(Vec::new()),
+    /// A stale or unknown session id is reported as a clean `SessionNotFound`
+    /// (404) rather than yielding a silently empty list, so the browser can tell
+    /// "no threads yet" apart from "no such session".
+    pub async fn threads_for(&self, session_id: &SessionId) -> Result<Vec<Thread>> {
+        if self.store.session(session_id).await?.is_none() {
+            return Err(Error::SessionNotFound(session_id.as_str().to_owned()));
         }
+        self.store.list_threads(session_id).await
     }
 
     /// Assemble a thread's transcript view (its messages ordered by `seq`).
@@ -820,18 +825,6 @@ where
         Ok(messages)
     }
 
-    /// Resolve "the" session for the still-single-session server surface.
-    ///
-    /// Temporary single-session shim: the browser-facing REST API
-    /// (`GET /api/session`, `GET /api/threads`, `POST /api/sends`) is still
-    /// single-session, so the methods backing it collapse the multi-session
-    /// store down to one session — the most-recently-created one — preserving
-    /// today's observable behaviour. Returns `None` when no session exists yet.
-    /// Remove this once the multi-session REST surface routes by session id.
-    async fn resolve_single_session(&self) -> Result<Option<Session>> {
-        Ok(self.store.list_sessions().await?.into_iter().last())
-    }
-
     /// Ensure a thread exists, turning a stale/wrong id into a clean
     /// `ThreadNotFound` instead of an opaque foreign-key error downstream.
     async fn require_thread(&self, thread_id: ThreadId) -> Result<()> {
@@ -848,17 +841,14 @@ where
 /// No `pending_send` row exists yet — it references a session id that does not
 /// exist until the first `UserPromptSubmit` binds the spawn. This shapes a
 /// response for the REST surface meanwhile: `id` is `0` (no row), the status is
-/// `Pending`, and the session id is left empty. The real, correlatable row is
-/// written at bind time.
-fn deferred_pending_send(
-    thread_id: ThreadId,
-    text: &str,
-    locator_quote: Option<&str>,
-) -> PendingSend {
+/// `Pending`, and both the session id and target thread are left empty/`0`
+/// because neither exists yet (the real row is written on the new session's
+/// `main` thread at bind time).
+fn deferred_pending_send(text: &str, locator_quote: Option<&str>) -> PendingSend {
     PendingSend {
         id: 0,
         session_id: SessionId::from(""),
-        thread_id,
+        thread_id: ThreadId(0),
         semantic_parent_uuid: None,
         text: text.to_owned(),
         locator_quote: locator_quote.map(str::to_owned),

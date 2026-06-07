@@ -14,7 +14,24 @@ use crate::ports::{
     NewSession, SessionEvent, SessionLifecycle, SessionStore, TmuxDriver, Transcript,
     TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
-use crate::Interactor;
+use crate::{Interactor, SendTarget};
+
+/// A plain send into an existing thread.
+fn to(thread_id: ThreadId) -> SendTarget {
+    SendTarget::Thread {
+        thread_id,
+        branch_from: None,
+    }
+}
+
+/// A branch send: the first message of a new branch off `parent`, hanging off
+/// `thread_id` as the parent thread.
+fn branch_off(thread_id: ThreadId, parent: &MessageUuid) -> SendTarget {
+    SendTarget::Thread {
+        thread_id,
+        branch_from: Some(parent.clone()),
+    }
+}
 
 /// A single recorded `create_session` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -724,20 +741,19 @@ async fn poll_transcript_groups_new_lines_per_session() {
     assert!(ix.poll_transcript().await.unwrap().is_empty());
 }
 
-/// The temporary single-session shim behind the still-single REST surface
-/// (`current_session` / `threads`) collapses the multi-session store down to the
-/// most-recently-created session. With several registered, it must resolve to
-/// the last one, not the first — pinning `resolve_single_session`'s choice so a
-/// `.last()` → `.first()` slip is caught. With none registered it returns `None`.
+/// `list_sessions` lists every registered session in creation order, each
+/// annotated with its live (open) state and `main` thread id; `threads_for`
+/// scopes the thread tree to a single session by id.
 #[tokio::test]
-async fn single_session_shim_resolves_most_recently_created() {
+async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() {
     let ix = interactor();
 
-    // No session yet: the shim resolves cleanly to nothing.
-    assert!(ix.current_session().await.unwrap().is_none());
-    assert!(ix.threads().await.unwrap().is_empty());
+    // No session yet: the list is empty.
+    assert!(ix.list_sessions().await.unwrap().is_empty());
 
-    // Register two sessions in order; sess-2 is the most-recently-created.
+    // Register two sessions in order. Their hooks arrive in a cwd with no
+    // matching pending spawn, so they register as external, closed data sessions
+    // (no live pane).
     ix.on_user_prompt_submit(submit_for("sess-1", "/tmp/s1.jsonl", "seed"))
         .await
         .unwrap();
@@ -745,22 +761,75 @@ async fn single_session_shim_resolves_most_recently_created() {
         .await
         .unwrap();
 
-    let (session, _main) = ix
-        .current_session()
-        .await
-        .unwrap()
-        .expect("a session resolves once one is registered");
-    assert_eq!(
-        session.id.as_str(),
-        "sess-2",
-        "the shim resolves to the most-recently-created session"
+    let listings = ix.list_sessions().await.unwrap();
+    let ids: Vec<_> = listings
+        .iter()
+        .map(|l| l.session.id.as_str().to_owned())
+        .collect();
+    assert_eq!(ids, vec!["sess-1", "sess-2"], "ordered by creation");
+    assert!(
+        listings.iter().all(|l| !l.open),
+        "externally-registered sessions are closed (no live pane)"
+    );
+    assert!(
+        listings.iter().all(|l| l.main_thread_id.value() > 0),
+        "every listing carries its main thread id"
     );
 
-    // `threads` is scoped to that same resolved session: only its `main` thread.
-    let threads = ix.threads().await.unwrap();
+    // `threads_for` is scoped to the named session: only its own threads.
+    let threads = ix.threads_for(&SessionId::from("sess-2")).await.unwrap();
     assert!(
-        threads.iter().all(|t| t.session_id.as_str() == "sess-2"),
-        "threads must belong to the resolved (most-recent) session only"
+        !threads.is_empty() && threads.iter().all(|t| t.session_id.as_str() == "sess-2"),
+        "threads belong to the requested session only"
+    );
+
+    // An unknown session id is a clean SessionNotFound, not an empty list.
+    let err = ix
+        .threads_for(&SessionId::from("nope"))
+        .await
+        .expect_err("unknown session id is rejected");
+    assert!(matches!(err, crate::error::Error::SessionNotFound(_)));
+}
+
+/// The `open` flag tracks live state: a session with a bound pane lists as
+/// `open: true`, and once closed it lists as `open: false` while still present.
+/// The annotated-as-closed test above only pins the closed side, so this pins
+/// the open side (and the open→closed transition) that the API surfaces.
+#[tokio::test]
+async fn list_sessions_marks_a_bound_session_open_and_a_closed_one_not() {
+    let ix = interactor();
+
+    // Spawn and bind a session: it now has a live pane.
+    ix.new_session().await.unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-open",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-open");
+    assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
+
+    let open_state = |listings: &[crate::SessionListing]| {
+        listings
+            .iter()
+            .find(|l| l.session.id == id)
+            .map(|l| l.open)
+            .expect("the session is listed")
+    };
+
+    assert!(
+        open_state(&ix.list_sessions().await.unwrap()),
+        "a bound session lists as open"
+    );
+
+    // Closing tears the pane down but keeps the row: it now lists as closed.
+    ix.close_session(&id).await.unwrap();
+    assert!(
+        !open_state(&ix.list_sessions().await.unwrap()),
+        "a closed session still lists, now as not open"
     );
 }
 
@@ -777,7 +846,7 @@ async fn fifo_head_matches_and_marks_send() {
 
     // Queue a send (also dispatches to fake tmux).
     let pending = ix
-        .enqueue_send(main, "hello world", Some("[quote]"), None)
+        .enqueue_send(to(main), "hello world", Some("[quote]"))
         .await
         .unwrap();
     assert_eq!(pending.status, PendingSendStatus::Pending);
@@ -844,7 +913,7 @@ async fn branch_send_creates_child_thread() {
 
     let parent = MessageUuid::from("uuid-parent");
     let pending = ix
-        .enqueue_send(main, "branch text", None, Some(&parent))
+        .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();
 
@@ -863,7 +932,7 @@ async fn plain_send_attributes_user_and_assistant_to_main() {
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     let pending = ix
-        .enqueue_send(main, "hello world", None, None)
+        .enqueue_send(to(main), "hello world", None)
         .await
         .unwrap();
     assert_eq!(pending.thread_id, main);
@@ -899,7 +968,7 @@ async fn branch_send_attributes_user_and_assistant_to_child() {
     // Branch off some existing message and queue the first branch send.
     let parent = MessageUuid::from("uuid-parent");
     let pending = ix
-        .enqueue_send(main, "branch text", None, Some(&parent))
+        .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();
     let child = pending.thread_id;
@@ -960,7 +1029,11 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
     // Queue a branch send. The user line is NOT in the transcript yet.
     let parent = MessageUuid::from("uuid-parent");
     let pending = ix
-        .enqueue_send(main, "branch text", Some("quoted line"), Some(&parent))
+        .enqueue_send(
+            branch_off(main, &parent),
+            "branch text",
+            Some("quoted line"),
+        )
         .await
         .unwrap();
     let child = pending.thread_id;
@@ -1053,10 +1126,9 @@ async fn branch_send_titles_child_from_locator_quote() {
     let parent = MessageUuid::from("uuid-parent");
     let pending = ix
         .enqueue_send(
-            main,
+            branch_off(main, &parent),
             "branch text",
             Some("  the quoted source line  "),
-            Some(&parent),
         )
         .await
         .unwrap();
@@ -1065,7 +1137,7 @@ async fn branch_send_titles_child_from_locator_quote() {
 
     // With no quote, the title falls back to "untitled".
     let pending2 = ix
-        .enqueue_send(main, "branch text 2", None, Some(&parent))
+        .enqueue_send(branch_off(main, &parent), "branch text 2", None)
         .await
         .unwrap();
     let child2 = ix
@@ -1086,7 +1158,7 @@ async fn enqueue_send_to_unknown_thread_is_thread_not_found() {
 
     // A thread id that was never created (stale/wrong id from the browser).
     let err = ix
-        .enqueue_send(ThreadId(999), "hello", None, None)
+        .enqueue_send(to(ThreadId(999)), "hello", None)
         .await
         .expect_err("unknown thread must be rejected");
     assert!(matches!(err, Error::ThreadNotFound(999)));
@@ -1103,7 +1175,7 @@ async fn failed_dispatch_rolls_back_pending_send_and_returns_error() {
 
     // The dispatch fails, so the use case must surface the tmux error...
     let err = ix
-        .enqueue_send(main, "never delivered", None, None)
+        .enqueue_send(to(main), "never delivered", None)
         .await
         .expect_err("a failed dispatch must propagate the error");
     assert!(matches!(err, Error::Tmux(_)));
@@ -1147,7 +1219,7 @@ async fn skipped_line_does_not_stall_later_turn_ingestion() {
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     // --- Sync 1: turn 1 (user + assistant) followed by a no-uuid line. ---
-    ix.enqueue_send(main, "turn one", None, None).await.unwrap();
+    ix.enqueue_send(to(main), "turn one", None).await.unwrap();
     ix.transcript_fake().push(user_line("u-1", "turn one")); // line 0
     ix.transcript_fake()
         .push(assistant_line("a-1", "reply one")); // line 1
@@ -1173,7 +1245,7 @@ async fn skipped_line_does_not_stall_later_turn_ingestion() {
     );
 
     // --- Sync 2: turn 2 appended. Previously this stalled. ---
-    ix.enqueue_send(main, "turn two", None, None).await.unwrap();
+    ix.enqueue_send(to(main), "turn two", None).await.unwrap();
     ix.transcript_fake().push(user_line("u-2", "turn two")); // line 3
     ix.transcript_fake()
         .push(assistant_line("a-2", "reply two")); // line 4
@@ -1220,7 +1292,7 @@ async fn poll_transcript_ingests_assistant_line_flushed_after_stop() {
 
     // Queue a send and run the user-turn hooks. At `Stop` only the user line is
     // present — the assistant reply has not been flushed yet.
-    ix.enqueue_send(main, "hello world", None, None)
+    ix.enqueue_send(to(main), "hello world", None)
         .await
         .unwrap();
     ix.transcript_fake().push(user_line("u-1", "hello world"));
@@ -1311,7 +1383,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     // No session exists yet. The send spawns a fresh session and returns a
     // synthetic (not-yet-persisted) pending row.
     let returned = ix
-        .enqueue_send(ThreadId(1), "first message", None, None)
+        .enqueue_send(SendTarget::NewSession, "first message", None)
         .await
         .unwrap();
     assert_eq!(returned.id, 0, "no row persisted before the spawn binds");
@@ -1394,7 +1466,7 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     // No session yet: the composer-first send spawns, then fails to type the
     // prompt into the pane. The error propagates.
     let err = ix
-        .enqueue_send(ThreadId(1), "first message", None, None)
+        .enqueue_send(SendTarget::NewSession, "first message", None)
         .await
         .expect_err("a failed first-prompt dispatch must propagate");
     assert!(matches!(err, Error::Tmux(_)));
@@ -1539,7 +1611,7 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
     // into the resumed pane.
     let main = ix.store().main_thread_id(&id).await.unwrap();
     let pending = ix
-        .enqueue_send(main, "after resume", None, None)
+        .enqueue_send(to(main), "after resume", None)
         .await
         .unwrap();
     assert_ne!(pending.id, 0, "a real pending_send row was written");
@@ -1575,7 +1647,7 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
 
     let main = ix.store().main_thread_id(&id).await.unwrap();
     let pending = ix
-        .enqueue_send(main, "after resume", None, None)
+        .enqueue_send(to(main), "after resume", None)
         .await
         .unwrap();
     assert_ne!(pending.id, 0, "a real pending_send row was written");
@@ -1658,37 +1730,74 @@ async fn open_session_unknown_id_is_session_not_found() {
     );
 }
 
-/// A branch send with no session at all is rejected with `NoSession`: there is
-/// no message to branch from, so it must not silently fall through to spawning a
-/// fresh session and dropping the branch intent.
+/// A branch send targeting a thread that does not exist is rejected with
+/// `ThreadNotFound`. A branch send always names the parent thread it hangs off,
+/// so with no such thread (no session has been registered) there is nothing to
+/// branch from — and it must not silently spawn a fresh session.
 #[tokio::test]
-async fn branch_send_without_session_is_no_session() {
+async fn branch_send_to_unknown_thread_is_thread_not_found() {
     use crate::error::Error;
 
     let ix = interactor();
     let parent = MessageUuid::from("uuid-parent");
     let err = ix
-        .enqueue_send(ThreadId(1), "branch text", None, Some(&parent))
+        .enqueue_send(branch_off(ThreadId(1), &parent), "branch text", None)
         .await
-        .expect_err("a branch send needs an existing session");
-    assert!(matches!(err, Error::NoSession));
+        .expect_err("a branch send needs an existing parent thread");
+    assert!(matches!(err, Error::ThreadNotFound(_)));
     assert!(
         ix.tmux_fake().created.lock().unwrap().is_empty(),
         "a rejected branch send must not spawn a session"
     );
 }
 
-/// Closing a session that is not open is a no-op: no pane is killed and no error
-/// is raised, so a stale close from the browser is harmless.
+/// Closing a *known* session that is not open is a no-op: no pane is killed and
+/// no error is raised, so a stale close from the browser is harmless.
 #[tokio::test]
-async fn close_session_not_open_is_a_noop() {
+async fn close_session_known_but_not_open_is_a_noop() {
     let ix = interactor();
-    ix.close_session(&SessionId::from("never-open"))
+    // Register a known-but-closed session (an external claude): it has a store
+    // row but no live pane.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-closed",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-closed");
+    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+
+    ix.close_session(&id)
         .await
-        .expect("closing a non-open session is a no-op, not an error");
+        .expect("closing a known non-open session is a no-op, not an error");
     assert!(
         ix.tmux_fake().killed.lock().unwrap().is_empty(),
         "no pane is killed when nothing was open"
+    );
+}
+
+/// Closing an *unknown* session id is rejected with `SessionNotFound` (the
+/// variant the API layer maps to 404), symmetric with `open_session`. This keeps
+/// "already closed" distinguishable from "no such session" so a stale id does not
+/// silently succeed, and no pane is killed.
+#[tokio::test]
+async fn close_session_unknown_id_is_session_not_found() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    let err = ix
+        .close_session(&SessionId::from("ghost"))
+        .await
+        .expect_err("closing a non-existent session must be rejected");
+    assert!(
+        matches!(err, Error::SessionNotFound(id) if id == "ghost"),
+        "the missing id is surfaced as SessionNotFound"
+    );
+    assert!(
+        ix.tmux_fake().killed.lock().unwrap().is_empty(),
+        "a rejected close must not kill a pane"
     );
 }
 

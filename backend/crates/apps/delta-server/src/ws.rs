@@ -1,8 +1,10 @@
 //! Browser event WebSocket.
 //!
 //! Each connected browser subscribes to the process-wide event stream and
-//! receives JSON-encoded [`SessionEvent`]s: session registered, turn started,
-//! external input, turn completed, and permission requested.
+//! receives JSON-encoded [`SessionEvent`]s: session registered, opened, closed,
+//! turn started, external input, turn completed, transcript updated, and
+//! permission requested. Every event is id-routed by `session_id`; focus is
+//! purely client-side, so there is no server-side focus event.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;

@@ -19,10 +19,12 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
         // Browser REST surface: queries and commands.
         .route(
-            "/api/session",
-            get(api::get_session).post(api::ensure_session),
+            "/api/sessions",
+            get(api::list_sessions).post(api::create_session),
         )
-        .route("/api/threads", get(api::list_threads))
+        .route("/api/sessions/{id}/open", post(api::open_session))
+        .route("/api/sessions/{id}/close", post(api::close_session))
+        .route("/api/sessions/{id}/threads", get(api::list_threads))
         .route("/api/threads/{id}/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
         // Browser event stream.
