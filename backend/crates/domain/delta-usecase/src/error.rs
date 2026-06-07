@@ -13,6 +13,10 @@ pub enum Error {
     #[error("no session registered")]
     NoSession,
 
+    /// A referenced session does not exist in the store.
+    #[error("session not found: {0}")]
+    SessionNotFound(String),
+
     /// A referenced thread does not exist.
     #[error("thread not found: {0}")]
     ThreadNotFound(i64),

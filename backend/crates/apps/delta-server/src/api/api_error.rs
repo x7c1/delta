@@ -24,7 +24,7 @@ impl IntoResponse for ApiError {
         let status = match &self.0 {
             // No session yet means nothing to act on for the caller.
             Error::NoSession => StatusCode::NOT_FOUND,
-            Error::ThreadNotFound(_) => StatusCode::NOT_FOUND,
+            Error::ThreadNotFound(_) | Error::SessionNotFound(_) => StatusCode::NOT_FOUND,
             // Everything else is an internal failure.
             Error::Tmux(_) | Error::Transcript(_) | Error::Store(_) | Error::Workspace(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR

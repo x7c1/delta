@@ -1,8 +1,9 @@
 //! PTY bridge between the browser terminal and the tmux pane.
 //!
 //! The browser runs an xterm.js terminal and connects here over a WebSocket.
-//! The server spawns `tmux attach-session` against the configured pane inside a
-//! pseudo-terminal and bridges bytes both ways: PTY output is streamed to the
+//! The server resolves the open session's pane from the registry, spawns
+//! `tmux attach-session` against it inside a pseudo-terminal, and bridges bytes
+//! both ways: PTY output is streamed to the
 //! browser as binary frames, and browser input frames are written back into the
 //! PTY. This is a deliberately minimal attach; resize negotiation and richer
 //! control messages can be layered on later without changing the route.
@@ -22,12 +23,23 @@ pub async fn pty_handler(
     State(state): State<AppState>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let pane = state.tmux_pane().to_owned();
+    // Resolve the open session's pane up front. With no session open there is
+    // nothing to attach to, so the bridge closes the socket cleanly instead of
+    // attaching to a non-existent pane.
+    let pane = state.focused_pane().await;
     upgrade.on_upgrade(move |socket| bridge(socket, pane))
 }
 
 /// Bridge a browser WebSocket to a tmux pane through a PTY.
-async fn bridge(socket: WebSocket, pane: String) {
+///
+/// With no open session (`pane` is `None`) there is nothing to attach to: log it
+/// and let the socket close.
+async fn bridge(mut socket: WebSocket, pane: Option<String>) {
+    let Some(pane) = pane else {
+        tracing::warn!("pty bridge requested with no open session; closing");
+        let _ = socket.close().await;
+        return;
+    };
     if let Err(err) = run_bridge(socket, pane).await {
         tracing::error!(error = %err, "pty bridge terminated with error");
     }

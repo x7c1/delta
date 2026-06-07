@@ -26,15 +26,19 @@ variables, all with local-friendly defaults:
 |----------|---------|---------|
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
-| `DELTA_TMUX_SESSION` | `delta` | tmux session name; the driven pane is `<session>:0.0` |
-| `DELTA_SESSION_WORKDIR` | `.tmp/session` | working directory the `claude` session runs in |
+| `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
-session present and lazily creates one (running `claude` in the working
-directory, with Claude Code hooks pointed back at it) the first time the browser
-calls `POST /api/session`. Authentication is assumed — the server relies on a
-cached Claude Code token (or `CLAUDE_CODE_OAUTH_TOKEN`) and never runs
-interactive OAuth.
+session present and lazily spawns one the first time the browser calls
+`POST /api/session`. Each spawn gets its own tmux session, named after a
+Delta-minted token (`delta-<n>`), running `claude` in its own working directory
+(`<base>/<token>`) with Claude Code hooks pointed back at this server. Naming the
+tmux session after a Delta-owned token (never Claude's `session_id`) is what lets
+a closed conversation be resumed (`claude --resume <id>`) under a fresh tmux
+session without a name collision. Open/closed is in-memory only: after a restart
+every persisted conversation is "closed" until it is resumed. Authentication is
+assumed — the server relies on a cached Claude Code token (or
+`CLAUDE_CODE_OAUTH_TOKEN`) and never runs interactive OAuth.
 
 ## Frontend (`frontend/`)
 
@@ -154,10 +158,11 @@ which brings the `claude` session up if it is not already running.
 
 If `claude` is not yet authenticated, the session will not become usable and the
 UI shows an explicit error. Run `claude` once on its own to finish login, or
-attach to the pane to log in and to answer permission prompts as they appear:
+attach to a spawned pane to log in and to answer permission prompts as they
+appear (each spawn is named `delta-<n>`; the first is `delta-1`):
 
 ```bash
-tmux attach -t delta     # detach again with Ctrl-b then d
+tmux attach -t delta-1     # detach again with Ctrl-b then d
 ```
 
 ### Happy-path check
@@ -165,7 +170,7 @@ tmux attach -t delta     # detach again with Ctrl-b then d
 Type a message in the browser. It is dispatched into the tmux pane via
 `send-keys`; `claude`'s reply is ingested from the transcript and surfaces in
 the browser. When a tool needs permission, answer it in the embedded terminal or
-in the TUI (`tmux attach -t delta`).
+in the TUI (`tmux attach -t delta-1`).
 
 ### Shut down
 
@@ -173,5 +178,5 @@ in the TUI (`tmux attach -t delta`).
 scripts/dev.sh --down    # or: scripts/stop.sh
 ```
 
-This stops `delta-server`, the frontend dev server (port 5173), and the `delta`
-tmux session.
+This stops `delta-server`, the frontend dev server (port 5173), and every
+`delta-<n>` tmux session the server spawned.

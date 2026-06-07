@@ -16,39 +16,59 @@ use crate::ports::{
 };
 use crate::Interactor;
 
+/// A single recorded `create_session` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CreatedSession {
+    name: String,
+    workdir: String,
+    command: Vec<String>,
+}
+
 #[derive(Default)]
 struct FakeTmux {
-    sent: Mutex<Vec<String>>,
+    /// The `(pane, text)` pairs `send_line` was called with.
+    sent: Mutex<Vec<(String, String)>>,
     /// When set, `send_line` fails instead of recording the line, simulating a
     /// dispatch failure into the pane.
     fail: bool,
-    /// Whether a session currently "exists" for `has_session`. Toggled to true
-    /// by `create_session`.
-    has_session: Mutex<bool>,
-    /// The `(workdir, command)` pairs `create_session` was called with.
-    created: Mutex<Vec<(String, String)>>,
+    /// The session names currently "existing" for `has_session`.
+    live: Mutex<Vec<String>>,
+    /// The sessions `create_session` was called with, in order.
+    created: Mutex<Vec<CreatedSession>>,
+    /// The session names `kill_session` was called with, in order.
+    killed: Mutex<Vec<String>>,
 }
 
 #[async_trait]
 impl TmuxDriver for FakeTmux {
-    async fn has_session(&self) -> Result<bool> {
-        Ok(*self.has_session.lock().unwrap())
+    async fn has_session(&self, name: &str) -> Result<bool> {
+        Ok(self.live.lock().unwrap().iter().any(|n| n == name))
     }
 
-    async fn create_session(&self, workdir: &str, command: &str) -> Result<()> {
-        self.created
-            .lock()
-            .unwrap()
-            .push((workdir.to_owned(), command.to_owned()));
-        *self.has_session.lock().unwrap() = true;
+    async fn create_session(&self, name: &str, workdir: &str, command: &[String]) -> Result<()> {
+        self.created.lock().unwrap().push(CreatedSession {
+            name: name.to_owned(),
+            workdir: workdir.to_owned(),
+            command: command.to_vec(),
+        });
+        self.live.lock().unwrap().push(name.to_owned());
         Ok(())
     }
 
-    async fn send_line(&self, text: &str) -> Result<()> {
+    async fn send_line(&self, pane: &str, text: &str) -> Result<()> {
         if self.fail {
             return Err(crate::error::Error::Tmux("dispatch failed".into()));
         }
-        self.sent.lock().unwrap().push(text.to_owned());
+        self.sent
+            .lock()
+            .unwrap()
+            .push((pane.to_owned(), text.to_owned()));
+        Ok(())
+    }
+
+    async fn kill_session(&self, name: &str) -> Result<()> {
+        self.killed.lock().unwrap().push(name.to_owned());
+        self.live.lock().unwrap().retain(|n| n != name);
         Ok(())
     }
 }
@@ -412,12 +432,20 @@ fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
     }
 }
 
+/// The base working directory the test interactor spawns sessions under.
+const TEST_WORKDIR_BASE: &str = "/work";
+
+/// The hook settings JSON the test interactor writes into each spawn's workdir.
+const TEST_SETTINGS_JSON: &str = r#"{"hooks":{}}"#;
+
 fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
     Interactor::new(
         FakeTmux::default(),
         FakeTranscript::default(),
         FakeStore::default(),
         FakeWorkspace::default(),
+        TEST_WORKDIR_BASE,
+        TEST_SETTINGS_JSON,
     )
 }
 
@@ -432,6 +460,8 @@ fn interactor_with_failing_tmux() -> Interactor<FakeTmux, FakeTranscript, FakeSt
         FakeTranscript::default(),
         FakeStore::default(),
         FakeWorkspace::default(),
+        TEST_WORKDIR_BASE,
+        TEST_SETTINGS_JSON,
     )
 }
 
@@ -456,53 +486,85 @@ fn submit_for(session_id: &str, transcript_path: &str, text: &str) -> UserPrompt
 }
 
 #[tokio::test]
-async fn ensure_session_creates_and_writes_settings_when_absent() {
+async fn ensure_session_spawns_a_session_in_its_own_workdir_when_absent() {
     let ix = interactor();
 
-    let status = ix
-        .ensure_session("/work/session", "claude", r#"{"hooks":{}}"#)
-        .await
-        .unwrap();
+    let status = ix.ensure_session().await.unwrap();
 
-    // A fresh session reports `Starting`, was created with the given workdir and
-    // command, and had its settings written first.
+    // A fresh cold start reports `Starting` and spawns a session in its own
+    // per-token workdir under the base, with the settings written there first.
     assert_eq!(status, SessionLifecycle::Starting);
     let created = ix.tmux_fake().created.lock().unwrap().clone();
+    assert_eq!(created.len(), 1, "one session was spawned");
+    assert_eq!(created[0].name, "delta-1", "named after the minted token");
+    assert_eq!(created[0].workdir, "/work/delta-1", "<base>/<token>");
     assert_eq!(
-        created,
-        vec![("/work/session".to_owned(), "claude".to_owned())]
+        created[0].command,
+        vec!["claude".to_owned()],
+        "plain claude"
     );
     let written = ix.workspace_fake().written.lock().unwrap().clone();
     assert_eq!(
         written,
-        vec![("/work/session".to_owned(), r#"{"hooks":{}}"#.to_owned())]
+        vec![("/work/delta-1".to_owned(), TEST_SETTINGS_JSON.to_owned())]
     );
 }
 
 #[tokio::test]
-async fn ensure_session_reuses_existing_session_idempotently() {
+async fn ensure_session_is_idempotent_while_a_spawn_is_live() {
     let ix = interactor();
 
-    // First call creates the session.
-    ix.ensure_session("/work/session", "claude", "{}")
-        .await
-        .unwrap();
-    // Second call finds it already up: reuse, no second create, no second write.
-    let status = ix
-        .ensure_session("/work/session", "claude", "{}")
-        .await
-        .unwrap();
+    // First call spawns a session. It stays pending (no hook has bound it yet).
+    ix.ensure_session().await.unwrap();
+    // Second call finds a live (pending) spawn: reuse, no second spawn or write.
+    let status = ix.ensure_session().await.unwrap();
 
     assert_eq!(status, SessionLifecycle::Ready);
     assert_eq!(
         ix.tmux_fake().created.lock().unwrap().len(),
         1,
-        "an existing session must not be recreated"
+        "a live spawn must not be re-spawned"
     );
     assert_eq!(
         ix.workspace_fake().written.lock().unwrap().len(),
         1,
-        "settings must not be rewritten when the session is reused"
+        "settings must not be rewritten when a spawn is already live"
+    );
+}
+
+/// `ensure_session` is idempotent against a *bound* session too, not only a
+/// pending spawn: once a hook has bound the spawn to a session id, a further
+/// `ensure_session` reuses it (`Ready`) without spawning a second pane. This
+/// pins the `bound` half of `has_any_live`, which the pending-only idempotency
+/// test above does not exercise.
+#[tokio::test]
+async fn ensure_session_is_idempotent_while_a_session_is_bound() {
+    let ix = interactor();
+
+    // Spawn, then bind it to a session id via a hook in its workdir.
+    ix.ensure_session().await.unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-B",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    assert!(
+        ix.pane_for_session(&SessionId::from("sess-B"))
+            .await
+            .is_some(),
+        "the spawn is now bound"
+    );
+
+    // A further ensure_session finds the bound session live: reuse, no re-spawn.
+    let status = ix.ensure_session().await.unwrap();
+    assert_eq!(status, SessionLifecycle::Ready);
+    assert_eq!(
+        ix.tmux_fake().created.lock().unwrap().len(),
+        1,
+        "a bound session must not be re-spawned"
     );
 }
 
@@ -1220,6 +1282,482 @@ async fn poll_transcript_without_session_is_empty() {
     let ix = interactor();
     let polled = ix.poll_transcript().await.unwrap();
     assert!(polled.is_empty());
+}
+
+/// A submit hook for an explicit cwd, used by the spawn-binding tests where the
+/// hook's cwd is the correlation key to a pending spawn.
+fn submit_in(
+    session_id: &str,
+    transcript_path: &str,
+    cwd: &str,
+    text: &str,
+) -> UserPromptSubmitHook {
+    UserPromptSubmitHook {
+        prompt: text.into(),
+        session_id: SessionId::from(session_id),
+        transcript_path: transcript_path.into(),
+        cwd: cwd.into(),
+    }
+}
+
+/// Composer-first send with no prior session: it spawns a fresh session,
+/// defers the first prompt, and once a `UserPromptSubmit` binds the spawn the
+/// deferred `pending_send` is written and the first user line correlates (the
+/// turn starts) through the normal machinery.
+#[tokio::test]
+async fn composer_first_send_defers_first_prompt_until_bind() {
+    let ix = interactor();
+
+    // No session exists yet. The send spawns a fresh session and returns a
+    // synthetic (not-yet-persisted) pending row.
+    let returned = ix
+        .enqueue_send(ThreadId(1), "first message", None, None)
+        .await
+        .unwrap();
+    assert_eq!(returned.id, 0, "no row persisted before the spawn binds");
+    assert_eq!(returned.text, "first message");
+
+    // The spawn created exactly one tmux session in its own workdir, and no
+    // pending_send row was written yet (the session id does not exist).
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].name, "delta-1");
+    assert_eq!(created[0].workdir, "/work/delta-1");
+
+    // The deferred first prompt was actually typed into the spawned pane up
+    // front (otherwise Claude would sit idle and never fire the hook that binds
+    // the spawn).
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert_eq!(
+        sent,
+        vec![("delta-1:0.0".to_owned(), "first message".to_owned())],
+        "the first prompt is dispatched into the fresh pane"
+    );
+
+    // The first UserPromptSubmit arrives in the spawn's workdir. It binds the
+    // spawn to the now-known session id, registers the session, and writes the
+    // deferred pending_send BEFORE attribution — so the user line correlates.
+    ix.transcript_fake()
+        .push_to("/work/delta-1/t.jsonl", user_line("u-1", "first message"));
+    let (events, _) = ix
+        .on_user_prompt_submit(submit_in(
+            "sess-A",
+            "/work/delta-1/t.jsonl",
+            "/work/delta-1",
+            "first message",
+        ))
+        .await
+        .unwrap();
+
+    // The session registered and the first turn started (the deferred send was
+    // written and matched the user line).
+    assert!(events.contains(&SessionEvent::SessionRegistered {
+        session_id: SessionId::from("sess-A"),
+    }));
+    let started = events
+        .iter()
+        .any(|e| matches!(e, SessionEvent::TurnStarted { .. }));
+    assert!(started, "the deferred first prompt correlates into a turn");
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
+        "a bound deferred send is not external input"
+    );
+
+    // The user line landed on main and the send is now matched (FIFO clear).
+    let main = ix
+        .store()
+        .main_thread_id(&SessionId::from("sess-A"))
+        .await
+        .unwrap();
+    let view = ix.thread_view(main).await.unwrap();
+    assert!(view.iter().any(|m| m.uuid.as_str() == "u-1"));
+    assert!(ix
+        .store()
+        .head_pending_send(&SessionId::from("sess-A"))
+        .await
+        .unwrap()
+        .is_none());
+}
+
+/// When the composer-first spawn cannot type its first prompt into the new
+/// pane, the use case surfaces the dispatch error AND rolls the half-spawned
+/// pane out of `pending`, so a later, unrelated `UserPromptSubmit` arriving in
+/// that workdir is not mis-bound to it (it registers as external instead).
+#[tokio::test]
+async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
+    use crate::error::Error;
+
+    let ix = interactor_with_failing_tmux();
+
+    // No session yet: the composer-first send spawns, then fails to type the
+    // prompt into the pane. The error propagates.
+    let err = ix
+        .enqueue_send(ThreadId(1), "first message", None, None)
+        .await
+        .expect_err("a failed first-prompt dispatch must propagate");
+    assert!(matches!(err, Error::Tmux(_)));
+
+    // The spawn was rolled back: a hook later arriving in that same workdir
+    // finds no pending spawn and is treated as an external, closed session
+    // rather than binding to the abandoned pane.
+    let (events, _) = ix
+        .on_user_prompt_submit(submit_in(
+            "sess-late",
+            "/work/delta-1/t.jsonl",
+            "/work/delta-1",
+            "typed in claude",
+        ))
+        .await
+        .unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
+        "no pending spawn remained, so the hook is external input"
+    );
+    assert!(
+        ix.pane_for_session(&SessionId::from("sess-late"))
+            .await
+            .is_none(),
+        "the rolled-back spawn must not bind a later session"
+    );
+}
+
+/// A `UserPromptSubmit` for an unknown session id whose cwd matches a pending
+/// spawn binds that spawn (pending → bound) and registers the session.
+#[tokio::test]
+async fn user_prompt_binds_pending_spawn_by_workdir() {
+    let ix = interactor();
+    // Cold-start spawn (no first prompt).
+    ix.new_session().await.unwrap();
+
+    // The spawn is not yet open under any session id.
+    assert!(ix
+        .pane_for_session(&SessionId::from("sess-A"))
+        .await
+        .is_none());
+
+    // A hook arrives in the spawn's workdir; it binds and registers.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-A",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+
+    // Now bound: the pane is the spawn's pane, and the session row exists.
+    assert_eq!(
+        ix.pane_for_session(&SessionId::from("sess-A")).await,
+        Some("delta-1:0.0".to_owned())
+    );
+    assert!(ix
+        .store()
+        .session(&SessionId::from("sess-A"))
+        .await
+        .unwrap()
+        .is_some());
+}
+
+/// Two pending spawns with DIFFERENT workdirs bind to the right session each:
+/// the per-spawn unique-workdir guarantee makes the correlation exact.
+#[tokio::test]
+async fn two_pending_spawns_bind_to_the_right_session_each() {
+    let ix = interactor();
+    ix.new_session().await.unwrap(); // delta-1 → /work/delta-1
+    ix.new_session().await.unwrap(); // delta-2 → /work/delta-2
+
+    // Bind them in the opposite order to their spawn order, by workdir.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-2",
+        "/work/delta-2/t.jsonl",
+        "/work/delta-2",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-1",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+
+    assert_eq!(
+        ix.pane_for_session(&SessionId::from("sess-1")).await,
+        Some("delta-1:0.0".to_owned()),
+    );
+    assert_eq!(
+        ix.pane_for_session(&SessionId::from("sess-2")).await,
+        Some("delta-2:0.0".to_owned()),
+    );
+}
+
+/// `open_session` resumes a closed known session: it spawns `claude --resume
+/// <id>` (asserted via the recorded argv), binds it, and a subsequent send uses
+/// the normal pre-dispatch pending_send path into the resumed pane.
+#[tokio::test]
+async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
+    let ix = interactor();
+    // Register a known-but-closed session (an external claude in /elsewhere).
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+
+    ix.open_session(&id).await.unwrap();
+
+    // The resume spawned `claude --resume sess-R` in the session's stored cwd.
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    let resume = created
+        .iter()
+        .find(|c| c.command.iter().any(|a| a == "--resume"))
+        .expect("a resume spawn was recorded");
+    assert_eq!(
+        resume.command,
+        vec![
+            "claude".to_owned(),
+            "--resume".to_owned(),
+            "sess-R".to_owned()
+        ],
+    );
+    assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
+    let pane = ix.pane_for_session(&id).await.expect("now open");
+
+    // A subsequent send writes the pending_send (normal path) and dispatches
+    // into the resumed pane.
+    let main = ix.store().main_thread_id(&id).await.unwrap();
+    let pending = ix
+        .enqueue_send(main, "after resume", None, None)
+        .await
+        .unwrap();
+    assert_ne!(pending.id, 0, "a real pending_send row was written");
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert!(
+        sent.iter().any(|(p, t)| p == &pane && t == "after resume"),
+        "the send dispatched into the resumed pane"
+    );
+}
+
+/// `enqueue_send` against a known-but-*closed* session resumes it as part of the
+/// send (the documented "Closed" branch): `ensure_open` finds no live pane, so
+/// it spawns `claude --resume <id>` and then dispatches the message into the
+/// freshly-resumed pane on the normal path — all within the single
+/// `enqueue_send` call, with no prior explicit `open_session`. This pins the
+/// resume-within-send wiring, which the test above only exercises after a
+/// separate `open_session` (the already-open branch of `ensure_open`).
+#[tokio::test]
+async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
+    let ix = interactor();
+    // Register a known-but-closed session (an external claude in /elsewhere):
+    // it has a store row but no live pane.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+
+    let main = ix.store().main_thread_id(&id).await.unwrap();
+    let pending = ix
+        .enqueue_send(main, "after resume", None, None)
+        .await
+        .unwrap();
+    assert_ne!(pending.id, 0, "a real pending_send row was written");
+
+    // The send resumed the session: a `claude --resume sess-R` spawn was
+    // recorded in the stored cwd, with no prior explicit open_session call.
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    let resume = created
+        .iter()
+        .find(|c| c.command.iter().any(|a| a == "--resume"))
+        .expect("the send resumed the closed session");
+    assert_eq!(
+        resume.command,
+        vec![
+            "claude".to_owned(),
+            "--resume".to_owned(),
+            "sess-R".to_owned()
+        ],
+    );
+    assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
+
+    // The session is now open and the message was dispatched into its pane.
+    let pane = ix.pane_for_session(&id).await.expect("now open after send");
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert!(
+        sent.iter().any(|(p, t)| p == &pane && t == "after resume"),
+        "the send dispatched into the resumed pane"
+    );
+}
+
+/// Opening an already-open session does not spawn a second pane (double-open
+/// guard): it routes to the existing one.
+#[tokio::test]
+async fn open_session_is_a_noop_when_already_open() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+
+    ix.open_session(&id).await.unwrap();
+    let first_pane = ix.pane_for_session(&id).await.unwrap();
+    let created_after_first = ix.tmux_fake().created.lock().unwrap().len();
+
+    // A second open is a no-op: same pane, no new spawn.
+    ix.open_session(&id).await.unwrap();
+    assert_eq!(ix.pane_for_session(&id).await.unwrap(), first_pane);
+    assert_eq!(
+        ix.tmux_fake().created.lock().unwrap().len(),
+        created_after_first,
+        "no second pane spawned for an already-open session"
+    );
+}
+
+/// Opening a session id that does not exist in the store is rejected with
+/// `SessionNotFound` (the variant the API layer maps to 404), and no pane is
+/// spawned. This is the only code path that produces `SessionNotFound`, so it
+/// pins both the error and the reason its 404 mapping exists.
+#[tokio::test]
+async fn open_session_unknown_id_is_session_not_found() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    let err = ix
+        .open_session(&SessionId::from("ghost"))
+        .await
+        .expect_err("opening a non-existent session must be rejected");
+    assert!(
+        matches!(err, Error::SessionNotFound(id) if id == "ghost"),
+        "the missing id is surfaced as SessionNotFound"
+    );
+    assert!(
+        ix.tmux_fake().created.lock().unwrap().is_empty(),
+        "a rejected open must not spawn a pane"
+    );
+}
+
+/// A branch send with no session at all is rejected with `NoSession`: there is
+/// no message to branch from, so it must not silently fall through to spawning a
+/// fresh session and dropping the branch intent.
+#[tokio::test]
+async fn branch_send_without_session_is_no_session() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    let parent = MessageUuid::from("uuid-parent");
+    let err = ix
+        .enqueue_send(ThreadId(1), "branch text", None, Some(&parent))
+        .await
+        .expect_err("a branch send needs an existing session");
+    assert!(matches!(err, Error::NoSession));
+    assert!(
+        ix.tmux_fake().created.lock().unwrap().is_empty(),
+        "a rejected branch send must not spawn a session"
+    );
+}
+
+/// Closing a session that is not open is a no-op: no pane is killed and no error
+/// is raised, so a stale close from the browser is harmless.
+#[tokio::test]
+async fn close_session_not_open_is_a_noop() {
+    let ix = interactor();
+    ix.close_session(&SessionId::from("never-open"))
+        .await
+        .expect("closing a non-open session is a no-op, not an error");
+    assert!(
+        ix.tmux_fake().killed.lock().unwrap().is_empty(),
+        "no pane is killed when nothing was open"
+    );
+}
+
+/// A `UserPromptSubmit` for an unknown id with NO matching pending spawn is an
+/// external claude: it registers a closed data session (no open pane) and emits
+/// external input, without panicking.
+#[tokio::test]
+async fn unknown_session_without_pending_spawn_registers_external_closed() {
+    let ix = interactor();
+    ix.transcript_fake()
+        .push_to("/outside/t.jsonl", user_line("u-x", "typed outside"));
+
+    let (events, _) = ix
+        .on_user_prompt_submit(submit_in(
+            "sess-X",
+            "/outside/t.jsonl",
+            "/outside",
+            "typed outside",
+        ))
+        .await
+        .unwrap();
+
+    // Registered, but closed (no live pane), and reported as external input.
+    assert!(events.contains(&SessionEvent::SessionRegistered {
+        session_id: SessionId::from("sess-X"),
+    }));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        SessionEvent::ExternalInput { prompt, .. } if prompt == "typed outside"
+    )));
+    assert!(
+        ix.pane_for_session(&SessionId::from("sess-X"))
+            .await
+            .is_none(),
+        "an external session has no open pane"
+    );
+}
+
+/// `close_session` kills the pane (recorded by the fake) and removes it from the
+/// registry, while the session data remains in the store.
+#[tokio::test]
+async fn close_session_kills_the_pane_and_keeps_the_data() {
+    let ix = interactor();
+    // Spawn and bind a session.
+    ix.new_session().await.unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-C",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-C");
+    assert!(
+        ix.pane_for_session(&id).await.is_some(),
+        "open before close"
+    );
+
+    ix.close_session(&id).await.unwrap();
+
+    // The pane was killed by token, and the session is no longer open.
+    assert_eq!(
+        ix.tmux_fake().killed.lock().unwrap().clone(),
+        vec!["delta-1".to_owned()],
+    );
+    assert!(ix.pane_for_session(&id).await.is_none(), "closed");
+    // The data session remains.
+    assert!(ix.store().session(&id).await.unwrap().is_some());
 }
 
 /// `frame_locator_context` wraps a non-empty quote with provenance framing and

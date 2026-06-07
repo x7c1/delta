@@ -41,23 +41,34 @@ use delta_usecase::{Interactor, TmuxDriver, Workspace};
 /// a real tmux.
 #[derive(Default)]
 struct FakeTmux {
+    /// The number of lines dispatched via `send_line`.
     sent: AtomicUsize,
-    has_session: std::sync::atomic::AtomicBool,
+    /// The number of sessions spawned via `create_session`.
+    created: AtomicUsize,
 }
 
 #[async_trait]
 impl TmuxDriver for FakeTmux {
-    async fn has_session(&self) -> delta_usecase::Result<bool> {
-        Ok(self.has_session.load(Ordering::SeqCst))
+    async fn has_session(&self, _name: &str) -> delta_usecase::Result<bool> {
+        Ok(false)
     }
 
-    async fn create_session(&self, _workdir: &str, _command: &str) -> delta_usecase::Result<()> {
-        self.has_session.store(true, Ordering::SeqCst);
+    async fn create_session(
+        &self,
+        _name: &str,
+        _workdir: &str,
+        _command: &[String],
+    ) -> delta_usecase::Result<()> {
+        self.created.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
-    async fn send_line(&self, _text: &str) -> delta_usecase::Result<()> {
+    async fn send_line(&self, _pane: &str, _text: &str) -> delta_usecase::Result<()> {
         self.sent.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn kill_session(&self, _name: &str) -> delta_usecase::Result<()> {
         Ok(())
     }
 }
@@ -68,16 +79,25 @@ struct SharedTmux(Arc<FakeTmux>);
 
 #[async_trait]
 impl TmuxDriver for SharedTmux {
-    async fn has_session(&self) -> delta_usecase::Result<bool> {
-        self.0.has_session().await
+    async fn has_session(&self, name: &str) -> delta_usecase::Result<bool> {
+        self.0.has_session(name).await
     }
 
-    async fn create_session(&self, workdir: &str, command: &str) -> delta_usecase::Result<()> {
-        self.0.create_session(workdir, command).await
+    async fn create_session(
+        &self,
+        name: &str,
+        workdir: &str,
+        command: &[String],
+    ) -> delta_usecase::Result<()> {
+        self.0.create_session(name, workdir, command).await
     }
 
-    async fn send_line(&self, text: &str) -> delta_usecase::Result<()> {
-        self.0.send_line(text).await
+    async fn send_line(&self, pane: &str, text: &str) -> delta_usecase::Result<()> {
+        self.0.send_line(pane, text).await
+    }
+
+    async fn kill_session(&self, name: &str) -> delta_usecase::Result<()> {
+        self.0.kill_session(name).await
     }
 }
 
@@ -115,14 +135,11 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf) {
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(NoopWorkspace) as Box<dyn delta_usecase::Workspace>,
+        "/tmp/delta-e2e-session",
+        "{}",
     );
 
-    let state = AppState::from_interactor(
-        interactor,
-        "delta:0.0".into(),
-        "/tmp/delta-e2e-session".into(),
-        "{}".into(),
-    );
+    let state = AppState::from_interactor(interactor);
     (router(state), tmux, transcript_path)
 }
 
@@ -312,18 +329,30 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
 async fn ensure_session_endpoint_reports_starting_then_ready() {
     let (app, tmux, transcript_path) = build_app();
 
-    // No session exists yet, so the first POST /api/session creates it and the
+    // No session exists yet, so the first POST /api/session spawns one and the
     // route serializes the lifecycle as "starting".
     let (status, body) = post_json(&app, "/api/session", json!({})).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["status"], "starting", "a freshly created session is starting");
-    assert!(tmux.has_session().await.unwrap(), "the session was created");
+    assert_eq!(
+        body["status"], "starting",
+        "a freshly spawned session is starting"
+    );
+    assert_eq!(
+        tmux.created.load(Ordering::SeqCst),
+        1,
+        "exactly one session was spawned"
+    );
 
-    // A second POST finds the session already up: idempotent reuse, reported as
-    // "ready" with no recreate.
+    // A second POST finds a live spawn already in the registry: idempotent
+    // reuse, reported as "ready" with no second spawn.
     let (status, body) = post_json(&app, "/api/session", json!({})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ready", "a reused session is ready");
+    assert_eq!(
+        tmux.created.load(Ordering::SeqCst),
+        1,
+        "no second session was spawned"
+    );
 
     let _ = std::fs::remove_file(&transcript_path);
 }

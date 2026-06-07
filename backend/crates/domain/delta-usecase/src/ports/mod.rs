@@ -15,7 +15,7 @@ pub use session_store::SessionStore;
 mod stop_hook;
 pub use stop_hook::StopHook;
 mod tmux_driver;
-pub use tmux_driver::TmuxDriver;
+pub use tmux_driver::{pane_for, TmuxDriver};
 mod transcript;
 pub use transcript::Transcript;
 mod transcript_message;

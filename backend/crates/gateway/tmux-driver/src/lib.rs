@@ -1,10 +1,11 @@
 //! tmux-backed [`TmuxDriver`] implementation.
 //!
-//! [`Tmux`] manages the Claude Code session by shelling out to `tmux`. It is
-//! constructed with a session name and derives the pane it drives as
-//! `<session>:0.0`. It can create/check/kill the session and send keystrokes:
-//! text is sent literally (with `-l`) followed by a separate `Enter` keystroke
-//! so the prompt is submitted exactly as typed.
+//! [`Tmux`] manages Claude Code sessions by shelling out to `tmux`. It is
+//! stateless: every method takes the target session name (or pane) explicitly,
+//! so one driver instance manages any number of concurrent sessions. It can
+//! create/check/kill a session and send keystrokes: text is sent literally
+//! (with `-l`) followed by a separate `Enter` keystroke so the prompt is
+//! submitted exactly as typed.
 
 mod error;
 mod tmux;
