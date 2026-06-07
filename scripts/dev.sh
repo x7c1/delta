@@ -12,13 +12,15 @@
 #
 # What it does:
 #   1. Starts `delta-server` (DELTA_PORT=7878). The server owns the claude
-#      session lifecycle: it lazily creates the tmux session running `claude`
-#      (and writes its `.claude/settings.json` so the hooks point back at the
-#      server) the first time the browser asks for it.
+#      session lifecycle: spawning a session creates a tmux session running
+#      `claude` (and writes its `.claude/settings.json` so the hooks point back
+#      at the server). No session is spawned on startup or on page load.
 #   2. Starts the frontend dev server against the real backend.
 #
-# Opening the browser is the only manual step: when the web UI loads it asks the
-# server to bring the session up, so tmux is a hidden implementation detail.
+# Opening the browser is the only manual step. On load the UI shows the session
+# list (empty on a fresh database) — it does not auto-start anything. The first
+# Send from the composer (or a New action) spawns a fresh `claude` session;
+# Sending to a closed session resumes it. tmux is a hidden implementation detail.
 #
 # Authentication is assumed: the server relies on a cached Claude Code token (or
 # CLAUDE_CODE_OAUTH_TOKEN) and does not run interactive OAuth. If `claude` is not
@@ -226,10 +228,12 @@ The only manual step: open the browser.
 
   Open:  http://localhost:$FRONTEND_PORT
 
-When the UI loads it asks the server to start the claude session, so there is
-nothing else to launch. Authentication is assumed (cached token /
-CLAUDE_CODE_OAUTH_TOKEN). If claude is not yet authenticated, run 'claude' once
-on its own — or attach to a spawned pane — to complete login, then reload:
+On load the UI shows the session list (empty on a fresh database); nothing
+auto-starts. The first Send from the composer (or a New action) spawns a fresh
+claude session, and Sending to a closed session resumes it. Authentication is
+assumed (cached token / CLAUDE_CODE_OAUTH_TOKEN). If claude is not yet
+authenticated, run 'claude' once on its own — or attach to a spawned pane — to
+complete login, then reload:
 
        tmux attach -t ${TMUX_SESSION_PREFIX}1      # detach with Ctrl-b then d
 
