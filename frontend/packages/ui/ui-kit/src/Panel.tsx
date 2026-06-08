@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { cn } from './cn';
 
 export interface PanelProps {
@@ -8,6 +8,11 @@ export interface PanelProps {
   footer?: ReactNode;
   className?: string;
   bodyClassName?: string;
+  /**
+   * Optional ref to the scrollable body `<div>`, so callers can drive its
+   * scroll position (e.g. stick-to-bottom transcripts).
+   */
+  bodyRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }
 
@@ -20,6 +25,7 @@ export function Panel({
   footer,
   className,
   bodyClassName,
+  bodyRef,
   children,
 }: PanelProps) {
   return (
@@ -31,7 +37,10 @@ export function Panel({
           {header}
         </header>
       )}
-      <div className={cn('min-h-0 flex-1 overflow-y-auto', bodyClassName)}>
+      <div
+        ref={bodyRef}
+        className={cn('min-h-0 flex-1 overflow-y-auto', bodyClassName)}
+      >
         {children}
       </div>
       {footer !== undefined && (
