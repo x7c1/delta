@@ -131,6 +131,48 @@ describe('Composer', () => {
     expect(useLiveStore.getState().pending[0]?.threadId).toBe(MAIN_THREAD_ID);
   });
 
+  it('branches from a closed (read-only) session, drilling into the new child', async () => {
+    // A quote selected in a closed session sets a branch origin. The send must
+    // still branch (not degrade into a plain resume): the backend resumes the
+    // session and creates the child, and the composer drills into it.
+    useComposerStore.setState({
+      branchOrigin: {
+        parentThreadId: MAIN_THREAD_ID,
+        semanticParentUuid: 'uuid-a',
+        locatorQuote: 'old passage',
+      },
+    });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              readOnly: true,
+              sessionMainThreadId: MAIN_THREAD_ID,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'dig into this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      const active = useNavStore.getState().activeThreadId;
+      expect(active).not.toBeNull();
+      expect(active).not.toBe(MAIN_THREAD_ID);
+    });
+    expect(useComposerStore.getState().branchOrigin).toBeNull();
+  });
+
   it('marks the optimistic send failed when the resume request fails', async () => {
     // Force the send to fail so the resume never starts.
     server.use(

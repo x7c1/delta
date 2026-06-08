@@ -41,10 +41,10 @@ export interface TranscriptPaneProps {
  * The right pane. For an existing session it shows the active thread's trunk as
  * a linear list (breadcrumb, branch chips, external-input marker) in the
  * scrolling body, with a pinned footer that stacks the optimistic pending-send
- * strip directly above the composer. A closed session is view-only —
- * branch-from-quote is disabled — but the composer stays available so a Send
- * resumes the session. For the new-session state it shows a blank prompt and a
- * new-session composer.
+ * strip directly above the composer. A closed session is read-only for viewing,
+ * but the composer stays available: a plain Send resumes it, and a
+ * branch-from-quote both resumes it and drills into the new sub-thread. For the
+ * new-session state it shows a blank prompt and a new-session composer.
  */
 export function TranscriptPane({
   threads,
@@ -256,15 +256,15 @@ export function TranscriptPane({
           <div key={message.uuid}>
             <MessageItem
               message={message}
-              onSelectQuote={
-                readOnly
-                  ? undefined
-                  : (msg, quote) =>
-                      setBranchOrigin({
-                        parentThreadId: activeThread!.id,
-                        semanticParentUuid: msg.uuid,
-                        locatorQuote: quote,
-                      })
+              // Branch-from-quote works on closed sessions too: the branch send
+              // resumes the session before creating the child thread, so an old
+              // conversation can be picked up from a selected passage.
+              onSelectQuote={(msg, quote) =>
+                setBranchOrigin({
+                  parentThreadId: activeThread!.id,
+                  semanticParentUuid: msg.uuid,
+                  locatorQuote: quote,
+                })
               }
             />
             {children.length > 0 && (
