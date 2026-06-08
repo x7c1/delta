@@ -22,6 +22,12 @@ const CONNECTION_TONE: Record<ConnectionStatus, DotTone> = {
   closed: 'red',
 };
 
+const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
+  connecting: 'Server connection: connecting…',
+  open: 'Server connection: connected',
+  closed: 'Server connection: disconnected',
+};
+
 /**
  * The left pane: a session → thread nested tree, plus a "New" affordance, the
  * open-session count, the permission notice, a running indicator, and the live
@@ -35,7 +41,6 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
   const connection = useLiveStore((state) => state.connection);
   const permission = useLiveStore((state) => state.permission);
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
-  const resuming = useLiveStore((state) => state.resuming);
   const hasInProgress = useLiveStore((state) =>
     state.pending.some((item) => item.status === 'in_progress'),
   );
@@ -51,9 +56,15 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
       className="border-r border-slate-200"
       header={
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-slate-700">
-            Sessions
-          </span>
+          <div className="flex items-center gap-2">
+            <StatusDot
+              tone={CONNECTION_TONE[connection]}
+              title={CONNECTION_TITLE[connection]}
+            />
+            <span className="text-sm font-semibold text-slate-700">
+              Sessions
+            </span>
+          </div>
           <div className="flex items-center gap-2">
             <span
               className="text-xs text-slate-500"
@@ -61,7 +72,13 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
             >
               open: {openCount}
             </span>
-            <StatusDot tone={CONNECTION_TONE[connection]} label={connection} />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
+            >
+              New
+            </Button>
           </div>
         </div>
       }
@@ -84,19 +101,6 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
         </div>
       )}
 
-      <div className="flex items-center justify-between px-3 py-2">
-        <span className="text-xs uppercase tracking-wide text-slate-400">
-          Conversations
-        </span>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
-        >
-          New
-        </Button>
-      </div>
-
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
           className="mx-3 mb-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-700"
@@ -112,7 +116,6 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
             key={item.session.id}
             item={item}
             isFocused={focusedSessionId === item.session.id}
-            resuming={resuming[item.session.id] ?? false}
             threads={
               focusedSessionId === item.session.id ? threads : undefined
             }

@@ -129,7 +129,7 @@ describe('WorkspaceScreen multi-session', () => {
     expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
 
     // Only the open session exposes a Close affordance.
-    fireEvent.click(screen.getByRole('button', { name: /^Close/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Close session/ }));
 
     // The mock flips the session closed; the refetched list drops the open
     // count and the still-focused session re-renders read-only.

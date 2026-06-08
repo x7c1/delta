@@ -1,12 +1,10 @@
 import type { SessionListItem, Thread } from '@delta/model';
-import { Badge, StatusDot, cn } from '@delta/ui-kit';
+import { StatusDot, cn } from '@delta/ui-kit';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
   item: SessionListItem;
   isFocused: boolean;
-  /** True while a Send-driven resume of this session is awaiting confirmation. */
-  resuming: boolean;
   /**
    * The session's thread tree, supplied only for the focused session (whose
    * threads are loaded). Expanding shows it; non-focused sessions show no tree.
@@ -26,6 +24,28 @@ function sessionLabel(item: SessionListItem): string {
 }
 
 /**
+ * Format a stored UTC ISO-8601 timestamp as absolute local time
+ * (`YYYY-MM-DD HH:mm`) in the browser's timezone. Returns `null` when the input
+ * is absent or unparseable so the caller can render nothing.
+ */
+function formatLastActivity(iso: string | null): string | null {
+  if (!iso) {
+    return null;
+  }
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = date.getFullYear();
+  const mo = pad(date.getMonth() + 1);
+  const d = pad(date.getDate());
+  const h = pad(date.getHours());
+  const mi = pad(date.getMinutes());
+  return `${y}-${mo}-${d} ${h}:${mi}`;
+}
+
+/**
  * One top-level navigator node: a session. Shows an open/closed indicator and
  * the session label, focuses on click, and exposes a Close affordance. When the
  * session is focused, its {@link ThreadTree} is rendered nested beneath it.
@@ -33,11 +53,11 @@ function sessionLabel(item: SessionListItem): string {
 export function SessionNode({
   item,
   isFocused,
-  resuming,
   threads,
   onFocus,
   onClose,
 }: SessionNodeProps) {
+  const lastActivity = formatLastActivity(item.last_activity_at);
   return (
     <li>
       <div
@@ -55,15 +75,18 @@ export function SessionNode({
         >
           <StatusDot
             tone={item.open ? 'green' : 'slate'}
-            label={item.open ? 'open' : 'closed'}
+            title={item.open ? 'Open' : 'Closed'}
           />
           <span
             className={cn('truncate', isFocused && 'font-medium text-indigo-800')}
           >
             {sessionLabel(item)}
           </span>
-          {resuming && <Badge tone="warning">resuming…</Badge>}
-          {!item.open && !resuming && <Badge tone="neutral">view</Badge>}
+          {lastActivity && (
+            <span className="ml-auto shrink-0 text-xs tabular-nums text-slate-400">
+              {lastActivity}
+            </span>
+          )}
         </button>
         {item.open && (
           <button
