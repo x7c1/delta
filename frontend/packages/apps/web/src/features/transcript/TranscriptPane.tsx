@@ -29,12 +29,10 @@ export interface TranscriptPaneProps {
   threads: Thread[];
   /** The active thread, or null for the cold-start / new-session state. */
   activeThread: Thread | null;
-  /** True when the focused session is closed: view-only, no branch selection. */
+  /** True when the focused session is closed (read-only viewing; a Send resumes it). */
   readOnly: boolean;
   /** True for the new-session composer state (no session/thread exists yet). */
   newSession?: boolean;
-  /** The focused session's main thread id (target for a resume send). */
-  sessionMainThreadId?: ThreadId;
 }
 
 /**
@@ -51,7 +49,6 @@ export function TranscriptPane({
   activeThread,
   readOnly,
   newSession = false,
-  sessionMainThreadId,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -180,7 +177,6 @@ export function TranscriptPane({
         kind: 'thread',
         activeThread,
         readOnly,
-        sessionMainThreadId,
       }}
     />
   ) : undefined;

@@ -16,10 +16,10 @@ import { useNavStore } from '../../store/navStore';
  * - `new-session`: spawns a brand-new session (`{ new_session: true, text }`).
  *   There is no thread or session id yet; drafts key off a stable sentinel.
  * - `thread`: targets the focused session's active thread. A branch origin turns
- *   the send into a branch (a new child thread) whether the session is open or
- *   closed. Otherwise, when the session is closed (`readOnly`), the Send resumes
- *   it (targeting its main thread). Either way a closed session is re-opened by
- *   the backend before the send is dispatched.
+ *   the send into a branch (a new child thread); otherwise it is a plain send to
+ *   the active thread. Either way, a closed (`readOnly`) session is re-opened by
+ *   the backend before the send is dispatched — continuing whatever thread is in
+ *   view, main or sub, rather than jumping to the session's main thread.
  */
 export type ComposerMode =
   | { kind: 'new-session' }
@@ -27,7 +27,6 @@ export type ComposerMode =
       kind: 'thread';
       activeThread: Thread;
       readOnly: boolean;
-      sessionMainThreadId?: ThreadId;
     };
 
 export interface ComposerProps {
@@ -61,13 +60,6 @@ export function Composer({ mode }: ComposerProps) {
   const failSend = useLiveStore((state) => state.failSend);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
-  // A closed session resumes by sending to its main thread (falling back to the
-  // active thread if the main id was not supplied).
-  const resumeThreadId: ThreadId | null =
-    mode.kind === 'thread'
-      ? mode.sessionMainThreadId ?? mode.activeThread.id
-      : null;
-
   // Branching applies to the active thread whether the session is open or
   // closed: a branch send to a closed session resumes it (the backend
   // ensure-opens) and then creates the child thread, so a quote from an old
@@ -87,15 +79,13 @@ export function Composer({ mode }: ComposerProps) {
       const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       // The optimistic FIFO entry is keyed by the thread the pending queue
-      // renders under. A branch send keys to the parent thread (retargeted to
-      // the child once the backend creates it). A plain resume of a closed
-      // session targets its main thread. A new-session send has no thread yet,
-      // so it uses the sentinel key.
-      const optimisticThread: ThreadId = !activeThread
-        ? NEW_SESSION_DRAFT_KEY
-        : !branching && readOnly && resumeThreadId !== null
-          ? resumeThreadId
-          : activeThread.id;
+      // renders under. A branch send keys to the active (parent) thread and is
+      // retargeted to the child once the backend creates it; a plain send keys
+      // to the active thread directly. Only the new-session send, which has no
+      // thread yet, uses the sentinel key.
+      const optimisticThread: ThreadId = activeThread
+        ? activeThread.id
+        : NEW_SESSION_DRAFT_KEY;
 
       enqueueSend({
         localId,
@@ -111,10 +101,11 @@ export function Composer({ mode }: ComposerProps) {
       });
       clearDraft(draftKey);
 
-      // Build the send target. Branching is checked before the closed-session
-      // resume: a branch send already resumes a closed session (the backend
-      // ensure-opens before creating the child), so it must carry the
-      // semantic parent rather than degrade into a plain main-thread resume.
+      // Build the send target. A branch carries the semantic parent; otherwise
+      // it is a plain send to the active thread. Both target the active thread
+      // regardless of open/closed — for a closed session the backend
+      // ensure-opens (resumes) it before dispatching, so continuing a sub-thread
+      // stays on that sub-thread instead of jumping to the session's main thread.
       let body: SendRequest;
       if (isNew) {
         body = { new_session: true, text };
@@ -125,10 +116,6 @@ export function Composer({ mode }: ComposerProps) {
           semantic_parent_uuid: branchOrigin.semanticParentUuid,
           locator_quote: branchOrigin.locatorQuote,
         };
-      } else if (readOnly && activeThread && resumeThreadId !== null) {
-        // Resume a closed session: send to its main thread; the backend
-        // auto-resumes.
-        body = { thread_id: resumeThreadId, text };
       } else {
         body = { thread_id: activeThread!.id, text };
       }
@@ -154,8 +141,6 @@ export function Composer({ mode }: ComposerProps) {
       draft,
       draftKey,
       isNew,
-      readOnly,
-      resumeThreadId,
       activeThread,
       branching,
       branchOrigin,

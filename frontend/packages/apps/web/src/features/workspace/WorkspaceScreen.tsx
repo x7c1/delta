@@ -224,7 +224,6 @@ export function WorkspaceScreen() {
             threads={threads}
             activeThread={activeThread}
             readOnly={!focusedOpen}
-            sessionMainThreadId={focusedItem?.main_thread_id}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-400">
