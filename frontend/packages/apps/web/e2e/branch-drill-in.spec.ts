@@ -65,7 +65,7 @@ test('sending a branch from selected text switches the pane to the new branch', 
   });
 
   // The composer now shows the branch banner.
-  await expect(page.getByText('from selected text')).toBeVisible();
+  await expect(page.getByText('Branch from selected text')).toBeVisible();
 
   // Send the branch follow-up; the pane drills into the new child thread.
   await page.getByRole('textbox').fill('a follow-up on the selected passage');
