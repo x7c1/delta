@@ -11,6 +11,12 @@ import { createMockEventSource } from './mockEventControl';
  * Open the live event source (the real `/ws` client, or the dev fake in mock
  * mode), and route every event through {@link applySessionEvent}. Connection
  * status is mirrored into the live store.
+ *
+ * The source reconnects on its own after a dropped socket. Events broadcast
+ * during the gap are lost (the server does not replay), so on every *re*-open
+ * we resync: refetch all REST resources (sessions, threads, messages catch up)
+ * and clear the optimistic pending FIFO whose `turn_completed` drains may have
+ * been missed — otherwise a stuck "waiting" chip would linger until a reload.
  */
 export function useSessionEvents(): void {
   const queryClient = useQueryClient();
@@ -36,7 +42,21 @@ export function useSessionEvents(): void {
         focusedRealSessionId,
       );
     });
-    const offStatus = source.onStatus((status) => setConnection(status));
+
+    // Track connections so a *re*-open (not the first) triggers a resync.
+    let hasConnected = false;
+    const offStatus = source.onStatus((status) => {
+      setConnection(status);
+      if (status !== 'open') {
+        return;
+      }
+      if (hasConnected) {
+        // Reconnected after a gap: heal the missed window.
+        void queryClient.invalidateQueries();
+        useLiveStore.getState().clearPending();
+      }
+      hasConnected = true;
+    });
 
     return () => {
       offEvent();

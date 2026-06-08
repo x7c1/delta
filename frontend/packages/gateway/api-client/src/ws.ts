@@ -82,30 +82,67 @@ export class EventEmitter {
   }
 }
 
+/**
+ * Reconnect backoff schedule (ms). The server broadcast channel does not replay
+ * missed events, so a dropped socket must reconnect quickly; the delay grows on
+ * repeated failures and then holds at the last value.
+ */
+const DEFAULT_RECONNECT_DELAYS_MS = [500, 1000, 2000, 5000, 10000];
+
 export interface WsClientOptions {
   /** Full ws(s) URL of the `/ws` endpoint. */
   url: string;
   /** Injectable WebSocket constructor, primarily for tests. */
   socketFactory?: (url: string) => WebSocket;
+  /** Backoff schedule (ms) for reconnection; the last value repeats. */
+  reconnectDelaysMs?: number[];
 }
 
-/** A live `SessionEventSource` backed by a real WebSocket connection. */
+/**
+ * A live `SessionEventSource` backed by a real WebSocket connection that
+ * **reconnects automatically**.
+ *
+ * The `/ws` stream is the only channel that drains the optimistic pending-send
+ * FIFO (via `turn_completed`) and refreshes the transcript. Without
+ * reconnection a single dropped socket — a server hiccup, a dev-proxy blip, an
+ * idle timeout — would silently freeze all live updates until a full page
+ * reload: pending sends would stick on "waiting" forever and the transcript
+ * would stop growing. So on an unexpected close this source schedules a backoff
+ * reconnect and re-emits `connecting` → `open`, letting the app resync the gap
+ * on each fresh `open`. An explicit {@link close} (component unmount) suppresses
+ * reconnection.
+ */
 export class WsEventSource implements SessionEventSource {
   private readonly emitter = new EventEmitter();
-  private readonly socket: WebSocket;
+  private readonly factory: (url: string) => WebSocket;
+  private readonly url: string;
+  private readonly reconnectDelaysMs: number[];
+  private socket: WebSocket | null = null;
+  private closedByClient = false;
+  private attempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WsClientOptions) {
-    const factory =
+    this.factory =
       options.socketFactory ?? ((url: string) => new WebSocket(url));
+    this.url = options.url;
+    this.reconnectDelaysMs =
+      options.reconnectDelaysMs ?? DEFAULT_RECONNECT_DELAYS_MS;
+    this.connect();
+  }
+
+  private connect(): void {
     this.emitter.emitStatus('connecting');
-    this.socket = factory(options.url);
-    this.socket.addEventListener('open', () => {
+    const socket = this.factory(this.url);
+    this.socket = socket;
+    socket.addEventListener('open', () => {
+      this.attempt = 0;
       this.emitter.emitStatus('open');
     });
-    this.socket.addEventListener('close', () => {
-      this.emitter.emitStatus('closed');
+    socket.addEventListener('close', () => {
+      this.handleDisconnect();
     });
-    this.socket.addEventListener('message', (message: MessageEvent) => {
+    socket.addEventListener('message', (message: MessageEvent) => {
       if (typeof message.data !== 'string') {
         return;
       }
@@ -114,6 +151,21 @@ export class WsEventSource implements SessionEventSource {
         this.emitter.emitEvent(event);
       }
     });
+  }
+
+  private handleDisconnect(): void {
+    this.emitter.emitStatus('closed');
+    if (this.closedByClient) {
+      return;
+    }
+    // Reconnect after a backoff. Events broadcast while we are disconnected are
+    // gone (the server does not replay), so the app resyncs on the next `open`.
+    const delay =
+      this.reconnectDelaysMs[
+        Math.min(this.attempt, this.reconnectDelaysMs.length - 1)
+      ];
+    this.attempt += 1;
+    this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
   onEvent(listener: SessionEventListener): () => void {
@@ -125,6 +177,11 @@ export class WsEventSource implements SessionEventSource {
   }
 
   close(): void {
-    this.socket.close();
+    this.closedByClient = true;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.socket?.close();
   }
 }
