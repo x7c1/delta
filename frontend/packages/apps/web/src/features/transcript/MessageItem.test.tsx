@@ -179,6 +179,17 @@ describe('MessageItem', () => {
     expect(screen.getByText('the answer')).toBeInTheDocument();
   });
 
+  it('renders nothing for a message whose only block is empty thinking', () => {
+    // Hiding the empty thinking block must not leave a bare timestamp behind:
+    // the whole turn collapses to nothing and is dropped.
+    const message = makeMessageWithContent('assistant', [
+      { type: 'thinking', thinking: '' },
+    ]);
+    const { container } = render(<MessageItem message={message} />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByTestId('message-item')).toBeNull();
+  });
+
   it('renders a thinking block that has text', () => {
     const message = makeMessageWithContent('assistant', [
       { type: 'thinking', thinking: 'let me reason' },

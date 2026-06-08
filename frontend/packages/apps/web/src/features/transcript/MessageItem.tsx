@@ -58,131 +58,140 @@ export function MessageItem({
     message.role === 'user' &&
     message.content.some((block) => block.type === 'text');
 
+  const renderedBlocks = message.content.map((block, index) => {
+    switch (block.type) {
+      case 'text':
+        // User text is what the person typed, not authored Markdown.
+        // Render it verbatim with preserved whitespace so single
+        // newlines survive and characters like `*` stay literal.
+        return message.role === 'user' ? (
+          <div key={index} className="whitespace-pre-wrap text-slate-800">
+            {block.text}
+          </div>
+        ) : (
+          <div
+            key={index}
+            // A small, chat-tuned Markdown stylesheet scoped to this class
+            // (see index.css) — just the elements Claude emits, styled
+            // modestly, rather than a full typography framework.
+            className="markdown-body text-slate-800"
+          >
+            {/* GFM enables tables, strikethrough, task lists, and
+                autolinks, which Claude routinely emits. */}
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {block.text}
+            </ReactMarkdown>
+          </div>
+        );
+      case 'thinking':
+        // Claude Code records a signed reference for thinking but leaves
+        // the plaintext empty in the transcript, so a thinking block
+        // usually has no body. A collapsible that always expands to
+        // nothing is noise — render only when there is text to show.
+        if (!block.thinking.trim()) {
+          return null;
+        }
+        return (
+          <Collapsible key={index} summary={blockSummary(block)}>
+            <pre className="whitespace-pre-wrap text-slate-600">
+              {block.thinking}
+            </pre>
+          </Collapsible>
+        );
+      case 'tool_use': {
+        // A tool call renders together with its result (resolved by id via
+        // the pairing): the header names the tool and shows its outcome,
+        // and the body stacks the call input above the returned result.
+        const result = pairing?.resultByUseId.get(block.id);
+        return (
+          <Collapsible
+            key={index}
+            summary={
+              <span className="flex items-center gap-1.5">
+                <span className="font-medium text-slate-700">
+                  {block.name}
+                </span>
+                {result ? (
+                  result.is_error ? (
+                    <Badge tone="warning">error</Badge>
+                  ) : (
+                    <span className="text-emerald-600" aria-label="ok">
+                      ✓
+                    </span>
+                  )
+                ) : (
+                  <span className="text-slate-400">running…</span>
+                )}
+              </span>
+            }
+          >
+            <div className="space-y-2">
+              <div>
+                <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
+                  input
+                </div>
+                <pre className="whitespace-pre-wrap text-slate-700">
+                  {stringifyContent(block.input)}
+                </pre>
+              </div>
+              {result && (
+                <div>
+                  <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
+                    result
+                  </div>
+                  <pre className="whitespace-pre-wrap text-slate-700">
+                    {stringifyContent(result.content)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </Collapsible>
+        );
+      }
+      case 'tool_result':
+        // A result paired to a call shown elsewhere is rendered inline with
+        // that call (see 'tool_use' above), so suppress it here. Only an
+        // orphan result (its call is not in view) falls through to a
+        // standalone collapsible.
+        if (pairing?.toolUseIds.has(block.tool_use_id)) {
+          return null;
+        }
+        return (
+          <Collapsible
+            key={index}
+            summary={
+              <span className="flex items-center gap-1">
+                {blockSummary(block)}
+                {block.is_error && <Badge tone="warning">error</Badge>}
+              </span>
+            }
+          >
+            <pre className="whitespace-pre-wrap text-slate-700">
+              {stringifyContent(block.content)}
+            </pre>
+          </Collapsible>
+        );
+      case 'other':
+        return (
+          <Collapsible key={index} summary={blockSummary(block)}>
+            <span className="text-slate-500">
+              Unsupported content block.
+            </span>
+          </Collapsible>
+        );
+    }
+  });
+
+  // A message whose blocks all collapse to nothing — only an empty thinking
+  // block, or only tool results that render inline with their calls — would
+  // otherwise show as a bare timestamp. Render nothing for it.
+  if (!renderedBlocks.some((node) => node !== null)) {
+    return null;
+  }
+
   const blocks = (
     <div className="space-y-1.5" onMouseUp={handleMouseUp}>
-      {message.content.map((block, index) => {
-        switch (block.type) {
-          case 'text':
-            // User text is what the person typed, not authored Markdown.
-            // Render it verbatim with preserved whitespace so single
-            // newlines survive and characters like `*` stay literal.
-            return message.role === 'user' ? (
-              <div key={index} className="whitespace-pre-wrap text-slate-800">
-                {block.text}
-              </div>
-            ) : (
-              <div
-                key={index}
-                // A small, chat-tuned Markdown stylesheet scoped to this class
-                // (see index.css) — just the elements Claude emits, styled
-                // modestly, rather than a full typography framework.
-                className="markdown-body text-slate-800"
-              >
-                {/* GFM enables tables, strikethrough, task lists, and
-                    autolinks, which Claude routinely emits. */}
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {block.text}
-                </ReactMarkdown>
-              </div>
-            );
-          case 'thinking':
-            // Claude Code records a signed reference for thinking but leaves
-            // the plaintext empty in the transcript, so a thinking block
-            // usually has no body. A collapsible that always expands to
-            // nothing is noise — render only when there is text to show.
-            if (!block.thinking.trim()) {
-              return null;
-            }
-            return (
-              <Collapsible key={index} summary={blockSummary(block)}>
-                <pre className="whitespace-pre-wrap text-slate-600">
-                  {block.thinking}
-                </pre>
-              </Collapsible>
-            );
-          case 'tool_use': {
-            // A tool call renders together with its result (resolved by id via
-            // the pairing): the header names the tool and shows its outcome,
-            // and the body stacks the call input above the returned result.
-            const result = pairing?.resultByUseId.get(block.id);
-            return (
-              <Collapsible
-                key={index}
-                summary={
-                  <span className="flex items-center gap-1.5">
-                    <span className="font-medium text-slate-700">
-                      {block.name}
-                    </span>
-                    {result ? (
-                      result.is_error ? (
-                        <Badge tone="warning">error</Badge>
-                      ) : (
-                        <span className="text-emerald-600" aria-label="ok">
-                          ✓
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-slate-400">running…</span>
-                    )}
-                  </span>
-                }
-              >
-                <div className="space-y-2">
-                  <div>
-                    <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
-                      input
-                    </div>
-                    <pre className="whitespace-pre-wrap text-slate-700">
-                      {stringifyContent(block.input)}
-                    </pre>
-                  </div>
-                  {result && (
-                    <div>
-                      <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
-                        result
-                      </div>
-                      <pre className="whitespace-pre-wrap text-slate-700">
-                        {stringifyContent(result.content)}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              </Collapsible>
-            );
-          }
-          case 'tool_result':
-            // A result paired to a call shown elsewhere is rendered inline with
-            // that call (see 'tool_use' above), so suppress it here. Only an
-            // orphan result (its call is not in view) falls through to a
-            // standalone collapsible.
-            if (pairing?.toolUseIds.has(block.tool_use_id)) {
-              return null;
-            }
-            return (
-              <Collapsible
-                key={index}
-                summary={
-                  <span className="flex items-center gap-1">
-                    {blockSummary(block)}
-                    {block.is_error && <Badge tone="warning">error</Badge>}
-                  </span>
-                }
-              >
-                <pre className="whitespace-pre-wrap text-slate-700">
-                  {stringifyContent(block.content)}
-                </pre>
-              </Collapsible>
-            );
-          case 'other':
-            return (
-              <Collapsible key={index} summary={blockSummary(block)}>
-                <span className="text-slate-500">
-                  Unsupported content block.
-                </span>
-              </Collapsible>
-            );
-        }
-      })}
+      {renderedBlocks}
     </div>
   );
 
