@@ -40,7 +40,7 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
     <article
       className={cn(
         'border-b border-slate-100 px-3 py-2 text-sm',
-        message.role === 'user' && 'bg-slate-50',
+        message.role === 'user' && 'bg-slate-100',
       )}
       data-role={message.role}
       data-testid="message-item"

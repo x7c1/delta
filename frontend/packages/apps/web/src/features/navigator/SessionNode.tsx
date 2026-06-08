@@ -1,5 +1,5 @@
 import type { SessionListItem, Thread } from '@delta/model';
-import { StatusDot, cn } from '@delta/ui-kit';
+import { Menu, StatusDot, cn } from '@delta/ui-kit';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
@@ -47,8 +47,11 @@ function formatLastActivity(iso: string | null): string | null {
 
 /**
  * One top-level navigator node: a session. Shows an open/closed indicator and
- * the session label, focuses on click, and exposes a Close affordance. When the
- * session is focused, its {@link ThreadTree} is rendered nested beneath it.
+ * the session label, focuses on click, and exposes a kebab actions menu. The
+ * kebab slot occupies a fixed width on every row (enabled only when the session
+ * is open) so the last-activity timestamp aligns in a stable column regardless
+ * of which sessions are open. When the session is focused, its
+ * {@link ThreadTree} is rendered nested beneath it.
  */
 export function SessionNode({
   item,
@@ -58,11 +61,12 @@ export function SessionNode({
   onClose,
 }: SessionNodeProps) {
   const lastActivity = formatLastActivity(item.last_activity_at);
+  const label = sessionLabel(item);
   return (
     <li>
       <div
         className={cn(
-          'flex items-center justify-between gap-2 px-2 py-1.5',
+          'flex items-center gap-2 px-2 py-1.5',
           isFocused && 'bg-indigo-50',
         )}
       >
@@ -80,24 +84,22 @@ export function SessionNode({
           <span
             className={cn('truncate', isFocused && 'font-medium text-indigo-800')}
           >
-            {sessionLabel(item)}
+            {label}
           </span>
-          {lastActivity && (
-            <span className="ml-auto shrink-0 text-xs tabular-nums text-slate-400">
-              {lastActivity}
-            </span>
-          )}
         </button>
-        {item.open && (
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={`Close ${sessionLabel(item)}`}
-            className="shrink-0 rounded px-1 text-xs text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-          >
-            Close
-          </button>
-        )}
+        <span className="shrink-0 text-xs tabular-nums text-slate-400">
+          {lastActivity}
+        </span>
+        {/* Fixed-width slot keeps the timestamp column aligned across rows. */}
+        <Menu
+          label={`Session actions for ${label}`}
+          disabled={!item.open}
+          items={
+            item.open
+              ? [{ label: 'Close', onSelect: onClose, tone: 'danger' }]
+              : []
+          }
+        />
       </div>
 
       {isFocused && threads && threads.length > 0 && (

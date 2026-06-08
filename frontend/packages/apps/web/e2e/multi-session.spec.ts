@@ -29,8 +29,12 @@ test('focusing a closed session shows its transcript read-only', async ({
   await useManualEventControl(page);
   await page.goto('/');
 
-  // The closed session ("scratch notes") is the second node; focus it.
-  await page.getByRole('button', { name: /scratch notes/ }).click();
+  // The closed session ("scratch notes") is the second node; focus its row
+  // button (the kebab menu shares the label, so target the row by test id).
+  await page
+    .getByTestId('session-node')
+    .filter({ hasText: 'scratch notes' })
+    .click();
 
   // Its transcript renders, but with a read-only notice (closed session).
   await expect(page.getByTestId('readonly-notice')).toBeVisible();
@@ -45,7 +49,10 @@ test('a closed session resumes after a Send via the pending queue', async ({
   await useManualEventControl(page);
   await page.goto('/');
 
-  await page.getByRole('button', { name: /scratch notes/ }).click();
+  await page
+    .getByTestId('session-node')
+    .filter({ hasText: 'scratch notes' })
+    .click();
   await expect(page.getByTestId('readonly-notice')).toBeVisible();
 
   // Sending to a closed session resumes it; the send is surfaced optimistically
@@ -56,6 +63,25 @@ test('a closed session resumes after a Send via the pending queue', async ({
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
   await expect(pending).toContainText('pick this back up');
+});
+
+test('closing an open session via its kebab menu drops the open count', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.goto('/');
+
+  await expect(page.getByTestId('open-session-count')).toHaveText('open: 1');
+
+  // The open session's actions menu is enabled; open it and select Close.
+  await page
+    .getByRole('button', { name: /^Session actions for/ })
+    .and(page.locator(':not([disabled])'))
+    .click();
+  await page.getByRole('menuitem', { name: 'Close' }).click();
+
+  // The mock flips the session closed and the refetched list reflects it.
+  await expect(page.getByTestId('open-session-count')).toHaveText('open: 0');
 });
 
 test('starting a new session shows the optimistic send', async ({ page }) => {

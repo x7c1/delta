@@ -128,8 +128,16 @@ describe('WorkspaceScreen multi-session', () => {
     );
     expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
 
-    // Only the open session exposes a Close affordance.
-    fireEvent.click(screen.getByRole('button', { name: /^Close session/ }));
+    // Every row carries a fixed-width actions menu, but only the open session's
+    // is enabled; open it and pick the Close menu item. The closed session's
+    // menu is disabled, so the enabled trigger is the one that opens.
+    const actionTriggers = screen.getAllByRole('button', {
+      name: /^Session actions for/,
+    });
+    const openTrigger = actionTriggers.find((button) => !button.hasAttribute('disabled'));
+    expect(openTrigger).toBeDefined();
+    fireEvent.click(openTrigger!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
 
     // The mock flips the session closed; the refetched list drops the open
     // count and the still-focused session re-renders read-only.
