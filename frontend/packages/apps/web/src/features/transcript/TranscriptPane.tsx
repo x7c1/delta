@@ -266,9 +266,17 @@ export function TranscriptPane({
             {children.length > 0 && (
               <div className="flex flex-wrap gap-1.5 px-3 pb-2">
                 {children.map((child) => (
-                  <Chip key={child.id} onClick={() => setActiveThread(child.id)}>
+                  <Chip
+                    key={child.id}
+                    // The chip's clickable pill shape conveys that it enters the
+                    // branch, so no "[enter →]" label is shown. The accessible
+                    // name still says "Enter <title>" for screen readers (and to
+                    // distinguish it from the navigator tree node of the same
+                    // branch).
+                    ariaLabel={`Enter ${child.title}`}
+                    onClick={() => setActiveThread(child.id)}
+                  >
                     ⤷ {child.title}
-                    <span className="font-medium">[enter →]</span>
                   </Chip>
                 ))}
               </div>

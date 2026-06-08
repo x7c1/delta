@@ -43,9 +43,10 @@ export function SessionNode({
 }: SessionNodeProps) {
   const lastActivity = formatLocalDateTime(item.last_activity_at);
   const label = sessionLabel(item);
-  // The standalone "main" node is redundant until the session has branched;
-  // once it has sub-threads, "main" must appear so the user can navigate back
-  // to the main thread. A sub-thread is any thread with a parent.
+  // Show the sub-thread list only once the session has branched. The main
+  // thread itself is never listed (it is reached by clicking this card's
+  // header — see NavigatorPane); a session with no sub-threads shows no tree at
+  // all. A sub-thread is any thread with a parent.
   const hasSubThreads =
     threads?.some((t) => t.parent_thread_id !== null) ?? false;
   return (

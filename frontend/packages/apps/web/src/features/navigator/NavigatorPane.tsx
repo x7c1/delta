@@ -48,6 +48,7 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
+  const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
 
   return (
@@ -115,7 +116,14 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
             threads={
               focusedSessionId === item.session.id ? threads : undefined
             }
-            onFocus={() => setFocusedSession(item.session.id)}
+            onFocus={() => {
+              setFocusedSession(item.session.id);
+              // The main thread is not listed in the tree, so clicking the
+              // session card is how you return to it. Always select main —
+              // this also covers re-clicking the already-focused session while
+              // viewing one of its sub-threads.
+              setActiveThread(item.main_thread_id);
+            }}
             onClose={() => closeSession.mutate(item.session.id)}
           />
         ))}
