@@ -214,16 +214,28 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
         }
     }
 
-    // Tear down. Kill the child first so the blocking read thread sees EOF and
-    // exits; aborting the input task drops the input sender so the write thread's
-    // channel closes. Both joins then return promptly rather than blocking the
-    // runtime, and closing the sink releases the socket instead of leaving it in
-    // CLOSE-WAIT.
+    // Tear down WITHOUT blocking the async runtime. The reader/writer halves are
+    // blocking OS threads; joining them directly on a worker is what wedges the
+    // runtime under repeated reloads. `write_thread` only exits once its input
+    // channel closes, and `input_task.abort()` does not synchronously drop the
+    // task's `in_tx` — so a bare `write_thread.join()` parks the worker until the
+    // task happens to be cleaned up, and enough teardowns starve every worker,
+    // freezing the whole server (even unrelated routes stop responding).
+    //
+    // Instead: abort the input task and AWAIT it so its captured `in_tx` and PTY
+    // master are actually dropped (closing the write channel and the master fd),
+    // kill the child so the read thread sees EOF, close the sink to release the
+    // socket, then join both now-finishing threads on a blocking-pool thread
+    // rather than a runtime worker.
     input_task.abort();
+    let _ = input_task.await;
     let _ = child.kill();
     let _ = sink.close().await;
-    let _ = read_thread.join();
-    let _ = write_thread.join();
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = read_thread.join();
+        let _ = write_thread.join();
+    })
+    .await;
     Ok(())
 }
 
