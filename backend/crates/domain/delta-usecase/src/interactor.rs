@@ -631,10 +631,12 @@ where
             .store
             .match_pending_send(&hook.session_id, hook.prompt.trim())
             .await?;
-        let additional_context = pending
-            .as_ref()
-            .and_then(|p| p.locator_quote.as_deref())
-            .and_then(frame_locator_context);
+        // Resolve the `additionalContext` note *before* syncing, so the current
+        // user line is not yet ingested and `latest_user_thread` still reports
+        // the PREVIOUS thread the user was in — letting us detect a switch.
+        let additional_context = self
+            .thread_switch_context(&hook.session_id, pending.as_ref())
+            .await?;
 
         // Ingest new transcript lines. This matches each user line to its queued
         // send and attributes it (plus the assistant lines that follow it) to
@@ -892,6 +894,71 @@ where
         Ok(messages)
     }
 
+    /// Compute the `additionalContext` note to inject for this prompt.
+    ///
+    /// Branching in Delta is view-only: the model only ever sees the single
+    /// linear `parentUuid` chain, never Delta's thread tree. So when the user
+    /// moves to a different thread and keeps talking, the model has no signal
+    /// that the topic changed and may misread an utterance like "is that what
+    /// you mean?" as referring to the (unrelated) message immediately above.
+    /// This produces a short natural-language note that gives the model that
+    /// missing signal.
+    ///
+    /// Must be called *before* `sync_transcript`, so the current user line is
+    /// not yet ingested and [`SessionStore::latest_user_thread`] still reports
+    /// the PREVIOUS thread the user was in. Four cases:
+    ///
+    /// 1. No queued send matched this prompt → external input → inject nothing.
+    /// 2. The send carries a locator quote → first entry into a branch → keep
+    ///    the locator-quote frame and bind it to the target thread.
+    /// 3. No locator and the target thread differs from the previous one →
+    ///    a thread switch / re-visit → inject a re-focus note (with the target
+    ///    thread's root quote, unless it is `main`).
+    /// 4. No locator and the target thread is unchanged → same thread,
+    ///    continuing → inject nothing.
+    async fn thread_switch_context(
+        &self,
+        session_id: &SessionId,
+        pending: Option<&PendingSend>,
+    ) -> Result<Option<String>> {
+        // Case 1: external input — no queued send to attribute → inject nothing.
+        let Some(pending) = pending else {
+            return Ok(None);
+        };
+        let cur = pending.thread_id;
+
+        // Case 2: first entry into a branch — the user selected a passage to
+        // anchor this message. Keep the locator-quote frame and tell the model
+        // that this quote roots the thread it is now in.
+        if let Some(quote) = pending.locator_quote.as_deref() {
+            if let Some(frame) = frame_locator_context(quote) {
+                return Ok(Some(frame_branch_entry_context(&frame, cur)));
+            }
+        }
+
+        // Cases 3 & 4 hinge on whether the active thread changed. `prev` is the
+        // thread of the latest already-persisted user line (this prompt's line
+        // is not synced yet), i.e. the thread the user was in before this send.
+        let prev = self.store.latest_user_thread(session_id).await?;
+        if prev == Some(cur) {
+            // Case 4: same thread, continuing — nothing to re-focus.
+            return Ok(None);
+        }
+
+        // Case 3: thread switch / re-visit. Cite the target thread's root quote
+        // so the re-focus survives even if the original binding scrolled out of
+        // context. `main` has no root quote, so it is cited by name only.
+        let root_quote = match self.store.thread(cur).await? {
+            Some(thread) => thread.root_message_uuid.is_some().then_some(thread.title),
+            None => None,
+        };
+        Ok(Some(frame_thread_switch_context(
+            prev,
+            cur,
+            root_quote.as_deref(),
+        )))
+    }
+
     /// Ensure a thread exists, turning a stale/wrong id into a clean
     /// `ThreadNotFound` instead of an opaque foreign-key error downstream.
     async fn require_thread(&self, thread_id: ThreadId) -> Result<()> {
@@ -963,8 +1030,75 @@ fn frame_locator_context(quote: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "The user is replying to this passage they selected from earlier in the conversation:\n\"{quote}\""
+        "The user is replying to this passage they selected from earlier in the conversation:\n{}",
+        delimit_quote(quote)
     ))
+}
+
+/// Delimit a passage so a provenance frame and its quoted text stay
+/// distinguishable. Centralised so every frame quotes passages the same way.
+fn delimit_quote(quote: &str) -> String {
+    format!("\"{}\"", quote.trim())
+}
+
+/// Extend a locator-quote frame with the thread the selected passage roots.
+///
+/// On the first message into a fresh branch the user has selected a passage to
+/// anchor it; [`frame_locator_context`] already frames that passage. This adds a
+/// note binding that passage to the thread the conversation is now in, as a
+/// stable `thread:N` handle, so a later return to the same thread can re-cite it
+/// by id. The id is just a handle — the quote carries the meaning.
+///
+/// Isolated so the exact wording is easy to tune; affects only the model-facing
+/// `additionalContext`, never an on-screen message or stored field.
+fn frame_branch_entry_context(locator_frame: &str, thread: ThreadId) -> String {
+    format!(
+        "{locator_frame}\nThat passage starts a separate thread (thread:{}); the user is now talking in that thread.",
+        thread.value()
+    )
+}
+
+/// Frame a switch back to an existing thread for injection as
+/// `additionalContext`.
+///
+/// Delta's threads are invisible to the model, which sees only the linear
+/// transcript. When the user moves to a different existing thread and continues
+/// without selecting a new passage, this note tells the model the topic changed:
+/// the continuation belongs to the named earlier thread, NOT the message
+/// immediately above. The target thread's root quote (`root_quote`) is re-cited
+/// so the re-focus holds even if the original binding scrolled out of context.
+///
+/// `prev` is the thread the user was just in, if any; naming both endpoints
+/// makes the move explicit. The trunk thread (`main`) has no root quote, so
+/// `root_quote` is `None` there and it is referred to by name only.
+///
+/// Isolated so the exact wording is easy to tune; affects only the model-facing
+/// `additionalContext`, never an on-screen message or stored field.
+fn frame_thread_switch_context(
+    prev: Option<ThreadId>,
+    cur: ThreadId,
+    root_quote: Option<&str>,
+) -> String {
+    let mut note = match prev {
+        Some(prev) => format!(
+            "The user has switched from thread:{} to thread:{}",
+            prev.value(),
+            cur.value()
+        ),
+        None => format!("The user has switched to thread:{}", cur.value()),
+    };
+    match root_quote {
+        Some(quote) if !quote.trim().is_empty() => note.push_str(&format!(
+            ", the thread rooted at this passage:\n{}",
+            delimit_quote(quote)
+        )),
+        // `main` (or a thread with no root passage): refer to it by name only.
+        _ => note.push_str(" (the main thread)"),
+    }
+    note.push_str(
+        ".\nThey are continuing that earlier discussion, not replying to the message immediately above.",
+    );
+    note
 }
 
 /// Find the transcript uuid for the user line carrying this prompt.

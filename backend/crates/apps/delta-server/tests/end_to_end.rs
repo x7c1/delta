@@ -301,10 +301,14 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     );
     // The quote is not injected verbatim: it is wrapped in a short frame so the
     // model recognises it as a passage the user selected from earlier in the
-    // conversation, anchoring the current message.
+    // conversation, anchoring the current message. Because the send carries a
+    // locator quote, the frame is followed by a note binding that passage to the
+    // thread the conversation is now in (`thread:N`).
     assert_eq!(
         body["hookSpecificOutput"]["additionalContext"],
-        "The user is replying to this passage they selected from earlier in the conversation:\n\"the main channel\"",
+        format!(
+            "The user is replying to this passage they selected from earlier in the conversation:\n\"the main channel\"\nThat passage starts a separate thread (thread:{main_thread_id}); the user is now talking in that thread."
+        ),
         "matched send injects its locator quote, framed, as additionalContext"
     );
 

@@ -973,7 +973,11 @@ async fn fifo_head_matches_and_marks_send() {
         .on_user_prompt_submit(submit("hello world"))
         .await
         .unwrap();
-    assert_eq!(additional, super::frame_locator_context("[quote]"));
+    // A locator quote → first entry into a branch: the locator frame plus a
+    // note binding the quote to the thread the send targets.
+    let expected =
+        super::frame_branch_entry_context(&super::frame_locator_context("[quote]").unwrap(), main);
+    assert_eq!(additional, Some(expected));
     let started = events
         .iter()
         .find_map(|e| match e {
@@ -1013,6 +1017,103 @@ async fn unmatched_prompt_is_external_input() {
         e,
         SessionEvent::ExternalInput { prompt, .. } if prompt == "typed directly"
     )));
+}
+
+/// Drive a full send round-trip: queue the send, push its matching user line,
+/// and run the `UserPromptSubmit` hook so the line is attributed to the send's
+/// thread (making it the session's `latest_user_thread`). Returns the injected
+/// `additionalContext` for that send so a caller can assert on it.
+async fn round_trip(
+    ix: &Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    target: SendTarget,
+    text: &str,
+    quote: Option<&str>,
+    uuid: &str,
+) -> (PendingSend, Option<String>) {
+    let pending = ix.enqueue_send(target, text, quote).await.unwrap();
+    ix.transcript_fake().push(user_line(uuid, text));
+    let (_events, additional) = ix.on_user_prompt_submit(submit(text)).await.unwrap();
+    (pending, additional)
+}
+
+#[tokio::test]
+async fn revisit_to_branch_injects_switch_note_with_root_quote() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // First entry into a branch off some message: this creates the child thread
+    // (titled after the locator quote) and makes it the latest user thread.
+    let parent = MessageUuid::from("uuid-parent");
+    let (branch_send, _) = round_trip(
+        &ix,
+        branch_off(main, &parent),
+        "into branch",
+        Some("[root quote]"),
+        "u-branch",
+    )
+    .await;
+    let child = branch_send.thread_id;
+    assert_ne!(child, main);
+
+    // Move back to main (no quote): the latest user thread becomes main again.
+    round_trip(&ix, to(main), "back on main", None, "u-main").await;
+
+    // Now re-visit the child thread (no quote): a thread switch from main to the
+    // child, so the note re-cites the child's root quote and re-focuses the
+    // model onto that earlier thread.
+    let (_, additional) = round_trip(&ix, to(child), "more on branch", None, "u-revisit").await;
+    let expected = super::frame_thread_switch_context(Some(main), child, Some("[root quote]"));
+    assert_eq!(additional, Some(expected));
+    let note = additional.unwrap();
+    assert!(note.contains(&format!("thread:{}", child.value())));
+    assert!(note.contains("[root quote]"));
+    assert!(note.contains("not replying to the message immediately above"));
+}
+
+#[tokio::test]
+async fn revisit_to_main_injects_switch_note_without_quote() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // Enter a branch first, so the latest user thread is the child.
+    let parent = MessageUuid::from("uuid-parent");
+    let (branch_send, _) = round_trip(
+        &ix,
+        branch_off(main, &parent),
+        "into branch",
+        Some("[root quote]"),
+        "u-branch",
+    )
+    .await;
+    let child = branch_send.thread_id;
+
+    // Return to main (no quote): a switch from the child back to the trunk.
+    // `main` has no root passage, so the note names it without citing a quote.
+    let (_, additional) = round_trip(&ix, to(main), "back to main", None, "u-main").await;
+    let expected = super::frame_thread_switch_context(Some(child), main, None);
+    assert_eq!(additional, Some(expected));
+    let note = additional.unwrap();
+    assert!(note.contains("the main thread"));
+    assert!(!note.contains('"'), "no quote is cited for main");
+    assert!(note.contains("not replying to the message immediately above"));
+}
+
+#[tokio::test]
+async fn same_thread_continuation_injects_nothing() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // Two consecutive plain sends to the same (main) thread. The second is a
+    // same-thread continuation, so nothing is injected.
+    round_trip(&ix, to(main), "first on main", None, "u-1").await;
+    let (_, additional) = round_trip(&ix, to(main), "second on main", None, "u-2").await;
+    assert!(additional.is_none());
 }
 
 #[tokio::test]
@@ -1154,12 +1255,17 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
     assert_ne!(child, main);
 
     // The hook fires before the user line is flushed to the JSONL. The locator
-    // quote is still returned (text-based), but nothing is attributed yet.
+    // quote frame (plus the branch-entry note) is still returned (text-based),
+    // but nothing is attributed yet.
     let (events, additional) = ix
         .on_user_prompt_submit(submit("branch text"))
         .await
         .unwrap();
-    assert_eq!(additional, super::frame_locator_context("quoted line"));
+    let expected = super::frame_branch_entry_context(
+        &super::frame_locator_context("quoted line").unwrap(),
+        child,
+    );
+    assert_eq!(additional, Some(expected));
     assert!(
         !events
             .iter()
