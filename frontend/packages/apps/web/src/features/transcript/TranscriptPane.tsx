@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
 import {
   threadAncestry,
   type Message,
@@ -18,6 +18,12 @@ import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
+
+/**
+ * Distance from the bottom (in px) under which the transcript is considered
+ * "at the bottom" and keeps following new content.
+ */
+const STICK_THRESHOLD_PX = 64;
 
 export interface TranscriptPaneProps {
   threads: Thread[];
@@ -50,6 +56,17 @@ export function TranscriptPane({
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const externalInput = useLiveStore((state) => state.externalInput);
 
+  // The key the pending queue renders under for this view.
+  const pendingThreadId: ThreadId | null = newSession
+    ? NEW_SESSION_DRAFT_KEY
+    : activeThread?.id ?? null;
+  const pendingCount = useLiveStore((state) =>
+    pendingThreadId === null
+      ? 0
+      : state.pending.filter((item) => item.threadId === pendingThreadId)
+          .length,
+  );
+
   const messagesQuery = useThreadMessagesQuery(
     client,
     activeThread?.id ?? null,
@@ -62,6 +79,64 @@ export function TranscriptPane({
       allMessages.filter((m) => m.role === 'user' || m.role === 'assistant'),
     [allMessages],
   );
+
+  // Stick-to-bottom: auto-scroll the transcript when new content arrives, but
+  // only while the user is already near the bottom (so reading scrollback is
+  // never yanked away). The scroll region is the Panel body.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
+  const prevPendingRef = useRef(pendingCount);
+
+  // Recompute "is the user near the bottom?" on every scroll so the
+  // stick-to-bottom effects know whether to follow new content.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) {
+      return;
+    }
+    const onScroll = () => {
+      stickRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // The last message's content length lets streaming/incremental appends to the
+  // same message count as a content change, so growing replies keep scrolling.
+  const lastContentLength =
+    messages.length > 0
+      ? JSON.stringify(messages[messages.length - 1].content).length
+      : 0;
+
+  // When the user sends, their own pending entry must always be visible at the
+  // bottom, so force stick on a pending-count increase for the active thread.
+  if (pendingCount > prevPendingRef.current) {
+    stickRef.current = true;
+  }
+  prevPendingRef.current = pendingCount;
+
+  // On active-thread change, reset to stick and jump to the latest of the newly
+  // focused thread.
+  useLayoutEffect(() => {
+    stickRef.current = true;
+    const el = bodyRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [activeThread?.id, newSession]);
+
+  // Keyed on the rendered content changing: jump to the bottom after paint when
+  // sticking.
+  useLayoutEffect(() => {
+    if (!stickRef.current) {
+      return;
+    }
+    const el = bodyRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages.length, lastContentLength, pendingCount]);
 
   const ancestry = useMemo(
     () => (activeThread ? threadAncestry(threads, activeThread.id) : []),
@@ -104,6 +179,7 @@ export function TranscriptPane({
 
   return (
     <Panel
+      bodyRef={bodyRef}
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">

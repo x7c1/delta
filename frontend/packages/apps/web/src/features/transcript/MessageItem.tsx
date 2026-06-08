@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@delta/model';
-import { Badge, Collapsible } from '@delta/ui-kit';
+import { Badge, Collapsible, cn } from '@delta/ui-kit';
 import { blockSummary, stringifyContent } from './blockSummary';
 
 export interface MessageItemProps {
@@ -38,7 +38,10 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
 
   return (
     <article
-      className="border-b border-slate-100 px-3 py-2 text-sm"
+      className={cn(
+        'border-b border-slate-100 px-3 py-2 text-sm',
+        message.role === 'user' && 'bg-slate-50',
+      )}
       data-role={message.role}
       data-testid="message-item"
     >
