@@ -1,6 +1,6 @@
 import { useCallback, type FormEvent } from 'react';
 import type { SendRequest, Thread, ThreadId } from '@delta/model';
-import { Badge, Button } from '@delta/ui-kit';
+import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useCreateSendMutation } from '@delta/api-client';
 import {
@@ -168,9 +168,8 @@ export function Composer({ mode }: ComposerProps) {
       {branching && (
         <div className="flex items-start justify-between gap-2 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs">
           <span className="flex flex-col gap-0.5">
-            <span className="flex items-center gap-1 font-medium text-indigo-700">
-              <Badge tone="info">branch</Badge>
-              from selected text
+            <span className="font-medium text-indigo-700">
+              Branch from selected text
             </span>
             <span className="line-clamp-2 italic text-slate-600">
               “{branchOrigin?.locatorQuote}”
