@@ -166,6 +166,27 @@ describe('MessageItem', () => {
     expect(screen.queryByText('search-hits')).toBeNull();
   });
 
+  it('omits an empty thinking block', () => {
+    // Claude Code leaves the thinking plaintext empty (only a signature), so
+    // an empty thinking block must not render a click-to-empty collapsible.
+    const message = makeMessageWithContent('assistant', [
+      { type: 'thinking', thinking: '   ' },
+      { type: 'text', text: 'the answer' },
+    ]);
+    render(<MessageItem message={message} />);
+
+    expect(screen.queryByText('thinking')).toBeNull();
+    expect(screen.getByText('the answer')).toBeInTheDocument();
+  });
+
+  it('renders a thinking block that has text', () => {
+    const message = makeMessageWithContent('assistant', [
+      { type: 'thinking', thinking: 'let me reason' },
+    ]);
+    render(<MessageItem message={message} />);
+    expect(screen.getByText('thinking')).toBeInTheDocument();
+  });
+
   it('renders no timestamp when created_at is unparseable', () => {
     const message = { ...makeMessage('user', 'hi'), created_at: 'not-a-date' };
     render(<MessageItem message={message} />);

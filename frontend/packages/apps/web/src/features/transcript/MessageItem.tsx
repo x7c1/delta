@@ -86,6 +86,13 @@ export function MessageItem({
               </div>
             );
           case 'thinking':
+            // Claude Code records a signed reference for thinking but leaves
+            // the plaintext empty in the transcript, so a thinking block
+            // usually has no body. A collapsible that always expands to
+            // nothing is noise — render only when there is text to show.
+            if (!block.thinking.trim()) {
+              return null;
+            }
             return (
               <Collapsible key={index} summary={blockSummary(block)}>
                 <pre className="whitespace-pre-wrap text-slate-600">
