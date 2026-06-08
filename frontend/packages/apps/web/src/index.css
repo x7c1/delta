@@ -67,6 +67,16 @@ body {
  * size is inherited from the message (text-sm). Tailwind's Preflight resets list
  * markers and heading sizes/weights to nothing, so those are re-stated here.
  */
+/*
+ * Marker highlight for the passage a pending branch was selected from (painted
+ * via the CSS Custom Highlight API; see branchHighlight.ts). A translucent
+ * fluorescent yellow so it reads as a highlighter over either user or
+ * assistant text without hiding it.
+ */
+::highlight(branch-origin) {
+  background-color: rgba(250, 204, 21, 0.45);
+}
+
 .markdown-body {
   overflow-wrap: break-word;
 }

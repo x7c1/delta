@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   threadAncestry,
   type Message,
@@ -19,6 +19,11 @@ import { PendingQueue } from '../composer/PendingQueue';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, isAbsorbedToolResultMessage } from './toolPairs';
+import {
+  clearBranchHighlight,
+  findAllQuoteRanges,
+  setBranchHighlight,
+} from './branchHighlight';
 
 /**
  * Distance from the bottom (in px) under which the transcript is considered
@@ -55,6 +60,11 @@ export function TranscriptPane({
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const externalInput = useLiveStore((state) => state.externalInput);
+
+  // The sub-thread chip currently hovered; its text is highlighted in the body.
+  const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
+    null,
+  );
 
   // The key the pending queue renders under for this view.
   const pendingThreadId: ThreadId | null = newSession
@@ -126,9 +136,11 @@ export function TranscriptPane({
   prevPendingRef.current = pendingCount;
 
   // On active-thread change, reset to stick and jump to the latest of the newly
-  // focused thread.
+  // focused thread, and drop any lingering hover highlight (navigating away via
+  // the navigator or breadcrumb does not fire the chip's mouseleave).
   useLayoutEffect(() => {
     stickRef.current = true;
+    setHoveredBranchTitle(null);
     const el = bodyRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
@@ -158,6 +170,28 @@ export function TranscriptPane({
         : new Map<string, Thread[]>(),
     [threads, activeThread],
   );
+
+  // While a sub-thread chip is hovered, mark every occurrence of its text in
+  // the body so it is clear at a glance what that branch was about. Re-run when
+  // content changes (rendered text nodes are recreated) so the marks track
+  // streaming and refetches; clear on leave or unmount.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !hoveredBranchTitle) {
+      clearBranchHighlight();
+      return;
+    }
+    // Search only message bodies, not the surrounding UI: the chips render as
+    // siblings of the message article, so scoping to the articles keeps a
+    // chip's own title text (and banners, the pending queue, etc.) out of the
+    // highlight.
+    const articles = body.querySelectorAll('[data-testid="message-item"]');
+    const ranges = Array.from(articles).flatMap((article) =>
+      findAllQuoteRanges(article, hoveredBranchTitle),
+    );
+    setBranchHighlight(ranges);
+    return () => clearBranchHighlight();
+  }, [hoveredBranchTitle, messages.length, lastContentLength]);
 
   const breadcrumbItems = ancestry.map((thread) => ({
     key: thread.id,
@@ -285,7 +319,17 @@ export function TranscriptPane({
                     // distinguish it from the navigator tree node of the same
                     // branch).
                     ariaLabel={`Enter ${child.title}`}
-                    onClick={() => setActiveThread(child.id)}
+                    // Clear the hover highlight on click: entering the branch
+                    // does not fire mouseleave, so the mark would otherwise
+                    // linger across the whole child thread.
+                    onClick={() => {
+                      setHoveredBranchTitle(null);
+                      setActiveThread(child.id);
+                    }}
+                    // Hovering the chip marks every occurrence of its text in
+                    // the body, so it is clear what the branch was about.
+                    onMouseEnter={() => setHoveredBranchTitle(child.title)}
+                    onMouseLeave={() => setHoveredBranchTitle(null)}
                   >
                     ⤷ {child.title}
                   </Chip>
