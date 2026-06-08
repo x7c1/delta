@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { connectPty, type PtyConnection } from '@delta/api-client';
 import type { SessionId } from '@delta/model';
 import { Button, Panel } from '@delta/ui-kit';
@@ -163,6 +164,11 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  // Use the Unicode 11 width table so emoji, full-width, and CJK glyphs are
+  // measured as the correct number of cells; the default Unicode 6 table
+  // under-counts them and shifts subsequent columns.
+  term.loadAddon(new Unicode11Addon());
+  term.unicode.activeVersion = '11';
   term.open(el);
   fit.fit();
 
