@@ -219,17 +219,14 @@ export function TranscriptPane({
         </div>
       )}
 
-      <PendingQueue
-        threadId={newSession ? NEW_SESSION_DRAFT_KEY : activeThread?.id ?? null}
-      />
-
       {!newSession && messagesQuery.isLoading && (
         <p className="px-3 py-4 text-sm text-slate-400">Loading transcript…</p>
       )}
 
       {!newSession &&
         !messagesQuery.isLoading &&
-        messages.length === 0 && (
+        messages.length === 0 &&
+        pendingCount === 0 && (
           <p className="px-3 py-4 text-sm text-slate-400">
             No messages yet. Send the first message below.
           </p>
@@ -265,6 +262,10 @@ export function TranscriptPane({
           </div>
         );
       })}
+
+      <PendingQueue
+        threadId={newSession ? NEW_SESSION_DRAFT_KEY : activeThread?.id ?? null}
+      />
     </Panel>
   );
 }
