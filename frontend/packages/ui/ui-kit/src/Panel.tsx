@@ -39,7 +39,10 @@ export function Panel({
       )}
       <div
         ref={bodyRef}
-        className={cn('min-h-0 flex-1 overflow-y-auto', bodyClassName)}
+        className={cn(
+          'min-h-0 flex-1 overflow-y-auto scrollbar-hover',
+          bodyClassName,
+        )}
       >
         {children}
       </div>
