@@ -162,7 +162,7 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     // Socket -> PTY input and control. Binary frames are raw input bytes;
     // Text frames are JSON control messages (resize). The master is owned here
     // so a resize can be applied directly.
-    let input_task = tokio::spawn(async move {
+    let mut input_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
             match msg {
                 Message::Binary(b) => {
@@ -191,16 +191,37 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
         }
     });
 
-    // PTY output -> socket.
-    while let Some(chunk) = out_rx.recv().await {
-        if sink.send(Message::Binary(chunk.into())).await.is_err() {
-            break;
+    // Pump PTY output to the socket until EITHER side ends: the output drains
+    // (or the sink fails), OR the input task finishes because the browser closed
+    // the socket. Gating teardown on the output loop alone leaks the bridge — a
+    // reload with no further pane output never wakes `out_rx.recv()` (the read
+    // thread stays blocked on the PTY until the child is killed, which only
+    // happens in teardown), and `sink.send` is never called either, so the
+    // child, the reader/writer threads, and the socket would linger forever. One
+    // leaked bridge per reload eventually starves the runtime. Selecting on the
+    // input task's completion tears the bridge down promptly on socket close.
+    loop {
+        tokio::select! {
+            chunk = out_rx.recv() => match chunk {
+                Some(chunk) => {
+                    if sink.send(Message::Binary(chunk.into())).await.is_err() {
+                        break;
+                    }
+                }
+                None => break,
+            },
+            _ = &mut input_task => break,
         }
     }
 
-    // Tear down: dropping the channels unblocks the threads.
+    // Tear down. Kill the child first so the blocking read thread sees EOF and
+    // exits; aborting the input task drops the input sender so the write thread's
+    // channel closes. Both joins then return promptly rather than blocking the
+    // runtime, and closing the sink releases the socket instead of leaving it in
+    // CLOSE-WAIT.
     input_task.abort();
     let _ = child.kill();
+    let _ = sink.close().await;
     let _ = read_thread.join();
     let _ = write_thread.join();
     Ok(())
