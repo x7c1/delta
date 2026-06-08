@@ -52,12 +52,10 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
             ) : (
               <div
                 key={index}
-                // Tailwind Typography (`prose`) gives every Markdown element
-                // consistent spacing and type without hand-rolling each one.
-                // `prose-sm` matches the pane's text size, `prose-slate` the
-                // palette, `max-w-none` lets it fill the column, `break-words`
-                // keeps long tokens from overflowing.
-                className="prose prose-sm prose-slate max-w-none break-words"
+                // A small, chat-tuned Markdown stylesheet scoped to this class
+                // (see index.css) — just the elements Claude emits, styled
+                // modestly, rather than a full typography framework.
+                className="markdown-body text-slate-800"
               >
                 {/* GFM enables tables, strikethrough, task lists, and
                     autolinks, which Claude routinely emits. */}
