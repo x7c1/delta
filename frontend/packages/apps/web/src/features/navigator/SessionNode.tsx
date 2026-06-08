@@ -46,12 +46,13 @@ function formatLastActivity(iso: string | null): string | null {
 }
 
 /**
- * One top-level navigator node: a session. Shows an open/closed indicator and
- * the session label, focuses on click, and exposes a kebab actions menu. The
- * kebab slot occupies a fixed width on every row (enabled only when the session
- * is open) so the last-activity timestamp aligns in a stable column regardless
- * of which sessions are open. When the session is focused, its
- * {@link ThreadTree} is rendered nested beneath it.
+ * One top-level navigator node: a session. The focus button holds a two-line
+ * block — line 1 is the open/closed indicator plus the session label, line 2 is
+ * the right-aligned last-activity timestamp (omitted when there is none, leaving
+ * a single line). Clicking either line focuses the session. The kebab actions
+ * menu sits in a fixed-width slot at the row's right end, vertically centered
+ * against the block, and is enabled only when the session is open. When the
+ * session is focused, its {@link ThreadTree} is rendered nested beneath it.
  */
 export function SessionNode({
   item,
@@ -73,24 +74,32 @@ export function SessionNode({
         <button
           type="button"
           onClick={onFocus}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm"
+          className="flex min-w-0 flex-1 flex-col gap-0.5 text-left text-sm"
           aria-current={isFocused ? 'true' : undefined}
           data-testid="session-node"
         >
-          <StatusDot
-            tone={item.open ? 'green' : 'slate'}
-            title={item.open ? 'Open' : 'Closed'}
-          />
-          <span
-            className={cn('truncate', isFocused && 'font-medium text-indigo-800')}
-          >
-            {label}
+          <span className="flex min-w-0 items-center gap-2">
+            <StatusDot
+              tone={item.open ? 'green' : 'slate'}
+              title={item.open ? 'Open' : 'Closed'}
+            />
+            <span
+              className={cn(
+                'truncate',
+                isFocused && 'font-medium text-indigo-800',
+              )}
+            >
+              {label}
+            </span>
           </span>
+          {/* Right-aligned so the timestamp column stays aligned across rows. */}
+          {lastActivity && (
+            <span className="text-right text-xs tabular-nums text-slate-400">
+              {lastActivity}
+            </span>
+          )}
         </button>
-        <span className="shrink-0 text-xs tabular-nums text-slate-400">
-          {lastActivity}
-        </span>
-        {/* Fixed-width slot keeps the timestamp column aligned across rows. */}
+        {/* Fixed-width slot, vertically centered against the two-line block. */}
         <Menu
           label={`Session actions for ${label}`}
           disabled={!item.open}
