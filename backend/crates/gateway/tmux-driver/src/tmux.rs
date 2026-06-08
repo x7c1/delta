@@ -105,6 +105,19 @@ impl TmuxDriver for Tmux {
             .await
             .map_err(delta_usecase::Error::from)?;
 
+        // Hide tmux's status bar on Delta's embedded pane. The user's
+        // ~/.tmux.conf (inherited at server start) often themes the status line
+        // with powerline separators and Nerd Font private-use glyphs, which the
+        // browser xterm has no matching font for and renders as tofu. The
+        // embedded terminal is a permission-answering escape hatch, not a full
+        // tmux workspace, so it needs no status bar at all; turning it off makes
+        // Delta's pane look the same on any machine and frees a row for Claude.
+        // `status` is a session option; `-g` applies it server-wide (Delta's own
+        // socket only). Idempotent, so setting it on each create is harmless.
+        self.run(&["set-option", "-g", "status", "off"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+
         // Settle delay: immediately after `tmux new-session ... claude`, the
         // Claude TUI has not finished initializing its terminal, so the very
         // first `send-keys` can be swallowed. We cannot screen-scrape the TUI to
