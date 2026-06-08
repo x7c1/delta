@@ -7,11 +7,11 @@ import { useManualEventControl } from './support/app';
  * The mock fixtures seed two sessions in distinct states: `sess-mock-1` (open,
  * with a thread tree) and `sess-mock-2` (closed). These specs assert the
  * structural behavior of the session-centric UI — the session list, the
- * open-session count and open/closed indicator, focusing a closed session into
- * a read-only transcript, and the new-session optimistic send — not appearance.
+ * per-session open/closed status dot, focusing a closed session into a
+ * read-only transcript, and the new-session optimistic send — not appearance.
  */
 
-test('the navigator lists every session with an open count', async ({
+test('the navigator lists every session with its open status dot', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -19,8 +19,10 @@ test('the navigator lists every session with an open count', async ({
 
   // Both seeded sessions appear as top-level nodes.
   await expect(page.getByTestId('session-node')).toHaveCount(2);
-  // Exactly one of the two is open.
-  await expect(page.getByTestId('open-session-count')).toHaveText('open: 1');
+  // Exactly one of the two is open, shown by its status dot.
+  await expect(
+    page.getByRole('status', { name: 'Open', exact: true }),
+  ).toHaveCount(1);
 });
 
 test('focusing a closed session shows its transcript read-only', async ({
@@ -65,13 +67,15 @@ test('a closed session resumes after a Send via the pending queue', async ({
   await expect(pending).toContainText('pick this back up');
 });
 
-test('closing an open session via its kebab menu drops the open count', async ({
+test('closing an open session via its kebab menu clears its open dot', async ({
   page,
 }) => {
   await useManualEventControl(page);
   await page.goto('/');
 
-  await expect(page.getByTestId('open-session-count')).toHaveText('open: 1');
+  await expect(
+    page.getByRole('status', { name: 'Open', exact: true }),
+  ).toHaveCount(1);
 
   // The open session's actions menu is enabled; open it and select Close.
   await page
@@ -80,8 +84,11 @@ test('closing an open session via its kebab menu drops the open count', async ({
     .click();
   await page.getByRole('menuitem', { name: 'Close' }).click();
 
-  // The mock flips the session closed and the refetched list reflects it.
-  await expect(page.getByTestId('open-session-count')).toHaveText('open: 0');
+  // The mock flips the session closed and the refetched list reflects it: no
+  // session carries the "Open" status dot any more.
+  await expect(
+    page.getByRole('status', { name: 'Open', exact: true }),
+  ).toHaveCount(0);
 });
 
 test('starting a new session shows the optimistic send', async ({ page }) => {

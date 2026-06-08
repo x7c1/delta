@@ -30,8 +30,9 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
 
 /**
  * The left pane: a session → thread nested tree, plus a "New" affordance, the
- * open-session count, the permission notice, a running indicator, and the live
- * connection status. Top-level nodes are sessions; expanding the focused session
+ * permission notice, a running indicator, and the live connection status. Each
+ * session's open/closed state is shown by its status dot, so no separate count
+ * is rendered. Top-level nodes are sessions; expanding the focused session
  * reveals its thread tree.
  */
 export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
@@ -48,8 +49,6 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
-
-  const openCount = sessions.filter((item) => item.open).length;
 
   return (
     <Panel
@@ -70,21 +69,13 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
               Sessions
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xs text-slate-500"
-              data-testid="open-session-count"
-            >
-              open: {openCount}
-            </span>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
-            >
-              New
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
+          >
+            New
+          </Button>
         </div>
       }
       footer={hasInProgress ? <Spinner label="running" /> : undefined}
