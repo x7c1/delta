@@ -71,3 +71,20 @@ body {
   overflow-x: auto;
   font-size: 1em;
 }
+/* Claude uses `##`/`###` as inline section headers, not document titles, so
+   prose's default heading scale (h2 ≈ 1.43em) feels oversized in a chat turn.
+   Pull the scale in to read as modest, still-bold section labels. Margins stay
+   prose-managed (em-relative), so they shrink with the smaller sizes and the
+   first-child top margin is preserved. */
+.prose h1 {
+  font-size: 1.4em;
+}
+.prose h2 {
+  font-size: 1.2em;
+}
+.prose h3 {
+  font-size: 1.05em;
+}
+.prose h4 {
+  font-size: 1em;
+}
