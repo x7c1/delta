@@ -96,6 +96,8 @@ body {
 .markdown-body h2 {
   font-size: 1.2em;
   font-weight: normal;
+  border-bottom: 1px solid darkgray;
+  margin: 1.5em 0em 1em 0em;
 }
 .markdown-body h3 {
   font-size: 1.05em;

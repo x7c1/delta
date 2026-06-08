@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import type { Message, MessageRole } from '@delta/model';
+import { fireEvent, render, screen } from '@testing-library/react';
+import type { ContentBlock, Message, MessageRole } from '@delta/model';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { MessageItem } from './MessageItem';
 
 function makeMessage(role: MessageRole, text: string): Message {
+  return makeMessageWithContent(role, [{ type: 'text', text }], text);
+}
+
+function makeMessageWithContent(
+  role: MessageRole,
+  content: ContentBlock[],
+  text: string | null = null,
+): Message {
   return {
     uuid: 'm-1',
     session_id: 's',
@@ -15,7 +23,7 @@ function makeMessage(role: MessageRole, text: string): Message {
     prompt_id: null,
     seq: 0,
     content_text: text,
-    content: [{ type: 'text', text }],
+    content,
     created_at: '2026-01-01T00:00:00Z',
   };
 }
@@ -86,6 +94,76 @@ describe('MessageItem', () => {
       'data-role',
       'assistant',
     );
+  });
+
+  it('renders a user-role tool_result on the assistant side, not as a user bubble', () => {
+    // Claude returns tool results as `role: "user"` lines. Such a message
+    // carries no author-written text, so it must not be laid out as a
+    // right-aligned user bubble.
+    const message = makeMessageWithContent('user', [
+      {
+        type: 'tool_result',
+        tool_use_id: 't1',
+        content: 'files: a, b',
+        is_error: false,
+      },
+    ]);
+    render(<MessageItem message={message} />);
+
+    // Not right-aligned: the assistant-side layout omits the bubble wrapper.
+    expect(screen.getByTestId('message-item')).not.toHaveClass('items-end');
+  });
+
+  it('still right-aligns a genuine user turn that has text', () => {
+    render(<MessageItem message={makeMessage('user', 'hi')} />);
+    expect(screen.getByTestId('message-item')).toHaveClass('items-end');
+  });
+
+  it('renders a tool call together with its paired result', () => {
+    const message = makeMessageWithContent('assistant', [
+      { type: 'tool_use', id: 't1', name: 'ToolSearch', input: { q: 'x' } },
+    ]);
+    const pairing = {
+      toolUseIds: new Set(['t1']),
+      resultByUseId: new Map([
+        [
+          't1',
+          {
+            type: 'tool_result' as const,
+            tool_use_id: 't1',
+            content: 'search-hits',
+            is_error: false,
+          },
+        ],
+      ]),
+    };
+    render(<MessageItem message={message} pairing={pairing} />);
+
+    // The tool name heads the (collapsed) row; expanding reveals the result.
+    const toggle = screen.getByRole('button', { name: /ToolSearch/ });
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByText('search-hits')).toBeInTheDocument();
+  });
+
+  it('suppresses a tool_result whose call is shown elsewhere', () => {
+    const message = makeMessageWithContent('user', [
+      {
+        type: 'tool_result',
+        tool_use_id: 't1',
+        content: 'search-hits',
+        is_error: false,
+      },
+    ]);
+    const pairing = {
+      toolUseIds: new Set(['t1']),
+      resultByUseId: new Map(),
+    };
+    render(<MessageItem message={message} pairing={pairing} />);
+
+    // The paired result is rendered inline with its call, not as its own block.
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByText('search-hits')).toBeNull();
   });
 
   it('renders no timestamp when created_at is unparseable', () => {

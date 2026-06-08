@@ -5,11 +5,18 @@ import type { Message } from '@delta/model';
 import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { blockSummary, stringifyContent } from './blockSummary';
+import type { ToolPairing } from './toolPairs';
 
 export interface MessageItemProps {
   message: Message;
   /** Called when the user selects a text range within this message. */
   onSelectQuote?: (message: Message, quote: string) => void;
+  /**
+   * The thread's tool_use ⇄ tool_result linkage. When provided, a `tool_use`
+   * block renders together with its result, and a `tool_result` whose call is
+   * shown elsewhere is suppressed here (it is rendered inline with that call).
+   */
+  pairing?: ToolPairing;
 }
 
 /**
@@ -21,8 +28,17 @@ export interface MessageItemProps {
  * newlines and any Markdown-like characters the user typed are preserved as
  * plain text. `thinking` and tool blocks are collapsed by default with a
  * one-line summary. Selecting a text range emits the quote for branching.
+ *
+ * Claude's transcript delivers tool results as `role: "user"` lines, so a
+ * user-role message that carries no human-authored text is a tool-result
+ * carrier, not a real user turn. Those render on the assistant side (left,
+ * plain) so they don't masquerade as right-aligned user bubbles.
  */
-export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
+export function MessageItem({
+  message,
+  onSelectQuote,
+  pairing,
+}: MessageItemProps) {
   const handleMouseUp = useCallback(() => {
     if (!onSelectQuote) {
       return;
@@ -35,7 +51,12 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
   }, [message, onSelectQuote]);
 
   const timestamp = formatLocalDateTime(message.created_at);
-  const isUser = message.role === 'user';
+  // A genuine human turn is a user-role message with author-written text. A
+  // user-role message that only carries tool results (fed back to the model
+  // after a tool_use) is not a human turn — render it on the assistant side.
+  const isUserTurn =
+    message.role === 'user' &&
+    message.content.some((block) => block.type === 'text');
 
   const blocks = (
     <div className="space-y-1.5" onMouseUp={handleMouseUp}>
@@ -72,15 +93,64 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
                 </pre>
               </Collapsible>
             );
-          case 'tool_use':
+          case 'tool_use': {
+            // A tool call renders together with its result (resolved by id via
+            // the pairing): the header names the tool and shows its outcome,
+            // and the body stacks the call input above the returned result.
+            const result = pairing?.resultByUseId.get(block.id);
             return (
-              <Collapsible key={index} summary={blockSummary(block)}>
-                <pre className="whitespace-pre-wrap text-slate-700">
-                  {stringifyContent(block.input)}
-                </pre>
+              <Collapsible
+                key={index}
+                summary={
+                  <span className="flex items-center gap-1.5">
+                    <span className="font-medium text-slate-700">
+                      {block.name}
+                    </span>
+                    {result ? (
+                      result.is_error ? (
+                        <Badge tone="warning">error</Badge>
+                      ) : (
+                        <span className="text-emerald-600" aria-label="ok">
+                          ✓
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-slate-400">running…</span>
+                    )}
+                  </span>
+                }
+              >
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
+                      input
+                    </div>
+                    <pre className="whitespace-pre-wrap text-slate-700">
+                      {stringifyContent(block.input)}
+                    </pre>
+                  </div>
+                  {result && (
+                    <div>
+                      <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
+                        result
+                      </div>
+                      <pre className="whitespace-pre-wrap text-slate-700">
+                        {stringifyContent(result.content)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
               </Collapsible>
             );
+          }
           case 'tool_result':
+            // A result paired to a call shown elsewhere is rendered inline with
+            // that call (see 'tool_use' above), so suppress it here. Only an
+            // orphan result (its call is not in view) falls through to a
+            // standalone collapsible.
+            if (pairing?.toolUseIds.has(block.tool_use_id)) {
+              return null;
+            }
             return (
               <Collapsible
                 key={index}
@@ -110,7 +180,7 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
   );
 
   // User: a right-aligned tinted bubble that does not span the full width.
-  if (isUser) {
+  if (isUserTurn) {
     return (
       <article
         className="flex flex-col items-end px-3 py-2 text-sm"

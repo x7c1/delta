@@ -18,6 +18,7 @@ import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
+import { buildToolPairing, isAbsorbedToolResultMessage } from './toolPairs';
 
 /**
  * Distance from the bottom (in px) under which the transcript is considered
@@ -77,6 +78,15 @@ export function TranscriptPane({
     () =>
       allMessages.filter((m) => m.role === 'user' || m.role === 'assistant'),
     [allMessages],
+  );
+
+  // Resolve each tool call to its result across the thread (the result arrives
+  // in a separate `role: "user"` message), so a call renders together with its
+  // result and the result-only carrier message is not shown on its own.
+  const pairing = useMemo(() => buildToolPairing(messages), [messages]);
+  const renderedMessages = useMemo(
+    () => messages.filter((m) => !isAbsorbedToolResultMessage(m, pairing)),
+    [messages, pairing],
   );
 
   // Stick-to-bottom: auto-scroll the transcript when new content arrives, but
@@ -246,12 +256,13 @@ export function TranscriptPane({
           </p>
         )}
 
-      {messages.map((message) => {
+      {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
         return (
           <div key={message.uuid}>
             <MessageItem
               message={message}
+              pairing={pairing}
               // Branch-from-quote works on closed sessions too: the branch send
               // resumes the session before creating the child thread, so an old
               // conversation can be picked up from a selected passage.
