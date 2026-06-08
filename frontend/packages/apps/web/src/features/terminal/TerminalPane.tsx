@@ -161,6 +161,9 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
     fontFamily: 'monospace',
     fontSize: 13,
     theme: { background: '#0f172a' },
+    // `term.unicode` is a proposed API that the Unicode 11 addon touches, so it
+    // must be opted into or `loadAddon`/`activeVersion` throws at attach time.
+    allowProposedApi: true,
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
