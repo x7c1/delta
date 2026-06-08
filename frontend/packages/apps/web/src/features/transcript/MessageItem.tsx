@@ -50,7 +50,15 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
                 {block.text}
               </div>
             ) : (
-              <div key={index} className="markdown-body text-slate-800">
+              <div
+                key={index}
+                // Tailwind Typography (`prose`) gives every Markdown element
+                // consistent spacing and type without hand-rolling each one.
+                // `prose-sm` matches the pane's text size, `prose-slate` the
+                // palette, `max-w-none` lets it fill the column, `break-words`
+                // keeps long tokens from overflowing.
+                className="prose prose-sm prose-slate max-w-none break-words"
+              >
                 {/* GFM enables tables, strikethrough, task lists, and
                     autolinks, which Claude routinely emits. */}
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>

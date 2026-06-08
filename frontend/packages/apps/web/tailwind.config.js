@@ -1,3 +1,5 @@
+import typography from '@tailwindcss/typography';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -10,5 +12,8 @@ export default {
   theme: {
     extend: {},
   },
-  plugins: [],
+  // The `prose` classes give rendered assistant Markdown consistent spacing and
+  // typography (paragraphs, lists, tables, headings) without hand-rolling each
+  // element. See MessageItem, which applies `prose prose-sm prose-slate`.
+  plugins: [typography],
 };
