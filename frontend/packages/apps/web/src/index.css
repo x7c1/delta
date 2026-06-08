@@ -171,6 +171,15 @@ body {
   background: rgb(248 250 252);
   font-weight: normal;
 }
+/* Claude tends to bold the first column of every table with `**…**`; that
+   emphasis reads as noise in a dense grid. Neutralize bold *inside tables only*
+   — body-text emphasis is left untouched. */
+.markdown-body th strong,
+.markdown-body td strong,
+.markdown-body th b,
+.markdown-body td b {
+  font-weight: normal;
+}
 
 .markdown-body hr {
   border: 0;
