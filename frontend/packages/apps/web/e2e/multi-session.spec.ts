@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { SESSION_ID_2 } from '@delta/api-mocks';
-import { emitEvent, useManualEventControl } from './support/app';
+import { useManualEventControl } from './support/app';
 
 /**
  * Multi-session navigator structure and the focus / closed=view model.
@@ -40,7 +39,7 @@ test('focusing a closed session shows its transcript read-only', async ({
   ).toBeVisible();
 });
 
-test('a closed session resumes after a Send and clears once it opens', async ({
+test('a closed session resumes after a Send via the pending queue', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -49,14 +48,14 @@ test('a closed session resumes after a Send and clears once it opens', async ({
   await page.getByRole('button', { name: /scratch notes/ }).click();
   await expect(page.getByTestId('readonly-notice')).toBeVisible();
 
-  // Send a message to the closed session: it shows a resuming marker until the
-  // session announces it is open.
+  // Sending to a closed session resumes it; the send is surfaced optimistically
+  // in the pending queue rather than via a navigator badge.
   await page.getByRole('textbox').fill('pick this back up');
   await page.getByRole('button', { name: 'Send' }).click();
-  await expect(page.getByText('resuming…')).toBeVisible();
 
-  await emitEvent(page, { kind: 'session_opened', session_id: SESSION_ID_2 });
-  await expect(page.getByText('resuming…')).toHaveCount(0);
+  const pending = page.getByTestId('pending-item');
+  await expect(pending).toHaveCount(1);
+  await expect(pending).toContainText('pick this back up');
 });
 
 test('starting a new session shows the optimistic send', async ({ page }) => {

@@ -10,7 +10,11 @@ import { defineConfig, devices } from '@playwright/test';
  * can resolve them; the `webServer` below only launches Vite in mock mode.
  */
 
-const PORT = 5173;
+// The suite spins up its own mock-mode Vite server. `E2E_PORT` overrides the
+// default so a run can avoid colliding with a real-backend dev server that may
+// already hold 5173 (in which case `reuseExistingServer` would otherwise reuse
+// the wrong, non-mock server).
+const PORT = Number(process.env.E2E_PORT ?? 5173);
 
 // CI installs and runs Playwright's bundled Chromium. On a dev machine whose OS
 // the bundled build does not target, set E2E_CHROME_CHANNEL=chrome to run the
@@ -35,7 +39,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm exec vite --port 5173 --strictPort',
+    command: `pnpm exec vite --port ${PORT} --strictPort`,
     env: { VITE_API_MOCK: '1' },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
