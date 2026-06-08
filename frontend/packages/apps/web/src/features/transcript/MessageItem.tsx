@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { Message } from '@delta/model';
 import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -50,7 +51,11 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
               </div>
             ) : (
               <div key={index} className="markdown-body text-slate-800">
-                <ReactMarkdown>{block.text}</ReactMarkdown>
+                {/* GFM enables tables, strikethrough, task lists, and
+                    autolinks, which Claude routinely emits. */}
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {block.text}
+                </ReactMarkdown>
               </div>
             );
           case 'thinking':

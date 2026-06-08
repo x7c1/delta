@@ -42,6 +42,17 @@ describe('MessageItem', () => {
     expect(strong.tagName).toBe('STRONG');
   });
 
+  it('renders GFM tables in assistant text', () => {
+    const table = '| A | B |\n|---|---|\n| 1 | 2 |';
+    render(<MessageItem message={makeMessage('assistant', table)} />);
+
+    // Without remark-gfm the pipes render as a literal paragraph; with it the
+    // markdown becomes a real <table> with header cells.
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'A' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: '2' })).toBeInTheDocument();
+  });
+
   it('renders the local-time timestamp for both roles', () => {
     const expected = formatLocalDateTime('2026-01-01T00:00:00Z');
     expect(expected).not.toBeNull();

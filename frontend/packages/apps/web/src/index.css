@@ -96,3 +96,29 @@ body {
   color: rgb(79 70 229);
   text-decoration: underline;
 }
+/* GFM tables (via remark-gfm). Bordered, with a tinted header row, and
+   horizontally scrollable so a wide table never overflows the pane. */
+.markdown-body table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0 0 0.5rem;
+  font-size: 0.9em;
+}
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid rgb(226 232 240);
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown-body th {
+  background: rgb(248 250 252);
+  font-weight: 600;
+}
+/* GFM strikethrough. */
+.markdown-body del {
+  text-decoration: line-through;
+}
