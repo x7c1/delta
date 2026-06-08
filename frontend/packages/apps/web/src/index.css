@@ -14,14 +14,16 @@ body {
 
 /*
  * Hover-reveal scrollbar for scroll areas. The thumb is invisible while idle
- * and fades in only when the pointer is over the scroll container. The gutter
- * is reserved up front with `scrollbar-gutter: stable` and only the thumb
- * *color* toggles (transparent -> visible), so content never reflows on hover.
- * Styles both the WebKit/Blink pseudo-elements and the standard `scrollbar-*`
- * properties so it also works under WebKitGTK.
+ * and fades in only when the pointer is over the scroll container. Hover only
+ * toggles the thumb *color* (transparent -> visible); the scrollbar's width is
+ * governed solely by whether the content overflows, so hovering never reflows
+ * the content. The gutter is deliberately NOT reserved (`scrollbar-gutter`
+ * stays `auto`): reserving it would leave an empty strip on the right whenever
+ * the content fits, which reads as stray blank space. Styles both the
+ * WebKit/Blink pseudo-elements and the standard `scrollbar-*` properties so it
+ * also works under WebKitGTK.
  */
 .scrollbar-hover {
-  scrollbar-gutter: stable;
   /* Standard properties: thin scrollbar, transparent thumb while idle. */
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
