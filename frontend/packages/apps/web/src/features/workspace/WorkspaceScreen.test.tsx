@@ -79,16 +79,14 @@ describe('WorkspaceScreen multi-session', () => {
     });
   });
 
-  it('lists every session with an open-session count', async () => {
+  it('lists every session with its open/closed status dot', async () => {
     renderScreen();
 
     await waitFor(() =>
       expect(screen.getAllByTestId('session-node').length).toBe(2),
     );
-    // One of the two seeded sessions is open.
-    expect(screen.getByTestId('open-session-count')).toHaveTextContent(
-      'open: 1',
-    );
+    // One of the two seeded sessions is open; its dot carries the "Open" name.
+    expect(screen.getAllByRole('status', { name: 'Open' })).toHaveLength(1);
   });
 
   it('focuses the most-recent open session on cold load', async () => {
@@ -167,9 +165,7 @@ describe('WorkspaceScreen multi-session', () => {
       expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
     );
     await waitFor(() =>
-      expect(screen.getByTestId('open-session-count')).toHaveTextContent(
-        'open: 1',
-      ),
+      expect(screen.getAllByRole('status', { name: 'Open' })).toHaveLength(1),
     );
     expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
 
@@ -184,12 +180,10 @@ describe('WorkspaceScreen multi-session', () => {
     fireEvent.click(openTrigger!);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
 
-    // The mock flips the session closed; the refetched list drops the open
-    // count and the still-focused session re-renders read-only.
+    // The mock flips the session closed; the refetched list shows no open dot
+    // and the still-focused session re-renders read-only.
     await waitFor(() =>
-      expect(screen.getByTestId('open-session-count')).toHaveTextContent(
-        'open: 0',
-      ),
+      expect(screen.queryAllByRole('status', { name: 'Open' })).toHaveLength(0),
     );
     await waitFor(() =>
       expect(screen.getByTestId('readonly-notice')).toBeInTheDocument(),

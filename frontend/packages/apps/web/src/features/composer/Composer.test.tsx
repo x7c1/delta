@@ -11,7 +11,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import { MAIN_THREAD_ID, createHandlers, mockThreads } from '@delta/api-mocks';
+import {
+  BRANCH_THREAD_ID,
+  MAIN_THREAD_ID,
+  createHandlers,
+  mockThreads,
+} from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import type { Thread } from '@delta/model';
 import { ApiProvider } from '../../data/apiContext';
@@ -41,7 +46,6 @@ function renderComposer(activeThread: Thread = mainThread) {
             kind: 'thread',
             activeThread,
             readOnly: false,
-            sessionMainThreadId: MAIN_THREAD_ID,
           }}
         />
       </ApiProvider>
@@ -113,7 +117,6 @@ describe('Composer', () => {
               kind: 'thread',
               activeThread: mainThread,
               readOnly: true,
-              sessionMainThreadId: MAIN_THREAD_ID,
             }}
           />
         </ApiProvider>
@@ -124,11 +127,85 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'resume please' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // A resume send queues optimistically against the session's main thread.
+    // A resume send queues optimistically against the active thread (here main).
     await waitFor(() => {
       expect(useLiveStore.getState().pending.length).toBe(1);
     });
     expect(useLiveStore.getState().pending[0]?.threadId).toBe(MAIN_THREAD_ID);
+  });
+
+  it('resumes a closed session onto the active SUB-thread, not main', async () => {
+    // Regression: continuing a closed session from one of its sub-threads must
+    // stay on that sub-thread. The send targets the active thread (the backend
+    // resumes the session), so the optimistic entry keys to the sub-thread —
+    // not the session's main thread.
+    const subThread = mockThreads.find(
+      (t) => t.id === BRANCH_THREAD_ID,
+    ) as Thread;
+    useNavStore.setState({ activeThreadId: BRANCH_THREAD_ID });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{ kind: 'thread', activeThread: subThread, readOnly: true }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'continue the sub-thread' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(useLiveStore.getState().pending.length).toBe(1);
+    });
+    expect(useLiveStore.getState().pending[0]?.threadId).toBe(BRANCH_THREAD_ID);
+  });
+
+  it('branches from a closed (read-only) session, drilling into the new child', async () => {
+    // A quote selected in a closed session sets a branch origin. The send must
+    // still branch (not degrade into a plain resume): the backend resumes the
+    // session and creates the child, and the composer drills into it.
+    useComposerStore.setState({
+      branchOrigin: {
+        parentThreadId: MAIN_THREAD_ID,
+        semanticParentUuid: 'uuid-a',
+        locatorQuote: 'old passage',
+      },
+    });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              readOnly: true,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'dig into this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      const active = useNavStore.getState().activeThreadId;
+      expect(active).not.toBeNull();
+      expect(active).not.toBe(MAIN_THREAD_ID);
+    });
+    expect(useComposerStore.getState().branchOrigin).toBeNull();
   });
 
   it('marks the optimistic send failed when the resume request fails', async () => {
@@ -151,7 +228,6 @@ describe('Composer', () => {
               kind: 'thread',
               activeThread: mainThread,
               readOnly: true,
-              sessionMainThreadId: MAIN_THREAD_ID,
             }}
           />
         </ApiProvider>

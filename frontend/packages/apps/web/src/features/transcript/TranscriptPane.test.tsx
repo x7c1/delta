@@ -22,20 +22,16 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderPane() {
+function renderPane(threads = mockThreads) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const client = new ApiClient({ baseUrl: 'http://localhost' });
-  const main = mockThreads.find((t) => t.id === MAIN_THREAD_ID)!;
+  const main = threads.find((t) => t.id === MAIN_THREAD_ID)!;
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <TranscriptPane
-          threads={mockThreads}
-          activeThread={main}
-          readOnly={false}
-        />
+        <TranscriptPane threads={threads} activeThread={main} readOnly={false} />
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -60,6 +56,20 @@ describe('TranscriptPane', () => {
     expect(
       screen.getByRole('navigation', { name: 'Breadcrumb' }),
     ).toHaveTextContent('main');
+  });
+
+  it('hides the breadcrumb until the session has branched', async () => {
+    // A main-only session (no sub-threads) should not show a lone "main"
+    // breadcrumb, which reads as abrupt with no tree to place it in.
+    const mainOnly = mockThreads.filter((t) => t.parent_thread_id === null);
+    renderPane(mainOnly);
+
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole('navigation', { name: 'Breadcrumb' }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders a branch chip where a child thread sprouts', async () => {

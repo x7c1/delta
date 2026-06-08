@@ -30,8 +30,9 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
 
 /**
  * The left pane: a session → thread nested tree, plus a "New" affordance, the
- * open-session count, the permission notice, a running indicator, and the live
- * connection status. Top-level nodes are sessions; expanding the focused session
+ * permission notice, a running indicator, and the live connection status. Each
+ * session's open/closed state is shown by its status dot, so no separate count
+ * is rendered. Top-level nodes are sessions; expanding the focused session
  * reveals its thread tree.
  */
 export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
@@ -49,11 +50,14 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
 
-  const openCount = sessions.filter((item) => item.open).length;
-
   return (
     <Panel
       className="border-r border-slate-200"
+      // The session list is a side panel; hide its scrollbar entirely (no bar,
+      // no reserved column) so it never shows a stray blank strip. It still
+      // scrolls via wheel/trackpad. The transcript pane keeps its hover-reveal
+      // scrollbar (Panel's default).
+      bodyClassName="scrollbar-none"
       header={
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -65,21 +69,13 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
               Sessions
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span
-              className="text-xs text-slate-500"
-              data-testid="open-session-count"
-            >
-              open: {openCount}
-            </span>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
-            >
-              New
-            </Button>
-          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
+          >
+            New
+          </Button>
         </div>
       }
       footer={hasInProgress ? <Spinner label="running" /> : undefined}
@@ -103,14 +99,14 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
 
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
-          className="mx-3 mb-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-700"
+          className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-indigo-300 bg-indigo-50/70 px-2 py-2 text-xs text-indigo-700 shadow-sm ring-1 ring-indigo-200"
           data-testid="new-session-node"
         >
           New session — send the first message to start it.
         </div>
       )}
 
-      <ul className="pb-2">
+      <ul className="pb-2 pt-1.5">
         {sessions.map((item) => (
           <SessionNode
             key={item.session.id}

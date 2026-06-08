@@ -29,19 +29,19 @@ export interface TranscriptPaneProps {
   threads: Thread[];
   /** The active thread, or null for the cold-start / new-session state. */
   activeThread: Thread | null;
-  /** True when the focused session is closed: view-only, no branch selection. */
+  /** True when the focused session is closed (read-only viewing; a Send resumes it). */
   readOnly: boolean;
   /** True for the new-session composer state (no session/thread exists yet). */
   newSession?: boolean;
-  /** The focused session's main thread id (target for a resume send). */
-  sessionMainThreadId?: ThreadId;
 }
 
 /**
  * The right pane. For an existing session it shows the active thread's trunk as
- * a linear list (breadcrumb, branch chips, external-input marker, pending queue,
- * composer). A closed session is view-only — branch-from-quote is disabled — but
- * the composer stays available so a Send resumes the session. For the
+ * a linear list (breadcrumb, branch chips, external-input marker) in the
+ * scrolling body, with a pinned footer that stacks the optimistic pending-send
+ * strip directly above the composer. A closed session is read-only for viewing,
+ * but the composer stays available: a plain Send resumes it, and a
+ * branch-from-quote both resumes it and drills into the new sub-thread. For the
  * new-session state it shows a blank prompt and a new-session composer.
  */
 export function TranscriptPane({
@@ -49,7 +49,6 @@ export function TranscriptPane({
   activeThread,
   readOnly,
   newSession = false,
-  sessionMainThreadId,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -156,6 +155,12 @@ export function TranscriptPane({
     onClick: () => setActiveThread(thread.id),
   }));
 
+  // Until the session has branched, the breadcrumb is a lone "main" that reads
+  // as abrupt noise — there is no tree to place it in. Show it only once a
+  // sub-thread exists (a sub-thread is any thread with a parent), matching the
+  // navigator, which hides the standalone main node under the same condition.
+  const hasSubThreads = threads.some((t) => t.parent_thread_id !== null);
+
   const showExternalInput =
     !newSession &&
     activeThread !== null &&
@@ -172,9 +177,18 @@ export function TranscriptPane({
         kind: 'thread',
         activeThread,
         readOnly,
-        sessionMainThreadId,
       }}
     />
+  ) : undefined;
+
+  // The optimistic pending-send strip is pinned just above the composer (in the
+  // fixed footer, not the scrolling transcript) so it never jostles the
+  // conversation tail while a turn is in flight.
+  const footer = composer ? (
+    <div className="space-y-2">
+      <PendingQueue threadId={pendingThreadId} />
+      {composer}
+    </div>
   ) : undefined;
 
   return (
@@ -185,11 +199,11 @@ export function TranscriptPane({
           <span className="text-sm font-semibold text-slate-700">
             New session
           </span>
-        ) : (
+        ) : hasSubThreads ? (
           <Breadcrumb items={breadcrumbItems} />
-        )
+        ) : null
       }
-      footer={composer}
+      footer={footer}
     >
       {readOnly && !newSession && (
         <div
@@ -238,15 +252,15 @@ export function TranscriptPane({
           <div key={message.uuid}>
             <MessageItem
               message={message}
-              onSelectQuote={
-                readOnly
-                  ? undefined
-                  : (msg, quote) =>
-                      setBranchOrigin({
-                        parentThreadId: activeThread!.id,
-                        semanticParentUuid: msg.uuid,
-                        locatorQuote: quote,
-                      })
+              // Branch-from-quote works on closed sessions too: the branch send
+              // resumes the session before creating the child thread, so an old
+              // conversation can be picked up from a selected passage.
+              onSelectQuote={(msg, quote) =>
+                setBranchOrigin({
+                  parentThreadId: activeThread!.id,
+                  semanticParentUuid: msg.uuid,
+                  locatorQuote: quote,
+                })
               }
             />
             {children.length > 0 && (
@@ -262,10 +276,6 @@ export function TranscriptPane({
           </div>
         );
       })}
-
-      <PendingQueue
-        threadId={newSession ? NEW_SESSION_DRAFT_KEY : activeThread?.id ?? null}
-      />
     </Panel>
   );
 }

@@ -15,9 +15,11 @@ import { useNavStore } from '../../store/navStore';
  *
  * - `new-session`: spawns a brand-new session (`{ new_session: true, text }`).
  *   There is no thread or session id yet; drafts key off a stable sentinel.
- * - `thread`: targets the focused session's active thread. When the session is
- *   closed (`readOnly`), the first Send resumes it (targeting its main thread);
- *   when open, a branch origin turns it into a branch send.
+ * - `thread`: targets the focused session's active thread. A branch origin turns
+ *   the send into a branch (a new child thread); otherwise it is a plain send to
+ *   the active thread. Either way, a closed (`readOnly`) session is re-opened by
+ *   the backend before the send is dispatched — continuing whatever thread is in
+ *   view, main or sub, rather than jumping to the session's main thread.
  */
 export type ComposerMode =
   | { kind: 'new-session' }
@@ -25,7 +27,6 @@ export type ComposerMode =
       kind: 'thread';
       activeThread: Thread;
       readOnly: boolean;
-      sessionMainThreadId?: ThreadId;
     };
 
 export interface ComposerProps {
@@ -55,19 +56,15 @@ export function Composer({ mode }: ComposerProps) {
 
   const enqueueSend = useLiveStore((state) => state.enqueueSend);
   const attachSendId = useLiveStore((state) => state.attachSendId);
+  const retargetSend = useLiveStore((state) => state.retargetSend);
   const failSend = useLiveStore((state) => state.failSend);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
-  // A closed session resumes by sending to its main thread (falling back to the
-  // active thread if the main id was not supplied).
-  const resumeThreadId: ThreadId | null =
-    mode.kind === 'thread'
-      ? mode.sessionMainThreadId ?? mode.activeThread.id
-      : null;
-
-  // Branching only applies to an open session's active thread.
+  // Branching applies to the active thread whether the session is open or
+  // closed: a branch send to a closed session resumes it (the backend
+  // ensure-opens) and then creates the child thread, so a quote from an old
+  // conversation can be picked up and drilled into.
   const branching =
-    !readOnly &&
     activeThread !== null &&
     branchOrigin !== null &&
     branchOrigin.parentThreadId === activeThread.id;
@@ -82,13 +79,13 @@ export function Composer({ mode }: ComposerProps) {
       const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       // The optimistic FIFO entry is keyed by the thread the pending queue
-      // renders under. A resume targets the session's main thread; a new-session
-      // send has no thread yet, so it uses the sentinel key.
-      const optimisticThread: ThreadId = !activeThread
-        ? NEW_SESSION_DRAFT_KEY
-        : readOnly && resumeThreadId !== null
-          ? resumeThreadId
-          : activeThread.id;
+      // renders under. A branch send keys to the active (parent) thread and is
+      // retargeted to the child once the backend creates it; a plain send keys
+      // to the active thread directly. Only the new-session send, which has no
+      // thread yet, uses the sentinel key.
+      const optimisticThread: ThreadId = activeThread
+        ? activeThread.id
+        : NEW_SESSION_DRAFT_KEY;
 
       enqueueSend({
         localId,
@@ -104,25 +101,23 @@ export function Composer({ mode }: ComposerProps) {
       });
       clearDraft(draftKey);
 
-      // Build the send target.
+      // Build the send target. A branch carries the semantic parent; otherwise
+      // it is a plain send to the active thread. Both target the active thread
+      // regardless of open/closed — for a closed session the backend
+      // ensure-opens (resumes) it before dispatching, so continuing a sub-thread
+      // stays on that sub-thread instead of jumping to the session's main thread.
       let body: SendRequest;
       if (isNew) {
         body = { new_session: true, text };
-      } else if (readOnly && activeThread && resumeThreadId !== null) {
-        // Resume a closed session: send to its main thread; the backend
-        // auto-resumes.
-        body = { thread_id: resumeThreadId, text };
-      } else {
+      } else if (branching) {
         body = {
           thread_id: activeThread!.id,
           text,
-          ...(branching
-            ? {
-                semantic_parent_uuid: branchOrigin.semanticParentUuid,
-                locator_quote: branchOrigin.locatorQuote,
-              }
-            : {}),
+          semantic_parent_uuid: branchOrigin.semanticParentUuid,
+          locator_quote: branchOrigin.locatorQuote,
         };
+      } else {
+        body = { thread_id: activeThread!.id, text };
       }
 
       try {
@@ -130,7 +125,11 @@ export function Composer({ mode }: ComposerProps) {
         attachSendId(localId, send.id);
         if (branching) {
           // The backend created a fresh child thread for this branch send and
-          // returns its id; drill into it and clear the branch origin.
+          // returns its id. The pending entry was enqueued under the parent
+          // thread (the child did not exist yet), so move it onto the child and
+          // drill into it — otherwise the "waiting" indicator would stay on the
+          // parent while the user is looking at the new sub-thread.
+          retargetSend(localId, send.thread_id);
           setActiveThread(send.thread_id);
           setBranchOrigin(null);
         }
@@ -142,8 +141,6 @@ export function Composer({ mode }: ComposerProps) {
       draft,
       draftKey,
       isNew,
-      readOnly,
-      resumeThreadId,
       activeThread,
       branching,
       branchOrigin,
@@ -151,6 +148,7 @@ export function Composer({ mode }: ComposerProps) {
       clearDraft,
       mutation,
       attachSendId,
+      retargetSend,
       setBranchOrigin,
       setActiveThread,
       failSend,
@@ -159,10 +157,10 @@ export function Composer({ mode }: ComposerProps) {
 
   const placeholder = isNew
     ? 'Message to start a new session…'
-    : readOnly
-      ? 'Send to resume this closed session…'
-      : branching
-        ? 'Ask a follow-up on the selected text…'
+    : branching
+      ? 'Ask a follow-up on the selected text…'
+      : readOnly
+        ? 'Send to resume this closed session…'
         : `Message ${activeThread?.title ?? ''}…`;
 
   return (
