@@ -63,8 +63,11 @@ body {
 
 /* Rendered assistant Markdown is styled by Tailwind Typography (`prose`); see
    MessageItem. A GFM table wider than the column should scroll within itself
-   rather than stretch the pane, which prose does not handle on its own. */
+   rather than stretch the pane, which prose does not handle on its own.
+   `prose` also shrinks table text to ~0.86em by default; bring it back to the
+   body size so cells read at the same scale as the surrounding text. */
 .prose table {
   display: block;
   overflow-x: auto;
+  font-size: 1em;
 }
