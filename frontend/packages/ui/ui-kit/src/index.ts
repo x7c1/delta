@@ -3,6 +3,7 @@ export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from '.
 export { Badge, type BadgeProps, type BadgeTone } from './Badge';
 export { Panel, type PanelProps } from './Panel';
 export { Collapsible, type CollapsibleProps } from './Collapsible';
+export { ErrorBoundary, type ErrorBoundaryProps } from './ErrorBoundary';
 export {
   Breadcrumb,
   type BreadcrumbItem,
