@@ -22,9 +22,9 @@ import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
 
 /**
  * Pick the session to focus on cold load from the session list: prefer the
- * most-recently-created open session, else the most-recently-created session,
+ * most-recently-active open session, else the most-recently-active session,
  * else the new-session sentinel when the list is empty. The list is ordered by
- * creation (ascending), so "most recent" is the last element.
+ * most recent activity first, so "most recent" is the first element.
  */
 function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
   if (sessions.length === 0) {
@@ -32,7 +32,7 @@ function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
   }
   const open = sessions.filter((item) => item.open);
   const pool = open.length > 0 ? open : sessions;
-  return pool[pool.length - 1].session.id;
+  return pool[0].session.id;
 }
 
 /**

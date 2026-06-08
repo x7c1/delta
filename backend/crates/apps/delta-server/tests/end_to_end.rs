@@ -229,6 +229,10 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         sessions[0]["open"], false,
         "a hook-registered (external) session has no live pane"
     );
+    assert!(
+        sessions[0]["last_activity_at"].is_null(),
+        "a freshly registered session has no messages yet"
+    );
     let main_thread_id = sessions[0]["main_thread_id"]
         .as_i64()
         .expect("main thread id");
@@ -360,6 +364,10 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     let sessions = body["sessions"].as_array().expect("sessions array");
     assert_eq!(sessions.len(), 1, "closing keeps the session in the store");
     assert_eq!(sessions[0]["open"], false, "the session lists as closed");
+    assert_eq!(
+        sessions[0]["last_activity_at"], "2026-01-01T00:00:00Z",
+        "last_activity_at reflects the ingested message's timestamp"
+    );
 
     // Open/close/threads on an unknown session id are 404.
     let (status, _) = post_json(&app, "/api/sessions/ghost/open", json!({})).await;

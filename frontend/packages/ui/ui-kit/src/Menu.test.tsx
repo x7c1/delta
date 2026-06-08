@@ -1,0 +1,80 @@
+import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { Menu } from './Menu';
+
+describe('Menu', () => {
+  it('opens the panel when the trigger is clicked', () => {
+    render(<Menu label="Session actions" items={[{ label: 'Close', onSelect: vi.fn() }]} />);
+
+    const trigger = screen.getByRole('button', { name: 'Session actions' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Close' })).toBeInTheDocument();
+  });
+
+  it('runs an item onSelect and closes the panel', () => {
+    const onSelect = vi.fn();
+    render(<Menu label="Session actions" items={[{ label: 'Close', onSelect }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('closes on Escape', () => {
+    render(<Menu label="Session actions" items={[{ label: 'Close', onSelect: vi.fn() }]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('closes on click outside', () => {
+    render(
+      <div>
+        <span data-testid="outside">outside</span>
+        <Menu label="Session actions" items={[{ label: 'Close', onSelect: vi.fn() }]} />
+      </div>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByTestId('outside'));
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('does not open when disabled', () => {
+    render(
+      <Menu
+        label="Session actions"
+        disabled
+        items={[{ label: 'Close', onSelect: vi.fn() }]}
+      />,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Session actions' });
+    expect(trigger).toBeDisabled();
+
+    fireEvent.click(trigger);
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('renders the trigger disabled when there are no items', () => {
+    render(<Menu label="Session actions" items={[]} />);
+
+    expect(screen.getByRole('button', { name: 'Session actions' })).toBeDisabled();
+  });
+});

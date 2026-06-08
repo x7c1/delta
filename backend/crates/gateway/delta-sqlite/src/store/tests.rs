@@ -20,7 +20,7 @@ fn new_session_with(id: &str) -> NewSession {
 }
 
 #[tokio::test]
-async fn list_sessions_returns_all_in_creation_order() {
+async fn list_sessions_returns_all_in_deterministic_base_order() {
     let store = SqliteStore::open_in_memory().unwrap();
     store
         .register_session(new_session_with("sess-1"))
@@ -31,7 +31,10 @@ async fn list_sessions_returns_all_in_creation_order() {
         .await
         .unwrap();
 
-    // Both registered sessions appear, ordered by creation (ascending).
+    // The store returns every registered session in a deterministic base order
+    // (`created_at`, then `id` to break equal-timestamp ties). The navigator's
+    // most-recently-active-first ordering is layered on in the usecase, which
+    // also knows each session's last activity.
     let sessions = store.list_sessions().await.unwrap();
     let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
     assert_eq!(ids, vec!["sess-1", "sess-2"]);
@@ -190,6 +193,41 @@ async fn message_upsert_and_thread_view() {
     assert_eq!(view.len(), 1);
     assert_eq!(view[0].content_text.as_deref(), Some("hello again"));
     assert_eq!(view[0].content.len(), 1);
+}
+
+#[tokio::test]
+async fn last_activity_at_returns_latest_message_timestamp() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // No messages yet: no activity timestamp.
+    assert_eq!(store.last_activity_at(&session.id).await.unwrap(), None);
+
+    let make = |uuid: &str, seq: i64, created_at: &str| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: created_at.into(),
+    };
+    store
+        .upsert_messages(&[
+            make("u-1", 0, "2026-01-01T00:00:00Z"),
+            make("u-2", 1, "2026-01-01T00:05:00Z"),
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.last_activity_at(&session.id).await.unwrap(),
+        Some("2026-01-01T00:05:00Z".to_string()),
+    );
 }
 
 #[tokio::test]

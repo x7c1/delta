@@ -142,9 +142,12 @@ live pane is *closed* and must be reopened before it can receive a send.
 
 ### `GET /api/sessions`
 
-List every known session, ordered by creation, each annotated with its live
-state and trunk thread. This is the browser's hydration surface: it shows every
-conversation — open or closed — so the navigator can route into any of them.
+List every known session, ordered by most recent activity (newest first), each
+annotated with its live state and trunk thread. The recency key is a session's
+last activity (`last_activity_at`), falling back to its own `created_at` when it
+has no messages yet — so a brand-new session sorts near the top. This is the
+browser's hydration surface: it shows every conversation — open or closed — so
+the navigator can route into any of them.
 
 - **200**:
 
@@ -154,15 +157,18 @@ conversation — open or closed — so the navigator can route into any of them.
       {
         "session": { /* Session */ },
         "open": true,
-        "main_thread_id": 1
+        "main_thread_id": 1,
+        "last_activity_at": "2026-01-01T00:01:01Z"
       }
     ]
   }
   ```
 
   `open` is `true` when the session currently has a live pane (resumable without
-  `--resume`). Returns an empty list until the first `UserPromptSubmit` hook
-  registers a session.
+  `--resume`). `last_activity_at` is the ISO-8601 UTC timestamp of the session's
+  most recent message (`MAX(message.created_at)`), or `null` when the session
+  has no messages yet. Returns an empty list until the first `UserPromptSubmit`
+  hook registers a session.
 
 ### `POST /api/sessions`
 

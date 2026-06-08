@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { Message } from '@delta/model';
-import { Badge, Collapsible } from '@delta/ui-kit';
+import { Badge, Collapsible, cn } from '@delta/ui-kit';
+import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { blockSummary, stringifyContent } from './blockSummary';
 
 export interface MessageItemProps {
@@ -36,9 +37,14 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
     }
   }, [message, onSelectQuote]);
 
+  const timestamp = formatLocalDateTime(message.created_at);
+
   return (
     <article
-      className="border-b border-slate-100 px-3 py-2 text-sm"
+      className={cn(
+        'border-b border-slate-100 px-3 py-2 text-sm',
+        message.role === 'user' && 'bg-slate-100',
+      )}
       data-role={message.role}
       data-testid="message-item"
     >
@@ -46,6 +52,12 @@ export function MessageItem({ message, onSelectQuote }: MessageItemProps) {
         <span className="text-xs font-semibold text-slate-500">
           {ROLE_LABEL[message.role]}
         </span>
+        {/* Right-aligned absolute local time, muted to match other timestamps. */}
+        {timestamp && (
+          <span className="ml-auto text-xs tabular-nums text-slate-400">
+            {timestamp}
+          </span>
+        )}
       </div>
       <div className="space-y-1.5" onMouseUp={handleMouseUp}>
         {message.content.map((block, index) => {

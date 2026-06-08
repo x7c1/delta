@@ -33,15 +33,44 @@ export function createHandlers(): RequestHandler[] {
       entry.threads.some((t) => t.id === threadId),
     );
 
+  // The latest message timestamp across a session's threads, or null when it has
+  // no messages — mirrors the backend's MAX(message.created_at) derivation.
+  const lastActivityAt = (threadIds: number[]): string | null => {
+    let latest: string | null = null;
+    for (const threadId of threadIds) {
+      for (const message of store.messagesByThread[threadId] ?? []) {
+        if (latest === null || message.created_at > latest) {
+          latest = message.created_at;
+        }
+      }
+    }
+    return latest;
+  };
+
   return [
     http.get('*/api/sessions', () => {
-      const body: SessionsResponse = {
-        sessions: store.sessions.map((entry) => ({
-          session: entry.session,
-          open: entry.open,
-          main_thread_id: entry.mainThreadId,
-        })),
-      };
+      const items = store.sessions.map((entry) => ({
+        session: entry.session,
+        open: entry.open,
+        main_thread_id: entry.mainThreadId,
+        last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
+      }));
+      // Most-recently-active first, mirroring the backend: key on last activity,
+      // falling back to the session's own created_at when it has no messages,
+      // with a deterministic created_at-then-id tiebreaker. ISO-8601 UTC strings
+      // compare lexicographically, so a string compare is a time compare.
+      const recency = (item: (typeof items)[number]) =>
+        item.last_activity_at ?? item.session.created_at;
+      items.sort((a, b) => {
+        if (recency(a) !== recency(b)) {
+          return recency(a) < recency(b) ? 1 : -1;
+        }
+        if (a.session.created_at !== b.session.created_at) {
+          return a.session.created_at < b.session.created_at ? 1 : -1;
+        }
+        return a.session.id < b.session.id ? -1 : a.session.id > b.session.id ? 1 : 0;
+      });
+      const body: SessionsResponse = { sessions: items };
       return HttpResponse.json(body);
     }),
 

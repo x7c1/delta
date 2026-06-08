@@ -191,9 +191,12 @@ impl SessionStore for SqliteStore {
 
     async fn list_sessions(&self) -> std::result::Result<Vec<Session>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
+        // Fetch in a deterministic `created_at` order; the navigator's final
+        // most-recently-active-first ordering is applied in the usecase, which
+        // already has each session's `last_activity_at` to key on.
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {SESSION_COLS} FROM session ORDER BY created_at"
+                "SELECT {SESSION_COLS} FROM session ORDER BY created_at, id"
             ))
             .map_err(Error::from)?;
         let rows = stmt.query_map([], map_session).map_err(Error::from)?;
@@ -495,6 +498,22 @@ impl SessionStore for SqliteStore {
         }
         tx.commit().map_err(Error::from)?;
         Ok(())
+    }
+
+    async fn last_activity_at(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // MAX over an empty set yields SQL NULL, mapped to `None`.
+        let latest: Option<String> = conn
+            .query_row(
+                "SELECT MAX(created_at) FROM message WHERE session_id = ?1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(Error::from)?;
+        Ok(latest)
     }
 
     async fn message_count(

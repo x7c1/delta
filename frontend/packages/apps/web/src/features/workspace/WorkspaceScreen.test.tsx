@@ -101,6 +101,51 @@ describe('WorkspaceScreen multi-session', () => {
     );
   });
 
+  it('falls back to the most-recently-active session when none are open', async () => {
+    // The list arrives recency-descending (newest first), so with no open
+    // session the head of the list is the most recent and gets focused.
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID_2,
+                cwd: '/work',
+                transcript_path: '/tmp/s2.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-02T00:00:00Z',
+              },
+              open: false,
+              main_thread_id: SESSION_2_MAIN_THREAD_ID,
+              last_activity_at: '2026-01-02T00:00:02Z',
+            },
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/work',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+              },
+              open: false,
+              main_thread_id: 1,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2),
+    );
+  });
+
   it('shows the new-session composer state when there are no sessions', async () => {
     server.use(
       http.get('*/api/sessions', () => HttpResponse.json({ sessions: [] })),
@@ -128,8 +173,16 @@ describe('WorkspaceScreen multi-session', () => {
     );
     expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
 
-    // Only the open session exposes a Close affordance.
-    fireEvent.click(screen.getByRole('button', { name: /^Close/ }));
+    // Every row carries a fixed-width actions menu, but only the open session's
+    // is enabled; open it and pick the Close menu item. The closed session's
+    // menu is disabled, so the enabled trigger is the one that opens.
+    const actionTriggers = screen.getAllByRole('button', {
+      name: /^Session actions for/,
+    });
+    const openTrigger = actionTriggers.find((button) => !button.hasAttribute('disabled'));
+    expect(openTrigger).toBeDefined();
+    fireEvent.click(openTrigger!);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
 
     // The mock flips the session closed; the refetched list drops the open
     // count and the still-focused session re-renders read-only.

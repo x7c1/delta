@@ -12,3 +12,9 @@ export {
 export { Spinner, type SpinnerProps } from './Spinner';
 export { Chip, type ChipProps } from './Chip';
 export { StatusDot, type DotTone, type StatusDotProps } from './StatusDot';
+export {
+  Menu,
+  type MenuItem,
+  type MenuItemTone,
+  type MenuProps,
+} from './Menu';

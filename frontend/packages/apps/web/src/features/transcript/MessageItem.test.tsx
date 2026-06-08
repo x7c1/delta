@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { Message, MessageRole } from '@delta/model';
+import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { MessageItem } from './MessageItem';
 
 function makeMessage(role: MessageRole, text: string): Message {
@@ -39,5 +40,26 @@ describe('MessageItem', () => {
 
     const strong = screen.getByText('bold');
     expect(strong.tagName).toBe('STRONG');
+  });
+
+  it('renders the local-time timestamp on the role line for both roles', () => {
+    const expected = formatLocalDateTime('2026-01-01T00:00:00Z');
+    expect(expected).not.toBeNull();
+
+    for (const role of ['user', 'assistant'] as const) {
+      const { unmount } = render(
+        <MessageItem message={makeMessage(role, 'hi')} />,
+      );
+      const stamp = screen.getByText(expected as string);
+      expect(stamp).toHaveClass('tabular-nums');
+      expect(stamp).toHaveClass('ml-auto');
+      unmount();
+    }
+  });
+
+  it('renders no timestamp when created_at is unparseable', () => {
+    const message = { ...makeMessage('user', 'hi'), created_at: 'not-a-date' };
+    render(<MessageItem message={message} />);
+    expect(screen.queryByText(/\d{4}-\d{2}-\d{2}/)).toBeNull();
   });
 });

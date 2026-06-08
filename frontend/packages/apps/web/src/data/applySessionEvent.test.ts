@@ -13,7 +13,6 @@ describe('applySessionEvent', () => {
       permission: null,
       unread: {},
       externalInput: null,
-      resuming: {},
     });
   });
 
@@ -175,20 +174,6 @@ describe('applySessionEvent', () => {
 
       expect(invalidate).toHaveBeenCalledWith({ queryKey: ['sessions'] });
     }
-  });
-
-  it('clears a resuming marker when the session opens', () => {
-    useLiveStore.getState().markResuming(FOCUSED);
-    expect(useLiveStore.getState().resuming[FOCUSED]).toBe(true);
-
-    applySessionEvent(
-      { kind: 'session_opened', session_id: FOCUSED },
-      new QueryClient(),
-      null,
-      FOCUSED,
-    );
-
-    expect(useLiveStore.getState().resuming[FOCUSED]).toBeUndefined();
   });
 
   it('routes a permission request to the store as a notice', () => {

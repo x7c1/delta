@@ -28,6 +28,7 @@ describe('ApiClient', () => {
             },
             open: true,
             main_thread_id: 1,
+            last_activity_at: '2026-01-01T00:01:01Z',
           },
         ],
       }),
@@ -39,6 +40,7 @@ describe('ApiClient', () => {
     expect(result.sessions).toHaveLength(1);
     expect(result.sessions[0].open).toBe(true);
     expect(result.sessions[0].main_thread_id).toBe(1);
+    expect(result.sessions[0].last_activity_at).toBe('2026-01-01T00:01:01Z');
     expect(fetchFn).toHaveBeenCalledWith(
       'http://localhost/api/sessions',
       undefined,

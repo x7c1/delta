@@ -17,4 +17,9 @@ pub struct SessionListing {
     pub open: bool,
     /// The id of the session's trunk (`main`) thread, for drilling in.
     pub main_thread_id: ThreadId,
+    /// The timestamp of the session's most recent message (ISO-8601 UTC), or
+    /// `None` when the session has no messages yet. Derived per call from
+    /// `MAX(message.created_at)`, so it reflects the latest activity even though
+    /// it is not a persisted column on `session`.
+    pub last_activity_at: Option<String>,
 }

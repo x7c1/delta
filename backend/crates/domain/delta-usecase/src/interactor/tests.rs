@@ -225,6 +225,15 @@ impl SessionStore for FakeStore {
             .cloned())
     }
 
+    async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.messages
+            .iter()
+            .filter(|m| &m.session_id == session_id)
+            .map(|m| m.created_at.clone())
+            .max())
+    }
+
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
         let g = self.inner.lock().unwrap();
         Ok(g.threads
@@ -453,6 +462,15 @@ fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
         created_at: Some("2026-01-01T00:00:00Z".into()),
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
+    }
+}
+
+/// An assistant transcript line stamped with an explicit `created_at`, so a
+/// test can give different sessions distinct last-activity timestamps.
+fn assistant_line_at(uuid: &str, text: &str, created_at: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        created_at: Some(created_at.into()),
+        ..assistant_line(uuid, text)
     }
 }
 
@@ -748,9 +766,12 @@ async fn poll_transcript_groups_new_lines_per_session() {
     assert!(ix.poll_transcript().await.unwrap().is_empty());
 }
 
-/// `list_sessions` lists every registered session in creation order, each
-/// annotated with its live (open) state and `main` thread id; `threads_for`
-/// scopes the thread tree to a single session by id.
+/// `list_sessions` lists every registered session, each annotated with its
+/// live (open) state and `main` thread id; `threads_for` scopes the thread
+/// tree to a single session by id. With no messages, both sessions share the
+/// same recency fallback (`created_at`), so the `id` tiebreaker decides their
+/// order; recency ordering proper is covered by
+/// [`list_sessions_orders_by_most_recent_activity`].
 #[tokio::test]
 async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() {
     let ix = interactor();
@@ -773,7 +794,11 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
         .iter()
         .map(|l| l.session.id.as_str().to_owned())
         .collect();
-    assert_eq!(ids, vec!["sess-1", "sess-2"], "ordered by creation");
+    assert_eq!(
+        ids,
+        vec!["sess-1", "sess-2"],
+        "equal recency falls back to the deterministic id tiebreaker"
+    );
     assert!(
         listings.iter().all(|l| !l.open),
         "externally-registered sessions are closed (no live pane)"
@@ -781,6 +806,10 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
     assert!(
         listings.iter().all(|l| l.main_thread_id.value() > 0),
         "every listing carries its main thread id"
+    );
+    assert!(
+        listings.iter().all(|l| l.last_activity_at.is_none()),
+        "sessions with no ingested messages have no last activity"
     );
 
     // `threads_for` is scoped to the named session: only its own threads.
@@ -796,6 +825,84 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
         .await
         .expect_err("unknown session id is rejected");
     assert!(matches!(err, crate::error::Error::SessionNotFound(_)));
+}
+
+/// The navigator lists sessions most-recently-active first. The sort key is a
+/// session's last activity (`MAX(message.created_at)`), falling back to its own
+/// `created_at` when it has no messages — so a message-less session sorts above
+/// one whose only activity is older than that fallback.
+#[tokio::test]
+async fn list_sessions_orders_by_most_recent_activity() {
+    let ix = interactor();
+
+    // Three sessions registered in id order; all share the same `created_at`
+    // (the fake store stamps a fixed registration time).
+    ix.on_user_prompt_submit(submit_for("sess-old", "/tmp/old.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-new", "/tmp/new.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-quiet", "/tmp/quiet.jsonl", "seed"))
+        .await
+        .unwrap();
+
+    // `sess-old` last spoke before the shared registration time; `sess-new`
+    // spoke after it. `sess-quiet` has no messages, so it falls back to its
+    // `created_at` (the shared registration time, "2026-01-01T00:00:00Z").
+    ix.transcript_fake().push_to(
+        "/tmp/old.jsonl",
+        assistant_line_at("a-old", "older", "2025-12-31T00:00:00Z"),
+    );
+    ix.transcript_fake().push_to(
+        "/tmp/new.jsonl",
+        assistant_line_at("a-new", "newer", "2026-02-01T00:00:00Z"),
+    );
+    ix.poll_transcript().await.unwrap();
+
+    let ids: Vec<_> = ix
+        .list_sessions()
+        .await
+        .unwrap()
+        .iter()
+        .map(|l| l.session.id.as_str().to_owned())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["sess-new", "sess-quiet", "sess-old"],
+        "most recent activity first; a message-less session sorts on its \
+         created_at fallback, above one whose only activity is older"
+    );
+}
+
+/// Equal recency keys order deterministically by the `created_at` then `id`
+/// tiebreaker, so the list never reshuffles between calls for sessions with the
+/// same last-activity timestamp.
+#[tokio::test]
+async fn list_sessions_breaks_recency_ties_deterministically() {
+    let ix = interactor();
+
+    // Two sessions, no messages: both fall back to the same (shared)
+    // `created_at`, so only the `id` tiebreaker distinguishes them.
+    ix.on_user_prompt_submit(submit_for("sess-b", "/tmp/b.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-a", "/tmp/a.jsonl", "seed"))
+        .await
+        .unwrap();
+
+    let order = || async {
+        ix.list_sessions()
+            .await
+            .unwrap()
+            .iter()
+            .map(|l| l.session.id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    // Registered b-then-a, but the ascending `id` tiebreaker puts "sess-a"
+    // first, and repeated calls agree.
+    assert_eq!(order().await, vec!["sess-a", "sess-b"]);
+    assert_eq!(order().await, vec!["sess-a", "sess-b"], "order is stable");
 }
 
 /// The `open` flag tracks live state: a session with a bound pane lists as

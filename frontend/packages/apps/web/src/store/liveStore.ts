@@ -54,13 +54,6 @@ export interface LiveState {
   unread: Record<ThreadId, number>;
   /** The most recent external (direct-pane) input, shown on the last active thread. */
   externalInput: ExternalInputMarker | null;
-  /**
-   * Sessions awaiting a resume confirmation, keyed by session id. Set when a
-   * Send is dispatched to a closed session (the backend auto-resumes); cleared
-   * once the session announces `session_opened`/`session_registered`. The UI
-   * shows a `resuming…` marker while true.
-   */
-  resuming: Record<SessionId, boolean>;
 
   setConnection: (status: ConnectionStatus) => void;
   enqueueSend: (item: PendingItem) => void;
@@ -71,19 +64,11 @@ export interface LiveState {
   /** Record an external (direct-pane) input marker on a thread. */
   noteExternalInput: (threadId: ThreadId, prompt: string) => void;
   dismissPermission: () => void;
-  /** Mark a session as resuming until it announces it is open. */
-  markResuming: (sessionId: SessionId) => void;
-  /**
-   * Clear a session's resuming marker without waiting for an open event — used
-   * when the resume request itself fails, so the `resuming…` marker does not
-   * stick forever on a session that never actually started opening.
-   */
-  clearResuming: (sessionId: SessionId) => void;
   /**
    * Apply a live session event, mutating only session-scoped ephemeral state
-   * (the pending FIFO, permission notice, resuming marker). Focus-dependent
-   * signals (the external-input marker, unread badges) are recorded by the
-   * router under a focus guard, not here.
+   * (the pending FIFO, permission notice). Focus-dependent signals (the
+   * external-input marker, unread badges) are recorded by the router under a
+   * focus guard, not here.
    */
   applyEvent: (event: SessionEvent) => void;
 }
@@ -119,24 +104,8 @@ export const useLiveStore = create<LiveState>((set) => ({
   permission: null,
   unread: {},
   externalInput: null,
-  resuming: {},
 
   setConnection: (status) => set({ connection: status }),
-
-  markResuming: (sessionId) =>
-    set((state) => ({
-      resuming: { ...state.resuming, [sessionId]: true },
-    })),
-
-  clearResuming: (sessionId) =>
-    set((state) => {
-      if (!state.resuming[sessionId]) {
-        return state;
-      }
-      const resuming = { ...state.resuming };
-      delete resuming[sessionId];
-      return { resuming };
-    }),
 
   enqueueSend: (item) =>
     set((state) => ({ pending: [...state.pending, item] })),
@@ -230,15 +199,10 @@ export const useLiveStore = create<LiveState>((set) => ({
           // via `noteExternalInput` under a focus guard. Nothing to do here.
           return state;
         case 'session_registered':
-        case 'session_opened': {
-          // The session is live: clear any pending resume marker for it.
-          if (!state.resuming[event.session_id]) {
-            return state;
-          }
-          const resuming = { ...state.resuming };
-          delete resuming[event.session_id];
-          return { resuming };
-        }
+        case 'session_opened':
+          // Open/closed lifecycle is reflected by the sessions query, not
+          // ephemeral here.
+          return state;
         case 'session_closed':
           // Closed state is reflected by the sessions query, not ephemeral here.
           return state;
