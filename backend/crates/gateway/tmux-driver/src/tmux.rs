@@ -134,13 +134,22 @@ impl TmuxDriver for Tmux {
         pane: &str,
         text: &str,
     ) -> std::result::Result<(), delta_usecase::Error> {
-        for args in send_line_commands(pane, text) {
+        // Type the message (clear + literal text) without submitting it.
+        for args in input_commands(pane, text) {
             let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
             self.run(&borrowed)
                 .await
                 .map_err(delta_usecase::Error::from)?;
         }
-        Ok(())
+        // Wait out Claude's paste-burst window before the submit Enter, so the
+        // Enter lands as a discrete keystroke and is not absorbed into the
+        // just-typed text (see SUBMIT_ENTER_DELAY).
+        tokio::time::sleep(SUBMIT_ENTER_DELAY).await;
+        let submit = submit_command(pane);
+        let borrowed: Vec<&str> = submit.iter().map(String::as_str).collect();
+        self.run(&borrowed)
+            .await
+            .map_err(delta_usecase::Error::from)
     }
 
     async fn clear_input(&self, pane: &str) -> std::result::Result<(), delta_usecase::Error> {
@@ -208,18 +217,32 @@ fn clear_input_commands(pane: &str) -> Vec<String> {
     args
 }
 
-/// Build the ordered `tmux send-keys` invocations that submit a single line to
-/// `pane`.
+/// How long to wait after typing the literal text before sending the submit
+/// `Enter`.
 ///
-/// The sequence is clear → literal text → Enter:
+/// Claude's TUI treats a fast input burst as a paste; if the `Enter` arrives
+/// while that paste-burst window is still open, it is absorbed as part of the
+/// pasted text instead of submitting, leaving the message sitting in the input
+/// unsent. This is intermittent — it only fails when the `Enter` happens to land
+/// inside the window, which is likelier for longer/multi-line text that takes
+/// longer to process. Waiting out the window makes the `Enter` a discrete
+/// submit. Sized comfortably above the observed window; the added per-send
+/// latency is imperceptible.
+const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Build the `tmux send-keys` invocations that type a single line into `pane`'s
+/// input **without submitting it**:
+///
 /// 1. The shared [`clear_input_commands`] wipe (`C-u` then a run of `BSpace`,
 ///    see [`INPUT_CLEAR_BACKSPACES`]) clears the current line and any blank
 ///    lines stacked above it, so a prior submit's leftovers are never prepended
 ///    to this message and each programmatic send starts from an empty input.
 /// 2. `-l <text>` sends the text literally so it is not interpreted as tmux key
 ///    names.
-/// 3. `Enter` submits it as a separate keystroke.
-fn send_line_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
+///
+/// The submit `Enter` is issued separately by [`submit_command`] after
+/// [`SUBMIT_ENTER_DELAY`], so Claude's paste-burst detection cannot absorb it.
+fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
     vec![
         clear_input_commands(pane),
         vec![
@@ -229,8 +252,13 @@ fn send_line_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
             "-l".into(),
             text.into(),
         ],
-        vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()],
     ]
+}
+
+/// Build the `tmux send-keys` invocation that submits the typed input as a lone
+/// `Enter` keystroke. Issued after [`SUBMIT_ENTER_DELAY`] (see [`input_commands`]).
+fn submit_command(pane: &str) -> Vec<String> {
+    vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()]
 }
 
 #[cfg(test)]
@@ -289,23 +317,29 @@ mod tests {
     }
 
     #[test]
-    fn send_line_clears_the_input_before_typing() {
-        // The input must be cleared before the literal text so stray blank lines
-        // left by a prior submit cannot prepend to this message: `C-u` kills the
-        // current line and a run of `BSpace` deletes blank lines stacked above
-        // it. Expected sequence: clear → literal text → Enter, all targeting the
-        // passed pane.
-        let commands = send_line_commands("delta-1:0.0", "hi");
+    fn input_commands_clear_then_type_without_submitting() {
+        // Typing is clear → literal text, with NO Enter: the submit is issued
+        // separately after a delay so Claude's paste-burst detection cannot
+        // swallow it. `C-u` kills the current line and a run of `BSpace` deletes
+        // blank lines stacked above it.
+        let commands = input_commands("delta-1:0.0", "hi");
 
         let mut expected_clear = vec!["send-keys", "-t", "delta-1:0.0", "C-u"];
         expected_clear.extend(std::iter::repeat_n("BSpace", INPUT_CLEAR_BACKSPACES));
         assert_eq!(commands[0], expected_clear);
         assert_eq!(
             &commands[1..],
-            &[
-                vec!["send-keys", "-t", "delta-1:0.0", "-l", "hi"],
-                vec!["send-keys", "-t", "delta-1:0.0", "Enter"],
-            ],
+            &[vec!["send-keys", "-t", "delta-1:0.0", "-l", "hi"]],
+        );
+    }
+
+    #[test]
+    fn submit_command_is_a_lone_enter() {
+        // The submit is a single `Enter`, kept separate from typing so it can be
+        // delayed past the paste-burst window.
+        assert_eq!(
+            submit_command("delta-1:0.0"),
+            vec!["send-keys", "-t", "delta-1:0.0", "Enter"],
         );
     }
 
@@ -319,13 +353,10 @@ mod tests {
     }
 
     #[test]
-    fn send_line_reuses_the_shared_clear_sequence() {
-        // The clear step of a send is the exact same invocation as the
+    fn input_commands_reuse_the_shared_clear_sequence() {
+        // The clear step of typing is the exact same invocation as the
         // standalone clear, so the two paths share one source of truth.
         let pane = "delta-1:0.0";
-        assert_eq!(
-            send_line_commands(pane, "hi")[0],
-            clear_input_commands(pane)
-        );
+        assert_eq!(input_commands(pane, "hi")[0], clear_input_commands(pane));
     }
 }
