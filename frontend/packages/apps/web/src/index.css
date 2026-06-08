@@ -47,6 +47,20 @@ body {
   background-color: rgba(100, 116, 139, 0.45);
 }
 
+/*
+ * Fully hidden scrollbar: no bar and no reserved column, in either engine.
+ * Content still scrolls via wheel/trackpad. Used for side panels where a
+ * visible scrollbar is unnecessary and its reserved column reads as stray
+ * blank space. Declared after `.scrollbar-hover` so it wins when both classes
+ * are present on the same element (Panel always adds `scrollbar-hover`).
+ */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Constrain rendered Markdown so long assistant text wraps inside the pane. */
 .markdown-body {
   word-break: break-word;

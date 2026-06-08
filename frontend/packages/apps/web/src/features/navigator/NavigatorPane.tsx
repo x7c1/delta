@@ -54,6 +54,11 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
   return (
     <Panel
       className="border-r border-slate-200"
+      // The session list is a side panel; hide its scrollbar entirely (no bar,
+      // no reserved column) so it never shows a stray blank strip. It still
+      // scrolls via wheel/trackpad. The transcript pane keeps its hover-reveal
+      // scrollbar (Panel's default).
+      bodyClassName="scrollbar-none"
       header={
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
