@@ -5,9 +5,13 @@
 //! (`/pty?session_id=<id>`). The server resolves that session's pane from the
 //! registry, spawns `tmux attach-session` against it inside a pseudo-terminal,
 //! and bridges bytes both ways: PTY output is streamed to the browser as binary
-//! frames, and browser input frames are written back into the PTY. This is a
-//! deliberately minimal attach; resize negotiation and richer control messages
-//! can be layered on later without changing the route.
+//! frames, and browser frames carry two kinds, distinguished by WebSocket frame
+//! type. Binary frames are raw input bytes written into the PTY. Text frames are
+//! JSON control messages; the only one today is resize,
+//! `{"type":"resize","rows":<u16>,"cols":<u16>}`, which resizes the PTY master
+//! so tmux and the pane program follow the browser terminal's dimensions.
+//! Malformed or unknown control messages are logged and ignored so they never
+//! break the bridge.
 
 use std::io::{Read, Write};
 
@@ -27,6 +31,16 @@ use crate::state::AppState;
 #[derive(Debug, Deserialize)]
 pub struct PtyQuery {
     session_id: String,
+}
+
+/// A browser → server control message, carried on a WebSocket Text frame. Input
+/// bytes travel on Binary frames; Text frames are reserved for control. The only
+/// variant today is `resize`, which adjusts the PTY master's dimensions so tmux
+/// and the pane program track the browser terminal.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ControlMessage {
+    Resize { rows: u16, cols: u16 },
 }
 
 pub async fn pty_handler(
@@ -108,9 +122,12 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     let mut child = pair.slave.spawn_command(cmd)?;
 
     // The blocking PTY reader/writer halves run on dedicated threads; bytes are
-    // shuttled to/from the async socket via channels.
+    // shuttled to/from the async socket via channels. The master itself is moved
+    // into the async input task below so it can service resize control messages;
+    // it is otherwise idle once the reader and writer are taken.
     let mut reader = pair.master.try_clone_reader()?;
     let mut writer = pair.master.take_writer()?;
+    let master = pair.master;
 
     let (out_tx, mut out_rx) = mpsc::channel::<Vec<u8>>(64);
     let (in_tx, in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
@@ -142,32 +159,118 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
 
     let (mut sink, mut stream) = socket.split();
 
-    // Socket -> PTY input.
-    let input_task = tokio::spawn(async move {
+    // Socket -> PTY input and control. Binary frames are raw input bytes;
+    // Text frames are JSON control messages (resize). The master is owned here
+    // so a resize can be applied directly.
+    let mut input_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
-            let bytes: Vec<u8> = match msg {
-                Message::Binary(b) => b.into(),
-                Message::Text(t) => t.as_bytes().to_vec(),
+            match msg {
+                Message::Binary(b) => {
+                    if in_tx.send(b.into()).is_err() {
+                        break;
+                    }
+                }
+                Message::Text(t) => match serde_json::from_str::<ControlMessage>(&t) {
+                    Ok(ControlMessage::Resize { rows, cols }) => {
+                        if let Err(err) = master.resize(PtySize {
+                            rows,
+                            cols,
+                            pixel_width: 0,
+                            pixel_height: 0,
+                        }) {
+                            tracing::warn!(error = %err, "failed to resize pty");
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "ignoring malformed pty control message");
+                    }
+                },
                 Message::Close(_) => break,
                 _ => continue,
-            };
-            if in_tx.send(bytes).is_err() {
-                break;
             }
         }
     });
 
-    // PTY output -> socket.
-    while let Some(chunk) = out_rx.recv().await {
-        if sink.send(Message::Binary(chunk.into())).await.is_err() {
-            break;
+    // Pump PTY output to the socket until EITHER side ends: the output drains
+    // (or the sink fails), OR the input task finishes because the browser closed
+    // the socket. Gating teardown on the output loop alone leaks the bridge — a
+    // reload with no further pane output never wakes `out_rx.recv()` (the read
+    // thread stays blocked on the PTY until the child is killed, which only
+    // happens in teardown), and `sink.send` is never called either, so the
+    // child, the reader/writer threads, and the socket would linger forever. One
+    // leaked bridge per reload eventually starves the runtime. Selecting on the
+    // input task's completion tears the bridge down promptly on socket close.
+    loop {
+        tokio::select! {
+            chunk = out_rx.recv() => match chunk {
+                Some(chunk) => {
+                    if sink.send(Message::Binary(chunk.into())).await.is_err() {
+                        break;
+                    }
+                }
+                None => break,
+            },
+            _ = &mut input_task => break,
         }
     }
 
-    // Tear down: dropping the channels unblocks the threads.
+    // Tear down WITHOUT blocking the async runtime. The reader/writer halves are
+    // blocking OS threads; joining them directly on a worker is what wedges the
+    // runtime under repeated reloads. `write_thread` only exits once its input
+    // channel closes, and `input_task.abort()` does not synchronously drop the
+    // task's `in_tx` — so a bare `write_thread.join()` parks the worker until the
+    // task happens to be cleaned up, and enough teardowns starve every worker,
+    // freezing the whole server (even unrelated routes stop responding).
+    //
+    // Instead: abort the input task and AWAIT it so its captured `in_tx` and PTY
+    // master are actually dropped (closing the write channel and the master fd),
+    // kill the child so the read thread sees EOF, close the sink to release the
+    // socket, then join both now-finishing threads on a blocking-pool thread
+    // rather than a runtime worker.
     input_task.abort();
+    let _ = input_task.await;
     let _ = child.kill();
-    let _ = read_thread.join();
-    let _ = write_thread.join();
+    let _ = sink.close().await;
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = read_thread.join();
+        let _ = write_thread.join();
+    })
+    .await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A well-formed resize control message deserializes into the `Resize`
+    /// variant carrying the requested dimensions.
+    #[test]
+    fn resize_control_message_deserializes() {
+        let msg: ControlMessage =
+            serde_json::from_str(r#"{"type":"resize","rows":40,"cols":120}"#)
+                .expect("a well-formed resize message deserializes");
+        assert!(matches!(
+            msg,
+            ControlMessage::Resize {
+                rows: 40,
+                cols: 120,
+            }
+        ));
+    }
+
+    /// An unknown control `type` is rejected rather than panicking, so the input
+    /// task can log and ignore it without breaking the bridge.
+    #[test]
+    fn unknown_control_message_type_is_rejected() {
+        let result = serde_json::from_str::<ControlMessage>(r#"{"type":"explode"}"#);
+        assert!(result.is_err(), "an unknown control type is not accepted");
+    }
+
+    /// Garbage that is not even JSON is rejected the same way.
+    #[test]
+    fn garbage_control_message_is_rejected() {
+        let result = serde_json::from_str::<ControlMessage>("not json at all");
+        assert!(result.is_err(), "non-JSON text is not accepted");
+    }
 }

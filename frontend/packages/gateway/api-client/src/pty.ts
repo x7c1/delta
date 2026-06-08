@@ -1,9 +1,12 @@
 import type { SessionId } from '@delta/model';
 
 /**
- * The `/pty` terminal bridge client. Confines the raw binary WebSocket here so
- * the UI layer only deals with byte callbacks. Server frames are binary PTY
- * output; browser frames are input bytes written into the PTY.
+ * The `/pty` terminal bridge client. Confines the raw WebSocket here so the UI
+ * layer only deals with byte callbacks. Server frames are binary PTY output.
+ * Browser frames split by type: Binary frames carry raw input bytes written into
+ * the PTY, while Text frames carry JSON control messages. The only control
+ * message today is resize (`{ type: 'resize', rows, cols }`), which tells the
+ * server to resize the PTY so tmux and the pane program track the terminal.
  */
 
 export interface PtyConnectionOptions {
@@ -22,8 +25,17 @@ export interface PtyConnectionOptions {
 }
 
 export interface PtyConnection {
-  /** Write input bytes into the PTY. */
+  /**
+   * Write input into the PTY as a Binary frame. Strings are UTF-8 encoded to
+   * bytes; `Uint8Array` is sent as-is. Text frames are reserved for control.
+   */
   send(data: string | Uint8Array): void;
+  /**
+   * Tell the server to resize the PTY to `rows`×`cols`, sent as a JSON control
+   * message on a Text frame. Dropped if the socket is not open (the caller
+   * re-sends the current size on (re)open).
+   */
+  resize(rows: number, cols: number): void;
   close(): void;
 }
 
@@ -51,9 +63,18 @@ export function connectPty(options: PtyConnectionOptions): PtyConnection {
 
   return {
     send(data) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(data);
+      if (socket.readyState !== WebSocket.OPEN) {
+        return;
       }
+      const bytes =
+        typeof data === 'string' ? new TextEncoder().encode(data) : data;
+      socket.send(bytes);
+    },
+    resize(rows, cols) {
+      if (socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      socket.send(JSON.stringify({ type: 'resize', rows, cols }));
     },
     close() {
       socket.close();
