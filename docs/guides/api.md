@@ -378,11 +378,21 @@ names the session to attach to; the server resolves that session's pane and runs
 ways:
 
 - **Server → browser**: PTY output as binary frames.
-- **Browser → server**: input frames (binary or text) written into the PTY.
+- **Browser → server**: two frame kinds, distinguished by WebSocket frame type:
+  - **Binary frames** are raw input bytes written into the PTY.
+  - **Text frames** are JSON control messages. The only control message today is
+    resize, which resizes the PTY (and therefore tmux and the pane program) to
+    match the browser terminal's dimensions:
+
+    ```json
+    { "type": "resize", "rows": 40, "cols": 120 }
+    ```
+
+    Malformed or unknown control messages are logged and ignored; they never
+    break the bridge.
 
 Used by the embedded xterm.js terminal, primarily so the user can answer
-permission prompts in the TUI. This is a minimal attach; resize negotiation is
-not yet modelled.
+permission prompts in the TUI.
 
 If the named session is not open (no live pane — it was never opened, or it is
 closed), there is nothing to attach to: the server accepts the upgrade and then

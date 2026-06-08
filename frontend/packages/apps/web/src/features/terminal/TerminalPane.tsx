@@ -178,6 +178,10 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
       onStatus: (status) => {
         if (status === 'closed') {
           entry.closed = true;
+        } else if (status === 'open') {
+          // A resize sent before the socket is OPEN is dropped, so push the
+          // current size once the bridge (re)connects to sync the server PTY.
+          entry.connection.resize(entry.term.rows, entry.term.cols);
         }
       },
     }),
@@ -186,6 +190,9 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
     closed: false,
   };
   term.onData((data) => entry.connection.send(data));
+  // Push every fit-driven size change to the server so tmux and the pane
+  // program follow the browser terminal's dimensions.
+  term.onResize(({ rows, cols }) => entry.connection.resize(rows, cols));
 
   // Reflow on container resize (pane drag / window resize), coalesced onto one
   // animation frame to avoid thrashing fit() during a drag.
