@@ -42,7 +42,7 @@ describe('MessageItem', () => {
     expect(strong.tagName).toBe('STRONG');
   });
 
-  it('renders the local-time timestamp on the role line for both roles', () => {
+  it('renders the local-time timestamp for both roles', () => {
     const expected = formatLocalDateTime('2026-01-01T00:00:00Z');
     expect(expected).not.toBeNull();
 
@@ -52,9 +52,29 @@ describe('MessageItem', () => {
       );
       const stamp = screen.getByText(expected as string);
       expect(stamp).toHaveClass('tabular-nums');
-      expect(stamp).toHaveClass('ml-auto');
       unmount();
     }
+  });
+
+  it('distinguishes the sender by shape, not a role label', () => {
+    const { rerender } = render(
+      <MessageItem message={makeMessage('user', 'hi')} />,
+    );
+    // No "You"/"Assistant" labels — the sender is conveyed by layout alone.
+    expect(screen.queryByText('You')).toBeNull();
+    expect(screen.queryByText('Assistant')).toBeNull();
+    // The user turn is data-tagged so the layout can be asserted structurally.
+    expect(screen.getByTestId('message-item')).toHaveAttribute(
+      'data-role',
+      'user',
+    );
+
+    rerender(<MessageItem message={makeMessage('assistant', 'hi')} />);
+    expect(screen.queryByText('Assistant')).toBeNull();
+    expect(screen.getByTestId('message-item')).toHaveAttribute(
+      'data-role',
+      'assistant',
+    );
   });
 
   it('renders no timestamp when created_at is unparseable', () => {
