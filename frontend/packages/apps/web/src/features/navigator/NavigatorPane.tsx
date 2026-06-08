@@ -103,14 +103,14 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
 
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
-          className="mx-3 mb-1 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs text-indigo-700"
+          className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-indigo-300 bg-indigo-50/70 px-2 py-2 text-xs text-indigo-700 shadow-sm ring-1 ring-indigo-200"
           data-testid="new-session-node"
         >
           New session — send the first message to start it.
         </div>
       )}
 
-      <ul className="pb-2">
+      <ul className="pb-2 pt-1.5">
         {sessions.map((item) => (
           <SessionNode
             key={item.session.id}
