@@ -31,7 +31,8 @@ function sessionLabel(item: SessionListItem): string {
  * a single line). Clicking either line focuses the session. The kebab actions
  * menu sits in a fixed-width slot at the row's right end, vertically centered
  * against the block, and is enabled only when the session is open. When the
- * session is focused, its {@link ThreadTree} is rendered nested beneath it.
+ * session is focused and has branched into sub-threads, its
+ * {@link ThreadTree} is rendered nested beneath it.
  */
 export function SessionNode({
   item,
@@ -42,6 +43,11 @@ export function SessionNode({
 }: SessionNodeProps) {
   const lastActivity = formatLocalDateTime(item.last_activity_at);
   const label = sessionLabel(item);
+  // The standalone "main" node is redundant until the session has branched;
+  // once it has sub-threads, "main" must appear so the user can navigate back
+  // to the main thread. A sub-thread is any thread with a parent.
+  const hasSubThreads =
+    threads?.some((t) => t.parent_thread_id !== null) ?? false;
   return (
     <li>
       <div
@@ -90,7 +96,7 @@ export function SessionNode({
         />
       </div>
 
-      {isFocused && threads && threads.length > 0 && (
+      {isFocused && hasSubThreads && threads && (
         <div className="pl-2">
           <ThreadTree threads={threads} />
         </div>
