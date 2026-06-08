@@ -200,6 +200,7 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     // child, the reader/writer threads, and the socket would linger forever. One
     // leaked bridge per reload eventually starves the runtime. Selecting on the
     // input task's completion tears the bridge down promptly on socket close.
+    let mut input_done = false;
     loop {
         tokio::select! {
             chunk = out_rx.recv() => match chunk {
@@ -210,7 +211,13 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
                 }
                 None => break,
             },
-            _ = &mut input_task => break,
+            // The browser closed the socket: the input task ran to completion in
+            // this arm, so its JoinHandle is now resolved. Record that so the
+            // teardown does NOT poll it again.
+            _ = &mut input_task => {
+                input_done = true;
+                break;
+            }
         }
     }
 
@@ -222,13 +229,21 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     // task happens to be cleaned up, and enough teardowns starve every worker,
     // freezing the whole server (even unrelated routes stop responding).
     //
-    // Instead: abort the input task and AWAIT it so its captured `in_tx` and PTY
-    // master are actually dropped (closing the write channel and the master fd),
-    // kill the child so the read thread sees EOF, close the sink to release the
+    // So when the bridge ended because the PTY output drained or the sink failed
+    // (the input task is still running), abort it and AWAIT it so its captured
+    // `in_tx` and PTY master are actually dropped (closing the write channel and
+    // the master fd). But when the input task already finished above (the browser
+    // closed the socket — the common case), its JoinHandle is resolved and its
+    // captures are already dropped; awaiting it again panics with "JoinHandle
+    // polled after completion" and would skip the cleanup below, leaking the
+    // child and threads. Guard on `input_done` so we poll it at most once.
+    if !input_done {
+        input_task.abort();
+        let _ = input_task.await;
+    }
+    // Kill the child so the read thread sees EOF, close the sink to release the
     // socket, then join both now-finishing threads on a blocking-pool thread
     // rather than a runtime worker.
-    input_task.abort();
-    let _ = input_task.await;
     let _ = child.kill();
     let _ = sink.close().await;
     let _ = tokio::task::spawn_blocking(move || {

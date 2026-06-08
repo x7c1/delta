@@ -66,6 +66,14 @@ export interface LiveState {
    */
   retargetSend: (localId: string, threadId: ThreadId) => void;
   failSend: (localId: string) => void;
+  /**
+   * Drop every optimistic pending send. Used on a live-stream reconnect: the
+   * `turn_completed` events that would have drained these were broadcast while
+   * the socket was down and are not replayed, so the FIFO can no longer be
+   * reconciled from events. The refetched transcript is the source of truth for
+   * what actually landed, so clearing the stale optimistic chips is correct.
+   */
+  clearPending: () => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
   /** Record an external (direct-pane) input marker on a thread. */
@@ -137,6 +145,8 @@ export const useLiveStore = create<LiveState>((set) => ({
         item.localId === localId ? { ...item, status: 'failed' } : item,
       ),
     })),
+
+  clearPending: () => set({ pending: [] }),
 
   bumpUnread: (threadId) =>
     set((state) => ({
