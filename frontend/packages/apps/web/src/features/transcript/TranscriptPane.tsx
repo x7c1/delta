@@ -39,10 +39,12 @@ export interface TranscriptPaneProps {
 
 /**
  * The right pane. For an existing session it shows the active thread's trunk as
- * a linear list (breadcrumb, branch chips, external-input marker, pending queue,
- * composer). A closed session is view-only — branch-from-quote is disabled — but
- * the composer stays available so a Send resumes the session. For the
- * new-session state it shows a blank prompt and a new-session composer.
+ * a linear list (breadcrumb, branch chips, external-input marker) in the
+ * scrolling body, with a pinned footer that stacks the optimistic pending-send
+ * strip directly above the composer. A closed session is view-only —
+ * branch-from-quote is disabled — but the composer stays available so a Send
+ * resumes the session. For the new-session state it shows a blank prompt and a
+ * new-session composer.
  */
 export function TranscriptPane({
   threads,
@@ -177,6 +179,16 @@ export function TranscriptPane({
     />
   ) : undefined;
 
+  // The optimistic pending-send strip is pinned just above the composer (in the
+  // fixed footer, not the scrolling transcript) so it never jostles the
+  // conversation tail while a turn is in flight.
+  const footer = composer ? (
+    <div className="space-y-2">
+      <PendingQueue threadId={pendingThreadId} />
+      {composer}
+    </div>
+  ) : undefined;
+
   return (
     <Panel
       bodyRef={bodyRef}
@@ -189,7 +201,7 @@ export function TranscriptPane({
           <Breadcrumb items={breadcrumbItems} />
         )
       }
-      footer={composer}
+      footer={footer}
     >
       {readOnly && !newSession && (
         <div
@@ -262,10 +274,6 @@ export function TranscriptPane({
           </div>
         );
       })}
-
-      <PendingQueue
-        threadId={newSession ? NEW_SESSION_DRAFT_KEY : activeThread?.id ?? null}
-      />
     </Panel>
   );
 }
