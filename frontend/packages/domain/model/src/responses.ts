@@ -19,7 +19,11 @@ export interface SessionListItem {
   last_activity_at: string | null;
 }
 
-/** Response body for `GET /api/sessions`, ordered by creation. */
+/**
+ * Response body for `GET /api/sessions`, ordered by most recent activity
+ * (newest first). The recency key is each session's last activity, falling back
+ * to its own `created_at` when it has no messages yet.
+ */
 export interface SessionsResponse {
   sessions: SessionListItem[];
 }

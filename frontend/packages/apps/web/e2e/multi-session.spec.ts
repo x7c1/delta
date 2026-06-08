@@ -29,8 +29,8 @@ test('focusing a closed session shows its transcript read-only', async ({
   await useManualEventControl(page);
   await page.goto('/');
 
-  // The closed session ("scratch notes") is the second node; focus its row
-  // button (the kebab menu shares the label, so target the row by test id).
+  // Focus the closed session ("scratch notes") by its label; the kebab menu
+  // shares the label, so target the row by test id.
   await page
     .getByTestId('session-node')
     .filter({ hasText: 'scratch notes' })

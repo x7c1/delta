@@ -101,6 +101,51 @@ describe('WorkspaceScreen multi-session', () => {
     );
   });
 
+  it('falls back to the most-recently-active session when none are open', async () => {
+    // The list arrives recency-descending (newest first), so with no open
+    // session the head of the list is the most recent and gets focused.
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID_2,
+                cwd: '/work',
+                transcript_path: '/tmp/s2.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-02T00:00:00Z',
+              },
+              open: false,
+              main_thread_id: SESSION_2_MAIN_THREAD_ID,
+              last_activity_at: '2026-01-02T00:00:02Z',
+            },
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/work',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+              },
+              open: false,
+              main_thread_id: 1,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2),
+    );
+  });
+
   it('shows the new-session composer state when there are no sessions', async () => {
     server.use(
       http.get('*/api/sessions', () => HttpResponse.json({ sessions: [] })),

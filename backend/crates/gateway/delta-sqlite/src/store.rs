@@ -191,9 +191,12 @@ impl SessionStore for SqliteStore {
 
     async fn list_sessions(&self) -> std::result::Result<Vec<Session>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
+        // Fetch in a deterministic `created_at` order; the navigator's final
+        // most-recently-active-first ordering is applied in the usecase, which
+        // already has each session's `last_activity_at` to key on.
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {SESSION_COLS} FROM session ORDER BY created_at"
+                "SELECT {SESSION_COLS} FROM session ORDER BY created_at, id"
             ))
             .map_err(Error::from)?;
         let rows = stmt.query_map([], map_session).map_err(Error::from)?;

@@ -142,9 +142,12 @@ live pane is *closed* and must be reopened before it can receive a send.
 
 ### `GET /api/sessions`
 
-List every known session, ordered by creation, each annotated with its live
-state and trunk thread. This is the browser's hydration surface: it shows every
-conversation — open or closed — so the navigator can route into any of them.
+List every known session, ordered by most recent activity (newest first), each
+annotated with its live state and trunk thread. The recency key is a session's
+last activity (`last_activity_at`), falling back to its own `created_at` when it
+has no messages yet — so a brand-new session sorts near the top. This is the
+browser's hydration surface: it shows every conversation — open or closed — so
+the navigator can route into any of them.
 
 - **200**:
 
