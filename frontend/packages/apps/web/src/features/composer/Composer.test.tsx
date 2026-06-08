@@ -56,7 +56,6 @@ describe('Composer', () => {
       pending: [],
       externalInput: null,
       unread: {},
-      resuming: {},
     });
     useComposerStore.setState({ drafts: {}, branchOrigin: null });
   });
@@ -101,7 +100,7 @@ describe('Composer', () => {
     expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
   });
 
-  it('marks the session resuming on a closed (read-only) send', async () => {
+  it('enqueues an optimistic send on a closed (read-only) resume', async () => {
     render(
       <QueryClientProvider
         client={
@@ -125,12 +124,14 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'resume please' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
+    // A resume send queues optimistically against the session's main thread.
     await waitFor(() => {
-      expect(useLiveStore.getState().resuming[mainThread.session_id]).toBe(true);
+      expect(useLiveStore.getState().pending.length).toBe(1);
     });
+    expect(useLiveStore.getState().pending[0]?.threadId).toBe(MAIN_THREAD_ID);
   });
 
-  it('clears the resuming marker when the resume request fails', async () => {
+  it('marks the optimistic send failed when the resume request fails', async () => {
     // Force the send to fail so the resume never starts.
     server.use(
       http.post('*/api/sends', () =>
@@ -161,16 +162,11 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'resume please' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // The send is marked failed and the resuming marker must NOT stick — a
-    // failed resume never opens the session, so the event that would clear it
-    // never arrives.
+    // The optimistic entry is marked failed when the resume request errors.
     await waitFor(() => {
       const pending = useLiveStore.getState().pending;
       expect(pending[0]?.status).toBe('failed');
     });
-    expect(
-      useLiveStore.getState().resuming[mainThread.session_id],
-    ).toBeUndefined();
   });
 
   it('targets a new session when in new-session mode', async () => {

@@ -8,7 +8,6 @@ function reset() {
     permission: null,
     unread: {},
     externalInput: null,
-    resuming: {},
   });
 }
 
@@ -191,33 +190,14 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().unread[2]).toBeUndefined();
   });
 
-  it('marks a session resuming and clears it when the session opens', () => {
-    useLiveStore.getState().markResuming('sess-1');
-    expect(useLiveStore.getState().resuming['sess-1']).toBe(true);
-
+  it('ignores session lifecycle events for ephemeral state', () => {
+    // session_registered / session_opened / session_closed are reflected by the
+    // sessions query, not the live store, so applying them is a no-op here.
+    const before = useLiveStore.getState().pending;
     useLiveStore.getState().applyEvent({
       kind: 'session_opened',
       session_id: 'sess-1',
     });
-    expect(useLiveStore.getState().resuming['sess-1']).toBeUndefined();
-  });
-
-  it('clears a resuming marker directly (failed-resume path)', () => {
-    useLiveStore.getState().markResuming('sess-3');
-    expect(useLiveStore.getState().resuming['sess-3']).toBe(true);
-    useLiveStore.getState().clearResuming('sess-3');
-    expect(useLiveStore.getState().resuming['sess-3']).toBeUndefined();
-    // Clearing an unmarked session is a no-op, not a crash.
-    useLiveStore.getState().clearResuming('never-marked');
-    expect(useLiveStore.getState().resuming['never-marked']).toBeUndefined();
-  });
-
-  it('clears a resuming marker on session_registered too', () => {
-    useLiveStore.getState().markResuming('sess-2');
-    useLiveStore.getState().applyEvent({
-      kind: 'session_registered',
-      session_id: 'sess-2',
-    });
-    expect(useLiveStore.getState().resuming['sess-2']).toBeUndefined();
+    expect(useLiveStore.getState().pending).toBe(before);
   });
 });
