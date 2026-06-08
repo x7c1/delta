@@ -43,6 +43,28 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().pending).toHaveLength(0);
   });
 
+  it('retargets a pending send to a new thread, keeping it queued', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 1,
+      sessionId: 'sess-1',
+      threadId: 1, // enqueued under the parent thread
+      text: 'branch follow-up',
+      semanticParentUuid: 'uuid-origin',
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    // The branch send created child thread 7; move the pending entry onto it.
+    useLiveStore.getState().retargetSend('l1', 7);
+
+    const item = useLiveStore.getState().pending[0];
+    expect(item.threadId).toBe(7);
+    expect(item.status).toBe('queued');
+    expect(item.text).toBe('branch follow-up');
+  });
+
   it('drops a still-queued send on turn_completed when turn_started never fired', () => {
     const store = useLiveStore.getState();
     store.enqueueSend({

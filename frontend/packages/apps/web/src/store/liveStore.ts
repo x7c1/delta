@@ -58,6 +58,13 @@ export interface LiveState {
   setConnection: (status: ConnectionStatus) => void;
   enqueueSend: (item: PendingItem) => void;
   attachSendId: (localId: string, sendId: number) => void;
+  /**
+   * Re-key a pending send to a different thread. A branch send is enqueued under
+   * its parent thread (the child does not exist yet); once the server creates
+   * the child and the view drills into it, the pending entry is moved to the
+   * child so the "waiting" indicator follows the user into the sub-thread.
+   */
+  retargetSend: (localId: string, threadId: ThreadId) => void;
   failSend: (localId: string) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
@@ -114,6 +121,13 @@ export const useLiveStore = create<LiveState>((set) => ({
     set((state) => ({
       pending: state.pending.map((item) =>
         item.localId === localId ? { ...item, sendId } : item,
+      ),
+    })),
+
+  retargetSend: (localId, threadId) =>
+    set((state) => ({
+      pending: state.pending.map((item) =>
+        item.localId === localId ? { ...item, threadId } : item,
       ),
     })),
 

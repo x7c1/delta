@@ -55,6 +55,7 @@ export function Composer({ mode }: ComposerProps) {
 
   const enqueueSend = useLiveStore((state) => state.enqueueSend);
   const attachSendId = useLiveStore((state) => state.attachSendId);
+  const retargetSend = useLiveStore((state) => state.retargetSend);
   const failSend = useLiveStore((state) => state.failSend);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
@@ -130,7 +131,11 @@ export function Composer({ mode }: ComposerProps) {
         attachSendId(localId, send.id);
         if (branching) {
           // The backend created a fresh child thread for this branch send and
-          // returns its id; drill into it and clear the branch origin.
+          // returns its id. The pending entry was enqueued under the parent
+          // thread (the child did not exist yet), so move it onto the child and
+          // drill into it — otherwise the "waiting" indicator would stay on the
+          // parent while the user is looking at the new sub-thread.
+          retargetSend(localId, send.thread_id);
           setActiveThread(send.thread_id);
           setBranchOrigin(null);
         }
@@ -151,6 +156,7 @@ export function Composer({ mode }: ComposerProps) {
       clearDraft,
       mutation,
       attachSendId,
+      retargetSend,
       setBranchOrigin,
       setActiveThread,
       failSend,
