@@ -34,7 +34,7 @@ export function Panel({
     >
       {header !== undefined && (
         <header className="flex h-10 shrink-0 items-center border-b border-slate-200 px-3">
-          {header}
+          <div className="min-w-0 flex-1">{header}</div>
         </header>
       )}
       <div
