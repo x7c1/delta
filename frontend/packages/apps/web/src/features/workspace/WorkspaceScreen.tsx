@@ -4,7 +4,7 @@ import {
   useSessionThreadsQuery,
 } from '@delta/api-client';
 import type { SessionListItem } from '@delta/model';
-import { Button } from '@delta/ui-kit';
+import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
 import {
@@ -17,6 +17,7 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { NavigatorPane } from '../navigator/NavigatorPane';
 import { TranscriptPane } from '../transcript/TranscriptPane';
 import { TerminalPane } from '../terminal/TerminalPane';
+import { TerminalFallback } from '../terminal/TerminalFallback';
 import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
 
 /**
@@ -187,6 +188,21 @@ export function WorkspaceScreen() {
 
   const focusedOpen = focusedItem?.open ?? false;
 
+  // Fence the embedded terminal behind an error boundary: its attach runs in an
+  // effect that can throw (e.g. an xterm addon failing to load), and without a
+  // boundary that exception would unmount the whole app. Isolating it here keeps
+  // the conversation usable and shows a recoverable fallback in the pane. The
+  // focused id is the reset key, so switching sessions retries the attach.
+  const terminal = (
+    <ErrorBoundary
+      label="terminal"
+      resetKey={focusedRealSessionId}
+      fallback={() => <TerminalFallback onClose={toggleTerminal} />}
+    >
+      <TerminalPane sessionId={focusedRealSessionId} attachable={focusedOpen} />
+    </ErrorBoundary>
+  );
+
   return (
     <div className="relative flex h-full overflow-hidden">
       {/* Left: navigator (session → thread tree) */}
@@ -234,17 +250,11 @@ export function WorkspaceScreen() {
             style={{ width: terminalWidth }}
           >
             <TerminalResizeHandle />
-            <TerminalPane
-              sessionId={focusedRealSessionId}
-              attachable={focusedOpen}
-            />
+            {terminal}
           </div>
         ) : (
           <div className="absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl">
-            <TerminalPane
-              sessionId={focusedRealSessionId}
-              attachable={focusedOpen}
-            />
+            {terminal}
           </div>
         ))}
     </div>
