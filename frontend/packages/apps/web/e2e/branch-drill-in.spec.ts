@@ -19,10 +19,10 @@ test('clicking a branch chip switches the pane to the branch trunk', async ({
   const current = page.locator('[aria-current="page"]');
   await expect(current).toHaveText('main');
 
-  // Drill into the child branch via its in-transcript chip (the "[enter →]"
-  // affordance distinguishes the chip from the navigator's tree node, which
-  // also names the branch).
-  await page.getByRole('button', { name: /delta etymology.*enter/ }).click();
+  // Drill into the child branch via its in-transcript chip. The chip's visible
+  // label is just the title, but its accessible name is "Enter <title>", which
+  // distinguishes it from the navigator's tree node that also names the branch.
+  await page.getByRole('button', { name: /enter delta etymology/i }).click();
 
   // The pane is now the branch trunk: breadcrumb location and its messages.
   await expect(current).toHaveText('delta etymology');

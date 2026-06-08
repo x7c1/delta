@@ -14,7 +14,9 @@ test('branch content survives a reload via persisted layout', async ({
   await useManualEventControl(page);
   await page.goto('/');
 
-  await page.getByRole('button', { name: /delta etymology.*enter/ }).click();
+  // The branch chip's accessible name is "Enter <title>" (its visible label is
+  // just the title), distinct from the navigator tree node of the same branch.
+  await page.getByRole('button', { name: /enter delta etymology/i }).click();
   const current = page.locator('[aria-current="page"]');
   await expect(current).toHaveText('delta etymology');
 

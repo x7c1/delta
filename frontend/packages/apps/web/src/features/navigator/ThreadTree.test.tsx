@@ -30,10 +30,12 @@ describe('ThreadTree', () => {
     useLiveStore.setState({ unread: {} });
   });
 
-  it('renders the nested tree and selecting a node sets it active', () => {
+  it('lists sub-threads only (not main) and selecting one sets it active', () => {
     render(<ThreadTree threads={threads} />);
 
-    expect(screen.getByText('main')).toBeInTheDocument();
+    // The main thread is reached via the session header, not listed in the
+    // tree; only its sub-threads appear.
+    expect(screen.queryByText('main')).not.toBeInTheDocument();
     expect(screen.getByText('branch one')).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('branch one'));

@@ -12,12 +12,19 @@ export interface ThreadTreeProps {
  * sets it active; activation clears the thread's unread badge (handled centrally
  * by the workspace, so every activation path clears it). Siblings keep creation
  * order.
+ *
+ * The main thread is intentionally not listed: it is always present, so a row
+ * for it is redundant. The main thread is reached instead by clicking the
+ * session card header (see {@link NavigatorPane}). Only main's sub-threads are
+ * rendered, lifted to depth 0 so they sit directly under the session without a
+ * redundant indent level.
  */
 export function ThreadTree({ threads }: ThreadTreeProps) {
   const roots = buildThreadTree(threads);
+  const subThreads = roots.flatMap((root) => root.children);
   return (
     <ul className="py-1">
-      {roots.map((node) => (
+      {subThreads.map((node) => (
         <ThreadTreeNode key={node.thread.id} node={node} depth={0} />
       ))}
     </ul>
@@ -38,13 +45,16 @@ function ThreadTreeNode({ node, depth }: { node: ThreadNode; depth: number }) {
         onClick={() => setActiveThread(node.thread.id)}
         style={{ paddingLeft: `${0.5 + depth * 0.85}rem` }}
         className={cn(
-          'flex w-full items-center justify-between gap-2 py-1 pr-2 text-left text-sm hover:bg-slate-100',
+          'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-[13px] leading-5 hover:bg-slate-100',
           isActive && 'bg-indigo-50 font-medium text-indigo-800',
         )}
         aria-current={isActive ? 'true' : undefined}
       >
         <span className="truncate">
-          {depth > 0 && <span className="text-slate-400">⤷ </span>}
+          {/* Every node rendered here is a sub-thread (main is not listed), so
+              all levels get the branch marker — including the first level, now
+              lifted to depth 0. Indentation still grows with depth. */}
+          <span className="text-slate-400">⤷ </span>
           {node.thread.title}
         </span>
         {unread > 0 && !isActive && <Badge tone="count">{unread}</Badge>}
