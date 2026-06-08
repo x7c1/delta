@@ -95,6 +95,7 @@ body {
 }
 .markdown-body h2 {
   font-size: 1.2em;
+  font-weight: normal;
 }
 .markdown-body h3 {
   font-size: 1.05em;
@@ -157,7 +158,7 @@ body {
   display: block;
   overflow-x: auto;
   border-collapse: collapse;
-  margin: 0 0 0.6rem;
+  margin: 0.75rem 0 0.9rem;
 }
 .markdown-body th,
 .markdown-body td {
@@ -168,7 +169,7 @@ body {
 }
 .markdown-body th {
   background: rgb(248 250 252);
-  font-weight: 600;
+  font-weight: normal;
 }
 
 .markdown-body hr {
