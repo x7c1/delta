@@ -158,6 +158,12 @@ export function TranscriptPane({
     onClick: () => setActiveThread(thread.id),
   }));
 
+  // Until the session has branched, the breadcrumb is a lone "main" that reads
+  // as abrupt noise — there is no tree to place it in. Show it only once a
+  // sub-thread exists (a sub-thread is any thread with a parent), matching the
+  // navigator, which hides the standalone main node under the same condition.
+  const hasSubThreads = threads.some((t) => t.parent_thread_id !== null);
+
   const showExternalInput =
     !newSession &&
     activeThread !== null &&
@@ -197,9 +203,9 @@ export function TranscriptPane({
           <span className="text-sm font-semibold text-slate-700">
             New session
           </span>
-        ) : (
+        ) : hasSubThreads ? (
           <Breadcrumb items={breadcrumbItems} />
-        )
+        ) : null
       }
       footer={footer}
     >
