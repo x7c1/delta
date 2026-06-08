@@ -122,6 +122,15 @@ body {
 .markdown-body li > ol {
   margin: 0.15rem 0;
 }
+/* Claude often opens a list item with a bold "label" (`- **Term**: …`). De-bold
+   only that leading strong so it reads as a calm label; strong elsewhere in the
+   item (mid-text emphasis) stays bold. `:first-child` targets just the head.
+   Covers tight lists (strong directly under li) and loose lists (the item's
+   content wrapped in a leading paragraph). */
+.markdown-body li > strong:first-child,
+.markdown-body li > p:first-child > strong:first-child {
+  font-weight: normal;
+}
 
 .markdown-body a {
   color: rgb(79 70 229);
