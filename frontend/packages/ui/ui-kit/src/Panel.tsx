@@ -33,7 +33,7 @@ export function Panel({
       className={cn('flex h-full min-h-0 flex-col bg-white', className)}
     >
       {header !== undefined && (
-        <header className="shrink-0 border-b border-slate-200 px-3 py-2">
+        <header className="flex h-10 shrink-0 items-center border-b border-slate-200 px-3">
           {header}
         </header>
       )}
