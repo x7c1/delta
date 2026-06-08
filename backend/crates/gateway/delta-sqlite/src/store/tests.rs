@@ -193,6 +193,41 @@ async fn message_upsert_and_thread_view() {
 }
 
 #[tokio::test]
+async fn last_activity_at_returns_latest_message_timestamp() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // No messages yet: no activity timestamp.
+    assert_eq!(store.last_activity_at(&session.id).await.unwrap(), None);
+
+    let make = |uuid: &str, seq: i64, created_at: &str| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: created_at.into(),
+    };
+    store
+        .upsert_messages(&[
+            make("u-1", 0, "2026-01-01T00:00:00Z"),
+            make("u-2", 1, "2026-01-01T00:05:00Z"),
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.last_activity_at(&session.id).await.unwrap(),
+        Some("2026-01-01T00:05:00Z".to_string()),
+    );
+}
+
+#[tokio::test]
 async fn upsert_preserves_thread_overlay_on_reingest() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

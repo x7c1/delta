@@ -225,6 +225,15 @@ impl SessionStore for FakeStore {
             .cloned())
     }
 
+    async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.messages
+            .iter()
+            .filter(|m| &m.session_id == session_id)
+            .map(|m| m.created_at.clone())
+            .max())
+    }
+
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
         let g = self.inner.lock().unwrap();
         Ok(g.threads
@@ -781,6 +790,10 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
     assert!(
         listings.iter().all(|l| l.main_thread_id.value() > 0),
         "every listing carries its main thread id"
+    );
+    assert!(
+        listings.iter().all(|l| l.last_activity_at.is_none()),
+        "sessions with no ingested messages have no last activity"
     );
 
     // `threads_for` is scoped to the named session: only its own threads.

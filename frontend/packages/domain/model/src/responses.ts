@@ -12,6 +12,11 @@ export interface SessionListItem {
   session: Session;
   open: boolean;
   main_thread_id: ThreadId;
+  /**
+   * The timestamp of the session's most recent message (UTC ISO-8601), or
+   * `null` when the session has no messages yet.
+   */
+  last_activity_at: string | null;
 }
 
 /** Response body for `GET /api/sessions`, ordered by creation. */

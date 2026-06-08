@@ -154,15 +154,18 @@ conversation — open or closed — so the navigator can route into any of them.
       {
         "session": { /* Session */ },
         "open": true,
-        "main_thread_id": 1
+        "main_thread_id": 1,
+        "last_activity_at": "2026-01-01T00:01:01Z"
       }
     ]
   }
   ```
 
   `open` is `true` when the session currently has a live pane (resumable without
-  `--resume`). Returns an empty list until the first `UserPromptSubmit` hook
-  registers a session.
+  `--resume`). `last_activity_at` is the ISO-8601 UTC timestamp of the session's
+  most recent message (`MAX(message.created_at)`), or `null` when the session
+  has no messages yet. Returns an empty list until the first `UserPromptSubmit`
+  hook registers a session.
 
 ### `POST /api/sessions`
 

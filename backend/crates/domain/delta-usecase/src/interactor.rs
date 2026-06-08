@@ -744,10 +744,12 @@ where
         for session in sessions {
             let main_thread_id = self.store.main_thread_id(&session.id).await?;
             let open = self.is_session_open(&session.id).await;
+            let last_activity_at = self.store.last_activity_at(&session.id).await?;
             out.push(SessionListing {
                 session,
                 open,
                 main_thread_id,
+                last_activity_at,
             });
         }
         Ok(out)

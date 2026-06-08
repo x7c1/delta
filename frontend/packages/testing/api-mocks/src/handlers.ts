@@ -33,6 +33,20 @@ export function createHandlers(): RequestHandler[] {
       entry.threads.some((t) => t.id === threadId),
     );
 
+  // The latest message timestamp across a session's threads, or null when it has
+  // no messages — mirrors the backend's MAX(message.created_at) derivation.
+  const lastActivityAt = (threadIds: number[]): string | null => {
+    let latest: string | null = null;
+    for (const threadId of threadIds) {
+      for (const message of store.messagesByThread[threadId] ?? []) {
+        if (latest === null || message.created_at > latest) {
+          latest = message.created_at;
+        }
+      }
+    }
+    return latest;
+  };
+
   return [
     http.get('*/api/sessions', () => {
       const body: SessionsResponse = {
@@ -40,6 +54,7 @@ export function createHandlers(): RequestHandler[] {
           session: entry.session,
           open: entry.open,
           main_thread_id: entry.mainThreadId,
+          last_activity_at: lastActivityAt(entry.threads.map((t) => t.id)),
         })),
       };
       return HttpResponse.json(body);

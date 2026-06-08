@@ -497,6 +497,22 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
+    async fn last_activity_at(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // MAX over an empty set yields SQL NULL, mapped to `None`.
+        let latest: Option<String> = conn
+            .query_row(
+                "SELECT MAX(created_at) FROM message WHERE session_id = ?1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .map_err(Error::from)?;
+        Ok(latest)
+    }
+
     async fn message_count(
         &self,
         session_id: &SessionId,

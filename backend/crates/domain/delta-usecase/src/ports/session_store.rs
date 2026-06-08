@@ -26,6 +26,11 @@ pub trait SessionStore: Send + Sync {
     /// Look up a session by id, if it exists.
     async fn session(&self, id: &SessionId) -> Result<Option<Session>>;
 
+    /// The timestamp of a session's most recent message
+    /// (`MAX(message.created_at)`), or `None` when it has no messages yet.
+    /// Stored as ISO-8601 UTC, the same format messages are persisted with.
+    async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>>;
+
     /// The id of a session's trunk (`main`) thread.
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId>;
 
@@ -127,6 +132,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
         (**self).session(id).await
+    }
+
+    async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>> {
+        (**self).last_activity_at(session_id).await
     }
 
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
