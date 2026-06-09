@@ -11,7 +11,7 @@ import type {
   Thread,
   ThreadsResponse,
 } from '@delta/model';
-import { seedData, type MockStore } from './fixtures';
+import { seedData, SESSIONS_PAGE_SIZE, type MockStore } from './fixtures';
 
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
@@ -48,7 +48,7 @@ export function createHandlers(): RequestHandler[] {
   };
 
   return [
-    http.get('*/api/sessions', () => {
+    http.get('*/api/sessions', ({ request }) => {
       const items = store.sessions.map((entry) => ({
         session: entry.session,
         open: entry.open,
@@ -70,7 +70,33 @@ export function createHandlers(): RequestHandler[] {
         }
         return a.session.id < b.session.id ? -1 : a.session.id > b.session.id ? 1 : 0;
       });
-      const body: SessionsResponse = { sessions: items };
+
+      // Cursor pagination over the fully-ordered list. The cursor is opaque to
+      // the client; here it encodes the offset of the next page's first item.
+      // An absent or unparseable cursor starts at offset 0 (first page).
+      const url = new URL(request.url);
+      const limitParam = url.searchParams.get('limit');
+      const parsedLimit = limitParam === null ? NaN : Number(limitParam);
+      const requestedLimit =
+        Number.isInteger(parsedLimit) && parsedLimit > 0
+          ? parsedLimit
+          : SESSIONS_PAGE_SIZE;
+      // Cap the effective page size to the small mock default so the seeded list
+      // always spans multiple pages, even though the app requests a larger
+      // production-sized limit. This is what exercises the infinite-scroll path
+      // (a non-null next_cursor, then a terminal null) in dev and e2e.
+      const limit = Math.min(requestedLimit, SESSIONS_PAGE_SIZE);
+
+      const cursorParam = url.searchParams.get('cursor');
+      const parsedOffset = cursorParam === null ? 0 : Number(cursorParam);
+      const offset =
+        Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
+      const page = items.slice(offset, offset + limit);
+      const nextOffset = offset + page.length;
+      const next_cursor = nextOffset < items.length ? String(nextOffset) : null;
+
+      const body: SessionsResponse = { sessions: page, next_cursor };
       return HttpResponse.json(body);
     }),
 

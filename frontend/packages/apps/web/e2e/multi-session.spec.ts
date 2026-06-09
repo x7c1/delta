@@ -1,28 +1,84 @@
 import { test, expect } from '@playwright/test';
+import { TOTAL_SEEDED_SESSIONS } from '@delta/api-mocks';
 import { useManualEventControl } from './support/app';
 
 /**
  * Multi-session navigator structure and the focus / closed=view model.
  *
- * The mock fixtures seed two sessions in distinct states: `sess-mock-1` (open,
- * with a thread tree) and `sess-mock-2` (closed). These specs assert the
- * structural behavior of the session-centric UI — the session list, the
- * per-session open/closed status dot, focusing a closed session into a
- * read-only transcript, and the new-session optimistic send — not appearance.
+ * The mock fixtures seed two detailed sessions in distinct states — `sess-mock-1`
+ * (open, with a thread tree) and `sess-mock-2` (closed) — plus enough filler
+ * sessions to span many pages and overflow a single viewport. These specs assert
+ * the structural behavior of the session-centric UI — the cursor-paginated,
+ * DOM-windowed session list with scroll-to-load, the per-session open/closed
+ * status dot, focusing a closed session into a read-only transcript, and the
+ * new-session optimistic send — not appearance.
  */
 
-test('the navigator lists every session with its open status dot', async ({
+test('the navigator paginates to the end while keeping the rendered DOM windowed', async ({
   page,
 }) => {
   await useManualEventControl(page);
   await page.goto('/');
 
-  // Both seeded sessions appear as top-level nodes.
-  await expect(page.getByTestId('session-node')).toHaveCount(2);
-  // Exactly one of the two is open, shown by its status dot.
-  await expect(
-    page.getByRole('status', { name: 'Open', exact: true }),
-  ).toHaveCount(1);
+  // The list is cursor-paginated (mock page size 2) and DOM-windowed: only the
+  // rows in the scroll viewport (+overscan) are mounted. Pagination is driven by
+  // the virtualizer's range — when the window reaches the last loaded row the
+  // next page is fetched. Repeatedly scrolling the navigator body to its bottom
+  // walks the whole list: each scroll reveals the tail, which triggers the next
+  // fetch, until `next_cursor` reaches null.
+  const sessionNodes = page.getByTestId('session-node');
+  const scrollBody = page.getByTestId('sessions-list').locator('..');
+  await expect(sessionNodes.first()).toBeVisible();
+
+  // Track how many rows are mounted at once. Because the list is windowed, this
+  // peak must stay well below the total once the list is long — that is the
+  // proof that off-screen nodes are recycled rather than accumulated.
+  let peakRendered = 0;
+  let lastCursorReached = -1;
+  for (let i = 0; i < 40; i += 1) {
+    const mounted = await sessionNodes.count();
+    peakRendered = Math.max(peakRendered, mounted);
+    // The highest loaded index currently reachable, read from the last mounted
+    // row's data-index — it climbs as pagination advances.
+    const maxIndex = await page
+      .getByTestId('session-node')
+      .last()
+      .evaluate((el) => Number(el.closest('[data-index]')?.getAttribute('data-index') ?? '-1'));
+    if (maxIndex >= TOTAL_SEEDED_SESSIONS - 1) {
+      break;
+    }
+    if (maxIndex === lastCursorReached) {
+      // No progress this round; give the in-flight fetch a moment, then retry.
+      await page.waitForTimeout(150);
+    }
+    lastCursorReached = maxIndex;
+    await scrollBody.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await page.waitForTimeout(120);
+  }
+
+  // The last seeded session is reachable (pagination walked to the end), and the
+  // virtual spacer is tall enough to hold every loaded row even though only a
+  // window of them is mounted.
+  await scrollBody.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(async () => {
+    const maxIndex = await page
+      .getByTestId('session-node')
+      .last()
+      .evaluate((el) =>
+        Number(el.closest('[data-index]')?.getAttribute('data-index') ?? '-1'),
+      );
+    expect(maxIndex).toBe(TOTAL_SEEDED_SESSIONS - 1);
+  }).toPass();
+
+  // Windowing guarantee: across the whole walk the DOM never held all sessions
+  // at once — the peak mounted count stayed comfortably below the total. (If the
+  // list were not windowed, every loaded row would stay in the DOM and this peak
+  // would equal the total.)
+  expect(peakRendered).toBeLessThan(TOTAL_SEEDED_SESSIONS);
 });
 
 test('focusing a closed session shows its transcript read-only', async ({
@@ -76,6 +132,11 @@ test('closing an open session via its kebab menu clears its open dot', async ({
   await expect(
     page.getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1);
+
+  // The windowed list keeps fetching pages to fill the viewport after the first
+  // page lands; let that settle before interacting so the open session's kebab
+  // is not detached by a row remount mid-click.
+  await page.waitForLoadState('networkidle');
 
   // The open session's actions menu is enabled; open it and select Close.
   await page

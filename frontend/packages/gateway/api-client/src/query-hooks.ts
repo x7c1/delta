@@ -1,7 +1,9 @@
 import {
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
+  type UseInfiniteQueryResult,
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
@@ -18,17 +20,33 @@ import type {
 import type { ApiClient } from './http';
 import { queryKeys } from './query-keys';
 
+/** Sessions per page requested from `GET /api/sessions`. */
+const SESSIONS_PAGE_SIZE = 30;
+
 /**
- * The session list (`GET /api/sessions`). Runs on app load and is invalidated by
- * lifecycle events (`session_registered`/`session_opened`/`session_closed`). A
- * bounded retry covers a transient failure while the server is still coming up.
+ * The session list (`GET /api/sessions`), cursor-paginated as an infinite query.
+ * Runs on app load and is invalidated by lifecycle events
+ * (`session_registered`/`session_opened`/`session_closed`). A bounded retry
+ * covers a transient failure while the server is still coming up.
+ *
+ * Pages are addressed by the server's opaque `next_cursor`: the first page sends
+ * no cursor (`pageParam: null`), and each subsequent page echoes back the prior
+ * page's `next_cursor`. `getNextPageParam` returns `undefined` at end-of-list
+ * (`next_cursor: null`), which is how `hasNextPage` becomes `false`. Consumers
+ * flatten `data.pages[].sessions` to recover the full ordered list.
  */
 export function useSessionsQuery(
   client: ApiClient,
-): UseQueryResult<SessionsResponse> {
-  return useQuery({
+): UseInfiniteQueryResult<{ pages: SessionsResponse[] }, Error> {
+  return useInfiniteQuery({
     queryKey: queryKeys.sessions,
-    queryFn: () => client.getSessions(),
+    queryFn: ({ pageParam }) =>
+      client.getSessions({
+        cursor: pageParam ?? undefined,
+        limit: SESSIONS_PAGE_SIZE,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     retry: 2,
   });
 }

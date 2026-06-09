@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { SessionListItem, Thread } from '@delta/model';
 import { Button, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
 import {
@@ -9,11 +11,35 @@ import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { SessionNode } from './SessionNode';
 
+/**
+ * Estimated height of a collapsed session card, in pixels. Only a seed for the
+ * virtualizer's spacer math: each rendered row reports its true height back via
+ * `measureElement` (ResizeObserver-backed), so the focused card expanding its
+ * thread tree is measured rather than assumed. The session list's scrollbar is
+ * hidden (`scrollbar-none`), so the brief estimate-vs-actual jitter that the
+ * spacer approach can cause is not visible.
+ */
+const ESTIMATED_SESSION_NODE_HEIGHT = 64;
+
+/**
+ * Extra rows rendered above and below the visible window. A small buffer keeps
+ * scrolling smooth (rows exist before they scroll into view) while still
+ * recycling off-screen DOM so the node count stays bounded regardless of how
+ * many sessions have loaded.
+ */
+const SESSION_OVERSCAN = 8;
+
 export interface NavigatorPaneProps {
-  /** Every session, ordered by creation. */
+  /** The loaded sessions so far, ordered most-recently-active first. */
   sessions: SessionListItem[];
   /** The focused session's thread tree (empty when none is focused). */
   threads: Thread[];
+  /** Whether more session pages remain to be fetched. */
+  hasMoreSessions: boolean;
+  /** Whether the next session page is currently in flight. */
+  isLoadingMoreSessions: boolean;
+  /** Request the next session page (cursor-paginated). */
+  onLoadMoreSessions: () => void;
 }
 
 const CONNECTION_TONE: Record<ConnectionStatus, DotTone> = {
@@ -35,9 +61,56 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
  * is rendered. Top-level nodes are sessions; expanding the focused session
  * reveals its thread tree.
  */
-export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
+export function NavigatorPane({
+  sessions,
+  threads,
+  hasMoreSessions,
+  isLoadingMoreSessions,
+  onLoadMoreSessions,
+}: NavigatorPaneProps) {
   const client = useApiClient();
   const closeSession = useCloseSessionMutation(client);
+
+  // The Panel body is the scroll container; the virtualizer reads its scroll
+  // position and viewport height to decide which rows to render.
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
+  // The default `measureElement` is ResizeObserver-backed: each rendered row
+  // reports its real height, so the focused card growing/shrinking its thread
+  // tree re-measures instead of corrupting the positions of the rows below it.
+  // Rows opt into measurement by attaching `virtualizer.measureElement` as their
+  // ref (see below); `estimateSize` is only the spacer seed before measurement.
+  const virtualizer = useVirtualizer({
+    count: sessions.length,
+    getScrollElement: () => scrollBodyRef.current,
+    estimateSize: () => ESTIMATED_SESSION_NODE_HEIGHT,
+    overscan: SESSION_OVERSCAN,
+  });
+
+  const virtualItems = virtualizer.getVirtualItems();
+
+  // Scroll-triggered page loading, driven off the virtual range rather than a
+  // DOM sentinel: once the window reaches the last loaded session, fetch the
+  // next page. This replaces the earlier IntersectionObserver trigger, which
+  // could not see a sentinel that windowing keeps unmounted until scrolled to.
+  useEffect(() => {
+    const lastItem = virtualItems[virtualItems.length - 1];
+    if (!lastItem) {
+      return;
+    }
+    if (
+      lastItem.index >= sessions.length - 1 &&
+      hasMoreSessions &&
+      !isLoadingMoreSessions
+    ) {
+      onLoadMoreSessions();
+    }
+  }, [
+    virtualItems,
+    sessions.length,
+    hasMoreSessions,
+    isLoadingMoreSessions,
+    onLoadMoreSessions,
+  ]);
 
   const connection = useLiveStore((state) => state.connection);
   const permission = useLiveStore((state) => state.permission);
@@ -54,6 +127,7 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
   return (
     <Panel
       className="border-r border-slate-200"
+      bodyRef={scrollBodyRef}
       // The session list is a side panel; hide its scrollbar entirely (no bar,
       // no reserved column) so it never shows a stray blank strip. It still
       // scrolls via wheel/trackpad. The transcript pane keeps its hover-reveal
@@ -107,27 +181,63 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
         </div>
       )}
 
-      <ul className="pb-2 pt-1.5">
-        {sessions.map((item) => (
-          <SessionNode
-            key={item.session.id}
-            item={item}
-            isFocused={focusedSessionId === item.session.id}
-            threads={
-              focusedSessionId === item.session.id ? threads : undefined
-            }
-            onFocus={() => {
-              setFocusedSession(item.session.id);
-              // The main thread is not listed in the tree, so clicking the
-              // session card is how you return to it. Always select main —
-              // this also covers re-clicking the already-focused session while
-              // viewing one of its sub-threads.
-              setActiveThread(item.main_thread_id);
-            }}
-            onClose={() => closeSession.mutate(item.session.id)}
-          />
-        ))}
+      {/*
+        Windowed session list. The `<ul>` is a spacer sized to the full virtual
+        height (getTotalSize); only the rows in the current window (+overscan)
+        are mounted, each absolutely positioned by the virtualizer. This bounds
+        the live DOM-node count regardless of how many sessions have loaded.
+      */}
+      <ul
+        data-testid="sessions-list"
+        className="relative w-full pt-1.5"
+        style={{ height: virtualizer.getTotalSize() }}
+      >
+        {virtualItems.map((virtualRow) => {
+          const item = sessions[virtualRow.index];
+          return (
+            <SessionNode
+              key={item.session.id}
+              rowRef={virtualizer.measureElement}
+              index={virtualRow.index}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+              item={item}
+              isFocused={focusedSessionId === item.session.id}
+              threads={
+                focusedSessionId === item.session.id ? threads : undefined
+              }
+              onFocus={() => {
+                setFocusedSession(item.session.id);
+                // The main thread is not listed in the tree, so clicking the
+                // session card is how you return to it. Always select main —
+                // this also covers re-clicking the already-focused session
+                // while viewing one of its sub-threads.
+                setActiveThread(item.main_thread_id);
+              }}
+              onClose={() => closeSession.mutate(item.session.id)}
+            />
+          );
+        })}
       </ul>
+
+      {/*
+        While the next page is in flight, surface a small loading row below the
+        windowed list. The fetch itself is triggered from the virtualizer's
+        range (see the effect above), not from this element.
+      */}
+      {hasMoreSessions && isLoadingMoreSessions && (
+        <div
+          data-testid="sessions-load-more"
+          className="flex justify-center px-3 pb-3 pt-1 text-xs text-slate-400"
+        >
+          <Spinner label="loading more" />
+        </div>
+      )}
     </Panel>
   );
 }

@@ -47,8 +47,11 @@ export function WorkspaceScreen() {
   useSessionEvents();
 
   const sessionsQuery = useSessionsQuery(client);
+  // The session list is cursor-paginated; flatten the loaded pages back into one
+  // ordered list. Pages arrive most-recently-active first, so concatenation
+  // preserves the global order.
   const sessions = useMemo(
-    () => sessionsQuery.data?.sessions ?? [],
+    () => sessionsQuery.data?.pages.flatMap((page) => page.sessions) ?? [],
     [sessionsQuery.data],
   );
 
@@ -99,17 +102,17 @@ export function WorkspaceScreen() {
       return;
     }
     if (isNewSessionFocus) {
-      // The new-session send spawned a session; when it registers it appears in
-      // the list as an id absent from the baseline. Focus it and leave the
-      // new-session state. (A fresh New has no id until its first hook binds.)
+      // The new-session send spawned a session; when it registers, the sessions
+      // query is invalidated and the fresh session — being the most-recently
+      // active — refetches to the head of the list. So the spawn is "the head
+      // session, absent from the baseline". We must check only the head, not the
+      // whole list: while in the new-session state the windowed list may keep
+      // paginating in *older* sessions (they land at the tail), and those are
+      // not the spawn — focusing one would wrongly drop the new-session state.
       const baseline = newSessionBaselineRef.current;
-      if (baseline) {
-        const registered = sessions.find(
-          (item) => !baseline.has(item.session.id),
-        );
-        if (registered) {
-          setFocusedSession(registered.session.id);
-        }
+      const head = sessions[0];
+      if (baseline && head && !baseline.has(head.session.id)) {
+        setFocusedSession(head.session.id);
       }
       return;
     }
@@ -117,10 +120,24 @@ export function WorkspaceScreen() {
       focusedSessionId !== null &&
       sessions.some((item) => item.session.id === focusedSessionId);
     if (!stillExists) {
+      // A persisted focus (`focusedSessionId !== null`) that is absent from the
+      // loaded pages is ambiguous while more pages remain: the session may live
+      // on a not-yet-loaded page rather than being truly gone. Defer
+      // reconciliation in that case so a reload does not spuriously refocus the
+      // top of page 1 while later pages are still streaming in; once all pages
+      // are loaded (`!hasNextPage`), a missing id genuinely no longer exists.
+      //
+      // Cold start (`focusedSessionId === null`) is never ambiguous: the
+      // most-recently-active focus candidate is page-1 top by construction, so
+      // pick it immediately rather than waiting for the whole list to load.
+      if (focusedSessionId !== null && sessionsQuery.hasNextPage) {
+        return;
+      }
       setFocusedSession(pickInitialFocus(sessions));
     }
   }, [
     sessionsQuery.isSuccess,
+    sessionsQuery.hasNextPage,
     sessions,
     focusedSessionId,
     isNewSessionFocus,
@@ -207,7 +224,13 @@ export function WorkspaceScreen() {
     <div className="relative flex h-full overflow-hidden">
       {/* Left: navigator (session → thread tree) */}
       <div className="w-72 shrink-0">
-        <NavigatorPane sessions={sessions} threads={threads} />
+        <NavigatorPane
+          sessions={sessions}
+          threads={threads}
+          hasMoreSessions={sessionsQuery.hasNextPage}
+          isLoadingMoreSessions={sessionsQuery.isFetchingNextPage}
+          onLoadMoreSessions={sessionsQuery.fetchNextPage}
+        />
       </div>
 
       {/* Center: transcript, or the cold-start / new-session composer state */}

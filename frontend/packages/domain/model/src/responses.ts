@@ -20,12 +20,18 @@ export interface SessionListItem {
 }
 
 /**
- * Response body for `GET /api/sessions`, ordered by most recent activity
- * (newest first). The recency key is each session's last activity, falling back
- * to its own `created_at` when it has no messages yet.
+ * Response body for one page of `GET /api/sessions`, ordered by most recent
+ * activity (newest first). The recency key is each session's last activity,
+ * falling back to its own `created_at` when it has no messages yet.
+ *
+ * The list is cursor-paginated: `next_cursor` is an opaque, server-issued token
+ * to pass back as `?cursor=` to fetch the following page, or `null` when this is
+ * the last page. The token is opaque — clients must echo it verbatim and never
+ * parse it.
  */
 export interface SessionsResponse {
   sessions: SessionListItem[];
+  next_cursor: string | null;
 }
 
 /** Lifecycle state of a Claude Code session after a `new` spawn. */

@@ -1,3 +1,4 @@
+import type { CSSProperties, Ref } from 'react';
 import type { SessionListItem, Thread } from '@delta/model';
 import { Menu, StatusDot, cn } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -13,6 +14,22 @@ export interface SessionNodeProps {
   threads: Thread[] | undefined;
   onFocus: () => void;
   onClose: () => void;
+  /**
+   * Ref to the row's `<li>`, used by the virtualizer's `measureElement` to read
+   * the card's real height (it varies: the focused card expands its thread
+   * tree). Omitted when the list is rendered without windowing.
+   */
+  rowRef?: Ref<HTMLLIElement>;
+  /**
+   * Virtual-row index, mirrored onto `data-index` so the virtualizer can map a
+   * measured element back to its row. Paired with {@link rowRef}.
+   */
+  index?: number;
+  /**
+   * Inline style for the row's `<li>`. The virtualizer absolutely positions each
+   * row via `transform: translateY(...)`, which it supplies here.
+   */
+  style?: CSSProperties;
 }
 
 /** A short, readable stand-in for a session that has no title yet. */
@@ -40,6 +57,9 @@ export function SessionNode({
   threads,
   onFocus,
   onClose,
+  rowRef,
+  index,
+  style,
 }: SessionNodeProps) {
   const lastActivity = formatLocalDateTime(item.last_activity_at);
   const label = sessionLabel(item);
@@ -50,7 +70,17 @@ export function SessionNode({
   const hasSubThreads =
     threads?.some((t) => t.parent_thread_id !== null) ?? false;
   return (
-    <li className="mx-2 mb-1.5">
+    // Horizontal inset (px-2) and the inter-card gap (pb-1.5) live *inside* the
+    // measured box: the virtualizer measures `getBoundingClientRect().height`,
+    // which excludes margins, so spacing expressed as margins would not be
+    // accounted for and rows would overlap. Padding is included, so the gap is
+    // preserved under windowing.
+    <li
+      ref={rowRef}
+      data-index={index}
+      style={style}
+      className="px-2 pb-1.5"
+    >
       <div
         className={cn(
           'rounded-lg border bg-white shadow-sm transition-colors',
