@@ -335,7 +335,8 @@ where
 
     /// Spawn a fresh session, optionally dispatching a first prompt.
     ///
-    /// Mints a token and a fresh Claude `session_id` (a random UUID), creates the
+    /// Mints a token and a fresh Claude `session_id` (a time-ordered UUID v7, so
+    /// session ids sort chronologically by creation time), creates the
     /// `<base>/<token>` workdir with settings written, launches
     /// `claude --settings <path> --session-id <uuid>` there, and records a
     /// [`PendingSpawn`] carrying that minted id (the binding key) and
@@ -363,9 +364,12 @@ where
         // Mint and pin the conversation's session id up front. `claude
         // --session-id <uuid>` makes the first `UserPromptSubmit` hook report
         // exactly this id, so the spawn correlates to its session by id rather
-        // than by working directory. The id is a random UUID v4, so collision
-        // with an existing stored session is astronomically unlikely.
-        let session_id = SessionId::from(uuid::Uuid::new_v4().to_string());
+        // than by working directory. The id is a time-ordered UUID v7 (a 48-bit
+        // millisecond timestamp prefix followed by random bits), so session ids
+        // sort chronologically by creation time while remaining a fully valid
+        // RFC 9562 UUID, and collision with an existing stored session is
+        // astronomically unlikely.
+        let session_id = SessionId::from(uuid::Uuid::now_v7().to_string());
 
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
