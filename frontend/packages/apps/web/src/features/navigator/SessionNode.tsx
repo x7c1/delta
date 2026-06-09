@@ -1,4 +1,4 @@
-import type { CSSProperties, Ref } from 'react';
+import { useState, type CSSProperties, type Ref } from 'react';
 import type { SessionListItem, ThreadId } from '@delta/model';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, StatusDot, cn } from '@delta/ui-kit';
@@ -75,6 +75,11 @@ export function SessionNode({
   const client = useApiClient();
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
+  // The kebab menu's dropdown opens below the trigger, but each windowed row is
+  // an absolutely-positioned `transform` stacking context, so the dropdown is
+  // painted under the next row's card. While the menu is open, lift this row
+  // above its siblings so the dropdown is visible (see the `zIndex` on `<li>`).
+  const [menuOpen, setMenuOpen] = useState(false);
   // Fetch this row's thread tree. Mounted only for sessions in the windowed
   // viewport (+overscan), so the number of in-flight thread queries is bounded
   // by the visible window, not the full session list. Shares the focused
@@ -110,7 +115,10 @@ export function SessionNode({
     <li
       ref={rowRef}
       data-index={index}
-      style={style}
+      // Spread the virtualizer's positioning style, then lift this row above its
+      // siblings while its menu is open so the dropdown is not covered by the
+      // next row's card (sibling rows are z-auto, painting in DOM order).
+      style={menuOpen ? { ...style, zIndex: 20 } : style}
       // pb-1.5 is the inter-card gap (baked into each measured row). The first
       // card also needs that gap above it: the windowed rows are absolutely
       // positioned, so a `pt` on the list container is ignored — give the top
@@ -162,6 +170,7 @@ export function SessionNode({
           {/* Fixed-width slot, vertically centered against the two-line block. */}
           <Menu
             label={`Session actions for ${label}`}
+            onOpenChange={setMenuOpen}
             disabled={!item.open}
             items={
               item.open

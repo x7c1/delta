@@ -26,6 +26,13 @@ export interface MenuProps {
   /** Force the trigger disabled regardless of items. */
   disabled?: boolean;
   className?: string;
+  /**
+   * Notified whenever the panel opens or closes. Lets an enclosing row react to
+   * the open state — e.g. lift its stacking order so the dropdown is not painted
+   * under a sibling row (needed inside a windowed list, where each row is a
+   * `transform`ed stacking context and the panel cannot otherwise escape it).
+   */
+  onOpenChange?: (open: boolean) => void;
 }
 
 const ITEM_TONE_CLASSES: Record<MenuItemTone, string> = {
@@ -58,7 +65,13 @@ function KebabIcon() {
  * activates an enclosing row's handler. When disabled (explicitly or because
  * no items are enabled) the trigger is greyed and never opens a panel.
  */
-export function Menu({ label, items, disabled = false, className }: MenuProps) {
+export function Menu({
+  label,
+  items,
+  disabled = false,
+  className,
+  onOpenChange,
+}: MenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -67,6 +80,12 @@ export function Menu({ label, items, disabled = false, className }: MenuProps) {
   const isDisabled = disabled || items.length === 0;
 
   const close = useCallback(() => setOpen(false), []);
+
+  // Surface open/close to the parent. `setState` setters are identity-stable, so
+  // a parent passing one directly keeps this effect from re-firing each render.
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
 
   // Move focus into the panel on open; restore it to the trigger on close.
   useEffect(() => {

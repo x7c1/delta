@@ -55,6 +55,26 @@ describe('Menu', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
+  it('notifies onOpenChange when the panel opens and closes', () => {
+    const onOpenChange = vi.fn();
+    render(
+      <Menu
+        label="Session actions"
+        items={[{ label: 'Close', onSelect: vi.fn() }]}
+        onOpenChange={onOpenChange}
+      />,
+    );
+
+    // Mounted closed: the callback fires once with the initial state.
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
+
   it('does not open when disabled', () => {
     render(
       <Menu
