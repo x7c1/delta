@@ -2,7 +2,7 @@ import { useCallback, type FormEvent } from 'react';
 import type { SendRequest, Thread, ThreadId } from '@delta/model';
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
-import { useCreateSendMutation } from '@delta/api-client';
+import { ApiError, useCreateSendMutation } from '@delta/api-client';
 import {
   NEW_SESSION_DRAFT_KEY,
   useComposerStore,
@@ -58,6 +58,13 @@ export function Composer({ mode }: ComposerProps) {
   const attachSendId = useLiveStore((state) => state.attachSendId);
   const retargetSend = useLiveStore((state) => state.retargetSend);
   const failSend = useLiveStore((state) => state.failSend);
+  const removePending = useLiveStore((state) => state.removePending);
+  const markResumeUnavailable = useLiveStore(
+    (state) => state.markResumeUnavailable,
+  );
+  const clearResumeUnavailable = useLiveStore(
+    (state) => state.clearResumeUnavailable,
+  );
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
   // Branching applies to the active thread whether the session is open or
@@ -77,6 +84,13 @@ export function Composer({ mode }: ComposerProps) {
         return;
       }
       const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+      // A fresh attempt against this session clears any stale "cannot be
+      // resumed" notice up front, so a retry (e.g. after the transcript is
+      // restored) does not leave the old notice showing alongside the new chip.
+      if (activeThread) {
+        clearResumeUnavailable(activeThread.session_id);
+      }
 
       // The optimistic FIFO entry is keyed by the thread the pending queue
       // renders under. A branch send keys to the active (parent) thread and is
@@ -133,8 +147,21 @@ export function Composer({ mode }: ComposerProps) {
           setActiveThread(send.thread_id);
           setBranchOrigin(null);
         }
-      } catch {
-        failSend(localId);
+      } catch (error) {
+        // A resume-unavailable session can never start this turn (its transcript
+        // is gone), so drop the optimistic chip outright instead of leaving a
+        // "failed" one, keep the session closed, and surface the inline notice.
+        // Any other failure keeps today's behaviour: mark the chip failed.
+        if (
+          error instanceof ApiError &&
+          error.code === 'resume_unavailable' &&
+          activeThread
+        ) {
+          removePending(localId);
+          markResumeUnavailable(activeThread.session_id);
+        } else {
+          failSend(localId);
+        }
       }
     },
     [
@@ -152,6 +179,9 @@ export function Composer({ mode }: ComposerProps) {
       setBranchOrigin,
       setActiveThread,
       failSend,
+      removePending,
+      markResumeUnavailable,
+      clearResumeUnavailable,
     ],
   );
 

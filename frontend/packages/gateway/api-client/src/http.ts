@@ -21,27 +21,48 @@ export interface ApiClientOptions {
   fetchFn?: typeof fetch;
 }
 
+/**
+ * Stable machine-readable error code the server may attach to an error body.
+ *
+ * `resume_unavailable` means a closed session cannot be resumed because its
+ * local transcript file is gone, so `claude --resume` has nothing to replay.
+ * Callers branch on this to keep the session closed and show a specific message
+ * rather than a generic failure.
+ */
+export type ApiErrorCode = 'resume_unavailable';
+
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The server's machine-readable error code, when present. */
+    readonly code?: ApiErrorCode,
   ) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
-async function readError(response: Response): Promise<string> {
+/** The parsed error payload: a human message and an optional stable code. */
+interface ParsedError {
+  message: string;
+  code?: ApiErrorCode;
+}
+
+async function readError(response: Response): Promise<ParsedError> {
   const text = await response.text();
   if (!text) {
-    return response.statusText;
+    return { message: response.statusText };
   }
   try {
-    const body = JSON.parse(text) as { error?: string };
-    return body.error ?? text;
+    const body = JSON.parse(text) as { error?: string; code?: string };
+    return {
+      message: body.error ?? text,
+      code: body.code as ApiErrorCode | undefined,
+    };
   } catch {
-    return text;
+    return { message: text };
   }
 }
 
@@ -58,7 +79,8 @@ export class ApiClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await this.fetchFn(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
-      throw new ApiError(response.status, await readError(response));
+      const { message, code } = await readError(response);
+      throw new ApiError(response.status, message, code);
     }
     return (await response.json()) as T;
   }
@@ -70,7 +92,8 @@ export class ApiClient {
   ): Promise<void> {
     const response = await this.fetchFn(`${this.baseUrl}${path}`, init);
     if (!response.ok) {
-      throw new ApiError(response.status, await readError(response));
+      const { message, code } = await readError(response);
+      throw new ApiError(response.status, message, code);
     }
   }
 

@@ -19,6 +19,21 @@ function isNewSessionSend(body: SendRequest): body is SendToNewSession {
 }
 
 /**
+ * The response the real server gives when a closed session cannot be resumed
+ * because its transcript is gone: `409` with the stable `resume_unavailable`
+ * code the frontend branches on. Shared by the `open` and `sends` handlers.
+ */
+function resumeUnavailableResponse() {
+  return HttpResponse.json(
+    {
+      error: 'session cannot be resumed (transcript missing)',
+      code: 'resume_unavailable',
+    },
+    { status: 409 },
+  );
+}
+
+/**
  * MSW handlers backing the multi-session REST surface. They share a small
  * in-memory store (one per {@link createHandlers} call) so a `POST /api/sends`
  * that branches actually creates a thread the navigator can then list, and the
@@ -113,6 +128,11 @@ export function createHandlers(): RequestHandler[] {
       if (!entry) {
         return HttpResponse.json({ error: 'unknown session' }, { status: 404 });
       }
+      // A resume-impossible session stays closed; opening it is refused exactly
+      // as the real server's resume gate does.
+      if (entry.resumable === false) {
+        return resumeUnavailableResponse();
+      }
       entry.open = true;
       return new HttpResponse(null, { status: 204 });
     }),
@@ -182,6 +202,12 @@ export function createHandlers(): RequestHandler[] {
       const session = findSessionByThread(target.thread_id);
       if (!session) {
         return HttpResponse.json({ error: 'unknown thread' }, { status: 404 });
+      }
+      // Sending to a closed session resumes it first; if that session can no
+      // longer be resumed (transcript gone), the send is refused before any
+      // optimistic pending row — mirroring the real server.
+      if (!session.open && session.resumable === false) {
+        return resumeUnavailableResponse();
       }
 
       let threadId = target.thread_id;

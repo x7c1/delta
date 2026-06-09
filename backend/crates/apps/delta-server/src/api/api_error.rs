@@ -6,6 +6,10 @@ use axum::Json;
 
 use super::error_body::ErrorBody;
 
+/// Stable machine-readable code for a resume-impossible session, carried in the
+/// error body so the frontend can distinguish it from a generic failure.
+const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -28,25 +32,42 @@ impl From<delta_usecase::Error> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         use delta_usecase::Error;
-        let (status, message) = match self {
-            ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message),
+        let (status, message, code) = match self {
+            ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message, None),
             ApiError::UseCase(err) => {
-                let status = match &err {
+                let (status, code) = match &err {
                     // No session yet means nothing to act on for the caller.
-                    Error::NoSession => StatusCode::NOT_FOUND,
-                    Error::ThreadNotFound(_) | Error::SessionNotFound(_) => StatusCode::NOT_FOUND,
+                    Error::NoSession => (StatusCode::NOT_FOUND, None),
+                    Error::ThreadNotFound(_) | Error::SessionNotFound(_) => {
+                        (StatusCode::NOT_FOUND, None)
+                    }
+                    // The session exists but its transcript is gone, so resume is
+                    // impossible. This is a conflict with current state, not a
+                    // server fault: report `409` with a stable code so the
+                    // frontend can keep the session closed and show a specific
+                    // "cannot be resumed" message instead of a generic failure.
+                    Error::ResumeUnavailable(_) => {
+                        (StatusCode::CONFLICT, Some(RESUME_UNAVAILABLE_CODE))
+                    }
                     // Everything else is an internal failure.
                     Error::Tmux(_)
                     | Error::Transcript(_)
                     | Error::Store(_)
-                    | Error::Workspace(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                    | Error::Workspace(_) => (StatusCode::INTERNAL_SERVER_ERROR, None),
                 };
-                (status, err.to_string())
+                (status, err.to_string(), code)
             }
         };
         if status.is_server_error() {
             tracing::error!(error = %message, "api handler failed");
         }
-        (status, Json(ErrorBody { error: message })).into_response()
+        (
+            status,
+            Json(ErrorBody {
+                error: message,
+                code,
+            }),
+        )
+            .into_response()
     }
 }

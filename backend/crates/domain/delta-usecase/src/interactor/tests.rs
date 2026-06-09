@@ -130,6 +130,12 @@ const DEFAULT_TRANSCRIPT_PATH: &str = "/tmp/t.jsonl";
 #[derive(Default)]
 struct FakeTranscript {
     by_path: Mutex<HashMap<String, Vec<Option<TranscriptMessage>>>>,
+    /// Paths the fake reports as absent from `exists`, modelling a transcript
+    /// file that has been removed. By default every path is considered present,
+    /// so the resume gate does not perturb the existing open/resume tests; a
+    /// test marks a path missing via [`Self::mark_missing`] to exercise the
+    /// resume-unavailable path.
+    missing: Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -152,6 +158,10 @@ impl Transcript for FakeTranscript {
             messages,
             total_lines: lines.len(),
         })
+    }
+
+    async fn exists(&self, path: &str) -> Result<bool> {
+        Ok(!self.missing.lock().unwrap().iter().any(|p| p == path))
     }
 }
 
@@ -2403,6 +2413,101 @@ async fn open_session_unknown_id_is_session_not_found() {
     );
 }
 
+/// Opening a known-but-closed session whose transcript file is gone is rejected
+/// with `ResumeUnavailable` (which the API layer maps to 409): `claude --resume`
+/// would have nothing to replay, so the gate refuses before minting a token,
+/// writing settings, or spawning. No pane is created and the session stays
+/// closed.
+#[tokio::test]
+async fn open_session_missing_transcript_is_resume_unavailable() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    // Register a known-but-closed session, then model its transcript as removed.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    ix.transcript_fake().mark_missing("/elsewhere/t.jsonl");
+    assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
+
+    let err = ix
+        .open_session(&id)
+        .await
+        .expect_err("a missing transcript makes resume impossible");
+    assert!(
+        matches!(err, Error::ResumeUnavailable(ref s) if s == "sess-R"),
+        "the session id is surfaced as ResumeUnavailable, got: {err:?}"
+    );
+
+    // Nothing was spawned and no settings were written: the gate runs before any
+    // of that, and the session remains closed.
+    assert!(
+        ix.tmux_fake().created.lock().unwrap().is_empty(),
+        "a resume-unavailable open must not spawn a pane"
+    );
+    assert!(
+        ix.workspace_fake().written.lock().unwrap().is_empty(),
+        "a resume-unavailable open must not write session settings"
+    );
+    assert!(
+        ix.pane_for_session(&id).await.is_none(),
+        "the session stays closed"
+    );
+}
+
+/// A Send to a closed session whose transcript is gone fails before any pending
+/// row is written: `ensure_open` resumes via `open_session`, which now refuses
+/// with `ResumeUnavailable`, so `enqueue_into_open` never runs. This is the
+/// fix for the "stuck waiting indicator" — without an optimistic pending row,
+/// the UI has nothing to leave hanging.
+#[tokio::test]
+async fn send_to_closed_session_with_missing_transcript_writes_no_pending_row() {
+    use crate::error::Error;
+
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    ix.transcript_fake().mark_missing("/elsewhere/t.jsonl");
+    let main = ix.store().main_thread_id(&id).await.unwrap();
+
+    let err = ix
+        .enqueue_send(to(main), "after resume", None)
+        .await
+        .expect_err("a send to a resume-impossible session must fail");
+    assert!(
+        matches!(err, Error::ResumeUnavailable(ref s) if s == "sess-R"),
+        "the failure propagates as ResumeUnavailable, got: {err:?}"
+    );
+
+    // The key assertion: no optimistic pending row sits at the FIFO head waiting
+    // for a hook that will never fire.
+    assert!(
+        ix.store().head_pending_send(&id).await.unwrap().is_none(),
+        "no pending send row was enqueued"
+    );
+    assert!(
+        ix.tmux_fake().sent.lock().unwrap().is_empty(),
+        "no keystrokes were dispatched"
+    );
+    assert!(
+        ix.pane_for_session(&id).await.is_none(),
+        "the session stays closed"
+    );
+}
+
 /// A branch send targeting a thread that does not exist is rejected with
 /// `ThreadNotFound`. A branch send always names the parent thread it hangs off,
 /// so with no such thread (no session has been registered) there is nothing to
@@ -2647,6 +2752,13 @@ impl FakeTranscript {
             .entry(path.to_owned())
             .or_default()
             .push(Some(line));
+    }
+
+    /// Mark a transcript path as absent, so [`Transcript::exists`] reports
+    /// `false` for it — modelling a removed transcript that makes
+    /// `claude --resume` impossible.
+    fn mark_missing(&self, path: &str) {
+        self.missing.lock().unwrap().push(path.to_owned());
     }
 
     /// Append a line that produces no message but still occupies a line and

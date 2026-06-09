@@ -225,6 +225,17 @@ where
                 return Ok(handle.token.clone());
             }
 
+            // Resume gate: `claude --resume <id>` replays from the local JSONL
+            // transcript, so a missing transcript makes resume impossible. tmux
+            // would still report a clean spawn (it only checks `new-session`'s
+            // exit code, which is 0 before claude's own resume failure surfaces),
+            // leaving the UI stuck on a "waiting" pending row that never clears.
+            // Refuse here — before minting a token, writing settings, or spawning
+            // — so no pane is created and no optimistic pending send is enqueued.
+            if !self.transcript.exists(&session.transcript_path).await? {
+                return Err(Error::ResumeUnavailable(id.as_str().to_owned()));
+            }
+
             let token = self.mint_free_token().await?;
             let workdir = session.cwd.clone();
             // Settings must already be present from the original spawn, but

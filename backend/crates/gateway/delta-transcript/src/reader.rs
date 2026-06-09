@@ -71,6 +71,12 @@ impl Transcript for JsonlTranscript {
             total_lines,
         })
     }
+
+    async fn exists(&self, path: &str) -> std::result::Result<bool, delta_usecase::Error> {
+        fs::try_exists(path)
+            .await
+            .map_err(|e| Error::from(e).into())
+    }
 }
 
 #[cfg(test)]
@@ -115,6 +121,19 @@ mod tests {
         let out = t.read_from("/nonexistent/transcript.jsonl", 0).await.unwrap();
         assert!(out.messages.is_empty());
         assert_eq!(out.total_lines, 0);
+    }
+
+    #[tokio::test]
+    async fn exists_reports_presence() {
+        let file = tempfile_jsonl();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let t = JsonlTranscript::new();
+        assert!(t.exists(&path).await.unwrap(), "an existing file is present");
+        assert!(
+            !t.exists("/nonexistent/transcript.jsonl").await.unwrap(),
+            "a missing file is absent, not an error"
+        );
     }
 
     #[tokio::test]

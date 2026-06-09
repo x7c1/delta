@@ -5,7 +5,7 @@ import type { Message } from '@delta/model';
 import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { blockSummary, stringifyContent } from './blockSummary';
-import type { ToolPairing } from './toolPairs';
+import { messageRendersNothing, type ToolPairing } from './toolPairs';
 
 export interface MessageItemProps {
   message: Message;
@@ -50,7 +50,7 @@ export function MessageItem({
     }
   }, [message, onSelectQuote]);
 
-  const timestamp = formatLocalDateTime(message.created_at);
+  const timestamp = formatLocalDateTime(message.created_at, true);
   // A genuine human turn is a user-role message with author-written text. A
   // user-role message that only carries tool results (fed back to the model
   // after a tool_use) is not a human turn — render it on the assistant side.
@@ -108,7 +108,7 @@ export function MessageItem({
             key={index}
             summary={
               <span className="flex items-center gap-1.5">
-                <span className="font-medium text-slate-700">
+                <span className="font-medium text-slate-500">
                   {block.name}
                 </span>
                 {result ? (
@@ -184,8 +184,9 @@ export function MessageItem({
 
   // A message whose blocks all collapse to nothing — only an empty thinking
   // block, or only tool results that render inline with their calls — would
-  // otherwise show as a bare timestamp. Render nothing for it.
-  if (!renderedBlocks.some((node) => node !== null)) {
+  // otherwise show as a bare timestamp. Render nothing for it. This mirrors the
+  // transcript's own filter (the single source of truth is messageRendersNothing).
+  if (messageRendersNothing(message, pairing)) {
     return null;
   }
 
@@ -199,11 +200,11 @@ export function MessageItem({
   if (isUserTurn) {
     return (
       <article
-        className="flex flex-col items-end px-3 py-2 text-sm"
+        className="flex flex-col items-end px-3 text-sm"
         data-role={message.role}
         data-testid="message-item"
       >
-        <div className="max-w-[85%] rounded-2xl bg-slate-100 px-3 py-2 text-slate-800">
+        <div className="max-w-[85%] rounded-lg bg-blue-50 px-3 py-2 text-slate-800">
           {blocks}
         </div>
         {timestamp && (
@@ -215,16 +216,28 @@ export function MessageItem({
     );
   }
 
-  // Assistant: plain full-width text on the canvas, no background or label.
+  // Assistant prose gets a tinted rounded bubble, in a different hue from the
+  // user's bubble so the two sides are easy to tell apart. Tool turns and
+  // tool-result carriers keep their own Collapsible cards instead — wrapping a
+  // bubble around those would nest a box inside a box.
+  const inBubble = !message.content.some(
+    (block) => block.type === 'tool_use' || block.type === 'tool_result',
+  );
   return (
     <article
-      className="px-3 py-2 text-sm"
+      className="px-3 text-sm"
       data-role={message.role}
       data-testid="message-item"
     >
-      {blocks}
+      {inBubble ? (
+        <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+          {blocks}
+        </div>
+      ) : (
+        blocks
+      )}
       {timestamp && (
-        <span className="mt-1 block text-xs tabular-nums text-slate-400">
+        <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
           {timestamp}
         </span>
       )}

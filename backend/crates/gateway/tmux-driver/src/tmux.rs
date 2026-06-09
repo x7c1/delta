@@ -227,8 +227,9 @@ fn clear_input_commands(pane: &str) -> Vec<String> {
 /// inside the window, which is likelier for longer/multi-line text that takes
 /// longer to process. Waiting out the window makes the `Enter` a discrete
 /// submit. Sized comfortably above the observed window; the added per-send
-/// latency is imperceptible.
-const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+/// latency is imperceptible. Bumped to 250ms after the occasional miss still
+/// slipped through at 150ms (the failure is rare and not reproducible on demand).
+const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Build the `tmux send-keys` invocations that type a single line into `pane`'s
 /// input **without submitting it**:

@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   threadAncestry,
   type Message,
@@ -6,7 +13,7 @@ import {
   type ThreadId,
 } from '@delta/model';
 import { useThreadMessagesQuery } from '@delta/api-client';
-import { Badge, Breadcrumb, Chip, Panel } from '@delta/ui-kit';
+import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
@@ -18,7 +25,7 @@ import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
-import { buildToolPairing, isAbsorbedToolResultMessage } from './toolPairs';
+import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import {
   clearBranchHighlight,
   findAllQuoteRanges,
@@ -58,8 +65,20 @@ export function TranscriptPane({
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
+  const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const externalInput = useLiveStore((state) => state.externalInput);
+  // Whether the focused (closed) session just failed to resume because its
+  // transcript is gone; drives the inline "cannot be resumed" notice.
+  const resumeUnavailable = useLiveStore((state) =>
+    activeThread ? Boolean(state.resumeUnavailable[activeThread.session_id]) : false,
+  );
+  // The focused session's pending permission prompt, if any. A tool's PreToolUse
+  // hook blocks that session until it is answered in the terminal.
+  const permission = useLiveStore((state) =>
+    activeThread ? state.permission[activeThread.session_id] ?? null : null,
+  );
+  const dismissPermission = useLiveStore((state) => state.dismissPermission);
 
   // The sub-thread chip currently hovered; its text is highlighted in the body.
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
@@ -94,8 +113,11 @@ export function TranscriptPane({
   // in a separate `role: "user"` message), so a call renders together with its
   // result and the result-only carrier message is not shown on its own.
   const pairing = useMemo(() => buildToolPairing(messages), [messages]);
+  // Drop messages that render nothing on their own (empty thinking blocks,
+  // inline-absorbed tool results, or empty content). Without this their block
+  // wrapper would still emit its padding — an empty, mysteriously large gap.
   const renderedMessages = useMemo(
-    () => messages.filter((m) => !isAbsorbedToolResultMessage(m, pairing)),
+    () => messages.filter((m) => !messageRendersNothing(m, pairing)),
     [messages, pairing],
   );
 
@@ -213,9 +235,12 @@ export function TranscriptPane({
 
   // The new-session state has no session id yet; the composer targets a fresh
   // spawn. An existing thread targets that thread (a resume on a closed session).
+  // A resume-impossible session is the exception: every send and branch would
+  // re-trigger the failed resume, so it gets no composer at all and becomes a
+  // pure read-only viewer (see the footer below).
   const composer = newSession ? (
     <Composer mode={{ kind: 'new-session' }} />
-  ) : activeThread ? (
+  ) : activeThread && !resumeUnavailable ? (
     <Composer
       mode={{
         kind: 'thread',
@@ -225,15 +250,83 @@ export function TranscriptPane({
     />
   ) : undefined;
 
-  // The optimistic pending-send strip is pinned just above the composer (in the
-  // fixed footer, not the scrolling transcript) so it never jostles the
-  // conversation tail while a turn is in flight.
-  const footer = composer ? (
-    <div className="space-y-2">
-      <PendingQueue threadId={pendingThreadId} />
-      {composer}
-    </div>
-  ) : undefined;
+  // The fixed footer (pinned below the scrolling transcript). For a
+  // resume-impossible session it is just the "cannot resume" notice, replacing
+  // the input entirely — there is nothing useful to type. Otherwise it stacks
+  // the session-state notices (permission, closed, external input), the
+  // optimistic pending-send strip, and the composer. The notices are pinned
+  // directly above the input rather than at the top of the scrolling body, where
+  // a long conversation scrolled to its tail would bury them out of sight.
+  let footer: ReactNode;
+  if (resumeUnavailable && !newSession) {
+    footer = (
+      <div
+        className="flex items-center gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700"
+        data-testid="resume-unavailable-notice"
+        role="alert"
+      >
+        <Badge tone="warning">cannot resume</Badge>
+        <span>
+          This session cannot be resumed: its conversation transcript is no
+          longer available. Its history above stays readable.
+        </span>
+      </div>
+    );
+  } else if (composer) {
+    footer = (
+      <div className="space-y-2">
+        {permission && activeThread && (
+          <div
+            className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs"
+            data-testid="permission-notice"
+            role="alert"
+          >
+            <p className="font-medium text-amber-800">
+              Permission requested: {permission.toolName}
+            </p>
+            <p className="text-slate-600">Answer the prompt in the terminal.</p>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => setTerminalOpen(true)}>
+                Open terminal
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => dismissPermission(activeThread.session_id)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {readOnly && !newSession && (
+          <div
+            className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
+            data-testid="readonly-notice"
+          >
+            <Badge tone="neutral">closed</Badge>
+            <span>This session is closed. Sending a message resumes it.</span>
+          </div>
+        )}
+
+        {showExternalInput && (
+          <div
+            className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+            data-testid="external-input-notice"
+          >
+            <Badge tone="info">external input</Badge>
+            <span className="line-clamp-2 text-slate-700">
+              {externalInput.prompt}
+            </span>
+          </div>
+        )}
+
+        <PendingQueue threadId={pendingThreadId} />
+        {composer}
+      </div>
+    );
+  }
 
   return (
     <Panel
@@ -249,18 +342,6 @@ export function TranscriptPane({
       }
       footer={footer}
     >
-      {readOnly && !newSession && (
-        <div
-          className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500"
-          data-testid="readonly-notice"
-        >
-          <Badge tone="neutral">closed</Badge>
-          <span>
-            This session is closed. Sending a message resumes it.
-          </span>
-        </div>
-      )}
-
       {newSession && (
         <p
           className="px-3 py-4 text-sm text-slate-400"
@@ -268,13 +349,6 @@ export function TranscriptPane({
         >
           Send the first message below to start a new session.
         </p>
-      )}
-
-      {showExternalInput && (
-        <div className="flex items-start gap-2 border-b border-slate-100 bg-sky-50 px-3 py-2 text-xs">
-          <Badge tone="info">external input</Badge>
-          <span className="text-slate-700">{externalInput.prompt}</span>
-        </div>
       )}
 
       {!newSession && messagesQuery.isLoading && (
@@ -292,8 +366,27 @@ export function TranscriptPane({
 
       {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
+        // Vary the block's top and bottom gap by message kind; user messages are
+        // unchanged. An assistant prose turn gets a little more room below it,
+        // while a tool-execution turn (one carrying a `tool_use` block, e.g. a
+        // Bash call) is tightened on both top and bottom so chained tool steps
+        // group closely.
+        const isToolTurn =
+          message.role === 'assistant' &&
+          message.content.some((block) => block.type === 'tool_use');
+        const topGap =
+          message.role === 'user' ? 'pt-2' : isToolTurn ? 'pt-0.5' : 'pt-1.5';
+        const bottomGap =
+          message.role === 'user' ? 'pb-1' : isToolTurn ? 'pb-0.5' : 'pb-2';
+        // Inset a tool-execution turn (left + right margin) so it reads as a
+        // nested step and sits in a narrower column than prose.
+        const indent = isToolTurn ? 'ml-6 mr-0' : '';
         return (
-          <div key={message.uuid}>
+          // One block per message: the message and its sub-thread chips. The
+          // block owns the vertical rhythm (not the message article), so adjacent
+          // messages are separated by a consistent gap while the chips hug their
+          // parent message just below it (see their small pt).
+          <div key={message.uuid} className={`${topGap} ${bottomGap} ${indent}`}>
             <MessageItem
               message={message}
               pairing={pairing}
@@ -309,7 +402,7 @@ export function TranscriptPane({
               }
             />
             {children.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+              <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">
                 {children.map((child) => (
                   <Chip
                     key={child.id}

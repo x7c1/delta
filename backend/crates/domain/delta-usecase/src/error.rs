@@ -21,6 +21,12 @@ pub enum Error {
     #[error("thread not found: {0}")]
     ThreadNotFound(i64),
 
+    /// A closed session cannot be resumed because its local transcript file is
+    /// gone, so `claude --resume <id>` would have nothing to replay. The session
+    /// is left closed rather than spawning a doomed pane.
+    #[error("session cannot be resumed (transcript missing): {0}")]
+    ResumeUnavailable(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),

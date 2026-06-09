@@ -62,7 +62,8 @@ describe('MessageItem', () => {
   });
 
   it('renders the local-time timestamp for both roles', () => {
-    const expected = formatLocalDateTime('2026-01-01T00:00:00Z');
+    // The transcript shows seconds (unlike the session list).
+    const expected = formatLocalDateTime('2026-01-01T00:00:00Z', true);
     expect(expected).not.toBeNull();
 
     for (const role of ['user', 'assistant'] as const) {

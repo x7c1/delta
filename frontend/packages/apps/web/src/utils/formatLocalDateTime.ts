@@ -1,9 +1,13 @@
 /**
- * Format a stored UTC ISO-8601 timestamp as absolute local time
- * (`YYYY-MM-DD HH:mm`) in the browser's timezone. Returns `null` when the input
- * is absent or unparseable so the caller can render nothing.
+ * Format a stored UTC ISO-8601 timestamp as absolute local time in the
+ * browser's timezone (`YYYY-MM-DD HH:mm`, or `YYYY-MM-DD HH:mm:ss` when
+ * `withSeconds` is set). Returns `null` when the input is absent or unparseable
+ * so the caller can render nothing.
  */
-export function formatLocalDateTime(iso: string | null): string | null {
+export function formatLocalDateTime(
+  iso: string | null,
+  withSeconds = false,
+): string | null {
   if (!iso) {
     return null;
   }
@@ -17,5 +21,6 @@ export function formatLocalDateTime(iso: string | null): string | null {
   const d = pad(date.getDate());
   const h = pad(date.getHours());
   const mi = pad(date.getMinutes());
-  return `${y}-${mo}-${d} ${h}:${mi}`;
+  const base = `${y}-${mo}-${d} ${h}:${mi}`;
+  return withSeconds ? `${base}:${pad(date.getSeconds())}` : base;
 }

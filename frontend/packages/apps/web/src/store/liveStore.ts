@@ -49,11 +49,26 @@ export interface LiveState {
   connection: ConnectionStatus;
   /** FIFO of optimistic sends, oldest first. */
   pending: PendingItem[];
-  permission: PermissionNotice | null;
+  /**
+   * Permission requests keyed by the session blocked on them. A tool's
+   * PreToolUse hook blocks that session until the prompt is answered in its
+   * terminal, so the notice is per-session: the focused session's drives the
+   * inline notice above the composer, and any session's drives a badge on its
+   * navigator row. Cleared on dismiss, when the session's turn completes, and
+   * when the session closes.
+   */
+  permission: Record<SessionId, PermissionNotice>;
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
   unread: Record<ThreadId, number>;
   /** The most recent external (direct-pane) input, shown on the last active thread. */
   externalInput: ExternalInputMarker | null;
+  /**
+   * Sessions a Send/open just failed to resume because their transcript is gone
+   * (the server's `resume_unavailable`). The focused session's presence here
+   * drives an inline "cannot be resumed" notice; the session stays closed and
+   * no optimistic pending chip is shown. Cleared when the session opens.
+   */
+  resumeUnavailable: Record<SessionId, true>;
 
   setConnection: (status: ConnectionStatus) => void;
   enqueueSend: (item: PendingItem) => void;
@@ -67,6 +82,17 @@ export interface LiveState {
   retargetSend: (localId: string, threadId: ThreadId) => void;
   failSend: (localId: string) => void;
   /**
+   * Drop an optimistic pending send outright (not merely mark it failed). Used
+   * when a Send is rejected before it could ever queue server-side — e.g. a
+   * resume-unavailable session — so no "waiting" chip lingers for a turn that
+   * will never start.
+   */
+  removePending: (localId: string) => void;
+  /** Flag a session as resume-impossible, surfacing the inline notice. */
+  markResumeUnavailable: (sessionId: SessionId) => void;
+  /** Clear a session's resume-impossible flag (e.g. once it opens). */
+  clearResumeUnavailable: (sessionId: SessionId) => void;
+  /**
    * Drop every optimistic pending send. Used on a live-stream reconnect: the
    * `turn_completed` events that would have drained these were broadcast while
    * the socket was down and are not replayed, so the FIFO can no longer be
@@ -78,7 +104,8 @@ export interface LiveState {
   clearUnread: (threadId: ThreadId) => void;
   /** Record an external (direct-pane) input marker on a thread. */
   noteExternalInput: (threadId: ThreadId, prompt: string) => void;
-  dismissPermission: () => void;
+  /** Dismiss the permission notice for a session. */
+  dismissPermission: (sessionId: SessionId) => void;
   /**
    * Apply a live session event, mutating only session-scoped ephemeral state
    * (the pending FIFO, permission notice). Focus-dependent signals (the
@@ -116,9 +143,10 @@ function matchPendingIndex(
 export const useLiveStore = create<LiveState>((set) => ({
   connection: 'connecting',
   pending: [],
-  permission: null,
+  permission: {},
   unread: {},
   externalInput: null,
+  resumeUnavailable: {},
 
   setConnection: (status) => set({ connection: status }),
 
@@ -146,6 +174,30 @@ export const useLiveStore = create<LiveState>((set) => ({
       ),
     })),
 
+  removePending: (localId) =>
+    set((state) => ({
+      pending: state.pending.filter((item) => item.localId !== localId),
+    })),
+
+  markResumeUnavailable: (sessionId) =>
+    set((state) =>
+      state.resumeUnavailable[sessionId]
+        ? state
+        : {
+            resumeUnavailable: { ...state.resumeUnavailable, [sessionId]: true },
+          },
+    ),
+
+  clearResumeUnavailable: (sessionId) =>
+    set((state) => {
+      if (!state.resumeUnavailable[sessionId]) {
+        return state;
+      }
+      const next = { ...state.resumeUnavailable };
+      delete next[sessionId];
+      return { resumeUnavailable: next };
+    }),
+
   clearPending: () => set({ pending: [] }),
 
   bumpUnread: (threadId) =>
@@ -166,7 +218,15 @@ export const useLiveStore = create<LiveState>((set) => ({
   noteExternalInput: (threadId, prompt) =>
     set({ externalInput: { threadId, prompt, at: Date.now() } }),
 
-  dismissPermission: () => set({ permission: null }),
+  dismissPermission: (sessionId) =>
+    set((state) => {
+      if (!state.permission[sessionId]) {
+        return state;
+      }
+      const permission = { ...state.permission };
+      delete permission[sessionId];
+      return { permission };
+    }),
 
   applyEvent: (event) =>
     set((state) => {
@@ -191,30 +251,39 @@ export const useLiveStore = create<LiveState>((set) => ({
           return { pending };
         }
         case 'turn_completed': {
-          // Drop the oldest active send for THIS session from the visible FIFO.
-          // It may still be `queued` rather than `in_progress`: `turn_started`
-          // only fires when the user line was ingested in the same
-          // `UserPromptSubmit` sync, which often does not happen, so a completed
-          // turn must clear a still-queued send too — otherwise it stays
-          // "waiting" forever. Scoped by session so a turn in one session never
-          // drains another session's queue.
+          // The turn ended, so any permission prompt that was blocking THIS
+          // session is resolved — clear it. Also drop the oldest active send for
+          // this session from the visible FIFO. It may still be `queued` rather
+          // than `in_progress`: `turn_started` only fires when the user line was
+          // ingested in the same `UserPromptSubmit` sync, which often does not
+          // happen, so a completed turn must clear a still-queued send too —
+          // otherwise it stays "waiting" forever. Scoped by session so a turn in
+          // one session never drains another session's queue.
+          const next: Partial<LiveState> = {};
           const idx = matchPendingIndex(
             state.pending,
             event.session_id,
             (item) =>
               item.status === 'in_progress' || item.status === 'queued',
           );
-          if (idx === -1) {
-            return state;
+          if (idx !== -1) {
+            next.pending = state.pending.filter((_, i) => i !== idx);
           }
-          const pending = state.pending.filter((_, i) => i !== idx);
-          return { pending };
+          if (state.permission[event.session_id]) {
+            const permission = { ...state.permission };
+            delete permission[event.session_id];
+            next.permission = permission;
+          }
+          return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':
           return {
             permission: {
-              requestId: event.request_id,
-              toolName: event.tool_name,
+              ...state.permission,
+              [event.session_id]: {
+                requestId: event.request_id,
+                toolName: event.tool_name,
+              },
             },
           };
         case 'external_input':
@@ -223,13 +292,31 @@ export const useLiveStore = create<LiveState>((set) => ({
           // via `noteExternalInput` under a focus guard. Nothing to do here.
           return state;
         case 'session_registered':
-        case 'session_opened':
           // Open/closed lifecycle is reflected by the sessions query, not
           // ephemeral here.
           return state;
-        case 'session_closed':
-          // Closed state is reflected by the sessions query, not ephemeral here.
-          return state;
+        case 'session_opened': {
+          // The session resumed successfully, so any stale "cannot be resumed"
+          // notice for it is now wrong — clear it. Open/closed itself is
+          // reflected by the sessions query, not ephemeral here.
+          if (!state.resumeUnavailable[event.session_id]) {
+            return state;
+          }
+          const resumeUnavailable = { ...state.resumeUnavailable };
+          delete resumeUnavailable[event.session_id];
+          return { resumeUnavailable };
+        }
+        case 'session_closed': {
+          // Closed state itself is reflected by the sessions query. But a closed
+          // session has no live process, so any permission prompt for it is moot
+          // — clear it.
+          if (!state.permission[event.session_id]) {
+            return state;
+          }
+          const permission = { ...state.permission };
+          delete permission[event.session_id];
+          return { permission };
+        }
         default:
           return state;
       }

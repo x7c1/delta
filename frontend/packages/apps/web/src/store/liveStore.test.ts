@@ -5,7 +5,7 @@ function reset() {
   useLiveStore.setState({
     connection: 'connecting',
     pending: [],
-    permission: null,
+    permission: {},
     unread: {},
     externalInput: null,
   });
@@ -166,7 +166,7 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().pending).toHaveLength(0);
   });
 
-  it('records a permission notice and clears it on dismiss', () => {
+  it('records a permission notice per session and clears it on dismiss', () => {
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',
       session_id: 'sess-1',
@@ -174,12 +174,65 @@ describe('liveStore.applyEvent', () => {
       tool_name: 'Bash',
     });
     expect(useLiveStore.getState().permission).toEqual({
-      requestId: 7,
-      toolName: 'Bash',
+      'sess-1': { requestId: 7, toolName: 'Bash' },
     });
 
-    useLiveStore.getState().dismissPermission();
-    expect(useLiveStore.getState().permission).toBeNull();
+    useLiveStore.getState().dismissPermission('sess-1');
+    expect(useLiveStore.getState().permission).toEqual({});
+  });
+
+  it('keeps permission notices for different sessions independent', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-1',
+      request_id: 1,
+      tool_name: 'Bash',
+    });
+    store.applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-2',
+      request_id: 2,
+      tool_name: 'Edit',
+    });
+
+    // Dismissing one session leaves the other's notice intact.
+    useLiveStore.getState().dismissPermission('sess-1');
+    expect(useLiveStore.getState().permission).toEqual({
+      'sess-2': { requestId: 2, toolName: 'Edit' },
+    });
+  });
+
+  it('clears a session permission notice when its turn completes', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-1',
+      request_id: 7,
+      tool_name: 'Bash',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    // The turn ended, so the prompt that was blocking the session is resolved.
+    expect(useLiveStore.getState().permission).toEqual({});
+  });
+
+  it('clears a session permission notice when the session closes', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-1',
+      request_id: 7,
+      tool_name: 'Bash',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().permission).toEqual({});
   });
 
   it('records an external-input marker on a thread', () => {

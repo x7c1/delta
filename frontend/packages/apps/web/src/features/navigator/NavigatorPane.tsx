@@ -110,8 +110,11 @@ export function NavigatorPane({
   ]);
 
   const connection = useLiveStore((state) => state.connection);
-  const permission = useLiveStore((state) => state.permission);
-  const dismissPermission = useLiveStore((state) => state.dismissPermission);
+  // Per-session permission requests. The notice itself now lives in the focused
+  // session's conversation pane (above the composer); here it only drives a
+  // badge on each session's row so a request on a non-focused session is still
+  // discoverable.
+  const permissions = useLiveStore((state) => state.permission);
   const hasInProgress = useLiveStore((state) =>
     state.pending.some((item) => item.status === 'in_progress'),
   );
@@ -119,7 +122,6 @@ export function NavigatorPane({
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
-  const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
 
   return (
     <Panel
@@ -152,23 +154,6 @@ export function NavigatorPane({
       }
       footer={hasInProgress ? <Spinner label="running" /> : undefined}
     >
-      {permission && (
-        <div className="space-y-1 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs">
-          <p className="font-medium text-amber-800">
-            Permission requested: {permission.toolName}
-          </p>
-          <p className="text-slate-600">Answer the prompt in the terminal.</p>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => setTerminalOpen(true)}>
-              Open terminal
-            </Button>
-            <Button size="sm" variant="ghost" onClick={dismissPermission}>
-              Dismiss
-            </Button>
-          </div>
-        </div>
-      )}
-
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
           className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-indigo-300 bg-indigo-50/70 px-2 py-2 text-xs text-indigo-700 shadow-sm ring-1 ring-indigo-200"
@@ -186,7 +171,7 @@ export function NavigatorPane({
       */}
       <ul
         data-testid="sessions-list"
-        className="relative w-full pt-1.5"
+        className="relative w-full"
         style={{ height: virtualizer.getTotalSize() }}
       >
         {virtualItems.map((virtualRow) => {
@@ -205,6 +190,7 @@ export function NavigatorPane({
               }}
               item={item}
               isFocused={focusedSessionId === item.session.id}
+              needsPermission={Boolean(permissions[item.session.id])}
               onFocus={() => {
                 setFocusedSession(item.session.id);
                 // The main thread is not listed in the tree, so clicking the
