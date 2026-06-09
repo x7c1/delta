@@ -32,7 +32,7 @@ mock:
 down:
 	scripts/dev.sh --down
 
-## reset: stop the loop and clear local state (db + session workdirs)
+## reset: stop the loop and reset the database (empty schema on next start)
 .PHONY: reset
 reset:
 	scripts/dev.sh --reset

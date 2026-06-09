@@ -186,5 +186,5 @@ make down
 ```
 
 This stops `delta-server`, the frontend dev server (port 5173), and every
-`delta-<n>` tmux session the server spawned. To also clear local state (the
-SQLite overlay and per-spawn working directories), run `make reset` instead.
+`delta-<n>` tmux session the server spawned. To also delete the SQLite overlay
+so the next start recreates an empty schema, run `make reset` instead.
