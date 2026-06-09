@@ -52,6 +52,7 @@ interface PaneEntry {
 export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
+  const pendingTeardownRef = useRef<number | null>(null);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
 
   const canAttach = !isMockMode() && attachable && sessionId !== null;
@@ -102,13 +103,30 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   }, [canAttach, sessionId]);
 
   // Detach everything only when the terminal itself closes (this unmounts).
+  //
+  // The teardown is deferred to a macrotask so React StrictMode's dev-only
+  // mount → unmount → mount does not destroy the just-built terminals: the
+  // immediate remount cancels the pending teardown, so the entries (which this
+  // component deliberately keeps alive while open) survive. Without this the
+  // throwaway unmount would close each `/pty` socket while it is still
+  // connecting (a "closed before the connection is established" warning) and
+  // dispose each xterm before its queued `open()` timer fires (an uncaught
+  // "reading 'dimensions'" error). A real unmount has nothing to cancel it, so
+  // the teardown runs on the next tick.
   useEffect(() => {
     const entries = entriesRef.current;
+    if (pendingTeardownRef.current !== null) {
+      window.clearTimeout(pendingTeardownRef.current);
+      pendingTeardownRef.current = null;
+    }
     return () => {
-      for (const entry of entries.values()) {
-        disposeEntry(entry);
-      }
-      entries.clear();
+      pendingTeardownRef.current = window.setTimeout(() => {
+        pendingTeardownRef.current = null;
+        for (const entry of entries.values()) {
+          disposeEntry(entry);
+        }
+        entries.clear();
+      }, 0);
     };
   }, []);
 
