@@ -28,6 +28,10 @@ mod sessions_response;
 pub use sessions_response::{SessionListItem, SessionsResponse};
 mod threads_response;
 pub use threads_response::ThreadsResponse;
+mod workdir_list_response;
+pub use workdir_list_response::WorkdirListResponse;
+mod workdir_recent_response;
+pub use workdir_recent_response::{RecentWorkdirItem, WorkdirRecentResponse};
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -151,6 +155,45 @@ pub(crate) async fn thread_messages(
 ) -> Result<Json<MessagesResponse>, ApiError> {
     let messages = state.interactor().thread_view(ThreadId(thread_id)).await?;
     Ok(Json(MessagesResponse { messages }))
+}
+
+/// Query parameters for `GET /api/workdir/list`: the directory to browse.
+#[derive(Debug, Deserialize)]
+pub(crate) struct WorkdirListQuery {
+    /// The absolute path to list. Omitted or empty defaults to the user's home
+    /// directory, so the picker has a sensible starting point.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// `GET /api/workdir/list` — browse a directory for the working-directory picker.
+///
+/// Lists the immediate subdirectories of `path` (dirs only, dot-directories
+/// hidden, sorted by name), along with the canonical path and its parent so the
+/// picker can step up. `path` defaults to `$HOME` when omitted. A missing path
+/// or a non-directory is a `400`; a permission error is a `403`.
+pub(crate) async fn list_workdir(
+    State(state): State<AppState>,
+    Query(query): Query<WorkdirListQuery>,
+) -> Result<Json<WorkdirListResponse>, ApiError> {
+    let listing = state
+        .interactor()
+        .browse_workdir(query.path.as_deref())
+        .await?;
+    Ok(Json(WorkdirListResponse::from(listing)))
+}
+
+/// `GET /api/workdir/recent` — recently-used working directories for the picker.
+///
+/// Returns the distinct directories sessions have run in, most-recently-used
+/// first, derived from existing session rows (Delta keeps no separate history).
+pub(crate) async fn recent_workdir(
+    State(state): State<AppState>,
+) -> Result<Json<WorkdirRecentResponse>, ApiError> {
+    let workdirs = state.interactor().recent_workdirs().await?;
+    Ok(Json(WorkdirRecentResponse {
+        workdirs: workdirs.into_iter().map(RecentWorkdirItem::from).collect(),
+    }))
 }
 
 /// `POST /api/sends` — enqueue a send into a session named by the request.

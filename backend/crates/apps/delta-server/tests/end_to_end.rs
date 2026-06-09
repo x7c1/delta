@@ -125,6 +125,20 @@ impl Workspace for NoopWorkspace {
     ) -> delta_usecase::Result<()> {
         Ok(())
     }
+
+    async fn resolve_existing_dir(&self, path: &str) -> delta_usecase::Result<String> {
+        // The end-to-end tests never request a user-selected workdir, so a real
+        // resolution is unnecessary; echo the path back as already-canonical.
+        Ok(path.to_owned())
+    }
+
+    async fn list_dirs(&self, path: &str) -> delta_usecase::Result<delta_usecase::DirListing> {
+        Ok(delta_usecase::DirListing {
+            path: path.to_owned(),
+            parent: None,
+            entries: Vec::new(),
+        })
+    }
 }
 
 /// Assemble the app with test-wired gateways and return the router plus the

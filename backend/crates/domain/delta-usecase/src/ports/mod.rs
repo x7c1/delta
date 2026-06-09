@@ -4,6 +4,8 @@
 //! crates implement them; the [`crate::Interactor`] consumes them. Everything
 //! here is expressed in terms of [`delta_model`] types only.
 
+mod dir_listing;
+pub use dir_listing::{DirEntry, DirListing};
 mod new_session;
 pub use new_session::NewSession;
 mod session_event;
@@ -11,7 +13,7 @@ pub use session_event::SessionEvent;
 mod session_lifecycle;
 pub use session_lifecycle::SessionLifecycle;
 mod session_store;
-pub use session_store::{SessionPageRow, SessionStore};
+pub use session_store::{RecentWorkdir, SessionPageRow, SessionStore};
 mod stop_hook;
 pub use stop_hook::StopHook;
 mod tmux_driver;

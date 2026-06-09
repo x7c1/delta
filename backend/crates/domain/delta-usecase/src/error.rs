@@ -27,6 +27,16 @@ pub enum Error {
     #[error("session cannot be resumed (transcript missing): {0}")]
     ResumeUnavailable(String),
 
+    /// A user-selected working directory is not a usable directory: it does not
+    /// exist, is not a directory, or could not be resolved. Surfaced as `400`.
+    #[error("invalid working directory: {0}")]
+    InvalidWorkdir(String),
+
+    /// A directory could not be read because the process lacks permission.
+    /// Surfaced as `403`.
+    #[error("permission denied: {0}")]
+    WorkdirPermission(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),

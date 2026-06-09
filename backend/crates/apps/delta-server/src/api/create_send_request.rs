@@ -35,6 +35,13 @@ pub struct CreateSendRequest {
     /// before the first prompt, so the persisted row carries no quote.
     #[serde(default)]
     pub locator_quote: Option<String>,
+    /// The working directory a fresh session should start in. Only meaningful
+    /// with `new_session: true`; for a thread send the session already has a
+    /// fixed cwd, so this is ignored. When omitted, a `new_session` send uses
+    /// the default per-spawn directory. The path is validated (it must be an
+    /// existing directory) before the session launches.
+    #[serde(default)]
+    pub workdir: Option<String>,
 }
 
 /// Why a [`CreateSendRequest`] could not be resolved to a [`SendTarget`].
@@ -81,7 +88,9 @@ impl CreateSendRequest {
                 if self.semantic_parent_uuid.is_some() {
                     return Err(SendTargetError::BranchOnNewSession);
                 }
-                SendTarget::NewSession
+                SendTarget::NewSession {
+                    workdir: self.workdir,
+                }
             }
         };
         Ok((target, self.text, self.locator_quote))
@@ -102,6 +111,7 @@ mod tests {
             semantic_parent_uuid: None,
             text: "hi".into(),
             locator_quote: Some("q".into()),
+            workdir: None,
         };
         let (target, text, quote) = req.into_target().expect("a plain thread send is valid");
         assert!(
@@ -129,6 +139,7 @@ mod tests {
             semantic_parent_uuid: Some(parent.clone()),
             text: "branch".into(),
             locator_quote: None,
+            workdir: None,
         };
         let (target, _, _) = req.into_target().expect("a branch send is valid");
         match target {
@@ -139,7 +150,9 @@ mod tests {
                 assert_eq!(thread_id, ThreadId(3));
                 assert_eq!(branch_from, Some(parent), "the branch roots at the parent");
             }
-            SendTarget::NewSession => panic!("a thread_id send must not be a NewSession target"),
+            SendTarget::NewSession { .. } => {
+                panic!("a thread_id send must not be a NewSession target")
+            }
         }
     }
 
@@ -152,9 +165,52 @@ mod tests {
             semantic_parent_uuid: None,
             text: "kick off".into(),
             locator_quote: None,
+            workdir: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
-        assert!(matches!(target, SendTarget::NewSession));
+        assert!(matches!(target, SendTarget::NewSession { workdir: None }));
+    }
+
+    /// A `new_session` send carrying a `workdir` maps that directory onto the
+    /// `NewSession` target, where it is later validated before launch.
+    #[test]
+    fn new_session_with_workdir_carries_the_directory() {
+        let req = CreateSendRequest {
+            thread_id: None,
+            new_session: true,
+            semantic_parent_uuid: None,
+            text: "in a project".into(),
+            locator_quote: None,
+            workdir: Some("/projects/app".into()),
+        };
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        assert!(
+            matches!(target, SendTarget::NewSession { workdir } if workdir.as_deref() == Some("/projects/app")),
+            "the workdir rides on the NewSession target"
+        );
+    }
+
+    /// A `workdir` on a thread send is ignored: an existing thread's session
+    /// already has a fixed cwd, so the request resolves to a plain `Thread`
+    /// target with no working-directory override.
+    #[test]
+    fn workdir_is_ignored_for_a_thread_send() {
+        let req = CreateSendRequest {
+            thread_id: Some(ThreadId(5)),
+            new_session: false,
+            semantic_parent_uuid: None,
+            text: "hi".into(),
+            locator_quote: None,
+            workdir: Some("/ignored".into()),
+        };
+        let (target, _, _) = req.into_target().expect("a plain thread send is valid");
+        assert!(matches!(
+            target,
+            SendTarget::Thread {
+                thread_id: ThreadId(5),
+                branch_from: None,
+            }
+        ));
     }
 
     /// Naming neither a thread nor a new session is the `Unspecified` conflict
@@ -167,6 +223,7 @@ mod tests {
             semantic_parent_uuid: None,
             text: "no target".into(),
             locator_quote: None,
+            workdir: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Unspecified);
     }
@@ -182,6 +239,7 @@ mod tests {
             semantic_parent_uuid: None,
             text: "both".into(),
             locator_quote: None,
+            workdir: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Conflicting);
     }
@@ -197,6 +255,7 @@ mod tests {
             semantic_parent_uuid: Some(MessageUuid::from("uuid-parent")),
             text: "branch on new".into(),
             locator_quote: None,
+            workdir: None,
         };
         assert_eq!(
             req.into_target().unwrap_err(),

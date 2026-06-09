@@ -8,7 +8,7 @@ use delta_model::{
     ContentBlock, Message, MessageUuid, PendingSend, PendingSendStatus, PermissionRequest,
     PermissionStatus, PromptId, Role, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
-use delta_usecase::{NewSession, SessionPageCursor, SessionPageRow, SessionStore};
+use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow, SessionStore};
 
 use crate::error::{Error, Result};
 use crate::schema::SCHEMA_SQL;
@@ -305,6 +305,41 @@ impl SessionStore for SqliteStore {
             )
             .map_err(Error::from)?;
         Ok(ThreadId(id))
+    }
+
+    async fn recent_workdirs(
+        &self,
+        limit: u32,
+    ) -> std::result::Result<Vec<RecentWorkdir>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // One row per distinct `cwd`, ordered by the most recent activity of any
+        // session that ran in it. Per-session recency is
+        // `COALESCE(MAX(message.created_at), session.created_at)` — the same key
+        // the session list uses — and a cwd's recency is the max of that across
+        // its sessions. ISO-8601 UTC text compares correctly as time, so no
+        // datetime casting is needed.
+        let mut stmt = conn
+            .prepare(
+                "SELECT s.cwd, \
+                        MAX(COALESCE( \
+                          (SELECT MAX(m.created_at) FROM message m WHERE m.session_id = s.id), \
+                          s.created_at)) AS recency \
+                 FROM session s \
+                 GROUP BY s.cwd \
+                 ORDER BY recency DESC, s.cwd ASC \
+                 LIMIT ?1",
+            )
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![limit], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)?);
+        }
+        Ok(out)
     }
 
     async fn thread(
