@@ -37,5 +37,7 @@ in [docs/guides/api.md](docs/guides/api.md).
 
 ## Development
 
-Build, test, lint, and run commands are in
+Common tasks run through `make` from the repo root — `make help` lists the
+targets (`dev`, `mock`, `build`, `test`, `lint`, `check`, `e2e`, …). Build,
+test, lint, and run details are in
 [docs/guides/development.md](docs/guides/development.md).
