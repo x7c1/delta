@@ -2090,6 +2090,232 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     );
 }
 
+/// Reproduces the DB-behind precondition that produced the resume bug: a known
+/// session whose transcript already holds prior user history, but whose DB
+/// message rows and read cursor have not caught up to it yet (a cold/just-
+/// restored DB, or any DB-behind-transcript state). In that state
+/// `latest_user_thread` reports `None`, even though the user really was in a
+/// thread — the stale value that mis-seeds thread context on the first
+/// post-resume prompt.
+#[tokio::test]
+async fn db_behind_transcript_reports_no_latest_user_thread() {
+    let ix = interactor();
+    // Register a known-but-closed session. At registration its transcript is
+    // empty, so the cursor is 0 and no message rows exist.
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+
+    // Prior history is written to the transcript WITHOUT syncing: the DB is now
+    // behind the transcript (message table empty, cursor 0).
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", user_line("u-prior", "prior prompt"));
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", assistant_line("a-prior", "prior reply"));
+
+    // Precondition: the DB-behind state makes `latest_user_thread` report `None`
+    // even though the transcript holds a prior user line.
+    assert!(
+        ix.store().latest_user_thread(&id).await.unwrap().is_none(),
+        "DB behind transcript: no user row yet, so the latest user thread is unknown"
+    );
+    assert_eq!(
+        ix.store().message_count(&id).await.unwrap(),
+        0,
+        "no prior history ingested yet"
+    );
+}
+
+/// The root fix: `open_session` catches the DB up to the existing transcript
+/// before returning, so the resume's first prompt resolves thread context
+/// against the user's real last thread instead of a DB-behind `None`. After the
+/// open, the prior history is ingested and `latest_user_thread` reports the
+/// prior user line's thread.
+#[tokio::test]
+async fn open_session_syncs_existing_transcript_so_latest_user_thread_is_known() {
+    let ix = interactor();
+    // Register a known-but-closed session (empty transcript at registration).
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    let main = ix.store().main_thread_id(&id).await.unwrap();
+
+    // Prior history exists in the transcript but is not yet ingested (DB behind).
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", user_line("u-prior", "prior prompt"));
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", assistant_line("a-prior", "prior reply"));
+    assert!(
+        ix.store().latest_user_thread(&id).await.unwrap().is_none(),
+        "precondition: DB behind transcript"
+    );
+
+    // Resume the session. The catch-up sync runs as part of the open.
+    ix.open_session(&id).await.unwrap();
+
+    // The DB is now caught up: the prior user line is ingested and reported as
+    // the latest user thread, so the first post-resume prompt sees the real
+    // previous thread rather than `None`.
+    assert_eq!(
+        ix.store().latest_user_thread(&id).await.unwrap(),
+        Some(main),
+        "the prior user line is now the known latest user thread"
+    );
+    let view = ix.thread_view(main).await.unwrap();
+    let uuids: Vec<&str> = view.iter().map(|m| m.uuid.as_str()).collect();
+    assert!(uuids.contains(&"u-prior"), "prior user line ingested on open");
+    assert!(
+        uuids.contains(&"a-prior"),
+        "prior assistant line ingested on open"
+    );
+}
+
+/// Register a known-but-closed session that has a prior *branch* turn pending
+/// (a child thread plus a queued branch send matching `prior branch prompt`),
+/// returning the interactor and the `(session, main, child)` ids. The branch
+/// send and child thread are written via the store directly, NOT through
+/// `enqueue_send`, so the closed session is not resumed yet (going through
+/// `enqueue_send` would open it early and trip the double-open guard on the
+/// explicit `open_session` under test).
+async fn closed_session_with_pending_branch() -> (
+    Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    SessionId,
+    ThreadId,
+    ThreadId,
+) {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "seed",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-R");
+    let main = ix.store().main_thread_id(&id).await.unwrap();
+    let parent = MessageUuid::from("uuid-parent");
+    let child = ix
+        .store()
+        .create_thread(&id, "prior branch prompt", Some(main), Some(&parent))
+        .await
+        .unwrap()
+        .id;
+    ix.store()
+        .enqueue_send(&id, child, Some(&parent), "prior branch prompt", None)
+        .await
+        .unwrap();
+    (ix, id, main, child)
+}
+
+/// The thread a given ingested message landed on, by uuid.
+fn ingested_thread(
+    ix: &Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    uuid: &str,
+) -> Option<ThreadId> {
+    ix.store()
+        .inner
+        .lock()
+        .unwrap()
+        .messages
+        .iter()
+        .find(|m| m.uuid.as_str() == uuid)
+        .map(|m| m.thread_id)
+}
+
+/// `carry_thread` regression — the PRE-FIX behaviour this fix removes.
+///
+/// `sync_transcript` seeds `carry_thread` from
+/// `latest_user_thread().unwrap_or(main)`. When the DB is behind the transcript
+/// at the resume boundary, `latest_user_thread` is `None`, so the seed defaults
+/// to `main`. A non-user line that leads the synced batch — before any user
+/// line in it re-corrects `carry_thread` — is then mis-attributed to `main`,
+/// even though it is the tail of the user's prior (branch) turn.
+///
+/// This drives that batch directly (no `open_session` catch-up) to pin the
+/// mechanism the fix targets.
+#[tokio::test]
+async fn db_behind_mis_seeds_carry_thread_to_main_for_a_leading_non_user_line() {
+    let (ix, id, main, _child) = closed_session_with_pending_branch().await;
+
+    // The DB is behind: no user row yet, so the latest user thread is unknown.
+    assert!(
+        ix.store().latest_user_thread(&id).await.unwrap().is_none(),
+        "precondition: DB behind transcript"
+    );
+
+    // A batch whose head is a non-user line (the tail of the prior branch turn),
+    // with no user line in it to re-correct the carry thread.
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", assistant_line("a-lead", "leading reply"));
+    ix.poll_transcript().await.unwrap();
+
+    assert_eq!(
+        ingested_thread(&ix, "a-lead"),
+        Some(main),
+        "with the DB behind, the leading non-user line is mis-attributed to main"
+    );
+}
+
+/// The root fix closes the window above. `open_session` catches the DB up to
+/// the prior branch turn before returning, so by the time the post-resume tail
+/// batch is synced `latest_user_thread` is the branch. A non-user line leading
+/// that batch then follows the branch carry thread, not `main`.
+#[tokio::test]
+async fn open_session_seeds_carry_thread_from_branch_so_leading_line_is_not_main() {
+    let (ix, id, main, child) = closed_session_with_pending_branch().await;
+
+    // The prior branch user line sits in the transcript, unsynced (DB behind).
+    ix.transcript_fake().push_to(
+        "/elsewhere/t.jsonl",
+        user_line("u-branch", "prior branch prompt"),
+    );
+    assert!(
+        ix.store().latest_user_thread(&id).await.unwrap().is_none(),
+        "precondition: DB behind transcript"
+    );
+
+    // Resume: the catch-up sync ingests the prior branch turn, so the branch
+    // becomes the known latest user thread.
+    ix.open_session(&id).await.unwrap();
+    assert_eq!(
+        ix.store().latest_user_thread(&id).await.unwrap(),
+        Some(child),
+        "open caught the DB up to the prior branch user line"
+    );
+
+    // The post-resume tail now arrives as its own batch, leading with a
+    // non-user line. It follows the branch carry thread, not main.
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", assistant_line("a-lead", "post-resume reply"));
+    ix.poll_transcript().await.unwrap();
+    assert_eq!(
+        ingested_thread(&ix, "a-lead"),
+        Some(child),
+        "the leading non-user line follows the branch carry thread, not main"
+    );
+
+    // Nothing leaked onto main.
+    let main_view = ix.thread_view(main).await.unwrap();
+    assert!(
+        main_view.is_empty(),
+        "no line was mis-attributed to main, got: {:?}",
+        main_view.iter().map(|m| m.uuid.as_str()).collect::<Vec<_>>()
+    );
+}
+
 /// Opening an already-open session does not spawn a second pane (double-open
 /// guard): it routes to the existing one.
 #[tokio::test]

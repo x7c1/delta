@@ -197,6 +197,20 @@ where
     /// port is idempotent), launches `claude --resume <id>` there, and binds the
     /// new pane to `id` immediately. Resuming an already-open session is a no-op
     /// that returns the existing handle's token (the double-open guard).
+    ///
+    /// Before returning, the existing transcript is synced so the DB's message
+    /// rows and read cursor catch up to whatever Claude Code already wrote for
+    /// this conversation. This matters because the resume's first
+    /// `UserPromptSubmit` resolves thread context from already-persisted history:
+    /// [`Self::thread_switch_context`] reads [`SessionStore::latest_user_thread`]
+    /// and [`Self::sync_transcript`] seeds `carry_thread` from it. If the DB were
+    /// behind the transcript at that first prompt (a cold/just-restored DB, or
+    /// any DB-behind-transcript state), `latest_user_thread` would report `None`,
+    /// mis-seeding `carry_thread` to `main` and mis-attributing any leading
+    /// non-user line of the resumed batch. Catching up here, before
+    /// `claude --resume` can produce a new prompt hook, makes the user's actual
+    /// last thread visible on that first prompt. The sync is `sync_lock`-guarded
+    /// and cursor-based idempotent, so it never double-ingests.
     pub async fn open_session(&self, id: &SessionId) -> Result<PaneToken> {
         let session = self
             .store
@@ -204,36 +218,47 @@ where
             .await?
             .ok_or_else(|| Error::SessionNotFound(id.as_str().to_owned()))?;
 
-        let mut registry = self.open_sessions.lock().await;
-        // Double-open guard: if already open, route to the existing pane.
-        if let Some(handle) = registry.handle(id) {
-            return Ok(handle.token.clone());
-        }
+        let token = {
+            let mut registry = self.open_sessions.lock().await;
+            // Double-open guard: if already open, route to the existing pane.
+            if let Some(handle) = registry.handle(id) {
+                return Ok(handle.token.clone());
+            }
 
-        let token = self.mint_free_token().await?;
-        let workdir = session.cwd.clone();
-        // Settings must already be present from the original spawn, but re-write
-        // them defensively in case the port is fresh or the file was lost.
-        self.workspace
-            .write_session_settings(&workdir, &self.session_settings_json)
-            .await?;
-        let command = vec![
-            SESSION_COMMAND.to_owned(),
-            RESUME_FLAG.to_owned(),
-            id.as_str().to_owned(),
-        ];
-        self.tmux
-            .create_session(token.as_str(), &workdir, &command)
-            .await?;
-        let pane = pane_for(token.as_str());
-        registry.bind(
-            id.clone(),
-            OpenHandle {
-                token: token.clone(),
-                pane,
-                workdir,
-            },
-        );
+            let token = self.mint_free_token().await?;
+            let workdir = session.cwd.clone();
+            // Settings must already be present from the original spawn, but
+            // re-write them defensively in case the port is fresh or the file
+            // was lost.
+            self.workspace
+                .write_session_settings(&workdir, &self.session_settings_json)
+                .await?;
+            let command = vec![
+                SESSION_COMMAND.to_owned(),
+                RESUME_FLAG.to_owned(),
+                id.as_str().to_owned(),
+            ];
+            self.tmux
+                .create_session(token.as_str(), &workdir, &command)
+                .await?;
+            let pane = pane_for(token.as_str());
+            registry.bind(
+                id.clone(),
+                OpenHandle {
+                    token: token.clone(),
+                    pane,
+                    workdir,
+                },
+            );
+            token
+        };
+
+        // Catch the DB up to the existing transcript before the resume's first
+        // prompt can arrive, so thread context resolves against the user's real
+        // last thread rather than a DB-behind `None`. Released the registry lock
+        // above first: `sync_transcript` takes its own `sync_lock` and does not
+        // need the registry held.
+        self.sync_transcript(&session).await?;
         Ok(token)
     }
 
