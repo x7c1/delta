@@ -111,14 +111,18 @@ export function SessionNode({
       ref={rowRef}
       data-index={index}
       style={style}
-      className="px-2 pb-1.5"
+      // pb-1.5 is the inter-card gap (baked into each measured row). The first
+      // card also needs that gap above it: the windowed rows are absolutely
+      // positioned, so a `pt` on the list container is ignored — give the top
+      // row a matching pt-1.5 so it is not flush against the panel top.
+      className={cn('px-2 pb-1.5', index === 0 && 'pt-1.5')}
     >
       <div
         className={cn(
           'rounded-lg border bg-white shadow-sm transition-colors',
           isFocused
             ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200'
-            : 'border-slate-200 hover:border-slate-300',
+            : 'border-slate-300 hover:border-slate-400',
         )}
       >
         <div className="flex items-center gap-2 px-2 py-2">

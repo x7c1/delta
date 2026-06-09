@@ -171,7 +171,7 @@ export function NavigatorPane({
       */}
       <ul
         data-testid="sessions-list"
-        className="relative w-full pt-1.5"
+        className="relative w-full"
         style={{ height: virtualizer.getTotalSize() }}
       >
         {virtualItems.map((virtualRow) => {
