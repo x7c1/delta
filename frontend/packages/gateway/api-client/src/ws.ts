@@ -89,6 +89,13 @@ export class EventEmitter {
  */
 const DEFAULT_RECONNECT_DELAYS_MS = [500, 1000, 2000, 5000, 10000];
 
+/**
+ * `WebSocket.CONNECTING` (readyState `0`). Spelled as a literal so this module
+ * does not depend on a global `WebSocket`, which is absent in the non-DOM test
+ * environment (and would also misfire against the hand-rolled fake socket).
+ */
+const WS_CONNECTING = 0;
+
 export interface WsClientOptions {
   /** Full ws(s) URL of the `/ws` endpoint. */
   url: string;
@@ -182,6 +189,19 @@ export class WsEventSource implements SessionEventSource {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    this.socket?.close();
+    const socket = this.socket;
+    if (socket === null) {
+      return;
+    }
+    if (socket.readyState === WS_CONNECTING) {
+      // Closing a socket mid-handshake makes browsers log "WebSocket is closed
+      // before the connection is established". Defer the close until the
+      // handshake settles, then close cleanly. This is routine under React
+      // StrictMode's dev-only mount → unmount → mount, which tears down the
+      // first socket while it is still connecting.
+      socket.addEventListener('open', () => socket.close(), { once: true });
+    } else {
+      socket.close();
+    }
   }
 }

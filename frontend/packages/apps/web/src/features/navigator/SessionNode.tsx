@@ -1,17 +1,15 @@
 import type { CSSProperties, Ref } from 'react';
-import type { SessionListItem, Thread } from '@delta/model';
+import type { SessionListItem, ThreadId } from '@delta/model';
+import { useSessionThreadsQuery } from '@delta/api-client';
 import { Menu, StatusDot, cn } from '@delta/ui-kit';
+import { useApiClient } from '../../data/apiContext';
+import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
   item: SessionListItem;
   isFocused: boolean;
-  /**
-   * The session's thread tree, supplied only for the focused session (whose
-   * threads are loaded). Expanding shows it; non-focused sessions show no tree.
-   */
-  threads: Thread[] | undefined;
   onFocus: () => void;
   onClose: () => void;
   /**
@@ -47,20 +45,35 @@ function sessionLabel(item: SessionListItem): string {
  * indicator plus the session label, line 2 is the right-aligned last-activity
  * timestamp, omitted when there is none) plus the kebab actions menu in a
  * fixed-width slot at the right end, enabled only when the session is open. The
- * focused card is lifted with an indigo border, tint, and ring. When the focused
- * session has branched into sub-threads, its {@link ThreadTree} is rendered in a
- * divided section inside the same card.
+ * focused card is lifted with an indigo border, tint, and ring.
+ *
+ * Every session that has branched into sub-threads shows its {@link ThreadTree}
+ * expanded by default — focused or not — so the whole visible list reads as a
+ * navigable session → thread tree. Each mounted row fetches its own thread tree;
+ * because the list is windowed, that fetch is bounded to the visible window, and
+ * it shares the focused session's query key so the two are deduped into one
+ * request per session. Clicking a sub-thread in a non-focused session focuses
+ * that session and activates the thread, switching the center pane to it.
  */
 export function SessionNode({
   item,
   isFocused,
-  threads,
   onFocus,
   onClose,
   rowRef,
   index,
   style,
 }: SessionNodeProps) {
+  const client = useApiClient();
+  const setFocusedSession = useNavStore((state) => state.setFocusedSession);
+  const setActiveThread = useNavStore((state) => state.setActiveThread);
+  // Fetch this row's thread tree. Mounted only for sessions in the windowed
+  // viewport (+overscan), so the number of in-flight thread queries is bounded
+  // by the visible window, not the full session list. Shares the focused
+  // session's query key, so React Query serves both from one request.
+  const threadsQuery = useSessionThreadsQuery(client, item.session.id);
+  const threads = threadsQuery.data?.threads;
+
   const lastActivity = formatLocalDateTime(item.last_activity_at);
   const label = sessionLabel(item);
   // Show the sub-thread list only once the session has branched. The main
@@ -69,6 +82,17 @@ export function SessionNode({
   // all. A sub-thread is any thread with a parent.
   const hasSubThreads =
     threads?.some((t) => t.parent_thread_id !== null) ?? false;
+
+  // Selecting a sub-thread switches the center pane to it. Focus the owning
+  // session first (a focus switch clears the active thread), then set the
+  // active thread — order matters so the activation is not cleared. Re-selecting
+  // within the already-focused session is a no-op focus, leaving the active
+  // thread set as expected.
+  const selectThread = (threadId: ThreadId) => {
+    setFocusedSession(item.session.id);
+    setActiveThread(threadId);
+  };
+
   return (
     // Horizontal inset (px-2) and the inter-card gap (pb-1.5) live *inside* the
     // measured box: the virtualizer measures `getBoundingClientRect().height`,
@@ -130,9 +154,14 @@ export function SessionNode({
           />
         </div>
 
-        {isFocused && hasSubThreads && threads && (
-          <div className="border-t border-indigo-200 px-2 py-1.5">
-            <ThreadTree threads={threads} />
+        {hasSubThreads && threads && (
+          <div
+            className={cn(
+              'border-t px-2 py-1.5',
+              isFocused ? 'border-indigo-200' : 'border-slate-200',
+            )}
+          >
+            <ThreadTree threads={threads} onSelectThread={selectThread} />
           </div>
         )}
       </div>

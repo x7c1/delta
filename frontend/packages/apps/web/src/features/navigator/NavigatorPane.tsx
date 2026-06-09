@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { SessionListItem, Thread } from '@delta/model';
+import type { SessionListItem } from '@delta/model';
 import { Button, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
 import {
   useCloseSessionMutation,
@@ -32,8 +32,6 @@ const SESSION_OVERSCAN = 8;
 export interface NavigatorPaneProps {
   /** The loaded sessions so far, ordered most-recently-active first. */
   sessions: SessionListItem[];
-  /** The focused session's thread tree (empty when none is focused). */
-  threads: Thread[];
   /** Whether more session pages remain to be fetched. */
   hasMoreSessions: boolean;
   /** Whether the next session page is currently in flight. */
@@ -58,12 +56,11 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
  * The left pane: a session → thread nested tree, plus a "New" affordance, the
  * permission notice, a running indicator, and the live connection status. Each
  * session's open/closed state is shown by its status dot, so no separate count
- * is rendered. Top-level nodes are sessions; expanding the focused session
- * reveals its thread tree.
+ * is rendered. Top-level nodes are sessions; every session that has branched
+ * shows its thread tree expanded (each row fetches its own — see SessionNode).
  */
 export function NavigatorPane({
   sessions,
-  threads,
   hasMoreSessions,
   isLoadingMoreSessions,
   onLoadMoreSessions,
@@ -208,9 +205,6 @@ export function NavigatorPane({
               }}
               item={item}
               isFocused={focusedSessionId === item.session.id}
-              threads={
-                focusedSessionId === item.session.id ? threads : undefined
-              }
               onFocus={() => {
                 setFocusedSession(item.session.id);
                 // The main thread is not listed in the tree, so clicking the

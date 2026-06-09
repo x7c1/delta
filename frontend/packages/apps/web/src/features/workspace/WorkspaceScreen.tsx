@@ -226,7 +226,6 @@ export function WorkspaceScreen() {
       <div className="w-72 shrink-0">
         <NavigatorPane
           sessions={sessions}
-          threads={threads}
           hasMoreSessions={sessionsQuery.hasNextPage}
           isLoadingMoreSessions={sessionsQuery.isFetchingNextPage}
           onLoadMoreSessions={sessionsQuery.fetchNextPage}
