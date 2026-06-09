@@ -6,6 +6,7 @@ import { setupServer } from 'msw/node';
 import type { MessagesResponse } from '@delta/model';
 import {
   MAIN_THREAD_ID,
+  SESSION_ID,
   createHandlers,
   mockThreads,
 } from '@delta/api-mocks';
@@ -40,7 +41,11 @@ function renderPane(threads = mockThreads) {
 describe('TranscriptPane', () => {
   beforeEach(() => {
     useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
-    useLiveStore.setState({ pending: [], externalInput: null });
+    useLiveStore.setState({
+      pending: [],
+      externalInput: null,
+      resumeUnavailable: {},
+    });
     useComposerStore.setState({ drafts: {}, branchOrigin: null });
   });
 
@@ -138,5 +143,30 @@ describe('TranscriptPane', () => {
     );
     expect(screen.queryByText('SECRET SYSTEM NOISE')).not.toBeInTheDocument();
     expect(screen.queryByText('OTHER NOISE')).not.toBeInTheDocument();
+  });
+
+  it('drops the composer and shows the cannot-resume notice for a resume-unavailable session', async () => {
+    // A session whose transcript is gone can never be resumed, so every send or
+    // branch would just fail: the input is removed entirely and the session is a
+    // read-only viewer with a pinned notice. The history stays readable.
+    useLiveStore.setState({
+      pending: [],
+      externalInput: null,
+      resumeUnavailable: { [SESSION_ID]: true },
+    });
+
+    renderPane();
+
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByTestId('resume-unavailable-notice'),
+    ).toBeInTheDocument();
+    // No input affordance: neither the textarea nor the Send button is rendered.
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Send' }),
+    ).not.toBeInTheDocument();
   });
 });

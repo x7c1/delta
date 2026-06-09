@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   threadAncestry,
   type Message,
@@ -218,9 +225,12 @@ export function TranscriptPane({
 
   // The new-session state has no session id yet; the composer targets a fresh
   // spawn. An existing thread targets that thread (a resume on a closed session).
+  // A resume-impossible session is the exception: every send and branch would
+  // re-trigger the failed resume, so it gets no composer at all and becomes a
+  // pure read-only viewer (see the footer below).
   const composer = newSession ? (
     <Composer mode={{ kind: 'new-session' }} />
-  ) : activeThread ? (
+  ) : activeThread && !resumeUnavailable ? (
     <Composer
       mode={{
         kind: 'thread',
@@ -230,15 +240,46 @@ export function TranscriptPane({
     />
   ) : undefined;
 
-  // The optimistic pending-send strip is pinned just above the composer (in the
-  // fixed footer, not the scrolling transcript) so it never jostles the
-  // conversation tail while a turn is in flight.
-  const footer = composer ? (
-    <div className="space-y-2">
-      <PendingQueue threadId={pendingThreadId} />
-      {composer}
-    </div>
-  ) : undefined;
+  // The fixed footer (pinned below the scrolling transcript). For a
+  // resume-impossible session it is just the "cannot resume" notice, replacing
+  // the input entirely — there is nothing useful to type. Otherwise it stacks
+  // the optimistic pending-send strip and the composer, with the closed-session
+  // notice pinned directly above the input (rather than at the top of the
+  // scrolling body, where a long conversation scrolled to its tail would bury
+  // it out of sight).
+  let footer: ReactNode;
+  if (resumeUnavailable && !newSession) {
+    footer = (
+      <div
+        className="flex items-center gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700"
+        data-testid="resume-unavailable-notice"
+        role="alert"
+      >
+        <Badge tone="warning">cannot resume</Badge>
+        <span>
+          This session cannot be resumed: its conversation transcript is no
+          longer available. Its history above stays readable.
+        </span>
+      </div>
+    );
+  } else if (composer) {
+    footer = (
+      <div className="space-y-2">
+        {readOnly && !newSession && (
+          <div
+            className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
+            data-testid="readonly-notice"
+          >
+            <Badge tone="neutral">closed</Badge>
+            <span>This session is closed. Sending a message resumes it.</span>
+          </div>
+        )}
+
+        <PendingQueue threadId={pendingThreadId} />
+        {composer}
+      </div>
+    );
+  }
 
   return (
     <Panel
@@ -254,32 +295,6 @@ export function TranscriptPane({
       }
       footer={footer}
     >
-      {readOnly && !newSession && (
-        <div
-          className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500"
-          data-testid="readonly-notice"
-        >
-          <Badge tone="neutral">closed</Badge>
-          <span>
-            This session is closed. Sending a message resumes it.
-          </span>
-        </div>
-      )}
-
-      {resumeUnavailable && !newSession && (
-        <div
-          className="flex items-center gap-2 border-b border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700"
-          data-testid="resume-unavailable-notice"
-          role="alert"
-        >
-          <Badge tone="warning">cannot resume</Badge>
-          <span>
-            This session cannot be resumed: its conversation transcript is no
-            longer available.
-          </span>
-        </div>
-      )}
-
       {newSession && (
         <p
           className="px-3 py-4 text-sm text-slate-400"
