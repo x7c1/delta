@@ -19,6 +19,12 @@ const SESSION_COMMAND: &str = "claude";
 /// The `--resume` flag passed to `claude` to reattach to a stored conversation.
 const RESUME_FLAG: &str = "--resume";
 
+/// The `--settings` flag passed to `claude` to load Delta's session settings
+/// (hooks + theme) from a Delta-owned file, instead of writing them into the
+/// session's working directory and risking a clobber of a real project's
+/// `.claude/settings.json`.
+const SETTINGS_FLAG: &str = "--settings";
+
 /// Holds the injected capabilities and exposes Delta's use cases.
 ///
 /// Generic over the four ports so callers can inject any implementation. The
@@ -36,10 +42,16 @@ pub struct Interactor<T, X, S, W> {
     /// Each fresh spawn gets its own `<base>/<token>` subdirectory so the
     /// `cwd ↔ spawn` mapping is 1:1, making the hook-binding correlation exact.
     session_workdir_base: String,
-    /// The Claude Code settings JSON written into each session's working
-    /// directory so its hooks point back at this server. Rendered by the caller
-    /// (with the running port) and held verbatim.
+    /// The Claude Code settings JSON whose hooks point back at this server (and
+    /// which pins the session theme). Rendered by the caller (with the running
+    /// port) and held verbatim; written to [`Self::session_settings_path`] and
+    /// passed to `claude --settings`.
     session_settings_json: String,
+    /// Delta-owned path the settings JSON is written to before each launch, then
+    /// passed to `claude --settings <path>`. Kept *outside* any session working
+    /// directory so spawning/resuming in a real project never overwrites that
+    /// project's own `.claude/settings.json`.
+    session_settings_path: String,
     /// Mints unique [`PaneToken`]s for fresh spawns.
     minter: PaneTokenMinter,
     /// The in-memory registry of live (open) panes. Rebuilt empty on boot, so
@@ -71,7 +83,8 @@ where
     W: Workspace,
 {
     /// Construct an Interactor from the four injected ports plus the spawn
-    /// configuration (the base working directory and rendered hook settings).
+    /// configuration (the base working directory, the rendered settings JSON,
+    /// and the Delta-owned path that JSON is written to for `--settings`).
     pub fn new(
         tmux: T,
         transcript: X,
@@ -79,6 +92,7 @@ where
         workspace: W,
         session_workdir_base: impl Into<String>,
         session_settings_json: impl Into<String>,
+        session_settings_path: impl Into<String>,
     ) -> Self {
         Self {
             tmux,
@@ -87,6 +101,7 @@ where
             workspace,
             session_workdir_base: session_workdir_base.into(),
             session_settings_json: session_settings_json.into(),
+            session_settings_path: session_settings_path.into(),
             minter: PaneTokenMinter::new(),
             open_sessions: tokio::sync::Mutex::new(OpenSessions::default()),
             sync_lock: tokio::sync::Mutex::new(()),
@@ -193,9 +208,10 @@ where
     /// Resume a closed but known session under a fresh tmux session.
     ///
     /// The conversational `session_id` is known up front, so this mints a fresh
-    /// token, re-writes the hook settings into the session's stored `cwd` (the
-    /// port is idempotent), launches `claude --resume <id>` there, and binds the
-    /// new pane to `id` immediately. Resuming an already-open session is a no-op
+    /// token, re-writes the settings file (at Delta's own path, not the session
+    /// cwd; the port is idempotent), launches `claude --settings <file> --resume
+    /// <id>` in the stored cwd, and binds the new pane to `id` immediately.
+    /// Resuming an already-open session is a no-op
     /// that returns the existing handle's token (the double-open guard).
     ///
     /// Before returning, the existing transcript is synced so the DB's message
@@ -238,14 +254,17 @@ where
 
             let token = self.mint_free_token().await?;
             let workdir = session.cwd.clone();
-            // Settings must already be present from the original spawn, but
-            // re-write them defensively in case the port is fresh or the file
-            // was lost.
+            // Re-write the settings file before resuming, in case the port is
+            // fresh or the file was lost. It lives at a Delta-owned path, not in
+            // `workdir`, so resuming in a real project never touches that
+            // project's own `.claude/settings.json`.
             self.workspace
-                .write_session_settings(&workdir, &self.session_settings_json)
+                .write_session_settings(&self.session_settings_path, &self.session_settings_json)
                 .await?;
             let command = vec![
                 SESSION_COMMAND.to_owned(),
+                SETTINGS_FLAG.to_owned(),
+                self.session_settings_path.clone(),
                 RESUME_FLAG.to_owned(),
                 id.as_str().to_owned(),
             ];
@@ -319,9 +338,13 @@ where
         let pane = pane_for(token.as_str());
 
         self.workspace
-            .write_session_settings(&workdir, &self.session_settings_json)
+            .write_session_settings(&self.session_settings_path, &self.session_settings_json)
             .await?;
-        let command = vec![SESSION_COMMAND.to_owned()];
+        let command = vec![
+            SESSION_COMMAND.to_owned(),
+            SETTINGS_FLAG.to_owned(),
+            self.session_settings_path.clone(),
+        ];
         self.tmux
             .create_session(token.as_str(), &workdir, &command)
             .await?;

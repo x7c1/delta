@@ -97,7 +97,7 @@ impl TmuxDriver for FakeTmux {
     }
 }
 
-/// Records the session settings written, so tests can assert the workdir and the
+/// Records the session settings written, so tests can assert the path and the
 /// rendered JSON the server passed in.
 #[derive(Default)]
 struct FakeWorkspace {
@@ -106,11 +106,15 @@ struct FakeWorkspace {
 
 #[async_trait]
 impl Workspace for FakeWorkspace {
-    async fn write_session_settings(&self, workdir: &str, settings_json: &str) -> Result<()> {
+    async fn write_session_settings(
+        &self,
+        settings_path: &str,
+        settings_json: &str,
+    ) -> Result<()> {
         self.written
             .lock()
             .unwrap()
-            .push((workdir.to_owned(), settings_json.to_owned()));
+            .push((settings_path.to_owned(), settings_json.to_owned()));
         Ok(())
     }
 }
@@ -559,8 +563,12 @@ fn tool_result_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
 /// The base working directory the test interactor spawns sessions under.
 const TEST_WORKDIR_BASE: &str = "/work";
 
-/// The hook settings JSON the test interactor writes into each spawn's workdir.
+/// The settings JSON the test interactor writes for each launch.
 const TEST_SETTINGS_JSON: &str = r#"{"hooks":{}}"#;
+
+/// The Delta-owned path the test interactor writes settings to and passes via
+/// `claude --settings`. Outside any spawn workdir, on purpose.
+const TEST_SETTINGS_PATH: &str = "/run/delta/settings.json";
 
 fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
     Interactor::new(
@@ -570,6 +578,7 @@ fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace
         FakeWorkspace::default(),
         TEST_WORKDIR_BASE,
         TEST_SETTINGS_JSON,
+        TEST_SETTINGS_PATH,
     )
 }
 
@@ -586,6 +595,7 @@ fn interactor_with_failing_tmux() -> Interactor<FakeTmux, FakeTranscript, FakeSt
         FakeWorkspace::default(),
         TEST_WORKDIR_BASE,
         TEST_SETTINGS_JSON,
+        TEST_SETTINGS_PATH,
     )
 }
 
@@ -616,7 +626,8 @@ async fn ensure_session_spawns_a_session_in_its_own_workdir_when_absent() {
     let status = ix.ensure_session().await.unwrap();
 
     // A fresh cold start reports `Starting` and spawns a session in its own
-    // per-token workdir under the base, with the settings written there first.
+    // per-token workdir under the base, with the settings written to Delta's own
+    // path (not the workdir) and passed via `--settings`.
     assert_eq!(status, SessionLifecycle::Starting);
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1, "one session was spawned");
@@ -624,13 +635,18 @@ async fn ensure_session_spawns_a_session_in_its_own_workdir_when_absent() {
     assert_eq!(created[0].workdir, "/work/delta-1", "<base>/<token>");
     assert_eq!(
         created[0].command,
-        vec!["claude".to_owned()],
-        "plain claude"
+        vec![
+            "claude".to_owned(),
+            "--settings".to_owned(),
+            TEST_SETTINGS_PATH.to_owned(),
+        ],
+        "claude --settings <delta path>"
     );
     let written = ix.workspace_fake().written.lock().unwrap().clone();
     assert_eq!(
         written,
-        vec![("/work/delta-1".to_owned(), TEST_SETTINGS_JSON.to_owned())]
+        vec![(TEST_SETTINGS_PATH.to_owned(), TEST_SETTINGS_JSON.to_owned())],
+        "settings go to Delta's path, not the spawn workdir"
     );
 }
 
@@ -2114,6 +2130,8 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
         resume.command,
         vec![
             "claude".to_owned(),
+            "--settings".to_owned(),
+            TEST_SETTINGS_PATH.to_owned(),
             "--resume".to_owned(),
             "sess-R".to_owned()
         ],
@@ -2177,6 +2195,8 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
         resume.command,
         vec![
             "claude".to_owned(),
+            "--settings".to_owned(),
+            TEST_SETTINGS_PATH.to_owned(),
             "--resume".to_owned(),
             "sess-R".to_owned()
         ],
@@ -2800,6 +2820,7 @@ async fn spawn_skips_tmux_session_names_already_in_use() {
         FakeWorkspace::default(),
         TEST_WORKDIR_BASE,
         TEST_SETTINGS_JSON,
+        TEST_SETTINGS_PATH,
     );
 
     let token = ix.new_session().await.expect("spawn does not collide");
