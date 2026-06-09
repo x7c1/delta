@@ -19,6 +19,12 @@ const SESSION_COMMAND: &str = "claude";
 /// The `--resume` flag passed to `claude` to reattach to a stored conversation.
 const RESUME_FLAG: &str = "--resume";
 
+/// The `--session-id` flag passed to `claude` to pin a fresh conversation's
+/// `session_id` to a value Delta mints up front. With the id known at spawn
+/// time, the first `UserPromptSubmit` hook reports exactly that id, so a fresh
+/// spawn correlates to its session by id — never by working directory.
+const SESSION_ID_FLAG: &str = "--session-id";
+
 /// The `--settings` flag passed to `claude` to load Delta's session settings
 /// (hooks + theme) from a Delta-owned file, instead of writing them into the
 /// session's working directory and risking a clobber of a real project's
@@ -39,8 +45,11 @@ pub struct Interactor<T, X, S, W> {
     workspace: W,
     /// Base directory for per-spawn working directories.
     ///
-    /// Each fresh spawn gets its own `<base>/<token>` subdirectory so the
-    /// `cwd ↔ spawn` mapping is 1:1, making the hook-binding correlation exact.
+    /// Each fresh spawn runs in its own `<base>/<token>` subdirectory. The
+    /// workdir is no longer the hook-binding key — correlation is by the
+    /// Delta-minted session id pinned via `claude --session-id` — so this base
+    /// is free to become a user-selected project path in a later change without
+    /// breaking spawn↔session correlation.
     session_workdir_base: String,
     /// The Claude Code settings JSON whose hooks point back at this server (and
     /// which pins the session theme). Rendered by the caller (with the running
@@ -170,6 +179,16 @@ where
     #[cfg(test)]
     pub(crate) fn workspace(&self) -> &W {
         &self.workspace
+    }
+
+    /// The Delta-minted session ids of the currently-pending spawns, in order.
+    ///
+    /// Test-only seam: a fresh spawn's session id is a random UUID a test cannot
+    /// predict, yet it is now the hook-binding key. Tests spawn, read the id(s)
+    /// back here, then fire a `UserPromptSubmit` carrying that exact id to bind.
+    #[cfg(test)]
+    pub(crate) async fn pending_session_ids(&self) -> Vec<SessionId> {
+        self.open_sessions.lock().await.pending_session_ids()
     }
 
     /// Ensure at least one Claude Code session is up, spawning one if absent.
@@ -316,13 +335,17 @@ where
 
     /// Spawn a fresh session, optionally dispatching a first prompt.
     ///
-    /// Mints a token, creates the unique `<base>/<token>` workdir with settings
-    /// written, launches `claude` there, and records a [`PendingSpawn`] carrying
-    /// `first_prompt`. When a `first_prompt` is present (a composer-initiated
-    /// New), it is typed into the freshly-created pane so Claude actually
-    /// receives the message and fires the `UserPromptSubmit` hook that binds this
-    /// spawn — the hook then writes the deferred `pending_send` row that lets the
-    /// first user line correlate. Returns the minted token.
+    /// Mints a token and a fresh Claude `session_id` (a random UUID), creates the
+    /// `<base>/<token>` workdir with settings written, launches
+    /// `claude --settings <path> --session-id <uuid>` there, and records a
+    /// [`PendingSpawn`] carrying that minted id (the binding key) and
+    /// `first_prompt`. Pinning the id up front means the first `UserPromptSubmit`
+    /// hook reports exactly this id, so the spawn correlates to its session by id
+    /// rather than by working directory. When a `first_prompt` is present (a
+    /// composer-initiated New), it is typed into the freshly-created pane so
+    /// Claude actually receives the message and fires the `UserPromptSubmit` hook
+    /// that binds this spawn — the hook then writes the deferred `pending_send`
+    /// row that lets the first user line correlate. Returns the minted token.
     ///
     /// The registry lock is taken only for the brief record/rollback steps, never
     /// across the tmux/workspace I/O (which includes the create-session settle
@@ -337,6 +360,13 @@ where
         let workdir = self.workdir_for(&token);
         let pane = pane_for(token.as_str());
 
+        // Mint and pin the conversation's session id up front. `claude
+        // --session-id <uuid>` makes the first `UserPromptSubmit` hook report
+        // exactly this id, so the spawn correlates to its session by id rather
+        // than by working directory. The id is a random UUID v4, so collision
+        // with an existing stored session is astronomically unlikely.
+        let session_id = SessionId::from(uuid::Uuid::new_v4().to_string());
+
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
             .await?;
@@ -344,6 +374,8 @@ where
             SESSION_COMMAND.to_owned(),
             SETTINGS_FLAG.to_owned(),
             self.session_settings_path.clone(),
+            SESSION_ID_FLAG.to_owned(),
+            session_id.as_str().to_owned(),
         ];
         self.tmux
             .create_session(token.as_str(), &workdir, &command)
@@ -355,6 +387,7 @@ where
         self.open_sessions.lock().await.push_pending(PendingSpawn {
             token: token.clone(),
             pane: pane.clone(),
+            session_id,
             workdir,
             first_prompt: first_prompt.clone(),
         });
@@ -393,7 +426,10 @@ where
         }
     }
 
-    /// The unique working directory for a spawn: `<base>/<token>`.
+    /// The working directory for a spawn: `<base>/<token>`.
+    ///
+    /// Distinct per spawn today, but no longer required to be: correlation is by
+    /// the Delta-minted session id, not the workdir.
     fn workdir_for(&self, token: &PaneToken) -> String {
         std::path::Path::new(&self.session_workdir_base)
             .join(token.as_str())
@@ -563,18 +599,19 @@ where
     /// Register a session on the first `UserPromptSubmit` for its id, binding it
     /// to a fresh spawn when one is waiting.
     ///
-    /// A hook's `session_id` is unknown the first time Claude Code reports it.
-    /// Two cases are distinguished by the hook's `cwd`:
+    /// The first time Claude Code reports a `session_id`, two cases are
+    /// distinguished by whether that id matches a pending spawn:
     ///
-    /// - **Fresh spawn binding**: a [`PendingSpawn`] whose unique workdir equals
-    ///   `cwd` is moved `pending → bound[session_id]`. The session row is
-    ///   registered, and if the spawn carried a deferred `first_prompt` (a
-    ///   composer-initiated New), the held `pending_send` is written *now* —
-    ///   with the now-known session id — *before* the caller's
-    ///   `match_pending_send` runs, so the first prompt correlates through the
-    ///   normal FIFO machinery.
-    /// - **External claude**: no pending spawn matches `cwd`, so this is a
-    ///   `claude` started outside Delta. The session is registered as a
+    /// - **Fresh spawn binding**: a [`PendingSpawn`] whose Delta-minted
+    ///   `session_id` (pinned via `claude --session-id`) equals the hook's
+    ///   `session_id` is moved `pending → bound[session_id]`. The session row is
+    ///   registered (from the hook's `cwd`/`transcript_path`), and if the spawn
+    ///   carried a deferred `first_prompt` (a composer-initiated New), the held
+    ///   `pending_send` is written *now* — with the now-known session id —
+    ///   *before* the caller's `match_pending_send` runs, so the first prompt
+    ///   correlates through the normal FIFO machinery.
+    /// - **External claude**: no pending spawn carries this session id, so this
+    ///   is a `claude` started outside Delta. The session is registered as a
     ///   known-but-closed data session (no [`OpenHandle`]) and a warning is
     ///   logged, preserving today's external-input behaviour.
     async fn register_on_first_contact(
@@ -582,11 +619,11 @@ where
         hook: &UserPromptSubmitHook,
         events: &mut Vec<SessionEvent>,
     ) -> Result<Session> {
-        // Match a waiting spawn by workdir under the registry lock, taking its
-        // deferred first prompt with it.
+        // Match a waiting spawn by the Delta-minted session id under the
+        // registry lock, taking its deferred first prompt with it.
         let bound = {
             let mut registry = self.open_sessions.lock().await;
-            match registry.take_pending_for_workdir(&hook.cwd) {
+            match registry.take_pending_for_session(&hook.session_id) {
                 Some(spawn) => {
                     registry.bind(
                         hook.session_id.clone(),
