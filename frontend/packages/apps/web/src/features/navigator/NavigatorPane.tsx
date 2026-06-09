@@ -76,11 +76,20 @@ export function NavigatorPane({
   // tree re-measures instead of corrupting the positions of the rows below it.
   // Rows opt into measurement by attaching `virtualizer.measureElement` as their
   // ref (see below); `estimateSize` is only the spacer seed before measurement.
+  //
+  // `getItemKey` keys the measurement cache by session id, not by index. The
+  // list is recency-ordered, so sending a message bumps that session to the top
+  // and reindexes the rest. With the default index key, each row would inherit
+  // the cached height of whichever session previously sat at its index — a tall
+  // threaded card's height landing on a short collapsed one, leaving gaps (and
+  // vice versa, overlaps). Keying by id makes a measured height travel with its
+  // session across reorders, so the spacers stay correct.
   const virtualizer = useVirtualizer({
     count: sessions.length,
     getScrollElement: () => scrollBodyRef.current,
     estimateSize: () => ESTIMATED_SESSION_NODE_HEIGHT,
     overscan: SESSION_OVERSCAN,
+    getItemKey: (index) => sessions[index].session.id,
   });
 
   const virtualItems = virtualizer.getVirtualItems();
