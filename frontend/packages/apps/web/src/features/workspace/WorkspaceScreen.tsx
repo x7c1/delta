@@ -102,17 +102,17 @@ export function WorkspaceScreen() {
       return;
     }
     if (isNewSessionFocus) {
-      // The new-session send spawned a session; when it registers it appears in
-      // the list as an id absent from the baseline. Focus it and leave the
-      // new-session state. (A fresh New has no id until its first hook binds.)
+      // The new-session send spawned a session; when it registers, the sessions
+      // query is invalidated and the fresh session — being the most-recently
+      // active — refetches to the head of the list. So the spawn is "the head
+      // session, absent from the baseline". We must check only the head, not the
+      // whole list: while in the new-session state the windowed list may keep
+      // paginating in *older* sessions (they land at the tail), and those are
+      // not the spawn — focusing one would wrongly drop the new-session state.
       const baseline = newSessionBaselineRef.current;
-      if (baseline) {
-        const registered = sessions.find(
-          (item) => !baseline.has(item.session.id),
-        );
-        if (registered) {
-          setFocusedSession(registered.session.id);
-        }
+      const head = sessions[0];
+      if (baseline && head && !baseline.has(head.session.id)) {
+        setFocusedSession(head.session.id);
       }
       return;
     }

@@ -38,9 +38,17 @@ export const SESSIONS_PAGE_SIZE = 2;
  * to push the session list past one page. Each is older than the two detailed
  * sessions so it sorts after them (most-recently-active first), keeping the two
  * fully-featured sessions on page 1.
+ *
+ * The count is deliberately larger than fits in a single navigator viewport so
+ * the windowed (virtualized) list keeps far fewer rows in the DOM than the full
+ * list — the e2e asserts this bound. It also spans many pages, exercising the
+ * cursor-paginated load path repeatedly.
  */
-const FILLER_SESSION_COUNT = 4;
+export const FILLER_SESSION_COUNT = 40;
 const FIRST_FILLER_THREAD_ID = 100;
+
+/** Total seeded sessions: the two detailed ones plus the filler. */
+export const TOTAL_SEEDED_SESSIONS = 2 + FILLER_SESSION_COUNT;
 
 export const mockSession: Session = {
   id: SESSION_ID,
@@ -260,9 +268,13 @@ function buildFillerSessions(): MockStore['sessions'] {
     const ordinal = index + 1;
     const threadId = FIRST_FILLER_THREAD_ID + index;
     const sessionId = `sess-mock-fill-${ordinal}`;
-    // Descending dates (2025-12-...) keep them older than the detailed sessions
-    // and give each a deterministic, distinct recency for stable pagination.
-    const createdAt = `2025-12-${String(31 - index).padStart(2, '0')}T00:00:00Z`;
+    // Strictly descending timestamps (one day apart, starting just before the
+    // detailed sessions) keep every filler older than them and give each a
+    // distinct, deterministic recency for stable pagination — scaling to any
+    // FILLER_SESSION_COUNT without colliding or running off the calendar.
+    const createdAt = new Date(
+      Date.UTC(2025, 11, 31) - (index + 1) * 24 * 60 * 60 * 1000,
+    ).toISOString();
     return {
       session: {
         id: sessionId,
