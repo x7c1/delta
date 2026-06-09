@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { HttpHandler } from 'msw';
 import type { SessionsResponse } from '@delta/model';
 import { createHandlers } from './handlers';
-import { SESSIONS_PAGE_SIZE } from './fixtures';
+import {
+  SESSIONS_PAGE_SIZE,
+  SESSION_ID_2,
+  SESSION_ID_3,
+  SESSION_3_MAIN_THREAD_ID,
+} from './fixtures';
 
 /**
  * The `GET /api/sessions` mock is cursor-paginated so the infinite-scroll path
@@ -77,5 +82,73 @@ describe('GET /api/sessions mock pagination', () => {
 
     expect(page.sessions).toHaveLength(1);
     expect(page.next_cursor).not.toBeNull();
+  });
+});
+
+/** Run a POST handler selected by a path suffix, returning the raw response. */
+async function runPost(
+  handlers: HttpHandler[],
+  pathSuffix: string,
+  url: string,
+  body?: unknown,
+): Promise<Response> {
+  const handler = handlers.find(
+    (h) =>
+      h.info.method === 'POST' && String(h.info.path).endsWith(pathSuffix),
+  );
+  if (!handler) {
+    throw new Error(`POST handler ending in ${pathSuffix} not found`);
+  }
+  const request = new Request(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const result = await handler.run({ request, requestId: 'test' });
+  const response = result?.response;
+  if (!response) {
+    throw new Error('handler did not produce a response');
+  }
+  return response;
+}
+
+describe('resume-unavailable session mock', () => {
+  it('refuses to open the resume-unavailable session with 409 resume_unavailable', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+
+    const response = await runPost(
+      handlers,
+      '/open',
+      `http://localhost/api/sessions/${SESSION_ID_3}/open`,
+    );
+
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { code?: string };
+    expect(body.code).toBe('resume_unavailable');
+  });
+
+  it('refuses a send to the resume-unavailable session with 409 resume_unavailable', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+
+    const response = await runPost(handlers, '/api/sends', 'http://localhost/api/sends', {
+      thread_id: SESSION_3_MAIN_THREAD_ID,
+      text: 'resume please',
+    });
+
+    expect(response.status).toBe(409);
+    const body = (await response.json()) as { code?: string };
+    expect(body.code).toBe('resume_unavailable');
+  });
+
+  it('still opens a normal closed session (the gate is specific to resume-unavailable)', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+
+    const response = await runPost(
+      handlers,
+      '/open',
+      `http://localhost/api/sessions/${SESSION_ID_2}/open`,
+    );
+
+    expect(response.status).toBe(204);
   });
 });

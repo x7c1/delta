@@ -18,14 +18,23 @@ import type {
  *   a short transcript, and one child branch thread. It is on page 1 but is not
  *   the auto-focused session (the open `sess-mock-1` is), so it exercises a
  *   *non-focused* session showing its sub-thread tree expanded by default.
+ * - `sess-mock-3` — **closed and resume-unavailable**. A readable session whose
+ *   transcript is gone, so the backend would refuse to resume it. It is flagged
+ *   `resumable: false`, which makes the mock `open`/`sends` handlers answer with
+ *   `409 resume_unavailable` — exactly as the real server does — so the
+ *   "this session cannot be resumed" UI is developable with no backend. It sorts
+ *   just after the two detailed sessions (top of page 2), leaving page 1 and the
+ *   auto-focus unchanged.
  */
 
 export const SESSION_ID = 'sess-mock-1';
 export const SESSION_ID_2 = 'sess-mock-2';
+export const SESSION_ID_3 = 'sess-mock-3';
 export const MAIN_THREAD_ID = 1;
 export const BRANCH_THREAD_ID = 2;
 export const SESSION_2_MAIN_THREAD_ID = 3;
 export const SESSION_2_BRANCH_THREAD_ID = 4;
+export const SESSION_3_MAIN_THREAD_ID = 5;
 
 /**
  * Number of sessions returned per page by the mock `GET /api/sessions`. Small on
@@ -50,8 +59,8 @@ export const SESSIONS_PAGE_SIZE = 2;
 export const FILLER_SESSION_COUNT = 40;
 const FIRST_FILLER_THREAD_ID = 100;
 
-/** Total seeded sessions: the two detailed ones plus the filler. */
-export const TOTAL_SEEDED_SESSIONS = 2 + FILLER_SESSION_COUNT;
+/** Total seeded sessions: the three detailed ones plus the filler. */
+export const TOTAL_SEEDED_SESSIONS = 3 + FILLER_SESSION_COUNT;
 
 export const mockSession: Session = {
   id: SESSION_ID,
@@ -69,6 +78,15 @@ export const mockSession2: Session = {
   title: 'scratch notes',
   status: 'ended',
   created_at: '2026-01-02T00:00:00Z',
+};
+
+export const mockSession3: Session = {
+  id: SESSION_ID_3,
+  cwd: '/work/old-experiment',
+  transcript_path: '/tmp/transcript-3-gone.jsonl',
+  title: 'resume-unavailable demo',
+  status: 'ended',
+  created_at: '2025-12-31T00:00:00Z',
 };
 
 export const mockThreads: Thread[] = [
@@ -106,6 +124,17 @@ export const mockThreads2: Thread[] = [
     parent_thread_id: SESSION_2_MAIN_THREAD_ID,
     root_message_uuid: 'uuid-s2-a1',
     created_at: '2026-01-02T00:05:00Z',
+  },
+];
+
+export const mockThreads3: Thread[] = [
+  {
+    id: SESSION_3_MAIN_THREAD_ID,
+    session_id: SESSION_ID_3,
+    title: 'main',
+    parent_thread_id: null,
+    root_message_uuid: null,
+    created_at: '2025-12-31T00:00:00Z',
   },
 ];
 
@@ -267,6 +296,42 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       created_at: '2026-01-02T00:05:01Z',
     },
   ],
+  [SESSION_3_MAIN_THREAD_ID]: [
+    {
+      uuid: 'uuid-s3-u1',
+      session_id: SESSION_ID_3,
+      thread_id: SESSION_3_MAIN_THREAD_ID,
+      role: 'user',
+      linear_parent_uuid: null,
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-s3-1',
+      seq: 0,
+      content_text: 'Summarize what we did in this experiment.',
+      content: [
+        { type: 'text', text: 'Summarize what we did in this experiment.' },
+      ],
+      created_at: '2025-12-31T00:00:01Z',
+    },
+    {
+      uuid: 'uuid-s3-a1',
+      session_id: SESSION_ID_3,
+      thread_id: SESSION_3_MAIN_THREAD_ID,
+      role: 'assistant',
+      linear_parent_uuid: 'uuid-s3-u1',
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-s3-1',
+      seq: 1,
+      content_text:
+        'We prototyped the parser and benchmarked it. The history is still readable here, but this session can no longer be resumed.',
+      content: [
+        {
+          type: 'text',
+          text: 'We prototyped the parser and benchmarked it. The history is still readable here, but this session can no longer be resumed.',
+        },
+      ],
+      created_at: '2025-12-31T00:00:02Z',
+    },
+  ],
 };
 
 /** In-memory store shape shared by the MSW handlers within one render. */
@@ -277,6 +342,13 @@ export interface MockStore {
     open: boolean;
     mainThreadId: number;
     threads: Thread[];
+    /**
+     * Whether a closed session can be resumed. Absent means yes (the common
+     * case). `false` models a session whose transcript is gone: the `open` and
+     * `sends` handlers then answer `409 resume_unavailable`, mirroring the real
+     * server's resume gate.
+     */
+    resumable?: boolean;
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: PendingSend[];
@@ -342,6 +414,13 @@ export function seedData(): MockStore {
         open: false,
         mainThreadId: SESSION_2_MAIN_THREAD_ID,
         threads: structuredClone(mockThreads2),
+      },
+      {
+        session: structuredClone(mockSession3),
+        open: false,
+        mainThreadId: SESSION_3_MAIN_THREAD_ID,
+        threads: structuredClone(mockThreads3),
+        resumable: false,
       },
       ...structuredClone(filler),
     ],
