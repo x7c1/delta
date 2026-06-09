@@ -16,6 +16,7 @@ import {
   SESSION_ID,
   SESSION_ID_2,
   SESSION_2_MAIN_THREAD_ID,
+  SESSION_2_BRANCH_THREAD_ID,
   createHandlers,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
@@ -103,6 +104,32 @@ describe('WorkspaceScreen multi-session', () => {
     // thread becomes active.
     await waitFor(() =>
       expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
+    );
+  });
+
+  it("expands a non-focused session's sub-thread tree without a click", async () => {
+    renderScreen();
+
+    // sess-mock-1 (open) is auto-focused; sess-mock-2 (closed, "scratch notes")
+    // is visible but NOT focused. Each visible row fetches its own thread tree,
+    // so the non-focused session shows its sub-thread ("scratch ideas") expanded
+    // from the start — no click required. (Runs before the Close test below,
+    // which permanently closes sess-mock-1 in the shared mock store.)
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
+    );
+    await waitFor(() =>
+      expect(screen.getByText('scratch ideas')).toBeInTheDocument(),
+    );
+
+    // Clicking that sub-thread focuses its owning (previously non-focused)
+    // session and makes the sub-thread active, so the center pane switches to it.
+    fireEvent.click(screen.getByText('scratch ideas'));
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2),
+    );
+    expect(useNavStore.getState().activeThreadId).toBe(
+      SESSION_2_BRANCH_THREAD_ID,
     );
   });
 

@@ -51,7 +51,23 @@ export function useSessionsQuery(
   });
 }
 
-/** A single session's thread tree. Disabled until a session is focused. */
+/**
+ * Milliseconds a fetched thread tree is considered fresh. Every session visible
+ * in the windowed list mounts its own thread query, so rows mounting and
+ * unmounting during a scroll would otherwise refetch repeatedly. A short window
+ * keeps a row's tree from refetching the instant it scrolls back into view while
+ * still letting branch-send invalidation (`useCreateSendMutation`) force a
+ * refresh immediately, since invalidation overrides `staleTime`.
+ */
+const SESSION_THREADS_STALE_TIME = 30_000;
+
+/**
+ * A single session's thread tree. Disabled until a real session id is supplied.
+ *
+ * Both the focused-session query in the workspace and each visible session
+ * row's query share the same `sessionThreads(sessionId)` key, so React Query
+ * dedupes them into one request per session — no double fetch.
+ */
 export function useSessionThreadsQuery(
   client: ApiClient,
   sessionId: SessionId | null,
@@ -63,6 +79,7 @@ export function useSessionThreadsQuery(
         : queryKeys.sessionThreads(sessionId),
     queryFn: () => client.getSessionThreads(sessionId as SessionId),
     enabled: sessionId !== null,
+    staleTime: SESSION_THREADS_STALE_TIME,
   });
 }
 

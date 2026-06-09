@@ -81,6 +81,36 @@ test('the navigator paginates to the end while keeping the rendered DOM windowed
   expect(peakRendered).toBeLessThan(TOTAL_SEEDED_SESSIONS);
 });
 
+test('a visible non-focused session shows its sub-thread tree expanded without a click', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.goto('/');
+
+  // The open session ("sess-mock-1") is auto-focused; the closed session
+  // ("scratch notes") is on page 1 and visible but NOT focused. Every visible
+  // row fetches its own thread tree and renders it expanded by default, so the
+  // non-focused session's sub-thread ("scratch ideas") is on screen with no
+  // interaction.
+  const scratchRow = page
+    .getByTestId('session-node')
+    .filter({ hasText: 'scratch notes' });
+  await expect(scratchRow).toBeVisible();
+  const subThread = page.getByRole('button', { name: /scratch ideas/ });
+  await expect(subThread).toBeVisible();
+
+  // The transcript still shows the focused (open) session, confirming the tree
+  // is shown for navigation without stealing focus.
+  await expect(page.getByText('What is a delta?')).toBeVisible();
+
+  // Clicking the non-focused session's sub-thread focuses that session and
+  // switches the center pane to the sub-thread.
+  await subThread.click();
+  const current = page.locator('[aria-current="page"]');
+  await expect(current).toHaveText('scratch ideas');
+  await expect(page.getByText('Jot down a few ideas for later.')).toBeVisible();
+});
+
 test('focusing a closed session shows its transcript read-only', async ({
   page,
 }) => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { Thread } from '@delta/model';
 import { ThreadTree } from './ThreadTree';
@@ -30,21 +30,27 @@ describe('ThreadTree', () => {
     useLiveStore.setState({ unread: {} });
   });
 
-  it('lists sub-threads only (not main) and selecting one sets it active', () => {
-    render(<ThreadTree threads={threads} />);
+  it('lists sub-threads only (not main) and selecting one invokes the callback', () => {
+    const onSelectThread = vi.fn();
+    render(<ThreadTree threads={threads} onSelectThread={onSelectThread} />);
 
     // The main thread is reached via the session header, not listed in the
     // tree; only its sub-threads appear.
     expect(screen.queryByText('main')).not.toBeInTheDocument();
     expect(screen.getByText('branch one')).toBeInTheDocument();
 
+    // The tree delegates selection to the session card (which focuses the
+    // owning session and activates the thread) rather than touching the store
+    // directly, so a click on a non-focused session's tree can switch focus.
     fireEvent.click(screen.getByText('branch one'));
-    expect(useNavStore.getState().activeThreadId).toBe(2);
+    expect(onSelectThread).toHaveBeenCalledWith(2);
   });
 
   it('shows an unread badge for inactive threads and hides it for the active one', () => {
     useLiveStore.setState({ unread: { 2: 3 } });
-    const { rerender } = render(<ThreadTree threads={threads} />);
+    const { rerender } = render(
+      <ThreadTree threads={threads} onSelectThread={() => {}} />,
+    );
 
     expect(screen.getByText('3')).toBeInTheDocument();
 
@@ -53,7 +59,7 @@ describe('ThreadTree', () => {
     act(() => {
       useNavStore.setState({ activeThreadId: 2 });
     });
-    rerender(<ThreadTree threads={threads} />);
+    rerender(<ThreadTree threads={threads} onSelectThread={() => {}} />);
     expect(screen.queryByText('3')).not.toBeInTheDocument();
   });
 });

@@ -14,8 +14,10 @@ import type {
  * - `sess-mock-1` — **open**. A trunk `main` thread with a multi-turn
  *   conversation (a tool call and a thinking block to exercise the collapsible
  *   blocks) plus one child branch thread sprouting from an assistant message.
- * - `sess-mock-2` — **closed**. A separate session with its own `main` thread
- *   and a short transcript, used to verify a closed session renders read-only.
+ * - `sess-mock-2` — **closed**. A separate session with its own `main` thread,
+ *   a short transcript, and one child branch thread. It is on page 1 but is not
+ *   the auto-focused session (the open `sess-mock-1` is), so it exercises a
+ *   *non-focused* session showing its sub-thread tree expanded by default.
  */
 
 export const SESSION_ID = 'sess-mock-1';
@@ -23,6 +25,7 @@ export const SESSION_ID_2 = 'sess-mock-2';
 export const MAIN_THREAD_ID = 1;
 export const BRANCH_THREAD_ID = 2;
 export const SESSION_2_MAIN_THREAD_ID = 3;
+export const SESSION_2_BRANCH_THREAD_ID = 4;
 
 /**
  * Number of sessions returned per page by the mock `GET /api/sessions`. Small on
@@ -95,6 +98,14 @@ export const mockThreads2: Thread[] = [
     parent_thread_id: null,
     root_message_uuid: null,
     created_at: '2026-01-02T00:00:00Z',
+  },
+  {
+    id: SESSION_2_BRANCH_THREAD_ID,
+    session_id: SESSION_ID_2,
+    title: 'scratch ideas',
+    parent_thread_id: SESSION_2_MAIN_THREAD_ID,
+    root_message_uuid: 'uuid-s2-a1',
+    created_at: '2026-01-02T00:05:00Z',
   },
 ];
 
@@ -239,6 +250,21 @@ export const mockMessagesByThread: Record<number, Message[]> = {
         },
       ],
       created_at: '2026-01-02T00:00:02Z',
+    },
+  ],
+  [SESSION_2_BRANCH_THREAD_ID]: [
+    {
+      uuid: 'uuid-s2-b1',
+      session_id: SESSION_ID_2,
+      thread_id: SESSION_2_BRANCH_THREAD_ID,
+      role: 'user',
+      linear_parent_uuid: 'uuid-s2-a1',
+      semantic_parent_uuid: 'uuid-s2-a1',
+      prompt_id: 'prompt-s2-2',
+      seq: 0,
+      content_text: 'Jot down a few ideas for later.',
+      content: [{ type: 'text', text: 'Jot down a few ideas for later.' }],
+      created_at: '2026-01-02T00:05:01Z',
     },
   ],
 };
