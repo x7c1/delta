@@ -88,12 +88,20 @@ export function Menu({
   }, [open, onOpenChange]);
 
   // Move focus into the panel on open; restore it to the trigger on close.
+  //
+  // Only *restore* focus when closing after having been open — never on the
+  // initial mount. Without the `wasOpen` guard, the `else` branch fires on mount
+  // (open starts false) and every freshly rendered Menu grabs focus, so right
+  // after a page load a kebab trigger shows a focus ring it never earned. With
+  // a windowed list that mounts many Menus at once, this is very visible.
+  const wasOpen = useRef(false);
   useEffect(() => {
     if (open) {
       firstItemRef.current?.focus();
-    } else {
+    } else if (wasOpen.current) {
       triggerRef.current?.focus();
     }
+    wasOpen.current = open;
   }, [open]);
 
   // Escape closes; click-outside closes.
