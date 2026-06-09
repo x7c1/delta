@@ -169,4 +169,20 @@ describe('TranscriptPane', () => {
       screen.queryByRole('button', { name: 'Send' }),
     ).not.toBeInTheDocument();
   });
+
+  it('shows the external-input notice for the focused thread (pinned above the input)', async () => {
+    useLiveStore.setState({
+      pending: [],
+      resumeUnavailable: {},
+      externalInput: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
+    });
+
+    renderPane();
+
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+    const notice = screen.getByTestId('external-input-notice');
+    expect(notice).toHaveTextContent('typed in the pane');
+  });
 });

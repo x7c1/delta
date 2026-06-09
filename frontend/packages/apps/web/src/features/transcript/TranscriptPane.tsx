@@ -250,10 +250,10 @@ export function TranscriptPane({
   // The fixed footer (pinned below the scrolling transcript). For a
   // resume-impossible session it is just the "cannot resume" notice, replacing
   // the input entirely — there is nothing useful to type. Otherwise it stacks
-  // the optimistic pending-send strip and the composer, with the closed-session
-  // notice pinned directly above the input (rather than at the top of the
-  // scrolling body, where a long conversation scrolled to its tail would bury
-  // it out of sight).
+  // the session-state notices (permission, closed, external input), the
+  // optimistic pending-send strip, and the composer. The notices are pinned
+  // directly above the input rather than at the top of the scrolling body, where
+  // a long conversation scrolled to its tail would bury them out of sight.
   let footer: ReactNode;
   if (resumeUnavailable && !newSession) {
     footer = (
@@ -307,6 +307,18 @@ export function TranscriptPane({
           </div>
         )}
 
+        {showExternalInput && (
+          <div
+            className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+            data-testid="external-input-notice"
+          >
+            <Badge tone="info">external input</Badge>
+            <span className="line-clamp-2 text-slate-700">
+              {externalInput.prompt}
+            </span>
+          </div>
+        )}
+
         <PendingQueue threadId={pendingThreadId} />
         {composer}
       </div>
@@ -334,13 +346,6 @@ export function TranscriptPane({
         >
           Send the first message below to start a new session.
         </p>
-      )}
-
-      {showExternalInput && (
-        <div className="flex items-start gap-2 border-b border-slate-100 bg-sky-50 px-3 py-2 text-xs">
-          <Badge tone="info">external input</Badge>
-          <span className="text-slate-700">{externalInput.prompt}</span>
-        </div>
       )}
 
       {!newSession && messagesQuery.isLoading && (
