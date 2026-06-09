@@ -766,8 +766,10 @@ where
 
         // Ingest new transcript lines. This matches each user line to its queued
         // send and attributes it (plus the assistant lines that follow it) to
-        // the right thread, marking the send matched as a side effect.
-        let new_messages = self.sync_transcript(&session).await?;
+        // the right thread, marking the send matched as a side effect. Any
+        // permission-resolution events the ingest produced are broadcast too.
+        let (new_messages, resolved_events) = self.sync_transcript(&session).await?;
+        events.extend(resolved_events);
 
         match pending {
             Some(pending) => {
@@ -799,15 +801,20 @@ where
     /// Handle a `Stop` hook: ingest the final transcript lines and report the
     /// turn as completed.
     pub async fn on_stop(&self, hook: StopHook) -> Result<Vec<SessionEvent>> {
+        let mut events = Vec::new();
         // Route by the hook's own session id so the right session's transcript is
-        // synced, even when several sessions are registered.
+        // synced, even when several sessions are registered. The final transcript
+        // lines often include the last tool_result, so the `Stop` sync is a key
+        // place permission requests resolve.
         if let Some(session) = self.store.session(&hook.session_id).await? {
-            self.sync_transcript(&session).await?;
+            let (_messages, resolved_events) = self.sync_transcript(&session).await?;
+            events.extend(resolved_events);
         }
-        Ok(vec![SessionEvent::TurnCompleted {
+        events.push(SessionEvent::TurnCompleted {
             session_id: hook.session_id,
             stop_reason: hook.stop_reason,
-        }])
+        });
+        Ok(events)
     }
 
     /// Poll every registered session's transcript for newly-written lines.
@@ -826,17 +833,25 @@ where
     /// notification per session.
     ///
     /// Reuses [`Self::sync_transcript`] (cursor, attribution, the serialization
-    /// lock), so it is safe to call concurrently with the hook handlers. Returns
-    /// an empty list when no session has been registered yet.
-    pub async fn poll_transcript(&self) -> Result<Vec<Vec<Message>>> {
+    /// lock), so it is safe to call concurrently with the hook handlers.
+    ///
+    /// Alongside the per-session message groups, returns any [`SessionEvent`]s
+    /// the ingest produced (e.g. [`SessionEvent::PermissionResolved`] when a
+    /// late `tool_result` is tailed in) for the caller to broadcast. Most
+    /// tool_results are ingested here by the continuous tail, so this is the
+    /// primary path that clears an auto-approved tool's notice. Returns empty
+    /// when no session has been registered yet.
+    pub async fn poll_transcript(&self) -> Result<(Vec<Vec<Message>>, Vec<SessionEvent>)> {
         let mut groups = Vec::new();
+        let mut events = Vec::new();
         for session in self.store.list_sessions().await? {
-            let messages = self.sync_transcript(&session).await?;
+            let (messages, resolved_events) = self.sync_transcript(&session).await?;
+            events.extend(resolved_events);
             if !messages.is_empty() {
                 groups.push(messages);
             }
         }
-        Ok(groups)
+        Ok((groups, events))
     }
 
     /// Handle a `PreToolUse` hook: record the request for UI/audit and notify
@@ -846,10 +861,11 @@ where
         session_id: &delta_model::SessionId,
         tool_name: &str,
         tool_input_json: &str,
+        tool_use_id: &str,
     ) -> Result<Vec<SessionEvent>> {
         let request = self
             .store
-            .record_permission_request(session_id, tool_name, tool_input_json)
+            .record_permission_request(session_id, tool_name, tool_input_json, tool_use_id)
             .await?;
         Ok(vec![SessionEvent::PermissionRequested {
             session_id: session_id.clone(),
@@ -1018,7 +1034,17 @@ where
     ///   belongs to. This covers assistant/system lines AND tool-result lines,
     ///   which Claude delivers as `role: user` but which are part of the
     ///   in-flight turn, not a new human turn.
-    async fn sync_transcript(&self, session: &Session) -> Result<Vec<Message>> {
+    ///
+    /// Returns the newly-ingested messages and any [`SessionEvent`]s that the
+    /// ingest produced. The only such event today is
+    /// [`SessionEvent::PermissionResolved`]: when a `tool_result` line is
+    /// ingested, the open permission request correlated by its `tool_use_id` is
+    /// resolved so the browser can clear the "permission requested" notice. The
+    /// caller is responsible for broadcasting these events.
+    async fn sync_transcript(
+        &self,
+        session: &Session,
+    ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
         // Serialize the whole cursor → read → ingest → cursor sequence so the
         // hook handlers and the background tail cannot interleave and
         // double-ingest or race the cursor (see `sync_lock`).
@@ -1044,7 +1070,7 @@ where
             .await?;
 
         if read.messages.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         }
 
         // The turn in progress when this batch starts: the thread of the most
@@ -1056,8 +1082,36 @@ where
             .unwrap_or(main_thread);
 
         let mut messages = Vec::with_capacity(read.messages.len());
+        let mut events = Vec::new();
         for line in read.messages {
             let content_text = Message::flatten_text(&line.content);
+
+            // Correlate any tool_result blocks on this line with an open
+            // permission request keyed by `tool_use_id`. Resolving on actual
+            // completion (rather than at `PreToolUse` time) is what lets an
+            // auto-approved tool's notice clear immediately while a genuine TUI
+            // prompt's notice persists until the human answers. A denied tool
+            // yields `is_error: true` ("User rejected tool use"), so the error
+            // flag infers allowed vs denied.
+            for block in &line.content {
+                if let delta_model::ContentBlock::ToolResult {
+                    tool_use_id,
+                    is_error,
+                    ..
+                } = block
+                {
+                    if let Some(request_id) = self
+                        .store
+                        .resolve_permission_by_tool_use_id(&session.id, tool_use_id, !is_error)
+                        .await?
+                    {
+                        events.push(SessionEvent::PermissionResolved {
+                            session_id: session.id.clone(),
+                            request_id,
+                        });
+                    }
+                }
+            }
 
             // A genuine human turn is a user line with author-written text.
             // Claude delivers tool results as `role: user` lines too, but those
@@ -1103,7 +1157,7 @@ where
         }
 
         self.store.upsert_messages(&messages).await?;
-        Ok(messages)
+        Ok((messages, events))
     }
 
     /// Compute the `additionalContext` note to inject for this prompt.

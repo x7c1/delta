@@ -1,5 +1,21 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -43,6 +59,7 @@ describe('TranscriptPane', () => {
     useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
     useLiveStore.setState({
       pending: [],
+      permission: {},
       externalInput: {},
       resumeUnavailable: {},
     });
@@ -208,5 +225,69 @@ describe('TranscriptPane', () => {
       screen.queryByTestId('external-input-notice'),
     ).not.toBeInTheDocument();
     expect(useLiveStore.getState().externalInput).toEqual({});
+  });
+
+  it('does not flash the permission notice when the request resolves within the debounce window', async () => {
+    vi.useFakeTimers();
+    try {
+      useLiveStore.setState({
+        pending: [],
+        externalInput: {},
+        resumeUnavailable: {},
+        permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+      });
+
+      renderPane();
+
+      // Within the debounce window the notice has not painted yet.
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(
+        screen.queryByTestId('permission-notice'),
+      ).not.toBeInTheDocument();
+
+      // The request resolves (auto-approved tool's tool_result ingested) before
+      // the window elapses, so the notice must never appear.
+      act(() => {
+        useLiveStore.getState().applyEvent({
+          kind: 'permission_resolved',
+          session_id: SESSION_ID,
+          request_id: 7,
+        });
+      });
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(
+        screen.queryByTestId('permission-notice'),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the permission notice once it outlasts the debounce window', async () => {
+    vi.useFakeTimers();
+    try {
+      useLiveStore.setState({
+        pending: [],
+        externalInput: {},
+        resumeUnavailable: {},
+        permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+      });
+
+      renderPane();
+
+      // A genuine pending prompt has no resolution; once the window elapses the
+      // notice renders as normal.
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      const notice = screen.getByTestId('permission-notice');
+      expect(notice).toHaveTextContent('Permission requested: Bash');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

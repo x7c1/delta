@@ -220,6 +220,42 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().permission).toEqual({});
   });
 
+  it('clears a session permission notice when its request resolves', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-1',
+      request_id: 7,
+      tool_name: 'Bash',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_resolved',
+      session_id: 'sess-1',
+      request_id: 7,
+    });
+    // The correlated tool_result was ingested, so the notice is cleared.
+    expect(useLiveStore.getState().permission).toEqual({});
+  });
+
+  it('ignores a resolution for a different request than the current notice', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-1',
+      request_id: 8,
+      tool_name: 'Bash',
+    });
+
+    // A stale resolution for an older request must not wipe the live notice.
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_resolved',
+      session_id: 'sess-1',
+      request_id: 7,
+    });
+    expect(useLiveStore.getState().permission).toEqual({
+      'sess-1': { requestId: 8, toolName: 'Bash' },
+    });
+  });
+
   it('clears a session permission notice when the session closes', () => {
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',

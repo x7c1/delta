@@ -322,6 +322,21 @@ export const useLiveStore = create<LiveState>((set) => ({
               },
             },
           };
+        case 'permission_resolved': {
+          // The correlated tool_result was ingested, so the request is done.
+          // Clear the notice only when it is the SAME request that resolved, so
+          // a stale resolution never wipes a newer pending prompt for the same
+          // session. An auto-approved tool resolves almost immediately, so this
+          // clears the brief notice (hidden by the render debounce); a genuine
+          // prompt has no resolution until the human answers.
+          const current = state.permission[event.session_id];
+          if (!current || current.requestId !== event.request_id) {
+            return state;
+          }
+          const permission = { ...state.permission };
+          delete permission[event.session_id];
+          return { permission };
+        }
         case 'external_input':
           // The external-input marker is session-scoped and only meaningful for
           // the focused session, so the router (`applySessionEvent`) records it

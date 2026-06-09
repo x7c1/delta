@@ -17,6 +17,10 @@ pub struct PermissionRequest {
     pub tool_name: String,
     /// The tool input, serialized as JSON text.
     pub tool_input_json: String,
+    /// The id of the tool call this request gates (Claude Code's `tool_use_id`).
+    /// It correlates the request with the matching `tool_result` transcript line
+    /// so the request can be resolved the moment the tool completes.
+    pub tool_use_id: String,
     pub status: PermissionStatus,
     pub decision_reason: Option<String>,
     /// ISO-8601 timestamp.

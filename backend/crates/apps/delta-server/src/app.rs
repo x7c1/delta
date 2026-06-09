@@ -184,7 +184,8 @@ mod tests {
         let body = serde_json::json!({
             "session_id": "sess-1",
             "tool_name": "Bash",
-            "tool_input": {"command": "ls"}
+            "tool_input": {"command": "ls"},
+            "tool_use_id": "toolu_01"
         })
         .to_string();
 

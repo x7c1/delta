@@ -127,7 +127,7 @@ impl AppState {
             loop {
                 ticker.tick().await;
                 match interactor.poll_transcript().await {
-                    Ok(groups) => {
+                    Ok((groups, resolved_events)) => {
                         // One non-empty group per session that ingested new lines.
                         for messages in groups {
                             let session_id = messages[0].session_id.clone();
@@ -145,6 +145,12 @@ impl AppState {
                                 session_id,
                                 thread_ids,
                             });
+                        }
+                        // Permission-resolution events from the ingest (a late
+                        // tool_result tailed in here): broadcast so the browser
+                        // clears the "permission requested" notice.
+                        for event in resolved_events {
+                            let _ = events.send(event);
                         }
                     }
                     Err(err) => {

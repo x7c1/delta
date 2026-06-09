@@ -92,7 +92,12 @@ pub async fn pre_tool_use(
 
     match state
         .interactor()
-        .on_pre_tool_use(&session_id, &payload.tool_name, &tool_input_json)
+        .on_pre_tool_use(
+            &session_id,
+            &payload.tool_name,
+            &tool_input_json,
+            &payload.tool_use_id,
+        )
         .await
     {
         Ok(events) => {

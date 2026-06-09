@@ -47,6 +47,18 @@ export interface PermissionRequestedEvent {
 }
 
 /**
+ * A previously-requested tool permission was resolved (the correlated
+ * `tool_result` was ingested). Auto-approved tools resolve almost immediately,
+ * so the notice clears promptly; a genuine TUI prompt yields no result until the
+ * human answers, so its notice persists until then.
+ */
+export interface PermissionResolvedEvent {
+  kind: 'permission_resolved';
+  session_id: SessionId;
+  request_id: number;
+}
+
+/**
  * The transcript grew between hooks (continuous tail). Unlike `turn_completed`
  * and `external_input`, this carries no turn semantics: it must only refetch the
  * affected threads, never mutate the pending-send FIFO or unread badges.
@@ -65,6 +77,7 @@ export type SessionEvent =
   | ExternalInputEvent
   | TurnCompletedEvent
   | PermissionRequestedEvent
+  | PermissionResolvedEvent
   | TranscriptUpdatedEvent;
 
 export type SessionEventKind = SessionEvent['kind'];

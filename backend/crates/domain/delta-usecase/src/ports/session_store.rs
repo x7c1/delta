@@ -157,7 +157,22 @@ pub trait SessionStore: Send + Sync {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
+        tool_use_id: &str,
     ) -> Result<PermissionRequest>;
+
+    /// Resolve the open (`pending`) permission request for this session whose
+    /// `tool_use_id` matches the just-ingested `tool_result`, if any.
+    ///
+    /// `allowed` records the disposition inferred from the tool_result's error
+    /// flag (`false` → the tool was denied). Returns the resolved request's id
+    /// when a pending request matched, or `None` when there was nothing to
+    /// resolve (already decided, or no such request).
+    async fn resolve_permission_by_tool_use_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        allowed: bool,
+    ) -> Result<Option<i64>>;
 }
 
 #[async_trait]
@@ -282,9 +297,21 @@ impl SessionStore for Box<dyn SessionStore> {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
+        tool_use_id: &str,
     ) -> Result<PermissionRequest> {
         (**self)
-            .record_permission_request(session_id, tool_name, tool_input_json)
+            .record_permission_request(session_id, tool_name, tool_input_json, tool_use_id)
+            .await
+    }
+
+    async fn resolve_permission_by_tool_use_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        allowed: bool,
+    ) -> Result<Option<i64>> {
+        (**self)
+            .resolve_permission_by_tool_use_id(session_id, tool_use_id, allowed)
             .await
     }
 }

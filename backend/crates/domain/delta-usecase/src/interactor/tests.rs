@@ -548,6 +548,7 @@ impl SessionStore for FakeStore {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
+        tool_use_id: &str,
     ) -> Result<PermissionRequest> {
         let mut g = self.inner.lock().unwrap();
         g.next_perm_id += 1;
@@ -556,6 +557,7 @@ impl SessionStore for FakeStore {
             session_id: session_id.clone(),
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
+            tool_use_id: tool_use_id.to_owned(),
             status: PermissionStatus::Pending,
             decision_reason: None,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -563,6 +565,32 @@ impl SessionStore for FakeStore {
         };
         g.permissions.push(req.clone());
         Ok(req)
+    }
+
+    async fn resolve_permission_by_tool_use_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        allowed: bool,
+    ) -> Result<Option<i64>> {
+        let mut g = self.inner.lock().unwrap();
+        let req = g.permissions.iter_mut().find(|r| {
+            &r.session_id == session_id
+                && r.tool_use_id == tool_use_id
+                && r.status == PermissionStatus::Pending
+        });
+        match req {
+            Some(req) => {
+                req.status = if allowed {
+                    PermissionStatus::Allowed
+                } else {
+                    PermissionStatus::Denied
+                };
+                req.decided_at = Some("2026-01-01T00:00:00Z".into());
+                Ok(Some(req.id))
+            }
+            None => Ok(None),
+        }
     }
 }
 
@@ -907,7 +935,7 @@ async fn poll_transcript_groups_new_lines_per_session() {
     ix.transcript_fake()
         .push_to("/tmp/s2.jsonl", assistant_line("a-2", "reply two"));
 
-    let groups = ix.poll_transcript().await.unwrap();
+    let (groups, _events) = ix.poll_transcript().await.unwrap();
     assert_eq!(groups.len(), 2, "one group per session that grew");
 
     // Each group carries exactly its own session's new line.
@@ -931,7 +959,7 @@ async fn poll_transcript_groups_new_lines_per_session() {
 
     // A second poll with no new lines yields no groups (per-session cursors
     // advanced independently).
-    assert!(ix.poll_transcript().await.unwrap().is_empty());
+    assert!(ix.poll_transcript().await.unwrap().0.is_empty());
 }
 
 /// `list_sessions` lists every registered session, each annotated with its
@@ -1794,13 +1822,78 @@ async fn pre_tool_use_records_request_and_notifies() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let events = ix
-        .on_pre_tool_use(&SessionId::from("sess-1"), "Bash", r#"{"command":"ls"}"#)
+        .on_pre_tool_use(
+            &SessionId::from("sess-1"),
+            "Bash",
+            r#"{"command":"ls"}"#,
+            "toolu_01",
+        )
         .await
         .unwrap();
     assert!(events.iter().any(|e| matches!(
         e,
         SessionEvent::PermissionRequested { tool_name, .. } if tool_name == "Bash"
     )));
+}
+
+/// An auto-approved tool resolves its permission request the moment the
+/// correlated `tool_result` is ingested: the request is keyed by `tool_use_id`,
+/// so ingesting the result yields a `PermissionResolved` for that request, while
+/// a non-matching `tool_result` resolves nothing.
+#[tokio::test]
+async fn ingesting_tool_result_resolves_the_correlated_permission() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+
+    // A permission request is recorded for an imminent tool call.
+    let requested = ix
+        .on_pre_tool_use(
+            &SessionId::from("sess-1"),
+            "Bash",
+            r#"{"command":"ls"}"#,
+            "toolu_01",
+        )
+        .await
+        .unwrap();
+    let request_id = match requested.as_slice() {
+        [SessionEvent::PermissionRequested { request_id, .. }] => *request_id,
+        other => panic!("expected a single PermissionRequested, got {other:?}"),
+    };
+
+    // A tool_result for a *different* tool_use_id resolves nothing.
+    ix.transcript_fake()
+        .push(tool_result_line("r-other", "toolu_other"));
+    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::PermissionResolved { .. })),
+        "a non-matching tool_result must not resolve the request"
+    );
+
+    // The correlated tool_result resolves the open request and emits
+    // `PermissionResolved` for exactly that request.
+    ix.transcript_fake()
+        .push(tool_result_line("r-1", "toolu_01"));
+    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::PermissionResolved { request_id: id, .. } if *id == request_id
+        )),
+        "the matching tool_result resolves the request"
+    );
+
+    // A re-ingested tool_result (no longer pending) resolves nothing again.
+    ix.transcript_fake()
+        .push(tool_result_line("r-1-dup", "toolu_01"));
+    let (_groups, events) = ix.poll_transcript().await.unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::PermissionResolved { .. })),
+        "an already-resolved request is not resolved twice"
+    );
 }
 
 /// Regression test for the line-vs-message offset stall.
@@ -1922,7 +2015,7 @@ async fn poll_transcript_ingests_assistant_line_flushed_after_stop() {
     // Claude Code now flushes the assistant line. A poll (no hook) catches it.
     // The single session yields one group carrying just the new line.
     ix.transcript_fake().push(assistant_line("a-1", "hi there"));
-    let polled = ix.poll_transcript().await.unwrap();
+    let (polled, _events) = ix.poll_transcript().await.unwrap();
     assert_eq!(
         polled.len(),
         1,
@@ -1944,7 +2037,7 @@ async fn poll_transcript_ingests_assistant_line_flushed_after_stop() {
     );
 
     // A second poll with no new lines returns nothing (cursor advanced).
-    let again = ix.poll_transcript().await.unwrap();
+    let (again, _events) = ix.poll_transcript().await.unwrap();
     assert!(again.is_empty(), "no new lines, nothing returned");
 }
 
@@ -1952,7 +2045,7 @@ async fn poll_transcript_ingests_assistant_line_flushed_after_stop() {
 #[tokio::test]
 async fn poll_transcript_without_session_is_empty() {
     let ix = interactor();
-    let polled = ix.poll_transcript().await.unwrap();
+    let (polled, _events) = ix.poll_transcript().await.unwrap();
     assert!(polled.is_empty());
 }
 
