@@ -43,6 +43,12 @@ set -s focus-events off
 # hatch, not a full tmux workspace, so the bar only wastes a row and renders the
 # user's themed powerline/Nerd-Font glyphs as tofu in the browser xterm.
 set -g status off
+
+# Deepen the scrollback so the embedded terminal can scroll far enough back
+# through Claude's output to be useful for debugging (via copy-mode: prefix `[`).
+# Vanilla tmux keeps only 2000 lines, which a single verbose tool output can
+# fill; 10000 lines costs only a few MB per pane.
+set -g history-limit 10000
 ";
 
 /// Drives Claude Code sessions living in tmux.
@@ -407,13 +413,14 @@ mod tests {
     }
 
     #[test]
-    fn fixed_config_pins_the_three_deliberate_settings() {
+    fn fixed_config_pins_the_deliberate_settings() {
         // The whole point of the `-f` config is a host-independent baseline:
-        // these three lines are the only customization Delta applies, so guard
-        // against an edit silently dropping one. (`screen-256color` is pinned
-        // over tmux's own default for terminfo portability.)
+        // these lines are the only customization Delta applies, so guard against
+        // an edit silently dropping one. (`screen-256color` is pinned over
+        // tmux's own default for terminfo portability.)
         assert!(DELTA_TMUX_CONF.contains("set -g default-terminal \"screen-256color\""));
         assert!(DELTA_TMUX_CONF.contains("set -s focus-events off"));
         assert!(DELTA_TMUX_CONF.contains("set -g status off"));
+        assert!(DELTA_TMUX_CONF.contains("set -g history-limit 10000"));
     }
 }
