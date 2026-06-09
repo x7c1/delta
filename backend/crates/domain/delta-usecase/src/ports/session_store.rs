@@ -8,6 +8,12 @@ use delta_model::{
 
 use crate::error::Result;
 use crate::ports::new_session::NewSession;
+use crate::session_page::SessionPageCursor;
+
+/// One row of a session-list page: the stored session plus its `last_activity_at`
+/// (`MAX(message.created_at)`, `None` when message-less), fetched inline by the
+/// page query so the usecase needs no per-row follow-up lookup.
+pub type SessionPageRow = (Session, Option<String>);
 
 /// Persists and queries Delta's thread overlay.
 ///
@@ -22,6 +28,20 @@ pub trait SessionStore: Send + Sync {
 
     /// All registered sessions, ordered by creation (ascending `created_at`).
     async fn list_sessions(&self) -> Result<Vec<Session>>;
+
+    /// One page of sessions, ordered most-recently-active first, resuming
+    /// strictly after `cursor` (or from the top when `None`).
+    ///
+    /// The ordering is `recency` DESC, then `created_at` DESC, then `id` ASC,
+    /// where `recency = COALESCE(MAX(message.created_at), session.created_at)`.
+    /// Each row carries its raw `last_activity_at` (`None` when message-less) so
+    /// the usecase needs no per-row activity lookup. At most `limit` rows are
+    /// returned; a full page (`len == limit`) signals more may follow.
+    async fn list_sessions_page(
+        &self,
+        cursor: Option<SessionPageCursor>,
+        limit: u32,
+    ) -> Result<Vec<SessionPageRow>>;
 
     /// Look up a session by id, if it exists.
     async fn session(&self, id: &SessionId) -> Result<Option<Session>>;
@@ -128,6 +148,14 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn list_sessions(&self) -> Result<Vec<Session>> {
         (**self).list_sessions().await
+    }
+
+    async fn list_sessions_page(
+        &self,
+        cursor: Option<SessionPageCursor>,
+        limit: u32,
+    ) -> Result<Vec<SessionPageRow>> {
+        (**self).list_sessions_page(cursor, limit).await
     }
 
     async fn session(&self, id: &SessionId) -> Result<Option<Session>> {

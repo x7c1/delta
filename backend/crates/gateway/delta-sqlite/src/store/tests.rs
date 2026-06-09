@@ -1,5 +1,5 @@
 use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId};
-use delta_usecase::{NewSession, SessionStore};
+use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
 use super::SqliteStore;
 
@@ -366,6 +366,126 @@ async fn branch_thread_records_parent_and_root() {
     let fetched = store.thread(child.id).await.unwrap().unwrap();
     assert_eq!(fetched.parent_thread_id, Some(main));
     assert_eq!(fetched.root_message_uuid, Some(root));
+}
+
+/// Register a session and stamp one message at `activity_at`, so its recency
+/// (last activity) is fully controlled regardless of wall-clock registration
+/// time. Returns the session id for assertions.
+async fn session_active_at(store: &SqliteStore, id: &str, activity_at: &str) -> SessionId {
+    let (session, main) = store.register_session(new_session_with(id)).await.unwrap();
+    store
+        .upsert_messages(&[Message {
+            uuid: MessageUuid::from(format!("{id}-msg")),
+            session_id: session.id.clone(),
+            thread_id: main,
+            role: Role::User,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: None,
+            prompt_id: None,
+            seq: 0,
+            content_text: Some("hi".into()),
+            content: vec![ContentBlock::Text { text: "hi".into() }],
+            created_at: activity_at.into(),
+        }])
+        .await
+        .unwrap();
+    session.id
+}
+
+fn page_ids(rows: &[(delta_model::Session, Option<String>)]) -> Vec<String> {
+    rows.iter().map(|(s, _)| s.id.as_str().to_owned()).collect()
+}
+
+#[tokio::test]
+async fn list_sessions_page_orders_by_recency_descending() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    session_active_at(&store, "sess-mid", "2026-02-01T00:00:00Z").await;
+    session_active_at(&store, "sess-new", "2026-03-01T00:00:00Z").await;
+    session_active_at(&store, "sess-old", "2026-01-01T00:00:00Z").await;
+
+    let page = store.list_sessions_page(None, 10).await.unwrap();
+    assert_eq!(page_ids(&page), vec!["sess-new", "sess-mid", "sess-old"]);
+    // Each row carries its inline last activity; no follow-up lookup needed.
+    assert_eq!(page[0].1.as_deref(), Some("2026-03-01T00:00:00Z"));
+}
+
+#[tokio::test]
+async fn list_sessions_page_advances_across_pages_without_gap_or_overlap() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    session_active_at(&store, "sess-a", "2026-04-01T00:00:00Z").await;
+    session_active_at(&store, "sess-b", "2026-03-01T00:00:00Z").await;
+    session_active_at(&store, "sess-c", "2026-02-01T00:00:00Z").await;
+    session_active_at(&store, "sess-d", "2026-01-01T00:00:00Z").await;
+
+    // First page of two, then resume after its last row.
+    let first = store.list_sessions_page(None, 2).await.unwrap();
+    assert_eq!(page_ids(&first), vec!["sess-a", "sess-b"]);
+
+    let (last_session, last_activity) = first.last().unwrap();
+    let cursor = SessionPageCursor {
+        recency: last_activity.clone().unwrap(),
+        created_at: last_session.created_at.clone(),
+        id: last_session.id.as_str().to_owned(),
+    };
+    let second = store
+        .list_sessions_page(Some(cursor), 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        page_ids(&second),
+        vec!["sess-c", "sess-d"],
+        "the next page resumes strictly after the cursor with no gap or overlap"
+    );
+}
+
+#[tokio::test]
+async fn list_sessions_page_breaks_recency_ties_by_id_ascending() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    // Equal recency: only the ascending `id` tiebreaker distinguishes them.
+    let shared = "2026-01-01T00:00:00Z";
+    session_active_at(&store, "sess-b", shared).await;
+    session_active_at(&store, "sess-a", shared).await;
+
+    let page = store.list_sessions_page(None, 10).await.unwrap();
+    assert_eq!(page_ids(&page), vec!["sess-a", "sess-b"]);
+}
+
+#[tokio::test]
+async fn list_sessions_page_falls_back_to_created_at_for_message_less_session() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    // One active session whose activity is far in the past, plus a message-less
+    // session. The message-less one falls back to its own (just-now) created_at,
+    // which sorts above the old activity.
+    session_active_at(&store, "sess-old", "2020-01-01T00:00:00Z").await;
+    let (quiet, _) = store
+        .register_session(new_session_with("sess-quiet"))
+        .await
+        .unwrap();
+
+    let page = store.list_sessions_page(None, 10).await.unwrap();
+    assert_eq!(
+        page_ids(&page),
+        vec!["sess-quiet", "sess-old"],
+        "a message-less session sorts on its created_at fallback"
+    );
+    // The message-less row exposes a NULL last_activity_at (not the fallback).
+    let quiet_row = page.iter().find(|(s, _)| s.id == quiet.id).unwrap();
+    assert_eq!(quiet_row.1, None);
+}
+
+#[tokio::test]
+async fn list_sessions_page_signals_more_via_full_page_only() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    session_active_at(&store, "sess-a", "2026-02-01T00:00:00Z").await;
+    session_active_at(&store, "sess-b", "2026-01-01T00:00:00Z").await;
+
+    // A full page (returned count == limit) signals more may follow; the store
+    // returns exactly `limit` rows. A short/last page returns fewer.
+    let full = store.list_sessions_page(None, 2).await.unwrap();
+    assert_eq!(full.len(), 2, "a full page returns exactly the limit");
+
+    let short = store.list_sessions_page(None, 10).await.unwrap();
+    assert_eq!(short.len(), 2, "a last page returns fewer than the limit");
 }
 
 #[tokio::test]

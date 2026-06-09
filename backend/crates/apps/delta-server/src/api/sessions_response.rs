@@ -28,8 +28,12 @@ impl From<SessionListing> for SessionListItem {
     }
 }
 
-/// Response for `GET /api/sessions`: every known session, ordered by creation.
+/// Response for `GET /api/sessions`: one page of sessions, most-recently-active
+/// first, plus the cursor to fetch the following page.
 #[derive(Debug, Serialize)]
 pub struct SessionsResponse {
     pub sessions: Vec<SessionListItem>,
+    /// An opaque token to fetch the next page (echo it back as the `cursor`
+    /// query parameter), or `null` when this is the last page.
+    pub next_cursor: Option<String>,
 }

@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS message (
 );
 
 CREATE INDEX IF NOT EXISTS ix_message_session_seq ON message(session_id, seq);
+-- Speeds up the per-session MAX(created_at) the session-list page query runs to
+-- derive each row's recency (last activity) inline.
+CREATE INDEX IF NOT EXISTS ix_message_session_created ON message(session_id, created_at);
 CREATE INDEX IF NOT EXISTS ix_message_thread ON message(thread_id);
 CREATE INDEX IF NOT EXISTS ix_message_semantic_parent ON message(semantic_parent_uuid);
 
