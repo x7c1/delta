@@ -245,4 +245,48 @@ describe('ApiClient', () => {
       status: 404,
     });
   });
+
+  it('surfaces the machine-readable error code from a send response', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: 'session cannot be resumed', code: 'resume_unavailable' },
+        409,
+      ),
+    );
+    const client = new ApiClient({ fetchFn });
+
+    await expect(
+      client.createSend({ thread_id: 1, text: 'hi' }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: 'session cannot be resumed',
+      code: 'resume_unavailable',
+    } satisfies Partial<ApiError>);
+  });
+
+  it('surfaces the error code from an open (204-style) endpoint too', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: 'session cannot be resumed', code: 'resume_unavailable' },
+        409,
+      ),
+    );
+    const client = new ApiClient({ fetchFn });
+
+    await expect(client.openSession('gone')).rejects.toMatchObject({
+      status: 409,
+      code: 'resume_unavailable',
+    });
+  });
+
+  it('leaves the code undefined when the error body carries none', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: 'boom' }, 500));
+    const client = new ApiClient({ fetchFn });
+
+    const err = await client.getThreadMessages(1).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBeUndefined();
+  });
 });

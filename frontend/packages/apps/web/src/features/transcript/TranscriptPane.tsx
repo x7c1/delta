@@ -60,6 +60,11 @@ export function TranscriptPane({
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const externalInput = useLiveStore((state) => state.externalInput);
+  // Whether the focused (closed) session just failed to resume because its
+  // transcript is gone; drives the inline "cannot be resumed" notice.
+  const resumeUnavailable = useLiveStore((state) =>
+    activeThread ? Boolean(state.resumeUnavailable[activeThread.session_id]) : false,
+  );
 
   // The sub-thread chip currently hovered; its text is highlighted in the body.
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
@@ -257,6 +262,20 @@ export function TranscriptPane({
           <Badge tone="neutral">closed</Badge>
           <span>
             This session is closed. Sending a message resumes it.
+          </span>
+        </div>
+      )}
+
+      {resumeUnavailable && !newSession && (
+        <div
+          className="flex items-center gap-2 border-b border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+          data-testid="resume-unavailable-notice"
+          role="alert"
+        >
+          <Badge tone="warning">cannot resume</Badge>
+          <span>
+            This session cannot be resumed: its conversation transcript is no
+            longer available.
           </span>
         </div>
       )}

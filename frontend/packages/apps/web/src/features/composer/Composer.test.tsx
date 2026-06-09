@@ -60,6 +60,7 @@ describe('Composer', () => {
       pending: [],
       externalInput: null,
       unread: {},
+      resumeUnavailable: {},
     });
     useComposerStore.setState({ drafts: {}, branchOrigin: null });
   });
@@ -243,6 +244,52 @@ describe('Composer', () => {
       const pending = useLiveStore.getState().pending;
       expect(pending[0]?.status).toBe('failed');
     });
+  });
+
+  it('drops the optimistic send and flags the session when resume is unavailable', async () => {
+    // The server refuses the resume because the transcript is gone (409 with a
+    // stable code). Unlike a generic failure, the optimistic chip must be
+    // dropped entirely (not left "failed") and the session flagged so the inline
+    // notice can show — the session stays closed.
+    server.use(
+      http.post('*/api/sends', () =>
+        HttpResponse.json(
+          { error: 'session cannot be resumed', code: 'resume_unavailable' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              readOnly: true,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'resume please' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(
+        useLiveStore.getState().resumeUnavailable[mainThread.session_id],
+      ).toBe(true);
+    });
+    // No lingering chip: a resume-unavailable send is removed outright, not
+    // marked failed.
+    expect(useLiveStore.getState().pending).toHaveLength(0);
   });
 
   it('targets a new session when in new-session mode', async () => {

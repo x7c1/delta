@@ -1,4 +1,9 @@
-export { ApiClient, ApiError, type ApiClientOptions } from './http';
+export {
+  ApiClient,
+  ApiError,
+  type ApiClientOptions,
+  type ApiErrorCode,
+} from './http';
 export {
   EventEmitter,
   WsEventSource,

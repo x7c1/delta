@@ -54,6 +54,13 @@ export interface LiveState {
   unread: Record<ThreadId, number>;
   /** The most recent external (direct-pane) input, shown on the last active thread. */
   externalInput: ExternalInputMarker | null;
+  /**
+   * Sessions a Send/open just failed to resume because their transcript is gone
+   * (the server's `resume_unavailable`). The focused session's presence here
+   * drives an inline "cannot be resumed" notice; the session stays closed and
+   * no optimistic pending chip is shown. Cleared when the session opens.
+   */
+  resumeUnavailable: Record<SessionId, true>;
 
   setConnection: (status: ConnectionStatus) => void;
   enqueueSend: (item: PendingItem) => void;
@@ -66,6 +73,17 @@ export interface LiveState {
    */
   retargetSend: (localId: string, threadId: ThreadId) => void;
   failSend: (localId: string) => void;
+  /**
+   * Drop an optimistic pending send outright (not merely mark it failed). Used
+   * when a Send is rejected before it could ever queue server-side — e.g. a
+   * resume-unavailable session — so no "waiting" chip lingers for a turn that
+   * will never start.
+   */
+  removePending: (localId: string) => void;
+  /** Flag a session as resume-impossible, surfacing the inline notice. */
+  markResumeUnavailable: (sessionId: SessionId) => void;
+  /** Clear a session's resume-impossible flag (e.g. once it opens). */
+  clearResumeUnavailable: (sessionId: SessionId) => void;
   /**
    * Drop every optimistic pending send. Used on a live-stream reconnect: the
    * `turn_completed` events that would have drained these were broadcast while
@@ -119,6 +137,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   permission: null,
   unread: {},
   externalInput: null,
+  resumeUnavailable: {},
 
   setConnection: (status) => set({ connection: status }),
 
@@ -145,6 +164,30 @@ export const useLiveStore = create<LiveState>((set) => ({
         item.localId === localId ? { ...item, status: 'failed' } : item,
       ),
     })),
+
+  removePending: (localId) =>
+    set((state) => ({
+      pending: state.pending.filter((item) => item.localId !== localId),
+    })),
+
+  markResumeUnavailable: (sessionId) =>
+    set((state) =>
+      state.resumeUnavailable[sessionId]
+        ? state
+        : {
+            resumeUnavailable: { ...state.resumeUnavailable, [sessionId]: true },
+          },
+    ),
+
+  clearResumeUnavailable: (sessionId) =>
+    set((state) => {
+      if (!state.resumeUnavailable[sessionId]) {
+        return state;
+      }
+      const next = { ...state.resumeUnavailable };
+      delete next[sessionId];
+      return { resumeUnavailable: next };
+    }),
 
   clearPending: () => set({ pending: [] }),
 
@@ -223,10 +266,20 @@ export const useLiveStore = create<LiveState>((set) => ({
           // via `noteExternalInput` under a focus guard. Nothing to do here.
           return state;
         case 'session_registered':
-        case 'session_opened':
           // Open/closed lifecycle is reflected by the sessions query, not
           // ephemeral here.
           return state;
+        case 'session_opened': {
+          // The session resumed successfully, so any stale "cannot be resumed"
+          // notice for it is now wrong — clear it. Open/closed itself is
+          // reflected by the sessions query, not ephemeral here.
+          if (!state.resumeUnavailable[event.session_id]) {
+            return state;
+          }
+          const resumeUnavailable = { ...state.resumeUnavailable };
+          delete resumeUnavailable[event.session_id];
+          return { resumeUnavailable };
+        }
         case 'session_closed':
           // Closed state is reflected by the sessions query, not ephemeral here.
           return state;

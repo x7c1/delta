@@ -29,7 +29,11 @@ types).
   and `prompt_id` are strings.
 - Errors carry a JSON body `{ "error": "<message>" }`, except request-decoding
   failures rejected before a handler runs (the framework-level `400`/`415`/`422`
-  cases below), which carry a plain-text body from the framework. Status codes:
+  cases below), which carry a plain-text body from the framework. Some errors
+  also include a stable, machine-readable `code` (e.g.
+  `{ "error": "...", "code": "resume_unavailable" }`) that clients can branch on
+  instead of matching the human message; the field is omitted when there is no
+  distinct code. Status codes:
   - `400 Bad Request` — a malformed request. Either rejected before the handler
     (a syntactically invalid JSON body, a missing `Content-Type:
     application/json` header, a missing required query parameter, or a path/query
@@ -37,6 +41,12 @@ types).
     body), or rejected by a handler for a structurally valid body whose target is
     ambiguous or contradictory (see `POST /api/sends` — JSON body).
   - `404 Not Found` — an unknown session id, or an unknown thread.
+  - `409 Conflict` — the session exists but cannot be resumed because its local
+    transcript file is gone, so `claude --resume <id>` has nothing to replay
+    (body `code: "resume_unavailable"`). Returned by `POST /api/sessions/{id}/open`
+    and by `POST /api/sends` when the target's session is closed and must be
+    resumed first. The session is left closed; no pane is spawned and no send is
+    enqueued.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not
@@ -205,6 +215,8 @@ pane. Broadcasts `session_opened`. Re-opening an already-open session is a no-op
 
 - **204 No Content** — the session is now open.
 - **404** — no session with that id.
+- **409** — the session's transcript is gone, so it cannot be resumed (body
+  `code: "resume_unavailable"`); it is left closed and no pane is spawned.
 - **500** — preparing the working directory or starting the tmux session failed.
 
 ### `POST /api/sessions/{id}/close`
@@ -314,6 +326,9 @@ Response:
   (malformed JSON, wrong/missing `Content-Type`, or a missing/wrong-typed field
   such as an absent `text`) reported as `400 / 415 / 422` with a plain-text body.
 - **404** — no thread (or branch parent thread) with the given `thread_id`.
+- **409** — the target's session is closed and cannot be resumed because its
+  transcript is gone (body `code: "resume_unavailable"`). No send is enqueued and
+  the session stays closed.
 
 ## Browser live channels
 
