@@ -12,6 +12,13 @@ pub enum Error {
     /// `tmux` ran but exited non-zero.
     #[error("tmux exited with status {status}: {stderr}")]
     Command { status: String, stderr: String },
+
+    /// Delta's fixed tmux config could not be written before the server started.
+    #[error("failed to write tmux config {path}: {source}")]
+    Config {
+        path: String,
+        source: std::io::Error,
+    },
 }
 
 /// Convenience result alias for this crate.

@@ -1,10 +1,13 @@
-//! Rendering the Claude Code session's `.claude/settings.json`.
+//! Rendering the Claude Code session settings JSON.
 //!
 //! The session needs native HTTP hooks pointing back at this server so Delta
 //! receives `UserPromptSubmit`, `Stop`, and `PreToolUse` callbacks. The server
 //! renders these settings itself (rather than copying a static template) so the
 //! hook URLs always match the port the server is actually listening on — there
-//! is no second source of truth to drift out of sync.
+//! is no second source of truth to drift out of sync. The rendered JSON is
+//! written to a Delta-owned file and handed to `claude --settings <file>`, so it
+//! never has to be written into (and risk clobbering) the session's working
+//! directory.
 
 use serde_json::json;
 
@@ -19,6 +22,12 @@ pub fn render_session_settings(port: u16) -> String {
         })
     };
     let settings = json!({
+        // Force the dark theme: the embedded terminal renders on a dark
+        // background (see the web terminal's xterm theme), so Claude must emit
+        // dark-appropriate colors to stay readable — regardless of whatever
+        // theme the user has set globally. Passed via `--settings`, so this only
+        // applies to Delta's sessions and never touches the user's own config.
+        "theme": "dark",
         "hooks": {
             "UserPromptSubmit": [http_hook("user-prompt-submit")],
             "Stop": [http_hook("stop")],
@@ -30,8 +39,8 @@ pub fn render_session_settings(port: u16) -> String {
             }],
         }
     });
-    // Pretty-printed so the on-disk file is human-readable when inspecting a
-    // session workdir. Rendering never fails for this fixed shape.
+    // Pretty-printed so the on-disk file is human-readable when inspected.
+    // Rendering never fails for this fixed shape.
     serde_json::to_string_pretty(&settings).expect("session settings serialize")
 }
 
@@ -43,6 +52,9 @@ mod tests {
     fn embeds_the_port_in_every_hook_url() {
         let rendered = render_session_settings(9999);
         let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+        // The embedded terminal is dark, so the session's theme is forced dark.
+        assert_eq!(parsed["theme"], "dark");
 
         assert_eq!(
             parsed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["url"],

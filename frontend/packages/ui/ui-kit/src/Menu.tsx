@@ -26,6 +26,13 @@ export interface MenuProps {
   /** Force the trigger disabled regardless of items. */
   disabled?: boolean;
   className?: string;
+  /**
+   * Notified whenever the panel opens or closes. Lets an enclosing row react to
+   * the open state — e.g. lift its stacking order so the dropdown is not painted
+   * under a sibling row (needed inside a windowed list, where each row is a
+   * `transform`ed stacking context and the panel cannot otherwise escape it).
+   */
+  onOpenChange?: (open: boolean) => void;
 }
 
 const ITEM_TONE_CLASSES: Record<MenuItemTone, string> = {
@@ -58,7 +65,13 @@ function KebabIcon() {
  * activates an enclosing row's handler. When disabled (explicitly or because
  * no items are enabled) the trigger is greyed and never opens a panel.
  */
-export function Menu({ label, items, disabled = false, className }: MenuProps) {
+export function Menu({
+  label,
+  items,
+  disabled = false,
+  className,
+  onOpenChange,
+}: MenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -68,13 +81,27 @@ export function Menu({ label, items, disabled = false, className }: MenuProps) {
 
   const close = useCallback(() => setOpen(false), []);
 
+  // Surface open/close to the parent. `setState` setters are identity-stable, so
+  // a parent passing one directly keeps this effect from re-firing each render.
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
+
   // Move focus into the panel on open; restore it to the trigger on close.
+  //
+  // Only *restore* focus when closing after having been open — never on the
+  // initial mount. Without the `wasOpen` guard, the `else` branch fires on mount
+  // (open starts false) and every freshly rendered Menu grabs focus, so right
+  // after a page load a kebab trigger shows a focus ring it never earned. With
+  // a windowed list that mounts many Menus at once, this is very visible.
+  const wasOpen = useRef(false);
   useEffect(() => {
     if (open) {
       firstItemRef.current?.focus();
-    } else {
+    } else if (wasOpen.current) {
       triggerRef.current?.focus();
     }
+    wasOpen.current = open;
   }, [open]);
 
   // Escape closes; click-outside closes.

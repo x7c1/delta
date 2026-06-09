@@ -149,6 +149,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf) {
         Box::new(NoopWorkspace) as Box<dyn delta_usecase::Workspace>,
         "/tmp/delta-e2e-session",
         "{}",
+        "/tmp/delta-e2e-settings.json",
     );
 
     let state = AppState::from_interactor(interactor, "delta-e2e");

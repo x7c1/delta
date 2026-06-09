@@ -11,6 +11,46 @@ use crate::error::Error;
 /// let the Claude TUI finish initializing so the first `send-keys` is not lost.
 const SESSION_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(750);
 
+/// Delta's fixed tmux configuration, loaded via `-f` when Delta's server starts.
+///
+/// Starting the server with `-f <file>` makes tmux skip the user's
+/// `~/.tmux.conf` (and the system config) entirely, so the embedded pane behaves
+/// identically on every machine no matter how the user has themed or rebound
+/// their own tmux. This config is the *only* customization Delta applies, and
+/// every line is a deliberate requirement of the embedded pane — not a style
+/// preference. See [`Tmux::output`] (which passes `-f`) and
+/// [`TmuxDriver::create_session`] (which writes this file before the
+/// server-starting `new-session`).
+const DELTA_TMUX_CONF: &str = "\
+# Delta's fixed tmux configuration. Delta starts its own tmux server with
+# `-f <this file>`, which makes tmux ignore the user's ~/.tmux.conf so the
+# embedded pane is identical on every machine. Every line below is a deliberate
+# requirement of the embedded pane, not a preference.
+
+# Pin the terminal type the Claude pane runs under so its terminfo (and the
+# capabilities the TUI probes) are the same everywhere. screen-256color is
+# preferred over tmux's own default (tmux-256color) because its terminfo entry
+# is present on far more machines out of the box.
+set -g default-terminal \"screen-256color\"
+
+# focus-events is off in vanilla tmux but a common user override turns it on.
+# With it on, tmux reports focus in/out to the pane program every time a client
+# attaches/detaches (which the embedded terminal does on every session switch),
+# and Claude's TUI renders each report as a stray blank line. Pin it off.
+set -s focus-events off
+
+# Vanilla tmux shows a status bar; Delta's pane is a permission-answering escape
+# hatch, not a full tmux workspace, so the bar only wastes a row and renders the
+# user's themed powerline/Nerd-Font glyphs as tofu in the browser xterm.
+set -g status off
+
+# Deepen the scrollback so the embedded terminal can scroll far enough back
+# through Claude's output to be useful for debugging (via copy-mode: prefix `[`).
+# Vanilla tmux keeps only 2000 lines, which a single verbose tool output can
+# fill; 10000 lines costs only a few MB per pane.
+set -g history-limit 10000
+";
+
 /// Drives Claude Code sessions living in tmux.
 ///
 /// The driver is stateless with respect to any particular session: every method
@@ -21,31 +61,46 @@ const SESSION_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_mill
 ///
 /// Every command runs against Delta's **own tmux server** via a dedicated socket
 /// (`tmux -L <socket>`), kept separate from the user's default tmux server. This
-/// isolation means Delta's sessions never clutter the user's `tmux ls`, teardown
-/// can kill the whole server at once, and server-wide options Delta sets (e.g.
-/// `focus-events off`, see [`TmuxDriver::create_session`]) never affect the
-/// user's other tmux sessions.
+/// isolation means Delta's sessions never clutter the user's `tmux ls` and
+/// teardown can kill the whole server at once. The server also starts with
+/// Delta's fixed config (`-f`, see [`DELTA_TMUX_CONF`]) instead of the user's
+/// `~/.tmux.conf`, so the embedded pane is identical on every machine.
 #[derive(Debug, Clone)]
 pub struct Tmux {
     /// The dedicated tmux socket name (`tmux -L <socket>`).
     socket: String,
+    /// Path to the rendered [`DELTA_TMUX_CONF`] file passed via `tmux -f`.
+    ///
+    /// Per-socket so concurrent Delta servers on different sockets never share a
+    /// file. Written by [`TmuxDriver::create_session`] before the server starts.
+    conf_path: String,
 }
 
 impl Tmux {
     /// Create a driver bound to a dedicated tmux socket.
     pub fn new(socket: impl Into<String>) -> Self {
-        Self {
-            socket: socket.into(),
-        }
+        let socket = socket.into();
+        let conf_path = std::env::temp_dir()
+            .join(format!("delta-tmux-{socket}.conf"))
+            .to_string_lossy()
+            .into_owned();
+        Self { socket, conf_path }
     }
 
-    /// Run `tmux -L <socket> <args>`, returning the captured output.
+    /// Run `tmux -L <socket> -f <conf> <args>`, returning the captured output.
     ///
     /// The `-L <socket>` prefix pins every command to Delta's own tmux server.
+    /// The `-f <conf>` prefix makes that server load Delta's fixed config instead
+    /// of the user's `~/.tmux.conf`. `-f` is only consulted when the server
+    /// starts (by `new-session`, see [`TmuxDriver::create_session`]) and is
+    /// harmlessly ignored on every other command, so passing it on all of them
+    /// guarantees whichever call boots the server uses Delta's config.
     async fn output(&self, args: &[&str]) -> std::result::Result<std::process::Output, Error> {
         Ok(Command::new("tmux")
             .arg("-L")
             .arg(&self.socket)
+            .arg("-f")
+            .arg(&self.conf_path)
             .args(args)
             .output()
             .await?)
@@ -84,37 +139,25 @@ impl TmuxDriver for Tmux {
         workdir: &str,
         command: &[String],
     ) -> std::result::Result<(), delta_usecase::Error> {
+        // Write Delta's fixed config before the server-starting `new-session`
+        // runs. `-f <conf_path>` (added by `output`) is read only when the server
+        // boots, and `new-session` is the call that boots it (`has-session` and
+        // friends just fail when no server is running). Writing on each create is
+        // idempotent: once the server is up the file is left untouched, and a
+        // rewrite for an already-running server is a harmless no-op. This is what
+        // makes the embedded pane (terminal type, focus events, status bar) the
+        // same on every machine — see DELTA_TMUX_CONF.
+        tokio::fs::write(&self.conf_path, DELTA_TMUX_CONF)
+            .await
+            .map_err(|source| Error::Config {
+                path: self.conf_path.clone(),
+                source,
+            })
+            .map_err(delta_usecase::Error::from)?;
+
         let args = new_session_args(name, workdir, command);
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         self.run(&borrowed)
-            .await
-            .map_err(delta_usecase::Error::from)?;
-
-        // Turn off focus events on Delta's tmux server. `focus-events` is a
-        // server-wide option; with it on (a common user default, inherited from
-        // ~/.tmux.conf) tmux sends the pane's program a focus in/out report each
-        // time a client attaches/detaches — which the embedded terminal does on
-        // every session switch — and Claude's TUI renders each as a stray blank
-        // line. The primary fix is the frontend dropping these terminal device
-        // reports before they reach the pane (see the PTY terminal's input
-        // filter); disabling focus events here is complementary defense so tmux
-        // never generates them in the first place. Safe because Delta runs on its
-        // own socket, so this never affects the user's other tmux sessions.
-        // Idempotent, so setting it on each create is harmless.
-        self.run(&["set-option", "-s", "focus-events", "off"])
-            .await
-            .map_err(delta_usecase::Error::from)?;
-
-        // Hide tmux's status bar on Delta's embedded pane. The user's
-        // ~/.tmux.conf (inherited at server start) often themes the status line
-        // with powerline separators and Nerd Font private-use glyphs, which the
-        // browser xterm has no matching font for and renders as tofu. The
-        // embedded terminal is a permission-answering escape hatch, not a full
-        // tmux workspace, so it needs no status bar at all; turning it off makes
-        // Delta's pane look the same on any machine and frees a row for Claude.
-        // `status` is a session option; `-g` applies it server-wide (Delta's own
-        // socket only). Idempotent, so setting it on each create is harmless.
-        self.run(&["set-option", "-g", "status", "off"])
             .await
             .map_err(delta_usecase::Error::from)?;
 
@@ -359,5 +402,25 @@ mod tests {
         // standalone clear, so the two paths share one source of truth.
         let pane = "delta-1:0.0";
         assert_eq!(input_commands(pane, "hi")[0], clear_input_commands(pane));
+    }
+
+    #[test]
+    fn conf_path_is_derived_per_socket() {
+        // The config path is namespaced by socket so concurrent Delta servers on
+        // different sockets never write over each other's config.
+        assert!(Tmux::new("delta").conf_path.ends_with("delta-tmux-delta.conf"));
+        assert!(Tmux::new("other").conf_path.ends_with("delta-tmux-other.conf"));
+    }
+
+    #[test]
+    fn fixed_config_pins_the_deliberate_settings() {
+        // The whole point of the `-f` config is a host-independent baseline:
+        // these lines are the only customization Delta applies, so guard against
+        // an edit silently dropping one. (`screen-256color` is pinned over
+        // tmux's own default for terminfo portability.)
+        assert!(DELTA_TMUX_CONF.contains("set -g default-terminal \"screen-256color\""));
+        assert!(DELTA_TMUX_CONF.contains("set -s focus-events off"));
+        assert!(DELTA_TMUX_CONF.contains("set -g status off"));
+        assert!(DELTA_TMUX_CONF.contains("set -g history-limit 10000"));
     }
 }

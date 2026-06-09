@@ -183,9 +183,11 @@ the navigator can route into any of them.
 ### `POST /api/sessions`
 
 Spawn a fresh session eagerly. Used by cold start (an empty session list) and the
-"New" button: the server starts a tmux session running `claude` in a fresh
-per-spawn working directory (writing its `.claude/settings.json` so Claude Code's
-hooks point back at this server).
+"New" button: the server starts a tmux session running `claude --settings <file>`
+in a fresh per-spawn working directory. The settings file (rendered with this
+server's hook URLs) is Delta-owned and lives outside the working directory, so
+Claude Code's hooks point back at this server without touching any
+`.claude/settings.json` in the working directory.
 
 This drives only the tmux/process lifecycle; the conversational session is still
 registered later by the first `UserPromptSubmit` hook, so a freshly created

@@ -29,9 +29,9 @@ pub type AppInteractor = BoxedInteractor;
 /// Default name of Delta's dedicated tmux socket (`tmux -L <socket>`).
 ///
 /// Delta runs its sessions on their own tmux server so they are isolated from
-/// the user's default tmux server — no clutter in the user's `tmux ls`, and
-/// Delta can set server-wide options (e.g. `focus-events off`) without changing
-/// the user's other sessions.
+/// the user's default tmux server — no clutter in the user's `tmux ls`, and the
+/// server starts with Delta's own fixed config (via `tmux -f`) instead of the
+/// user's `~/.tmux.conf`, so the embedded pane is identical on every machine.
 pub const DEFAULT_TMUX_SOCKET: &str = "delta";
 
 /// Runtime configuration for the composition root.
@@ -55,6 +55,21 @@ impl Config {
     pub fn session_settings_json(&self) -> String {
         render_session_settings(self.port)
     }
+
+    /// Delta-owned path the rendered settings JSON is written to and handed to
+    /// `claude --settings <path>`.
+    ///
+    /// Lives under the system temp directory (never a user project), so spawning
+    /// or resuming in a real repository never overwrites that repository's own
+    /// `.claude/settings.json`. Namespaced by port so two Delta servers on
+    /// different ports — whose hook URLs differ — never share one file.
+    pub fn session_settings_path(&self) -> String {
+        std::env::temp_dir()
+            .join(format!("delta-{}", self.port))
+            .join("settings.json")
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 /// Construct the wired [`AppInteractor`] from configuration.
@@ -75,6 +90,7 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
         Box::new(workspace) as Box<dyn delta_usecase::Workspace>,
         config.session_workdir_base.clone(),
         config.session_settings_json(),
+        config.session_settings_path(),
     ))
 }
 

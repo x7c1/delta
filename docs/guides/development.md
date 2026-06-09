@@ -143,9 +143,11 @@ make dev WORKDIR=~/scratch # or pass your own working directory for claude
 
 1. Starts `delta-server` (`DELTA_PORT=7878`), passing the session working
    directory. The server owns the `claude` session lifecycle: when a session is
-   spawned (first Send / New) it creates the tmux session and writes that
-   spawn's `.claude/settings.json` (so the hooks point at
-   `http://127.0.0.1:7878/hooks/...`). Nothing is spawned on startup.
+   spawned (first Send / New) it creates the tmux session and launches `claude
+   --settings <file>` with Delta's rendered session settings (so the hooks point
+   at `http://127.0.0.1:7878/hooks/...`); the settings file lives outside the
+   working directory, so a real project's own `.claude/settings.json` is never
+   touched. Nothing is spawned on startup.
 2. Installs and builds the frontend workspace libraries, then starts the web dev
    server against the real backend (port 5173).
 
