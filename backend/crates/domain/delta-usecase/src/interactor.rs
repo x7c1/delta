@@ -894,13 +894,15 @@ where
     /// Lines are processed in order while maintaining `carry_thread`, the thread
     /// of the current turn:
     ///
-    /// - A **user** line that matches a still-`pending` send is attributed to
-    ///   that send's thread (the new child thread for a branch send), the send
-    ///   is marked matched, and `carry_thread` advances to it. A user line with
-    ///   no matching send is external input and lands on `main`, resetting
-    ///   `carry_thread` to `main`.
-    /// - A **non-user** line (assistant/tool/system) follows `carry_thread` —
-    ///   the thread of the turn it belongs to.
+    /// - A **human** user line (a user line carrying author-written text) that
+    ///   matches a still-`pending` send is attributed to that send's thread (the
+    ///   new child thread for a branch send), the send is marked matched, and
+    ///   `carry_thread` advances to it. A human user line with no matching send
+    ///   is external input and lands on `main`, resetting `carry_thread`.
+    /// - Every other line follows `carry_thread` — the thread of the turn it
+    ///   belongs to. This covers assistant/system lines AND tool-result lines,
+    ///   which Claude delivers as `role: user` but which are part of the
+    ///   in-flight turn, not a new human turn.
     async fn sync_transcript(&self, session: &Session) -> Result<Vec<Message>> {
         // Serialize the whole cursor → read → ingest → cursor sequence so the
         // hook handlers and the background tail cannot interleave and
@@ -942,9 +944,17 @@ where
         for line in read.messages {
             let content_text = Message::flatten_text(&line.content);
 
-            let (thread_id, semantic_parent_uuid) = if matches!(line.role, delta_model::Role::User)
-            {
-                let trimmed = content_text.as_deref().unwrap_or("").trim();
+            // A genuine human turn is a user line with author-written text.
+            // Claude delivers tool results as `role: user` lines too, but those
+            // belong to the in-flight turn, not a new human turn, so they must
+            // inherit `carry_thread` rather than reset it to `main`. (Mirrors the
+            // frontend's `isUserTurn`.) Treating a tool_result as a turn boundary
+            // used to drop the rest of a sub-thread's turn onto `main`.
+            let trimmed = content_text.as_deref().unwrap_or("").trim();
+            let is_human_turn =
+                matches!(line.role, delta_model::Role::User) && !trimmed.is_empty();
+
+            let (thread_id, semantic_parent_uuid) = if is_human_turn {
                 match self.store.match_pending_send(&session.id, trimmed).await? {
                     Some(pending) => {
                         self.store.mark_send_matched(pending.id, &line.uuid).await?;
