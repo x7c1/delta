@@ -1,4 +1,4 @@
-import type { Message, ToolResultBlock } from '@delta/model';
+import type { ContentBlock, Message, ToolResultBlock } from '@delta/model';
 
 /**
  * The link between a tool invocation and its result.
@@ -32,22 +32,37 @@ export function buildToolPairing(messages: Message[]): ToolPairing {
   return { resultByUseId, toolUseIds };
 }
 
-/**
- * True when a message carries nothing but tool results that are already paired
- * to a tool_use rendered elsewhere. Such a message renders to nothing on its
- * own (its results are shown inline with their calls), so the transcript skips
- * it rather than emit an empty turn.
- */
-export function isAbsorbedToolResultMessage(
-  message: Message,
-  pairing: ToolPairing,
+/** Whether a single content block renders to nothing on its own. */
+function blockRendersNothing(
+  block: ContentBlock,
+  pairing: ToolPairing | undefined,
 ): boolean {
-  return (
-    message.content.length > 0 &&
-    message.content.every(
-      (block) =>
-        block.type === 'tool_result' &&
-        pairing.toolUseIds.has(block.tool_use_id),
-    )
-  );
+  switch (block.type) {
+    case 'thinking':
+      // Claude Code records a signed reference for thinking but leaves the
+      // plaintext empty, so an empty thinking block renders nothing.
+      return block.thinking.trim() === '';
+    case 'tool_result':
+      // A result paired to a visible call is shown inline with that call; with
+      // no pairing it is treated as an orphan and rendered, so it is not nothing.
+      return pairing?.toolUseIds.has(block.tool_use_id) ?? false;
+    default:
+      // text, tool_use, and any other block always render something.
+      return false;
+  }
+}
+
+/**
+ * True when a message has nothing that renders on its own: only empty thinking
+ * blocks (Claude Code stores a signed reference but no plaintext) and/or tool
+ * results already shown inline with their calls, or no content at all. The
+ * transcript skips such a message so it does not emit an empty, padded turn,
+ * which would otherwise show as a mysterious gap. `MessageItem` returns `null`
+ * under the same condition — this is the single source of truth for both.
+ */
+export function messageRendersNothing(
+  message: Message,
+  pairing: ToolPairing | undefined,
+): boolean {
+  return message.content.every((block) => blockRendersNothing(block, pairing));
 }

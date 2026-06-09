@@ -25,7 +25,7 @@ import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
-import { buildToolPairing, isAbsorbedToolResultMessage } from './toolPairs';
+import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import {
   clearBranchHighlight,
   findAllQuoteRanges,
@@ -113,8 +113,11 @@ export function TranscriptPane({
   // in a separate `role: "user"` message), so a call renders together with its
   // result and the result-only carrier message is not shown on its own.
   const pairing = useMemo(() => buildToolPairing(messages), [messages]);
+  // Drop messages that render nothing on their own (empty thinking blocks,
+  // inline-absorbed tool results, or empty content). Without this their block
+  // wrapper would still emit its padding — an empty, mysteriously large gap.
   const renderedMessages = useMemo(
-    () => messages.filter((m) => !isAbsorbedToolResultMessage(m, pairing)),
+    () => messages.filter((m) => !messageRendersNothing(m, pairing)),
     [messages, pairing],
   );
 
@@ -363,22 +366,27 @@ export function TranscriptPane({
 
       {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
-        // Vary only the block's BOTTOM gap by message kind; the top stays
-        // constant and user messages are unchanged. An assistant prose turn gets
-        // a little more room below it, but a tool-execution turn (one carrying a
-        // `tool_use` block, e.g. a Bash call) is tightened so chained tool steps
-        // read as a tighter group.
+        // Vary the block's top and bottom gap by message kind; user messages are
+        // unchanged. An assistant prose turn gets a little more room below it,
+        // while a tool-execution turn (one carrying a `tool_use` block, e.g. a
+        // Bash call) is tightened on both top and bottom so chained tool steps
+        // group closely.
         const isToolTurn =
           message.role === 'assistant' &&
           message.content.some((block) => block.type === 'tool_use');
+        const topGap =
+          message.role === 'user' ? 'pt-2' : isToolTurn ? 'pt-0.5' : 'pt-1.5';
         const bottomGap =
-          message.role === 'user' ? 'pb-2.5' : isToolTurn ? 'pb-1.5' : 'pb-3.5';
+          message.role === 'user' ? 'pb-1' : isToolTurn ? 'pb-0.5' : 'pb-2';
+        // Inset a tool-execution turn (left + right margin) so it reads as a
+        // nested step and sits in a narrower column than prose.
+        const indent = isToolTurn ? 'ml-6 mr-0' : '';
         return (
           // One block per message: the message and its sub-thread chips. The
           // block owns the vertical rhythm (not the message article), so adjacent
           // messages are separated by a consistent gap while the chips hug their
           // parent message just below it (see their small pt).
-          <div key={message.uuid} className={`pt-2.5 ${bottomGap}`}>
+          <div key={message.uuid} className={`${topGap} ${bottomGap} ${indent}`}>
             <MessageItem
               message={message}
               pairing={pairing}
@@ -394,7 +402,7 @@ export function TranscriptPane({
               }
             />
             {children.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-3 pt-1.5">
+              <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">
                 {children.map((child) => (
                   <Chip
                     key={child.id}

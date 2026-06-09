@@ -12,6 +12,18 @@ describe('formatLocalDateTime', () => {
     expect(formatLocalDateTime(iso)).toBe(expected);
   });
 
+  it('appends seconds when withSeconds is set', () => {
+    const iso = '2026-06-08T14:30:45Z';
+    const date = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const expected = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+      date.getDate(),
+    )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+      date.getSeconds(),
+    )}`;
+    expect(formatLocalDateTime(iso, true)).toBe(expected);
+  });
+
   it('returns null for a missing timestamp', () => {
     expect(formatLocalDateTime(null)).toBeNull();
   });

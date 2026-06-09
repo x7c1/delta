@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ContentBlock, Message } from '@delta/model';
-import {
-  buildToolPairing,
-  isAbsorbedToolResultMessage,
-} from './toolPairs';
+import { buildToolPairing, messageRendersNothing } from './toolPairs';
 
 function message(uuid: string, content: ContentBlock[]): Message {
   return {
@@ -49,7 +46,7 @@ describe('buildToolPairing', () => {
   });
 });
 
-describe('isAbsorbedToolResultMessage', () => {
+describe('messageRendersNothing', () => {
   const messages = [
     message('a', [
       { type: 'tool_use', id: 't1', name: 'ToolSearch', input: {} },
@@ -60,15 +57,26 @@ describe('isAbsorbedToolResultMessage', () => {
   ];
   const pairing = buildToolPairing(messages);
 
-  it('absorbs a message that is only paired tool results', () => {
-    expect(isAbsorbedToolResultMessage(messages[1], pairing)).toBe(true);
+  it('skips a message that is only paired tool results', () => {
+    expect(messageRendersNothing(messages[1], pairing)).toBe(true);
+  });
+
+  it('skips a message that is only an empty thinking block', () => {
+    // Claude Code stores a signed reference but no plaintext for thinking.
+    const empty = message('th', [{ type: 'thinking', thinking: '   ' }]);
+    expect(messageRendersNothing(empty, buildToolPairing([empty]))).toBe(true);
+  });
+
+  it('skips a message with no content', () => {
+    const blank = message('z', []);
+    expect(messageRendersNothing(blank, buildToolPairing([blank]))).toBe(true);
   });
 
   it('keeps a message whose result is an orphan', () => {
     const orphan = message('o', [
       { type: 'tool_result', tool_use_id: 'gone', content: 'x', is_error: false },
     ]);
-    expect(isAbsorbedToolResultMessage(orphan, buildToolPairing([orphan]))).toBe(
+    expect(messageRendersNothing(orphan, buildToolPairing([orphan]))).toBe(
       false,
     );
   });
@@ -78,6 +86,17 @@ describe('isAbsorbedToolResultMessage', () => {
       { type: 'tool_result', tool_use_id: 't1', content: 'hits', is_error: false },
       { type: 'text', text: 'and here is what I found' },
     ]);
-    expect(isAbsorbedToolResultMessage(mixed, pairing)).toBe(false);
+    expect(messageRendersNothing(mixed, pairing)).toBe(false);
+  });
+
+  it('keeps a message with a non-empty thinking block', () => {
+    const thinking = message('t', [{ type: 'thinking', thinking: 'pondering' }]);
+    expect(
+      messageRendersNothing(thinking, buildToolPairing([thinking])),
+    ).toBe(false);
+  });
+
+  it('keeps a message with a tool_use', () => {
+    expect(messageRendersNothing(messages[0], pairing)).toBe(false);
   });
 });
