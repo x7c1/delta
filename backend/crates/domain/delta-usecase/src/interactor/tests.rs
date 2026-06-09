@@ -633,14 +633,19 @@ async fn ensure_session_spawns_a_session_in_its_own_workdir_when_absent() {
     assert_eq!(created.len(), 1, "one session was spawned");
     assert_eq!(created[0].name, "delta-1", "named after the minted token");
     assert_eq!(created[0].workdir, "/work/delta-1", "<base>/<token>");
+    // The launched argv pins the conversation's session id with the id Delta
+    // minted and recorded on the pending spawn.
+    let minted = ix.pending_session_ids().await.remove(0);
     assert_eq!(
         created[0].command,
         vec![
             "claude".to_owned(),
             "--settings".to_owned(),
             TEST_SETTINGS_PATH.to_owned(),
+            "--session-id".to_owned(),
+            minted.as_str().to_owned(),
         ],
-        "claude --settings <delta path>"
+        "claude --settings <delta path> --session-id <minted id>"
     );
     let written = ix.workspace_fake().written.lock().unwrap().clone();
     assert_eq!(
@@ -681,10 +686,11 @@ async fn ensure_session_is_idempotent_while_a_spawn_is_live() {
 async fn ensure_session_is_idempotent_while_a_session_is_bound() {
     let ix = interactor();
 
-    // Spawn, then bind it to a session id via a hook in its workdir.
+    // Spawn, then bind it via a hook carrying the spawn's minted session id.
     ix.ensure_session().await.unwrap();
+    let id = ix.pending_session_ids().await.remove(0);
     ix.on_user_prompt_submit(submit_in(
-        "sess-B",
+        id.as_str(),
         "/work/delta-1/t.jsonl",
         "/work/delta-1",
         "hi",
@@ -692,9 +698,7 @@ async fn ensure_session_is_idempotent_while_a_session_is_bound() {
     .await
     .unwrap();
     assert!(
-        ix.pane_for_session(&SessionId::from("sess-B"))
-            .await
-            .is_some(),
+        ix.pane_for_session(&id).await.is_some(),
         "the spawn is now bound"
     );
 
@@ -1084,15 +1088,15 @@ async fn list_sessions_page_annotates_open_state_and_threads() {
     let ix = interactor();
 
     ix.new_session().await.unwrap();
+    let id = ix.pending_session_ids().await.remove(0);
     ix.on_user_prompt_submit(submit_in(
-        "sess-open",
+        id.as_str(),
         "/work/delta-1/t.jsonl",
         "/work/delta-1",
         "hi",
     ))
     .await
     .unwrap();
-    let id = SessionId::from("sess-open");
     assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
 
     let page = ix.list_sessions_page(None, 30).await.unwrap();
@@ -1122,15 +1126,15 @@ async fn list_sessions_marks_a_bound_session_open_and_a_closed_one_not() {
 
     // Spawn and bind a session: it now has a live pane.
     ix.new_session().await.unwrap();
+    let id = ix.pending_session_ids().await.remove(0);
     ix.on_user_prompt_submit(submit_in(
-        "sess-open",
+        id.as_str(),
         "/work/delta-1/t.jsonl",
         "/work/delta-1",
         "hi",
     ))
     .await
     .unwrap();
-    let id = SessionId::from("sess-open");
     assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
 
     let open_state = |listings: &[crate::SessionListing]| {
@@ -1886,8 +1890,10 @@ async fn poll_transcript_without_session_is_empty() {
     assert!(polled.is_empty());
 }
 
-/// A submit hook for an explicit cwd, used by the spawn-binding tests where the
-/// hook's cwd is the correlation key to a pending spawn.
+/// A submit hook for an explicit cwd. The cwd no longer drives spawn binding
+/// (that is keyed by the Delta-minted session id), so this is used both for
+/// external-claude registration tests and for binding tests that pass a spawn's
+/// minted session id while exercising an arbitrary cwd.
 fn submit_in(
     session_id: &str,
     transcript_path: &str,
@@ -1936,14 +1942,18 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
         "the first prompt is dispatched into the fresh pane"
     );
 
-    // The first UserPromptSubmit arrives in the spawn's workdir. It binds the
+    // Delta pinned the conversation's session id at spawn time; read it back so
+    // the hook can carry the exact id (a real hook reports the pinned id).
+    let session_id = ix.pending_session_ids().await.remove(0);
+
+    // The first UserPromptSubmit reports that pinned session id. It binds the
     // spawn to the now-known session id, registers the session, and writes the
     // deferred pending_send BEFORE attribution — so the user line correlates.
     ix.transcript_fake()
         .push_to("/work/delta-1/t.jsonl", user_line("u-1", "first message"));
     let (events, _) = ix
         .on_user_prompt_submit(submit_in(
-            "sess-A",
+            session_id.as_str(),
             "/work/delta-1/t.jsonl",
             "/work/delta-1",
             "first message",
@@ -1954,7 +1964,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     // The session registered and the first turn started (the deferred send was
     // written and matched the user line).
     assert!(events.contains(&SessionEvent::SessionRegistered {
-        session_id: SessionId::from("sess-A"),
+        session_id: session_id.clone(),
     }));
     let started = events
         .iter()
@@ -1968,16 +1978,12 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     );
 
     // The user line landed on main and the send is now matched (FIFO clear).
-    let main = ix
-        .store()
-        .main_thread_id(&SessionId::from("sess-A"))
-        .await
-        .unwrap();
+    let main = ix.store().main_thread_id(&session_id).await.unwrap();
     let view = ix.thread_view(main).await.unwrap();
     assert!(view.iter().any(|m| m.uuid.as_str() == "u-1"));
     assert!(ix
         .store()
-        .head_pending_send(&SessionId::from("sess-A"))
+        .head_pending_send(&session_id)
         .await
         .unwrap()
         .is_none());
@@ -1985,8 +1991,8 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
 
 /// When the composer-first spawn cannot type its first prompt into the new
 /// pane, the use case surfaces the dispatch error AND rolls the half-spawned
-/// pane out of `pending`, so a later, unrelated `UserPromptSubmit` arriving in
-/// that workdir is not mis-bound to it (it registers as external instead).
+/// pane out of `pending`, so a later, unrelated `UserPromptSubmit` is not
+/// mis-bound to it (it registers as external instead).
 #[tokio::test]
 async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     use crate::error::Error;
@@ -2001,9 +2007,13 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
         .expect_err("a failed first-prompt dispatch must propagate");
     assert!(matches!(err, Error::Tmux(_)));
 
-    // The spawn was rolled back: a hook later arriving in that same workdir
-    // finds no pending spawn and is treated as an external, closed session
-    // rather than binding to the abandoned pane.
+    // The spawn was rolled back: no pending spawn remains, so a later hook
+    // carrying any session id finds none to bind and is treated as an external,
+    // closed session rather than binding to the abandoned pane.
+    assert!(
+        ix.pending_session_ids().await.is_empty(),
+        "the failed spawn left no pending entry behind"
+    );
     let (events, _) = ix
         .on_user_prompt_submit(submit_in(
             "sess-late",
@@ -2027,23 +2037,24 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     );
 }
 
-/// A `UserPromptSubmit` for an unknown session id whose cwd matches a pending
-/// spawn binds that spawn (pending → bound) and registers the session.
+/// A `UserPromptSubmit` carrying a pending spawn's Delta-minted session id binds
+/// that spawn (pending → bound) and registers the session.
 #[tokio::test]
-async fn user_prompt_binds_pending_spawn_by_workdir() {
+async fn user_prompt_binds_pending_spawn_by_session_id() {
     let ix = interactor();
     // Cold-start spawn (no first prompt).
     ix.new_session().await.unwrap();
 
-    // The spawn is not yet open under any session id.
-    assert!(ix
-        .pane_for_session(&SessionId::from("sess-A"))
-        .await
-        .is_none());
+    // Delta pinned the conversation's session id at spawn time; read it back.
+    let session_id = ix.pending_session_ids().await.remove(0);
 
-    // A hook arrives in the spawn's workdir; it binds and registers.
+    // The spawn is not yet open under that session id.
+    assert!(ix.pane_for_session(&session_id).await.is_none());
+
+    // A hook reporting the pinned session id binds and registers. The cwd is
+    // unrelated to binding now, so it can be anything.
     ix.on_user_prompt_submit(submit_in(
-        "sess-A",
+        session_id.as_str(),
         "/work/delta-1/t.jsonl",
         "/work/delta-1",
         "hi",
@@ -2053,49 +2064,57 @@ async fn user_prompt_binds_pending_spawn_by_workdir() {
 
     // Now bound: the pane is the spawn's pane, and the session row exists.
     assert_eq!(
-        ix.pane_for_session(&SessionId::from("sess-A")).await,
+        ix.pane_for_session(&session_id).await,
         Some("delta-1:0.0".to_owned())
     );
-    assert!(ix
-        .store()
-        .session(&SessionId::from("sess-A"))
-        .await
-        .unwrap()
-        .is_some());
+    assert!(ix.store().session(&session_id).await.unwrap().is_some());
 }
 
-/// Two pending spawns with DIFFERENT workdirs bind to the right session each:
-/// the per-spawn unique-workdir guarantee makes the correlation exact.
+/// Two pending spawns that SHARE the same working directory each still bind to
+/// the right session, because correlation is keyed by the Delta-minted session
+/// id (pinned via `claude --session-id`), not by the cwd. This is the regression
+/// guard for a future where the user picks a real project directory as the
+/// session cwd: two spawns may then share a cwd without mis-correlating.
 #[tokio::test]
-async fn two_pending_spawns_bind_to_the_right_session_each() {
+async fn same_workdir_spawns_bind_to_their_own_session_each() {
     let ix = interactor();
-    ix.new_session().await.unwrap(); // delta-1 → /work/delta-1
-    ix.new_session().await.unwrap(); // delta-2 → /work/delta-2
+    ix.new_session().await.unwrap(); // delta-1
+    ix.new_session().await.unwrap(); // delta-2
 
-    // Bind them in the opposite order to their spawn order, by workdir.
+    // Read back the two pinned session ids, in spawn order.
+    let ids = ix.pending_session_ids().await;
+    assert_eq!(ids.len(), 2, "two spawns are pending");
+    let (id1, id2) = (ids[0].clone(), ids[1].clone());
+    assert_ne!(id1, id2, "each spawn mints a distinct session id");
+
+    // Fire the hooks in the OPPOSITE order to the spawn order, and crucially
+    // with the SAME shared cwd for both — so only the session id can resolve
+    // which spawn each binds to.
+    const SHARED_CWD: &str = "/work/project";
     ix.on_user_prompt_submit(submit_in(
-        "sess-2",
-        "/work/delta-2/t.jsonl",
-        "/work/delta-2",
+        id2.as_str(),
+        "/work/project/t2.jsonl",
+        SHARED_CWD,
         "hi",
     ))
     .await
     .unwrap();
     ix.on_user_prompt_submit(submit_in(
-        "sess-1",
-        "/work/delta-1/t.jsonl",
-        "/work/delta-1",
+        id1.as_str(),
+        "/work/project/t1.jsonl",
+        SHARED_CWD,
         "hi",
     ))
     .await
     .unwrap();
 
+    // Each session bound to its own spawn's pane despite the shared cwd.
     assert_eq!(
-        ix.pane_for_session(&SessionId::from("sess-1")).await,
+        ix.pane_for_session(&id1).await,
         Some("delta-1:0.0".to_owned()),
     );
     assert_eq!(
-        ix.pane_for_session(&SessionId::from("sess-2")).await,
+        ix.pane_for_session(&id2).await,
         Some("delta-2:0.0".to_owned()),
     );
 }
@@ -2733,15 +2752,15 @@ async fn close_session_kills_the_pane_and_keeps_the_data() {
     let ix = interactor();
     // Spawn and bind a session.
     ix.new_session().await.unwrap();
+    let id = ix.pending_session_ids().await.remove(0);
     ix.on_user_prompt_submit(submit_in(
-        "sess-C",
+        id.as_str(),
         "/work/delta-1/t.jsonl",
         "/work/delta-1",
         "hi",
     ))
     .await
     .unwrap();
-    let id = SessionId::from("sess-C");
     assert!(
         ix.pane_for_session(&id).await.is_some(),
         "open before close"

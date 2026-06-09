@@ -3,9 +3,9 @@
 //! Open/closed is **process-runtime** state, never persisted: after a restart
 //! the registry is empty, so every session that survives in the store is
 //! considered "closed" until it is resumed. The registry maps each open session
-//! to the tmux pane driving it, and tracks freshly-spawned panes that do not yet
-//! have a Claude `session_id` (they are bound to one by the first
-//! `UserPromptSubmit` hook).
+//! to the tmux pane driving it, and tracks freshly-spawned panes whose Claude
+//! `session_id` was pinned by Delta at spawn time (via `claude --session-id`)
+//! and which the first `UserPromptSubmit` hook then binds into the live map.
 
 use std::collections::HashMap;
 
@@ -27,18 +27,25 @@ pub struct OpenHandle {
 
 /// A freshly-spawned pane awaiting its first `UserPromptSubmit`.
 ///
-/// A new spawn has no Claude `session_id` yet, so it cannot be keyed by id.
-/// It is correlated to its session by matching the hook's `cwd` against
-/// [`Self::workdir`] (per-spawn unique workdirs make this exact). If the spawn
-/// was initiated by a composer send, [`Self::first_prompt`] carries the text to
-/// enqueue once the session id is known.
+/// Delta pins the conversation's `session_id` at spawn time by passing a
+/// freshly-minted UUID to `claude --session-id <uuid>`, so the first
+/// `UserPromptSubmit` hook reports exactly that id. The spawn is correlated to
+/// its session by matching the hook's `session_id` against [`Self::session_id`]
+/// — independent of the working directory, so two spawns may share a `cwd`
+/// without mis-correlating. If the spawn was initiated by a composer send,
+/// [`Self::first_prompt`] carries the text to enqueue once the session binds.
 #[derive(Debug, Clone)]
 pub struct PendingSpawn {
     /// The Delta-minted tmux session name.
     pub token: PaneToken,
     /// The pane keystrokes are sent to (`<token>:0.0`).
     pub pane: String,
-    /// The unique working directory this spawn runs in; the binding key.
+    /// The Delta-minted Claude `session_id` pinned via `--session-id`; the
+    /// binding key the first `UserPromptSubmit` hook is matched against.
+    pub session_id: SessionId,
+    /// The working directory this spawn runs in. Populates the [`OpenHandle`] at
+    /// bind time and is kept as informational data; it is no longer the match
+    /// key (correlation is by [`Self::session_id`]).
     pub workdir: String,
     /// The deferred first send, if this spawn was initiated by a composer send.
     ///
@@ -87,13 +94,24 @@ impl OpenSessions {
         self.pending.push(spawn);
     }
 
-    /// Take the oldest pending spawn whose workdir matches `cwd` (FIFO).
+    /// Take the pending spawn whose Delta-minted session id equals `id`.
     ///
-    /// With per-spawn unique workdirs this matches at most one spawn; the FIFO
-    /// tie-break is a defensive fallback should two ever share a workdir.
-    pub fn take_pending_for_workdir(&mut self, cwd: &str) -> Option<PendingSpawn> {
-        let idx = self.pending.iter().position(|p| p.workdir == cwd)?;
+    /// Delta pins each fresh spawn's `session_id` up front via
+    /// `claude --session-id`, so the first `UserPromptSubmit` hook reports
+    /// exactly that id and this matches at most one spawn — independent of the
+    /// working directory, so spawns sharing a `cwd` still correlate correctly.
+    pub fn take_pending_for_session(&mut self, id: &SessionId) -> Option<PendingSpawn> {
+        let idx = self.pending.iter().position(|p| &p.session_id == id)?;
         Some(self.pending.remove(idx))
+    }
+
+    /// The Delta-minted session ids of all currently-pending spawns, in order.
+    ///
+    /// Test-only seam: the production minted id is a random UUID a test cannot
+    /// predict, so binding tests read it back here to fire the matching hook.
+    #[cfg(test)]
+    pub(crate) fn pending_session_ids(&self) -> Vec<SessionId> {
+        self.pending.iter().map(|p| p.session_id.clone()).collect()
     }
 
     /// Drop the pending spawn with this token, if present.
