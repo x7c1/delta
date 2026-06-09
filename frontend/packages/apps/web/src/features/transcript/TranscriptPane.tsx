@@ -366,20 +366,27 @@ export function TranscriptPane({
 
       {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
-        // Vary the block's top and bottom gap by message kind; user messages are
-        // unchanged. An assistant prose turn gets a little more room below it,
-        // while a tool-execution turn (one carrying a `tool_use` block, e.g. a
-        // Bash call) is tightened on both top and bottom so chained tool steps
-        // group closely.
-        const isToolTurn =
-          message.role === 'assistant' &&
-          message.content.some((block) => block.type === 'tool_use');
-        const topGap =
-          message.role === 'user' ? 'pt-2' : isToolTurn ? 'pt-0.5' : 'pt-1.5';
-        const bottomGap =
-          message.role === 'user' ? 'pb-1' : isToolTurn ? 'pb-0.5' : 'pb-2';
-        // Inset a tool-execution turn (left + right margin) so it reads as a
-        // nested step and sits in a narrower column than prose.
+        // A "tool" message renders as a Collapsible card: an assistant tool call
+        // (`tool_use`) or a standalone tool result (`tool_result` — paired
+        // results are already dropped as empty-rendering, so any that survive are
+        // orphans Claude delivers as `role: user`). These are tightened and
+        // left-indented so they read as nested steps, distinct from prose. The
+        // check comes before the user/prose split so an orphan tool_result is
+        // treated as a tool card, not a user turn.
+        const isToolTurn = message.content.some(
+          (block) => block.type === 'tool_use' || block.type === 'tool_result',
+        );
+        const topGap = isToolTurn
+          ? 'pt-0.5'
+          : message.role === 'user'
+            ? 'pt-2'
+            : 'pt-1.5';
+        const bottomGap = isToolTurn
+          ? 'pb-0.5'
+          : message.role === 'user'
+            ? 'pb-1'
+            : 'pb-2';
+        // Inset a tool message (left margin) so it reads as a nested step.
         const indent = isToolTurn ? 'ml-6 mr-0' : '';
         return (
           // One block per message: the message and its sub-thread chips. The
