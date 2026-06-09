@@ -63,10 +63,10 @@ export function applySessionEvent(
       // Direct-pane input lands on the focused session's active thread. The
       // marker is recorded only for the focused session so a background
       // session's typing never surfaces on the transcript the user is viewing.
-      if (isFocused && activeThreadId !== null) {
+      if (isFocused && focusedSessionId !== null && activeThreadId !== null) {
         invalidateThreadMessages(queryClient, activeThreadId);
         store.bumpUnread(activeThreadId);
-        store.noteExternalInput(activeThreadId, event.prompt);
+        store.noteExternalInput(focusedSessionId, activeThreadId, event.prompt);
       }
       break;
     case 'transcript_updated':

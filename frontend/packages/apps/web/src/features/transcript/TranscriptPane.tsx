@@ -67,7 +67,11 @@ export function TranscriptPane({
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
-  const externalInput = useLiveStore((state) => state.externalInput);
+  // The focused session's external-input marker, if any. Keyed per session like
+  // the permission notice; visibility is further gated to the active thread below.
+  const externalInput = useLiveStore((state) =>
+    activeThread ? state.externalInput[activeThread.session_id] ?? null : null,
+  );
   // Whether the focused (closed) session just failed to resume because its
   // transcript is gone; drives the inline "cannot be resumed" notice.
   const resumeUnavailable = useLiveStore((state) =>
@@ -79,6 +83,9 @@ export function TranscriptPane({
     activeThread ? state.permission[activeThread.session_id] ?? null : null,
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
+  const dismissExternalInput = useLiveStore(
+    (state) => state.dismissExternalInput,
+  );
 
   // The sub-thread chip currently hovered; its text is highlighted in the body.
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
@@ -310,15 +317,26 @@ export function TranscriptPane({
           </div>
         )}
 
-        {showExternalInput && (
+        {showExternalInput && activeThread && (
           <div
-            className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+            className="space-y-1 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
             data-testid="external-input-notice"
           >
-            <Badge tone="info">external input</Badge>
-            <span className="line-clamp-2 text-slate-700">
-              {externalInput.prompt}
-            </span>
+            <div className="flex items-start gap-2">
+              <Badge tone="info">external input</Badge>
+              <span className="line-clamp-2 text-slate-700">
+                {externalInput.prompt}
+              </span>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => dismissExternalInput(activeThread.session_id)}
+              >
+                Dismiss
+              </Button>
+            </div>
           </div>
         )}
 

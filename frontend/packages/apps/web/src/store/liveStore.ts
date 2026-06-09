@@ -60,8 +60,16 @@ export interface LiveState {
   permission: Record<SessionId, PermissionNotice>;
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
   unread: Record<ThreadId, number>;
-  /** The most recent external (direct-pane) input, shown on the last active thread. */
-  externalInput: ExternalInputMarker | null;
+  /**
+   * External (direct-pane) input markers keyed by the session they landed on.
+   * Someone typing straight into a session's embedded terminal (rather than
+   * sending through the composer) surfaces an inline notice above the composer.
+   * Like {@link permission}, the marker is per-session and cleared on dismiss,
+   * when the session's turn completes, and when the session closes — otherwise
+   * the notice would linger forever once shown. The retained `threadId` lets the
+   * transcript pane gate visibility to the focused thread.
+   */
+  externalInput: Record<SessionId, ExternalInputMarker>;
   /**
    * Sessions a Send/open just failed to resume because their transcript is gone
    * (the server's `resume_unavailable`). The focused session's presence here
@@ -102,10 +110,16 @@ export interface LiveState {
   clearPending: () => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
-  /** Record an external (direct-pane) input marker on a thread. */
-  noteExternalInput: (threadId: ThreadId, prompt: string) => void;
+  /** Record an external (direct-pane) input marker for a session/thread. */
+  noteExternalInput: (
+    sessionId: SessionId,
+    threadId: ThreadId,
+    prompt: string,
+  ) => void;
   /** Dismiss the permission notice for a session. */
   dismissPermission: (sessionId: SessionId) => void;
+  /** Dismiss the external-input notice for a session. */
+  dismissExternalInput: (sessionId: SessionId) => void;
   /**
    * Apply a live session event, mutating only session-scoped ephemeral state
    * (the pending FIFO, permission notice). Focus-dependent signals (the
@@ -145,7 +159,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   pending: [],
   permission: {},
   unread: {},
-  externalInput: null,
+  externalInput: {},
   resumeUnavailable: {},
 
   setConnection: (status) => set({ connection: status }),
@@ -215,8 +229,13 @@ export const useLiveStore = create<LiveState>((set) => ({
       return { unread: next };
     }),
 
-  noteExternalInput: (threadId, prompt) =>
-    set({ externalInput: { threadId, prompt, at: Date.now() } }),
+  noteExternalInput: (sessionId, threadId, prompt) =>
+    set((state) => ({
+      externalInput: {
+        ...state.externalInput,
+        [sessionId]: { threadId, prompt, at: Date.now() },
+      },
+    })),
 
   dismissPermission: (sessionId) =>
     set((state) => {
@@ -226,6 +245,16 @@ export const useLiveStore = create<LiveState>((set) => ({
       const permission = { ...state.permission };
       delete permission[sessionId];
       return { permission };
+    }),
+
+  dismissExternalInput: (sessionId) =>
+    set((state) => {
+      if (!state.externalInput[sessionId]) {
+        return state;
+      }
+      const externalInput = { ...state.externalInput };
+      delete externalInput[sessionId];
+      return { externalInput };
     }),
 
   applyEvent: (event) =>
@@ -274,6 +303,13 @@ export const useLiveStore = create<LiveState>((set) => ({
             delete permission[event.session_id];
             next.permission = permission;
           }
+          // The turn ended, so any external-input notice for this session has
+          // served its purpose — clear it (mirrors the permission clear above).
+          if (state.externalInput[event.session_id]) {
+            const externalInput = { ...state.externalInput };
+            delete externalInput[event.session_id];
+            next.externalInput = externalInput;
+          }
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':
@@ -308,14 +344,20 @@ export const useLiveStore = create<LiveState>((set) => ({
         }
         case 'session_closed': {
           // Closed state itself is reflected by the sessions query. But a closed
-          // session has no live process, so any permission prompt for it is moot
-          // — clear it.
-          if (!state.permission[event.session_id]) {
-            return state;
+          // session has no live process, so any permission prompt or stale
+          // external-input notice for it is moot — clear both.
+          const next: Partial<LiveState> = {};
+          if (state.permission[event.session_id]) {
+            const permission = { ...state.permission };
+            delete permission[event.session_id];
+            next.permission = permission;
           }
-          const permission = { ...state.permission };
-          delete permission[event.session_id];
-          return { permission };
+          if (state.externalInput[event.session_id]) {
+            const externalInput = { ...state.externalInput };
+            delete externalInput[event.session_id];
+            next.externalInput = externalInput;
+          }
+          return Object.keys(next).length > 0 ? next : state;
         }
         default:
           return state;

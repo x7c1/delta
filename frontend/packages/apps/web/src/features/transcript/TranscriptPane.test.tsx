@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -43,7 +43,7 @@ describe('TranscriptPane', () => {
     useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
     useLiveStore.setState({
       pending: [],
-      externalInput: null,
+      externalInput: {},
       resumeUnavailable: {},
     });
     useComposerStore.setState({ drafts: {}, branchOrigin: null });
@@ -151,7 +151,7 @@ describe('TranscriptPane', () => {
     // read-only viewer with a pinned notice. The history stays readable.
     useLiveStore.setState({
       pending: [],
-      externalInput: null,
+      externalInput: {},
       resumeUnavailable: { [SESSION_ID]: true },
     });
 
@@ -174,7 +174,9 @@ describe('TranscriptPane', () => {
     useLiveStore.setState({
       pending: [],
       resumeUnavailable: {},
-      externalInput: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
+      externalInput: {
+        [SESSION_ID]: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
+      },
     });
 
     renderPane();
@@ -184,5 +186,27 @@ describe('TranscriptPane', () => {
     );
     const notice = screen.getByTestId('external-input-notice');
     expect(notice).toHaveTextContent('typed in the pane');
+  });
+
+  it('dismisses the external-input notice via its Dismiss button', async () => {
+    useLiveStore.setState({
+      pending: [],
+      resumeUnavailable: {},
+      externalInput: {
+        [SESSION_ID]: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
+      },
+    });
+
+    renderPane();
+
+    const notice = await screen.findByTestId('external-input-notice');
+    fireEvent.click(
+      within(notice).getByRole('button', { name: 'Dismiss' }),
+    );
+
+    expect(
+      screen.queryByTestId('external-input-notice'),
+    ).not.toBeInTheDocument();
+    expect(useLiveStore.getState().externalInput).toEqual({});
   });
 });

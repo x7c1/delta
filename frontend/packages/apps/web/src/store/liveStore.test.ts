@@ -7,7 +7,7 @@ function reset() {
     pending: [],
     permission: {},
     unread: {},
-    externalInput: null,
+    externalInput: {},
   });
 }
 
@@ -235,14 +235,67 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().permission).toEqual({});
   });
 
-  it('records an external-input marker on a thread', () => {
+  it('records an external-input marker keyed by session and clears it on dismiss', () => {
     // The focus guard lives in the router (`applySessionEvent`); the store
-    // action just records the marker for whichever thread it is given.
-    useLiveStore.getState().noteExternalInput(3, 'typed');
-    expect(useLiveStore.getState().externalInput).toMatchObject({
+    // action just records the marker for whichever session/thread it is given.
+    useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
+    expect(useLiveStore.getState().externalInput['sess-1']).toMatchObject({
       threadId: 3,
       prompt: 'typed',
     });
+
+    useLiveStore.getState().dismissExternalInput('sess-1');
+    expect(useLiveStore.getState().externalInput).toEqual({});
+  });
+
+  it('keeps external-input markers for different sessions independent', () => {
+    const store = useLiveStore.getState();
+    store.noteExternalInput('sess-1', 1, 'one');
+    store.noteExternalInput('sess-2', 2, 'two');
+
+    // Dismissing one session leaves the other's marker intact.
+    useLiveStore.getState().dismissExternalInput('sess-1');
+    expect(useLiveStore.getState().externalInput).toMatchObject({
+      'sess-2': { threadId: 2, prompt: 'two' },
+    });
+    expect(useLiveStore.getState().externalInput['sess-1']).toBeUndefined();
+  });
+
+  it('clears a session external-input marker when its turn completes', () => {
+    useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    // The turn ended, so the external-input notice has served its purpose.
+    expect(useLiveStore.getState().externalInput).toEqual({});
+  });
+
+  it('leaves a foreign session external-input marker on turn_completed', () => {
+    useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
+
+    // A turn completing in a different session must not clear sess-1's marker.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-2',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().externalInput['sess-1']).toMatchObject({
+      threadId: 3,
+      prompt: 'typed',
+    });
+  });
+
+  it('clears a session external-input marker when the session closes', () => {
+    useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().externalInput).toEqual({});
   });
 
   it('does not set an external-input marker straight from applyEvent', () => {
@@ -253,7 +306,7 @@ describe('liveStore.applyEvent', () => {
       session_id: 'sess-1',
       prompt: 'typed',
     });
-    expect(useLiveStore.getState().externalInput).toBeNull();
+    expect(useLiveStore.getState().externalInput).toEqual({});
   });
 
   it('bumps and clears unread counts', () => {

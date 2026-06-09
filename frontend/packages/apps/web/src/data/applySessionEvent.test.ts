@@ -12,7 +12,7 @@ describe('applySessionEvent', () => {
       pending: [],
       permission: {},
       unread: {},
-      externalInput: null,
+      externalInput: {},
     });
   });
 
@@ -82,7 +82,11 @@ describe('applySessionEvent', () => {
     );
 
     expect(useLiveStore.getState().unread[9]).toBe(1);
-    expect(useLiveStore.getState().externalInput?.prompt).toBe('typed');
+    // The marker is keyed by the focused session.
+    expect(useLiveStore.getState().externalInput[FOCUSED]).toMatchObject({
+      threadId: 9,
+      prompt: 'typed',
+    });
   });
 
   it('ignores external_input for a non-focused session', () => {
@@ -97,7 +101,7 @@ describe('applySessionEvent', () => {
     // A background session's typing must not badge or surface on the focused
     // transcript (regression: the marker used to be set unconditionally).
     expect(useLiveStore.getState().unread[9]).toBeUndefined();
-    expect(useLiveStore.getState().externalInput).toBeNull();
+    expect(useLiveStore.getState().externalInput).toEqual({});
   });
 
   it('invalidates the affected threads on transcript_updated without touching the FIFO', () => {
