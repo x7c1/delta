@@ -55,6 +55,17 @@ export function defaultScript(): SessionEvent[] {
     // open/close lifecycle the navigator's indicator reflects.
     { kind: 'session_opened', session_id: SESSION_ID_2 },
     { kind: 'session_closed', session_id: SESSION_ID_2 },
+    // A final permission request with no turn_completed after it, so the
+    // per-session permission UI stays visible in mock mode for development: the
+    // notice pinned above the focused session's composer and the "permission"
+    // badge on its navigator row. (The earlier request above is resolved by its
+    // turn_completed, demonstrating the request → resolve flow.)
+    {
+      kind: 'permission_requested',
+      session_id: SESSION_ID,
+      request_id: 2,
+      tool_name: 'Bash',
+    },
   ];
 }
 
