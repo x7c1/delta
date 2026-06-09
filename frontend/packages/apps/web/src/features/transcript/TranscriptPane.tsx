@@ -363,12 +363,22 @@ export function TranscriptPane({
 
       {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
+        // Vary only the block's BOTTOM gap by message kind; the top stays
+        // constant and user messages are unchanged. An assistant prose turn gets
+        // a little more room below it, but a tool-execution turn (one carrying a
+        // `tool_use` block, e.g. a Bash call) is tightened so chained tool steps
+        // read as a tighter group.
+        const isToolTurn =
+          message.role === 'assistant' &&
+          message.content.some((block) => block.type === 'tool_use');
+        const bottomGap =
+          message.role === 'user' ? 'pb-2.5' : isToolTurn ? 'pb-1.5' : 'pb-3.5';
         return (
           // One block per message: the message and its sub-thread chips. The
-          // block owns the vertical rhythm (py-2.5 here, not on the message), so
-          // adjacent messages are separated by a consistent gap while the chips
-          // hug their parent message just below it (see their small pt).
-          <div key={message.uuid} className="py-2.5">
+          // block owns the vertical rhythm (not the message article), so adjacent
+          // messages are separated by a consistent gap while the chips hug their
+          // parent message just below it (see their small pt).
+          <div key={message.uuid} className={`pt-2.5 ${bottomGap}`}>
             <MessageItem
               message={message}
               pairing={pairing}
