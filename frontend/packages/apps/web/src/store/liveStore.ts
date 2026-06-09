@@ -49,7 +49,15 @@ export interface LiveState {
   connection: ConnectionStatus;
   /** FIFO of optimistic sends, oldest first. */
   pending: PendingItem[];
-  permission: PermissionNotice | null;
+  /**
+   * Permission requests keyed by the session blocked on them. A tool's
+   * PreToolUse hook blocks that session until the prompt is answered in its
+   * terminal, so the notice is per-session: the focused session's drives the
+   * inline notice above the composer, and any session's drives a badge on its
+   * navigator row. Cleared on dismiss, when the session's turn completes, and
+   * when the session closes.
+   */
+  permission: Record<SessionId, PermissionNotice>;
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
   unread: Record<ThreadId, number>;
   /** The most recent external (direct-pane) input, shown on the last active thread. */
@@ -96,7 +104,8 @@ export interface LiveState {
   clearUnread: (threadId: ThreadId) => void;
   /** Record an external (direct-pane) input marker on a thread. */
   noteExternalInput: (threadId: ThreadId, prompt: string) => void;
-  dismissPermission: () => void;
+  /** Dismiss the permission notice for a session. */
+  dismissPermission: (sessionId: SessionId) => void;
   /**
    * Apply a live session event, mutating only session-scoped ephemeral state
    * (the pending FIFO, permission notice). Focus-dependent signals (the
@@ -134,7 +143,7 @@ function matchPendingIndex(
 export const useLiveStore = create<LiveState>((set) => ({
   connection: 'connecting',
   pending: [],
-  permission: null,
+  permission: {},
   unread: {},
   externalInput: null,
   resumeUnavailable: {},
@@ -209,7 +218,15 @@ export const useLiveStore = create<LiveState>((set) => ({
   noteExternalInput: (threadId, prompt) =>
     set({ externalInput: { threadId, prompt, at: Date.now() } }),
 
-  dismissPermission: () => set({ permission: null }),
+  dismissPermission: (sessionId) =>
+    set((state) => {
+      if (!state.permission[sessionId]) {
+        return state;
+      }
+      const permission = { ...state.permission };
+      delete permission[sessionId];
+      return { permission };
+    }),
 
   applyEvent: (event) =>
     set((state) => {
@@ -234,30 +251,39 @@ export const useLiveStore = create<LiveState>((set) => ({
           return { pending };
         }
         case 'turn_completed': {
-          // Drop the oldest active send for THIS session from the visible FIFO.
-          // It may still be `queued` rather than `in_progress`: `turn_started`
-          // only fires when the user line was ingested in the same
-          // `UserPromptSubmit` sync, which often does not happen, so a completed
-          // turn must clear a still-queued send too — otherwise it stays
-          // "waiting" forever. Scoped by session so a turn in one session never
-          // drains another session's queue.
+          // The turn ended, so any permission prompt that was blocking THIS
+          // session is resolved — clear it. Also drop the oldest active send for
+          // this session from the visible FIFO. It may still be `queued` rather
+          // than `in_progress`: `turn_started` only fires when the user line was
+          // ingested in the same `UserPromptSubmit` sync, which often does not
+          // happen, so a completed turn must clear a still-queued send too —
+          // otherwise it stays "waiting" forever. Scoped by session so a turn in
+          // one session never drains another session's queue.
+          const next: Partial<LiveState> = {};
           const idx = matchPendingIndex(
             state.pending,
             event.session_id,
             (item) =>
               item.status === 'in_progress' || item.status === 'queued',
           );
-          if (idx === -1) {
-            return state;
+          if (idx !== -1) {
+            next.pending = state.pending.filter((_, i) => i !== idx);
           }
-          const pending = state.pending.filter((_, i) => i !== idx);
-          return { pending };
+          if (state.permission[event.session_id]) {
+            const permission = { ...state.permission };
+            delete permission[event.session_id];
+            next.permission = permission;
+          }
+          return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':
           return {
             permission: {
-              requestId: event.request_id,
-              toolName: event.tool_name,
+              ...state.permission,
+              [event.session_id]: {
+                requestId: event.request_id,
+                toolName: event.tool_name,
+              },
             },
           };
         case 'external_input':
@@ -280,9 +306,17 @@ export const useLiveStore = create<LiveState>((set) => ({
           delete resumeUnavailable[event.session_id];
           return { resumeUnavailable };
         }
-        case 'session_closed':
-          // Closed state is reflected by the sessions query, not ephemeral here.
-          return state;
+        case 'session_closed': {
+          // Closed state itself is reflected by the sessions query. But a closed
+          // session has no live process, so any permission prompt for it is moot
+          // — clear it.
+          if (!state.permission[event.session_id]) {
+            return state;
+          }
+          const permission = { ...state.permission };
+          delete permission[event.session_id];
+          return { permission };
+        }
         default:
           return state;
       }

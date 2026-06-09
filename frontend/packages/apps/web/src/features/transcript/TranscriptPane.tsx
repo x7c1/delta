@@ -13,7 +13,7 @@ import {
   type ThreadId,
 } from '@delta/model';
 import { useThreadMessagesQuery } from '@delta/api-client';
-import { Badge, Breadcrumb, Chip, Panel } from '@delta/ui-kit';
+import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
@@ -65,6 +65,7 @@ export function TranscriptPane({
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
+  const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const externalInput = useLiveStore((state) => state.externalInput);
   // Whether the focused (closed) session just failed to resume because its
@@ -72,6 +73,12 @@ export function TranscriptPane({
   const resumeUnavailable = useLiveStore((state) =>
     activeThread ? Boolean(state.resumeUnavailable[activeThread.session_id]) : false,
   );
+  // The focused session's pending permission prompt, if any. A tool's PreToolUse
+  // hook blocks that session until it is answered in the terminal.
+  const permission = useLiveStore((state) =>
+    activeThread ? state.permission[activeThread.session_id] ?? null : null,
+  );
+  const dismissPermission = useLiveStore((state) => state.dismissPermission);
 
   // The sub-thread chip currently hovered; its text is highlighted in the body.
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
@@ -265,6 +272,31 @@ export function TranscriptPane({
   } else if (composer) {
     footer = (
       <div className="space-y-2">
+        {permission && activeThread && (
+          <div
+            className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs"
+            data-testid="permission-notice"
+            role="alert"
+          >
+            <p className="font-medium text-amber-800">
+              Permission requested: {permission.toolName}
+            </p>
+            <p className="text-slate-600">Answer the prompt in the terminal.</p>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => setTerminalOpen(true)}>
+                Open terminal
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => dismissPermission(activeThread.session_id)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        )}
+
         {readOnly && !newSession && (
           <div
             className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"

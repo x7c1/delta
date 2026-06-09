@@ -10,7 +10,7 @@ describe('applySessionEvent', () => {
     useLiveStore.setState({
       connection: 'connecting',
       pending: [],
-      permission: null,
+      permission: {},
       unread: {},
       externalInput: null,
     });
@@ -191,8 +191,7 @@ describe('applySessionEvent', () => {
     );
 
     expect(useLiveStore.getState().permission).toEqual({
-      requestId: 2,
-      toolName: 'Edit',
+      [FOCUSED]: { requestId: 2, toolName: 'Edit' },
     });
   });
 });

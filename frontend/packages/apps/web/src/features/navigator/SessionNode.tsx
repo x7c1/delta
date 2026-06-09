@@ -1,7 +1,7 @@
 import type { CSSProperties, Ref } from 'react';
 import type { SessionListItem, ThreadId } from '@delta/model';
 import { useSessionThreadsQuery } from '@delta/api-client';
-import { Menu, StatusDot, cn } from '@delta/ui-kit';
+import { Badge, Menu, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -10,6 +10,13 @@ import { ThreadTree } from './ThreadTree';
 export interface SessionNodeProps {
   item: SessionListItem;
   isFocused: boolean;
+  /**
+   * Whether this session has a pending permission request (a tool blocked on a
+   * prompt in its terminal). Surfaced as a badge so a request on a non-focused
+   * session is discoverable from the list; the actionable notice lives in the
+   * session's conversation pane.
+   */
+  needsPermission?: boolean;
   onFocus: () => void;
   onClose: () => void;
   /**
@@ -58,6 +65,7 @@ function sessionLabel(item: SessionListItem): string {
 export function SessionNode({
   item,
   isFocused,
+  needsPermission = false,
   onFocus,
   onClose,
   rowRef,
@@ -134,6 +142,11 @@ export function SessionNode({
               >
                 {label}
               </span>
+              {needsPermission && (
+                <span className="shrink-0" data-testid="session-permission-badge">
+                  <Badge tone="warning">permission</Badge>
+                </span>
+              )}
             </span>
             {/* Right-aligned so the timestamp column stays aligned across rows. */}
             {lastActivity && (
