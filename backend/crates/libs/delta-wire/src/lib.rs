@@ -29,9 +29,9 @@ pub type AppInteractor = BoxedInteractor;
 /// Default name of Delta's dedicated tmux socket (`tmux -L <socket>`).
 ///
 /// Delta runs its sessions on their own tmux server so they are isolated from
-/// the user's default tmux server — no clutter in the user's `tmux ls`, and
-/// Delta can set server-wide options (e.g. `focus-events off`) without changing
-/// the user's other sessions.
+/// the user's default tmux server — no clutter in the user's `tmux ls`, and the
+/// server starts with Delta's own fixed config (via `tmux -f`) instead of the
+/// user's `~/.tmux.conf`, so the embedded pane is identical on every machine.
 pub const DEFAULT_TMUX_SOCKET: &str = "delta";
 
 /// Runtime configuration for the composition root.
