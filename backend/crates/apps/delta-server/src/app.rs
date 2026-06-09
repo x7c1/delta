@@ -27,6 +27,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/threads", get(api::list_threads))
         .route("/api/threads/{id}/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
+        // Working-directory picker: browse and recents (read-only).
+        .route("/api/workdir/list", get(api::list_workdir))
+        .route("/api/workdir/recent", get(api::recent_workdir))
         // Browser event stream.
         .route("/ws", get(ws::ws_handler))
         // Terminal bridge to the tmux pane.
@@ -113,6 +116,67 @@ mod tests {
         // No pending send queued, so nothing is injected: the handler returns a
         // plain 200 with an empty body rather than a `hookSpecificOutput`.
         assert!(bytes.is_empty(), "no context to inject, so no body");
+    }
+
+    #[tokio::test]
+    async fn workdir_list_browses_a_real_directory() {
+        // Browse a temp directory containing one subdirectory and one file:
+        // only the subdirectory should appear.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("child")).unwrap();
+        std::fs::write(dir.path().join("a-file"), "x").unwrap();
+
+        // tempdir paths contain no query-reserved characters, so they need no
+        // percent-encoding for this test.
+        let uri = format!("/api/workdir/list?path={}", dir.path().to_str().unwrap());
+        let response = router(test_state())
+            .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let entries = body["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "dirs only, files excluded");
+        assert_eq!(entries[0]["name"], "child");
+        assert!(body["parent"].is_string(), "a non-root dir has a parent");
+    }
+
+    #[tokio::test]
+    async fn workdir_list_rejects_a_missing_path_with_400() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workdir/list?path=/no/such/path/here")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn workdir_recent_returns_an_empty_list_when_no_sessions() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workdir/recent")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body["workdirs"].as_array().unwrap().len(),
+            0,
+            "no sessions yet means no recent workdirs"
+        );
     }
 
     #[tokio::test]

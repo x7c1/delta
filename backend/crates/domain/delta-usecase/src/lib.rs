@@ -22,8 +22,9 @@ pub use interactor::{BoxedInteractor, Interactor};
 pub use open_sessions::{OpenHandle, OpenSessions, PendingSpawn};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    pane_for, NewSession, SessionEvent, SessionLifecycle, SessionPageRow, SessionStore, StopHook,
-    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
+    pane_for, DirEntry, DirListing, NewSession, RecentWorkdir, SessionEvent, SessionLifecycle,
+    SessionPageRow, SessionStore, StopHook, TmuxDriver, Transcript, TranscriptMessage,
+    TranscriptRead, UserPromptSubmitHook, Workspace,
 };
 pub use send_target::SendTarget;
 pub use session_listing::SessionListing;

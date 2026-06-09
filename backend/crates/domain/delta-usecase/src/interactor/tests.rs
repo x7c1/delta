@@ -98,10 +98,24 @@ impl TmuxDriver for FakeTmux {
 }
 
 /// Records the session settings written, so tests can assert the path and the
-/// rendered JSON the server passed in.
+/// rendered JSON the server passed in. Also models a small set of "existing"
+/// directories so the workdir-validation path can be exercised: a resolvable
+/// path is returned canonicalized (here, prefixed with `/canon` so a test can
+/// tell the canonical form apart from the input), anything else is an
+/// `InvalidWorkdir`.
 #[derive(Default)]
 struct FakeWorkspace {
     written: Mutex<Vec<(String, String)>>,
+    /// Paths that "exist" as directories; `resolve_existing_dir` accepts these.
+    existing_dirs: Mutex<Vec<String>>,
+}
+
+impl FakeWorkspace {
+    /// The canonical form this fake assigns to a resolvable directory, so tests
+    /// can assert the *canonical* path (not the raw input) reaches the launch.
+    fn canonical(path: &str) -> String {
+        format!("/canon{path}")
+    }
 }
 
 #[async_trait]
@@ -116,6 +130,26 @@ impl Workspace for FakeWorkspace {
             .unwrap()
             .push((settings_path.to_owned(), settings_json.to_owned()));
         Ok(())
+    }
+
+    async fn resolve_existing_dir(&self, path: &str) -> Result<String> {
+        if self.existing_dirs.lock().unwrap().iter().any(|d| d == path) {
+            Ok(Self::canonical(path))
+        } else {
+            Err(crate::error::Error::InvalidWorkdir(format!(
+                "{path}: no such directory"
+            )))
+        }
+    }
+
+    async fn list_dirs(&self, path: &str) -> Result<crate::ports::DirListing> {
+        // A minimal listing: only used to exercise the browse use case's default
+        // and delegation. The path is canonicalized like `resolve_existing_dir`.
+        Ok(crate::ports::DirListing {
+            path: Self::canonical(path),
+            parent: None,
+            entries: Vec::new(),
+        })
     }
 }
 
@@ -302,6 +336,38 @@ impl SessionStore for FakeStore {
             .find(|t| &t.session_id == session_id && t.title == "main")
             .unwrap()
             .id)
+    }
+
+    async fn recent_workdirs(&self, limit: u32) -> Result<Vec<crate::ports::RecentWorkdir>> {
+        let g = self.inner.lock().unwrap();
+        // Per-session recency: latest message, else the session's created_at.
+        // A cwd's recency is the max across its sessions. Then distinct cwds,
+        // most recent first.
+        let mut by_cwd: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for s in &g.sessions {
+            let recency = g
+                .messages
+                .iter()
+                .filter(|m| m.session_id == s.id)
+                .map(|m| m.created_at.clone())
+                .max()
+                .unwrap_or_else(|| s.created_at.clone());
+            by_cwd
+                .entry(s.cwd.clone())
+                .and_modify(|cur| {
+                    if recency > *cur {
+                        *cur = recency.clone();
+                    }
+                })
+                .or_insert(recency);
+        }
+        let mut rows: Vec<(String, Option<String>)> = by_cwd
+            .into_iter()
+            .map(|(cwd, recency)| (cwd, Some(recency)))
+            .collect();
+        rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        rows.truncate(limit as usize);
+        Ok(rows)
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {
@@ -1919,7 +1985,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     // No session exists yet. The send spawns a fresh session and returns a
     // synthetic (not-yet-persisted) pending row.
     let returned = ix
-        .enqueue_send(SendTarget::NewSession, "first message", None)
+        .enqueue_send(SendTarget::NewSession { workdir: None }, "first message", None)
         .await
         .unwrap();
     assert_eq!(returned.id, 0, "no row persisted before the spawn binds");
@@ -2002,7 +2068,7 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     // No session yet: the composer-first send spawns, then fails to type the
     // prompt into the pane. The error propagates.
     let err = ix
-        .enqueue_send(SendTarget::NewSession, "first message", None)
+        .enqueue_send(SendTarget::NewSession { workdir: None }, "first message", None)
         .await
         .expect_err("a failed first-prompt dispatch must propagate");
     assert!(matches!(err, Error::Tmux(_)));
@@ -2853,6 +2919,139 @@ async fn spawn_skips_tmux_session_names_already_in_use() {
     assert_eq!(created.len(), 1, "exactly one session was created");
     assert_eq!(created[0].name, "delta-3", "created under the free name");
     assert_eq!(created[0].workdir, "/work/delta-3", "<base>/<free token>");
+}
+
+/// A composer-first send carrying a validated user-selected workdir launches
+/// the fresh session in that directory's *canonical* path, not the default
+/// `<base>/<token>`.
+#[tokio::test]
+async fn new_session_with_valid_workdir_launches_there() {
+    let ix = interactor();
+    // Mark the chosen directory as existing so validation succeeds.
+    ix.workspace_fake()
+        .existing_dirs
+        .lock()
+        .unwrap()
+        .push("/projects/app".to_owned());
+
+    ix.enqueue_send(
+        SendTarget::NewSession {
+            workdir: Some("/projects/app".to_owned()),
+        },
+        "hello",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    assert_eq!(created.len(), 1, "one session spawned");
+    assert_eq!(
+        created[0].workdir,
+        FakeWorkspace::canonical("/projects/app"),
+        "the launch dir is the canonical user-selected path, not <base>/<token>"
+    );
+}
+
+/// A composer-first send with no workdir keeps today's behaviour: the session
+/// launches in the default per-token `<base>/<token>` directory.
+#[tokio::test]
+async fn new_session_without_workdir_falls_back_to_base_token() {
+    let ix = interactor();
+
+    ix.enqueue_send(SendTarget::NewSession { workdir: None }, "hello", None)
+        .await
+        .unwrap();
+
+    let created = ix.tmux_fake().created.lock().unwrap().clone();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].workdir, "/work/delta-1", "<base>/<token>");
+}
+
+/// An invalid user-selected workdir is rejected before anything is spawned: the
+/// send returns `InvalidWorkdir`, no tmux session is created, no settings are
+/// written, and no pending spawn is left behind to bind later.
+#[tokio::test]
+async fn new_session_with_invalid_workdir_spawns_nothing() {
+    let ix = interactor();
+    // `/nope` is not in `existing_dirs`, so validation fails.
+
+    let err = ix
+        .enqueue_send(
+            SendTarget::NewSession {
+                workdir: Some("/nope".to_owned()),
+            },
+            "hello",
+            None,
+        )
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, crate::error::Error::InvalidWorkdir(_)),
+        "an invalid workdir is rejected as InvalidWorkdir, got {err:?}"
+    );
+    assert!(
+        ix.tmux_fake().created.lock().unwrap().is_empty(),
+        "no pane is created for an invalid workdir"
+    );
+    assert!(
+        ix.workspace_fake().written.lock().unwrap().is_empty(),
+        "settings are not written when validation fails first"
+    );
+    assert!(
+        ix.pending_session_ids().await.is_empty(),
+        "no pending spawn is recorded for an invalid workdir"
+    );
+}
+
+/// `browse_workdir` defaults to `$HOME` when no path is given and delegates to
+/// the workspace port's listing.
+#[tokio::test]
+async fn browse_workdir_defaults_to_home() {
+    let ix = interactor();
+    // Pin HOME for a deterministic default.
+    std::env::set_var("HOME", "/home/tester");
+
+    let listing = ix.browse_workdir(None).await.unwrap();
+    assert_eq!(
+        listing.path,
+        FakeWorkspace::canonical("/home/tester"),
+        "an absent path browses $HOME"
+    );
+
+    // An explicit path is used verbatim (then canonicalized by the port).
+    let explicit = ix.browse_workdir(Some("/srv")).await.unwrap();
+    assert_eq!(explicit.path, FakeWorkspace::canonical("/srv"));
+}
+
+/// `recent_workdirs` surfaces the distinct cwds from the store, most-recent
+/// first.
+#[tokio::test]
+async fn recent_workdirs_lists_distinct_session_cwds() {
+    let ix = interactor();
+    // Register two sessions with distinct cwds via the store directly.
+    ix.store()
+        .register_session(NewSession {
+            id: SessionId::from("s-1"),
+            cwd: "/projects/a".into(),
+            transcript_path: "/tmp/a.jsonl".into(),
+        })
+        .await
+        .unwrap();
+    ix.store()
+        .register_session(NewSession {
+            id: SessionId::from("s-2"),
+            cwd: "/projects/b".into(),
+            transcript_path: "/tmp/b.jsonl".into(),
+        })
+        .await
+        .unwrap();
+
+    let recent = ix.recent_workdirs().await.unwrap();
+    let mut paths: Vec<&str> = recent.iter().map(|(p, _)| p.as_str()).collect();
+    paths.sort();
+    assert_eq!(paths, vec!["/projects/a", "/projects/b"]);
 }
 
 // Helper accessors used only in tests to reach into the fakes the interactor owns.

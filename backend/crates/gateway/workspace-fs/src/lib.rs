@@ -1,9 +1,9 @@
 //! Filesystem-backed [`delta_usecase::Workspace`] implementation.
 //!
-//! [`FsWorkspace`] prepares the Claude Code session working directory on disk:
-//! it creates `<workdir>/.claude/` and writes the server-rendered
-//! `settings.json` there so Claude Code's HTTP hooks point back at the running
-//! server.
+//! [`FsWorkspace`] writes the server-rendered `settings.json` to a Delta-owned
+//! path (so Claude Code's HTTP hooks point back at the running server) and
+//! serves the read-only filesystem queries a directory picker needs: validating
+//! a user-selected session working directory and browsing local subdirectories.
 
 mod error;
 mod workspace;

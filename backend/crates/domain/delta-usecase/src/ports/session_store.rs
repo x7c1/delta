@@ -15,6 +15,14 @@ use crate::session_page::SessionPageCursor;
 /// page query so the usecase needs no per-row follow-up lookup.
 pub type SessionPageRow = (Session, Option<String>);
 
+/// One recently-used working directory: its absolute `cwd` and the timestamp of
+/// the latest activity in any session that used it (`MAX(message.created_at)`,
+/// falling back to the session's `created_at`; `None` only when a contributing
+/// session is itself message-less and has a null `created_at`, which does not
+/// occur in practice). Derived from the `session.cwd` column — Delta keeps no
+/// separate working-directory history.
+pub type RecentWorkdir = (String, Option<String>);
+
 /// Persists and queries Delta's thread overlay.
 ///
 /// This is the irreplaceable data: thread assignment, the semantic-parent
@@ -53,6 +61,18 @@ pub trait SessionStore: Send + Sync {
 
     /// The id of a session's trunk (`main`) thread.
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId>;
+
+    /// The distinct working directories sessions have run in, most-recently-used
+    /// first, capped at `limit`.
+    ///
+    /// Derived from the `session.cwd` column (Delta keeps no separate
+    /// working-directory history): one row per distinct `cwd`, ordered by the
+    /// most recent activity of any session that used it. The recency key is the
+    /// same one the session list uses — `MAX(message.created_at)` over the
+    /// sessions sharing that `cwd`, falling back to their `created_at` — so a
+    /// directory's place reflects when it was last actually worked in. Each row
+    /// carries that recency timestamp for display.
+    async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>>;
 
     /// Look up a thread by id.
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>>;
@@ -168,6 +188,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn main_thread_id(&self, session_id: &SessionId) -> Result<ThreadId> {
         (**self).main_thread_id(session_id).await
+    }
+
+    async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>> {
+        (**self).recent_workdirs(limit).await
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {

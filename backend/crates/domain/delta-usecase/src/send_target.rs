@@ -29,5 +29,11 @@ pub enum SendTarget {
     /// the first `UserPromptSubmit` hook binds the spawn. Any `locator_quote` is
     /// ignored — a brand-new session has no earlier passage to anchor — so the
     /// deferred first prompt carries no quote.
-    NewSession,
+    NewSession {
+        /// The working directory the session should launch in. When `Some`, it
+        /// is a user-selected path validated (and canonicalized) before launch;
+        /// when `None`, the session uses its default per-spawn `<base>/<token>`
+        /// directory.
+        workdir: Option<String>,
+    },
 }

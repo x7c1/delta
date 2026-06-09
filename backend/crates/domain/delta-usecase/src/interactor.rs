@@ -6,8 +6,8 @@ use crate::error::{Error, Result};
 use crate::open_sessions::{OpenHandle, OpenSessions, PendingSpawn};
 use crate::pane_token::{PaneToken, PaneTokenMinter};
 use crate::ports::{
-    pane_for, NewSession, SessionEvent, SessionLifecycle, SessionStore, StopHook, TmuxDriver,
-    Transcript, UserPromptSubmitHook, Workspace,
+    pane_for, DirListing, NewSession, RecentWorkdir, SessionEvent, SessionLifecycle, SessionStore,
+    StopHook, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
 };
 use crate::send_target::SendTarget;
 use crate::session_listing::SessionListing;
@@ -15,6 +15,9 @@ use crate::session_page::{SessionPage, SessionPageCursor};
 
 /// The command Delta launches in each tmux session.
 const SESSION_COMMAND: &str = "claude";
+
+/// How many recently-used working directories the picker's "recent" list returns.
+const RECENT_WORKDIRS_LIMIT: u32 = 20;
 
 /// The `--resume` flag passed to `claude` to reattach to a stored conversation.
 const RESUME_FLAG: &str = "--resume";
@@ -221,7 +224,7 @@ where
     /// no `first_prompt`). The conversational session id is learned later when
     /// the first `UserPromptSubmit` hook binds this spawn.
     pub async fn new_session(&self) -> Result<PaneToken> {
-        self.spawn_fresh(None).await
+        self.spawn_fresh(None, None).await
     }
 
     /// Resume a closed but known session under a fresh tmux session.
@@ -336,9 +339,9 @@ where
     /// Spawn a fresh session, optionally dispatching a first prompt.
     ///
     /// Mints a token and a fresh Claude `session_id` (a time-ordered UUID v7, so
-    /// session ids sort chronologically by creation time), creates the
-    /// `<base>/<token>` workdir with settings written, launches
-    /// `claude --settings <path> --session-id <uuid>` there, and records a
+    /// session ids sort chronologically by creation time), launches
+    /// `claude --settings <path> --session-id <uuid>` in the launch directory,
+    /// and records a
     /// [`PendingSpawn`] carrying that minted id (the binding key) and
     /// `first_prompt`. Pinning the id up front means the first `UserPromptSubmit`
     /// hook reports exactly this id, so the spawn correlates to its session by id
@@ -355,10 +358,30 @@ where
     /// recorded *before* the first prompt is dispatched, so the
     /// `UserPromptSubmit` that prompt triggers always finds a spawn to bind
     /// rather than racing ahead and being misread as external input.
-    async fn spawn_fresh(&self, first_prompt: Option<String>) -> Result<PaneToken> {
+    ///
+    /// When `workdir` is `Some`, it is a user-selected path: it is validated and
+    /// canonicalized via [`Workspace::resolve_existing_dir`] *before* anything is
+    /// minted or launched, so an invalid path fails cleanly with no token, no
+    /// pane, and no pending spawn left behind (mirroring the resume gate in
+    /// [`Self::open_session`]). When `None`, the spawn falls back to its default
+    /// per-token `<base>/<token>` directory.
+    async fn spawn_fresh(
+        &self,
+        first_prompt: Option<String>,
+        workdir: Option<String>,
+    ) -> Result<PaneToken> {
+        // Validate a user-selected workdir before minting or launching anything,
+        // so an invalid path is rejected with no side effects. The canonical
+        // path becomes the launch directory; `None` defers to `<base>/<token>`
+        // computed after the token is minted, below.
+        let requested_workdir = match workdir {
+            Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
+            None => None,
+        };
+
         // The minter is atomic, so token uniqueness needs no lock here.
         let token = self.mint_free_token().await?;
-        let workdir = self.workdir_for(&token);
+        let workdir = requested_workdir.unwrap_or_else(|| self.workdir_for(&token));
         let pane = pane_for(token.as_str());
 
         // Mint and pin the conversation's session id up front. `claude
@@ -503,10 +526,12 @@ where
                 )
                 .await
             }
-            SendTarget::NewSession => {
+            SendTarget::NewSession { workdir } => {
                 // No session yet: spawn one with the text deferred as its first
-                // prompt. The real `pending_send` row is written when the first
-                // `UserPromptSubmit` binds the spawn.
+                // prompt, in the user-selected `workdir` when given (validated by
+                // `spawn_fresh` before any pane is created) or the default
+                // per-spawn directory otherwise. The real `pending_send` row is
+                // written when the first `UserPromptSubmit` binds the spawn.
                 //
                 // `locator_quote` is intentionally dropped here, not forwarded to
                 // the spawn: a brand-new session has no earlier passage to anchor,
@@ -514,7 +539,7 @@ where
                 // synthetic response below as a courtesy to the caller, but the
                 // deferred first prompt (and the row written at bind time) carry
                 // no quote.
-                self.spawn_fresh(Some(text.to_owned())).await?;
+                self.spawn_fresh(Some(text.to_owned()), workdir).await?;
                 Ok(deferred_pending_send(text, locator_quote))
             }
         }
@@ -831,6 +856,32 @@ where
             request_id: request.id,
             tool_name: tool_name.to_owned(),
         }])
+    }
+
+    /// Browse the immediate subdirectories of `path` for the directory picker.
+    ///
+    /// Delegates to [`Workspace::list_dirs`], which returns the canonical path,
+    /// its parent, and the immediate subdirectories (dirs only, dot-directories
+    /// excluded, sorted by name). A `None` or empty `path` defaults to the user's
+    /// home directory so the picker has a sensible starting point. A missing
+    /// path, a non-directory, or a permission error surfaces as a clean
+    /// `InvalidWorkdir`/`WorkdirPermission` rather than an internal failure.
+    pub async fn browse_workdir(&self, path: Option<&str>) -> Result<DirListing> {
+        let start = match path {
+            Some(p) if !p.is_empty() => p.to_owned(),
+            _ => home_dir()?,
+        };
+        self.workspace.list_dirs(&start).await
+    }
+
+    /// The recently-used working directories for the picker's "recent" list.
+    ///
+    /// Distinct `session.cwd` values, most-recently-used first, capped at
+    /// [`RECENT_WORKDIRS_LIMIT`]. Derived from existing session rows (Delta keeps
+    /// no separate history), so a directory appears here once any session has run
+    /// in it.
+    pub async fn recent_workdirs(&self) -> Result<Vec<RecentWorkdir>> {
+        self.store.recent_workdirs(RECENT_WORKDIRS_LIMIT).await
     }
 
     /// Every registered session, annotated with its live state and `main` thread.
@@ -1266,6 +1317,20 @@ fn frame_thread_switch_context(prev: ThreadId, cur: ThreadId, root_quote: Option
         ".\nThey are continuing that earlier discussion, not replying to the message immediately above.",
     );
     note
+}
+
+/// The user's home directory, the default starting point for directory browsing.
+///
+/// Read from `HOME`. An absent or empty `HOME` leaves the picker with no
+/// sensible default, so it is reported as an `InvalidWorkdir` rather than
+/// browsing some arbitrary fallback.
+fn home_dir() -> Result<String> {
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => Ok(home),
+        _ => Err(Error::InvalidWorkdir(
+            "HOME is not set; specify a path to browse".to_owned(),
+        )),
+    }
 }
 
 /// Find the transcript uuid for the user line carrying this prompt.

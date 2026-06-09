@@ -231,6 +231,98 @@ async fn last_activity_at_returns_latest_message_timestamp() {
 }
 
 #[tokio::test]
+async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    let session_in = |id: &str, cwd: &str| NewSession {
+        id: id.into(),
+        cwd: cwd.into(),
+        transcript_path: format!("/tmp/{id}.jsonl"),
+    };
+
+    // Three sessions across two distinct cwds. `/projects/b` is used by two
+    // sessions; `/projects/a` by one. Recency is driven by message activity.
+    let (a, a_main) = store
+        .register_session(session_in("sess-a", "/projects/a"))
+        .await
+        .unwrap();
+    let (b1, b1_main) = store
+        .register_session(session_in("sess-b1", "/projects/b"))
+        .await
+        .unwrap();
+    let (b2, b2_main) = store
+        .register_session(session_in("sess-b2", "/projects/b"))
+        .await
+        .unwrap();
+
+    let msg = |session_id: &SessionId, thread, uuid: &str, created_at: &str| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session_id.clone(),
+        thread_id: thread,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: created_at.into(),
+    };
+
+    // `/projects/a` had its latest activity at 00:10; `/projects/b`'s most
+    // recent session (b2) had activity at 00:05. So `/projects/a` is more recent
+    // even though `/projects/b` has more sessions.
+    store
+        .upsert_messages(&[
+            msg(&a.id, a_main, "a-1", "2026-01-01T00:10:00Z"),
+            msg(&b1.id, b1_main, "b1-1", "2026-01-01T00:01:00Z"),
+            msg(&b2.id, b2_main, "b2-1", "2026-01-01T00:05:00Z"),
+        ])
+        .await
+        .unwrap();
+
+    let recent = store.recent_workdirs(10).await.unwrap();
+    let paths: Vec<&str> = recent.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["/projects/a", "/projects/b"],
+        "distinct cwds, most-recently-active first"
+    );
+    // Each cwd carries the max recency across its sessions.
+    assert_eq!(recent[0].1.as_deref(), Some("2026-01-01T00:10:00Z"));
+    assert_eq!(recent[1].1.as_deref(), Some("2026-01-01T00:05:00Z"));
+
+    // The limit caps the result count.
+    let one = store.recent_workdirs(1).await.unwrap();
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].0, "/projects/a");
+}
+
+#[tokio::test]
+async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    // A session with no messages still contributes its cwd, keyed by its own
+    // `created_at`, so a freshly-used directory is listed before any message
+    // lands.
+    let (_s, _main) = store
+        .register_session(NewSession {
+            id: "sess-1".into(),
+            cwd: "/fresh".into(),
+            transcript_path: "/tmp/s.jsonl".into(),
+        })
+        .await
+        .unwrap();
+
+    let recent = store.recent_workdirs(10).await.unwrap();
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].0, "/fresh");
+    assert!(
+        recent[0].1.is_some(),
+        "recency falls back to the session's created_at"
+    );
+}
+
+#[tokio::test]
 async fn upsert_preserves_thread_overlay_on_reingest() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
