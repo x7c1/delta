@@ -199,7 +199,7 @@ export function MessageItem({
   if (isUserTurn) {
     return (
       <article
-        className="flex flex-col items-end px-3 py-2.5 text-sm"
+        className="flex flex-col items-end px-3 text-sm"
         data-role={message.role}
         data-testid="message-item"
       >
@@ -218,7 +218,7 @@ export function MessageItem({
   // Assistant: plain full-width text on the canvas, no background or label.
   return (
     <article
-      className="px-3 py-2.5 text-sm"
+      className="px-3 text-sm"
       data-role={message.role}
       data-testid="message-item"
     >

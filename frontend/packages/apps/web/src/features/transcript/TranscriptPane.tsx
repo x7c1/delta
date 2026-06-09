@@ -364,7 +364,11 @@ export function TranscriptPane({
       {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
         return (
-          <div key={message.uuid}>
+          // One block per message: the message and its sub-thread chips. The
+          // block owns the vertical rhythm (py-2.5 here, not on the message), so
+          // adjacent messages are separated by a consistent gap while the chips
+          // hug their parent message just below it (see their small pt).
+          <div key={message.uuid} className="py-2.5">
             <MessageItem
               message={message}
               pairing={pairing}
@@ -380,7 +384,7 @@ export function TranscriptPane({
               }
             />
             {children.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+              <div className="flex flex-wrap gap-1.5 px-3 pt-1.5">
                 {children.map((child) => (
                   <Chip
                     key={child.id}
