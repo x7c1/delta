@@ -11,10 +11,10 @@ use delta_model::{
 
 use crate::error::Result;
 use crate::ports::{
-    NewSession, SessionEvent, SessionLifecycle, SessionStore, TmuxDriver, Transcript,
-    TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
+    NewSession, SessionEvent, SessionLifecycle, SessionPageRow, SessionStore, TmuxDriver,
+    Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
-use crate::{Interactor, SendTarget};
+use crate::{Interactor, SendTarget, SessionPageCursor};
 
 /// A plain send into an existing thread.
 fn to(thread_id: ThreadId) -> SendTarget {
@@ -212,6 +212,53 @@ impl SessionStore for FakeStore {
 
     async fn list_sessions(&self) -> Result<Vec<Session>> {
         Ok(self.inner.lock().unwrap().sessions.clone())
+    }
+
+    async fn list_sessions_page(
+        &self,
+        cursor: Option<SessionPageCursor>,
+        limit: u32,
+    ) -> Result<Vec<SessionPageRow>> {
+        let g = self.inner.lock().unwrap();
+        // Build (session, last_activity_at) rows, then order exactly as the
+        // SQL page query does: recency DESC, created_at DESC, id ASC, where
+        // recency = last_activity_at or the session's created_at fallback.
+        let mut rows: Vec<SessionPageRow> = g
+            .sessions
+            .iter()
+            .map(|s| {
+                let last_activity_at = g
+                    .messages
+                    .iter()
+                    .filter(|m| m.session_id == s.id)
+                    .map(|m| m.created_at.clone())
+                    .max();
+                (s.clone(), last_activity_at)
+            })
+            .collect();
+        let recency = |row: &SessionPageRow| -> String {
+            row.1.clone().unwrap_or_else(|| row.0.created_at.clone())
+        };
+        rows.sort_by(|a, b| {
+            recency(b)
+                .cmp(&recency(a))
+                .then_with(|| b.0.created_at.cmp(&a.0.created_at))
+                .then_with(|| a.0.id.as_str().cmp(b.0.id.as_str()))
+        });
+        // Apply the cursor: keep only rows strictly after it under the same
+        // ordering.
+        if let Some(c) = cursor {
+            rows.retain(|row| {
+                let r = recency(row);
+                r < c.recency
+                    || (r == c.recency
+                        && (row.0.created_at < c.created_at
+                            || (row.0.created_at == c.created_at
+                                && row.0.id.as_str() > c.id.as_str())))
+            });
+        }
+        rows.truncate(limit as usize);
+        Ok(rows)
     }
 
     async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
@@ -903,6 +950,115 @@ async fn list_sessions_breaks_recency_ties_deterministically() {
     // first, and repeated calls agree.
     assert_eq!(order().await, vec!["sess-a", "sess-b"]);
     assert_eq!(order().await, vec!["sess-a", "sess-b"], "order is stable");
+}
+
+/// Paging across two pages reproduces the single-shot recency order of
+/// `list_sessions_orders_by_most_recent_activity`: most recent first, with a
+/// message-less session falling back to its `created_at`.
+#[tokio::test]
+async fn list_sessions_page_reproduces_recency_order_across_pages() {
+    let ix = interactor();
+
+    ix.on_user_prompt_submit(submit_for("sess-old", "/tmp/old.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-new", "/tmp/new.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-quiet", "/tmp/quiet.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.transcript_fake().push_to(
+        "/tmp/old.jsonl",
+        assistant_line_at("a-old", "older", "2025-12-31T00:00:00Z"),
+    );
+    ix.transcript_fake().push_to(
+        "/tmp/new.jsonl",
+        assistant_line_at("a-new", "newer", "2026-02-01T00:00:00Z"),
+    );
+    ix.poll_transcript().await.unwrap();
+
+    // Page through two at a time; concatenating the pages yields the same order
+    // the all-at-once method asserts.
+    let first = ix.list_sessions_page(None, 2).await.unwrap();
+    let first_ids: Vec<_> = first
+        .listings
+        .iter()
+        .map(|l| l.session.id.as_str().to_owned())
+        .collect();
+    assert_eq!(first_ids, vec!["sess-new", "sess-quiet"]);
+    assert!(first.next.is_some(), "a full page yields a cursor");
+
+    let second = ix.list_sessions_page(first.next, 2).await.unwrap();
+    let second_ids: Vec<_> = second
+        .listings
+        .iter()
+        .map(|l| l.session.id.as_str().to_owned())
+        .collect();
+    assert_eq!(second_ids, vec!["sess-old"]);
+    assert!(
+        second.next.is_none(),
+        "a short last page yields no further cursor"
+    );
+}
+
+/// Equal-recency sessions page in the same deterministic id-ascending order as
+/// `list_sessions_breaks_recency_ties_deterministically`, with the cursor
+/// stepping cleanly across the tie group.
+#[tokio::test]
+async fn list_sessions_page_breaks_recency_ties_deterministically() {
+    let ix = interactor();
+
+    // Two message-less sessions share the same created_at fallback, so only the
+    // ascending id tiebreaker orders them.
+    ix.on_user_prompt_submit(submit_for("sess-b", "/tmp/b.jsonl", "seed"))
+        .await
+        .unwrap();
+    ix.on_user_prompt_submit(submit_for("sess-a", "/tmp/a.jsonl", "seed"))
+        .await
+        .unwrap();
+
+    let first = ix.list_sessions_page(None, 1).await.unwrap();
+    assert_eq!(first.listings[0].session.id.as_str(), "sess-a");
+
+    let second = ix.list_sessions_page(first.next, 1).await.unwrap();
+    assert_eq!(second.listings[0].session.id.as_str(), "sess-b");
+}
+
+/// Page rows carry the same `open` and `main_thread_id` enrichment the
+/// all-at-once method does: a bound session pages as `open: true` with its
+/// trunk thread id; the inline `last_activity_at` is preserved.
+#[tokio::test]
+async fn list_sessions_page_annotates_open_state_and_threads() {
+    let ix = interactor();
+
+    ix.new_session().await.unwrap();
+    ix.on_user_prompt_submit(submit_in(
+        "sess-open",
+        "/work/delta-1/t.jsonl",
+        "/work/delta-1",
+        "hi",
+    ))
+    .await
+    .unwrap();
+    let id = SessionId::from("sess-open");
+    assert!(ix.pane_for_session(&id).await.is_some(), "bound = open");
+
+    let page = ix.list_sessions_page(None, 30).await.unwrap();
+    let listing = page
+        .listings
+        .iter()
+        .find(|l| l.session.id == id)
+        .expect("the session is paged");
+    assert!(listing.open, "a bound session pages as open");
+    assert!(
+        listing.main_thread_id.value() > 0,
+        "the page carries the trunk thread id"
+    );
+    assert!(
+        listing.last_activity_at.is_none(),
+        "no ingested messages means no inline last activity"
+    );
 }
 
 /// The `open` flag tracks live state: a session with a bound pane lists as

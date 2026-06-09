@@ -23,30 +23,69 @@ pub use ensure_session_response::EnsureSessionResponse;
 mod error_body;
 mod messages_response;
 pub use messages_response::MessagesResponse;
+mod session_cursor;
 mod sessions_response;
 pub use sessions_response::{SessionListItem, SessionsResponse};
 mod threads_response;
 pub use threads_response::ThreadsResponse;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use serde::Deserialize;
 
 use delta_usecase::{SessionId, ThreadId};
 
 use crate::state::AppState;
 
-/// `GET /api/sessions` — every known session, annotated with its live state.
+/// The default page size when the request omits `limit`.
+const DEFAULT_PAGE_LIMIT: u32 = 30;
+
+/// The hard cap on page size, so a caller cannot ask for an unbounded page.
+const MAX_PAGE_LIMIT: u32 = 100;
+
+/// Query parameters for `GET /api/sessions`: the opaque page cursor and an
+/// optional page-size override. Mirrors the local-struct convention used by the
+/// PTY bridge's `PtyQuery`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ListSessionsQuery {
+    /// The `next_cursor` echoed back from the previous page, or absent for the
+    /// first page. Opaque: encoded/decoded by [`session_cursor`].
+    cursor: Option<String>,
+    /// Requested page size, clamped to `[1, MAX_PAGE_LIMIT]`; defaults to
+    /// `DEFAULT_PAGE_LIMIT` when absent.
+    limit: Option<u32>,
+}
+
+/// `GET /api/sessions` — one page of known sessions, most-recently-active first.
 ///
-/// Lists all stored sessions (ordered by creation), each tagged with whether it
-/// currently has a live pane (`open`) and its `main` thread id, so the navigator
-/// can show and route into every conversation — open or closed.
+/// Returns a single page (most-recently-active first), each session tagged with
+/// whether it currently has a live pane (`open`) and its `main` thread id, so
+/// the navigator can show and route into every conversation — open or closed.
+/// The page size is `limit` (default [`DEFAULT_PAGE_LIMIT`], capped at
+/// [`MAX_PAGE_LIMIT`]). When more rows may follow, `next_cursor` carries an
+/// opaque token the caller echoes back as `cursor` to fetch the next page; a
+/// malformed `cursor` is a `400`.
 pub(crate) async fn list_sessions(
     State(state): State<AppState>,
+    Query(query): Query<ListSessionsQuery>,
 ) -> Result<Json<SessionsResponse>, ApiError> {
-    let sessions = state.interactor().list_sessions().await?;
+    let cursor = match query.cursor {
+        Some(token) => Some(
+            session_cursor::decode(&token)
+                .ok_or_else(|| ApiError::BadRequest("malformed cursor".to_owned()))?,
+        ),
+        None => None,
+    };
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_PAGE_LIMIT)
+        .clamp(1, MAX_PAGE_LIMIT);
+
+    let page = state.interactor().list_sessions_page(cursor, limit).await?;
     Ok(Json(SessionsResponse {
-        sessions: sessions.into_iter().map(SessionListItem::from).collect(),
+        sessions: page.listings.into_iter().map(SessionListItem::from).collect(),
+        next_cursor: page.next.as_ref().map(session_cursor::encode),
     }))
 }
 

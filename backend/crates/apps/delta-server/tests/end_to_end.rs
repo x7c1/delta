@@ -233,6 +233,10 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         sessions[0]["last_activity_at"].is_null(),
         "a freshly registered session has no messages yet"
     );
+    assert!(
+        body["next_cursor"].is_null(),
+        "a single short page has no next cursor"
+    );
     let main_thread_id = sessions[0]["main_thread_id"]
         .as_i64()
         .expect("main thread id");

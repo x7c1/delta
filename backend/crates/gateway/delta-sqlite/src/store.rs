@@ -1,14 +1,14 @@
 //! [`SqliteStore`]: the concrete [`SessionStore`].
 
 use async_trait::async_trait;
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
 use tokio::sync::Mutex;
 
 use delta_model::{
     ContentBlock, Message, MessageUuid, PendingSend, PendingSendStatus, PermissionRequest,
     PermissionStatus, PromptId, Role, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
-use delta_usecase::{NewSession, SessionStore};
+use delta_usecase::{NewSession, SessionPageCursor, SessionPageRow, SessionStore};
 
 use crate::error::{Error, Result};
 use crate::schema::SCHEMA_SQL;
@@ -73,6 +73,23 @@ fn session_from_parts(
         status: SessionStatus::parse(&status)?,
         created_at,
     })
+}
+
+/// Map a session-list page row: the session columns followed by the inline
+/// `last_activity_at` (`MAX(message.created_at)`, `NULL` when message-less).
+/// The query also selects the coalesced `recency` for its `WHERE`/`ORDER BY`,
+/// but that is derivable from `last_activity_at`/`created_at` and not returned.
+fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
+    let session = session_from_parts(
+        SessionId::from(row.get::<_, String>(0)?),
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+    )?;
+    let last_activity_at: Option<String> = row.get(6)?;
+    Ok((session, last_activity_at))
 }
 
 fn thread_from_row(row: &Row<'_>) -> Result<Thread> {
@@ -204,6 +221,65 @@ impl SessionStore for SqliteStore {
         for row in rows {
             let p = row.map_err(Error::from)?;
             out.push(session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5)?);
+        }
+        Ok(out)
+    }
+
+    async fn list_sessions_page(
+        &self,
+        cursor: Option<SessionPageCursor>,
+        limit: u32,
+    ) -> std::result::Result<Vec<SessionPageRow>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+
+        // `recency` is the row's last activity, falling back to its own
+        // `created_at` when message-less. The ordering is `recency` DESC, then
+        // `created_at` DESC, then `id` ASC — three keys with mixed directions,
+        // so the cursor predicate is the expanded OR form rather than a
+        // row-value tuple comparison (SQLite tuple `<` is uniform-direction
+        // only). When there is no cursor, `:cursor_null = 1` short-circuits the
+        // predicate to select from the top. ISO-8601 UTC timestamps compare
+        // correctly as text, so no datetime casting is needed.
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {SESSION_COLS}, \
+                 (SELECT MAX(m.created_at) FROM message m WHERE m.session_id = session.id) \
+                   AS last_activity_at, \
+                 COALESCE((SELECT MAX(m.created_at) FROM message m WHERE m.session_id = session.id), \
+                          created_at) AS recency \
+                 FROM session \
+                 WHERE :cursor_null = 1 \
+                    OR recency < :r \
+                    OR (recency = :r AND (created_at < :c OR (created_at = :c AND id > :i))) \
+                 ORDER BY recency DESC, created_at DESC, id ASC \
+                 LIMIT :limit"
+            ))
+            .map_err(Error::from)?;
+
+        // Bind cursor components even when absent: the `:cursor_null = 1` guard
+        // makes the comparisons inert, but every named parameter must still be
+        // supplied. Empty strings are harmless placeholders in that case.
+        let cursor_null = if cursor.is_some() { 0 } else { 1 };
+        let recency = cursor.as_ref().map(|c| c.recency.as_str()).unwrap_or("");
+        let created_at = cursor.as_ref().map(|c| c.created_at.as_str()).unwrap_or("");
+        let id = cursor.as_ref().map(|c| c.id.as_str()).unwrap_or("");
+
+        let rows = stmt
+            .query_map(
+                named_params! {
+                    ":cursor_null": cursor_null,
+                    ":r": recency,
+                    ":c": created_at,
+                    ":i": id,
+                    ":limit": limit,
+                },
+                |row| Ok(page_row_from_row(row)),
+            )
+            .map_err(Error::from)?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)??);
         }
         Ok(out)
     }

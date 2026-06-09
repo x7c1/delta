@@ -71,6 +71,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_sessions_rejects_a_malformed_cursor() {
+        // A non-decodable cursor is a client error, surfaced as 400 rather than
+        // silently ignored or treated as the first page.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/sessions?cursor=not-a-valid-cursor%21")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn user_prompt_submit_hook_registers_and_responds() {
         let body = serde_json::json!({
             "prompt": "hello",

@@ -11,7 +11,7 @@ pub use session_event::SessionEvent;
 mod session_lifecycle;
 pub use session_lifecycle::SessionLifecycle;
 mod session_store;
-pub use session_store::SessionStore;
+pub use session_store::{SessionPageRow, SessionStore};
 mod stop_hook;
 pub use stop_hook::StopHook;
 mod tmux_driver;
