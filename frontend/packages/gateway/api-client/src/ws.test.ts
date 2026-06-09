@@ -13,10 +13,17 @@ import {
 class FakeSocket {
   private readonly listeners: Record<string, ((ev: unknown) => void)[]> = {};
   closeCalls = 0;
+  // Mirrors `WebSocket.readyState`: starts CONNECTING (0), flips to OPEN (1)
+  // once an `open` is dispatched, so tests can exercise the close-while-
+  // connecting path.
+  readyState = 0;
   addEventListener(type: string, cb: (ev: unknown) => void): void {
     (this.listeners[type] ??= []).push(cb);
   }
   dispatch(type: string, ev?: unknown): void {
+    if (type === 'open') {
+      this.readyState = 1;
+    }
     (this.listeners[type] ?? []).forEach((cb) => cb(ev));
   }
   close(): void {
@@ -138,5 +145,29 @@ describe('WsEventSource reconnection', () => {
     expect(sockets[0].closeCalls).toBe(1);
     vi.advanceTimersByTime(1000);
     expect(sockets).toHaveLength(1);
+  });
+
+  it('defers closing a still-connecting socket until the handshake settles', () => {
+    const sockets: FakeSocket[] = [];
+    const source = new WsEventSource({
+      url: 'ws://localhost/ws',
+      socketFactory: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+    });
+
+    // The socket is still mid-handshake (no `open` dispatched yet).
+    expect(sockets[0].readyState).toBe(0);
+    source.close();
+
+    // Closing now would make the browser log "WebSocket is closed before the
+    // connection is established", so the close is deferred.
+    expect(sockets[0].closeCalls).toBe(0);
+
+    // Once the handshake settles, the deferred close fires cleanly.
+    sockets[0].dispatch('open');
+    expect(sockets[0].closeCalls).toBe(1);
   });
 });
