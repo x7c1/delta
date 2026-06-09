@@ -66,9 +66,15 @@ CREATE TABLE IF NOT EXISTS permission_request (
   session_id TEXT NOT NULL REFERENCES session(id),
   tool_name TEXT NOT NULL,
   tool_input_json TEXT NOT NULL,
+  tool_use_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   decision_reason TEXT,
   created_at TEXT NOT NULL,
   decided_at TEXT
 );
+
+-- Resolving a permission request looks it up by (session_id, tool_use_id) when
+-- the correlated tool_result is ingested.
+CREATE INDEX IF NOT EXISTS ix_permission_request_tool_use
+  ON permission_request(session_id, tool_use_id);
 "#;

@@ -696,14 +696,21 @@ impl SessionStore for SqliteStore {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
+        tool_use_id: &str,
     ) -> std::result::Result<PermissionRequest, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         conn.execute(
             "INSERT INTO permission_request
-             (session_id, tool_name, tool_input_json, status, decision_reason, created_at, decided_at)
-             VALUES (?1, ?2, ?3, 'pending', NULL, ?4, NULL)",
-            params![session_id.as_str(), tool_name, tool_input_json, now],
+             (session_id, tool_name, tool_input_json, tool_use_id, status, decision_reason, created_at, decided_at)
+             VALUES (?1, ?2, ?3, ?4, 'pending', NULL, ?5, NULL)",
+            params![
+                session_id.as_str(),
+                tool_name,
+                tool_input_json,
+                tool_use_id,
+                now
+            ],
         )
         .map_err(Error::from)?;
         let id = conn.last_insert_rowid();
@@ -712,11 +719,43 @@ impl SessionStore for SqliteStore {
             session_id: session_id.clone(),
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
+            tool_use_id: tool_use_id.to_owned(),
             status: PermissionStatus::Pending,
             decision_reason: None,
             created_at: now,
             decided_at: None,
         })
+    }
+
+    async fn resolve_permission_by_tool_use_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        allowed: bool,
+    ) -> std::result::Result<Option<i64>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        let status = if allowed {
+            PermissionStatus::Allowed
+        } else {
+            PermissionStatus::Denied
+        };
+        // Resolve only the still-`pending` request for this (session, tool_use_id),
+        // so a re-ingested tool_result cannot flip an already-decided row. The
+        // returned id is the row that transitioned, letting the caller emit a
+        // single `PermissionResolved`.
+        let id = conn
+            .query_row(
+                "UPDATE permission_request
+                 SET status = ?1, decided_at = ?2
+                 WHERE session_id = ?3 AND tool_use_id = ?4 AND status = 'pending'
+                 RETURNING id",
+                params![status.as_str(), now, session_id.as_str(), tool_use_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(id)
     }
 }
 

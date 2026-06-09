@@ -98,7 +98,8 @@ export function applySessionEvent(
       }
       break;
     case 'permission_requested':
-      // Pure UI notice; already handled by the store.
+    case 'permission_resolved':
+      // Pure UI notice (set/cleared); already handled by the store.
       break;
   }
 }

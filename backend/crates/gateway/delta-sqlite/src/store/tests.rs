@@ -585,9 +585,47 @@ async fn permission_request_is_recorded() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, _) = store.register_session(new_session()).await.unwrap();
     let req = store
-        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, "toolu_01")
         .await
         .unwrap();
     assert_eq!(req.tool_name, "Bash");
+    assert_eq!(req.tool_use_id, "toolu_01");
     assert!(req.id > 0);
+}
+
+#[tokio::test]
+async fn permission_request_resolves_by_tool_use_id() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _) = store.register_session(new_session()).await.unwrap();
+    let req = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, "toolu_01")
+        .await
+        .unwrap();
+
+    // A non-matching tool_use_id resolves nothing.
+    assert_eq!(
+        store
+            .resolve_permission_by_tool_use_id(&session.id, "toolu_other", true)
+            .await
+            .unwrap(),
+        None,
+    );
+
+    // The matching, still-pending request resolves and returns its id.
+    assert_eq!(
+        store
+            .resolve_permission_by_tool_use_id(&session.id, "toolu_01", true)
+            .await
+            .unwrap(),
+        Some(req.id),
+    );
+
+    // A second resolve is a no-op: the request is no longer pending.
+    assert_eq!(
+        store
+            .resolve_permission_by_tool_use_id(&session.id, "toolu_01", true)
+            .await
+            .unwrap(),
+        None,
+    );
 }

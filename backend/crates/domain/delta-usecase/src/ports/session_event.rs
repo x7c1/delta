@@ -58,6 +58,17 @@ pub enum SessionEvent {
         request_id: i64,
         tool_name: String,
     },
+    /// A previously-requested tool permission was resolved.
+    ///
+    /// Emitted when the `tool_result` correlated with an open
+    /// [`Self::PermissionRequested`] is ingested. An auto-approved tool resolves
+    /// almost immediately (the result lands right away), so the browser clears
+    /// the notice promptly; a genuine TUI prompt yields no result until the
+    /// human answers, so the notice persists until then.
+    PermissionResolved {
+        session_id: SessionId,
+        request_id: i64,
+    },
 }
 
 #[cfg(test)]
@@ -91,6 +102,34 @@ mod tests {
                 session_id: SessionId::from("sess-1"),
             }),
             serde_json::json!({ "kind": "session_registered", "session_id": "sess-1" }),
+        );
+    }
+
+    #[test]
+    fn permission_requested_and_resolved_serialize_as_tagged_events() {
+        assert_eq!(
+            json(&SessionEvent::PermissionRequested {
+                session_id: SessionId::from("sess-1"),
+                request_id: 7,
+                tool_name: "Bash".into(),
+            }),
+            serde_json::json!({
+                "kind": "permission_requested",
+                "session_id": "sess-1",
+                "request_id": 7,
+                "tool_name": "Bash",
+            }),
+        );
+        assert_eq!(
+            json(&SessionEvent::PermissionResolved {
+                session_id: SessionId::from("sess-1"),
+                request_id: 7,
+            }),
+            serde_json::json!({
+                "kind": "permission_resolved",
+                "session_id": "sess-1",
+                "request_id": 7,
+            }),
         );
     }
 }

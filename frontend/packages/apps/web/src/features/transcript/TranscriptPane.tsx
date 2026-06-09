@@ -38,6 +38,43 @@ import {
  */
 const STICK_THRESHOLD_PX = 64;
 
+/**
+ * How long a permission notice must stay pending before it is shown.
+ *
+ * The `PreToolUse` hook fires for every tool call, including auto-approved ones,
+ * so a notice is briefly set then cleared (via `permission_resolved`) the moment
+ * the correlated `tool_result` lands. Delaying the render by this window hides
+ * that flash: an auto-approved tool resolves well within it and never paints,
+ * while a genuine TUI prompt — which has no resolution until the human answers —
+ * outlasts the window and renders as normal.
+ */
+const PERMISSION_NOTICE_DELAY_MS = 300;
+
+/**
+ * Defer surfacing a permission notice until it has stayed present for
+ * {@link PERMISSION_NOTICE_DELAY_MS}. A notice that clears within the window
+ * never renders; a notice that persists renders once the window elapses.
+ * Returns `null` until then, and immediately when the source notice is gone.
+ */
+function useDebouncedPermission<T>(notice: T | null): T | null {
+  const [visible, setVisible] = useState<T | null>(null);
+
+  useEffect(() => {
+    if (notice === null) {
+      // Cleared (resolved/dismissed/turn done): drop it at once, no delay.
+      setVisible(null);
+      return;
+    }
+    const timer = setTimeout(
+      () => setVisible(notice),
+      PERMISSION_NOTICE_DELAY_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  return visible;
+}
+
 export interface TranscriptPaneProps {
   threads: Thread[];
   /** The active thread, or null for the cold-start / new-session state. */
@@ -82,6 +119,9 @@ export function TranscriptPane({
   const permission = useLiveStore((state) =>
     activeThread ? state.permission[activeThread.session_id] ?? null : null,
   );
+  // Defer showing the notice so an auto-approved tool's brief set→resolve never
+  // paints; a genuine pending prompt outlasts the window and shows as normal.
+  const visiblePermission = useDebouncedPermission(permission);
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   const dismissExternalInput = useLiveStore(
     (state) => state.dismissExternalInput,
@@ -282,14 +322,14 @@ export function TranscriptPane({
   } else if (composer) {
     footer = (
       <div className="space-y-2">
-        {permission && activeThread && (
+        {visiblePermission && activeThread && (
           <div
             className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs"
             data-testid="permission-notice"
             role="alert"
           >
             <p className="font-medium text-amber-800">
-              Permission requested: {permission.toolName}
+              Permission requested: {visiblePermission.toolName}
             </p>
             <p className="text-slate-600">Answer the prompt in the terminal.</p>
             <div className="flex gap-2">
