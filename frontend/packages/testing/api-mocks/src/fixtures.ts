@@ -24,6 +24,24 @@ export const MAIN_THREAD_ID = 1;
 export const BRANCH_THREAD_ID = 2;
 export const SESSION_2_MAIN_THREAD_ID = 3;
 
+/**
+ * Number of sessions returned per page by the mock `GET /api/sessions`. Small on
+ * purpose: with more seeded sessions than this, the list spans multiple pages so
+ * the infinite-scroll path (a non-null `next_cursor`, then a final `null`) is
+ * exercised in dev and e2e.
+ */
+export const SESSIONS_PAGE_SIZE = 2;
+
+/**
+ * Extra "filler" sessions beyond the two detailed ones above. They have a single
+ * empty main thread (no messages) so they are cheap to seed; their only job is
+ * to push the session list past one page. Each is older than the two detailed
+ * sessions so it sorts after them (most-recently-active first), keeping the two
+ * fully-featured sessions on page 1.
+ */
+const FILLER_SESSION_COUNT = 4;
+const FIRST_FILLER_THREAD_ID = 100;
+
 export const mockSession: Session = {
   id: SESSION_ID,
   cwd: '/work/delta',
@@ -232,8 +250,47 @@ export interface MockStore {
   nextSendId: number;
 }
 
+/**
+ * Build the filler sessions that push the list past one page. Each has one empty
+ * main thread and no messages, and a `created_at` older than the two detailed
+ * sessions so it sorts after them.
+ */
+function buildFillerSessions(): MockStore['sessions'] {
+  return Array.from({ length: FILLER_SESSION_COUNT }, (_, index) => {
+    const ordinal = index + 1;
+    const threadId = FIRST_FILLER_THREAD_ID + index;
+    const sessionId = `sess-mock-fill-${ordinal}`;
+    // Descending dates (2025-12-...) keep them older than the detailed sessions
+    // and give each a deterministic, distinct recency for stable pagination.
+    const createdAt = `2025-12-${String(31 - index).padStart(2, '0')}T00:00:00Z`;
+    return {
+      session: {
+        id: sessionId,
+        cwd: `/work/fill-${ordinal}`,
+        transcript_path: `/tmp/transcript-fill-${ordinal}.jsonl`,
+        title: `archived session ${ordinal}`,
+        status: 'ended' as const,
+        created_at: createdAt,
+      },
+      open: false,
+      mainThreadId: threadId,
+      threads: [
+        {
+          id: threadId,
+          session_id: sessionId,
+          title: 'main',
+          parent_thread_id: null,
+          root_message_uuid: null,
+          created_at: createdAt,
+        },
+      ],
+    };
+  });
+}
+
 /** Build a fresh deep copy of the seed data so handlers can mutate freely. */
 export function seedData(): MockStore {
+  const filler = buildFillerSessions();
   return {
     sessions: [
       {
@@ -248,10 +305,11 @@ export function seedData(): MockStore {
         mainThreadId: SESSION_2_MAIN_THREAD_ID,
         threads: structuredClone(mockThreads2),
       },
+      ...structuredClone(filler),
     ],
     messagesByThread: structuredClone(mockMessagesByThread),
     sends: [],
-    nextThreadId: 4,
+    nextThreadId: FIRST_FILLER_THREAD_ID + FILLER_SESSION_COUNT,
     nextSendId: 1,
   };
 }

@@ -13,7 +13,7 @@ function noContent(): Response {
 }
 
 describe('ApiClient', () => {
-  it('parses GET /api/sessions into a typed list', async () => {
+  it('parses a GET /api/sessions page into a typed list with its cursor', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse({
         sessions: [
@@ -31,6 +31,7 @@ describe('ApiClient', () => {
             last_activity_at: '2026-01-01T00:01:01Z',
           },
         ],
+        next_cursor: 'page-2',
       }),
     );
     const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
@@ -41,8 +42,38 @@ describe('ApiClient', () => {
     expect(result.sessions[0].open).toBe(true);
     expect(result.sessions[0].main_thread_id).toBe(1);
     expect(result.sessions[0].last_activity_at).toBe('2026-01-01T00:01:01Z');
+    expect(result.next_cursor).toBe('page-2');
+    // No params: the first page is requested with a bare path.
     expect(fetchFn).toHaveBeenCalledWith(
       'http://localhost/api/sessions',
+      undefined,
+    );
+  });
+
+  it('builds the query string from cursor and limit, encoding each value', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ sessions: [], next_cursor: null }));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await client.getSessions({ cursor: 'a b/c', limit: 30 });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/sessions?cursor=a%20b%2Fc&limit=30',
+      undefined,
+    );
+  });
+
+  it('omits absent pagination params from the query string', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ sessions: [], next_cursor: null }));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await client.getSessions({ limit: 10 });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/sessions?limit=10',
       undefined,
     );
   });

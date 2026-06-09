@@ -19,5 +19,6 @@ export {
   mockThreads,
   mockThreads2,
   seedData,
+  SESSIONS_PAGE_SIZE,
   type MockStore,
 } from './fixtures';

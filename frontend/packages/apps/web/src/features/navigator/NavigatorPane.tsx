@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { SessionListItem, Thread } from '@delta/model';
 import { Button, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
 import {
@@ -10,10 +11,16 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { SessionNode } from './SessionNode';
 
 export interface NavigatorPaneProps {
-  /** Every session, ordered by creation. */
+  /** The loaded sessions so far, ordered most-recently-active first. */
   sessions: SessionListItem[];
   /** The focused session's thread tree (empty when none is focused). */
   threads: Thread[];
+  /** Whether more session pages remain to be fetched. */
+  hasMoreSessions: boolean;
+  /** Whether the next session page is currently in flight. */
+  isLoadingMoreSessions: boolean;
+  /** Request the next session page (cursor-paginated). */
+  onLoadMoreSessions: () => void;
 }
 
 const CONNECTION_TONE: Record<ConnectionStatus, DotTone> = {
@@ -35,9 +42,39 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
  * is rendered. Top-level nodes are sessions; expanding the focused session
  * reveals its thread tree.
  */
-export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
+export function NavigatorPane({
+  sessions,
+  threads,
+  hasMoreSessions,
+  isLoadingMoreSessions,
+  onLoadMoreSessions,
+}: NavigatorPaneProps) {
   const client = useApiClient();
   const closeSession = useCloseSessionMutation(client);
+
+  // Scroll-triggered page loading. A sentinel sits at the bottom of the session
+  // list; when it scrolls into the Panel body's viewport we fetch the next page.
+  // TODO(PR3): replaced by the virtualizer's range-based trigger.
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = scrollBodyRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel || !hasMoreSessions) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting && hasMoreSessions && !isLoadingMoreSessions) {
+          onLoadMoreSessions();
+        }
+      },
+      { root },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMoreSessions, isLoadingMoreSessions, onLoadMoreSessions]);
 
   const connection = useLiveStore((state) => state.connection);
   const permission = useLiveStore((state) => state.permission);
@@ -54,6 +91,7 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
   return (
     <Panel
       className="border-r border-slate-200"
+      bodyRef={scrollBodyRef}
       // The session list is a side panel; hide its scrollbar entirely (no bar,
       // no reserved column) so it never shows a stray blank strip. It still
       // scrolls via wheel/trackpad. The transcript pane keeps its hover-reveal
@@ -128,6 +166,21 @@ export function NavigatorPane({ sessions, threads }: NavigatorPaneProps) {
           />
         ))}
       </ul>
+
+      {/*
+        Bottom sentinel for scroll-triggered pagination. Intersecting it loads
+        the next page; it only renders while more pages remain.
+        TODO(PR3): replaced by the virtualizer's range-based trigger.
+      */}
+      {hasMoreSessions && (
+        <div
+          ref={sentinelRef}
+          data-testid="sessions-load-more-sentinel"
+          className="flex justify-center px-3 pb-3 pt-1 text-xs text-slate-400"
+        >
+          {isLoadingMoreSessions ? <Spinner label="loading more" /> : null}
+        </div>
+      )}
     </Panel>
   );
 }

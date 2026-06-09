@@ -74,9 +74,27 @@ export class ApiClient {
     }
   }
 
-  /** `GET /api/sessions` — every session with its open flag and main thread. */
-  getSessions(): Promise<SessionsResponse> {
-    return this.request<SessionsResponse>('/api/sessions');
+  /**
+   * `GET /api/sessions` — one page of sessions with their open flag and main
+   * thread, ordered most-recently-active first. Pass the previous page's
+   * `next_cursor` as `cursor` to fetch the following page; omit it for the
+   * first page. `limit` caps the page size. The cursor is opaque: echo it back
+   * verbatim, never construct or parse one.
+   */
+  getSessions(
+    params?: { cursor?: string; limit?: number },
+  ): Promise<SessionsResponse> {
+    // `request()` has no query-string helper, so build it manually with the
+    // same encodeURIComponent style used by the path-segment endpoints above.
+    const query: string[] = [];
+    if (params?.cursor !== undefined) {
+      query.push(`cursor=${encodeURIComponent(params.cursor)}`);
+    }
+    if (params?.limit !== undefined) {
+      query.push(`limit=${encodeURIComponent(params.limit)}`);
+    }
+    const suffix = query.length > 0 ? `?${query.join('&')}` : '';
+    return this.request<SessionsResponse>(`/api/sessions${suffix}`);
   }
 
   /**

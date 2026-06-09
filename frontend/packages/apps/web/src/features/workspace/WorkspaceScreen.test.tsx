@@ -79,14 +79,21 @@ describe('WorkspaceScreen multi-session', () => {
     });
   });
 
-  it('lists every session with its open/closed status dot', async () => {
+  it('shows the first page of sessions with a load-more sentinel when more remain', async () => {
     renderScreen();
 
+    // The list is cursor-paginated (mock page size 2), so the first page holds
+    // exactly the two most-recently-active sessions; the rest stay unloaded.
     await waitFor(() =>
       expect(screen.getAllByTestId('session-node').length).toBe(2),
     );
-    // One of the two seeded sessions is open; its dot carries the "Open" name.
+    // The open one (sess-mock-1) is on page 1; its dot carries the "Open" name.
     expect(screen.getAllByRole('status', { name: 'Open' })).toHaveLength(1);
+    // More pages remain, so the scroll sentinel is rendered to drive the next
+    // fetch. (In jsdom the IntersectionObserver is inert, so no auto-load.)
+    expect(
+      screen.getByTestId('sessions-load-more-sentinel'),
+    ).toBeInTheDocument();
   });
 
   it('focuses the most-recent open session on cold load', async () => {
@@ -133,6 +140,7 @@ describe('WorkspaceScreen multi-session', () => {
               last_activity_at: '2026-01-01T00:00:02Z',
             },
           ],
+          next_cursor: null,
         }),
       ),
     );
@@ -146,7 +154,9 @@ describe('WorkspaceScreen multi-session', () => {
 
   it('shows the new-session composer state when there are no sessions', async () => {
     server.use(
-      http.get('*/api/sessions', () => HttpResponse.json({ sessions: [] })),
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({ sessions: [], next_cursor: null }),
+      ),
     );
 
     renderScreen();

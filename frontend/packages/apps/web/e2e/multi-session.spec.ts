@@ -4,22 +4,40 @@ import { useManualEventControl } from './support/app';
 /**
  * Multi-session navigator structure and the focus / closed=view model.
  *
- * The mock fixtures seed two sessions in distinct states: `sess-mock-1` (open,
- * with a thread tree) and `sess-mock-2` (closed). These specs assert the
- * structural behavior of the session-centric UI — the session list, the
- * per-session open/closed status dot, focusing a closed session into a
- * read-only transcript, and the new-session optimistic send — not appearance.
+ * The mock fixtures seed two detailed sessions in distinct states — `sess-mock-1`
+ * (open, with a thread tree) and `sess-mock-2` (closed) — plus filler sessions
+ * that push the list past one page. These specs assert the structural behavior
+ * of the session-centric UI — the cursor-paginated session list with
+ * scroll-to-load, the per-session open/closed status dot, focusing a closed
+ * session into a read-only transcript, and the new-session optimistic send —
+ * not appearance.
  */
 
-test('the navigator lists every session with its open status dot', async ({
+test('the navigator paginates the session list to the end via the scroll sentinel', async ({
   page,
 }) => {
   await useManualEventControl(page);
   await page.goto('/');
 
-  // Both seeded sessions appear as top-level nodes.
-  await expect(page.getByTestId('session-node')).toHaveCount(2);
-  // Exactly one of the two is open, shown by its status dot.
+  // The list is cursor-paginated (mock page size 2). The bottom sentinel drives
+  // loading: while more pages remain and the sentinel is within the scroll
+  // viewport, the IntersectionObserver keeps fetching the next page. With a
+  // short list the sentinel stays visible, so every page loads without an
+  // explicit scroll; a longer list would load incrementally as the user scrolls.
+  // Either way the chain ends when `next_cursor` reaches null and the sentinel
+  // unmounts.
+  const sentinel = page.getByTestId('sessions-load-more-sentinel');
+  for (let i = 0; i < 6 && (await sentinel.count()) > 0; i += 1) {
+    await sentinel.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(150);
+  }
+
+  // All six seeded sessions (two detailed + four filler) are now present and the
+  // sentinel is gone (next_cursor reached null), confirming pagination walked to
+  // the end without dropping or duplicating any page.
+  await expect(page.getByTestId('session-node')).toHaveCount(6);
+  await expect(sentinel).toHaveCount(0);
+  // Exactly one session is open, shown by its status dot.
   await expect(
     page.getByRole('status', { name: 'Open', exact: true }),
   ).toHaveCount(1);
