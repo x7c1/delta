@@ -58,7 +58,7 @@ describe('Composer', () => {
     useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
     useLiveStore.setState({
       pending: [],
-      externalInput: null,
+      externalInput: {},
       unread: {},
       resumeUnavailable: {},
     });
