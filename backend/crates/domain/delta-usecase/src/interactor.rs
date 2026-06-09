@@ -962,11 +962,12 @@ where
     /// 1. No queued send matched this prompt → external input → inject nothing.
     /// 2. The send carries a locator quote → first entry into a branch → keep
     ///    the locator-quote frame and bind it to the target thread.
-    /// 3. No locator and the target thread differs from the previous one →
-    ///    a thread switch / re-visit → inject a re-focus note (with the target
-    ///    thread's root quote, unless it is `main`).
-    /// 4. No locator and the target thread is unchanged → same thread,
-    ///    continuing → inject nothing.
+    /// 3. No locator and the previous thread is KNOWN and differs from the
+    ///    target → a thread switch / re-visit → inject a re-focus note (with the
+    ///    target thread's root quote, unless it is `main`).
+    /// 4. No locator and either the target thread is unchanged or the previous
+    ///    thread is unknown (first turn / first prompt after a resume) → not a
+    ///    switch → inject nothing.
     async fn thread_switch_context(
         &self,
         session_id: &SessionId,
@@ -990,11 +991,21 @@ where
         // Cases 3 & 4 hinge on whether the active thread changed. `prev` is the
         // thread of the latest already-persisted user line (this prompt's line
         // is not synced yet), i.e. the thread the user was in before this send.
+        //
+        // Only a KNOWN switch warrants a re-focus note. `prev == None` means the
+        // previous thread is unknown — there is no persisted user line yet. That
+        // happens on the very first turn and, crucially, on the first prompt
+        // after a session resume (the prior turn's user line is not visible to
+        // `latest_user_thread` at the resume boundary, since this runs before
+        // `sync_transcript`). Asserting a switch there is false: injecting a
+        // "switched to thread:N" note misleads the model into treating an
+        // ordinary continuation as a re-visit to an earlier discussion. So a
+        // switch is asserted only when `prev` is known and differs from `cur`
+        // (Case 4 — same/unknown thread — falls through to no injection).
         let prev = self.store.latest_user_thread(session_id).await?;
-        if prev == Some(cur) {
-            // Case 4: same thread, continuing — nothing to re-focus.
+        let Some(prev) = prev.filter(|p| *p != cur) else {
             return Ok(None);
-        }
+        };
 
         // Case 3: thread switch / re-visit. Cite the target thread's root quote
         // so the re-focus survives even if the original binding scrolled out of
@@ -1119,25 +1130,20 @@ fn frame_branch_entry_context(locator_frame: &str, thread: ThreadId) -> String {
 /// immediately above. The target thread's root quote (`root_quote`) is re-cited
 /// so the re-focus holds even if the original binding scrolled out of context.
 ///
-/// `prev` is the thread the user was just in, if any; naming both endpoints
-/// makes the move explicit. The trunk thread (`main`) has no root quote, so
-/// `root_quote` is `None` there and it is referred to by name only.
+/// `prev` is the thread the user was just in; naming both endpoints makes the
+/// move explicit. A switch is only asserted when the previous thread is known
+/// and differs from the current one, so `prev` is always a concrete thread
+/// here. The trunk thread (`main`) has no root quote, so `root_quote` is `None`
+/// there and it is referred to by name only.
 ///
 /// Isolated so the exact wording is easy to tune; affects only the model-facing
 /// `additionalContext`, never an on-screen message or stored field.
-fn frame_thread_switch_context(
-    prev: Option<ThreadId>,
-    cur: ThreadId,
-    root_quote: Option<&str>,
-) -> String {
-    let mut note = match prev {
-        Some(prev) => format!(
-            "The user has switched from thread:{} to thread:{}",
-            prev.value(),
-            cur.value()
-        ),
-        None => format!("The user has switched to thread:{}", cur.value()),
-    };
+fn frame_thread_switch_context(prev: ThreadId, cur: ThreadId, root_quote: Option<&str>) -> String {
+    let mut note = format!(
+        "The user has switched from thread:{} to thread:{}",
+        prev.value(),
+        cur.value()
+    );
     match root_quote {
         Some(quote) if !quote.trim().is_empty() => note.push_str(&format!(
             ", the thread rooted at this passage:\n{}",

@@ -1220,7 +1220,7 @@ async fn revisit_to_branch_injects_switch_note_with_root_quote() {
     // child, so the note re-cites the child's root quote and re-focuses the
     // model onto that earlier thread.
     let (_, additional) = round_trip(&ix, to(child), "more on branch", None, "u-revisit").await;
-    let expected = super::frame_thread_switch_context(Some(main), child, Some("[root quote]"));
+    let expected = super::frame_thread_switch_context(main, child, Some("[root quote]"));
     assert_eq!(additional, Some(expected));
     let note = additional.unwrap();
     assert!(note.contains(&format!("thread:{}", child.value())));
@@ -1250,12 +1250,48 @@ async fn revisit_to_main_injects_switch_note_without_quote() {
     // Return to main (no quote): a switch from the child back to the trunk.
     // `main` has no root passage, so the note names it without citing a quote.
     let (_, additional) = round_trip(&ix, to(main), "back to main", None, "u-main").await;
-    let expected = super::frame_thread_switch_context(Some(child), main, None);
+    let expected = super::frame_thread_switch_context(child, main, None);
     assert_eq!(additional, Some(expected));
     let note = additional.unwrap();
     assert!(note.contains("the main thread"));
     assert!(!note.contains('"'), "no quote is cited for main");
     assert!(note.contains("not replying to the message immediately above"));
+}
+
+#[tokio::test]
+async fn unknown_previous_thread_injects_nothing() {
+    // Regression: on the first prompt after a session resume (and on the very
+    // first turn), no user line is persisted yet, so `latest_user_thread`
+    // reports `None` at the moment `thread_switch_context` runs. That is an
+    // UNKNOWN previous thread, not a switch — the user may simply be continuing.
+    // Asserting a switch there ("The user has switched to thread:N") is false
+    // and misleads the model, so nothing must be injected.
+    let ix = interactor();
+    // Register the session (creates its `main` thread) without persisting any
+    // user line: `submit` carries no matching transcript line, so it syncs
+    // nothing. This mirrors the resume boundary where no user line is visible
+    // to `latest_user_thread` yet.
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // No prior persisted user line exists, so `latest_user_thread` is `None`.
+    assert!(
+        ix.store()
+            .latest_user_thread(&session)
+            .await
+            .unwrap()
+            .is_none(),
+        "precondition: previous thread is unknown"
+    );
+
+    // A plain send to main with no locator quote: the previous thread is
+    // unknown, so this is not a switch and no re-focus note is injected.
+    let (_, additional) = round_trip(&ix, to(main), "first prompt", None, "u-1").await;
+    assert!(
+        additional.is_none(),
+        "unknown previous thread must not inject a switch note, got: {additional:?}"
+    );
 }
 
 #[tokio::test]
