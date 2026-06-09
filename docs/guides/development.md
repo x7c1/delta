@@ -1,19 +1,22 @@
 # Development
 
 How to build, test, lint, and run Delta locally. Delta has two parts: a Rust
-backend (`backend/`) and a TypeScript frontend (`frontend/`). Run each part's
-commands from that part's directory.
+backend (`backend/`) and a TypeScript frontend (`frontend/`).
+
+The unified entry point is `make`, run from the repo root: it wraps the
+per-part commands and the `scripts/dev.sh` loop so you do not have to `cd` into
+each part or remember the underlying `cargo`/`pnpm` invocations. Run `make help`
+for the full target list. This guide names the relevant `make` target for each
+task and keeps the underlying commands only where there is no target (one-time
+setup and env-overridden runs).
 
 ## Backend (`backend/`)
 
-Quality gate — run after changing backend code:
+Quality gate — `make build`, `make test`, and `make lint` each cover both
+parts; `make check` runs the whole gate (build, test, lint, plus the frontend
+typecheck) for both parts at once, which is what to run before opening a PR.
 
-```bash
-cd backend
-cargo build && cargo test && cargo clippy --all-targets -- -D warnings
-```
-
-Run the server:
+Run the server (from `backend/`):
 
 ```bash
 cargo run -p delta-server
@@ -44,33 +47,26 @@ assumed — the server relies on a cached Claude Code token (or
 
 ## Frontend (`frontend/`)
 
-All `pnpm` commands run from `frontend/` (the workspace root). pnpm is provided
-by corepack from the `packageManager` field — run `corepack enable` once if pnpm
-is not on your PATH.
+The `frontend/` directory is the pnpm workspace root. pnpm is provided by
+corepack from the `packageManager` field — run `corepack enable` once if pnpm is
+not on your PATH. Install dependencies once with `pnpm install` from `frontend/`.
 
-Install:
-
-```bash
-cd frontend
-pnpm install
-```
-
-Quality gate — run after changing frontend code (`lint` is ESLint +
-dependency-cruiser):
-
-```bash
-pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
-```
+The quality gate (build, typecheck, test, and `lint` = ESLint +
+dependency-cruiser) is covered by `make check`, or the individual `make build` /
+`make test` / `make lint` targets.
 
 ### Run the UI against mocks (no backend needed)
 
 MSW mocks the REST API and a fake event source replays the WebSocket stream, so
-the full UI runs without the backend:
+the full UI runs without the backend — no tmux or `claude` required:
 
 ```bash
-pnpm -r build                                   # build workspace libs first
-VITE_API_MOCK=1 pnpm --filter @delta/web dev    # → http://localhost:5173
+make mock    # → http://localhost:5173
 ```
+
+`make mock` builds the workspace libraries first (the dev server resolves them
+from built output), then starts the mock-mode dev server with `--force` so the
+freshly built libs are re-optimized and served.
 
 ### End-to-end UI tests (headless, mock mode)
 
@@ -80,15 +76,15 @@ pending/running indicator lifecycle, layout restore after reload, terminal
 resize). It lives in `@delta/web` (`packages/apps/web/e2e/`), separate from the
 vitest unit tests.
 
-Build the workspace libraries first (the dev server resolves them from built
-output), install the browser once, then run the suite — Playwright starts the
-mock-mode dev server itself:
+Install the browser once:
 
 ```bash
-pnpm -r build
 pnpm --filter @delta/web exec playwright install --with-deps chromium
-pnpm --filter @delta/web e2e
 ```
+
+Build the workspace libraries (`make build`, since the dev server resolves them
+from built output), then run the suite with `make e2e` — Playwright starts the
+mock-mode dev server itself.
 
 The suite puts the fake event source under manual control (no auto-replay) and
 feeds events explicitly, so every run is fast and deterministic. If the bundled
@@ -122,7 +118,7 @@ This brings up the full loop end to end: type in the browser, a real `claude`
 TUI (running in tmux) receives it via `send-keys`, and its response flows back
 through the JSONL transcript and Claude Code's HTTP hooks to the browser.
 
-Opening the browser is the only manual step. `scripts/dev.sh` starts both the
+Opening the browser is the only manual step. `make dev` starts both the
 server and the frontend dev server. The server owns the `claude` session
 lifecycle but does not spawn anything on startup or on page load: on load the UI
 shows the session list (empty on a fresh database), and the first Send from the
@@ -139,11 +135,11 @@ composer (or a New action) spawns a session, so there is nothing else to launch.
 ### Launch
 
 ```bash
-scripts/dev.sh           # default session workdir: .tmp/session
-scripts/dev.sh ~/scratch # or pass your own working directory for claude
+make dev                 # default session workdir: .tmp/session
+make dev WORKDIR=~/scratch # or pass your own working directory for claude
 ```
 
-`scripts/dev.sh`:
+`make dev` runs `scripts/dev.sh`, which:
 
 1. Starts `delta-server` (`DELTA_PORT=7878`), passing the session working
    directory. The server owns the `claude` session lifecycle: when a session is
@@ -186,8 +182,9 @@ in the TUI (`tmux -L delta attach -t delta-1`).
 ### Shut down
 
 ```bash
-scripts/dev.sh --down    # or: scripts/stop.sh
+make down
 ```
 
 This stops `delta-server`, the frontend dev server (port 5173), and every
-`delta-<n>` tmux session the server spawned.
+`delta-<n>` tmux session the server spawned. To also clear local state (the
+SQLite overlay and per-spawn working directories), run `make reset` instead.
