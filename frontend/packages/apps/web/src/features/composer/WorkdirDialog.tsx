@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
   ApiError,
+  useHomeDirQuery,
   useRecentWorkdirsQuery,
   useWorkdirListQuery,
 } from '@delta/api-client';
 import { Button, Dialog, Spinner, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
+import { displayPath } from '../../utils/displayPath';
 
 export interface WorkdirDialogProps {
   /** Whether the modal is shown. */
@@ -56,6 +58,10 @@ export function WorkdirDialog({
 
   const recentQuery = useRecentWorkdirsQuery(client, open);
   const listQuery = useWorkdirListQuery(client, browsePath, open);
+
+  // The home directory, used only to abbreviate displayed paths to `~`. The
+  // values committed to the store and sent to the backend stay absolute.
+  const home = useHomeDirQuery(client, open).data?.path ?? null;
 
   // A 400/403 from an invalid or forbidden directory: show it inline with a way
   // back to the parent (or $HOME), never crash the dialog.
@@ -169,7 +175,7 @@ export function WorkdirDialog({
                     )}
                     title={item.path}
                   >
-                    {item.path}
+                    {displayPath(item.path, home)}
                   </button>
                 </li>
               ))}
@@ -225,7 +231,7 @@ export function WorkdirDialog({
                 title={listing.path}
                 data-testid="workdir-use-current"
               >
-                Use this directory: {listing.path}
+                Use this directory: {displayPath(listing.path, home)}
               </button>
               <ul className="space-y-0.5">
                 {listing.parent !== null && (
@@ -278,7 +284,11 @@ export interface WorkdirChipProps {
  * different directory. Renders nothing when no directory is selected.
  */
 export function WorkdirChip({ onEdit }: WorkdirChipProps) {
+  const client = useApiClient();
   const selected = useComposerStore((state) => state.newSessionWorkdir);
+  // Read before the early return to keep the hook order stable. Display-only;
+  // the stored `newSessionWorkdir` stays the absolute path.
+  const home = useHomeDirQuery(client, true).data?.path ?? null;
 
   if (!selected) {
     return null;
@@ -294,7 +304,7 @@ export function WorkdirChip({ onEdit }: WorkdirChipProps) {
         className="min-w-0 flex-1 truncate font-mono text-slate-700"
         title={selected}
       >
-        {selected}
+        {displayPath(selected, home)}
       </span>
       <Button
         variant="ghost"

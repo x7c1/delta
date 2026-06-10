@@ -8,7 +8,13 @@ import {
   it,
   vi,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -67,17 +73,33 @@ describe('WorkdirDialog', () => {
     renderDialog();
 
     // The first Recent row is highlighted (aria-pressed) without any click, and
-    // Select is enabled so the user can confirm immediately.
-    const firstRow = await screen.findByRole('button', { name: MOST_RECENT });
+    // Select is enabled so the user can confirm immediately. Looked up by its
+    // stable `title` (full path); the visible label is abbreviated.
+    const firstRow = await screen.findByTitle(MOST_RECENT);
     await waitFor(() => expect(firstRow).toHaveAttribute('aria-pressed', 'true'));
     expect(screen.getByTestId('workdir-confirm')).toBeEnabled();
+  });
+
+  it('abbreviates the home directory to `~` while keeping the full path as the value', async () => {
+    const { onClose } = renderDialog();
+
+    // The most-recent row's title stays the absolute path, but its visible
+    // label collapses the home directory (`/home/dev`) to `~`.
+    const firstRow = await screen.findByTitle(MOST_RECENT);
+    expect(firstRow).toHaveTextContent('~/projects/delta');
+    expect(firstRow).not.toHaveTextContent('/home/dev');
+
+    // Selecting still commits the absolute path, not the abbreviated label.
+    fireEvent.click(screen.getByTestId('workdir-confirm'));
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(MOST_RECENT);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('commits the candidate and closes when Select is clicked', async () => {
     const { onClose } = renderDialog();
 
     // recent[0] is pre-selected; Select commits it.
-    await screen.findByRole('button', { name: MOST_RECENT });
+    await screen.findByTitle(MOST_RECENT);
     fireEvent.click(screen.getByTestId('workdir-confirm'));
 
     expect(useComposerStore.getState().newSessionWorkdir).toBe(MOST_RECENT);
@@ -87,9 +109,7 @@ describe('WorkdirDialog', () => {
   it('selecting a different Recent row makes it the candidate', async () => {
     renderDialog();
 
-    const otherRow = await screen.findByRole('button', {
-      name: '/home/dev/projects/website',
-    });
+    const otherRow = await screen.findByTitle('/home/dev/projects/website');
     fireEvent.click(otherRow);
     fireEvent.click(screen.getByTestId('workdir-confirm'));
 
@@ -101,7 +121,7 @@ describe('WorkdirDialog', () => {
   it('closes without committing when Cancel is clicked', async () => {
     const { onClose } = renderDialog();
 
-    await screen.findByRole('button', { name: MOST_RECENT });
+    await screen.findByTitle(MOST_RECENT);
     fireEvent.click(screen.getByTestId('workdir-cancel'));
 
     // Cancel never commits, even though a recent row was pre-selected.
@@ -113,7 +133,7 @@ describe('WorkdirDialog', () => {
     const { onClose } = renderDialog(vi.fn(), { dismissable: false });
 
     // The only way out is to choose a directory: Cancel is absent.
-    await screen.findByRole('button', { name: MOST_RECENT });
+    await screen.findByTitle(MOST_RECENT);
     expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
 
     // Select still commits the pre-selected candidate and closes.
@@ -125,34 +145,45 @@ describe('WorkdirDialog', () => {
   it('descends, ascends, and the browsed directory becomes the candidate', async () => {
     renderDialog();
 
-    // Default browse lists $HOME (/home/dev) with its subdirectories.
+    // Default browse lists $HOME (/home/dev) with its subdirectories. The
+    // current-directory label collapses home to `~` (title keeps the full path).
     await waitFor(() => {
-      expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
+      expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
+        'title',
         '/home/dev',
       );
     });
+    expect(screen.getByTestId('workdir-use-current')).toHaveTextContent('~');
 
     // Descend into projects/. Navigating makes the browsed dir the candidate,
     // dropping the recent pre-selection.
     fireEvent.click(screen.getByRole('button', { name: 'projects/' }));
     await waitFor(() => {
-      expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
+      expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
+        'title',
         '/home/dev/projects',
       );
     });
+    expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
+      '~/projects',
+    );
     expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
       'aria-pressed',
       'true',
     );
+    // The recent row (now showing the abbreviated `~/projects/delta`) is no
+    // longer the candidate. Scope the lookup to the Recent section since the
+    // `delta/` browse entry shares the same absolute path/title.
     expect(
-      screen.getByRole('button', { name: MOST_RECENT }),
+      within(screen.getByTestId('workdir-recent')).getByTitle(MOST_RECENT),
     ).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'delta/' })).toBeInTheDocument();
 
     // Ascend via the ".." entry back to $HOME; that dir is now the candidate.
     fireEvent.click(screen.getByTestId('workdir-parent'));
     await waitFor(() => {
-      expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
+      expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
+        'title',
         '/home/dev',
       );
     });

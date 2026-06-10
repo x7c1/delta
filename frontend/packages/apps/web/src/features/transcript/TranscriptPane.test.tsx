@@ -329,9 +329,7 @@ describe('TranscriptPane', () => {
     // The modal opens without any user action, with the most-recent directory
     // pre-selected so the user can confirm immediately.
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    const firstRow = await screen.findByRole('button', {
-      name: '/home/dev/projects/delta',
-    });
+    const firstRow = await screen.findByTitle('/home/dev/projects/delta');
     await waitFor(() =>
       expect(firstRow).toHaveAttribute('aria-pressed', 'true'),
     );
@@ -353,12 +351,19 @@ describe('TranscriptPane', () => {
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 
-  it('shows a chip with an edit affordance once a directory is selected', () => {
+  it('shows a chip with an edit affordance once a directory is selected', async () => {
     useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
     renderNewSessionPane();
 
     const chip = screen.getByTestId('workdir-chip');
-    expect(chip).toHaveTextContent('/home/dev/projects/delta');
+    // The path label collapses home to `~` once $HOME is known, while the
+    // full path is preserved in the title for hover.
+    await waitFor(() =>
+      expect(chip).toHaveTextContent('Start in:~/projects/delta'),
+    );
+    expect(
+      within(chip).getByTitle('/home/dev/projects/delta'),
+    ).toBeInTheDocument();
     // The ✎ reopens the dialog rather than clearing the (mandatory) selection.
     expect(
       within(chip).getByRole('button', { name: 'Change working directory' }),

@@ -29,6 +29,7 @@ export {
   useCreateSendMutation,
   useThreadMessagesQuery,
   useWorkdirListQuery,
+  useHomeDirQuery,
   useRecentWorkdirsQuery,
 } from './query-hooks';
 export {

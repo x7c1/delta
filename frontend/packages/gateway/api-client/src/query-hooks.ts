@@ -120,6 +120,24 @@ export function useWorkdirListQuery(
 }
 
 /**
+ * The user's home directory (the default `GET /api/workdir/list` target),
+ * cached for path-abbreviation. Shares the `workdirList(null)` cache key with
+ * the picker's initial browse, so it costs no extra request; `staleTime:
+ * Infinity` since $HOME does not change during a session.
+ */
+export function useHomeDirQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<WorkdirListResponse> {
+  return useQuery({
+    queryKey: queryKeys.workdirList(null),
+    queryFn: () => client.getWorkdirList(),
+    enabled,
+    staleTime: Infinity,
+  });
+}
+
+/**
  * Recently-used working directories (`GET /api/workdir/recent`) for the
  * new-session picker's "Recent" list. Gated by `enabled` so it only fetches
  * while the picker is mounted.
