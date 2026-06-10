@@ -30,8 +30,8 @@ function FolderIcon({ className }: { className?: string }) {
 
 /**
  * The corner / level-up arrow glyph marking the ".." row so it reads as "go up
- * one level to the parent directory" rather than pointing at the row directly
- * above it, visually distinct from the folder rows. Decorative — always
+ * one level to the parent directory" — the shaft rises then turns to point left,
+ * visually distinct from the folder rows. Decorative — always
  * `aria-hidden`, so the row's accessible name stays "..". This file is the only
  * user.
  */
@@ -47,8 +47,8 @@ function ParentDirIcon({ className }: { className?: string }) {
       className={className}
       aria-hidden="true"
     >
-      <polyline points="14 9 9 4 4 9" />
-      <path d="M20 20h-7a4 4 0 0 1-4-4V4" />
+      <polyline points="9 14 4 9 9 4" />
+      <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
     </svg>
   );
 }
