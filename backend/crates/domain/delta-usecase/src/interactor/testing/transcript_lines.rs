@@ -53,6 +53,13 @@ pub(crate) fn tool_use_line(uuid: &str, id: &str, name: &str) -> TranscriptMessa
     }
 }
 
+/// An interrupt-marker line. Claude writes this as a `role: user` line whose
+/// only text block is `[Request interrupted by user...]` when the user aborts
+/// the in-flight turn; it belongs to the interrupted turn, not a new human turn.
+pub(crate) fn interrupt_line(uuid: &str) -> TranscriptMessage {
+    user_line(uuid, "[Request interrupted by user]")
+}
+
 /// A tool-result carrier line. Claude delivers these as `role: user` with no
 /// author-written text; they belong to the in-flight turn, not a new human turn.
 pub(crate) fn tool_result_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {

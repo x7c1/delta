@@ -43,6 +43,77 @@ describe('liveStore.applyEvent', () => {
     expect(useLiveStore.getState().pending).toHaveLength(0);
   });
 
+  it('clears the in-flight pending send on turn_interrupted', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 1,
+      sessionId: 'sess-1',
+      threadId: 1,
+      text: 'hi',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    // The turn starts, then the user interrupts it. The `Stop` hook never fires
+    // on interrupt, so `turn_interrupted` must drain the stuck pending chip.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      pending_send_id: 1,
+      matched_uuid: 'uuid-1',
+    });
+    expect(useLiveStore.getState().pending[0].status).toBe('in_progress');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().pending).toHaveLength(0);
+  });
+
+  it('drops a still-queued send on turn_interrupted when turn_started never fired', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 1,
+      sessionId: 'sess-1',
+      threadId: 1,
+      text: 'interrupted before start',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().pending).toHaveLength(0);
+  });
+
+  it('does not drain another session queue on a foreign turn_interrupted', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'a1',
+      sendId: 1,
+      sessionId: 'sess-1',
+      threadId: 1,
+      text: 'session one send',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-2',
+    });
+    expect(useLiveStore.getState().pending).toHaveLength(1);
+    expect(useLiveStore.getState().pending[0].localId).toBe('a1');
+  });
+
   it('retargets a pending send to a new thread, keeping it queued', () => {
     const store = useLiveStore.getState();
     store.enqueueSend({

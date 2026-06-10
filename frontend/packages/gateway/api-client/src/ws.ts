@@ -30,6 +30,7 @@ const EVENT_KINDS: ReadonlySet<string> = new Set([
   'turn_started',
   'external_input',
   'turn_completed',
+  'turn_interrupted',
   'permission_requested',
   'permission_resolved',
   'transcript_updated',
