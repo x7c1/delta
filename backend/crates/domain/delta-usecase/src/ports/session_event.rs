@@ -40,6 +40,16 @@ pub enum SessionEvent {
         session_id: SessionId,
         stop_reason: Option<String>,
     },
+    /// The in-flight turn was interrupted by the user (Escape / Ctrl-C).
+    ///
+    /// Detected from the transcript itself rather than a hook: when the user
+    /// interrupts, Claude's `Stop` hook does not fire, so [`Self::TurnCompleted`]
+    /// is never emitted and the optimistic "pending send" chip would stay
+    /// "in progress" forever. The transcript tail instead sees a discrete
+    /// `[Request interrupted by user...]` user line and emits this event, which
+    /// clears the stuck pending send hook-independently (same delivery path as
+    /// [`Self::PermissionResolved`]).
+    TurnInterrupted { session_id: SessionId },
     /// The transcript grew between hooks (continuous tail).
     ///
     /// Emitted by the background poll when new lines were ingested, so the
@@ -102,6 +112,16 @@ mod tests {
                 session_id: SessionId::from("sess-1"),
             }),
             serde_json::json!({ "kind": "session_registered", "session_id": "sess-1" }),
+        );
+    }
+
+    #[test]
+    fn turn_interrupted_serializes_as_id_routed_tagged_event() {
+        assert_eq!(
+            json(&SessionEvent::TurnInterrupted {
+                session_id: SessionId::from("sess-1"),
+            }),
+            serde_json::json!({ "kind": "turn_interrupted", "session_id": "sess-1" }),
         );
     }
 

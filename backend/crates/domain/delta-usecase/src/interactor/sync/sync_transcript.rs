@@ -4,6 +4,14 @@ use crate::error::Result;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::Interactor;
 
+/// Prefix Claude Code writes to the transcript when the user interrupts the
+/// in-flight turn. It appears as a `role: user` line whose only text block is
+/// either `[Request interrupted by user]` (plain mid-response interrupt) or
+/// `[Request interrupted by user for tool use]` (interrupt during a tool use).
+/// Matching on the shared prefix covers both variants (and any future suffix)
+/// without enumerating each exact string.
+const INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user";
+
 impl<T, X, S, W> Interactor<T, X, S, W>
 where
     T: TmuxDriver,
@@ -31,11 +39,17 @@ where
     ///   in-flight turn, not a new human turn.
     ///
     /// Returns the newly-ingested messages and any [`SessionEvent`]s that the
-    /// ingest produced. The only such event today is
-    /// [`SessionEvent::PermissionResolved`]: when a `tool_result` line is
-    /// ingested, the open permission request correlated by its `tool_use_id` is
-    /// resolved so the browser can clear the "permission requested" notice. The
-    /// caller is responsible for broadcasting these events.
+    /// ingest produced. Two events can arise here:
+    ///
+    /// - [`SessionEvent::PermissionResolved`]: when a `tool_result` line is
+    ///   ingested, the open permission request correlated by its `tool_use_id`
+    ///   is resolved so the browser can clear the "permission requested" notice.
+    /// - [`SessionEvent::TurnInterrupted`]: when a `[Request interrupted by
+    ///   user...]` marker line is ingested, signalling the user aborted the
+    ///   in-flight turn. Claude's `Stop` hook does not fire on interrupt, so this
+    ///   is the hook-independent signal that clears the stuck pending send.
+    ///
+    /// The caller is responsible for broadcasting these events.
     pub(in crate::interactor) async fn sync_transcript(
         &self,
         session: &Session,
@@ -114,8 +128,26 @@ where
             // inherit `carry_thread` rather than reset it to `main`. (Mirrors the
             // frontend's `isUserTurn`.) Treating a tool_result as a turn boundary
             // used to drop the rest of a sub-thread's turn onto `main`.
+            //
+            // An interrupt marker is also a `role: user` line, but it belongs to
+            // the turn the user just aborted, not a new human turn — so it too
+            // inherits `carry_thread` and is excluded from `is_human_turn` (it
+            // must not run through `match_pending_send` nor reset to `main`).
             let trimmed = content_text.as_deref().unwrap_or("").trim();
-            let is_human_turn = matches!(line.role, delta_model::Role::User) && !trimmed.is_empty();
+            let is_interrupt_marker = matches!(line.role, delta_model::Role::User)
+                && trimmed.starts_with(INTERRUPT_MARKER_PREFIX);
+            let is_human_turn = matches!(line.role, delta_model::Role::User)
+                && !trimmed.is_empty()
+                && !is_interrupt_marker;
+
+            // The interrupt is hook-independent (Claude's `Stop` hook does not
+            // fire on interrupt), so emit `TurnInterrupted` here to clear the
+            // stuck pending send in the browser.
+            if is_interrupt_marker {
+                events.push(SessionEvent::TurnInterrupted {
+                    session_id: session.id.clone(),
+                });
+            }
 
             let (thread_id, semantic_parent_uuid) = if is_human_turn {
                 match self.store.match_pending_send(&session.id, trimmed).await? {

@@ -39,6 +39,18 @@ export interface TurnCompletedEvent {
   stop_reason: string | null;
 }
 
+/**
+ * The in-flight turn was interrupted by the user (Escape / Ctrl-C). Claude's
+ * `Stop` hook does not fire on interrupt, so no `turn_completed` arrives and the
+ * optimistic "pending send" chip would stay "in progress" forever. The backend
+ * detects the `[Request interrupted by user...]` transcript line independently
+ * of any hook and emits this so the stuck pending send can be cleared.
+ */
+export interface TurnInterruptedEvent {
+  kind: 'turn_interrupted';
+  session_id: SessionId;
+}
+
 export interface PermissionRequestedEvent {
   kind: 'permission_requested';
   session_id: SessionId;
@@ -76,6 +88,7 @@ export type SessionEvent =
   | TurnStartedEvent
   | ExternalInputEvent
   | TurnCompletedEvent
+  | TurnInterruptedEvent
   | PermissionRequestedEvent
   | PermissionResolvedEvent
   | TranscriptUpdatedEvent;

@@ -154,6 +154,43 @@ function matchPendingIndex(
   );
 }
 
+/**
+ * Compute the state changes for a turn ending in `sessionId`: drop the oldest
+ * active (in_progress or queued) pending send for that session and clear any
+ * session-scoped permission / external-input notices. Returns only the changed
+ * slices (empty object when nothing matched, so the caller can keep the
+ * identity-stable `state`). Shared by `turn_completed` (the `Stop` hook) and
+ * `turn_interrupted` (the transcript-detected interrupt), which must drain the
+ * stuck pending the same way; on interrupt the `Stop` hook never fires, and the
+ * two can occasionally both arrive, so the drain is idempotent (a no-match is a
+ * no-op).
+ */
+function drainTurnForSession(
+  state: LiveState,
+  sessionId: SessionId,
+): Partial<LiveState> {
+  const next: Partial<LiveState> = {};
+  const idx = matchPendingIndex(
+    state.pending,
+    sessionId,
+    (item) => item.status === 'in_progress' || item.status === 'queued',
+  );
+  if (idx !== -1) {
+    next.pending = state.pending.filter((_, i) => i !== idx);
+  }
+  if (state.permission[sessionId]) {
+    const permission = { ...state.permission };
+    delete permission[sessionId];
+    next.permission = permission;
+  }
+  if (state.externalInput[sessionId]) {
+    const externalInput = { ...state.externalInput };
+    delete externalInput[sessionId];
+    next.externalInput = externalInput;
+  }
+  return next;
+}
+
 export const useLiveStore = create<LiveState>((set) => ({
   connection: 'connecting',
   pending: [],
@@ -281,35 +318,26 @@ export const useLiveStore = create<LiveState>((set) => ({
         }
         case 'turn_completed': {
           // The turn ended, so any permission prompt that was blocking THIS
-          // session is resolved — clear it. Also drop the oldest active send for
-          // this session from the visible FIFO. It may still be `queued` rather
-          // than `in_progress`: `turn_started` only fires when the user line was
+          // session is resolved, any external-input notice has served its
+          // purpose, and the oldest active send for this session is drained from
+          // the visible FIFO. The send may still be `queued` rather than
+          // `in_progress`: `turn_started` only fires when the user line was
           // ingested in the same `UserPromptSubmit` sync, which often does not
           // happen, so a completed turn must clear a still-queued send too —
           // otherwise it stays "waiting" forever. Scoped by session so a turn in
           // one session never drains another session's queue.
-          const next: Partial<LiveState> = {};
-          const idx = matchPendingIndex(
-            state.pending,
-            event.session_id,
-            (item) =>
-              item.status === 'in_progress' || item.status === 'queued',
-          );
-          if (idx !== -1) {
-            next.pending = state.pending.filter((_, i) => i !== idx);
-          }
-          if (state.permission[event.session_id]) {
-            const permission = { ...state.permission };
-            delete permission[event.session_id];
-            next.permission = permission;
-          }
-          // The turn ended, so any external-input notice for this session has
-          // served its purpose — clear it (mirrors the permission clear above).
-          if (state.externalInput[event.session_id]) {
-            const externalInput = { ...state.externalInput };
-            delete externalInput[event.session_id];
-            next.externalInput = externalInput;
-          }
+          const next = drainTurnForSession(state, event.session_id);
+          return Object.keys(next).length > 0 ? next : state;
+        }
+        case 'turn_interrupted': {
+          // The user interrupted the in-flight turn (Escape / Ctrl-C). Claude's
+          // `Stop` hook does not fire on interrupt, so `turn_completed` never
+          // arrives and the optimistic pending chip would stay "in progress"
+          // forever. The backend detects the interrupt from the transcript and
+          // emits this hook-independent signal; drain the stuck send exactly as
+          // a completed turn would. Idempotent — `Stop` may occasionally also
+          // fire, and a no-match is a no-op.
+          const next = drainTurnForSession(state, event.session_id);
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':

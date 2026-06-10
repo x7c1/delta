@@ -50,7 +50,10 @@ export function applySessionEvent(
   switch (event.kind) {
     case 'turn_started':
     case 'turn_completed':
-      // Transcript grew on the focused session: refetch the active thread.
+    case 'turn_interrupted':
+      // Transcript grew on the focused session: refetch the active thread. An
+      // interrupt also appends the `[Request interrupted by user]` marker line,
+      // so it refetches the same way a completed turn does.
       if (isFocused && activeThreadId !== null) {
         invalidateThreadMessages(queryClient, activeThreadId);
       }
