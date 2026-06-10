@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useLiveStore } from './liveStore';
+import { NEW_SESSION_DRAFT_KEY } from './composerStore';
 
 function reset() {
   useLiveStore.setState({
@@ -134,6 +135,73 @@ describe('liveStore.applyEvent', () => {
     expect(item.threadId).toBe(7);
     expect(item.status).toBe('queued');
     expect(item.text).toBe('branch follow-up');
+  });
+
+  it('binds the unbound new-session send to its spawned session and main thread', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 0, // placeholder id from the new-session POST response
+      sessionId: null, // unbound: the spawn has no real session id yet
+      threadId: NEW_SESSION_DRAFT_KEY, // enqueued under the new-session sentinel
+      text: 'first message',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    // The spawn registered as sess-9 with main thread 42; bind the pending to it
+    // so the optimistic strip survives the focus jump to the real thread.
+    useLiveStore.getState().bindNewSessionPending('sess-9', 42);
+
+    const item = useLiveStore.getState().pending[0];
+    expect(item.sessionId).toBe('sess-9');
+    expect(item.threadId).toBe(42);
+    expect(item.status).toBe('queued');
+    expect(item.text).toBe('first message');
+  });
+
+  it('keeps the bound new-session send drainable on its first turn_completed', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 0,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'first message',
+      semanticParentUuid: null,
+      status: 'in_progress',
+      createdAt: 0,
+    });
+    useLiveStore.getState().bindNewSessionPending('sess-9', 42);
+
+    // The first turn finishes: the now-bound send drains by exact session match.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-9',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().pending).toHaveLength(0);
+  });
+
+  it('leaves the queue untouched when no unbound new-session send exists', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'l1',
+      sendId: 1,
+      sessionId: 'sess-1', // already bound
+      threadId: 1,
+      text: 'bound send',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    useLiveStore.getState().bindNewSessionPending('sess-9', 42);
+
+    const item = useLiveStore.getState().pending[0];
+    expect(item.sessionId).toBe('sess-1');
+    expect(item.threadId).toBe(1);
   });
 
   it('drops a still-queued send on turn_completed when turn_started never fired', () => {

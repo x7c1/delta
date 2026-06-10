@@ -88,6 +88,17 @@ export interface LiveState {
    * child so the "waiting" indicator follows the user into the sub-thread.
    */
   retargetSend: (localId: string, threadId: ThreadId) => void;
+  /**
+   * Bind the unbound new-session pending send to the session and main thread it
+   * spawned, once that session registers and its main thread id becomes known. A
+   * new-session send is enqueued under the new-session sentinel thread with no
+   * session id (the spawn has no real ids yet), so the optimistic strip — keyed
+   * by the active thread — would otherwise vanish the instant the view navigates
+   * to the freshly-spawned session, even while its first turn is still running.
+   * Re-keys the oldest unbound send (`sessionId === null`); a no-op when none is
+   * unbound (the send already drained, or there was no new-session send).
+   */
+  bindNewSessionPending: (sessionId: SessionId, threadId: ThreadId) => void;
   failSend: (localId: string) => void;
   /**
    * Drop an optimistic pending send outright (not merely mark it failed). Used
@@ -217,6 +228,17 @@ export const useLiveStore = create<LiveState>((set) => ({
         item.localId === localId ? { ...item, threadId } : item,
       ),
     })),
+
+  bindNewSessionPending: (sessionId, threadId) =>
+    set((state) => {
+      const idx = state.pending.findIndex((item) => item.sessionId === null);
+      if (idx === -1) {
+        return state;
+      }
+      const pending = state.pending.slice();
+      pending[idx] = { ...pending[idx], sessionId, threadId };
+      return { pending };
+    }),
 
   failSend: (localId) =>
     set((state) => ({
