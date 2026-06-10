@@ -106,11 +106,19 @@ export function TranscriptPane({
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const cancelNewSession = useNavStore((state) => state.cancelNewSession);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
-  const newSessionWorkdir = useComposerStore(
-    (state) => state.newSessionWorkdir,
-  );
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
+  );
+  // The picker's open state lives in the store (not local component state) so
+  // the navigator's "New" button can (re)open it without a focus transition.
+  const workdirDialogOpen = useComposerStore(
+    (state) => state.workdirDialogOpen,
+  );
+  const openWorkdirDialog = useComposerStore(
+    (state) => state.openWorkdirDialog,
+  );
+  const closeWorkdirDialog = useComposerStore(
+    (state) => state.closeWorkdirDialog,
   );
   // The focused session's external-input marker, if any. Keyed per session like
   // the permission notice; visibility is further gated to the active thread below.
@@ -139,11 +147,6 @@ export function TranscriptPane({
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
     null,
   );
-
-  // Whether the working-directory modal is open. Selection is mandatory for a
-  // new session, so the dialog auto-opens on entering that state (see below);
-  // local state is enough — no other view needs to know it is open.
-  const [workdirDialogOpen, setWorkdirDialogOpen] = useState(false);
 
   // The key the pending queue renders under for this view.
   const pendingThreadId: ThreadId | null = newSession
@@ -240,13 +243,13 @@ export function TranscriptPane({
   useEffect(() => {
     if (newSession) {
       if (!useComposerStore.getState().newSessionWorkdir) {
-        setWorkdirDialogOpen(true);
+        openWorkdirDialog();
       }
     } else {
       setNewSessionWorkdir(null);
-      setWorkdirDialogOpen(false);
+      closeWorkdirDialog();
     }
-  }, [newSession, setNewSessionWorkdir]);
+  }, [newSession, setNewSessionWorkdir, openWorkdirDialog, closeWorkdirDialog]);
 
   // Keyed on the rendered content changing: jump to the bottom after paint when
   // sticking.
@@ -412,22 +415,11 @@ export function TranscriptPane({
           </div>
         )}
 
-        {newSession &&
-          (newSessionWorkdir ? (
-            // A directory is chosen: show it as a chip with a ✎ to change it.
-            <WorkdirChip onEdit={() => setWorkdirDialogOpen(true)} />
-          ) : (
-            // The user dismissed the auto-opened modal without selecting. Send
-            // stays disabled; this button reopens the modal to pick one.
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setWorkdirDialogOpen(true)}
-              data-testid="workdir-open"
-            >
-              📁 Choose a directory…
-            </Button>
-          ))}
+        {/* A directory is chosen: show it as a chip with a ✎ to change it (the
+            ✎ reopens the picker without resetting the selection). The chip
+            renders nothing when no directory is selected, so there is no button
+            to (re)open the picker from here — that is done via "New". */}
+        {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
         <PendingQueue threadId={pendingThreadId} />
         {composer}
       </div>
@@ -462,14 +454,14 @@ export function TranscriptPane({
           <WorkdirDialog
             open={workdirDialogOpen}
             onClose={() => {
-              setWorkdirDialogOpen(false);
+              closeWorkdirDialog();
               // Dismissing the picker without a directory cancels the
               // new-session intent and returns to the previously-focused
               // session — but only when there is one to return to. With no
               // sessions, new-session is the mandatory default, so
-              // cancelNewSession() is a no-op and we stay (the "Choose a
-              // directory…" button remains). Read the live store value to
-              // avoid a stale closure (mirrors the auto-open effect above).
+              // cancelNewSession() is a no-op and we stay. Read the live store
+              // value to avoid a stale closure (mirrors the auto-open effect
+              // above).
               if (!useComposerStore.getState().newSessionWorkdir) {
                 cancelNewSession();
               }

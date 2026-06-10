@@ -22,6 +22,7 @@ import {
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import { useComposerStore } from '../../store/composerStore';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
 // The live event source opens a real WebSocket outside mock mode, and the
@@ -76,7 +77,14 @@ describe('WorkspaceScreen multi-session', () => {
     useNavStore.setState({
       focusedSessionId: null,
       activeThreadId: null,
+      preNewSessionFocus: null,
       terminalOpen: false,
+    });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+      workdirDialogOpen: false,
     });
   });
 
@@ -227,6 +235,46 @@ describe('WorkspaceScreen multi-session', () => {
     );
     // Focus stays on the now-closed session rather than snapping elsewhere.
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
+  });
+
+  it('starts the new-session flow when "New" is clicked from a real session', async () => {
+    // Pin focus to a real session so the test does not depend on cold-load
+    // auto-focus (the shared mock store can be mutated by earlier specs).
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    renderScreen();
+
+    const newButton = await screen.findByRole('button', { name: 'New' });
+    fireEvent.click(newButton);
+
+    // Focus moves to the sentinel, any prior selection is reset, and the picker
+    // is opened — all three driven by the single "New" click.
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
+  });
+
+  it('re-opens the picker when "New" is clicked while already in new-session', async () => {
+    // Already in the new-session state with a stale selection and the picker
+    // dismissed — the regression case where focus does not change, so a
+    // focus-driven auto-open would not re-fire.
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: SESSION_ID,
+    });
+    useComposerStore.setState({
+      workdirDialogOpen: false,
+      newSessionWorkdir: '/stale/dir',
+    });
+    renderScreen();
+
+    const newButton = await screen.findByRole('button', { name: 'New' });
+    fireEvent.click(newButton);
+
+    // Clicking "New" again (still in new-session) must reset the selection and
+    // re-open the picker.
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
   });
 
   it('renders a closed focused session read-only', async () => {

@@ -71,6 +71,7 @@ describe('TranscriptPane', () => {
       drafts: {},
       branchOrigin: null,
       newSessionWorkdir: null,
+      workdirDialogOpen: false,
     });
   });
 
@@ -342,10 +343,31 @@ describe('TranscriptPane', () => {
     expect(
       within(chip).getByRole('button', { name: 'Change working directory' }),
     ).toBeInTheDocument();
-    expect(screen.queryByTestId('workdir-open')).not.toBeInTheDocument();
   });
 
-  it('falls back to a "Choose a directory" button after cancelling without selecting (no session to return to)', async () => {
+  it('reopens the picker from the chip ✎ without resetting the selection', async () => {
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    renderNewSessionPane();
+
+    // The picker starts closed (a directory is already selected, so the
+    // auto-open effect does not fire).
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByTestId('workdir-chip')).getByRole('button', {
+        name: 'Change working directory',
+      }),
+    );
+
+    // The ✎ opens the picker via openWorkdirDialog (no reset), so the chosen
+    // directory is still in the store while editing.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(
+      '/home/dev/projects/delta',
+    );
+  });
+
+  it('closes the picker and shows no chip after cancelling without selecting (no session to return to)', async () => {
     // No previous session is recorded (the empty initial screen), so dismissing
     // the picker is a no-op: new-session stays as the mandatory default.
     useNavStore.setState({
@@ -360,15 +382,12 @@ describe('TranscriptPane', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
     );
-    // No selection: the reopen button shows and Send stays disabled.
-    expect(screen.getByTestId('workdir-open')).toBeInTheDocument();
+    // No selection: no chip is shown and Send stays disabled. Reopening the
+    // picker is now done from the navigator's "New" button, not a center button.
+    expect(screen.queryByTestId('workdir-chip')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     // Stays in new-session (nowhere to return to).
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
-
-    // The button reopens the modal.
-    fireEvent.click(screen.getByTestId('workdir-open'));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 
   it('returns to the previously-focused session when the picker is dismissed without a selection', async () => {
