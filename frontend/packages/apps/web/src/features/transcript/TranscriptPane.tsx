@@ -270,6 +270,29 @@ export function TranscriptPane({
     }
   }, [messages.length, lastContentLength, pendingCount]);
 
+  // The Panel footer (notifications, Composer, queue, chips) sits outside the
+  // scroll region and has a variable height: when a notice appears or the
+  // composer grows, the footer expands and this `flex-1` body shrinks. That
+  // shrink reduces the scroll viewport without firing a scroll or content
+  // change, so the content effects above never re-run and the latest content
+  // slips below the fold. Observe the body's size and re-stick on resize so the
+  // bottom stays pinned. Setting `scrollTop` does not alter layout, so this
+  // cannot trigger a ResizeObserver feedback loop.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      if (!stickRef.current) {
+        return;
+      }
+      el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const ancestry = useMemo(
     () => (activeThread ? threadAncestry(threads, activeThread.id) : []),
     [threads, activeThread],
