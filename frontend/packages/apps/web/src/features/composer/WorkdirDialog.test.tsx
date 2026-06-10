@@ -99,7 +99,7 @@ describe('WorkdirDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('descends, ascends, and uses the currently-browsed directory', async () => {
+  it('descends, ascends, and the browsed directory becomes the candidate', async () => {
     renderDialog();
 
     // Default browse lists $HOME (/home/dev) with its subdirectories.
@@ -109,25 +109,37 @@ describe('WorkdirDialog', () => {
       );
     });
 
-    // Descend into projects/.
+    // Descend into projects/. Navigating makes the browsed dir the candidate,
+    // dropping the recent pre-selection.
     fireEvent.click(screen.getByRole('button', { name: 'projects/' }));
     await waitFor(() => {
       expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
         '/home/dev/projects',
       );
     });
+    expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(
+      screen.getByRole('button', { name: MOST_RECENT }),
+    ).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'delta/' })).toBeInTheDocument();
 
-    // Ascend via the ".." entry back to $HOME.
+    // Ascend via the ".." entry back to $HOME; that dir is now the candidate.
     fireEvent.click(screen.getByTestId('workdir-parent'));
     await waitFor(() => {
       expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
         '/home/dev',
       );
     });
+    expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
 
-    // "Use this directory" sets the browsed path as the candidate, then commit.
-    fireEvent.click(screen.getByTestId('workdir-use-current'));
+    // Navigation alone made it the candidate: Select commits it without ever
+    // clicking "Use this directory".
     fireEvent.click(screen.getByTestId('workdir-confirm'));
     expect(useComposerStore.getState().newSessionWorkdir).toBe('/home/dev');
   });

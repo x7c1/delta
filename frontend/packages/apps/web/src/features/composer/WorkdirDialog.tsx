@@ -79,6 +79,14 @@ export function WorkdirDialog({ open, onClose }: WorkdirDialogProps) {
     }
   }, [open, recent, candidate]);
 
+  // Navigating to a directory also makes it the candidate, so the highlighted
+  // selection follows where you are in Browse — dropping the recent
+  // pre-selection once the user starts browsing.
+  const navigateTo = (path: string | null) => {
+    setBrowsePath(path);
+    setCandidate(path);
+  };
+
   const confirm = () => {
     if (candidate === null) {
       return;
@@ -202,7 +210,7 @@ export function WorkdirDialog({ open, onClose }: WorkdirDialogProps) {
                   <li>
                     <button
                       type="button"
-                      onClick={() => setBrowsePath(listing.parent)}
+                      onClick={() => navigateTo(listing.parent)}
                       className="w-full rounded px-2 py-1 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
                       data-testid="workdir-parent"
                     >
@@ -214,7 +222,7 @@ export function WorkdirDialog({ open, onClose }: WorkdirDialogProps) {
                   <li key={entry.path}>
                     <button
                       type="button"
-                      onClick={() => setBrowsePath(entry.path)}
+                      onClick={() => navigateTo(entry.path)}
                       className="w-full truncate rounded px-2 py-1 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
                       title={entry.path}
                     >
