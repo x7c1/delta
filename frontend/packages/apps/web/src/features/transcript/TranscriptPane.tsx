@@ -49,27 +49,72 @@ const STICK_THRESHOLD_PX = 64;
  * while a genuine TUI prompt — which has no resolution until the human answers —
  * outlasts the window and renders as normal.
  */
-const PERMISSION_NOTICE_DELAY_MS = 300;
+const PERMISSION_NOTICE_DELAY_MS = 1000;
 
 /**
- * Defer surfacing a permission notice until it has stayed present for
- * {@link PERMISSION_NOTICE_DELAY_MS}. A notice that clears within the window
- * never renders; a notice that persists renders once the window elapses.
- * Returns `null` until then, and immediately when the source notice is gone.
+ * Once shown, the smallest time a permission notice stays on screen, even if its
+ * source clears immediately after. A notice that pops in and vanishes within a
+ * blink reads as a glitch; holding it for this window makes a real (if quickly
+ * resolved) prompt register as a deliberate appearance rather than a flicker.
+ */
+const PERMISSION_NOTICE_MIN_VISIBLE_MS = 500;
+
+/**
+ * Gate a permission notice's visibility on two timers:
+ *
+ * - **Appear delay**: it must stay present for {@link PERMISSION_NOTICE_DELAY_MS}
+ *   before painting. A notice that clears within the window never renders (the
+ *   auto-approved-tool flash); one that persists renders once the window elapses.
+ * - **Minimum visible**: once shown, it stays for at least
+ *   {@link PERMISSION_NOTICE_MIN_VISIBLE_MS} even if the source clears right
+ *   after, so it never blinks out the instant it appears.
+ *
+ * A new source notice arriving during the min-visible hold cancels the pending
+ * clear and keeps the notice up seamlessly.
  */
 function useDebouncedPermission<T>(notice: T | null): T | null {
   const [visible, setVisible] = useState<T | null>(null);
+  // Wall-clock time the notice became visible; null while hidden. A ref (not
+  // state) so reading it never re-runs the effect, and it survives the timer
+  // callbacks that flip visibility.
+  const shownAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (notice === null) {
-      // Cleared (resolved/dismissed/turn done): drop it at once, no delay.
+    if (notice !== null) {
+      // Already on screen: just track the latest notice (e.g. a follow-up
+      // request) without resetting how long it has been visible.
+      if (shownAtRef.current !== null) {
+        setVisible(notice);
+        return;
+      }
+      // Not yet shown: arm the appear delay. Cleanup cancels it if the source
+      // clears first, so a quickly-resolved notice never paints.
+      const timer = setTimeout(() => {
+        shownAtRef.current = Date.now();
+        setVisible(notice);
+      }, PERMISSION_NOTICE_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+
+    // Source gone while still within the appear delay (never shown): drop it.
+    if (shownAtRef.current === null) {
       setVisible(null);
       return;
     }
-    const timer = setTimeout(
-      () => setVisible(notice),
-      PERMISSION_NOTICE_DELAY_MS,
-    );
+
+    // Source gone after it was shown: hold for the remainder of the minimum
+    // visible window before clearing (clear at once if it has already elapsed).
+    const remaining =
+      PERMISSION_NOTICE_MIN_VISIBLE_MS - (Date.now() - shownAtRef.current);
+    if (remaining <= 0) {
+      shownAtRef.current = null;
+      setVisible(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      shownAtRef.current = null;
+      setVisible(null);
+    }, remaining);
     return () => clearTimeout(timer);
   }, [notice]);
 
