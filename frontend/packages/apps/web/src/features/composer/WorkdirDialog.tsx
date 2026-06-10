@@ -29,20 +29,26 @@ function FolderIcon({ className }: { className?: string }) {
 }
 
 /**
- * The up-arrow glyph marking the ".." row so it reads as "go up to the parent
- * directory", visually distinct from the folder rows. Decorative — always
+ * The corner / level-up arrow glyph marking the ".." row so it reads as "go up
+ * one level to the parent directory" rather than pointing at the row directly
+ * above it, visually distinct from the folder rows. Decorative — always
  * `aria-hidden`, so the row's accessible name stays "..". This file is the only
  * user.
  */
 function ParentDirIcon({ className }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 20 20"
-      fill="currentColor"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className={className}
       aria-hidden="true"
     >
-      <path d="M10 17a.75.75 0 0 1-.75-.75V5.612L5.29 9.77a.75.75 0 0 1-1.08-1.04l5.25-5.5a.75.75 0 0 1 1.08 0l5.25 5.5a.75.75 0 1 1-1.08 1.04L10.75 5.612V16.25A.75.75 0 0 1 10 17Z" />
+      <polyline points="14 9 9 4 4 9" />
+      <path d="M20 20h-7a4 4 0 0 1-4-4V4" />
     </svg>
   );
 }
