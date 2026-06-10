@@ -330,9 +330,10 @@ describe('WorkspaceScreen multi-session', () => {
 
     renderScreen();
 
-    const tail = await screen.findByText('projects/delta');
-    // The directory tail leads the first line; its tooltip carries the full
-    // path (no longer the time).
+    // The visible directory tail leads the first line, rendered with ' : '
+    // separators in place of slashes; its tooltip still carries the full
+    // slash path (no longer the time).
+    const tail = await screen.findByText('projects : delta');
     expect(tail.getAttribute('title')).toBe('/home/dev/projects/delta');
 
     // The session id and the last-activity time are visible row text on the

@@ -157,7 +157,7 @@ export function SessionNode({
                 )}
                 title={item.session.cwd}
               >
-                {cwdTail || label}
+                {cwdTail ? cwdTail.split('/').join(' : ') : label}
               </span>
               {needsPermission && (
                 <span className="shrink-0" data-testid="session-permission-badge">
