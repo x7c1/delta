@@ -176,7 +176,15 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
 
   const term = new Terminal({
     convertEol: true,
-    fontFamily: 'monospace',
+    // A bare `monospace` resolves to a Latin-only face (e.g. DejaVu Sans Mono),
+    // so CJK glyphs fall back to whatever the browser picks — often a
+    // *proportional* CJK face that draws punctuation (`、` U+3001 / `。` U+3002)
+    // shoved into the left of the full-width cell instead of centered. Naming an
+    // explicit *monospaced* CJK face keeps Latin on the preferred mono face
+    // while CJK punctuation lands centered in its cell. The list degrades across
+    // OSes (Linux Noto, macOS Hiragino) before the generic `monospace`.
+    fontFamily:
+      "'DejaVu Sans Mono', 'Noto Sans Mono CJK JP', 'Hiragino Sans', monospace",
     fontSize: 13,
     theme: { background: '#0f172a' },
     // `term.unicode` is a proposed API that the Unicode 11 addon touches, so it
@@ -193,6 +201,13 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
   term.open(el);
   fit.fit();
 
+  // Pass { stream: true } so that an incomplete multi-byte UTF-8 sequence
+  // split across WebSocket frame boundaries is held in the decoder's internal
+  // buffer and completed by the next chunk. Without this, each decode() call
+  // flushes the buffer, replacing any trailing incomplete byte(s) with U+FFFD.
+  // The PTY output is a continuous stream, so there is no meaningful "end":
+  // any bytes still buffered when the socket closes are silently dropped, which
+  // is acceptable — a final incomplete sequence would be garbled either way.
   const decoder = new TextDecoder();
   const entry: PaneEntry = {
     el,
@@ -201,7 +216,7 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
     connection: connectPty({
       url: wsUrl('/pty'),
       sessionId,
-      onData: (chunk) => term.write(decoder.decode(chunk)),
+      onData: (chunk) => term.write(decoder.decode(chunk, { stream: true })),
       onStatus: (status) => {
         if (status === 'closed') {
           entry.closed = true;
