@@ -8,9 +8,15 @@
 //!   `hookSpecificOutput.additionalContext` to inject a locator quote into that
 //!   prompt only.
 //! - `Stop` fires when a response completes.
-//! - `PreToolUse` fires when a permission prompt is imminent; Delta only
-//!   notifies the browser and records the request — the TUI decides allow/deny.
+//! - `PreToolUse` fires for every tool call; Delta only records the request
+//!   (it carries the `tool_use_id` needed to resolve the notice later) and does
+//!   not notify the browser — the TUI decides allow/deny.
+//! - `PermissionRequest` fires only when an interactive permission dialog
+//!   actually appears (a human answer is genuinely pending); Delta notifies the
+//!   browser, correlating it to the request recorded at `PreToolUse`.
 
+mod permission_request_payload;
+pub use permission_request_payload::PermissionRequestPayload;
 mod pre_tool_use_payload;
 pub use pre_tool_use_payload::PreToolUsePayload;
 mod stop_payload;
@@ -75,6 +81,29 @@ pub async fn stop(
     };
 
     match state.interactor().on_stop(hook).await {
+        Ok(events) => {
+            state.broadcast(events);
+            StatusCode::OK.into_response()
+        }
+        Err(err) => internal_error(err).into_response(),
+    }
+}
+
+/// Handle a `PermissionRequest` hook: an interactive permission dialog has
+/// appeared, so a human answer is genuinely pending. Correlate it to the request
+/// recorded at `PreToolUse` and broadcast the resulting `PermissionRequested` so
+/// the browser shows the notice.
+pub async fn permission_request(
+    State(state): State<AppState>,
+    Json(payload): Json<PermissionRequestPayload>,
+) -> impl IntoResponse {
+    let session_id = SessionId::from(payload.session_id);
+    let tool_input_json = payload.tool_input.to_string();
+    match state
+        .interactor()
+        .on_permission_request(&session_id, &payload.tool_name, &tool_input_json)
+        .await
+    {
         Ok(events) => {
             state.broadcast(events);
             StatusCode::OK.into_response()

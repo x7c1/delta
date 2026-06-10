@@ -160,6 +160,17 @@ pub trait SessionStore: Send + Sync {
         tool_use_id: &str,
     ) -> Result<PermissionRequest>;
 
+    /// Find the open (`pending`) permission request that a `PermissionRequest`
+    /// hook refers to. The hook carries no `tool_use_id`, so match by
+    /// (session, tool_name) and prefer an exact `tool_input_json` match, falling
+    /// back to the most recent pending request for that tool. Returns its id.
+    async fn find_open_permission_request(
+        &self,
+        session_id: &SessionId,
+        tool_name: &str,
+        tool_input_json: &str,
+    ) -> Result<Option<i64>>;
+
     /// Resolve the open (`pending`) permission request for this session whose
     /// `tool_use_id` matches the just-ingested `tool_result`, if any.
     ///
@@ -301,6 +312,17 @@ impl SessionStore for Box<dyn SessionStore> {
     ) -> Result<PermissionRequest> {
         (**self)
             .record_permission_request(session_id, tool_name, tool_input_json, tool_use_id)
+            .await
+    }
+
+    async fn find_open_permission_request(
+        &self,
+        session_id: &SessionId,
+        tool_name: &str,
+        tool_input_json: &str,
+    ) -> Result<Option<i64>> {
+        (**self)
+            .find_open_permission_request(session_id, tool_name, tool_input_json)
             .await
     }
 

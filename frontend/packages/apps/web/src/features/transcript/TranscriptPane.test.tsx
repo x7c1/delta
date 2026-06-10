@@ -6,7 +6,6 @@ import {
   describe,
   expect,
   it,
-  vi,
 } from 'vitest';
 import {
   act,
@@ -259,112 +258,43 @@ describe('TranscriptPane', () => {
     expect(useLiveStore.getState().externalInput).toEqual({});
   });
 
-  it('does not flash the permission notice when the request resolves within the debounce window', async () => {
-    vi.useFakeTimers();
-    try {
-      useLiveStore.setState({
-        pending: [],
-        externalInput: {},
-        resumeUnavailable: {},
-        permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
-      });
+  it('shows the permission notice as soon as a permission is requested', async () => {
+    // The notice is driven by the `PermissionRequest` hook, which fires only when
+    // an interactive dialog actually appears, so it is surfaced directly with no
+    // debounce.
+    useLiveStore.setState({
+      pending: [],
+      externalInput: {},
+      resumeUnavailable: {},
+      permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+    });
 
-      renderPane();
+    renderPane();
 
-      // Within the debounce window the notice has not painted yet.
-      act(() => {
-        vi.advanceTimersByTime(100);
-      });
-      expect(
-        screen.queryByTestId('permission-notice'),
-      ).not.toBeInTheDocument();
-
-      // The request resolves (auto-approved tool's tool_result ingested) before
-      // the window elapses, so the notice must never appear.
-      act(() => {
-        useLiveStore.getState().applyEvent({
-          kind: 'permission_resolved',
-          session_id: SESSION_ID,
-          request_id: 7,
-        });
-      });
-      act(() => {
-        vi.advanceTimersByTime(1000);
-      });
-      expect(
-        screen.queryByTestId('permission-notice'),
-      ).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+    const notice = await screen.findByTestId('permission-notice');
+    expect(notice).toHaveTextContent('Permission requested: Bash');
   });
 
-  it('shows the permission notice once it outlasts the debounce window', async () => {
-    vi.useFakeTimers();
-    try {
-      useLiveStore.setState({
-        pending: [],
-        externalInput: {},
-        resumeUnavailable: {},
-        permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
-      });
+  it('clears the permission notice when the request resolves', async () => {
+    useLiveStore.setState({
+      pending: [],
+      externalInput: {},
+      resumeUnavailable: {},
+      permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+    });
 
-      renderPane();
+    renderPane();
+    expect(await screen.findByTestId('permission-notice')).toBeInTheDocument();
 
-      // A genuine pending prompt has no resolution; once the window elapses the
-      // notice renders as normal.
-      act(() => {
-        vi.advanceTimersByTime(1100);
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'permission_resolved',
+        session_id: SESSION_ID,
+        request_id: 7,
       });
-      const notice = screen.getByTestId('permission-notice');
-      expect(notice).toHaveTextContent('Permission requested: Bash');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+    });
 
-  it('holds the permission notice for the minimum window after its source clears', async () => {
-    vi.useFakeTimers();
-    try {
-      useLiveStore.setState({
-        pending: [],
-        externalInput: {},
-        resumeUnavailable: {},
-        permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
-      });
-
-      renderPane();
-
-      // Surface the notice (outlast the appear delay).
-      act(() => {
-        vi.advanceTimersByTime(1100);
-      });
-      expect(screen.getByTestId('permission-notice')).toBeInTheDocument();
-
-      // It resolves almost immediately after showing; it must not blink out at
-      // once but hold for the minimum visible window.
-      act(() => {
-        useLiveStore.getState().applyEvent({
-          kind: 'permission_resolved',
-          session_id: SESSION_ID,
-          request_id: 7,
-        });
-      });
-      act(() => {
-        vi.advanceTimersByTime(200);
-      });
-      expect(screen.getByTestId('permission-notice')).toBeInTheDocument();
-
-      // Once the minimum window elapses it clears.
-      act(() => {
-        vi.advanceTimersByTime(400);
-      });
-      expect(
-        screen.queryByTestId('permission-notice'),
-      ).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(screen.queryByTestId('permission-notice')).not.toBeInTheDocument();
   });
 
   it('auto-opens the workdir dialog on entering the new-session state', async () => {

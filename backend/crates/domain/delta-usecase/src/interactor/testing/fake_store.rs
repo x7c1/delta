@@ -378,6 +378,27 @@ impl SessionStore for FakeStore {
         Ok(req)
     }
 
+    async fn find_open_permission_request(
+        &self,
+        session_id: &SessionId,
+        tool_name: &str,
+        tool_input_json: &str,
+    ) -> Result<Option<i64>> {
+        let g = self.inner.lock().unwrap();
+        // Mirror the SQL ordering `(tool_input_json = ?) DESC, id DESC`: among
+        // pending rows for this (session, tool_name), prefer an exact tool_input
+        // match, else fall back to the most recent pending row (highest id).
+        Ok(g.permissions
+            .iter()
+            .filter(|r| {
+                &r.session_id == session_id
+                    && r.tool_name == tool_name
+                    && r.status == PermissionStatus::Pending
+            })
+            .max_by_key(|r| (r.tool_input_json == tool_input_json, r.id))
+            .map(|r| r.id))
+    }
+
     async fn resolve_permission_by_tool_use_id(
         &self,
         session_id: &SessionId,

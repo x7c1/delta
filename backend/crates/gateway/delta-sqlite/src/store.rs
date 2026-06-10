@@ -727,6 +727,31 @@ impl SessionStore for SqliteStore {
         })
     }
 
+    async fn find_open_permission_request(
+        &self,
+        session_id: &SessionId,
+        tool_name: &str,
+        tool_input_json: &str,
+    ) -> std::result::Result<Option<i64>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // The `PermissionRequest` hook carries no `tool_use_id`, so correlate by
+        // (session, tool_name) among still-`pending` rows. `(tool_input_json =
+        // ?3) DESC` puts an exact tool_input match first; otherwise the most
+        // recent pending row for that tool wins.
+        let id = conn
+            .query_row(
+                "SELECT id FROM permission_request
+                 WHERE session_id = ?1 AND tool_name = ?2 AND status = 'pending'
+                 ORDER BY (tool_input_json = ?3) DESC, id DESC
+                 LIMIT 1",
+                params![session_id.as_str(), tool_name, tool_input_json],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(id)
+    }
+
     async fn resolve_permission_by_tool_use_id(
         &self,
         session_id: &SessionId,
