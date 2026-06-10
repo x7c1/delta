@@ -50,11 +50,12 @@ function sessionLabel(item: SessionListItem): string {
 /**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
- * indicator plus the session label, line 2 shows the session's working-directory
- * tail, omitted when there is none; the last-activity timestamp lives in the
- * directory's hover tooltip alongside the full path) plus the kebab actions menu in a
- * fixed-width slot at the right end, enabled only when the session is open. The
- * focused card is lifted with an indigo border, tint, and ring.
+ * indicator plus the working-directory tail, which is the primary identifier
+ * (left-truncated, full path on hover; falls back to the session label when
+ * there is no directory); line 2 shows the session id and the last-activity
+ * time, right-aligned) plus the kebab actions menu in a fixed-width slot at the
+ * right end, enabled only when the session is open. The focused card is lifted
+ * with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -151,11 +152,12 @@ export function SessionNode({
               />
               <span
                 className={cn(
-                  'truncate',
+                  'min-w-0 truncate text-left [direction:rtl]',
                   isFocused && 'font-medium text-indigo-800',
                 )}
+                title={item.session.cwd}
               >
-                {label}
+                {cwdTail || label}
               </span>
               {needsPermission && (
                 <span className="shrink-0" data-testid="session-permission-badge">
@@ -163,22 +165,16 @@ export function SessionNode({
                 </span>
               )}
             </span>
-            {cwdTail && (
-              // Second line: the working directory only (last two path segments,
-              // left-truncated so the identifying end stays visible). The hover tooltip
-              // carries the full path and the last-activity time on a second line —
-              // native `title` renders the `\n` as a line break.
-              <span
-                className="min-w-0 truncate text-left font-mono text-xs text-slate-400 [direction:rtl]"
-                title={
-                  lastActivity
-                    ? `${item.session.cwd}\n${lastActivity}`
-                    : item.session.cwd
-                }
-              >
-                {cwdTail}
+            {/* Secondary line: session id + last-activity time, right-aligned. The id is
+                a long UUID, so it truncates with the full value in its title. */}
+            <span className="flex items-baseline justify-end gap-2 text-xs text-slate-400">
+              <span className="min-w-0 truncate font-mono" title={item.session.id}>
+                {item.session.id}
               </span>
-            )}
+              {lastActivity && (
+                <span className="shrink-0 tabular-nums">{lastActivity}</span>
+              )}
+            </span>
           </button>
           {/* Fixed-width slot, vertically centered against the two-line block. */}
           <Menu

@@ -300,10 +300,10 @@ describe('WorkspaceScreen multi-session', () => {
   });
 
   it("shows the working-directory tail in a session's row", async () => {
-    // The row carries the session's cwd compactly (its last two segments) so a
-    // session is identifiable by where it runs. The full path and the
-    // last-activity time stay available on hover via `title` — the time is no
-    // longer rendered as visible row text.
+    // The row leads with the session's cwd tail (its last two segments) on the
+    // first line so a session is identifiable by where it runs; the full path
+    // stays available on hover via `title`. The second line carries the session
+    // id and the last-activity time as visible, right-aligned row text.
     const lastActivityAt = '2026-01-01T00:00:02Z';
     server.use(
       http.get('*/api/sessions', () =>
@@ -331,17 +331,19 @@ describe('WorkspaceScreen multi-session', () => {
     renderScreen();
 
     const tail = await screen.findByText('projects/delta');
-    // The tooltip carries the full path on the first line and the formatted
-    // last-activity time on the second (native `title` renders `\n` as a line
-    // break). Derive the expected time the same way the component does so the
-    // assertion is timezone-agnostic.
+    // The directory tail leads the first line; its tooltip carries the full
+    // path (no longer the time).
+    expect(tail.getAttribute('title')).toBe('/home/dev/projects/delta');
+
+    // The session id and the last-activity time are visible row text on the
+    // second line now. Derive the expected time the same way the component does
+    // so the assertion is timezone-agnostic.
     const formattedTime = formatLocalDateTime(lastActivityAt);
     expect(formattedTime).not.toBeNull();
-    const title = tail.getAttribute('title');
-    expect(title).toBe(`/home/dev/projects/delta\n${formattedTime}`);
-    expect(title).toContain('/home/dev/projects/delta');
-
-    // The timestamp is not visible row text — only in the tooltip.
-    expect(screen.queryByText(formattedTime as string)).not.toBeInTheDocument();
+    expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
+    // The id is rendered (truncated, full value in its title).
+    const idEl = screen.getByText(SESSION_ID);
+    expect(idEl).toBeInTheDocument();
+    expect(idEl.getAttribute('title')).toBe(SESSION_ID);
   });
 });
