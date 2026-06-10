@@ -28,7 +28,7 @@ import {
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
-import { useNavStore } from '../../store/navStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import { TranscriptPane } from './TranscriptPane';
@@ -56,15 +56,47 @@ function renderPane(threads = mockThreads) {
 
 describe('TranscriptPane', () => {
   beforeEach(() => {
-    useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
+    useNavStore.setState({
+      activeThreadId: MAIN_THREAD_ID,
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: null,
+    });
     useLiveStore.setState({
       pending: [],
       permission: {},
       externalInput: {},
       resumeUnavailable: {},
     });
-    useComposerStore.setState({ drafts: {}, branchOrigin: null });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+      workdirDialogOpen: false,
+    });
   });
+
+  function renderNewSessionPane(
+    threads = mockThreads,
+    { workdirMandatory = false } = {},
+  ) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const client = new ApiClient({ baseUrl: 'http://localhost' });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <TranscriptPane
+            threads={threads}
+            activeThread={null}
+            readOnly={false}
+            newSession
+            workdirMandatory={workdirMandatory}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+  }
 
   it('renders messages fetched from the mocked REST API', async () => {
     renderPane();
@@ -289,5 +321,141 @@ describe('TranscriptPane', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('auto-opens the workdir dialog on entering the new-session state', async () => {
+    renderNewSessionPane();
+
+    // The modal opens without any user action, with the most-recent directory
+    // pre-selected so the user can confirm immediately.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const firstRow = await screen.findByTitle('/home/dev/projects/delta');
+    await waitFor(() =>
+      expect(firstRow).toHaveAttribute('aria-pressed', 'true'),
+    );
+  });
+
+  it('makes the workdir dialog non-dismissable when workdirMandatory', async () => {
+    // First run (no sessions to fall back to): the picker is mandatory, so there
+    // is no Cancel button and Esc/backdrop do not close it.
+    renderNewSessionPane(mockThreads, { workdirMandatory: true });
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('dialog-backdrop'));
+
+    // The dialog is still open and the new-session intent is intact.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+  });
+
+  it('shows a chip with an edit affordance once a directory is selected', async () => {
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    renderNewSessionPane();
+
+    const chip = screen.getByTestId('workdir-chip');
+    // The path label collapses home to `~` once $HOME is known, while the
+    // full path is preserved in the title for hover.
+    await waitFor(() =>
+      expect(chip).toHaveTextContent('Start in:~/projects/delta'),
+    );
+    expect(
+      within(chip).getByTitle('/home/dev/projects/delta'),
+    ).toBeInTheDocument();
+    // The ✎ reopens the dialog rather than clearing the (mandatory) selection.
+    expect(
+      within(chip).getByRole('button', { name: 'Change working directory' }),
+    ).toBeInTheDocument();
+  });
+
+  it('reopens the picker from the chip ✎ without resetting the selection', async () => {
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    renderNewSessionPane();
+
+    // The picker starts closed (a directory is already selected, so the
+    // auto-open effect does not fire).
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      within(screen.getByTestId('workdir-chip')).getByRole('button', {
+        name: 'Change working directory',
+      }),
+    );
+
+    // The ✎ opens the picker via openWorkdirDialog (no reset), so the chosen
+    // directory is still in the store while editing.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(
+      '/home/dev/projects/delta',
+    );
+  });
+
+  it('closes the picker and shows no chip after cancelling without selecting (no session to return to)', async () => {
+    // No previous session is recorded (the empty initial screen), so dismissing
+    // the picker is a no-op: new-session stays as the mandatory default.
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: null,
+    });
+    renderNewSessionPane();
+
+    // Cancel the auto-opened modal without committing a directory.
+    fireEvent.click(await screen.findByTestId('workdir-cancel'));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    // No selection: no chip is shown and Send stays disabled. Reopening the
+    // picker is now done from the navigator's "New" button, not a center button.
+    expect(screen.queryByTestId('workdir-chip')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    // Stays in new-session (nowhere to return to).
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+  });
+
+  it('returns to the previously-focused session when the picker is dismissed without a selection', async () => {
+    // The user was on a real session before clicking "New", so dismissing the
+    // picker without choosing a directory cancels the new-session intent and
+    // restores that session.
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: SESSION_ID,
+    });
+    renderNewSessionPane();
+
+    fireEvent.click(await screen.findByTestId('workdir-cancel'));
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
+    );
+    expect(useNavStore.getState().preNewSessionFocus).toBeNull();
+  });
+
+  it('stays in new-session when a directory has been selected (dismiss does not cancel)', async () => {
+    // A previous session is recorded, but a directory is already chosen, so
+    // dismissing the picker (e.g. the ✎-reopen-then-close path) must NOT cancel
+    // the new-session intent.
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: SESSION_ID,
+    });
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    renderNewSessionPane();
+
+    // Reopen via the chip's edit affordance, then dismiss.
+    fireEvent.click(
+      within(screen.getByTestId('workdir-chip')).getByRole('button', {
+        name: 'Change working directory',
+      }),
+    );
+    fireEvent.click(await screen.findByTestId('workdir-cancel'));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    // Still in new-session: a directory is selected, so the cancel was skipped.
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 });

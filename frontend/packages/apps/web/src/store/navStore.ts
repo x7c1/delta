@@ -40,6 +40,13 @@ export type FocusedSession = SessionId | typeof NEW_SESSION_FOCUS | null;
 export interface NavState {
   /** Focused session id, the new-session sentinel, or null before load. */
   focusedSessionId: FocusedSession;
+  /**
+   * The focus the user was on when they entered the new-session state, so it can
+   * be restored if they dismiss the new-session intent (e.g. cancel the
+   * working-directory picker). Never persisted — a reload must never restore a
+   * stale intent.
+   */
+  preNewSessionFocus: FocusedSession;
   /** Active thread within the focused session (scoped to it). */
   activeThreadId: ThreadId | null;
   /** Whether the terminal pane is shown (persistent pane on large screens, or
@@ -54,6 +61,18 @@ export interface NavState {
    * session leaves the active thread untouched.
    */
   setFocusedSession: (sessionId: FocusedSession) => void;
+  /**
+   * Enter the new-session state, stashing the current focus so it can be
+   * restored on cancel. Only stashes when not already in new-session, so
+   * repeated entries don't overwrite the real previous focus.
+   */
+  startNewSession: () => void;
+  /**
+   * Dismiss the new-session intent, returning to the previously-focused session
+   * if there is a real one to return to; otherwise a no-op (the empty initial
+   * screen keeps new-session as the mandatory default).
+   */
+  cancelNewSession: () => void;
   setActiveThread: (threadId: ThreadId) => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
@@ -76,6 +95,7 @@ export const useNavStore = create<NavState>()(
   persist(
     (set) => ({
       focusedSessionId: null,
+      preNewSessionFocus: null,
       activeThreadId: null,
       terminalOpen: false,
       terminalWidth: DEFAULT_TERMINAL_WIDTH,
@@ -86,6 +106,30 @@ export const useNavStore = create<NavState>()(
             ? state
             : { focusedSessionId: sessionId, activeThreadId: null },
         ),
+      startNewSession: () =>
+        set((state) => ({
+          preNewSessionFocus:
+            state.focusedSessionId === NEW_SESSION_FOCUS
+              ? state.preNewSessionFocus
+              : state.focusedSessionId,
+          focusedSessionId: NEW_SESSION_FOCUS,
+          activeThreadId: null,
+        })),
+      cancelNewSession: () =>
+        set((state) => {
+          const prev = state.preNewSessionFocus;
+          // Only a real session id is a valid place to return to. null / the
+          // new-session sentinel mean there is nowhere to go (e.g. the empty
+          // initial screen), so stay in new-session.
+          if (prev === null || prev === NEW_SESSION_FOCUS) {
+            return state;
+          }
+          return {
+            focusedSessionId: prev,
+            activeThreadId: null,
+            preNewSessionFocus: null,
+          };
+        }),
       setActiveThread: (threadId) => set({ activeThreadId: threadId }),
       setTerminalOpen: (open) => set({ terminalOpen: open }),
       toggleTerminal: () =>

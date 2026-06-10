@@ -9,6 +9,7 @@ import {
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
 
 /**
@@ -130,7 +131,14 @@ export function NavigatorPane({
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
+  const startNewSession = useNavStore((state) => state.startNewSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
+  const setNewSessionWorkdir = useComposerStore(
+    (state) => state.setNewSessionWorkdir,
+  );
+  const openWorkdirDialog = useComposerStore(
+    (state) => state.openWorkdirDialog,
+  );
 
   return (
     <Panel
@@ -155,7 +163,16 @@ export function NavigatorPane({
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
+            // The "New" button always (re)starts the new-session flow, even when
+            // the app is already in the new-session state. It is not enough to
+            // change focus: the picker's open state lives in the store so it can
+            // be opened without relying on a focus transition. Reset any prior
+            // selection so a fresh "New" starts from a clean directory choice.
+            onClick={() => {
+              startNewSession();
+              setNewSessionWorkdir(null);
+              openWorkdirDialog();
+            }}
           >
             New
           </Button>

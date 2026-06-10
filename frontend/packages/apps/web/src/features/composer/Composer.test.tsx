@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -62,7 +62,11 @@ describe('Composer', () => {
       unread: {},
       resumeUnavailable: {},
     });
-    useComposerStore.setState({ drafts: {}, branchOrigin: null });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+    });
   });
 
   it('switches the active thread to the new child after a branch send', async () => {
@@ -293,6 +297,8 @@ describe('Composer', () => {
   });
 
   it('targets a new session when in new-session mode', async () => {
+    // A new session needs a chosen directory before Send is enabled.
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev' });
     render(
       <QueryClientProvider
         client={
@@ -314,6 +320,96 @@ describe('Composer', () => {
       const pending = useLiveStore.getState().pending;
       expect(pending.length).toBe(1);
       expect(pending[0].text).toBe('start fresh');
+    });
+  });
+
+  it('disables Send for a new session until a workdir is selected', async () => {
+    // Default state: no directory chosen. Selection is mandatory for a new
+    // session, so Send stays disabled even with text entered.
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    // Once a directory is selected, Send becomes enabled.
+    act(() => {
+      useComposerStore.setState({ newSessionWorkdir: '/home/dev' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+    });
+  });
+
+  /**
+   * Render the new-session composer and capture the body of the `POST
+   * /api/sends` it fires, so a test can assert exactly which fields are sent.
+   */
+  function renderNewSessionAndCaptureBody(): { read: () => unknown } {
+    let captured: unknown;
+    server.use(
+      http.post('*/api/sends', async ({ request }) => {
+        captured = await request.json();
+        return HttpResponse.json(
+          {
+            send: {
+              id: 0,
+              session_id: '',
+              thread_id: 0,
+              semantic_parent_uuid: null,
+              text: 'irrelevant',
+              locator_quote: null,
+              status: 'pending',
+              matched_uuid: null,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    return { read: () => captured };
+  }
+
+  it('includes the selected workdir on a new-session send', async () => {
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start in delta' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'start in delta',
+        workdir: '/home/dev/projects/delta',
+      });
+    });
+    // A successful new-session send resets the picker selection.
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
     });
   });
 });

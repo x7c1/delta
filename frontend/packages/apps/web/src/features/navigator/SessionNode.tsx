@@ -5,6 +5,7 @@ import { Badge, Menu, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
+import { pathTail } from '../../utils/pathTail';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
@@ -49,10 +50,12 @@ function sessionLabel(item: SessionListItem): string {
 /**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
- * indicator plus the session label, line 2 is the right-aligned last-activity
- * timestamp, omitted when there is none) plus the kebab actions menu in a
- * fixed-width slot at the right end, enabled only when the session is open. The
- * focused card is lifted with an indigo border, tint, and ring.
+ * indicator plus the working-directory tail, which is the primary identifier
+ * (left-truncated, full path on hover; falls back to the session label when
+ * there is no directory); line 2 shows the session id and the last-activity
+ * time, right-aligned) plus the kebab actions menu in a fixed-width slot at the
+ * right end, enabled only when the session is open. The focused card is lifted
+ * with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -88,6 +91,7 @@ export function SessionNode({
   const threads = threadsQuery.data?.threads;
 
   const lastActivity = formatLocalDateTime(item.last_activity_at);
+  const cwdTail = pathTail(item.session.cwd);
   const label = sessionLabel(item);
   // Show the sub-thread list only once the session has branched. The main
   // thread itself is never listed (it is reached by clicking this card's
@@ -148,11 +152,12 @@ export function SessionNode({
               />
               <span
                 className={cn(
-                  'truncate',
+                  'min-w-0 truncate text-left [direction:rtl]',
                   isFocused && 'font-medium text-indigo-800',
                 )}
+                title={item.session.cwd}
               >
-                {label}
+                {cwdTail ? cwdTail.split('/').join(' : ') : label}
               </span>
               {needsPermission && (
                 <span className="shrink-0" data-testid="session-permission-badge">
@@ -160,12 +165,17 @@ export function SessionNode({
                 </span>
               )}
             </span>
-            {/* Right-aligned so the timestamp column stays aligned across rows. */}
-            {lastActivity && (
-              <span className="text-right text-xs tabular-nums text-slate-400">
-                {lastActivity}
+            {/* Secondary line: session id + last-activity time, right-aligned. The id is
+                a long UUID, so only its first 8 chars are shown, with the full value
+                in its title. */}
+            <span className="flex items-baseline justify-end gap-2 text-xs text-slate-400">
+              <span className="font-mono" title={item.session.id}>
+                {item.session.id.slice(0, 8)}
               </span>
-            )}
+              {lastActivity && (
+                <span className="shrink-0 tabular-nums">{lastActivity}</span>
+              )}
+            </span>
           </button>
           {/* Fixed-width slot, vertically centered against the two-line block. */}
           <Menu

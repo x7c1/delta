@@ -27,5 +27,8 @@ export {
   SESSIONS_PAGE_SIZE,
   FILLER_SESSION_COUNT,
   TOTAL_SEEDED_SESSIONS,
+  MOCK_WORKDIR_HOME,
+  workdirListing,
+  recentWorkdirs,
   type MockStore,
 } from './fixtures';

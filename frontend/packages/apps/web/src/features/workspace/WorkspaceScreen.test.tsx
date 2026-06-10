@@ -22,6 +22,8 @@ import {
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import { useComposerStore } from '../../store/composerStore';
+import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
 // The live event source opens a real WebSocket outside mock mode, and the
@@ -76,7 +78,14 @@ describe('WorkspaceScreen multi-session', () => {
     useNavStore.setState({
       focusedSessionId: null,
       activeThreadId: null,
+      preNewSessionFocus: null,
       terminalOpen: false,
+    });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+      workdirDialogOpen: false,
     });
   });
 
@@ -192,6 +201,11 @@ describe('WorkspaceScreen multi-session', () => {
       expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS),
     );
     expect(screen.getByTestId('new-session-empty')).toBeInTheDocument();
+
+    // First run (zero sessions): the directory picker is mandatory, so it opens
+    // with no Cancel button — the user must choose a directory to proceed.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
   });
 
   it('flips the focused session to read-only after its Close button is clicked', async () => {
@@ -229,6 +243,46 @@ describe('WorkspaceScreen multi-session', () => {
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
   });
 
+  it('starts the new-session flow when "New" is clicked from a real session', async () => {
+    // Pin focus to a real session so the test does not depend on cold-load
+    // auto-focus (the shared mock store can be mutated by earlier specs).
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    renderScreen();
+
+    const newButton = await screen.findByRole('button', { name: 'New' });
+    fireEvent.click(newButton);
+
+    // Focus moves to the sentinel, any prior selection is reset, and the picker
+    // is opened — all three driven by the single "New" click.
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
+  });
+
+  it('re-opens the picker when "New" is clicked while already in new-session', async () => {
+    // Already in the new-session state with a stale selection and the picker
+    // dismissed — the regression case where focus does not change, so a
+    // focus-driven auto-open would not re-fire.
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: SESSION_ID,
+    });
+    useComposerStore.setState({
+      workdirDialogOpen: false,
+      newSessionWorkdir: '/stale/dir',
+    });
+    renderScreen();
+
+    const newButton = await screen.findByRole('button', { name: 'New' });
+    fireEvent.click(newButton);
+
+    // Clicking "New" again (still in new-session) must reset the selection and
+    // re-open the picker.
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
+  });
+
   it('renders a closed focused session read-only', async () => {
     useNavStore.setState({ focusedSessionId: SESSION_ID_2 });
 
@@ -243,5 +297,54 @@ describe('WorkspaceScreen multi-session', () => {
         SESSION_2_MAIN_THREAD_ID,
       ),
     );
+  });
+
+  it("shows the working-directory tail in a session's row", async () => {
+    // The row leads with the session's cwd tail (its last two segments) on the
+    // first line so a session is identifiable by where it runs; the full path
+    // stays available on hover via `title`. The second line carries the session
+    // id and the last-activity time as visible, right-aligned row text.
+    const lastActivityAt = '2026-01-01T00:00:02Z';
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/home/dev/projects/delta',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+              },
+              open: true,
+              main_thread_id: 1,
+              last_activity_at: lastActivityAt,
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+
+    renderScreen();
+
+    // The visible directory tail leads the first line, rendered with ' : '
+    // separators in place of slashes; its tooltip still carries the full
+    // slash path (no longer the time).
+    const tail = await screen.findByText('projects : delta');
+    expect(tail.getAttribute('title')).toBe('/home/dev/projects/delta');
+
+    // The session id and the last-activity time are visible row text on the
+    // second line now. Derive the expected time the same way the component does
+    // so the assertion is timezone-agnostic.
+    const formattedTime = formatLocalDateTime(lastActivityAt);
+    expect(formattedTime).not.toBeNull();
+    expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
+    // The id is rendered as its first 8 chars, with the full value in its title.
+    const idEl = screen.getByText(SESSION_ID.slice(0, 8));
+    expect(idEl).toBeInTheDocument();
+    expect(idEl.getAttribute('title')).toBe(SESSION_ID);
   });
 });

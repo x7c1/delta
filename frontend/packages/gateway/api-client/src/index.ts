@@ -28,6 +28,9 @@ export {
   useCloseSessionMutation,
   useCreateSendMutation,
   useThreadMessagesQuery,
+  useWorkdirListQuery,
+  useHomeDirQuery,
+  useRecentWorkdirsQuery,
 } from './query-hooks';
 export {
   appendMessage,

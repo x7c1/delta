@@ -240,6 +240,10 @@ export function WorkspaceScreen() {
             activeThread={null}
             newSession
             readOnly={false}
+            // On the very first run there is no session to fall back to, so the
+            // directory picker is mandatory (non-dismissable) — the user must
+            // choose a directory before reaching the new-session screen.
+            workdirMandatory={sessions.length === 0}
           />
         ) : activeThread ? (
           <TranscriptPane

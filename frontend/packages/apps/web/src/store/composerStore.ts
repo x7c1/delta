@@ -25,15 +25,34 @@ export interface BranchOrigin {
 export interface ComposerState {
   drafts: Record<ThreadId, string>;
   branchOrigin: BranchOrigin | null;
+  /**
+   * The working directory chosen in the new-session picker, or `null` for the
+   * default (the send then omits `workdir`, preserving today's behavior).
+   * Like `drafts`, it is session-only state; it is cleared on a successful
+   * new-session send and whenever the new-session state is left.
+   */
+  newSessionWorkdir: string | null;
+  /**
+   * Whether the new-session working-directory picker modal is open. Lifted from
+   * local component state into the store so the "New" button can (re)open it
+   * even when the app is already in the new-session state (no focus transition
+   * to drive a component-local auto-open effect). Session-only; not persisted.
+   */
+  workdirDialogOpen: boolean;
 
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
   setBranchOrigin: (origin: BranchOrigin | null) => void;
+  setNewSessionWorkdir: (workdir: string | null) => void;
+  openWorkdirDialog: () => void;
+  closeWorkdirDialog: () => void;
 }
 
 export const useComposerStore = create<ComposerState>((set) => ({
   drafts: {},
   branchOrigin: null,
+  newSessionWorkdir: null,
+  workdirDialogOpen: false,
 
   setDraft: (threadId, text) =>
     set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
@@ -46,4 +65,10 @@ export const useComposerStore = create<ComposerState>((set) => ({
     }),
 
   setBranchOrigin: (origin) => set({ branchOrigin: origin }),
+
+  setNewSessionWorkdir: (workdir) => set({ newSessionWorkdir: workdir }),
+
+  openWorkdirDialog: () => set({ workdirDialogOpen: true }),
+
+  closeWorkdirDialog: () => set({ workdirDialogOpen: false }),
 }));

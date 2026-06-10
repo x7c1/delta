@@ -73,7 +73,54 @@ export interface SendToThread {
 export interface SendToNewSession {
   new_session: true;
   text: string;
+  /**
+   * The working directory the fresh session should start in. Honored only for a
+   * new-session send; when omitted the server uses its default per-spawn
+   * directory. Mirrors `CreateSendRequest.workdir`.
+   */
+  workdir?: string;
 }
 
 /** Request body for `POST /api/sends` — a discriminated send target. */
 export type SendRequest = SendToThread | SendToNewSession;
+
+/**
+ * One subdirectory in a `GET /api/workdir/list` browse: its bare display name
+ * and absolute path. Mirrors the server's `WorkdirEntry`.
+ */
+export interface WorkdirEntry {
+  name: string;
+  path: string;
+}
+
+/**
+ * Response body for `GET /api/workdir/list`: one level of a directory browse.
+ *
+ * `path` is the canonical directory that was listed, `parent` its canonical
+ * parent (`null` at a filesystem root), and `entries` its immediate
+ * subdirectories (dirs only, dot-directories hidden, sorted by name). Mirrors
+ * the server's `WorkdirListResponse`.
+ */
+export interface WorkdirListResponse {
+  path: string;
+  parent: string | null;
+  entries: WorkdirEntry[];
+}
+
+/**
+ * One recently-used working directory: its absolute path and the timestamp of
+ * the latest activity in any session that used it (UTC ISO-8601, `null` when
+ * unknown). Mirrors the server's `RecentWorkdirItem`.
+ */
+export interface RecentWorkdirItem {
+  path: string;
+  last_used_at: string | null;
+}
+
+/**
+ * Response body for `GET /api/workdir/recent`: recently-used working
+ * directories, most-recent first. Mirrors the server's `WorkdirRecentResponse`.
+ */
+export interface WorkdirRecentResponse {
+  workdirs: RecentWorkdirItem[];
+}

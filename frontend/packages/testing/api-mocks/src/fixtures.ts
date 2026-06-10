@@ -430,3 +430,67 @@ export function seedData(): MockStore {
     nextSendId: 1,
   };
 }
+
+/** The mock filesystem's `$HOME`, used when a workdir list omits `path`. */
+export const MOCK_WORKDIR_HOME = '/home/dev';
+
+/**
+ * A tiny static directory tree backing the workdir-picker mock. Each key is a
+ * canonical directory; the value lists its immediate subdirectory names. A path
+ * absent from this map is treated as "not a directory" (400).
+ */
+const MOCK_WORKDIR_TREE: Record<string, string[]> = {
+  '/': ['home'],
+  '/home': ['dev'],
+  [MOCK_WORKDIR_HOME]: ['projects', 'scratch'],
+  '/home/dev/projects': ['delta', 'website'],
+  '/home/dev/projects/delta': ['backend', 'frontend'],
+  '/home/dev/projects/delta/backend': [],
+  '/home/dev/projects/delta/frontend': [],
+  '/home/dev/projects/website': [],
+  '/home/dev/scratch': [],
+};
+
+/** The canonical parent of a path in the mock tree, or `null` at the root. */
+function workdirParent(path: string): string | null {
+  if (path === '/') {
+    return null;
+  }
+  const parent = path.slice(0, path.lastIndexOf('/'));
+  return parent === '' ? '/' : parent;
+}
+
+/**
+ * One level of the mock browse for `path`, or `null` when `path` is not a known
+ * directory (mapped to a 400 by the handler). Entries are name-sorted, dirs
+ * only, mirroring the real server.
+ */
+export function workdirListing(path: string): {
+  path: string;
+  parent: string | null;
+  entries: { name: string; path: string }[];
+} | null {
+  const names = MOCK_WORKDIR_TREE[path];
+  if (!names) {
+    return null;
+  }
+  const entries = [...names]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({
+      name,
+      path: path === '/' ? `/${name}` : `${path}/${name}`,
+    }));
+  return { path, parent: workdirParent(path), entries };
+}
+
+/** Recently-used working directories for the mock, most-recent first. */
+export function recentWorkdirs(): {
+  path: string;
+  last_used_at: string | null;
+}[] {
+  return [
+    { path: '/home/dev/projects/delta', last_used_at: '2026-01-03T00:00:00Z' },
+    { path: '/home/dev/projects/website', last_used_at: '2026-01-02T00:00:00Z' },
+    { path: '/home/dev/scratch', last_used_at: null },
+  ];
+}

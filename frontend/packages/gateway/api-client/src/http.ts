@@ -7,6 +7,8 @@ import type {
   SessionsResponse,
   ThreadId,
   ThreadsResponse,
+  WorkdirListResponse,
+  WorkdirRecentResponse,
 } from '@delta/model';
 
 /**
@@ -173,5 +175,31 @@ export class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+  }
+
+  /**
+   * `GET /api/workdir/list` — one level of a directory browse for the
+   * new-session working-directory picker: the listed `path`, its `parent`
+   * (`null` at a filesystem root), and its immediate subdirectories. Omitting
+   * `path` lists `$HOME`. A missing/non-directory path is `400`, a permission
+   * denial `403` — both surface as {@link ApiError}.
+   */
+  getWorkdirList(path?: string): Promise<WorkdirListResponse> {
+    // `request()` has no query-string helper, so build it manually with the
+    // same encodeURIComponent style as `getSessions`.
+    const query: string[] = [];
+    if (path !== undefined) {
+      query.push(`path=${encodeURIComponent(path)}`);
+    }
+    const suffix = query.length > 0 ? `?${query.join('&')}` : '';
+    return this.request<WorkdirListResponse>(`/api/workdir/list${suffix}`);
+  }
+
+  /**
+   * `GET /api/workdir/recent` — recently-used working directories, most-recent
+   * first, for the new-session picker's "Recent" list.
+   */
+  getWorkdirRecent(): Promise<WorkdirRecentResponse> {
+    return this.request<WorkdirRecentResponse>('/api/workdir/recent');
   }
 }

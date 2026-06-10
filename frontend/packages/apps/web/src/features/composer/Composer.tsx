@@ -53,6 +53,12 @@ export function Composer({ mode }: ComposerProps) {
   const clearDraft = useComposerStore((state) => state.clearDraft);
   const branchOrigin = useComposerStore((state) => state.branchOrigin);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
+  const newSessionWorkdir = useComposerStore(
+    (state) => state.newSessionWorkdir,
+  );
+  const setNewSessionWorkdir = useComposerStore(
+    (state) => state.setNewSessionWorkdir,
+  );
 
   const enqueueSend = useLiveStore((state) => state.enqueueSend);
   const attachSendId = useLiveStore((state) => state.attachSendId);
@@ -122,7 +128,14 @@ export function Composer({ mode }: ComposerProps) {
       // stays on that sub-thread instead of jumping to the session's main thread.
       let body: SendRequest;
       if (isNew) {
-        body = { new_session: true, text };
+        // Honor the picker's chosen working directory when one is selected;
+        // omit `workdir` entirely otherwise so the server uses its default
+        // per-spawn directory (today's behavior).
+        body = {
+          new_session: true,
+          text,
+          ...(newSessionWorkdir ? { workdir: newSessionWorkdir } : {}),
+        };
       } else if (branching) {
         body = {
           thread_id: activeThread!.id,
@@ -137,6 +150,11 @@ export function Composer({ mode }: ComposerProps) {
       try {
         const { send } = await mutation.mutateAsync(body);
         attachSendId(localId, send.id);
+        if (isNew) {
+          // The spawn was accepted; reset the picker selection so the next new
+          // session starts from the default again.
+          setNewSessionWorkdir(null);
+        }
         if (branching) {
           // The backend created a fresh child thread for this branch send and
           // returns its id. The pending entry was enqueued under the parent
@@ -171,12 +189,14 @@ export function Composer({ mode }: ComposerProps) {
       activeThread,
       branching,
       branchOrigin,
+      newSessionWorkdir,
       enqueueSend,
       clearDraft,
       mutation,
       attachSendId,
       retargetSend,
       setBranchOrigin,
+      setNewSessionWorkdir,
       setActiveThread,
       failSend,
       removePending,
@@ -231,7 +251,13 @@ export function Composer({ mode }: ComposerProps) {
         <Button
           type="submit"
           variant="primary"
-          disabled={draft.trim().length === 0 || mutation.isPending}
+          disabled={
+            draft.trim().length === 0 ||
+            mutation.isPending ||
+            // A new session must start in a chosen directory: selection is
+            // mandatory, so Send stays disabled until the picker commits one.
+            (isNew && !newSessionWorkdir)
+          }
         >
           Send
         </Button>

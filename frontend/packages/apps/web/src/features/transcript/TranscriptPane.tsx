@@ -23,6 +23,7 @@ import {
 import { useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
+import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
@@ -83,6 +84,12 @@ export interface TranscriptPaneProps {
   readOnly: boolean;
   /** True for the new-session composer state (no session/thread exists yet). */
   newSession?: boolean;
+  /**
+   * True when choosing a working directory is mandatory (the first run, with no
+   * sessions to fall back to). Makes the directory picker non-dismissable, so the
+   * user must select a directory before they can reach the new-session screen.
+   */
+  workdirMandatory?: boolean;
 }
 
 /**
@@ -99,11 +106,27 @@ export function TranscriptPane({
   activeThread,
   readOnly,
   newSession = false,
+  workdirMandatory = false,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+  const cancelNewSession = useNavStore((state) => state.cancelNewSession);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
+  const setNewSessionWorkdir = useComposerStore(
+    (state) => state.setNewSessionWorkdir,
+  );
+  // The picker's open state lives in the store (not local component state) so
+  // the navigator's "New" button can (re)open it without a focus transition.
+  const workdirDialogOpen = useComposerStore(
+    (state) => state.workdirDialogOpen,
+  );
+  const openWorkdirDialog = useComposerStore(
+    (state) => state.openWorkdirDialog,
+  );
+  const closeWorkdirDialog = useComposerStore(
+    (state) => state.closeWorkdirDialog,
+  );
   // The focused session's external-input marker, if any. Keyed per session like
   // the permission notice; visibility is further gated to the active thread below.
   const externalInput = useLiveStore((state) =>
@@ -215,6 +238,25 @@ export function TranscriptPane({
       el.scrollTop = el.scrollHeight;
     }
   }, [activeThread?.id, newSession]);
+
+  // Entering the new-session state auto-opens the working-directory modal (when
+  // nothing is selected yet), since a directory is mandatory and the user should
+  // be able to confirm the most-recent one immediately. Leaving the state
+  // discards the selection and closes the modal, so a later return starts clean.
+  // The selection is also cleared on a successful new-session send by the
+  // composer. Keyed on `newSession` only: it must fire on the enter/leave
+  // transition, not every time the selection changes (which would re-open the
+  // modal the user just dismissed).
+  useEffect(() => {
+    if (newSession) {
+      if (!useComposerStore.getState().newSessionWorkdir) {
+        openWorkdirDialog();
+      }
+    } else {
+      setNewSessionWorkdir(null);
+      closeWorkdirDialog();
+    }
+  }, [newSession, setNewSessionWorkdir, openWorkdirDialog, closeWorkdirDialog]);
 
   // Keyed on the rendered content changing: jump to the bottom after paint when
   // sticking.
@@ -380,6 +422,11 @@ export function TranscriptPane({
           </div>
         )}
 
+        {/* A directory is chosen: show it as a chip with a ✎ to change it (the
+            ✎ reopens the picker without resetting the selection). The chip
+            renders nothing when no directory is selected, so there is no button
+            to (re)open the picker from here — that is done via "New". */}
+        {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
         <PendingQueue threadId={pendingThreadId} />
         {composer}
       </div>
@@ -401,12 +448,34 @@ export function TranscriptPane({
       footer={footer}
     >
       {newSession && (
-        <p
-          className="px-3 py-4 text-sm text-slate-400"
-          data-testid="new-session-empty"
-        >
-          Send the first message below to start a new session.
-        </p>
+        <>
+          <p
+            className="px-3 py-4 text-sm text-slate-400"
+            data-testid="new-session-empty"
+          >
+            Send the first message below to start a new session.
+          </p>
+          {/* Modal directory picker (portals to the document body). Auto-opens
+              on entering the new-session state; commits the chosen cwd to the
+              composer store on Select. */}
+          <WorkdirDialog
+            open={workdirDialogOpen}
+            dismissable={!workdirMandatory}
+            onClose={() => {
+              closeWorkdirDialog();
+              // Dismissing the picker without a directory cancels the
+              // new-session intent and returns to the previously-focused
+              // session — but only when there is one to return to. With no
+              // sessions, new-session is the mandatory default, so
+              // cancelNewSession() is a no-op and we stay. Read the live store
+              // value to avoid a stale closure (mirrors the auto-open effect
+              // above).
+              if (!useComposerStore.getState().newSessionWorkdir) {
+                cancelNewSession();
+              }
+            }}
+          />
+        </>
       )}
 
       {!newSession && messagesQuery.isLoading && (
