@@ -32,10 +32,10 @@ pub(in crate::interactor) fn frame_locator_context(quote: &str) -> Option<String
 mod tests {
     use super::frame_locator_context;
 
-    /// `frame_locator_context` wraps a non-empty quote with provenance framing and
-    /// the quote delimited so the frame and the quote stay distinguishable.
+    /// Wraps a non-empty quote with provenance framing and the quote delimited
+    /// so the frame and the quote stay distinguishable.
     #[test]
-    fn frame_locator_context_frames_a_quote() {
+    fn frames_a_quote() {
         let framed =
             frame_locator_context("the main channel").expect("a non-empty quote is framed");
         assert_eq!(
@@ -46,7 +46,7 @@ mod tests {
 
     /// Surrounding whitespace is trimmed before the quote is framed.
     #[test]
-    fn frame_locator_context_trims_the_quote() {
+    fn trims_the_quote() {
         let framed = frame_locator_context("  spaced  ").expect("a non-blank quote is framed");
         assert_eq!(
             framed,
@@ -56,7 +56,7 @@ mod tests {
 
     /// An empty or whitespace-only quote yields `None`, so nothing is injected.
     #[test]
-    fn frame_locator_context_returns_none_for_blank_quote() {
+    fn returns_none_for_blank_quote() {
         assert!(frame_locator_context("").is_none());
         assert!(frame_locator_context("   \n\t ").is_none());
     }
@@ -67,7 +67,7 @@ mod tests {
     /// the model, not a strict grammar, so this pins the shipped behaviour down
     /// rather than asserting any escaping.
     #[test]
-    fn frame_locator_context_embeds_quotes_and_newlines_verbatim() {
+    fn embeds_quotes_and_newlines_verbatim() {
         let framed = frame_locator_context("  she said \"go\"\nthen left  ")
             .expect("a non-blank quote is framed");
         assert_eq!(
