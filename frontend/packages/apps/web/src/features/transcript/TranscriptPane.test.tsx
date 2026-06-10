@@ -314,10 +314,54 @@ describe('TranscriptPane', () => {
       // A genuine pending prompt has no resolution; once the window elapses the
       // notice renders as normal.
       act(() => {
-        vi.advanceTimersByTime(400);
+        vi.advanceTimersByTime(1100);
       });
       const notice = screen.getByTestId('permission-notice');
       expect(notice).toHaveTextContent('Permission requested: Bash');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds the permission notice for the minimum window after its source clears', async () => {
+    vi.useFakeTimers();
+    try {
+      useLiveStore.setState({
+        pending: [],
+        externalInput: {},
+        resumeUnavailable: {},
+        permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+      });
+
+      renderPane();
+
+      // Surface the notice (outlast the appear delay).
+      act(() => {
+        vi.advanceTimersByTime(1100);
+      });
+      expect(screen.getByTestId('permission-notice')).toBeInTheDocument();
+
+      // It resolves almost immediately after showing; it must not blink out at
+      // once but hold for the minimum visible window.
+      act(() => {
+        useLiveStore.getState().applyEvent({
+          kind: 'permission_resolved',
+          session_id: SESSION_ID,
+          request_id: 7,
+        });
+      });
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.getByTestId('permission-notice')).toBeInTheDocument();
+
+      // Once the minimum window elapses it clears.
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(
+        screen.queryByTestId('permission-notice'),
+      ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

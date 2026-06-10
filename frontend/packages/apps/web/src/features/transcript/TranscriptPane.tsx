@@ -49,27 +49,72 @@ const STICK_THRESHOLD_PX = 64;
  * while a genuine TUI prompt — which has no resolution until the human answers —
  * outlasts the window and renders as normal.
  */
-const PERMISSION_NOTICE_DELAY_MS = 300;
+const PERMISSION_NOTICE_DELAY_MS = 1000;
 
 /**
- * Defer surfacing a permission notice until it has stayed present for
- * {@link PERMISSION_NOTICE_DELAY_MS}. A notice that clears within the window
- * never renders; a notice that persists renders once the window elapses.
- * Returns `null` until then, and immediately when the source notice is gone.
+ * Once shown, the smallest time a permission notice stays on screen, even if its
+ * source clears immediately after. A notice that pops in and vanishes within a
+ * blink reads as a glitch; holding it for this window makes a real (if quickly
+ * resolved) prompt register as a deliberate appearance rather than a flicker.
+ */
+const PERMISSION_NOTICE_MIN_VISIBLE_MS = 500;
+
+/**
+ * Gate a permission notice's visibility on two timers:
+ *
+ * - **Appear delay**: it must stay present for {@link PERMISSION_NOTICE_DELAY_MS}
+ *   before painting. A notice that clears within the window never renders (the
+ *   auto-approved-tool flash); one that persists renders once the window elapses.
+ * - **Minimum visible**: once shown, it stays for at least
+ *   {@link PERMISSION_NOTICE_MIN_VISIBLE_MS} even if the source clears right
+ *   after, so it never blinks out the instant it appears.
+ *
+ * A new source notice arriving during the min-visible hold cancels the pending
+ * clear and keeps the notice up seamlessly.
  */
 function useDebouncedPermission<T>(notice: T | null): T | null {
   const [visible, setVisible] = useState<T | null>(null);
+  // Wall-clock time the notice became visible; null while hidden. A ref (not
+  // state) so reading it never re-runs the effect, and it survives the timer
+  // callbacks that flip visibility.
+  const shownAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (notice === null) {
-      // Cleared (resolved/dismissed/turn done): drop it at once, no delay.
+    if (notice !== null) {
+      // Already on screen: just track the latest notice (e.g. a follow-up
+      // request) without resetting how long it has been visible.
+      if (shownAtRef.current !== null) {
+        setVisible(notice);
+        return;
+      }
+      // Not yet shown: arm the appear delay. Cleanup cancels it if the source
+      // clears first, so a quickly-resolved notice never paints.
+      const timer = setTimeout(() => {
+        shownAtRef.current = Date.now();
+        setVisible(notice);
+      }, PERMISSION_NOTICE_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+
+    // Source gone while still within the appear delay (never shown): drop it.
+    if (shownAtRef.current === null) {
       setVisible(null);
       return;
     }
-    const timer = setTimeout(
-      () => setVisible(notice),
-      PERMISSION_NOTICE_DELAY_MS,
-    );
+
+    // Source gone after it was shown: hold for the remainder of the minimum
+    // visible window before clearing (clear at once if it has already elapsed).
+    const remaining =
+      PERMISSION_NOTICE_MIN_VISIBLE_MS - (Date.now() - shownAtRef.current);
+    if (remaining <= 0) {
+      shownAtRef.current = null;
+      setVisible(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      shownAtRef.current = null;
+      setVisible(null);
+    }, remaining);
     return () => clearTimeout(timer);
   }, [notice]);
 
@@ -362,16 +407,50 @@ export function TranscriptPane({
     />
   ) : undefined;
 
-  // The fixed footer (pinned below the scrolling transcript). For a
+  // Floating layers over the scrolling transcript (see Panel's `overlay`). They
+  // sit on top of the conversation rather than in flow, so a notice appearing or
+  // disappearing never resizes the scroll viewport — the tail the user is
+  // reading stays put instead of jumping. The body reserves a fixed bottom
+  // padding (below) so resting content clears the bottom (composer) layer.
+
+  // The permission notice floats at the top-right, deliberately away from the
+  // conversation tail and the input. A tool's PreToolUse hook can flip it on and
+  // off repeatedly during a run; pinned above the input (its old home) it would
+  // jitter exactly where the user reads. Kept narrow so it does not blanket the
+  // transcript. It clears on dismiss, on resolution, or when the turn completes.
+  const permissionOverlay = visiblePermission && activeThread && (
+    <div
+      className="pointer-events-auto absolute right-3 top-3 max-w-xs space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs shadow-md"
+      data-testid="permission-notice"
+      role="alert"
+    >
+      <p className="font-medium text-amber-800">
+        Permission requested: {visiblePermission.toolName}
+      </p>
+      <p className="text-slate-600">Answer the prompt in the terminal.</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => setTerminalOpen(true)}>
+          Open terminal
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => dismissPermission(activeThread.session_id)}
+        >
+          Dismiss
+        </Button>
+      </div>
+    </div>
+  );
+
+  // The bottom layer: the composer plus the notices that must stay next to the
+  // input — the closed/external-input banners and, crucially, the pending-send
+  // strip, which the user reads to decide whether to hold a send. For a
   // resume-impossible session it is just the "cannot resume" notice, replacing
-  // the input entirely — there is nothing useful to type. Otherwise it stacks
-  // the session-state notices (permission, closed, external input), the
-  // optimistic pending-send strip, and the composer. The notices are pinned
-  // directly above the input rather than at the top of the scrolling body, where
-  // a long conversation scrolled to its tail would bury them out of sight.
-  let footer: ReactNode;
+  // the input entirely — there is nothing useful to type.
+  let bottomContent: ReactNode;
   if (resumeUnavailable && !newSession) {
-    footer = (
+    bottomContent = (
       <div
         className="flex items-center gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700"
         data-testid="resume-unavailable-notice"
@@ -385,33 +464,8 @@ export function TranscriptPane({
       </div>
     );
   } else if (composer) {
-    footer = (
+    bottomContent = (
       <div className="space-y-2">
-        {visiblePermission && activeThread && (
-          <div
-            className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs"
-            data-testid="permission-notice"
-            role="alert"
-          >
-            <p className="font-medium text-amber-800">
-              Permission requested: {visiblePermission.toolName}
-            </p>
-            <p className="text-slate-600">Answer the prompt in the terminal.</p>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => setTerminalOpen(true)}>
-                Open terminal
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => dismissPermission(activeThread.session_id)}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </div>
-        )}
-
         {readOnly && !newSession && (
           <div
             className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
@@ -456,9 +510,23 @@ export function TranscriptPane({
     );
   }
 
+  // Anchored to the bottom of the body, full width, with an opaque background so
+  // it occludes (rather than blends into) the transcript scrolling beneath it.
+  const bottomOverlay = bottomContent && (
+    <div className="pointer-events-auto absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white px-3 py-2">
+      {bottomContent}
+    </div>
+  );
+
   return (
     <Panel
       bodyRef={bodyRef}
+      // Reserve fixed space for the bottom overlay so the last turn is not hidden
+      // behind the composer at rest. A fixed (not measured) value is deliberate:
+      // it never changes, so the composer growing or a banner appearing cannot
+      // shift the transcript. When the overlay does grow past this, it briefly
+      // covers the last lines — an accepted trade for zero layout shift.
+      bodyClassName="pb-48"
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">
@@ -468,7 +536,12 @@ export function TranscriptPane({
           <Breadcrumb items={breadcrumbItems} />
         ) : null
       }
-      footer={footer}
+      overlay={
+        <>
+          {permissionOverlay}
+          {bottomOverlay}
+        </>
+      }
     >
       {newSession && (
         <>
