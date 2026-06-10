@@ -251,7 +251,13 @@ export function Composer({ mode }: ComposerProps) {
         <Button
           type="submit"
           variant="primary"
-          disabled={draft.trim().length === 0 || mutation.isPending}
+          disabled={
+            draft.trim().length === 0 ||
+            mutation.isPending ||
+            // A new session must start in a chosen directory: selection is
+            // mandatory, so Send stays disabled until the picker commits one.
+            (isNew && !newSessionWorkdir)
+          }
         >
           Send
         </Button>

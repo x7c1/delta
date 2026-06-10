@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -297,6 +297,8 @@ describe('Composer', () => {
   });
 
   it('targets a new session when in new-session mode', async () => {
+    // A new session needs a chosen directory before Send is enabled.
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev' });
     render(
       <QueryClientProvider
         client={
@@ -318,6 +320,34 @@ describe('Composer', () => {
       const pending = useLiveStore.getState().pending;
       expect(pending.length).toBe(1);
       expect(pending[0].text).toBe('start fresh');
+    });
+  });
+
+  it('disables Send for a new session until a workdir is selected', async () => {
+    // Default state: no directory chosen. Selection is mandatory for a new
+    // session, so Send stays disabled even with text entered.
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    // Once a directory is selected, Send becomes enabled.
+    act(() => {
+      useComposerStore.setState({ newSessionWorkdir: '/home/dev' });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
     });
   });
 
@@ -381,19 +411,5 @@ describe('Composer', () => {
     await waitFor(() => {
       expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
     });
-  });
-
-  it('omits workdir on a new-session send when none is selected', async () => {
-    // Default state: no directory chosen.
-    const { read } = renderNewSessionAndCaptureBody();
-
-    const textarea = screen.getByRole('textbox');
-    fireEvent.change(textarea, { target: { value: 'start fresh' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(read()).toEqual({ new_session: true, text: 'start fresh' });
-    });
-    expect(read()).not.toHaveProperty('workdir');
   });
 });

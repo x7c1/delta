@@ -6,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -15,7 +16,7 @@ import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
-import { WorkdirPicker } from './WorkdirPicker';
+import { WorkdirDialog } from './WorkdirDialog';
 
 const server = setupServer(...createHandlers());
 
@@ -23,56 +24,95 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderPicker() {
+/** The most-recent recent workdir (first row), which is pre-selected on open. */
+const MOST_RECENT = '/home/dev/projects/delta';
+
+function renderDialog(onClose = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const client = new ApiClient({ baseUrl: 'http://localhost' });
-  return render(
+  const utils = render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <WorkdirPicker />
+        <WorkdirDialog open onClose={onClose} />
       </ApiProvider>
     </QueryClientProvider>,
   );
+  return { ...utils, onClose };
 }
 
-describe('WorkdirPicker', () => {
+describe('WorkdirDialog', () => {
   beforeEach(() => {
     useComposerStore.setState({ newSessionWorkdir: null });
   });
 
-  it('selects a directory from the Recent list', async () => {
-    renderPicker();
+  it('renders the dialog content when open', async () => {
+    renderDialog();
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByTestId('workdir-picker')).toBeInTheDocument();
+  });
 
-    // The mock recent list includes the delta project as a clickable row.
-    const recentRow = await screen.findByRole('button', {
-      name: '/home/dev/projects/delta',
+  it('pre-selects the most-recent directory as the candidate on open', async () => {
+    renderDialog();
+
+    // The first Recent row is highlighted (aria-pressed) without any click, and
+    // Select is enabled so the user can confirm immediately.
+    const firstRow = await screen.findByRole('button', { name: MOST_RECENT });
+    await waitFor(() => expect(firstRow).toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('workdir-confirm')).toBeEnabled();
+  });
+
+  it('commits the candidate and closes when Select is clicked', async () => {
+    const { onClose } = renderDialog();
+
+    // recent[0] is pre-selected; Select commits it.
+    await screen.findByRole('button', { name: MOST_RECENT });
+    fireEvent.click(screen.getByTestId('workdir-confirm'));
+
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(MOST_RECENT);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('selecting a different Recent row makes it the candidate', async () => {
+    renderDialog();
+
+    const otherRow = await screen.findByRole('button', {
+      name: '/home/dev/projects/website',
     });
-    fireEvent.click(recentRow);
+    fireEvent.click(otherRow);
+    fireEvent.click(screen.getByTestId('workdir-confirm'));
 
     expect(useComposerStore.getState().newSessionWorkdir).toBe(
-      '/home/dev/projects/delta',
+      '/home/dev/projects/website',
     );
   });
 
-  it('descends into and ascends out of a directory while browsing', async () => {
-    renderPicker();
+  it('closes without committing when Cancel is clicked', async () => {
+    const { onClose } = renderDialog();
+
+    await screen.findByRole('button', { name: MOST_RECENT });
+    fireEvent.click(screen.getByTestId('workdir-cancel'));
+
+    // Cancel never commits, even though a recent row was pre-selected.
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('descends, ascends, and uses the currently-browsed directory', async () => {
+    renderDialog();
 
     // Default browse lists $HOME (/home/dev) with its subdirectories.
     await waitFor(() => {
-      expect(screen.getByTestId('workdir-current-path')).toHaveTextContent(
+      expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
         '/home/dev',
       );
     });
-    expect(
-      screen.getByRole('button', { name: 'projects/' }),
-    ).toBeInTheDocument();
 
     // Descend into projects/.
     fireEvent.click(screen.getByRole('button', { name: 'projects/' }));
     await waitFor(() => {
-      expect(screen.getByTestId('workdir-current-path')).toHaveTextContent(
+      expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
         '/home/dev/projects',
       );
     });
@@ -81,38 +121,46 @@ describe('WorkdirPicker', () => {
     // Ascend via the ".." entry back to $HOME.
     fireEvent.click(screen.getByTestId('workdir-parent'));
     await waitFor(() => {
-      expect(screen.getByTestId('workdir-current-path')).toHaveTextContent(
+      expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
         '/home/dev',
       );
     });
-  });
 
-  it('selects the currently-browsed directory as the cwd', async () => {
-    renderPicker();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('workdir-current-path')).toHaveTextContent(
-        '/home/dev',
-      );
-    });
-    fireEvent.click(screen.getByTestId('workdir-select-current'));
-
+    // "Use this directory" sets the browsed path as the candidate, then commit.
+    fireEvent.click(screen.getByTestId('workdir-use-current'));
+    fireEvent.click(screen.getByTestId('workdir-confirm'));
     expect(useComposerStore.getState().newSessionWorkdir).toBe('/home/dev');
   });
 
+  it('keeps Select disabled until a browse pick when Recent is empty', async () => {
+    // No recent list: nothing is pre-selected and Select stays disabled.
+    server.use(
+      http.get('*/api/workdir/recent', () =>
+        HttpResponse.json({ workdirs: [] }, { status: 200 }),
+      ),
+    );
+    renderDialog();
+
+    // Browse renders; the Recent section is omitted.
+    await screen.findByTestId('workdir-browse');
+    expect(screen.queryByTestId('workdir-recent')).not.toBeInTheDocument();
+    expect(screen.getByTestId('workdir-confirm')).toBeDisabled();
+
+    // Picking the browsed directory enables Select.
+    fireEvent.click(await screen.findByTestId('workdir-use-current'));
+    expect(screen.getByTestId('workdir-confirm')).toBeEnabled();
+  });
+
   it('shows an inline error and offers a way back when a listing is forbidden', async () => {
-    // Force the default ($HOME) listing to 403 so the error path renders without
-    // first needing a successful listing to know the parent.
     server.use(
       http.get('*/api/workdir/list', () =>
         HttpResponse.json({ error: 'permission denied' }, { status: 403 }),
       ),
     );
-    renderPicker();
+    renderDialog();
 
     const error = await screen.findByTestId('workdir-error');
     expect(error).toHaveTextContent('Permission denied');
-    // With no prior successful listing the recovery falls back to home.
     expect(
       screen.getByRole('button', { name: 'Back to home' }),
     ).toBeInTheDocument();
@@ -124,24 +172,25 @@ describe('WorkdirPicker', () => {
         HttpResponse.json({ error: 'not a directory' }, { status: 400 }),
       ),
     );
-    renderPicker();
+    renderDialog();
 
     const error = await screen.findByTestId('workdir-error');
     expect(error).toHaveTextContent('could not be opened');
   });
 
-  it('hides the Recent section when the recent query fails', async () => {
+  it('hides the Recent section and pre-selects nothing when recent fails', async () => {
     server.use(
       http.get('*/api/workdir/recent', () =>
         HttpResponse.json({ error: 'boom' }, { status: 500 }),
       ),
     );
-    renderPicker();
+    renderDialog();
 
-    // Browse still renders; Recent is omitted entirely on failure.
     await waitFor(() => {
       expect(screen.getByTestId('workdir-browse')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('workdir-recent')).not.toBeInTheDocument();
+    // Nothing pre-selected: Select is disabled until a browse pick.
+    expect(screen.getByTestId('workdir-confirm')).toBeDisabled();
   });
 });

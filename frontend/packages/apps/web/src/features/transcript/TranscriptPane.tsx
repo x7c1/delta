@@ -23,7 +23,7 @@ import {
 import { useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
-import { WorkdirChip, WorkdirPicker } from '../composer/WorkdirPicker';
+import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
@@ -105,6 +105,9 @@ export function TranscriptPane({
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
+  const newSessionWorkdir = useComposerStore(
+    (state) => state.newSessionWorkdir,
+  );
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
   );
@@ -135,6 +138,11 @@ export function TranscriptPane({
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
     null,
   );
+
+  // Whether the working-directory modal is open. Selection is mandatory for a
+  // new session, so the dialog auto-opens on entering that state (see below);
+  // local state is enough — no other view needs to know it is open.
+  const [workdirDialogOpen, setWorkdirDialogOpen] = useState(false);
 
   // The key the pending queue renders under for this view.
   const pendingThreadId: ThreadId | null = newSession
@@ -220,12 +228,22 @@ export function TranscriptPane({
     }
   }, [activeThread?.id, newSession]);
 
-  // Leaving the new-session state discards the picker's selection, so a later
-  // return to "new session" starts from the default (no `workdir`) again. The
-  // selection is also cleared on a successful new-session send by the composer.
+  // Entering the new-session state auto-opens the working-directory modal (when
+  // nothing is selected yet), since a directory is mandatory and the user should
+  // be able to confirm the most-recent one immediately. Leaving the state
+  // discards the selection and closes the modal, so a later return starts clean.
+  // The selection is also cleared on a successful new-session send by the
+  // composer. Keyed on `newSession` only: it must fire on the enter/leave
+  // transition, not every time the selection changes (which would re-open the
+  // modal the user just dismissed).
   useEffect(() => {
-    if (!newSession) {
+    if (newSession) {
+      if (!useComposerStore.getState().newSessionWorkdir) {
+        setWorkdirDialogOpen(true);
+      }
+    } else {
       setNewSessionWorkdir(null);
+      setWorkdirDialogOpen(false);
     }
   }, [newSession, setNewSessionWorkdir]);
 
@@ -393,7 +411,22 @@ export function TranscriptPane({
           </div>
         )}
 
-        {newSession && <WorkdirChip />}
+        {newSession &&
+          (newSessionWorkdir ? (
+            // A directory is chosen: show it as a chip with a ✎ to change it.
+            <WorkdirChip onEdit={() => setWorkdirDialogOpen(true)} />
+          ) : (
+            // The user dismissed the auto-opened modal without selecting. Send
+            // stays disabled; this button reopens the modal to pick one.
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setWorkdirDialogOpen(true)}
+              data-testid="workdir-open"
+            >
+              📁 Choose a directory…
+            </Button>
+          ))}
         <PendingQueue threadId={pendingThreadId} />
         {composer}
       </div>
@@ -422,7 +455,13 @@ export function TranscriptPane({
           >
             Send the first message below to start a new session.
           </p>
-          <WorkdirPicker />
+          {/* Modal directory picker (portals to the document body). Auto-opens
+              on entering the new-session state; commits the chosen cwd to the
+              composer store on Select. */}
+          <WorkdirDialog
+            open={workdirDialogOpen}
+            onClose={() => setWorkdirDialogOpen(false)}
+          />
         </>
       )}
 

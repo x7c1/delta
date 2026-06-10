@@ -63,8 +63,31 @@ describe('TranscriptPane', () => {
       externalInput: {},
       resumeUnavailable: {},
     });
-    useComposerStore.setState({ drafts: {}, branchOrigin: null });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+    });
   });
+
+  function renderNewSessionPane(threads = mockThreads) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const client = new ApiClient({ baseUrl: 'http://localhost' });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <TranscriptPane
+            threads={threads}
+            activeThread={null}
+            readOnly={false}
+            newSession
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+  }
 
   it('renders messages fetched from the mocked REST API', async () => {
     renderPane();
@@ -289,5 +312,50 @@ describe('TranscriptPane', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('auto-opens the workdir dialog on entering the new-session state', async () => {
+    renderNewSessionPane();
+
+    // The modal opens without any user action, with the most-recent directory
+    // pre-selected so the user can confirm immediately.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const firstRow = await screen.findByRole('button', {
+      name: '/home/dev/projects/delta',
+    });
+    await waitFor(() =>
+      expect(firstRow).toHaveAttribute('aria-pressed', 'true'),
+    );
+  });
+
+  it('shows a chip with an edit affordance once a directory is selected', () => {
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    renderNewSessionPane();
+
+    const chip = screen.getByTestId('workdir-chip');
+    expect(chip).toHaveTextContent('/home/dev/projects/delta');
+    // The ✎ reopens the dialog rather than clearing the (mandatory) selection.
+    expect(
+      within(chip).getByRole('button', { name: 'Change working directory' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('workdir-open')).not.toBeInTheDocument();
+  });
+
+  it('falls back to a "Choose a directory" button after cancelling without selecting', async () => {
+    renderNewSessionPane();
+
+    // Cancel the auto-opened modal without committing a directory.
+    fireEvent.click(await screen.findByTestId('workdir-cancel'));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    // No selection: the reopen button shows and Send stays disabled.
+    expect(screen.getByTestId('workdir-open')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    // The button reopens the modal.
+    fireEvent.click(screen.getByTestId('workdir-open'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
   });
 });
