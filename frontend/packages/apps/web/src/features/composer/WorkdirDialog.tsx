@@ -277,7 +277,14 @@ export function WorkdirDialog({
                 title={listing.path}
                 data-testid="workdir-use-current"
               >
-                Use this directory: {displayPath(listing.path, home)}
+                {(() => {
+                  // The home directory abbreviates to a bare `~`, which is easy
+                  // to overlook here; spell it out so the choice is unambiguous.
+                  // Only at this call site — `displayPath` stays pure and the
+                  // `title` keeps the full absolute path.
+                  const abbr = displayPath(listing.path, home);
+                  return `Use this directory: ${abbr === '~' ? '~ (HOME)' : abbr}`;
+                })()}
               </button>
               <ul className="space-y-0.5">
                 {listing.parent !== null && (

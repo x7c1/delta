@@ -156,14 +156,18 @@ describe('WorkdirDialog', () => {
     renderDialog();
 
     // Default browse lists $HOME (/home/dev) with its subdirectories. The
-    // current-directory label collapses home to `~` (title keeps the full path).
+    // current-directory label collapses home to `~` and spells it out as
+    // `~ (HOME)` so the bare tilde is not overlooked (title keeps the full
+    // path).
     await waitFor(() => {
       expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
         'title',
         '/home/dev',
       );
     });
-    expect(screen.getByTestId('workdir-use-current')).toHaveTextContent('~');
+    expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
+      'Use this directory: ~ (HOME)',
+    );
 
     // Descend into projects/. Navigating makes the browsed dir the candidate,
     // dropping the recent pre-selection.
@@ -175,7 +179,11 @@ describe('WorkdirDialog', () => {
       );
     });
     expect(screen.getByTestId('workdir-use-current')).toHaveTextContent(
-      '~/projects',
+      'Use this directory: ~/projects',
+    );
+    // A non-home directory keeps the plain abbreviation — no `(HOME)` label.
+    expect(screen.getByTestId('workdir-use-current')).not.toHaveTextContent(
+      '(HOME)',
     );
     expect(screen.getByTestId('workdir-use-current')).toHaveAttribute(
       'aria-pressed',
