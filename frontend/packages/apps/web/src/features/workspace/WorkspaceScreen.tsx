@@ -63,6 +63,9 @@ export function WorkspaceScreen() {
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
+  const bindNewSessionPending = useLiveStore(
+    (state) => state.bindNewSessionPending,
+  );
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
@@ -112,6 +115,11 @@ export function WorkspaceScreen() {
       const baseline = newSessionBaselineRef.current;
       const head = sessions[0];
       if (baseline && head && !baseline.has(head.session.id)) {
+        // The spawn just registered. Re-key its optimistic pending send onto the
+        // real session and main thread before focusing it, so the "waiting"
+        // strip stays visible through the first turn instead of vanishing the
+        // moment focus leaves the new-session state for the real thread.
+        bindNewSessionPending(head.session.id, head.main_thread_id);
         setFocusedSession(head.session.id);
       }
       return;
@@ -142,6 +150,7 @@ export function WorkspaceScreen() {
     focusedSessionId,
     isNewSessionFocus,
     setFocusedSession,
+    bindNewSessionPending,
   ]);
 
   // Reconcile the active thread against the focused session's threads. Default
