@@ -168,8 +168,13 @@ export function SessionNode({
                 the right so the timestamp column stays aligned across rows. */}
             {(cwdTail || lastActivity) && (
               <span className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                {/* Truncate the path from the LEFT (ellipsis at the start) so
+                    the end of the directory — the most identifying part — stays
+                    visible. `direction: rtl` flips where text-overflow's
+                    ellipsis lands; `text-left` keeps a short tail left-aligned.
+                    Path text is ASCII so its visual order is unchanged. */}
                 <span
-                  className="min-w-0 truncate font-mono"
+                  className="min-w-0 truncate text-left font-mono [direction:rtl]"
                   title={item.session.cwd}
                 >
                   {cwdTail}
