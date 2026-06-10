@@ -25,15 +25,24 @@ export interface BranchOrigin {
 export interface ComposerState {
   drafts: Record<ThreadId, string>;
   branchOrigin: BranchOrigin | null;
+  /**
+   * The working directory chosen in the new-session picker, or `null` for the
+   * default (the send then omits `workdir`, preserving today's behavior).
+   * Like `drafts`, it is session-only state; it is cleared on a successful
+   * new-session send and whenever the new-session state is left.
+   */
+  newSessionWorkdir: string | null;
 
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
   setBranchOrigin: (origin: BranchOrigin | null) => void;
+  setNewSessionWorkdir: (workdir: string | null) => void;
 }
 
 export const useComposerStore = create<ComposerState>((set) => ({
   drafts: {},
   branchOrigin: null,
+  newSessionWorkdir: null,
 
   setDraft: (threadId, text) =>
     set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
@@ -46,4 +55,6 @@ export const useComposerStore = create<ComposerState>((set) => ({
     }),
 
   setBranchOrigin: (origin) => set({ branchOrigin: origin }),
+
+  setNewSessionWorkdir: (workdir) => set({ newSessionWorkdir: workdir }),
 }));

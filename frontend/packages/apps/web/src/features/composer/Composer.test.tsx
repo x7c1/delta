@@ -62,7 +62,11 @@ describe('Composer', () => {
       unread: {},
       resumeUnavailable: {},
     });
-    useComposerStore.setState({ drafts: {}, branchOrigin: null });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+    });
   });
 
   it('switches the active thread to the new child after a branch send', async () => {
@@ -315,5 +319,81 @@ describe('Composer', () => {
       expect(pending.length).toBe(1);
       expect(pending[0].text).toBe('start fresh');
     });
+  });
+
+  /**
+   * Render the new-session composer and capture the body of the `POST
+   * /api/sends` it fires, so a test can assert exactly which fields are sent.
+   */
+  function renderNewSessionAndCaptureBody(): { read: () => unknown } {
+    let captured: unknown;
+    server.use(
+      http.post('*/api/sends', async ({ request }) => {
+        captured = await request.json();
+        return HttpResponse.json(
+          {
+            send: {
+              id: 0,
+              session_id: '',
+              thread_id: 0,
+              semantic_parent_uuid: null,
+              text: 'irrelevant',
+              locator_quote: null,
+              status: 'pending',
+              matched_uuid: null,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    return { read: () => captured };
+  }
+
+  it('includes the selected workdir on a new-session send', async () => {
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start in delta' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'start in delta',
+        workdir: '/home/dev/projects/delta',
+      });
+    });
+    // A successful new-session send resets the picker selection.
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    });
+  });
+
+  it('omits workdir on a new-session send when none is selected', async () => {
+    // Default state: no directory chosen.
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({ new_session: true, text: 'start fresh' });
+    });
+    expect(read()).not.toHaveProperty('workdir');
   });
 });

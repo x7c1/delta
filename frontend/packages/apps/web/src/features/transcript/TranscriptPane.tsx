@@ -23,6 +23,7 @@ import {
 import { useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
+import { WorkdirChip, WorkdirPicker } from '../composer/WorkdirPicker';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
@@ -104,6 +105,9 @@ export function TranscriptPane({
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
+  const setNewSessionWorkdir = useComposerStore(
+    (state) => state.setNewSessionWorkdir,
+  );
   // The focused session's external-input marker, if any. Keyed per session like
   // the permission notice; visibility is further gated to the active thread below.
   const externalInput = useLiveStore((state) =>
@@ -215,6 +219,15 @@ export function TranscriptPane({
       el.scrollTop = el.scrollHeight;
     }
   }, [activeThread?.id, newSession]);
+
+  // Leaving the new-session state discards the picker's selection, so a later
+  // return to "new session" starts from the default (no `workdir`) again. The
+  // selection is also cleared on a successful new-session send by the composer.
+  useEffect(() => {
+    if (!newSession) {
+      setNewSessionWorkdir(null);
+    }
+  }, [newSession, setNewSessionWorkdir]);
 
   // Keyed on the rendered content changing: jump to the bottom after paint when
   // sticking.
@@ -380,6 +393,7 @@ export function TranscriptPane({
           </div>
         )}
 
+        {newSession && <WorkdirChip />}
         <PendingQueue threadId={pendingThreadId} />
         {composer}
       </div>
@@ -401,12 +415,15 @@ export function TranscriptPane({
       footer={footer}
     >
       {newSession && (
-        <p
-          className="px-3 py-4 text-sm text-slate-400"
-          data-testid="new-session-empty"
-        >
-          Send the first message below to start a new session.
-        </p>
+        <>
+          <p
+            className="px-3 py-4 text-sm text-slate-400"
+            data-testid="new-session-empty"
+          >
+            Send the first message below to start a new session.
+          </p>
+          <WorkdirPicker />
+        </>
       )}
 
       {!newSession && messagesQuery.isLoading && (
