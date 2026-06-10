@@ -28,6 +28,25 @@ function FolderIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * The up-arrow glyph marking the ".." row so it reads as "go up to the parent
+ * directory", visually distinct from the folder rows. Decorative — always
+ * `aria-hidden`, so the row's accessible name stays "..". This file is the only
+ * user.
+ */
+function ParentDirIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M10 17a.75.75 0 0 1-.75-.75V5.612L5.29 9.77a.75.75 0 0 1-1.08-1.04l5.25-5.5a.75.75 0 0 1 1.08 0l5.25 5.5a.75.75 0 1 1-1.08 1.04L10.75 5.612V16.25A.75.75 0 0 1 10 17Z" />
+    </svg>
+  );
+}
+
 export interface WorkdirDialogProps {
   /** Whether the modal is shown. */
   open: boolean;
@@ -260,10 +279,11 @@ export function WorkdirDialog({
                     <button
                       type="button"
                       onClick={() => navigateTo(listing.parent)}
-                      className="w-full rounded px-2 py-1 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
+                      className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
                       data-testid="workdir-parent"
                     >
-                      ..
+                      <ParentDirIcon className="h-4 w-4 shrink-0" />
+                      <span>..</span>
                     </button>
                   </li>
                 )}
