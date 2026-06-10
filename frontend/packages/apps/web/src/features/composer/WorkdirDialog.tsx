@@ -111,7 +111,7 @@ export function WorkdirDialog({
       open={open}
       onClose={onClose}
       dismissable={dismissable}
-      title="Choose a directory"
+      title="Where should this session run?"
       footer={
         <>
           {dismissable && (
@@ -145,6 +145,10 @@ export function WorkdirDialog({
           }
         }}
       >
+        <p className="text-xs text-slate-500" data-testid="workdir-help">
+          Claude Code starts in this folder. Pick the project to work in.
+        </p>
+
         {recent && (
           <section className="space-y-1" data-testid="workdir-recent">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">

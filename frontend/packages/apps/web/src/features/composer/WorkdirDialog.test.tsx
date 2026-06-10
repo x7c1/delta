@@ -49,8 +49,18 @@ describe('WorkdirDialog', () => {
 
   it('renders the dialog content when open', async () => {
     renderDialog();
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAccessibleName('Where should this session run?');
     expect(screen.getByTestId('workdir-picker')).toBeInTheDocument();
+  });
+
+  it('explains why a directory is being chosen', async () => {
+    renderDialog();
+    const help = await screen.findByTestId('workdir-help');
+    expect(help).toHaveTextContent(
+      'Claude Code starts in this folder. Pick the project to work in.',
+    );
   });
 
   it('pre-selects the most-recent directory as the candidate on open', async () => {
