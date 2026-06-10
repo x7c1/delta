@@ -84,6 +84,12 @@ export interface TranscriptPaneProps {
   readOnly: boolean;
   /** True for the new-session composer state (no session/thread exists yet). */
   newSession?: boolean;
+  /**
+   * True when choosing a working directory is mandatory (the first run, with no
+   * sessions to fall back to). Makes the directory picker non-dismissable, so the
+   * user must select a directory before they can reach the new-session screen.
+   */
+  workdirMandatory?: boolean;
 }
 
 /**
@@ -100,6 +106,7 @@ export function TranscriptPane({
   activeThread,
   readOnly,
   newSession = false,
+  workdirMandatory = false,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -453,6 +460,7 @@ export function TranscriptPane({
               composer store on Select. */}
           <WorkdirDialog
             open={workdirDialogOpen}
+            dismissable={!workdirMandatory}
             onClose={() => {
               closeWorkdirDialog();
               // Dismissing the picker without a directory cancels the

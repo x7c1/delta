@@ -46,6 +46,19 @@ describe('Dialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('does not call onClose on Escape or a backdrop click when not dismissable', () => {
+    const onClose = vi.fn();
+    render(
+      <Dialog open dismissable={false} onClose={onClose} title="Choose a directory">
+        <p>body</p>
+      </Dialog>,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('dialog-backdrop'));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('does not call onClose when the content is clicked', () => {
     const onClose = vi.fn();
     render(

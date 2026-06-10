@@ -75,7 +75,10 @@ describe('TranscriptPane', () => {
     });
   });
 
-  function renderNewSessionPane(threads = mockThreads) {
+  function renderNewSessionPane(
+    threads = mockThreads,
+    { workdirMandatory = false } = {},
+  ) {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -88,6 +91,7 @@ describe('TranscriptPane', () => {
             activeThread={null}
             readOnly={false}
             newSession
+            workdirMandatory={workdirMandatory}
           />
         </ApiProvider>
       </QueryClientProvider>,
@@ -331,6 +335,22 @@ describe('TranscriptPane', () => {
     await waitFor(() =>
       expect(firstRow).toHaveAttribute('aria-pressed', 'true'),
     );
+  });
+
+  it('makes the workdir dialog non-dismissable when workdirMandatory', async () => {
+    // First run (no sessions to fall back to): the picker is mandatory, so there
+    // is no Cancel button and Esc/backdrop do not close it.
+    renderNewSessionPane(mockThreads, { workdirMandatory: true });
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.click(screen.getByTestId('dialog-backdrop'));
+
+    // The dialog is still open and the new-session intent is intact.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 
   it('shows a chip with an edit affordance once a directory is selected', () => {

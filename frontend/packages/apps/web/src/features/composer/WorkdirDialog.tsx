@@ -13,6 +13,13 @@ export interface WorkdirDialogProps {
   open: boolean;
   /** Close without committing (Cancel / Esc / backdrop). */
   onClose: () => void;
+  /**
+   * Whether the picker can be dismissed without choosing a directory. When
+   * `false` (the first-run / zero-session case) there is nowhere to fall back
+   * to, so the only way out is to Select a directory: the Cancel button is
+   * hidden and Esc/backdrop no longer close. Defaults to `true`.
+   */
+  dismissable?: boolean;
 }
 
 /**
@@ -33,7 +40,11 @@ export interface WorkdirDialogProps {
  * Cancel closes without committing. Enter confirms (when a candidate exists) and
  * Esc cancels (handled by the Dialog).
  */
-export function WorkdirDialog({ open, onClose }: WorkdirDialogProps) {
+export function WorkdirDialog({
+  open,
+  onClose,
+  dismissable = true,
+}: WorkdirDialogProps) {
   const client = useApiClient();
   const setSelected = useComposerStore((state) => state.setNewSessionWorkdir);
 
@@ -99,12 +110,19 @@ export function WorkdirDialog({ open, onClose }: WorkdirDialogProps) {
     <Dialog
       open={open}
       onClose={onClose}
+      dismissable={dismissable}
       title="Choose a directory"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose} data-testid="workdir-cancel">
-            Cancel
-          </Button>
+          {dismissable && (
+            <Button
+              variant="ghost"
+              onClick={onClose}
+              data-testid="workdir-cancel"
+            >
+              Cancel
+            </Button>
+          )}
           <Button
             variant="primary"
             onClick={confirm}

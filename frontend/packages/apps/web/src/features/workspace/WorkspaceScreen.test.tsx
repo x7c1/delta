@@ -200,6 +200,11 @@ describe('WorkspaceScreen multi-session', () => {
       expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS),
     );
     expect(screen.getByTestId('new-session-empty')).toBeInTheDocument();
+
+    // First run (zero sessions): the directory picker is mandatory, so it opens
+    // with no Cancel button — the user must choose a directory to proceed.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
   });
 
   it('flips the focused session to read-only after its Close button is clicked', async () => {

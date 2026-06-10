@@ -13,6 +13,12 @@ export interface DialogProps {
   children: ReactNode;
   /** Optional footer slot rendered below the body (e.g. action buttons). */
   footer?: ReactNode;
+  /**
+   * Whether the user can dismiss the dialog without an explicit action.
+   * When `false`, Escape and a backdrop click no longer request a close, so the
+   * only way out is whatever the footer/body provides. Defaults to `true`.
+   */
+  dismissable?: boolean;
   className?: string;
 }
 
@@ -20,7 +26,8 @@ export interface DialogProps {
  * A small, accessible modal dialog. A full-viewport backdrop dims the page and
  * centers a panel; the panel is `role="dialog"` + `aria-modal` and labelled by
  * its title. Escape and a backdrop click both request a close (→ `onClose`),
- * while a click inside the panel does not. Focus moves into the dialog on open
+ * while a click inside the panel does not — unless `dismissable` is `false`, in
+ * which case neither dismisses the dialog. Focus moves into the dialog on open
  * and is restored to the previously-focused element on close, mirroring the
  * focus handling in {@link Menu}.
  *
@@ -34,6 +41,7 @@ export function Dialog({
   title,
   children,
   footer,
+  dismissable = true,
   className,
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -57,9 +65,9 @@ export function Dialog({
     wasOpen.current = open;
   }, [open]);
 
-  // Escape requests a close while open.
+  // Escape requests a close while open, unless the dialog is non-dismissable.
   useEffect(() => {
-    if (!open) {
+    if (!open || !dismissable) {
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
@@ -70,7 +78,7 @@ export function Dialog({
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, dismissable]);
 
   if (!open) {
     return null;
@@ -82,7 +90,7 @@ export function Dialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       data-testid="dialog-backdrop"
-      onClick={onClose}
+      onClick={dismissable ? onClose : undefined}
     >
       <div
         ref={panelRef}

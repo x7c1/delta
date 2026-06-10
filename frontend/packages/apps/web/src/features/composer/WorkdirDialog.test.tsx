@@ -27,7 +27,7 @@ afterAll(() => server.close());
 /** The most-recent recent workdir (first row), which is pre-selected on open. */
 const MOST_RECENT = '/home/dev/projects/delta';
 
-function renderDialog(onClose = vi.fn()) {
+function renderDialog(onClose = vi.fn(), { dismissable = true } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -35,7 +35,7 @@ function renderDialog(onClose = vi.fn()) {
   const utils = render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <WorkdirDialog open onClose={onClose} />
+        <WorkdirDialog open onClose={onClose} dismissable={dismissable} />
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -96,6 +96,19 @@ describe('WorkdirDialog', () => {
 
     // Cancel never commits, even though a recent row was pre-selected.
     expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides Cancel but still commits via Select when not dismissable', async () => {
+    const { onClose } = renderDialog(vi.fn(), { dismissable: false });
+
+    // The only way out is to choose a directory: Cancel is absent.
+    await screen.findByRole('button', { name: MOST_RECENT });
+    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
+
+    // Select still commits the pre-selected candidate and closes.
+    fireEvent.click(screen.getByTestId('workdir-confirm'));
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(MOST_RECENT);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
