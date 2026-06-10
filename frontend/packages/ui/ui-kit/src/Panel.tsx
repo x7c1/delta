@@ -6,6 +6,17 @@ export interface PanelProps {
   header?: ReactNode;
   /** Optional footer rendered below the body with a top border. */
   footer?: ReactNode;
+  /**
+   * Optional layer floated over the body, anchored to the body region (below the
+   * header, above the footer). The wrapper is click-through; only the overlay's
+   * own children opt back into pointer events, so floating notices or an input
+   * can sit over the scrolling content without consuming its height — their
+   * appearing or disappearing then never resizes the scroll viewport. Callers
+   * position their children within it (e.g. `absolute top-3 right-3`, `absolute
+   * inset-x-0 bottom-0`) and add a fixed `bodyClassName` bottom padding so
+   * resting content clears any always-on overlay.
+   */
+  overlay?: ReactNode;
   className?: string;
   bodyClassName?: string;
   /**
@@ -18,11 +29,13 @@ export interface PanelProps {
 
 /**
  * A vertical column with an optional sticky header and footer and a scrollable
- * body. Used as the structural shell for each pane of the layout.
+ * body. Used as the structural shell for each pane of the layout. An optional
+ * {@link PanelProps.overlay} floats over the body without taking layout space.
  */
 export function Panel({
   header,
   footer,
+  overlay,
   className,
   bodyClassName,
   bodyRef,
@@ -37,14 +50,16 @@ export function Panel({
           <div className="min-w-0 flex-1">{header}</div>
         </header>
       )}
-      <div
-        ref={bodyRef}
-        className={cn(
-          'min-h-0 flex-1 overflow-y-auto scrollbar-hover',
-          bodyClassName,
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={bodyRef}
+          className={cn('h-full overflow-y-auto scrollbar-hover', bodyClassName)}
+        >
+          {children}
+        </div>
+        {overlay !== undefined && (
+          <div className="pointer-events-none absolute inset-0">{overlay}</div>
         )}
-      >
-        {children}
       </div>
       {footer !== undefined && (
         <footer className="shrink-0 border-t border-slate-200 px-3 py-2">

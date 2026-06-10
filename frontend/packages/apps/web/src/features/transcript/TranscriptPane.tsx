@@ -362,16 +362,50 @@ export function TranscriptPane({
     />
   ) : undefined;
 
-  // The fixed footer (pinned below the scrolling transcript). For a
+  // Floating layers over the scrolling transcript (see Panel's `overlay`). They
+  // sit on top of the conversation rather than in flow, so a notice appearing or
+  // disappearing never resizes the scroll viewport — the tail the user is
+  // reading stays put instead of jumping. The body reserves a fixed bottom
+  // padding (below) so resting content clears the bottom (composer) layer.
+
+  // The permission notice floats at the top-right, deliberately away from the
+  // conversation tail and the input. A tool's PreToolUse hook can flip it on and
+  // off repeatedly during a run; pinned above the input (its old home) it would
+  // jitter exactly where the user reads. Kept narrow so it does not blanket the
+  // transcript. It clears on dismiss, on resolution, or when the turn completes.
+  const permissionOverlay = visiblePermission && activeThread && (
+    <div
+      className="pointer-events-auto absolute right-3 top-3 max-w-xs space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs shadow-md"
+      data-testid="permission-notice"
+      role="alert"
+    >
+      <p className="font-medium text-amber-800">
+        Permission requested: {visiblePermission.toolName}
+      </p>
+      <p className="text-slate-600">Answer the prompt in the terminal.</p>
+      <div className="flex gap-2">
+        <Button size="sm" onClick={() => setTerminalOpen(true)}>
+          Open terminal
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => dismissPermission(activeThread.session_id)}
+        >
+          Dismiss
+        </Button>
+      </div>
+    </div>
+  );
+
+  // The bottom layer: the composer plus the notices that must stay next to the
+  // input — the closed/external-input banners and, crucially, the pending-send
+  // strip, which the user reads to decide whether to hold a send. For a
   // resume-impossible session it is just the "cannot resume" notice, replacing
-  // the input entirely — there is nothing useful to type. Otherwise it stacks
-  // the session-state notices (permission, closed, external input), the
-  // optimistic pending-send strip, and the composer. The notices are pinned
-  // directly above the input rather than at the top of the scrolling body, where
-  // a long conversation scrolled to its tail would bury them out of sight.
-  let footer: ReactNode;
+  // the input entirely — there is nothing useful to type.
+  let bottomContent: ReactNode;
   if (resumeUnavailable && !newSession) {
-    footer = (
+    bottomContent = (
       <div
         className="flex items-center gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700"
         data-testid="resume-unavailable-notice"
@@ -385,33 +419,8 @@ export function TranscriptPane({
       </div>
     );
   } else if (composer) {
-    footer = (
+    bottomContent = (
       <div className="space-y-2">
-        {visiblePermission && activeThread && (
-          <div
-            className="space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs"
-            data-testid="permission-notice"
-            role="alert"
-          >
-            <p className="font-medium text-amber-800">
-              Permission requested: {visiblePermission.toolName}
-            </p>
-            <p className="text-slate-600">Answer the prompt in the terminal.</p>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => setTerminalOpen(true)}>
-                Open terminal
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => dismissPermission(activeThread.session_id)}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </div>
-        )}
-
         {readOnly && !newSession && (
           <div
             className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
@@ -456,9 +465,23 @@ export function TranscriptPane({
     );
   }
 
+  // Anchored to the bottom of the body, full width, with an opaque background so
+  // it occludes (rather than blends into) the transcript scrolling beneath it.
+  const bottomOverlay = bottomContent && (
+    <div className="pointer-events-auto absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white px-3 py-2">
+      {bottomContent}
+    </div>
+  );
+
   return (
     <Panel
       bodyRef={bodyRef}
+      // Reserve fixed space for the bottom overlay so the last turn is not hidden
+      // behind the composer at rest. A fixed (not measured) value is deliberate:
+      // it never changes, so the composer growing or a banner appearing cannot
+      // shift the transcript. When the overlay does grow past this, it briefly
+      // covers the last lines — an accepted trade for zero layout shift.
+      bodyClassName="pb-48"
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">
@@ -468,7 +491,12 @@ export function TranscriptPane({
           <Breadcrumb items={breadcrumbItems} />
         ) : null
       }
-      footer={footer}
+      overlay={
+        <>
+          {permissionOverlay}
+          {bottomOverlay}
+        </>
+      }
     >
       {newSession && (
         <>
