@@ -91,10 +91,10 @@ test('a visible non-focused session shows its sub-thread tree expanded without a
   // ("scratch notes") is on page 1 and visible but NOT focused. Every visible
   // row fetches its own thread tree and renders it expanded by default, so the
   // non-focused session's sub-thread ("scratch ideas") is on screen with no
-  // interaction.
+  // interaction. The row is matched by its working-directory row ("work : scratch").
   const scratchRow = page
     .getByTestId('session-node')
-    .filter({ hasText: 'scratch notes' });
+    .filter({ hasText: 'work : scratch' });
   await expect(scratchRow).toBeVisible();
   const subThread = page.getByRole('button', { name: /scratch ideas/ });
   await expect(subThread).toBeVisible();
@@ -117,11 +117,11 @@ test('focusing a closed session shows its transcript read-only', async ({
   await useManualEventControl(page);
   await page.goto('/');
 
-  // Focus the closed session ("scratch notes") by its label; the kebab menu
-  // shares the label, so target the row by test id.
+  // Focus the closed session ("scratch notes") by its working-directory row; the
+  // kebab menu shares the label, so target the row by test id.
   await page
     .getByTestId('session-node')
-    .filter({ hasText: 'scratch notes' })
+    .filter({ hasText: 'work : scratch' })
     .click();
 
   // Its transcript renders, but with a read-only notice (closed session).
@@ -139,7 +139,7 @@ test('a closed session resumes after a Send via the pending queue', async ({
 
   await page
     .getByTestId('session-node')
-    .filter({ hasText: 'scratch notes' })
+    .filter({ hasText: 'work : scratch' })
     .click();
   await expect(page.getByTestId('readonly-notice')).toBeVisible();
 
@@ -186,8 +186,12 @@ test('starting a new session shows the optimistic send', async ({ page }) => {
   await useManualEventControl(page);
   await page.goto('/');
 
-  // Enter the new-session composer state.
+  // Enter the new-session composer state. A directory must be chosen before the
+  // first message can be sent, so the picker opens automatically — pick the
+  // default browsed directory and confirm.
   await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByTestId('workdir-use-current').click();
+  await page.getByTestId('workdir-confirm').click();
   await expect(page.getByTestId('new-session-empty')).toBeVisible();
 
   // The first Send is shown optimistically in the pending queue.
