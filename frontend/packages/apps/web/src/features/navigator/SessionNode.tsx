@@ -5,6 +5,7 @@ import { Badge, Menu, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
+import { pathTail } from '../../utils/pathTail';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
@@ -49,8 +50,9 @@ function sessionLabel(item: SessionListItem): string {
 /**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
- * indicator plus the session label, line 2 is the right-aligned last-activity
- * timestamp, omitted when there is none) plus the kebab actions menu in a
+ * indicator plus the session label, line 2 pairs the session's working-directory
+ * tail on the left with the right-aligned last-activity timestamp, each omitted
+ * when there is none) plus the kebab actions menu in a
  * fixed-width slot at the right end, enabled only when the session is open. The
  * focused card is lifted with an indigo border, tint, and ring.
  *
@@ -88,6 +90,7 @@ export function SessionNode({
   const threads = threadsQuery.data?.threads;
 
   const lastActivity = formatLocalDateTime(item.last_activity_at);
+  const cwdTail = pathTail(item.session.cwd);
   const label = sessionLabel(item);
   // Show the sub-thread list only once the session has branched. The main
   // thread itself is never listed (it is reached by clicking this card's
@@ -160,10 +163,20 @@ export function SessionNode({
                 </span>
               )}
             </span>
-            {/* Right-aligned so the timestamp column stays aligned across rows. */}
-            {lastActivity && (
-              <span className="text-right text-xs tabular-nums text-slate-400">
-                {lastActivity}
+            {/* Second line: the session's working-directory tail on the left
+                (truncating when long) and the last-activity timestamp pinned to
+                the right so the timestamp column stays aligned across rows. */}
+            {(cwdTail || lastActivity) && (
+              <span className="flex items-center justify-between gap-2 text-xs text-slate-400">
+                <span
+                  className="min-w-0 truncate font-mono"
+                  title={item.session.cwd}
+                >
+                  {cwdTail}
+                </span>
+                {lastActivity && (
+                  <span className="shrink-0 tabular-nums">{lastActivity}</span>
+                )}
               </span>
             )}
           </button>

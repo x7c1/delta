@@ -297,4 +297,37 @@ describe('WorkspaceScreen multi-session', () => {
       ),
     );
   });
+
+  it("shows the working-directory tail in a session's row", async () => {
+    // The row carries the session's cwd compactly (its last two segments) so a
+    // session is identifiable by where it runs; the full path stays available
+    // on hover via `title`.
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/home/dev/projects/delta',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+              },
+              open: true,
+              main_thread_id: 1,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+
+    renderScreen();
+
+    const tail = await screen.findByText('projects/delta');
+    expect(tail).toHaveAttribute('title', '/home/dev/projects/delta');
+  });
 });
