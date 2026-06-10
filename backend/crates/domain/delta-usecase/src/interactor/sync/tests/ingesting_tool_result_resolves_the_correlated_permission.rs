@@ -12,19 +12,24 @@ async fn ingesting_tool_result_resolves_the_correlated_permission() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
 
-    // A permission request is recorded for an imminent tool call.
-    let requested = ix
-        .on_pre_tool_use(
-            &SessionId::from("sess-1"),
-            "Bash",
-            r#"{"command":"ls"}"#,
-            "toolu_01",
-        )
-        .await
-        .unwrap();
-    let request_id = match requested.as_slice() {
-        [SessionEvent::PermissionRequested { request_id, .. }] => *request_id,
-        other => panic!("expected a single PermissionRequested, got {other:?}"),
+    // A permission request is recorded for an imminent tool call. PreToolUse
+    // only records it (the browser notice is emitted by the `PermissionRequest`
+    // hook), so the request id is read back from the store.
+    ix.on_pre_tool_use(
+        &SessionId::from("sess-1"),
+        "Bash",
+        r#"{"command":"ls"}"#,
+        "toolu_01",
+    )
+    .await
+    .unwrap();
+    let request_id = {
+        let g = ix.store().inner.lock().unwrap();
+        g.permissions
+            .iter()
+            .find(|r| r.tool_use_id == "toolu_01")
+            .expect("the request is recorded")
+            .id
     };
 
     // A tool_result for a *different* tool_use_id resolves nothing.

@@ -1,6 +1,8 @@
-//! Claude Code hook handlers: `UserPromptSubmit`, `Stop`, and `PreToolUse`.
+//! Claude Code hook handlers: `UserPromptSubmit`, `Stop`, `PreToolUse`, and
+//! `PermissionRequest`.
 
 mod match_uuid_for_prompt;
+mod on_permission_request;
 mod on_pre_tool_use;
 mod on_stop;
 mod on_user_prompt_submit;

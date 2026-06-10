@@ -594,6 +594,70 @@ async fn permission_request_is_recorded() {
 }
 
 #[tokio::test]
+async fn find_open_permission_request_prefers_exact_input_then_latest() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _) = store.register_session(new_session()).await.unwrap();
+
+    // Two pending Bash requests with different inputs.
+    let ls = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, "toolu_01")
+        .await
+        .unwrap();
+    let pwd = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"pwd"}"#, "toolu_02")
+        .await
+        .unwrap();
+
+    // An exact tool_input match wins over the latest row.
+    assert_eq!(
+        store
+            .find_open_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
+            .await
+            .unwrap(),
+        Some(ls.id),
+    );
+
+    // Without an exact match, the most recent pending row for the tool wins.
+    assert_eq!(
+        store
+            .find_open_permission_request(&session.id, "Bash", r#"{"command":"echo"}"#)
+            .await
+            .unwrap(),
+        Some(pwd.id),
+    );
+
+    // Resolved rows are not candidates; once both are decided, nothing matches.
+    store
+        .resolve_permission_by_tool_use_id(&session.id, "toolu_01", true)
+        .await
+        .unwrap();
+    store
+        .resolve_permission_by_tool_use_id(&session.id, "toolu_02", true)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .find_open_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
+            .await
+            .unwrap(),
+        None,
+    );
+
+    // A different tool name does not match either.
+    let _ = store
+        .record_permission_request(&session.id, "Read", r#"{"path":"/a"}"#, "toolu_03")
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .find_open_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
+            .await
+            .unwrap(),
+        None,
+    );
+}
+
+#[tokio::test]
 async fn permission_request_resolves_by_tool_use_id() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, _) = store.register_session(new_session()).await.unwrap();

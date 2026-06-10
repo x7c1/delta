@@ -1,7 +1,8 @@
 //! Rendering the Claude Code session settings JSON.
 //!
 //! The session needs native HTTP hooks pointing back at this server so Delta
-//! receives `UserPromptSubmit`, `Stop`, and `PreToolUse` callbacks. The server
+//! receives `UserPromptSubmit`, `Stop`, `PreToolUse`, and `PermissionRequest`
+//! callbacks. The server
 //! renders these settings itself (rather than copying a static template) so the
 //! hook URLs always match the port the server is actually listening on — there
 //! is no second source of truth to drift out of sync. The rendered JSON is
@@ -37,6 +38,11 @@ pub fn render_session_settings(port: u16) -> String {
                     { "type": "http", "url": url("pre-tool-use"), "timeout": 30 }
                 ]
             }],
+            // PermissionRequest fires only when an interactive permission dialog
+            // actually appears (not for auto/classifier-approved calls), so it is
+            // the signal for "a human answer is genuinely pending". PreToolUse
+            // fires for every call and only records the request.
+            "PermissionRequest": [http_hook("permission-request")],
         }
     });
     // Pretty-printed so the on-disk file is human-readable when inspected.
@@ -69,5 +75,9 @@ mod tests {
             "http://127.0.0.1:9999/hooks/pre-tool-use"
         );
         assert_eq!(parsed["hooks"]["PreToolUse"][0]["matcher"], "*");
+        assert_eq!(
+            parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["url"],
+            "http://127.0.0.1:9999/hooks/permission-request"
+        );
     }
 }

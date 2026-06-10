@@ -17,6 +17,8 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/user-prompt-submit", post(hooks::user_prompt_submit))
         .route("/hooks/stop", post(hooks::stop))
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
+        // Interactive permission dialog appeared (a human answer is pending).
+        .route("/hooks/permission-request", post(hooks::permission_request))
         // Browser REST surface: queries and commands.
         .route(
             "/api/sessions",
@@ -218,6 +220,32 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/hooks/pre-tool-use")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn permission_request_hook_returns_ok() {
+        // The hook carries no `tool_use_id`; the handler correlates by
+        // (session, tool_name, tool_input). With no recorded request it still
+        // returns 200 (emitting no notice).
+        let body = serde_json::json!({
+            "session_id": "sess-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "ls"}
+        })
+        .to_string();
+
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/permission-request")
                     .header("content-type", "application/json")
                     .body(Body::from(body))
                     .unwrap(),

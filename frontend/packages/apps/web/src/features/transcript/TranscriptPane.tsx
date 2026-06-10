@@ -39,88 +39,6 @@ import {
  */
 const STICK_THRESHOLD_PX = 64;
 
-/**
- * How long a permission notice must stay pending before it is shown.
- *
- * The `PreToolUse` hook fires for every tool call, including auto-approved ones,
- * so a notice is briefly set then cleared (via `permission_resolved`) the moment
- * the correlated `tool_result` lands. Delaying the render by this window hides
- * that flash: an auto-approved tool resolves well within it and never paints,
- * while a genuine TUI prompt — which has no resolution until the human answers —
- * outlasts the window and renders as normal.
- */
-const PERMISSION_NOTICE_DELAY_MS = 1000;
-
-/**
- * Once shown, the smallest time a permission notice stays on screen, even if its
- * source clears immediately after. A notice that pops in and vanishes within a
- * blink reads as a glitch; holding it for this window makes a real (if quickly
- * resolved) prompt register as a deliberate appearance rather than a flicker.
- */
-const PERMISSION_NOTICE_MIN_VISIBLE_MS = 500;
-
-/**
- * Gate a permission notice's visibility on two timers:
- *
- * - **Appear delay**: it must stay present for {@link PERMISSION_NOTICE_DELAY_MS}
- *   before painting. A notice that clears within the window never renders (the
- *   auto-approved-tool flash); one that persists renders once the window elapses.
- * - **Minimum visible**: once shown, it stays for at least
- *   {@link PERMISSION_NOTICE_MIN_VISIBLE_MS} even if the source clears right
- *   after, so it never blinks out the instant it appears.
- *
- * A new source notice arriving during the min-visible hold cancels the pending
- * clear and keeps the notice up seamlessly.
- */
-function useDebouncedPermission<T>(notice: T | null): T | null {
-  const [visible, setVisible] = useState<T | null>(null);
-  // Wall-clock time the notice became visible; null while hidden. A ref (not
-  // state) so reading it never re-runs the effect, and it survives the timer
-  // callbacks that flip visibility.
-  const shownAtRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (notice !== null) {
-      // Already on screen: just track the latest notice (e.g. a follow-up
-      // request) without resetting how long it has been visible.
-      if (shownAtRef.current !== null) {
-        setVisible(notice);
-        return;
-      }
-      // Not yet shown: arm the appear delay. Cleanup cancels it if the source
-      // clears first, so a quickly-resolved notice never paints.
-      const timer = setTimeout(() => {
-        shownAtRef.current = Date.now();
-        setVisible(notice);
-      }, PERMISSION_NOTICE_DELAY_MS);
-      return () => clearTimeout(timer);
-    }
-
-    // Source gone while still within the appear delay (never shown): drop it.
-    if (shownAtRef.current === null) {
-      setVisible(null);
-      return;
-    }
-
-    // Source gone after it was shown: hold for the remainder of the minimum
-    // visible window before clearing (clear at once if it has already elapsed).
-    const remaining =
-      PERMISSION_NOTICE_MIN_VISIBLE_MS - (Date.now() - shownAtRef.current);
-    if (remaining <= 0) {
-      shownAtRef.current = null;
-      setVisible(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      shownAtRef.current = null;
-      setVisible(null);
-    }, remaining);
-    return () => clearTimeout(timer);
-  }, [notice]);
-
-  return visible;
-}
-
 export interface TranscriptPaneProps {
   threads: Thread[];
   /** The active thread, or null for the cold-start / new-session state. */
@@ -182,14 +100,14 @@ export function TranscriptPane({
   const resumeUnavailable = useLiveStore((state) =>
     activeThread ? Boolean(state.resumeUnavailable[activeThread.session_id]) : false,
   );
-  // The focused session's pending permission prompt, if any. A tool's PreToolUse
-  // hook blocks that session until it is answered in the terminal.
+  // The focused session's pending permission prompt, if any. Emitted by the
+  // `PermissionRequest` hook, which fires only when an interactive dialog
+  // actually appears, so it is a genuine "answer needed" signal and is shown
+  // directly — no debounce. It clears on dismiss, on resolution, or when the
+  // turn completes.
   const permission = useLiveStore((state) =>
     activeThread ? state.permission[activeThread.session_id] ?? null : null,
   );
-  // Defer showing the notice so an auto-approved tool's brief set→resolve never
-  // paints; a genuine pending prompt outlasts the window and shows as normal.
-  const visiblePermission = useDebouncedPermission(permission);
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   const dismissExternalInput = useLiveStore(
     (state) => state.dismissExternalInput,
@@ -414,18 +332,18 @@ export function TranscriptPane({
   // padding (below) so resting content clears the bottom (composer) layer.
 
   // The permission notice floats at the top-right, deliberately away from the
-  // conversation tail and the input. A tool's PreToolUse hook can flip it on and
-  // off repeatedly during a run; pinned above the input (its old home) it would
-  // jitter exactly where the user reads. Kept narrow so it does not blanket the
-  // transcript. It clears on dismiss, on resolution, or when the turn completes.
-  const permissionOverlay = visiblePermission && activeThread && (
+  // conversation tail and the input. Pinned above the input (its old home) it
+  // would sit exactly where the user reads. Kept narrow so it does not blanket
+  // the transcript. It clears on dismiss, on resolution, or when the turn
+  // completes.
+  const permissionOverlay = permission && activeThread && (
     <div
       className="pointer-events-auto absolute right-3 top-3 max-w-xs space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs shadow-md"
       data-testid="permission-notice"
       role="alert"
     >
       <p className="font-medium text-amber-800">
-        Permission requested: {visiblePermission.toolName}
+        Permission requested: {permission.toolName}
       </p>
       <p className="text-slate-600">Answer the prompt in the terminal.</p>
       <div className="flex gap-2">
