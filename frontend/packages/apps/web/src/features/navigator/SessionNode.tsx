@@ -50,9 +50,9 @@ function sessionLabel(item: SessionListItem): string {
 /**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
- * indicator plus the session label, line 2 pairs the session's working-directory
- * tail on the left with the right-aligned last-activity timestamp, each omitted
- * when there is none) plus the kebab actions menu in a
+ * indicator plus the session label, line 2 shows the session's working-directory
+ * tail, omitted when there is none; the last-activity timestamp lives in the
+ * directory's hover tooltip alongside the full path) plus the kebab actions menu in a
  * fixed-width slot at the right end, enabled only when the session is open. The
  * focused card is lifted with an indigo border, tint, and ring.
  *
@@ -163,25 +163,20 @@ export function SessionNode({
                 </span>
               )}
             </span>
-            {/* Second line: the session's working-directory tail on the left
-                (truncating when long) and the last-activity timestamp pinned to
-                the right so the timestamp column stays aligned across rows. */}
-            {(cwdTail || lastActivity) && (
-              <span className="flex items-center justify-between gap-2 text-xs text-slate-400">
-                {/* Truncate the path from the LEFT (ellipsis at the start) so
-                    the end of the directory — the most identifying part — stays
-                    visible. `direction: rtl` flips where text-overflow's
-                    ellipsis lands; `text-left` keeps a short tail left-aligned.
-                    Path text is ASCII so its visual order is unchanged. */}
-                <span
-                  className="min-w-0 truncate text-left font-mono [direction:rtl]"
-                  title={item.session.cwd}
-                >
-                  {cwdTail}
-                </span>
-                {lastActivity && (
-                  <span className="shrink-0 tabular-nums">{lastActivity}</span>
-                )}
+            {cwdTail && (
+              // Second line: the working directory only (last two path segments,
+              // left-truncated so the identifying end stays visible). The hover tooltip
+              // carries the full path and the last-activity time on a second line —
+              // native `title` renders the `\n` as a line break.
+              <span
+                className="min-w-0 truncate text-left font-mono text-xs text-slate-400 [direction:rtl]"
+                title={
+                  lastActivity
+                    ? `${item.session.cwd}\n${lastActivity}`
+                    : item.session.cwd
+                }
+              >
+                {cwdTail}
               </span>
             )}
           </button>

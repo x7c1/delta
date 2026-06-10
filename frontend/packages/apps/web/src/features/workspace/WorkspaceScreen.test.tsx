@@ -23,6 +23,7 @@ import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
+import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
 // The live event source opens a real WebSocket outside mock mode, and the
@@ -300,8 +301,10 @@ describe('WorkspaceScreen multi-session', () => {
 
   it("shows the working-directory tail in a session's row", async () => {
     // The row carries the session's cwd compactly (its last two segments) so a
-    // session is identifiable by where it runs; the full path stays available
-    // on hover via `title`.
+    // session is identifiable by where it runs. The full path and the
+    // last-activity time stay available on hover via `title` — the time is no
+    // longer rendered as visible row text.
+    const lastActivityAt = '2026-01-01T00:00:02Z';
     server.use(
       http.get('*/api/sessions', () =>
         HttpResponse.json({
@@ -317,7 +320,7 @@ describe('WorkspaceScreen multi-session', () => {
               },
               open: true,
               main_thread_id: 1,
-              last_activity_at: '2026-01-01T00:00:02Z',
+              last_activity_at: lastActivityAt,
             },
           ],
           next_cursor: null,
@@ -328,6 +331,17 @@ describe('WorkspaceScreen multi-session', () => {
     renderScreen();
 
     const tail = await screen.findByText('projects/delta');
-    expect(tail).toHaveAttribute('title', '/home/dev/projects/delta');
+    // The tooltip carries the full path on the first line and the formatted
+    // last-activity time on the second (native `title` renders `\n` as a line
+    // break). Derive the expected time the same way the component does so the
+    // assertion is timezone-agnostic.
+    const formattedTime = formatLocalDateTime(lastActivityAt);
+    expect(formattedTime).not.toBeNull();
+    const title = tail.getAttribute('title');
+    expect(title).toBe(`/home/dev/projects/delta\n${formattedTime}`);
+    expect(title).toContain('/home/dev/projects/delta');
+
+    // The timestamp is not visible row text — only in the tooltip.
+    expect(screen.queryByText(formattedTime as string)).not.toBeInTheDocument();
   });
 });
