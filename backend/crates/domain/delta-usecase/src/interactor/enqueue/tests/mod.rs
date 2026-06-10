@@ -1,0 +1,12 @@
+//! Enqueue use-case tests.
+
+mod branch_send_creates_child_thread;
+mod branch_send_titles_child_from_locator_quote;
+mod branch_send_to_unknown_thread_is_thread_not_found;
+mod composer_first_send_defers_first_prompt_until_bind;
+mod composer_first_send_rolls_back_pending_spawn_on_dispatch_failure;
+mod enqueue_send_resumes_a_closed_session_then_dispatches;
+mod enqueue_send_to_unknown_thread_is_thread_not_found;
+mod failed_dispatch_rolls_back_pending_send_and_returns_error;
+mod fifo_head_matches_and_marks_send;
+mod send_to_closed_session_with_missing_transcript_writes_no_pending_row;

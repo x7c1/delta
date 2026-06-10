@@ -1,0 +1,8 @@
+//! Claude Code hook handler tests.
+
+mod first_submit_registers_session;
+mod on_stop_routes_sync_by_hook_session_id;
+mod pre_tool_use_records_request_and_notifies;
+mod submit_registers_each_session_id_independently;
+mod unknown_session_without_pending_spawn_registers_external_closed;
+mod unmatched_prompt_is_external_input;
