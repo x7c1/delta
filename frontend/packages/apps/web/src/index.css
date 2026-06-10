@@ -150,14 +150,14 @@ body {
 }
 
 .markdown-body code {
-  background: rgb(226 232 240);
+  background: rgb(232 237 244);
   border-radius: 0.25rem;
   padding: 0.25rem 0.25rem 0.1rem 0.25rem;
   font-size: 0.875em;
 }
 .markdown-body pre {
   margin: 0 0 0.6rem;
-  background: rgb(226 232 240);
+  background: rgb(232 237 244);
   border-radius: 0.375rem;
   padding: 0.5rem 0.75rem;
   overflow-x: auto;
