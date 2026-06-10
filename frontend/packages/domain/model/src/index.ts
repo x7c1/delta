@@ -42,6 +42,10 @@ export type {
   SendToThread,
   SendToNewSession,
   SendRequest,
+  WorkdirEntry,
+  WorkdirListResponse,
+  RecentWorkdirItem,
+  WorkdirRecentResponse,
 } from './responses';
 export type {
   SessionRegisteredEvent,

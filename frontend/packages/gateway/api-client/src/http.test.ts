@@ -223,6 +223,111 @@ describe('ApiClient', () => {
     expect(JSON.parse(init.body)).toEqual({ new_session: true, text: 'first' });
   });
 
+  it('serializes a new-session send carrying a working directory', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          send: {
+            id: 0,
+            session_id: '',
+            thread_id: 0,
+            semantic_parent_uuid: null,
+            text: 'first',
+            locator_quote: null,
+            status: 'pending',
+            matched_uuid: null,
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        },
+        201,
+      ),
+    );
+    const client = new ApiClient({ fetchFn });
+
+    await client.createSend({
+      new_session: true,
+      text: 'first',
+      workdir: '/projects/app',
+    });
+
+    // The chosen workdir must survive serialization onto the new-session body.
+    const [, init] = fetchFn.mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({
+      new_session: true,
+      text: 'first',
+      workdir: '/projects/app',
+    });
+  });
+
+  it('lists a working directory at the default ($HOME) path', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        path: '/home/dev',
+        parent: '/home',
+        entries: [
+          { name: 'projects', path: '/home/dev/projects' },
+          { name: 'scratch', path: '/home/dev/scratch' },
+        ],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getWorkdirList();
+
+    expect(result.path).toBe('/home/dev');
+    expect(result.parent).toBe('/home');
+    expect(result.entries).toHaveLength(2);
+    expect(result.entries[0]).toEqual({
+      name: 'projects',
+      path: '/home/dev/projects',
+    });
+    // No path param: the default directory is requested with a bare path.
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/workdir/list',
+      undefined,
+    );
+  });
+
+  it('encodes the path query when listing a specific directory', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        path: '/home/dev/my projects',
+        parent: '/home/dev',
+        entries: [],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await client.getWorkdirList('/home/dev/my projects');
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/workdir/list?path=%2Fhome%2Fdev%2Fmy%20projects',
+      undefined,
+    );
+  });
+
+  it('fetches the recently-used working directories', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        workdirs: [
+          { path: '/home/dev/projects/delta', last_used_at: '2026-01-03T00:00:00Z' },
+          { path: '/home/dev/scratch', last_used_at: null },
+        ],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getWorkdirRecent();
+
+    expect(result.workdirs).toHaveLength(2);
+    expect(result.workdirs[0].path).toBe('/home/dev/projects/delta');
+    expect(result.workdirs[1].last_used_at).toBeNull();
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/workdir/recent',
+      undefined,
+    );
+  });
+
   it('raises ApiError carrying the status and server error message', async () => {
     const fetchFn = vi
       .fn()

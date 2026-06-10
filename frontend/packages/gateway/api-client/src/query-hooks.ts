@@ -16,6 +16,8 @@ import type {
   SessionsResponse,
   ThreadId,
   ThreadsResponse,
+  WorkdirListResponse,
+  WorkdirRecentResponse,
 } from '@delta/model';
 import type { ApiClient } from './http';
 import { queryKeys } from './query-keys';
@@ -92,6 +94,44 @@ export function useThreadMessagesQuery(
       threadId === null ? queryKeys.messagesNone : queryKeys.messages(threadId),
     queryFn: () => client.getThreadMessages(threadId as ThreadId),
     enabled: threadId !== null,
+  });
+}
+
+/**
+ * One level of the working-directory browse (`GET /api/workdir/list`) for the
+ * new-session picker. A `null` path lists the server default (`$HOME`).
+ *
+ * Gated by `enabled` so nothing is fetched until the picker is actually mounted;
+ * a `400`/`403` from an invalid or forbidden directory rejects with an
+ * `ApiError` the picker renders inline. `retry` is disabled so that error
+ * surfaces immediately rather than after backoff.
+ */
+export function useWorkdirListQuery(
+  client: ApiClient,
+  path: string | null,
+  enabled: boolean,
+): UseQueryResult<WorkdirListResponse> {
+  return useQuery({
+    queryKey: queryKeys.workdirList(path),
+    queryFn: () => client.getWorkdirList(path ?? undefined),
+    enabled,
+    retry: false,
+  });
+}
+
+/**
+ * Recently-used working directories (`GET /api/workdir/recent`) for the
+ * new-session picker's "Recent" list. Gated by `enabled` so it only fetches
+ * while the picker is mounted.
+ */
+export function useRecentWorkdirsQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<WorkdirRecentResponse> {
+  return useQuery({
+    queryKey: queryKeys.workdirRecent,
+    queryFn: () => client.getWorkdirRecent(),
+    enabled,
   });
 }
 

@@ -10,8 +10,17 @@ import type {
   SessionsResponse,
   Thread,
   ThreadsResponse,
+  WorkdirListResponse,
+  WorkdirRecentResponse,
 } from '@delta/model';
-import { seedData, SESSIONS_PAGE_SIZE, type MockStore } from './fixtures';
+import {
+  MOCK_WORKDIR_HOME,
+  recentWorkdirs,
+  seedData,
+  SESSIONS_PAGE_SIZE,
+  workdirListing,
+  type MockStore,
+} from './fixtures';
 
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
@@ -240,6 +249,36 @@ export function createHandlers(): RequestHandler[] {
       store.sends.push(send);
       const body: SendResponse = { send };
       return HttpResponse.json(body, { status: 201 });
+    }),
+
+    // Browse one level of the (mock) filesystem for the new-session picker.
+    // An omitted `path` lists $HOME; an unknown path is a 400 and the special
+    // `/forbidden` path a 403, exercising the inline-error path.
+    http.get('*/api/workdir/list', ({ request }) => {
+      const url = new URL(request.url);
+      const path = url.searchParams.get('path') ?? MOCK_WORKDIR_HOME;
+      if (path === '/forbidden') {
+        return HttpResponse.json(
+          { error: 'permission denied' },
+          { status: 403 },
+        );
+      }
+      const listing = workdirListing(path);
+      if (!listing) {
+        return HttpResponse.json(
+          { error: 'not a directory' },
+          { status: 400 },
+        );
+      }
+      const responseBody: WorkdirListResponse = listing;
+      return HttpResponse.json(responseBody);
+    }),
+
+    http.get('*/api/workdir/recent', () => {
+      const responseBody: WorkdirRecentResponse = {
+        workdirs: recentWorkdirs(),
+      };
+      return HttpResponse.json(responseBody);
     }),
   ];
 }
