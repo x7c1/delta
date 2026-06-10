@@ -166,10 +166,11 @@ export function SessionNode({
               )}
             </span>
             {/* Secondary line: session id + last-activity time, right-aligned. The id is
-                a long UUID, so it truncates with the full value in its title. */}
+                a long UUID, so only its first 8 chars are shown, with the full value
+                in its title. */}
             <span className="flex items-baseline justify-end gap-2 text-xs text-slate-400">
-              <span className="min-w-0 truncate font-mono" title={item.session.id}>
-                {item.session.id}
+              <span className="font-mono" title={item.session.id}>
+                {item.session.id.slice(0, 8)}
               </span>
               {lastActivity && (
                 <span className="shrink-0 tabular-nums">{lastActivity}</span>

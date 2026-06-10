@@ -341,8 +341,8 @@ describe('WorkspaceScreen multi-session', () => {
     const formattedTime = formatLocalDateTime(lastActivityAt);
     expect(formattedTime).not.toBeNull();
     expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
-    // The id is rendered (truncated, full value in its title).
-    const idEl = screen.getByText(SESSION_ID);
+    // The id is rendered as its first 8 chars, with the full value in its title.
+    const idEl = screen.getByText(SESSION_ID.slice(0, 8));
     expect(idEl).toBeInTheDocument();
     expect(idEl.getAttribute('title')).toBe(SESSION_ID);
   });
