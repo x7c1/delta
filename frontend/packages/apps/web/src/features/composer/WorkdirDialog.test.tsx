@@ -80,6 +80,16 @@ describe('WorkdirDialog', () => {
     expect(screen.getByTestId('workdir-confirm')).toBeEnabled();
   });
 
+  it('marks directory rows with a folder icon', async () => {
+    renderDialog();
+
+    // The leading folder icon is decorative (aria-hidden) so it never changes a
+    // row's accessible name, but it should render inside the row so the screen
+    // reads as a directory picker.
+    const firstRow = await screen.findByTitle(MOST_RECENT);
+    expect(firstRow.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  });
+
   it('abbreviates the home directory to `~` while keeping the full path as the value', async () => {
     const { onClose } = renderDialog();
 

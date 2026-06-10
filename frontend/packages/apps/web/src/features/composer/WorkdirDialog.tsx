@@ -10,6 +10,24 @@ import { useApiClient } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
 import { displayPath } from '../../utils/displayPath';
 
+/**
+ * The folder glyph used to mark directory rows (and the chip's change button) so
+ * the picker reads as a directory chooser. Decorative — always `aria-hidden`, so
+ * a row's accessible name stays its path text. This file is the only user.
+ */
+function FolderIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
+    </svg>
+  );
+}
+
 export interface WorkdirDialogProps {
   /** Whether the modal is shown. */
   open: boolean;
@@ -168,14 +186,17 @@ export function WorkdirDialog({
                     onClick={() => setCandidate(item.path)}
                     aria-pressed={candidate === item.path}
                     className={cn(
-                      'w-full truncate rounded px-2 py-1 text-left font-mono text-xs hover:bg-slate-100',
+                      'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-xs hover:bg-slate-100',
                       candidate === item.path
                         ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
                         : 'text-slate-700',
                     )}
                     title={item.path}
                   >
-                    {displayPath(item.path, home)}
+                    <FolderIcon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">
+                      {displayPath(item.path, home)}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -251,10 +272,11 @@ export function WorkdirDialog({
                     <button
                       type="button"
                       onClick={() => navigateTo(entry.path)}
-                      className="w-full truncate rounded px-2 py-1 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
+                      className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-xs text-slate-700 hover:bg-slate-100"
                       title={entry.path}
                     >
-                      {entry.name}/
+                      <FolderIcon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{entry.name}/</span>
                     </button>
                   </li>
                 ))}
@@ -313,14 +335,7 @@ export function WorkdirChip({ onEdit }: WorkdirChipProps) {
         aria-label="Change working directory"
         title="Change directory"
       >
-        <svg
-          viewBox="0 0 20 20"
-          fill="currentColor"
-          className="h-4 w-4"
-          aria-hidden="true"
-        >
-          <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v3.26a3.235 3.235 0 0 1 1.75-.51h12.5c.644 0 1.245.188 1.75.51V6.75A1.75 1.75 0 0 0 16.25 5h-4.836a.25.25 0 0 1-.177-.073L9.823 3.513A1.75 1.75 0 0 0 8.586 3H3.75ZM3.75 9A1.75 1.75 0 0 0 2 10.75v4.5c0 .966.784 1.75 1.75 1.75h12.5A1.75 1.75 0 0 0 18 15.25v-4.5A1.75 1.75 0 0 0 16.25 9H3.75Z" />
-        </svg>
+        <FolderIcon className="h-4 w-4" />
       </Button>
     </div>
   );
