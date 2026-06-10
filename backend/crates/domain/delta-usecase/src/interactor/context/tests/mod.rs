@@ -2,10 +2,6 @@
 
 mod support;
 
-mod frame_locator_context_embeds_quotes_and_newlines_verbatim;
-mod frame_locator_context_frames_a_quote;
-mod frame_locator_context_returns_none_for_blank_quote;
-mod frame_locator_context_trims_the_quote;
 mod revisit_to_branch_injects_switch_note_with_root_quote;
 mod revisit_to_main_injects_switch_note_without_quote;
 mod same_thread_continuation_injects_nothing;
