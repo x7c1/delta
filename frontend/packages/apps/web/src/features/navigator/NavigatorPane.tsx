@@ -130,6 +130,7 @@ export function NavigatorPane({
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
+  const startNewSession = useNavStore((state) => state.startNewSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
 
   return (
@@ -155,7 +156,7 @@ export function NavigatorPane({
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => setFocusedSession(NEW_SESSION_FOCUS)}
+            onClick={() => startNewSession()}
           >
             New
           </Button>

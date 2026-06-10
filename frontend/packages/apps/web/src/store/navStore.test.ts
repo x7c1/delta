@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_TERMINAL_WIDTH,
   NAV_STORAGE_KEY,
+  NEW_SESSION_FOCUS,
   clampTerminalWidth,
   useNavStore,
 } from './navStore';
@@ -11,6 +12,7 @@ afterEach(() => {
   useNavStore.setState({
     terminalWidth: DEFAULT_TERMINAL_WIDTH,
     focusedSessionId: null,
+    preNewSessionFocus: null,
     activeThreadId: null,
   });
 });
@@ -81,5 +83,80 @@ describe('navStore.setFocusedSession', () => {
     useNavStore.getState().setActiveThread(7);
     useNavStore.getState().setFocusedSession('sess-a');
     expect(useNavStore.getState().activeThreadId).toBe(7);
+  });
+});
+
+describe('navStore.startNewSession', () => {
+  it('stashes the current focus and enters the new-session state', () => {
+    useNavStore.getState().setFocusedSession('sess-1');
+    useNavStore.getState().setActiveThread(7);
+
+    useNavStore.getState().startNewSession();
+
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useNavStore.getState().preNewSessionFocus).toBe('sess-1');
+    expect(useNavStore.getState().activeThreadId).toBeNull();
+  });
+
+  it('does not overwrite the stashed focus when already in new-session', () => {
+    useNavStore.getState().setFocusedSession('sess-1');
+    useNavStore.getState().startNewSession();
+    // A second entry (e.g. clicking "New" again) must keep the real previous
+    // focus, not stash the sentinel.
+    useNavStore.getState().startNewSession();
+
+    expect(useNavStore.getState().preNewSessionFocus).toBe('sess-1');
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+  });
+});
+
+describe('navStore.cancelNewSession', () => {
+  it('restores a real previous session and clears the stash + active thread', () => {
+    useNavStore.getState().setFocusedSession('sess-1');
+    useNavStore.getState().startNewSession();
+    useNavStore.getState().setActiveThread(9);
+
+    useNavStore.getState().cancelNewSession();
+
+    expect(useNavStore.getState().focusedSessionId).toBe('sess-1');
+    expect(useNavStore.getState().preNewSessionFocus).toBeNull();
+    expect(useNavStore.getState().activeThreadId).toBeNull();
+  });
+
+  it('is a no-op when the stashed focus is null (empty initial screen)', () => {
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: null,
+    });
+
+    useNavStore.getState().cancelNewSession();
+
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useNavStore.getState().preNewSessionFocus).toBeNull();
+  });
+
+  it('is a no-op when the stashed focus is the new-session sentinel', () => {
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: NEW_SESSION_FOCUS,
+    });
+
+    useNavStore.getState().cancelNewSession();
+
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
+    expect(useNavStore.getState().preNewSessionFocus).toBe(NEW_SESSION_FOCUS);
+  });
+});
+
+describe('navStore persistence (new-session intent)', () => {
+  it('never persists preNewSessionFocus', () => {
+    vi.stubGlobal('window', { innerWidth: 2000 });
+    useNavStore.getState().setFocusedSession('sess-1');
+    useNavStore.getState().startNewSession();
+
+    const raw = localStorage.getItem(NAV_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string).state;
+    expect(persisted).not.toHaveProperty('preNewSessionFocus');
   });
 });

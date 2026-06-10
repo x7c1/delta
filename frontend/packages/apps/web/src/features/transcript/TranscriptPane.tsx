@@ -104,6 +104,7 @@ export function TranscriptPane({
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+  const cancelNewSession = useNavStore((state) => state.cancelNewSession);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const newSessionWorkdir = useComposerStore(
     (state) => state.newSessionWorkdir,
@@ -460,7 +461,19 @@ export function TranscriptPane({
               composer store on Select. */}
           <WorkdirDialog
             open={workdirDialogOpen}
-            onClose={() => setWorkdirDialogOpen(false)}
+            onClose={() => {
+              setWorkdirDialogOpen(false);
+              // Dismissing the picker without a directory cancels the
+              // new-session intent and returns to the previously-focused
+              // session — but only when there is one to return to. With no
+              // sessions, new-session is the mandatory default, so
+              // cancelNewSession() is a no-op and we stay (the "Choose a
+              // directory…" button remains). Read the live store value to
+              // avoid a stale closure (mirrors the auto-open effect above).
+              if (!useComposerStore.getState().newSessionWorkdir) {
+                cancelNewSession();
+              }
+            }}
           />
         </>
       )}
