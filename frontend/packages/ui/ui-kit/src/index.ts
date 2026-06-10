@@ -18,3 +18,4 @@ export {
   type MenuItemTone,
   type MenuProps,
 } from './Menu';
+export { Dialog, type DialogProps } from './Dialog';
