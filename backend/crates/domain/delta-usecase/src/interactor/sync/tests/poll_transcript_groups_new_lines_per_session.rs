@@ -1,16 +1,24 @@
+use delta_model::SessionId;
+
 use crate::interactor::testing::*;
 
-/// `poll_transcript` syncs every registered session and groups the new lines per
+/// `poll_transcript` syncs every *open* session and groups the new lines per
 /// session, so the caller can announce each session's growth separately.
 #[tokio::test]
 async fn poll_transcript_groups_new_lines_per_session() {
     let ix = interactor();
+    // Two open sessions: register each, then bind a live pane so the tail (which
+    // is scoped to open sessions) polls them.
     ix.on_user_prompt_submit(submit_for("sess-1", "/tmp/s1.jsonl", "seed"))
         .await
         .unwrap();
+    ix.bind_open_session("delta-1", &SessionId::from("sess-1"))
+        .await;
     ix.on_user_prompt_submit(submit_for("sess-2", "/tmp/s2.jsonl", "seed"))
         .await
         .unwrap();
+    ix.bind_open_session("delta-2", &SessionId::from("sess-2"))
+        .await;
 
     // Both sessions flush a late assistant line.
     ix.transcript_fake()

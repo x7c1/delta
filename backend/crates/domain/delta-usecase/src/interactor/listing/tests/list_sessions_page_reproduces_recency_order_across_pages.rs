@@ -1,3 +1,5 @@
+use delta_model::SessionId;
+
 use crate::interactor::testing::*;
 
 /// Paging across two pages reproduces the single-shot recency order of
@@ -16,6 +18,15 @@ async fn list_sessions_page_reproduces_recency_order_across_pages() {
     ix.on_user_prompt_submit(submit_for("sess-quiet", "/tmp/quiet.jsonl", "seed"))
         .await
         .unwrap();
+    // Open each session so the tail (scoped to open sessions) ingests their
+    // seeded transcript growth below; the listing sort itself reads the store
+    // regardless of open/closed.
+    ix.bind_open_session("delta-old", &SessionId::from("sess-old"))
+        .await;
+    ix.bind_open_session("delta-new", &SessionId::from("sess-new"))
+        .await;
+    ix.bind_open_session("delta-quiet", &SessionId::from("sess-quiet"))
+        .await;
     ix.transcript_fake().push_to(
         "/tmp/old.jsonl",
         assistant_line_at("a-old", "older", "2025-12-31T00:00:00Z"),

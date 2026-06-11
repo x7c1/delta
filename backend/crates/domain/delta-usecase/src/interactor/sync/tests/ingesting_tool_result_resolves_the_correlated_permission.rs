@@ -11,6 +11,9 @@ use crate::ports::SessionEvent;
 async fn ingesting_tool_result_resolves_the_correlated_permission() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    // Bind a live pane so the tail (scoped to open sessions) polls `sess-1`.
+    ix.bind_open_session("delta-1", &SessionId::from("sess-1"))
+        .await;
 
     // A permission request is recorded for an imminent tool call. PreToolUse
     // only records it (the browser notice is emitted by the `PermissionRequest`
