@@ -44,7 +44,7 @@ where
             let mut registry = self.open_sessions.lock().await;
             (
                 registry.take_unbound_pending_for_session(&hook.session_id),
-                registry.mark_resume_ready(&hook.session_id),
+                registry.take_resuming(&hook.session_id),
             )
         };
 

@@ -43,6 +43,26 @@ pub const PENDING_SPAWN_DEADLINE: Duration = Duration::from_secs(30);
 /// for fresh spawns.
 pub const RESUME_READY_DEADLINE: Duration = Duration::from_secs(30);
 
+/// How long after a resume is marked ready Delta waits before dispatching its
+/// held first prompt.
+///
+/// `SessionStart(source=resume)` is delivered as a hook that blocks `claude`
+/// until the hook's HTTP handler returns. So the handler must not type the held
+/// prompt itself: while it is inside the hook, `claude` has not yet returned to
+/// its prompt and is not accepting input, and any keystroke sent then is lost
+/// (no `UserPromptSubmit` fires, the prompt never submits). Instead the handler
+/// only *marks the resume ready*; the keystroke is dispatched later, off the
+/// background tick, after the hook has returned and `claude` is input-ready.
+///
+/// This small settle is the margin between "ready was marked" and "dispatch the
+/// keystroke": the tick only dispatches a ready resume once `now - ready_at` has
+/// reached this value, so the dispatch is guaranteed to run a beat after the
+/// hook returned rather than racing it. Kept short (the hook has already
+/// returned by the time the tick runs) but non-zero so the ordering is
+/// deterministic. Compared against an injected `now`, like the watchdog
+/// deadlines, so it is testable without wall-clock sleeps.
+pub const RESUME_DISPATCH_SETTLE: Duration = Duration::from_millis(200);
+
 /// The result of an idempotent [`OpenSessions::bind_pending_spawn`] that
 /// actually performed a bind, carrying the just-bound spawn's deferred first
 /// prompt so the caller can write its `pending_send` row now that the session
@@ -106,14 +126,27 @@ pub struct PendingSpawn {
 }
 
 /// A resumed-but-not-yet-ready session: its pane is bound, but its first prompt
-/// is held until the resume's `SessionStart` (`source=resume`) hook arrives.
+/// is held until the resume's `SessionStart` (`source=resume`) hook arrives and,
+/// crucially, until a beat *after* that hook returns.
 ///
 /// Unlike a fresh spawn, a resume's `session_id` is known up front, so the pane
 /// binds immediately in [`OpenSessions::bound`]. But `claude --resume` needs a
 /// couple of seconds to replay the transcript and make its TUI input ready, far
 /// longer than any fixed settle could safely cover. So Delta does not type the
-/// first prompt at resume time; it records the resume here and dispatches the
-/// held keystroke only once `SessionStart(source=resume)` confirms readiness.
+/// first prompt at resume time; it records the resume here.
+///
+/// Readiness arrives in two stages, tracked by [`Self::ready_at`]:
+///
+/// 1. **Mark ready** — `SessionStart(source=resume)` fires. That hook blocks
+///    `claude` until its HTTP handler returns, so the handler must *not* type
+///    the held prompt (the keystroke would land while `claude` is still inside
+///    the hook and not accepting input, and be lost). It only stamps
+///    [`Self::ready_at`] and returns immediately, unblocking `claude`.
+/// 2. **Dispatch** — on a later background tick, once `now - ready_at` has
+///    reached [`RESUME_DISPATCH_SETTLE`], the held keystroke is dispatched on
+///    the normal `send_line` path. By then the hook has returned and `claude`
+///    is input-ready, so the keystroke submits.
+///
 /// The `pending_send` row for that first prompt is written normally (its thread,
 /// branch, and locator-quote semantics are persisted up front) — only the
 /// physical keystroke is held.
@@ -132,6 +165,15 @@ pub struct ResumingSession {
     /// [`PendingSpawn::created_at`] this is a monotonic `Instant`, so the
     /// deadline check is immune to system-clock changes.
     pub created_at: Instant,
+    /// When `SessionStart(source=resume)` marked this resume ready, or `None`
+    /// while still not-ready.
+    ///
+    /// `None` means the readiness hook has not arrived: the held prompt is
+    /// parked and the watchdog may reap the resume if [`RESUME_READY_DEADLINE`]
+    /// passes. `Some(t)` means the hook fired at `t` and the resume is pending
+    /// dispatch — the watchdog must leave it alone, and the dispatch tick types
+    /// the held prompt once `now - t` reaches [`RESUME_DISPATCH_SETTLE`].
+    pub ready_at: Option<Instant>,
 }
 
 /// The in-memory map of live panes.
@@ -143,15 +185,19 @@ pub struct OpenSessions {
     bound: HashMap<SessionId, OpenHandle>,
     /// Spawned panes awaiting their first `UserPromptSubmit` to learn the id.
     pending: Vec<PendingSpawn>,
-    /// Resumed sessions awaiting their `SessionStart(source=resume)` before the
-    /// held first prompt is dispatched, keyed by the (already-known) session id.
+    /// Resumed sessions awaiting their `SessionStart(source=resume)` and the
+    /// subsequent dispatch of the held first prompt, keyed by the (already-known)
+    /// session id.
     ///
-    /// A session is in this map exactly while it is resumed-but-not-ready: it is
-    /// inserted by `open_session`, removed when `SessionStart(source=resume)`
-    /// marks it ready (the held prompt is dispatched then), and drained by the
-    /// watchdog if its readiness deadline passes. Membership here is the "not
-    /// ready yet, hold sends" flag; absence means the session is ready and sends
-    /// dispatch immediately.
+    /// A session is in this map across its whole resumed-but-not-ready life:
+    /// inserted by `open_session` (with `ready_at = None`), stamped
+    /// `ready_at = Some(..)` when `SessionStart(source=resume)` marks it ready
+    /// (it stays in the map, now pending dispatch), and finally removed either by
+    /// [`Self::drain_ready_for_dispatch`] when the held prompt is dispatched on a
+    /// background tick, or by the watchdog ([`Self::drain_stale_resuming`]) if it
+    /// never became ready. Membership here is the "hold sends" flag; absence
+    /// means the session is ready and dispatched, so further sends dispatch
+    /// immediately.
     resuming: HashMap<SessionId, ResumingSession>,
 }
 
@@ -235,14 +281,75 @@ impl OpenSessions {
         }
     }
 
-    /// Mark a resuming session ready: remove it from the resuming map and return
-    /// its held first prompt (if any) so the caller can dispatch it now.
+    /// Take a resuming session out of the map, if present.
     ///
-    /// Returns `None` when the id is not resuming — the readiness hook for a
-    /// session that already became ready, was never resumed, or is a fresh spawn
-    /// — making `SessionStart(source=resume)` an idempotent, safe no-op there.
-    pub fn mark_resume_ready(&mut self, id: &SessionId) -> Option<ResumingSession> {
+    /// This is the *removing* variant, used by the failure paths — `SessionEnd`
+    /// for a resume that ended before becoming ready — which need to both detect
+    /// the not-yet-ready resume and tear it down. It is **not** used by the
+    /// `SessionStart(source=resume)` readiness hook: that hook must keep the entry
+    /// in the map (so the held prompt can be dispatched later, off the tick) and
+    /// instead uses [`Self::mark_resume_ready_at`].
+    ///
+    /// Returns `None` when the id is not resuming — the failure hook for a session
+    /// that already became ready, was never resumed, or is a fresh spawn — making
+    /// it an idempotent, safe no-op there.
+    pub fn take_resuming(&mut self, id: &SessionId) -> Option<ResumingSession> {
         self.resuming.remove(id)
+    }
+
+    /// Mark a resuming session ready *in place* by stamping its `ready_at`,
+    /// keeping it in the resuming map. Returns whether `id` was resuming.
+    ///
+    /// This is the `SessionStart(source=resume)` readiness path. It deliberately
+    /// does **not** dispatch the held prompt: that hook blocks `claude` until its
+    /// handler returns, so a keystroke typed here would be lost to a still-blocked
+    /// TUI. Marking ready returns immediately (unblocking `claude`); the held
+    /// keystroke is dispatched later by [`Self::drain_ready_for_dispatch`] on a
+    /// background tick, after the hook has returned and `claude` is input-ready.
+    ///
+    /// Idempotent: a repeated readiness hook just re-stamps `ready_at`. Returns
+    /// `false` when the id is not resuming (already dispatched, never resumed, or
+    /// a fresh spawn), so the hook is a safe no-op there.
+    pub fn mark_resume_ready_at(&mut self, id: &SessionId, now: Instant) -> bool {
+        match self.resuming.get_mut(id) {
+            Some(resuming) => {
+                resuming.ready_at = Some(now);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Remove and return every resuming session that has been marked ready long
+    /// enough to dispatch its held prompt as of `now` — i.e. `ready_at` is
+    /// `Some(t)` with `now - t >= RESUME_DISPATCH_SETTLE`.
+    ///
+    /// Run on the background tick (outside any hook handler), this is the second
+    /// stage of the two-stage readiness gate: [`Self::mark_resume_ready_at`]
+    /// stamps `ready_at` inside the (blocking) `SessionStart` hook, and this
+    /// drains the now-input-ready resumes so the caller dispatches their held
+    /// keystrokes via the normal `send_line` path. A ready resume whose settle has
+    /// not yet elapsed is left in place for a later tick; a not-yet-ready resume
+    /// (`ready_at == None`) is never returned here — it is the watchdog's concern.
+    ///
+    /// `now` is injected for deterministic tests, mirroring the watchdog drains.
+    pub fn drain_ready_for_dispatch(&mut self, now: Instant) -> Vec<(SessionId, ResumingSession)> {
+        let ready_ids: Vec<SessionId> = self
+            .resuming
+            .iter()
+            .filter(|(_, r)| match r.ready_at {
+                Some(t) => now.duration_since(t) >= RESUME_DISPATCH_SETTLE,
+                None => false,
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        ready_ids
+            .into_iter()
+            .map(|id| {
+                let resuming = self.resuming.remove(&id).expect("just collected");
+                (id, resuming)
+            })
+            .collect()
     }
 
     /// The session ids currently resuming-but-not-ready, in arbitrary order.
@@ -254,19 +361,27 @@ impl OpenSessions {
         self.resuming.keys().cloned().collect()
     }
 
-    /// Remove and return every resuming session whose readiness deadline has
-    /// passed as of `now`, also dropping each from the bound map (its pane is
-    /// being torn down). Mirrors [`Self::drain_stale_pending`] for resumes.
+    /// Remove and return every resuming session that *never became ready* before
+    /// its readiness deadline passed as of `now`, also dropping each from the
+    /// bound map (its pane is being torn down). Mirrors [`Self::drain_stale_pending`]
+    /// for resumes.
     ///
-    /// `now` is injected for deterministic tests. A resume is stale when
-    /// `now - created_at` has reached [`RESUME_READY_DEADLINE`]. A resume that
-    /// became ready in time was already removed from `resuming` by
-    /// [`Self::mark_resume_ready`], so it is never drained here.
+    /// `now` is injected for deterministic tests. A resume is stale only when it
+    /// is still not-ready (`ready_at == None`) AND `now - created_at` has reached
+    /// [`RESUME_READY_DEADLINE`]. A resume that became ready (`ready_at == Some`)
+    /// is **not** reaped even past the deadline: it is merely pending dispatch on
+    /// the tick (its keystroke is held while it settles past
+    /// [`RESUME_DISPATCH_SETTLE`]), so reaping it would kill a healthy resume that
+    /// is about to type its first prompt. Such a ready resume leaves the map via
+    /// [`Self::drain_ready_for_dispatch`], not here.
     pub fn drain_stale_resuming(&mut self, now: Instant) -> Vec<(SessionId, ResumingSession)> {
         let stale_ids: Vec<SessionId> = self
             .resuming
             .iter()
-            .filter(|(_, r)| now.duration_since(r.created_at) >= RESUME_READY_DEADLINE)
+            .filter(|(_, r)| {
+                r.ready_at.is_none()
+                    && now.duration_since(r.created_at) >= RESUME_READY_DEADLINE
+            })
             .map(|(id, _)| id.clone())
             .collect();
         stale_ids

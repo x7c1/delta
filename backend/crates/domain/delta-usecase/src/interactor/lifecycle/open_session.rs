@@ -31,12 +31,13 @@ where
     /// — far longer than any safe fixed settle — so the resumed pane is recorded
     /// as not-yet-ready ([`OpenSessions::start_resuming`]) and the caller's first
     /// keystroke is held by `enqueue_into_open` until the resume's
-    /// `SessionStart(source=resume)` fires, at which point
-    /// `release_resumed_first_prompt` types it on the normal path. This closes the
-    /// stall where the first keystroke landed before the cold pane was ready and
-    /// was silently lost (no `UserPromptSubmit`, stuck "pending" forever). A
-    /// resume that never becomes ready is failed by the watchdog (see
-    /// [`Self::reap_stale_spawns`]).
+    /// `SessionStart(source=resume)` fires (which only *marks* it ready, because
+    /// that hook blocks `claude` until it returns) and is then typed a beat later
+    /// by `dispatch_ready_resumes` on the background tick, once `claude` has left
+    /// the hook and is input-ready. This closes the stall where the first
+    /// keystroke landed before the cold pane was ready and was silently lost (no
+    /// `UserPromptSubmit`, stuck "pending" forever). A resume that never becomes
+    /// ready is failed by the watchdog (see [`Self::reap_stale_spawns`]).
     ///
     /// [`OpenSessions::start_resuming`]: crate::open_sessions::OpenSessions::start_resuming
     ///
@@ -109,11 +110,12 @@ where
             // Record the resume as not-yet-ready: the pane is bound, but the
             // first prompt is held until `SessionStart(source=resume)` confirms
             // the cold TUI can accept input. `enqueue_into_open` parks the
-            // keystroke here (via `hold_first_prompt`) and
-            // `release_resumed_first_prompt` dispatches it on readiness; the
-            // watchdog fails the resume if readiness never arrives. A resume with
-            // no following send leaves `held_prompt` `None` — readiness just
-            // clears the gate.
+            // keystroke here (via `hold_first_prompt`); `SessionStart(resume)`
+            // marks it ready and `dispatch_ready_resumes` types it a beat later on
+            // the background tick; the watchdog fails the resume if readiness
+            // never arrives. A resume with no following send leaves `held_prompt`
+            // `None` — readiness just clears the gate. `ready_at` starts `None`
+            // (not yet ready).
             registry.start_resuming(
                 id.clone(),
                 ResumingSession {
@@ -121,6 +123,7 @@ where
                     pane,
                     held_prompt: None,
                     created_at: Instant::now(),
+                    ready_at: None,
                 },
             );
             token

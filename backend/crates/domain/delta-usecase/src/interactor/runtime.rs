@@ -147,6 +147,27 @@ where
         self.open_sessions.lock().await.resuming_session_ids()
     }
 
+    /// Mark a resuming session ready at an explicit instant, for resume-dispatch
+    /// tests.
+    ///
+    /// Test-only seam mirroring [`Self::push_resuming_at`]: the production
+    /// `ready_at` is `Instant::now()` inside the `SessionStart(resume)` handler,
+    /// which a test cannot wind forwards/backwards. Dispatch-settle tests stamp a
+    /// chosen `ready_at` and then call `dispatch_ready_resumes(now)` with a
+    /// controlled `now`, so the `RESUME_DISPATCH_SETTLE` gate is deterministic.
+    /// Returns whether the id was resuming (the production hook's return).
+    #[cfg(test)]
+    pub(crate) async fn mark_resume_ready_at(
+        &self,
+        id: &SessionId,
+        ready_at: std::time::Instant,
+    ) -> bool {
+        self.open_sessions
+            .lock()
+            .await
+            .mark_resume_ready_at(id, ready_at)
+    }
+
     /// Record a resuming (not-yet-ready) session with an explicit `created_at`,
     /// for resume-watchdog tests.
     ///
@@ -184,6 +205,7 @@ where
                 pane: pane_for(token),
                 held_prompt,
                 created_at,
+                ready_at: None,
             },
         );
     }

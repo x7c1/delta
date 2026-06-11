@@ -24,11 +24,15 @@ where
     ///   spawn matches (already bound by the `UserPromptSubmit`, or an external
     ///   id).
     /// - **`resume`** — `claude --resume <id>` finished replaying and is ready.
-    ///   Release the held first prompt for that session (see
-    ///   [`Self::open_session`]): mark it ready and dispatch the held keystroke on
-    ///   the normal `send_line` path now that the cold pane can accept it. A
-    ///   no-op when the session is not resuming (already ready, or never resumed
-    ///   under Delta).
+    ///   Mark the session ready (stamp its `ready_at`) and return immediately;
+    ///   the held first prompt is **not** dispatched here. This hook blocks
+    ///   `claude` until the handler returns, so a keystroke typed now would land
+    ///   while `claude` is still inside the hook and not accepting input, and be
+    ///   silently lost. Instead the held prompt is dispatched a beat later by
+    ///   [`Self::dispatch_ready_resumes`] on the background tick, after the hook
+    ///   has returned and `claude` is input-ready (see [`Self::open_session`]). A
+    ///   no-op when the session is not resuming (already dispatched, or never
+    ///   resumed under Delta).
     /// - **`clear` / `compact`** — fire mid-session on an already-live session
     ///   (the user cleared the context, or it was auto/manually compacted). These
     ///   are not launches, so they must not be treated as a new launch: handled
@@ -64,7 +68,29 @@ where
                 }
             }
             SessionStartHook::SOURCE_RESUME => {
-                self.release_resumed_first_prompt(&hook.session_id).await?;
+                // Only mark ready and return immediately — do NOT dispatch the
+                // held prompt here. This hook blocks `claude` until the handler
+                // returns; the held keystroke is dispatched later by
+                // `dispatch_ready_resumes` on the background tick, after `claude`
+                // has left the hook and is input-ready.
+                let marked = self
+                    .open_sessions
+                    .lock()
+                    .await
+                    .mark_resume_ready_at(&hook.session_id, std::time::Instant::now());
+                if marked {
+                    tracing::info!(
+                        session_id = %hook.session_id,
+                        "SessionStart(resume): marked resume ready; the held first prompt \
+                         dispatches on the next background tick once it settles"
+                    );
+                } else {
+                    tracing::debug!(
+                        session_id = %hook.session_id,
+                        "SessionStart(resume): session not resuming (already dispatched or not \
+                         Delta-resumed); no-op"
+                    );
+                }
             }
             other => {
                 // clear/compact (and any unknown future source) fire on an

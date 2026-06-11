@@ -6,8 +6,10 @@ use crate::interactor::testing::*;
 use crate::open_sessions::RESUME_READY_DEADLINE;
 
 /// A resume that became ready in time is not failed by the watchdog. Even past
-/// the deadline instant, once `SessionStart(source=resume)` has marked it ready
-/// it is no longer in the resuming set, so the reaper never touches it.
+/// the read-deadline instant, once `SessionStart(source=resume)` has stamped its
+/// `ready_at` it is pending dispatch, not stalled, so the reaper must skip it —
+/// even though it is still in the resuming map (it leaves the map only when the
+/// dispatch tick types its held prompt).
 #[tokio::test]
 async fn reap_stale_resuming_leaves_a_ready_resume_alone() {
     let ix = interactor();
@@ -34,7 +36,12 @@ async fn reap_stale_resuming_leaves_a_ready_resume_alone() {
         ix.tmux_fake().killed.lock().unwrap().is_empty(),
         "a ready resume's pane is not killed"
     );
-    // It stayed bound (open) and left the resuming set when it became ready.
+    // It stayed bound (open) and stayed in the resuming map — `ready_at = Some`
+    // means pending dispatch, which the watchdog must leave for the dispatch tick.
     assert!(ix.is_session_open(&session_id).await);
-    assert!(ix.resuming_session_ids().await.is_empty());
+    assert_eq!(
+        ix.resuming_session_ids().await,
+        vec![session_id.clone()],
+        "a ready-but-not-yet-dispatched resume stays in the resuming map"
+    );
 }

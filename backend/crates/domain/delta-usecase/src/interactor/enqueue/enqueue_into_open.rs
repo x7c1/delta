@@ -91,7 +91,9 @@ where
         // `SessionStart(source=resume)` arrives (~2s later — far past any safe
         // fixed settle). Dispatching the first keystroke into that still-cold pane
         // would lose it, so hold this prompt's keystroke on the registry instead
-        // and let `release_resumed_first_prompt` type it once readiness fires. The
+        // and let `dispatch_ready_resumes` type it on the background tick once
+        // `SessionStart(resume)` has marked the resume ready and it has settled.
+        // The
         // `pending_send` row above is already written (its thread/branch/quote
         // semantics persisted), so only the physical keystroke is deferred. The
         // turn flag is still set, so anything composed before readiness defers
