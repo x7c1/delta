@@ -120,13 +120,11 @@ pub trait SessionStore: Send + Sync {
     /// normal `UserPromptSubmit` correlation can match it.
     async fn promote_deferred_send(&self, id: i64) -> Result<()>;
 
-    /// Whether a turn Delta dispatched is currently in flight for this session.
-    /// Delta sets this when it dispatches a send, and clears it when the turn
+    /// Whether a turn is currently in flight for this session. Set when Delta
+    /// dispatches a send and when a `UserPromptSubmit` arrives (so turns typed
+    /// straight into the pane are tracked too), and cleared when the turn
     /// completes (`Stop`) or is interrupted. A branch/quoted send issued while
-    /// this is set is deferred rather than dispatched mid-turn. Turns started by
-    /// input typed straight into the pane are not tracked here, so a quoted send
-    /// colliding with one still queues through Claude Code (its thread placement
-    /// is recovered from the transcript, only its locator quote is lost).
+    /// this is set is deferred rather than dispatched mid-turn.
     async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool>;
 
     /// Set the in-flight-turn flag for a session.

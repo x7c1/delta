@@ -10,7 +10,7 @@ use crate::interactor::testing::*;
 async fn plain_send_mid_turn_is_not_deferred() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     // Start a turn.

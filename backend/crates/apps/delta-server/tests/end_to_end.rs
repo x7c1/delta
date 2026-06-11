@@ -231,6 +231,17 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         "no pending send queued yet, so no additionalContext"
     );
 
+    // That first prompt started a turn; complete it with a Stop so the session
+    // is idle before the next send. Otherwise the quoted send below would be
+    // deferred (held back behind the in-flight turn) rather than dispatched.
+    let (status, _) = post_json(
+        &app,
+        "/hooks/stop",
+        json!({ "session_id": session_id }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
     // 2. GET /api/sessions lists the registered session, annotated with its open
     //    state and main thread id. It registered via a hook (not a Delta spawn),
     //    so it is a known-but-closed data session.

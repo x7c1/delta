@@ -10,7 +10,7 @@ use crate::interactor::testing::*;
 async fn deferred_branch_send_dispatches_after_interrupt() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     // Start a turn, then defer a branch send behind it.

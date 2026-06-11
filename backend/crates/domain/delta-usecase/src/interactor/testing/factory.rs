@@ -46,6 +46,25 @@ pub(crate) fn interactor_with_failing_tmux(
 
 // Helper accessors used only in tests to reach into the fakes the interactor owns.
 impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+    /// Register `sess-1` and return it to idle.
+    ///
+    /// Fires the first `UserPromptSubmit` (which registers the session) and then
+    /// a `Stop`, so the registration turn completes and `turn_active` is clear.
+    /// A bare `UserPromptSubmit` marks the turn in flight, so tests that go on to
+    /// dispatch a branch/quoted send must start from an idle session — otherwise
+    /// that send would be deferred behind the still-open registration turn.
+    pub(crate) async fn seed_session(&self) {
+        self.on_user_prompt_submit(super::submit("seed"))
+            .await
+            .unwrap();
+        self.on_stop(crate::ports::StopHook {
+            session_id: delta_model::SessionId::from("sess-1"),
+            stop_reason: None,
+        })
+        .await
+        .unwrap();
+    }
+
     pub(crate) fn transcript_fake(&self) -> &FakeTranscript {
         self.transcript()
     }

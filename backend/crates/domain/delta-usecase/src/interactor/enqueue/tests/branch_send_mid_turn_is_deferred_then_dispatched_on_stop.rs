@@ -11,7 +11,7 @@ use crate::ports::StopHook;
 async fn branch_send_mid_turn_is_deferred_then_dispatched_on_stop() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     // A first send is dispatched immediately and marks the turn in flight.

@@ -7,8 +7,8 @@ use crate::ports::SessionEvent;
 #[tokio::test]
 async fn fifo_head_matches_and_marks_send() {
     let ix = interactor();
-    // Register and obtain main thread.
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    // Register and obtain main thread, idle (the registration turn completed).
+    ix.seed_session().await;
     let main = ix
         .store()
         .main_thread_id(&SessionId::from("sess-1"))

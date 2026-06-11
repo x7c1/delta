@@ -11,7 +11,7 @@ use crate::ports::SessionEvent;
 #[tokio::test]
 async fn branch_send_attributes_late_arriving_lines_to_child() {
     let ix = interactor();
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    ix.seed_session().await;
     let session = SessionId::from("sess-1");
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
