@@ -531,15 +531,18 @@ async fn list_sessions_page_advances_across_pages_without_gap_or_overlap() {
 }
 
 #[tokio::test]
-async fn list_sessions_page_breaks_recency_ties_by_id_ascending() {
+async fn list_sessions_page_breaks_recency_ties_by_id_descending() {
     let store = SqliteStore::open_in_memory().unwrap();
-    // Equal recency: only the ascending `id` tiebreaker distinguishes them.
+    // Equal recency (and registration bursts tie `created_at` too, at second
+    // resolution): the `id` tiebreaker must put the larger id first, because
+    // Delta-minted ids are time-ordered UUID v7 — the newest session of a tie
+    // still sorts first.
     let shared = "2026-01-01T00:00:00Z";
-    session_active_at(&store, "sess-b", shared).await;
     session_active_at(&store, "sess-a", shared).await;
+    session_active_at(&store, "sess-b", shared).await;
 
     let page = store.list_sessions_page(None, 10).await.unwrap();
-    assert_eq!(page_ids(&page), vec!["sess-a", "sess-b"]);
+    assert_eq!(page_ids(&page), vec!["sess-b", "sess-a"]);
 }
 
 #[tokio::test]

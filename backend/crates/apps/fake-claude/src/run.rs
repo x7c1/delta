@@ -55,8 +55,13 @@ pub fn run() -> Result<(), String> {
 
     // A minimal "TUI": the pane shows what this fake is and which session it
     // plays, so an attached human (or a captured pane in CI) can tell what is
-    // running.
-    println!("fake-claude session {session_id} (transcript: {})", transcript_path.display());
+    // running. The identifying line comes LAST: a terminal always keeps the
+    // cursor row in view, so whatever is printed last stays visible no matter
+    // how small the attached client's viewport is — the long transcript path
+    // above it may wrap and scroll off. Tests watching for the attach key on
+    // this ordering.
+    println!("transcript: {}", transcript_path.display());
+    println!("fake-claude session {session_id}");
 
     input::enable_raw_mode();
     let events = input::spawn_reader();

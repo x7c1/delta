@@ -115,6 +115,48 @@ suite at that server's port — only ever a mock server, never `make dev`:
 E2E_REUSE=1 E2E_PORT=5173 make e2e
 ```
 
+### End-to-end UI tests (headless, fake mode)
+
+A second Playwright suite (`packages/apps/web/e2e-fake/`) drives the real
+backend instead of mocks: a live `delta-server` on a temp database, real tmux
+panes, real hooks, the real transcript tail, and the real WebSocket/PTY
+channels. The only scripted part is the "claude" the server spawns: the
+`fake-claude` binary (`backend/crates/apps/fake-claude`), a stand-in that
+accepts `claude`'s CLI flags, fires the same HTTP hooks, and writes the same
+transcript JSONL — but follows a deterministic scenario script instead of a
+model. This is the suite that proves the full loop
+(REST → spawn → tmux → hooks → transcript → tail → WS) end to end.
+
+Run it with:
+
+```bash
+make e2e-fake
+```
+
+`scripts/e2e-fake.sh` builds both binaries, boots the server on a dedicated
+port (7899) with a per-run temp database and tmux socket
+(`delta-e2e-<pid>`, killed on exit), shortens the launch watchdog via
+`DELTA_LAUNCH_DEADLINE_MS`, and lets Playwright start the Vite dev server
+(port 5198) proxied to that backend. Nothing it touches collides with
+`make dev` or the mock suite. It needs tmux, the Playwright chromium browser
+(see above), and built workspace libraries (`make build`).
+
+**Writing a scenario.** Scenarios are JSON files in
+`packages/apps/web/e2e-fake/scenarios/`, executed step by step by the fake:
+`await_prompt`, `reply`, `tool_use`, `permission_request`, `tool_result`,
+`stop`, `await_interrupt`, `write_queued_command`, `delay`, `hang`, plus
+`session_start` timing (`immediate` / `skip` / `{ "delay_ms": N }`) and an
+optional `loop`. The full vocabulary is documented in the fake's `scenario`
+module (`backend/crates/apps/fake-claude/src/scenario.rs`). A spec selects its
+scenario through the **first word of the first prompt it sends**: sending
+`"first-send hold then answer"` makes the spawned fake load
+`scenarios/first-send.json`. Keep specs structural — assert presence, absence,
+and ordering of UI elements, never scripted reply text.
+
+The same fake also backs a backend-only integration test
+(`backend/crates/apps/fake-claude/tests/full_loop.rs`, part of `cargo test`)
+that proves the loop without a browser; it skips where tmux is missing.
+
 ### Run the UI against the real backend
 
 Start the server (see Backend), then:
@@ -123,8 +165,9 @@ Start the server (see Backend), then:
 pnpm --filter @delta/web dev
 ```
 
-Vite proxies `/api`, `/ws`, and `/pty` to `127.0.0.1:7878` (the server's default
-port — keep them in sync if you set `DELTA_PORT`).
+Vite proxies `/api`, `/ws`, and `/pty` to `127.0.0.1:7878` by default; if the
+server runs elsewhere, start the dev server with the same `DELTA_PORT` and the
+proxy follows it.
 
 ### Notes
 

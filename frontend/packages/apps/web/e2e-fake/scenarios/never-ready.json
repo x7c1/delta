@@ -1,0 +1,4 @@
+{
+  "session_start": "skip",
+  "steps": [{ "type": "hang" }]
+}

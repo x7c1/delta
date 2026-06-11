@@ -1,0 +1,7 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "working on it" },
+    { "type": "await_interrupt" }
+  ]
+}

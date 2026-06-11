@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "tool_use", "name": "Bash", "input": { "command": "true" } },
+    { "type": "tool_result" },
+    { "type": "reply", "text": "tool finished without a dialog" },
+    { "type": "stop" }
+  ]
+}

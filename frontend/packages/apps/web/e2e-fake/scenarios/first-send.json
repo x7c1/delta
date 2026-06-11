@@ -1,0 +1,8 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "delay", "ms": 1500 },
+    { "type": "reply", "text": "done thinking", "thinking": "scripted thinking" },
+    { "type": "stop" }
+  ]
+}

@@ -80,7 +80,7 @@ impl SessionStore for FakeStore {
     ) -> Result<Vec<SessionPageRow>> {
         let g = self.inner.lock().unwrap();
         // Build (session, last_activity_at) rows, then order exactly as the
-        // SQL page query does: recency DESC, created_at DESC, id ASC, where
+        // SQL page query does: recency DESC, created_at DESC, id DESC, where
         // recency = last_activity_at or the session's created_at fallback.
         let mut rows: Vec<SessionPageRow> = g
             .sessions
@@ -102,7 +102,7 @@ impl SessionStore for FakeStore {
             recency(b)
                 .cmp(&recency(a))
                 .then_with(|| b.0.created_at.cmp(&a.0.created_at))
-                .then_with(|| a.0.id.as_str().cmp(b.0.id.as_str()))
+                .then_with(|| b.0.id.as_str().cmp(a.0.id.as_str()))
         });
         // Apply the cursor: keep only rows strictly after it under the same
         // ordering.
@@ -113,7 +113,7 @@ impl SessionStore for FakeStore {
                     || (r == c.recency
                         && (row.0.created_at < c.created_at
                             || (row.0.created_at == c.created_at
-                                && row.0.id.as_str() > c.id.as_str())))
+                                && row.0.id.as_str() < c.id.as_str())))
             });
         }
         rows.truncate(limit as usize);

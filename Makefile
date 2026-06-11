@@ -87,3 +87,8 @@ check:
 .PHONY: e2e
 e2e:
 	cd frontend && E2E_PORT=5199 pnpm --filter @delta/web e2e
+
+## e2e-fake: run the fake-mode Playwright suite — real backend + tmux with the scripted fake-claude binary (requires tmux)
+.PHONY: e2e-fake
+e2e-fake:
+	scripts/e2e-fake.sh

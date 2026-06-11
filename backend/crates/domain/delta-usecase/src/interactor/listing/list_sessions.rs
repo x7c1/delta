@@ -47,13 +47,14 @@ where
                     .as_deref()
                     .unwrap_or(s.session.created_at.as_str())
             }
-            // Reverse `recency` and `created_at` so the most recent comes
-            // first; the `id` tiebreaker stays ascending for a deterministic
-            // total order.
+            // Reverse all three keys so the most recent comes first; the `id`
+            // tiebreaker is descending too because Delta-minted ids are
+            // time-ordered UUID v7 — on a full timestamp tie (both keys have
+            // second resolution) the newest session still sorts first.
             recency(b)
                 .cmp(recency(a))
                 .then_with(|| b.session.created_at.cmp(&a.session.created_at))
-                .then_with(|| a.session.id.as_str().cmp(b.session.id.as_str()))
+                .then_with(|| b.session.id.as_str().cmp(a.session.id.as_str()))
         });
         Ok(out)
     }

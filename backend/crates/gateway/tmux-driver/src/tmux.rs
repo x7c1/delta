@@ -29,6 +29,14 @@ const DELTA_TMUX_CONF: &str = "\
 # is present on far more machines out of the box.
 set -g default-terminal \"screen-256color\"
 
+# Vanilla tmux holds a lone ESC from a client for 500ms (escape-time) to see
+# whether it is the start of an escape sequence. Delta's only attach clients
+# are PTY-bridged xterm.js terminals, whose escape sequences always arrive in
+# one complete write, so the disambiguation wait buys nothing — it only delays
+# Escape (the interrupt key for the Claude TUI) by half a second. Deliver it
+# immediately.
+set -s escape-time 0
+
 # focus-events is off in vanilla tmux but a common user override turns it on.
 # With it on, tmux reports focus in/out to the pane program every time a client
 # attaches/detaches (which the embedded terminal does on every session switch),
@@ -451,6 +459,7 @@ mod tests {
         // an edit silently dropping one. (`screen-256color` is pinned over
         // tmux's own default for terminfo portability.)
         assert!(DELTA_TMUX_CONF.contains("set -g default-terminal \"screen-256color\""));
+        assert!(DELTA_TMUX_CONF.contains("set -s escape-time 0"));
         assert!(DELTA_TMUX_CONF.contains("set -s focus-events off"));
         assert!(DELTA_TMUX_CONF.contains("set -g status off"));
         assert!(DELTA_TMUX_CONF.contains("set -g history-limit 10000"));
