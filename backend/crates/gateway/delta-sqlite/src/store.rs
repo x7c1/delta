@@ -38,10 +38,40 @@ impl SqliteStore {
     fn init(conn: Connection) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        // Forward-migrate databases created before `session.turn_active` existed.
+        // The `CREATE TABLE IF NOT EXISTS` above adds the column on fresh
+        // databases but never alters an existing table, so add it here when
+        // absent. SQLite has no `ADD COLUMN IF NOT EXISTS`, hence the probe.
+        add_column_if_missing(
+            &conn,
+            "session",
+            "turn_active",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
+}
+
+/// Add `column` (with the given type/constraint clause) to `table` when it is
+/// not already present, so opening an older database forward-migrates it. The
+/// `PRAGMA table_info` probe makes this idempotent across both fresh databases
+/// (where the column already exists from the `CREATE TABLE`) and older ones.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    decl: &str,
+) -> Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .any(|name| name.map(|n| n == column).unwrap_or(false));
+    if !exists {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
+    }
+    Ok(())
 }
 
 fn map_session(
@@ -449,6 +479,104 @@ impl SessionStore for SqliteStore {
             matched_uuid: None,
             created_at: now,
         })
+    }
+
+    async fn enqueue_deferred_send(
+        &self,
+        session_id: &SessionId,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+        text: &str,
+        locator_quote: Option<&str>,
+    ) -> std::result::Result<PendingSend, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        conn.execute(
+            "INSERT INTO pending_send
+             (session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, 'deferred', NULL, ?6)",
+            params![
+                session_id.as_str(),
+                thread_id.value(),
+                semantic_parent_uuid.map(MessageUuid::as_str),
+                text,
+                locator_quote,
+                now,
+            ],
+        )
+        .map_err(Error::from)?;
+        let id = conn.last_insert_rowid();
+        Ok(PendingSend {
+            id,
+            session_id: session_id.clone(),
+            thread_id,
+            semantic_parent_uuid: semantic_parent_uuid.cloned(),
+            text: text.to_owned(),
+            locator_quote: locator_quote.map(str::to_owned),
+            status: PendingSendStatus::Deferred,
+            matched_uuid: None,
+            created_at: now,
+        })
+    }
+
+    async fn next_deferred_send(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<PendingSend>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let row = conn
+            .query_row(
+                &format!(
+                    "SELECT {PENDING_COLS} FROM pending_send
+                     WHERE session_id = ?1 AND status = 'deferred'
+                     ORDER BY id LIMIT 1"
+                ),
+                params![session_id.as_str()],
+                |r| Ok(pending_send_from_row(r)),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        row.transpose().map_err(Into::into)
+    }
+
+    async fn promote_deferred_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE pending_send SET status = 'pending' WHERE id = ?1 AND status = 'deferred'",
+            params![id],
+        )
+        .map_err(Error::from)?;
+        Ok(())
+    }
+
+    async fn is_turn_active(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let active: Option<i64> = conn
+            .query_row(
+                "SELECT turn_active FROM session WHERE id = ?1",
+                params![session_id.as_str()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(active.unwrap_or(0) != 0)
+    }
+
+    async fn set_turn_active(
+        &self,
+        session_id: &SessionId,
+        active: bool,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE session SET turn_active = ?1 WHERE id = ?2",
+            params![active as i64, session_id.as_str()],
+        )
+        .map_err(Error::from)?;
+        Ok(())
     }
 
     async fn head_pending_send(

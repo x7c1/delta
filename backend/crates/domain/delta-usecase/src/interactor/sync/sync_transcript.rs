@@ -143,7 +143,13 @@ where
             // The interrupt is hook-independent (Claude's `Stop` hook does not
             // fire on interrupt), so emit `TurnInterrupted` here to clear the
             // stuck pending send in the browser.
+            //
+            // It also ends the turn, so clear the in-flight flag. Dispatching any
+            // deferred send is left to the caller (which acts on the returned
+            // `TurnInterrupted` once this sync's lock is released), so no
+            // keystrokes are sent from inside the ingestion path.
             if is_interrupt_marker {
+                self.store.set_turn_active(&session.id, false).await?;
                 events.push(SessionEvent::TurnInterrupted {
                     session_id: session.id.clone(),
                 });

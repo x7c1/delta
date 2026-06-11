@@ -99,6 +99,39 @@ pub trait SessionStore: Send + Sync {
         locator_quote: Option<&str>,
     ) -> Result<PendingSend>;
 
+    /// Enqueue a send held in the `deferred` state: its row is recorded (so the
+    /// branch thread and the queued text persist) but its keystrokes are not
+    /// dispatched yet. Delta promotes it with [`Self::promote_deferred_send`]
+    /// and dispatches it once the session goes idle.
+    async fn enqueue_deferred_send(
+        &self,
+        session_id: &SessionId,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+        text: &str,
+        locator_quote: Option<&str>,
+    ) -> Result<PendingSend>;
+
+    /// The oldest still-`deferred` send for a session (FIFO), if any. This is
+    /// the next held-back send to dispatch when the session becomes idle.
+    async fn next_deferred_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>>;
+
+    /// Promote a `deferred` send to `pending`, marking it dispatched so the
+    /// normal `UserPromptSubmit` correlation can match it.
+    async fn promote_deferred_send(&self, id: i64) -> Result<()>;
+
+    /// Whether a turn Delta dispatched is currently in flight for this session.
+    /// Delta sets this when it dispatches a send, and clears it when the turn
+    /// completes (`Stop`) or is interrupted. A branch/quoted send issued while
+    /// this is set is deferred rather than dispatched mid-turn. Turns started by
+    /// input typed straight into the pane are not tracked here, so a quoted send
+    /// colliding with one still queues through Claude Code (its thread placement
+    /// is recovered from the transcript, only its locator quote is lost).
+    async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool>;
+
+    /// Set the in-flight-turn flag for a session.
+    async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()>;
+
     /// The oldest pending send for a session (FIFO head), if any.
     async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>>;
 
@@ -257,6 +290,41 @@ impl SessionStore for Box<dyn SessionStore> {
                 locator_quote,
             )
             .await
+    }
+
+    async fn enqueue_deferred_send(
+        &self,
+        session_id: &SessionId,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+        text: &str,
+        locator_quote: Option<&str>,
+    ) -> Result<PendingSend> {
+        (**self)
+            .enqueue_deferred_send(
+                session_id,
+                thread_id,
+                semantic_parent_uuid,
+                text,
+                locator_quote,
+            )
+            .await
+    }
+
+    async fn next_deferred_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
+        (**self).next_deferred_send(session_id).await
+    }
+
+    async fn promote_deferred_send(&self, id: i64) -> Result<()> {
+        (**self).promote_deferred_send(id).await
+    }
+
+    async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool> {
+        (**self).is_turn_active(session_id).await
+    }
+
+    async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()> {
+        (**self).set_turn_active(session_id, active).await
     }
 
     async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {

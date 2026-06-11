@@ -1,4 +1,4 @@
-use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId};
+use delta_model::{ContentBlock, Message, MessageUuid, PendingSendStatus, Role, SessionId};
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
 use super::SqliteStore;
@@ -692,4 +692,110 @@ async fn permission_request_resolves_by_tool_use_id() {
             .unwrap(),
         None,
     );
+}
+
+#[tokio::test]
+async fn turn_active_flag_defaults_false_and_round_trips() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _main) = store.register_session(new_session()).await.unwrap();
+
+    assert!(
+        !store.is_turn_active(&session.id).await.unwrap(),
+        "a fresh session is idle"
+    );
+
+    store.set_turn_active(&session.id, true).await.unwrap();
+    assert!(store.is_turn_active(&session.id).await.unwrap());
+
+    store.set_turn_active(&session.id, false).await.unwrap();
+    assert!(!store.is_turn_active(&session.id).await.unwrap());
+}
+
+#[tokio::test]
+async fn deferred_send_is_held_then_promoted_to_pending() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // A deferred send is recorded but stays out of the pending FIFO and the
+    // text-match candidate set until it is promoted.
+    let deferred = store
+        .enqueue_deferred_send(&session.id, main, None, "branch text", Some("quote"))
+        .await
+        .unwrap();
+    assert_eq!(deferred.status, PendingSendStatus::Deferred);
+    assert!(
+        store.head_pending_send(&session.id).await.unwrap().is_none(),
+        "a deferred send is not a pending FIFO head"
+    );
+    assert!(
+        store
+            .match_pending_send(&session.id, "branch text")
+            .await
+            .unwrap()
+            .is_none(),
+        "a deferred send is not matchable until promoted"
+    );
+
+    let next = store
+        .next_deferred_send(&session.id)
+        .await
+        .unwrap()
+        .expect("the deferred send is the next to dispatch");
+    assert_eq!(next.id, deferred.id);
+
+    // Promotion flips it to pending, so it now correlates as an ordinary send.
+    store.promote_deferred_send(deferred.id).await.unwrap();
+    assert!(
+        store.next_deferred_send(&session.id).await.unwrap().is_none(),
+        "no deferred sends remain after promotion"
+    );
+    let matched = store
+        .match_pending_send(&session.id, "branch text")
+        .await
+        .unwrap()
+        .expect("the promoted send is now matchable");
+    assert_eq!(matched.id, deferred.id);
+    assert_eq!(matched.status, PendingSendStatus::Pending);
+    assert_eq!(matched.locator_quote.as_deref(), Some("quote"));
+}
+
+#[tokio::test]
+async fn opening_a_pre_turn_active_database_adds_the_column() {
+    // Simulate a database created before `session.turn_active` existed: a
+    // `session` table with the older column set. Opening the store must
+    // forward-migrate it (add the column) rather than fail.
+    let mut path = std::env::temp_dir();
+    let unique = format!(
+        "delta-sqlite-migration-test-{}.db",
+        std::process::id() as u64 * 1_000_000 + line!() as u64
+    );
+    path.push(unique);
+    let path_str = path.to_string_lossy().into_owned();
+    let _ = std::fs::remove_file(&path);
+
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (
+               id TEXT PRIMARY KEY,
+               cwd TEXT NOT NULL,
+               transcript_path TEXT NOT NULL,
+               title TEXT,
+               status TEXT NOT NULL DEFAULT 'active',
+               transcript_lines_read INTEGER NOT NULL DEFAULT 0,
+               created_at TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+    }
+
+    // Opening applies the schema (other tables) and the guarded ALTER for the
+    // missing column, so the turn-active flag works on the migrated database.
+    let store = SqliteStore::open(&path_str).unwrap();
+    let (session, _main) = store.register_session(new_session()).await.unwrap();
+    assert!(!store.is_turn_active(&session.id).await.unwrap());
+    store.set_turn_active(&session.id, true).await.unwrap();
+    assert!(store.is_turn_active(&session.id).await.unwrap());
+
+    let _ = std::fs::remove_file(&path);
 }

@@ -8,7 +8,13 @@ use crate::error::{Error, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PendingSendStatus {
-    /// Queued, awaiting a matching `UserPromptSubmit`.
+    /// Held back because a turn was in flight when it was composed: its
+    /// keystrokes have NOT been dispatched yet. Delta dispatches it (flipping it
+    /// to `Pending`) once the session goes idle, so it submits as an ordinary
+    /// prompt — the `UserPromptSubmit` hook fires and any locator quote is
+    /// injected normally, rather than Claude Code queueing it mid-turn.
+    Deferred,
+    /// Dispatched, awaiting a matching `UserPromptSubmit`.
     Pending,
     /// Matched to a transcript message uuid.
     Matched,
@@ -19,6 +25,7 @@ pub enum PendingSendStatus {
 impl PendingSendStatus {
     pub fn as_str(self) -> &'static str {
         match self {
+            PendingSendStatus::Deferred => "deferred",
             PendingSendStatus::Pending => "pending",
             PendingSendStatus::Matched => "matched",
             PendingSendStatus::Cancelled => "cancelled",
@@ -27,6 +34,7 @@ impl PendingSendStatus {
 
     pub fn parse(value: &str) -> Result<Self> {
         match value {
+            "deferred" => Ok(PendingSendStatus::Deferred),
             "pending" => Ok(PendingSendStatus::Pending),
             "matched" => Ok(PendingSendStatus::Matched),
             "cancelled" => Ok(PendingSendStatus::Cancelled),
@@ -45,6 +53,7 @@ mod tests {
     #[test]
     fn status_enum_round_trips() {
         for s in [
+            PendingSendStatus::Deferred,
             PendingSendStatus::Pending,
             PendingSendStatus::Matched,
             PendingSendStatus::Cancelled,

@@ -40,9 +40,20 @@ where
         let mut events = Vec::new();
         for session in self.store.list_sessions().await? {
             let (messages, resolved_events) = self.sync_transcript(&session).await?;
+            // An interrupt ends the turn but fires no `Stop` hook, so the tail is
+            // where it is observed. Release any deferred send now that the
+            // session is idle — done here, after `sync_transcript` has returned
+            // and dropped its lock, so dispatching sends no keystrokes from
+            // inside the ingestion path.
+            let interrupted = resolved_events.iter().any(|e| {
+                matches!(e, SessionEvent::TurnInterrupted { session_id } if *session_id == session.id)
+            });
             events.extend(resolved_events);
             if !messages.is_empty() {
                 groups.push(messages);
+            }
+            if interrupted {
+                self.dispatch_deferred_send(&session.id).await?;
             }
         }
         Ok((groups, events))

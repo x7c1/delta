@@ -14,6 +14,11 @@ CREATE TABLE IF NOT EXISTS session (
   title TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   transcript_lines_read INTEGER NOT NULL DEFAULT 0,
+  -- 1 while a turn is in flight (a send was dispatched / a turn started and no
+  -- Stop or interrupt has been observed since). Branch/quoted sends issued while
+  -- this is set are deferred rather than dispatched mid-turn. Added to existing
+  -- databases by a guarded ALTER on open (see `add_column_if_missing`).
+  turn_active INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 

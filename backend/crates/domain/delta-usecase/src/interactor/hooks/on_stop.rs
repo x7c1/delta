@@ -21,6 +21,11 @@ where
             let (_messages, resolved_events) = self.sync_transcript(&session).await?;
             events.extend(resolved_events);
         }
+        // The turn ended: clear the in-flight flag, then release the next
+        // deferred send (if any) now that the session is idle. Dispatching it
+        // sets the flag again for its own turn.
+        self.store.set_turn_active(&hook.session_id, false).await?;
+        self.dispatch_deferred_send(&hook.session_id).await?;
         events.push(SessionEvent::TurnCompleted {
             session_id: hook.session_id,
             stop_reason: hook.stop_reason,

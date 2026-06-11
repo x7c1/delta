@@ -2,6 +2,7 @@
 //! send, and dispatch the keystrokes.
 
 mod deferred_pending_send;
+mod dispatch_deferred;
 mod enqueue_into_open;
 mod enqueue_send;
 mod ensure_open;
