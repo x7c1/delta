@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-serde = { workspace = true }
+# `serde_json::Value` is used as plain data for opaque tool payloads
+# (`ContentBlock::ToolUse.input` / `ToolResult.content`). No serde derives:
+# serialization lives in the gateway crates' wire/record twins.
 serde_json = { workspace = true }
-uuid = { workspace = true }

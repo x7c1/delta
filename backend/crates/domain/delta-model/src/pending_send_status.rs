@@ -1,12 +1,9 @@
 //! Correlation status of a queued send.
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::{Error, Result};
 
 /// Correlation status of a queued send.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingSendStatus {
     /// Held back because a turn was in flight when it was composed: its
     /// keystrokes have NOT been dispatched yet. Delta dispatches it (flipping it

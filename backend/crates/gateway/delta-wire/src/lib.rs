@@ -10,6 +10,8 @@
 //! - The [`rest`] module owns the `/api/*` request and response shapes,
 //!   composed from the wire twins of the domain records ([`WireSession`],
 //!   [`WireThread`], [`WireMessage`], [`WirePendingSend`], …).
+//! - The [`hooks`] module owns the Claude Code hook payloads (`/hooks/*`),
+//!   which are never exported to TypeScript (see its module docs).
 //!
 //! The `export-ts` binary (see `src/bin/export-ts.rs`) writes the TypeScript
 //! types into the frontend's `@delta/wire-gen` package, so the browser types
@@ -17,6 +19,7 @@
 
 mod content_block;
 pub use content_block::WireContentBlock;
+pub mod hooks;
 mod message;
 pub use message::{WireMessage, WireRole};
 mod pending_send;

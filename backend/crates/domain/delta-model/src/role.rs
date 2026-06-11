@@ -1,12 +1,9 @@
 //! The author role of a message.
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::{Error, Result};
 
 /// The author role of a message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     User,
     Assistant,

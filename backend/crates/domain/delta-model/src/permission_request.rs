@@ -4,13 +4,11 @@
 //! Delta does not decide allow/deny — the TUI handles that — but it records the
 //! request so the browser can show state and keep an audit trail.
 
-use serde::{Deserialize, Serialize};
-
 use crate::permission_status::PermissionStatus;
 use crate::session::SessionId;
 
 /// A recorded tool-permission request.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionRequest {
     pub id: i64,
     pub session_id: SessionId,

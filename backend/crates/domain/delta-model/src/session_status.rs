@@ -1,12 +1,9 @@
 //! Lifecycle status of the single Claude Code session.
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::{Error, Result};
 
 /// Lifecycle status of the single Claude Code session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionStatus {
     Active,
     Ended,

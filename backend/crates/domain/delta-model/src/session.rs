@@ -1,7 +1,5 @@
 //! The single Claude Code TUI session Delta wraps.
 
-use serde::{Deserialize, Serialize};
-
 use crate::newtype::string_newtype;
 use crate::session_status::SessionStatus;
 
@@ -11,7 +9,7 @@ string_newtype! {
 }
 
 /// The single Claude Code TUI session Delta wraps.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
     pub id: SessionId,
     pub cwd: String,

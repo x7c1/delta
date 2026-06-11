@@ -10,8 +10,7 @@
 macro_rules! string_newtype {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]
-        #[serde(transparent)]
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
         pub struct $name(pub String);
 
         impl $name {
