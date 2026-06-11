@@ -49,6 +49,9 @@ struct FakeTmux {
     sent: AtomicUsize,
     /// The number of sessions spawned via `create_session`.
     created: AtomicUsize,
+    /// The `command` argv of the most recent `create_session` call, so a test
+    /// can assert the first prompt rides on the launch command line.
+    last_command: std::sync::Mutex<Vec<String>>,
 }
 
 #[async_trait]
@@ -61,9 +64,10 @@ impl TmuxDriver for FakeTmux {
         &self,
         _name: &str,
         _workdir: &str,
-        _command: &[String],
+        command: &[String],
     ) -> delta_usecase::Result<()> {
         self.created.fetch_add(1, Ordering::SeqCst);
+        *self.last_command.lock().unwrap() = command.to_vec();
         Ok(())
     }
 
@@ -439,16 +443,23 @@ async fn new_session_send_spawns_and_defers_first_prompt() {
         Some(0),
         "no row is persisted until the spawn binds to a session id"
     );
-    // A fresh tmux session was spawned and the first prompt typed into its pane.
+    // A fresh tmux session was spawned with the first prompt carried on its
+    // launch command line (claude auto-submits it at startup), not injected via
+    // post-launch keystrokes.
     assert_eq!(
         tmux.created.load(Ordering::SeqCst),
         1,
         "one session spawned"
     );
     assert_eq!(
+        tmux.last_command.lock().unwrap().last().map(String::as_str),
+        Some("kick off a new conversation"),
+        "the first prompt is the trailing positional launch argument"
+    );
+    assert_eq!(
         tmux.sent.load(Ordering::SeqCst),
-        1,
-        "first prompt dispatched"
+        0,
+        "the fresh spawn submits the prompt at launch, not via send_line"
     );
 
     let _ = std::fs::remove_file(&transcript_path);

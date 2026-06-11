@@ -24,19 +24,33 @@ where
     /// [`PendingSpawn`] carrying that minted id (the binding key) and
     /// `first_prompt`. Pinning the id up front means the first `UserPromptSubmit`
     /// hook reports exactly this id, so the spawn correlates to its session by id
-    /// rather than by working directory. When a `first_prompt` is present (a
-    /// composer-initiated New), it is typed into the freshly-created pane so
-    /// Claude actually receives the message and fires the `UserPromptSubmit` hook
-    /// that binds this spawn — the hook then writes the deferred `pending_send`
-    /// row that lets the first user line correlate. Returns the minted token.
+    /// rather than by working directory.
+    ///
+    /// When a `first_prompt` is present (a composer-initiated New), it is passed
+    /// to `claude` as a trailing positional argument on the launch command line
+    /// (`claude … <prompt>`) rather than typed into the pane after launch. An
+    /// interactive `claude` invoked with a positional prompt auto-submits it at
+    /// startup, which fires the `UserPromptSubmit` hook that binds this spawn —
+    /// the hook then writes the deferred `pending_send` row that lets the first
+    /// user line correlate. Submitting at launch avoids the failure mode of
+    /// injecting keystrokes after a fixed settle delay: on a slow cold start the
+    /// TUI input is not yet ready when the keystrokes land, they are lost, the
+    /// prompt is never submitted, and the spawn sits pending forever. The command
+    /// is forwarded as an argv tail (no shell), so a multi-line or quoted prompt
+    /// is already safe. Returns the minted token.
     ///
     /// The registry lock is taken only for the brief record/rollback steps, never
     /// across the tmux/workspace I/O (which includes the create-session settle
     /// delay), so a spawn does not serialize concurrent registry readers (hooks,
     /// the PTY bridge) for the whole spawn duration. The `PendingSpawn` is
-    /// recorded *before* the first prompt is dispatched, so the
-    /// `UserPromptSubmit` that prompt triggers always finds a spawn to bind
-    /// rather than racing ahead and being misread as external input.
+    /// recorded *before* `create_session` launches `claude`, so the
+    /// `UserPromptSubmit` that the launch-submitted prompt triggers always finds a
+    /// spawn to bind rather than racing ahead and being misread as external input.
+    /// With the prompt on the command line the hook fires very soon after launch,
+    /// so this pre-launch ordering — not any delay inside `create_session` — is
+    /// what guarantees the spawn record already exists when the hook arrives. A
+    /// failed `create_session` rolls the just-recorded pending back, so no
+    /// dangling spawn is left behind.
     ///
     /// When `workdir` is `Some`, it is a user-selected path: it is validated and
     /// canonicalized via [`Workspace::resolve_existing_dir`] *before* anything is
@@ -76,39 +90,51 @@ where
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
             .await?;
-        let command = vec![
+        let mut command = vec![
             SESSION_COMMAND.to_owned(),
             SETTINGS_FLAG.to_owned(),
             self.session_settings_path.clone(),
             SESSION_ID_FLAG.to_owned(),
             session_id.as_str().to_owned(),
         ];
-        self.tmux
-            .create_session(token.as_str(), &workdir, &command)
-            .await?;
+        // Carry the first prompt on the launch command line as a trailing
+        // positional argument. `claude` auto-submits a positional prompt at
+        // startup, so the prompt is delivered without any post-launch keystroke
+        // injection (which is lost when the TUI input is not yet ready on a slow
+        // cold start). The argv tail is forwarded without a shell, so a
+        // multi-line or quoted prompt is safe.
+        if let Some(text) = first_prompt.clone() {
+            command.push(text);
+        }
 
-        // Record the spawn before dispatching the first prompt, so the hook the
-        // prompt triggers can bind it. (A failed create above returns early with
-        // nothing recorded, so no dangling pending spawn is left behind.)
+        // Record the spawn *before* launching `claude`, so the `UserPromptSubmit`
+        // that the launch-submitted prompt triggers finds a pending spawn to bind
+        // instead of racing ahead and being misread as external input. With the
+        // prompt on the command line the hook fires very soon after launch, so
+        // this ordering — not any delay inside `create_session` — is what makes
+        // the spawn record reliably present when the hook arrives.
         self.open_sessions.lock().await.push_pending(PendingSpawn {
             token: token.clone(),
             pane: pane.clone(),
             session_id,
-            workdir,
-            first_prompt: first_prompt.clone(),
+            workdir: workdir.clone(),
+            first_prompt,
         });
 
-        // Type the deferred first prompt into the new pane. If it never reaches
-        // the pane the spawn would sit idle forever (Claude never fires the hook
-        // that binds it), so roll the pending spawn back and surface the error.
-        if let Some(text) = first_prompt {
-            if let Err(dispatch_err) = self.tmux.send_line(&pane, &text).await {
-                self.open_sessions
-                    .lock()
-                    .await
-                    .remove_pending_for_token(&token);
-                return Err(dispatch_err);
-            }
+        // Launch the session. If `create_session` fails, the spawn never starts,
+        // so roll the just-recorded pending back (otherwise a later, unrelated
+        // `UserPromptSubmit` could mis-bind to this abandoned pane) and surface
+        // the error.
+        if let Err(spawn_err) = self
+            .tmux
+            .create_session(token.as_str(), &workdir, &command)
+            .await
+        {
+            self.open_sessions
+                .lock()
+                .await
+                .remove_pending_for_token(&token);
+            return Err(spawn_err);
         }
         Ok(token)
     }

@@ -14,8 +14,8 @@ mod targets;
 mod transcript_lines;
 
 pub(crate) use factory::{
-    interactor, interactor_with_failing_tmux, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH,
-    TEST_WORKDIR_BASE,
+    interactor, interactor_with_failing_create_session, interactor_with_failing_tmux,
+    TEST_SETTINGS_JSON, TEST_SETTINGS_PATH, TEST_WORKDIR_BASE,
 };
 pub(crate) use fake_store::FakeStore;
 pub(crate) use fake_tmux::FakeTmux;

@@ -4,18 +4,18 @@ use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 use crate::SendTarget;
 
-/// When the composer-first spawn cannot type its first prompt into the new
-/// pane, the use case surfaces the dispatch error AND rolls the half-spawned
-/// pane out of `pending`, so a later, unrelated `UserPromptSubmit` is not
-/// mis-bound to it (it registers as external instead).
+/// When the composer-first spawn cannot launch its tmux session
+/// (`create_session` fails), the use case surfaces the launch error AND rolls
+/// the just-recorded pending spawn out of `pending`, so a later, unrelated
+/// `UserPromptSubmit` is not mis-bound to it (it registers as external instead).
 #[tokio::test]
 async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     use crate::error::Error;
 
-    let ix = interactor_with_failing_tmux();
+    let ix = interactor_with_failing_create_session();
 
-    // No session yet: the composer-first send spawns, then fails to type the
-    // prompt into the pane. The error propagates.
+    // No session yet: the composer-first send records the pending spawn, then
+    // fails to launch the tmux session. The error propagates.
     let err = ix
         .enqueue_send(
             SendTarget::NewSession { workdir: None },
@@ -23,7 +23,7 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
             None,
         )
         .await
-        .expect_err("a failed first-prompt dispatch must propagate");
+        .expect_err("a failed session launch must propagate");
     assert!(matches!(err, Error::Tmux(_)));
 
     // The spawn was rolled back: no pending spawn remains, so a later hook
