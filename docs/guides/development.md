@@ -55,6 +55,15 @@ The quality gate (build, typecheck, test, and `lint` = ESLint +
 dependency-cruiser) is covered by `make check`, or the individual `make build` /
 `make test` / `make lint` targets.
 
+### Generated wire bindings (`@delta/wire-gen`)
+
+`frontend/packages/gateway/wire-gen` contains TypeScript generated from the
+backend's wire contract (the `delta-wire` crate): the `SessionEvent` union and
+the `EVENT_KINDS` const. Never edit the files under `src/generated/` by hand —
+change the Rust types and run `make gen` to regenerate, then commit the result.
+`make check` (and CI) regenerates and fails on any diff, so stale bindings
+cannot land.
+
 ### Run the UI against mocks (no backend needed)
 
 MSW mocks the REST API and a fake event source replays the WebSocket stream, so

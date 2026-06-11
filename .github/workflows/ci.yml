@@ -40,6 +40,19 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
 
+      # The TypeScript bindings in frontend/packages/gateway/wire-gen are
+      # generated from the Rust wire contract and committed. Regenerate and
+      # fail on any diff so a wire-contract change cannot land without its
+      # regenerated bindings.
+      - name: Check generated wire bindings are fresh
+        run: |
+          cargo run --locked -p delta-wire --bin export-ts
+          if [ -n "$(git -C .. status --porcelain -- frontend/packages/gateway/wire-gen)" ]; then
+            git -C .. --no-pager diff -- frontend/packages/gateway/wire-gen
+            echo "error: generated wire bindings are stale — run 'make gen' and commit the result"
+            exit 1
+          fi
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

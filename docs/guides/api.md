@@ -19,8 +19,10 @@ The server binds to `127.0.0.1` only; it is never exposed on a public
 interface. All request and response bodies are JSON unless noted otherwise.
 
 This document is the source of truth for the browser↔server contract. Field
-names below match the JSON exactly (the wire shapes are the serialized domain
-types).
+names below match the JSON exactly. The `/ws` session-event shapes are defined
+by the backend's `delta-wire` crate, which also generates the frontend's
+`@delta/wire-gen` TypeScript bindings (`make gen`); the remaining shapes are
+the serialized domain types.
 
 ## Conventions
 
@@ -337,7 +339,10 @@ Response:
 ### `GET /ws` (WebSocket)
 
 After upgrade, the server pushes JSON-encoded `SessionEvent`s to the browser as
-text frames, one event per frame. Each event is a tagged union keyed on `kind`:
+text frames, one event per frame. Each event is a tagged union keyed on `kind`.
+These shapes are defined by the `delta-wire` crate (`WireSessionEvent`), and
+the frontend consumes TypeScript bindings generated from it (`@delta/wire-gen`
+via `make gen`), so the union below cannot drift from the implementation:
 
 ```json
 { "kind": "session_registered", "session_id": "sess-1" }

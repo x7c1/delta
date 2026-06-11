@@ -16,6 +16,7 @@ delta-sqlite = { path = "crates/gateway/delta-sqlite" }
 delta-transcript = { path = "crates/gateway/delta-transcript" }
 tmux-driver = { path = "crates/gateway/tmux-driver" }
 workspace-fs = { path = "crates/gateway/workspace-fs" }
+delta-wire = { path = "crates/gateway/delta-wire" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
 
 # Shared third-party dependencies
@@ -34,3 +35,4 @@ tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v7", "serde"] }
+ts-rs = "12"
