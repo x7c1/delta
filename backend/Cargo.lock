@@ -188,6 +188,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "delta-bootstrap"
+version = "0.1.0"
+dependencies = [
+ "delta-model",
+ "delta-sqlite",
+ "delta-transcript",
+ "delta-usecase",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tmux-driver",
+ "workspace-fs",
+]
+
+[[package]]
 name = "delta-model"
 version = "0.1.0"
 dependencies = [
@@ -203,10 +217,10 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "delta-bootstrap",
  "delta-sqlite",
  "delta-transcript",
  "delta-usecase",
- "delta-wire",
  "futures-util",
  "portable-pty",
  "serde",
@@ -257,20 +271,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "delta-wire"
-version = "0.1.0"
-dependencies = [
- "delta-model",
- "delta-sqlite",
- "delta-transcript",
- "delta-usecase",
- "serde_json",
- "thiserror 1.0.69",
- "tmux-driver",
- "workspace-fs",
 ]
 
 [[package]]
