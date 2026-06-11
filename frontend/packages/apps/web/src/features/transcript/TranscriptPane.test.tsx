@@ -20,6 +20,7 @@ import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import type { MessagesResponse } from '@delta/model';
 import {
+  BRANCH_THREAD_ID,
   MAIN_THREAD_ID,
   SESSION_ID,
   createHandlers,
@@ -38,16 +39,20 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderPane(threads = mockThreads) {
+function renderPane(threads = mockThreads, activeThreadId = MAIN_THREAD_ID) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const client = new ApiClient({ baseUrl: 'http://localhost' });
-  const main = threads.find((t) => t.id === MAIN_THREAD_ID)!;
+  const active = threads.find((t) => t.id === activeThreadId)!;
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <TranscriptPane threads={threads} activeThread={main} readOnly={false} />
+        <TranscriptPane
+          threads={threads}
+          activeThread={active}
+          readOnly={false}
+        />
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -105,10 +110,24 @@ describe('TranscriptPane', () => {
     );
     // Assistant Markdown text is foregrounded.
     expect(screen.getByText(/change between two states/)).toBeInTheDocument();
-    // The breadcrumb shows the current location.
+    // Viewing main hides the breadcrumb even though the session has branched
+    // (mockThreads contains a sub-thread): a lone "main" crumb is just noise.
     expect(
-      screen.getByRole('navigation', { name: 'Breadcrumb' }),
-    ).toHaveTextContent('main');
+      screen.queryByRole('navigation', { name: 'Breadcrumb' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the breadcrumb with "main" as an ancestor while viewing a sub-thread', async () => {
+    // Drilled into a sub-thread (ancestry = [main › delta etymology]), so the
+    // breadcrumb appears with "main" as a clickable leading crumb.
+    renderPane(mockThreads, BRANCH_THREAD_ID);
+
+    const breadcrumb = await screen.findByRole('navigation', {
+      name: 'Breadcrumb',
+    });
+    expect(
+      within(breadcrumb).getByRole('button', { name: 'main' }),
+    ).toBeInTheDocument();
   });
 
   it('hides the breadcrumb until the session has branched', async () => {
