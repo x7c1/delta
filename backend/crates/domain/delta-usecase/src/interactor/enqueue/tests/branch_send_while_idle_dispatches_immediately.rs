@@ -9,10 +9,10 @@ use crate::interactor::testing::*;
 async fn branch_send_while_idle_dispatches_immediately() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    // The session is idle (no Delta-dispatched turn in flight).
+    // The session is idle (the registration turn completed, none in flight).
     assert!(!ix.store().is_turn_active(&session).await.unwrap());
 
     let parent = MessageUuid::from("uuid-parent");

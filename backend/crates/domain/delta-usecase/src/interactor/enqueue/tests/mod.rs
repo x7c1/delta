@@ -1,6 +1,7 @@
 //! Enqueue use-case tests.
 
 mod branch_send_creates_child_thread;
+mod branch_send_during_external_turn_is_deferred;
 mod branch_send_mid_turn_is_deferred_then_dispatched_on_stop;
 mod branch_send_titles_child_from_locator_quote;
 mod branch_send_to_unknown_thread_is_thread_not_found;

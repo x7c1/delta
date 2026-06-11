@@ -70,6 +70,14 @@ where
         let (new_messages, resolved_events) = self.sync_transcript(&session).await?;
         events.extend(resolved_events);
 
+        // A prompt submission means a turn is now in flight — whether Delta
+        // dispatched it or it was typed straight into the embedded pane. Mark it
+        // so a branch/quoted send arriving mid-turn defers instead of dispatching
+        // into a busy session. Delta's own dispatch already sets this; doing it
+        // here also covers pane-started turns Delta did not dispatch. Cleared on
+        // `Stop` (see `on_stop`) or interrupt (see `sync_transcript`).
+        self.store.set_turn_active(&hook.session_id, true).await?;
+
         match pending {
             Some(pending) => {
                 // A queued send matches this prompt. If its user line was

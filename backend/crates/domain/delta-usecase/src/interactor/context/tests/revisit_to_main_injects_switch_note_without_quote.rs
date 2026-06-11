@@ -8,7 +8,7 @@ use super::support::round_trip;
 #[tokio::test]
 async fn revisit_to_main_injects_switch_note_without_quote() {
     let ix = interactor();
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    ix.seed_session().await;
     let session = SessionId::from("sess-1");
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
