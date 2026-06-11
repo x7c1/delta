@@ -135,10 +135,14 @@ export function TranscriptPane({
   );
   const allMessages: Message[] = messagesQuery.data?.messages ?? [];
 
-  // Render only user and assistant turns; system/other rows are ingest-only.
+  // Render user and assistant turns, plus meta lines (shown collapsed);
+  // system/other rows are ingest-only.
   const messages = useMemo(
     () =>
-      allMessages.filter((m) => m.role === 'user' || m.role === 'assistant'),
+      allMessages.filter(
+        (m) =>
+          m.role === 'user' || m.role === 'assistant' || m.role === 'meta',
+      ),
     [allMessages],
   );
 

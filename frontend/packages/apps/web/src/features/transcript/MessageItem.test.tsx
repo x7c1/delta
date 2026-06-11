@@ -199,6 +199,35 @@ describe('MessageItem', () => {
     expect(screen.getByText('thinking')).toBeInTheDocument();
   });
 
+  it('renders a meta line as a collapsed card, not a user bubble', () => {
+    // Harness-injected lines (skill bodies, system reminders) arrive as
+    // `role: "meta"`. They must render collapsed on the assistant side, never
+    // as a right-aligned user bubble, and the body must stay hidden until the
+    // disclosure is toggled.
+    // A multi-line body so the collapsed summary (first line only) is distinct
+    // from the hidden body (a later line), letting us assert the body is hidden.
+    const summaryLine = '<system-reminder> injected skill body';
+    const hiddenLine = 'BODY LINE ONLY VISIBLE WHEN EXPANDED';
+    const message = makeMessage('meta', `${summaryLine}\n${hiddenLine}`);
+    render(<MessageItem message={message} />);
+
+    const item = screen.getByTestId('message-item');
+    expect(item).toHaveAttribute('data-role', 'meta');
+    // Not a right-aligned user bubble.
+    expect(item).not.toHaveClass('items-end');
+
+    // Collapsed by default: the summary's first line shows, but the rest of the
+    // body is not in the DOM until toggled.
+    const toggle = screen.getByRole('button');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText(summaryLine)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(hiddenLine))).toBeNull();
+
+    // Toggling reveals the verbatim body.
+    fireEvent.click(toggle);
+    expect(screen.getByText(new RegExp(hiddenLine))).toBeInTheDocument();
+  });
+
   it('renders no timestamp when created_at is unparseable', () => {
     const message = { ...makeMessage('user', 'hi'), created_at: 'not-a-date' };
     render(<MessageItem message={message} />);
