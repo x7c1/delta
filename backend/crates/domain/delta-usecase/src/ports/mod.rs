@@ -8,6 +8,8 @@ mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
 mod new_session;
 pub use new_session::NewSession;
+mod session_end_hook;
+pub use session_end_hook::SessionEndHook;
 mod session_event;
 pub use session_event::SessionEvent;
 mod session_lifecycle;

@@ -8,10 +8,23 @@
 //! and which the first `UserPromptSubmit` hook then binds into the live map.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use delta_model::SessionId;
 
 use crate::pane_token::PaneToken;
+
+/// How long a spawn may sit unbound before the watchdog reaps it.
+///
+/// A spawn binds the instant its first `UserPromptSubmit` hook fires, which on a
+/// healthy launch happens within a second or two of `claude` reaching its
+/// prompt. This deadline is set deliberately generous — far longer than even a
+/// slow cold start — so a genuinely-slow-but-healthy launch always binds first
+/// via the normal hook path and the reaper only ever catches a spawn that is
+/// truly stuck (crashed/exited/hung before it could register). The `SessionEnd`
+/// hook is the precise early signal for an exited launch; this deadline is the
+/// coarse backstop for the hang-forever case the hook cannot observe.
+pub const PENDING_SPAWN_DEADLINE: Duration = Duration::from_secs(30);
 
 /// A live, bound session: its Claude `session_id` is known and it is mapped to
 /// the tmux pane driving it.
@@ -53,6 +66,15 @@ pub struct PendingSpawn {
     /// references `session(id)`, which does not exist yet), so the text is held
     /// here and enqueued once the binding supplies the session id.
     pub first_prompt: Option<String>,
+    /// When this spawn was recorded, for the watchdog deadline.
+    ///
+    /// A spawn is fire-and-forget: only the first `UserPromptSubmit` hook binds
+    /// it, so a launch that crashes/hangs before that hook never times out on
+    /// its own. The reaper compares `now - created_at` against
+    /// [`PENDING_SPAWN_DEADLINE`] to detect and clean up such a stuck spawn.
+    /// `Instant` is monotonic, so it measures elapsed wall time without being
+    /// perturbed by system-clock changes.
+    pub created_at: Instant,
 }
 
 /// The in-memory map of live panes.
@@ -121,6 +143,42 @@ impl OpenSessions {
     /// `UserPromptSubmit` could mis-bind to it.
     pub fn remove_pending_for_token(&mut self, token: &PaneToken) {
         self.pending.retain(|p| &p.token != token);
+    }
+
+    /// Take the still-pending (unbound) spawn whose Delta-minted session id
+    /// equals `id`, removing it from the registry.
+    ///
+    /// Mirrors [`Self::take_pending_for_session`] but is used by the failure
+    /// path (the `SessionEnd` hook): a launch that ended while still unbound is
+    /// removed here so its tmux pane can be cleaned up and a `SpawnFailed`
+    /// emitted. Returns `None` when no *pending* spawn carries this id — which
+    /// includes the normal case where the id belongs to an already-bound
+    /// session, so the caller can tell a failed launch apart from a normal end.
+    pub fn take_unbound_pending_for_session(&mut self, id: &SessionId) -> Option<PendingSpawn> {
+        self.take_pending_for_session(id)
+    }
+
+    /// Remove and return every unbound spawn whose deadline has passed as of
+    /// `now`, leaving the still-fresh and the already-bound ones in place.
+    ///
+    /// `now` is supplied by the caller rather than read here so the watchdog is
+    /// deterministic under test: a test seeds spawns with controlled
+    /// `created_at` values and passes an explicit `now`, instead of depending on
+    /// wall-clock elapsed time. A spawn is stale when `now - created_at` has
+    /// reached [`PENDING_SPAWN_DEADLINE`]. Only spawns still in `pending` are
+    /// considered: once a spawn binds it is moved out of `pending` into `bound`,
+    /// so a bound session is never reaped.
+    pub fn drain_stale_pending(&mut self, now: Instant) -> Vec<PendingSpawn> {
+        let mut stale = Vec::new();
+        let mut i = 0;
+        while i < self.pending.len() {
+            if now.duration_since(self.pending[i].created_at) >= PENDING_SPAWN_DEADLINE {
+                stale.push(self.pending.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        stale
     }
 
     /// Remove a session from the bound map (closing it), returning its handle.

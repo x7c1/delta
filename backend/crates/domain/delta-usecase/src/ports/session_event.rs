@@ -79,6 +79,24 @@ pub enum SessionEvent {
         session_id: SessionId,
         request_id: i64,
     },
+    /// A freshly-spawned session failed to come up: its launch ended (or never
+    /// got far enough) before it ever registered via its first
+    /// `UserPromptSubmit`, so it never bound to a live session.
+    ///
+    /// A new spawn is fire-and-forget — `claude` is launched in a tmux pane and
+    /// the only thing that registers/binds it is the first `UserPromptSubmit`
+    /// hook. If `claude` crashes, exits, or hangs on auth before that hook ever
+    /// fires, nothing would otherwise time the dangling spawn out and the UI is
+    /// stuck "pending" forever with no error. This event is the failure signal:
+    /// it is emitted either by the `SessionEnd` hook (the launch exited while
+    /// still unbound — the immediate case) or by the watchdog reaper (the spawn
+    /// outlived its deadline without ever binding). It carries the Delta-minted
+    /// `session_id` so the browser can correlate it to the optimistic pending
+    /// chip, plus the `pane_token` of the tmux session that was torn down.
+    SpawnFailed {
+        session_id: SessionId,
+        pane_token: String,
+    },
 }
 
 #[cfg(test)]
@@ -122,6 +140,21 @@ mod tests {
                 session_id: SessionId::from("sess-1"),
             }),
             serde_json::json!({ "kind": "turn_interrupted", "session_id": "sess-1" }),
+        );
+    }
+
+    #[test]
+    fn spawn_failed_serializes_with_id_and_pane_token() {
+        assert_eq!(
+            json(&SessionEvent::SpawnFailed {
+                session_id: SessionId::from("sess-1"),
+                pane_token: "delta-1".into(),
+            }),
+            serde_json::json!({
+                "kind": "spawn_failed",
+                "session_id": "sess-1",
+                "pane_token": "delta-1",
+            }),
         );
     }
 

@@ -72,6 +72,10 @@ where
             None => None,
         };
 
+        // Captured for tracing before `first_prompt` is moved into the spawn
+        // record below.
+        let has_first_prompt = first_prompt.is_some();
+
         // The minter is atomic, so token uniqueness needs no lock here.
         let token = self.mint_free_token().await?;
         let workdir = requested_workdir.unwrap_or_else(|| self.workdir_for(&token));
@@ -116,9 +120,13 @@ where
         self.open_sessions.lock().await.push_pending(PendingSpawn {
             token: token.clone(),
             pane: pane.clone(),
-            session_id,
+            session_id: session_id.clone(),
             workdir: workdir.clone(),
             first_prompt,
+            // Stamp the spawn for the watchdog deadline. From here the only thing
+            // that binds it is the first `UserPromptSubmit` hook; if that never
+            // arrives, the reaper uses this instant to reap the stuck spawn.
+            created_at: std::time::Instant::now(),
         });
 
         // Launch the session. If `create_session` fails, the spawn never starts,
@@ -130,12 +138,25 @@ where
             .create_session(token.as_str(), &workdir, &command)
             .await
         {
+            tracing::error!(
+                token = %token.as_str(),
+                session_id = %session_id,
+                error = %spawn_err,
+                "fresh spawn failed to launch; rolling back the pending spawn"
+            );
             self.open_sessions
                 .lock()
                 .await
                 .remove_pending_for_token(&token);
             return Err(spawn_err);
         }
+        tracing::info!(
+            token = %token.as_str(),
+            session_id = %session_id,
+            workdir = %workdir,
+            has_first_prompt = has_first_prompt,
+            "fresh spawn launched; awaiting first UserPromptSubmit to bind"
+        );
         Ok(token)
     }
 }

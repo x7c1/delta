@@ -80,6 +80,22 @@ describe('parseSessionEvent', () => {
     ).toEqual({ kind: 'session_closed', session_id: 'sess-1' });
   });
 
+  it('parses a spawn_failed event (passthrough kind)', () => {
+    const event = parseSessionEvent(
+      JSON.stringify({
+        kind: 'spawn_failed',
+        session_id: 'sess-1',
+        pane_token: 'delta-1',
+      }),
+    );
+
+    expect(event).toEqual({
+      kind: 'spawn_failed',
+      session_id: 'sess-1',
+      pane_token: 'delta-1',
+    });
+  });
+
   it('returns null for an unknown kind', () => {
     expect(parseSessionEvent(JSON.stringify({ kind: 'bogus' }))).toBeNull();
   });

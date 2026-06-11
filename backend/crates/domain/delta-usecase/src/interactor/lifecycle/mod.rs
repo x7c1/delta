@@ -5,6 +5,7 @@ mod ensure_session;
 mod mint_free_token;
 mod new_session;
 mod open_session;
+mod reap_stale_spawns;
 mod spawn_fresh;
 mod workdir_for;
 

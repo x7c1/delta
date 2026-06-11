@@ -116,9 +116,18 @@ impl AppState {
     /// assistant reply that Claude Code flushes to the JSONL *after* the `Stop`
     /// hook fires, which the hook sync misses.
     ///
+    /// The same tick also runs the spawn watchdog: it reaps any fresh spawn that
+    /// never bound before its deadline and broadcasts the resulting
+    /// [`SessionEvent::SpawnFailed`]s, so a launch that crashed/hung before its
+    /// first `UserPromptSubmit` can no longer stall the UI on "pending" forever
+    /// (the `SessionEnd` hook catches the exited case immediately; this catches
+    /// the hang-forever case). The reap shares this loop rather than owning a
+    /// second task — both are cheap periodic sweeps over the same registry.
+    ///
     /// The task clones the `Arc`-shared interactor and the broadcast sender, so
-    /// it stays alive independently of any request. A poll error is logged and
-    /// the loop continues — a transient read failure must never kill the tail.
+    /// it stays alive independently of any request. A poll or reap error is
+    /// logged and the loop continues — a transient failure must never kill the
+    /// tail or the watchdog.
     pub fn spawn_transcript_tail(&self) -> tokio::task::JoinHandle<()> {
         let interactor = Arc::clone(&self.interactor);
         let events = self.events.clone();
@@ -126,6 +135,19 @@ impl AppState {
             let mut ticker = tokio::time::interval(TRANSCRIPT_POLL_INTERVAL);
             loop {
                 ticker.tick().await;
+                // Watchdog: reap spawns that never bound before their deadline.
+                // `Instant::now()` is the live clock here; tests drive
+                // `reap_stale_spawns` directly with an injected `now`.
+                match interactor.reap_stale_spawns(std::time::Instant::now()).await {
+                    Ok(failed_events) => {
+                        for event in failed_events {
+                            let _ = events.send(event);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "spawn watchdog reap failed");
+                    }
+                }
                 match interactor.poll_transcript().await {
                     Ok((groups, resolved_events)) => {
                         // One non-empty group per session that ingested new lines.

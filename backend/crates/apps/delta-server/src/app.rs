@@ -19,6 +19,8 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
         // Interactive permission dialog appeared (a human answer is pending).
         .route("/hooks/permission-request", post(hooks::permission_request))
+        // A session terminated; used to catch a spawn that died before binding.
+        .route("/hooks/session-end", post(hooks::session_end))
         // Browser REST surface: queries and commands.
         .route(
             "/api/sessions",
@@ -220,6 +222,30 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/hooks/pre-tool-use")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn session_end_hook_returns_ok() {
+        // A SessionEnd for a session that is neither a pending spawn nor a known
+        // session is a normal end: the handler emits nothing and returns 200.
+        let body = serde_json::json!({
+            "session_id": "sess-1",
+            "reason": "exit"
+        })
+        .to_string();
+
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/session-end")
                     .header("content-type", "application/json")
                     .body(Body::from(body))
                     .unwrap(),

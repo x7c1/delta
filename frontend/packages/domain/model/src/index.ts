@@ -56,6 +56,7 @@ export type {
   TurnCompletedEvent,
   PermissionRequestedEvent,
   TranscriptUpdatedEvent,
+  SpawnFailedEvent,
   SessionEvent,
   SessionEventKind,
 } from './session-event';
