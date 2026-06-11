@@ -1,10 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type {
-  Message,
-  MessagesResponse,
-  SessionId,
-  ThreadId,
-} from '@delta/model';
+import type { SessionId, ThreadId } from '@delta/model';
+import type { Message, MessagesResponse } from '@delta/wire-gen';
 import { queryKeys } from './query-keys';
 
 /**

@@ -1,8 +1,9 @@
 //! Request body for `POST /api/sends`.
 
+use delta_model::{MessageUuid, ThreadId};
+use delta_usecase::SendTarget;
 use serde::Deserialize;
-
-use delta_usecase::{MessageUuid, SendTarget, ThreadId};
+use ts_rs::TS;
 
 /// Request body for `POST /api/sends`.
 ///
@@ -11,22 +12,32 @@ use delta_usecase::{MessageUuid, SendTarget, ThreadId};
 /// session, by setting `new_session: true` and omitting `thread_id`. The session
 /// is determined entirely by the request; there is no implicit "current"
 /// session.
-#[derive(Debug, Deserialize)]
-pub struct CreateSendRequest {
+///
+/// This is the only REST body that flows inward, so it is the wire twin of the
+/// domain [`SendTarget`]: it carries the deserialization concerns (field
+/// defaults, plain `String`/`i64` ids) and resolves into the domain target via
+/// [`into_target`](Self::into_target). All fields except `text` are optional in
+/// the TypeScript export, matching what serde accepts.
+#[derive(Debug, Deserialize, TS)]
+#[ts(rename = "CreateSendRequest")]
+pub struct WireCreateSendRequest {
     /// The thread to send into (typically a session's `main`). When
     /// `semantic_parent_uuid` is set this is the parent thread the new branch is
     /// created off. Omitted (with `new_session: true`) to start a fresh session.
     #[serde(default)]
-    pub thread_id: Option<ThreadId>,
+    #[ts(optional)]
+    pub thread_id: Option<i64>,
     /// Start a fresh session and land this message on its `main` thread. Mutually
     /// exclusive with `thread_id`.
     #[serde(default)]
+    #[ts(optional, as = "Option<_>")]
     pub new_session: bool,
     /// When present, this is a branch send: the Interactor creates an unnamed
     /// child thread off this message and attributes the send to it. Only valid
     /// together with `thread_id`.
     #[serde(default)]
-    pub semantic_parent_uuid: Option<MessageUuid>,
+    #[ts(optional)]
+    pub semantic_parent_uuid: Option<String>,
     /// The text to send into the session.
     pub text: String,
     /// An optional quote to inject as `additionalContext` on the matched turn.
@@ -34,6 +45,7 @@ pub struct CreateSendRequest {
     /// passage to anchor): it is echoed in the synthetic response but dropped
     /// before the first prompt, so the persisted row carries no quote.
     #[serde(default)]
+    #[ts(optional)]
     pub locator_quote: Option<String>,
     /// The working directory a fresh session should start in. Only meaningful
     /// with `new_session: true`; for a thread send the session already has a
@@ -41,10 +53,11 @@ pub struct CreateSendRequest {
     /// the default per-spawn directory. The path is validated (it must be an
     /// existing directory) before the session launches.
     #[serde(default)]
+    #[ts(optional)]
     pub workdir: Option<String>,
 }
 
-/// Why a [`CreateSendRequest`] could not be resolved to a [`SendTarget`].
+/// Why a [`WireCreateSendRequest`] could not be resolved to a [`SendTarget`].
 ///
 /// These are request-shape conflicts the schema alone cannot express, so they
 /// are surfaced as `400 Bad Request` rather than a use-case error.
@@ -74,15 +87,15 @@ impl SendTargetError {
     }
 }
 
-impl CreateSendRequest {
+impl WireCreateSendRequest {
     /// Resolve the request into a [`SendTarget`], or report a shape conflict.
     pub fn into_target(self) -> Result<(SendTarget, String, Option<String>), SendTargetError> {
         let target = match (self.thread_id, self.new_session) {
             (Some(_), true) => return Err(SendTargetError::Conflicting),
             (None, false) => return Err(SendTargetError::Unspecified),
             (Some(thread_id), false) => SendTarget::Thread {
-                thread_id,
-                branch_from: self.semantic_parent_uuid,
+                thread_id: ThreadId(thread_id),
+                branch_from: self.semantic_parent_uuid.map(MessageUuid::from),
             },
             (None, true) => {
                 if self.semantic_parent_uuid.is_some() {
@@ -105,8 +118,8 @@ mod tests {
     /// target whose session is derived from that thread downstream.
     #[test]
     fn thread_id_resolves_to_a_plain_thread_target() {
-        let req = CreateSendRequest {
-            thread_id: Some(ThreadId(7)),
+        let req = WireCreateSendRequest {
+            thread_id: Some(7),
             new_session: false,
             semantic_parent_uuid: None,
             text: "hi".into(),
@@ -132,11 +145,10 @@ mod tests {
     /// the same parent thread carrying the message to branch from.
     #[test]
     fn thread_id_with_semantic_parent_resolves_to_a_branch_target() {
-        let parent = MessageUuid::from("uuid-parent");
-        let req = CreateSendRequest {
-            thread_id: Some(ThreadId(3)),
+        let req = WireCreateSendRequest {
+            thread_id: Some(3),
             new_session: false,
-            semantic_parent_uuid: Some(parent.clone()),
+            semantic_parent_uuid: Some("uuid-parent".into()),
             text: "branch".into(),
             locator_quote: None,
             workdir: None,
@@ -148,7 +160,11 @@ mod tests {
                 branch_from,
             } => {
                 assert_eq!(thread_id, ThreadId(3));
-                assert_eq!(branch_from, Some(parent), "the branch roots at the parent");
+                assert_eq!(
+                    branch_from,
+                    Some(MessageUuid::from("uuid-parent")),
+                    "the branch roots at the parent"
+                );
             }
             SendTarget::NewSession { .. } => {
                 panic!("a thread_id send must not be a NewSession target")
@@ -159,7 +175,7 @@ mod tests {
     /// `new_session: true` with no thread resolves to a `NewSession` target.
     #[test]
     fn new_session_without_thread_resolves_to_a_new_session_target() {
-        let req = CreateSendRequest {
+        let req = WireCreateSendRequest {
             thread_id: None,
             new_session: true,
             semantic_parent_uuid: None,
@@ -175,7 +191,7 @@ mod tests {
     /// `NewSession` target, where it is later validated before launch.
     #[test]
     fn new_session_with_workdir_carries_the_directory() {
-        let req = CreateSendRequest {
+        let req = WireCreateSendRequest {
             thread_id: None,
             new_session: true,
             semantic_parent_uuid: None,
@@ -195,8 +211,8 @@ mod tests {
     /// target with no working-directory override.
     #[test]
     fn workdir_is_ignored_for_a_thread_send() {
-        let req = CreateSendRequest {
-            thread_id: Some(ThreadId(5)),
+        let req = WireCreateSendRequest {
+            thread_id: Some(5),
             new_session: false,
             semantic_parent_uuid: None,
             text: "hi".into(),
@@ -217,7 +233,7 @@ mod tests {
     /// (the API maps it to 400).
     #[test]
     fn neither_thread_nor_new_session_is_unspecified() {
-        let req = CreateSendRequest {
+        let req = WireCreateSendRequest {
             thread_id: None,
             new_session: false,
             semantic_parent_uuid: None,
@@ -233,8 +249,8 @@ mod tests {
     /// pick-one.
     #[test]
     fn thread_and_new_session_together_is_conflicting() {
-        let req = CreateSendRequest {
-            thread_id: Some(ThreadId(1)),
+        let req = WireCreateSendRequest {
+            thread_id: Some(1),
             new_session: true,
             semantic_parent_uuid: None,
             text: "both".into(),
@@ -249,10 +265,10 @@ mod tests {
     /// from, so this is a 400, not a dropped parent.
     #[test]
     fn branch_on_a_new_session_is_rejected() {
-        let req = CreateSendRequest {
+        let req = WireCreateSendRequest {
             thread_id: None,
             new_session: true,
-            semantic_parent_uuid: Some(MessageUuid::from("uuid-parent")),
+            semantic_parent_uuid: Some("uuid-parent".into()),
             text: "branch on new".into(),
             locator_quote: None,
             workdir: None,
@@ -261,5 +277,24 @@ mod tests {
             req.into_target().unwrap_err(),
             SendTargetError::BranchOnNewSession
         );
+    }
+
+    /// The JSON the frontend sends today (omitted optional fields) still
+    /// deserializes: omitted fields default rather than erroring.
+    #[test]
+    fn omitted_optional_fields_default_on_deserialize() {
+        let req: WireCreateSendRequest =
+            serde_json::from_str(r#"{"thread_id":7,"text":"hi"}"#).unwrap();
+        assert_eq!(req.thread_id, Some(7));
+        assert!(!req.new_session);
+        assert_eq!(req.semantic_parent_uuid, None);
+        assert_eq!(req.locator_quote, None);
+        assert_eq!(req.workdir, None);
+
+        let req: WireCreateSendRequest =
+            serde_json::from_str(r#"{"new_session":true,"text":"go","workdir":"/p"}"#).unwrap();
+        assert_eq!(req.thread_id, None);
+        assert!(req.new_session);
+        assert_eq!(req.workdir.as_deref(), Some("/p"));
     }
 }

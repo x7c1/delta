@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Message } from '@delta/model';
+import type { Message } from '@delta/wire-gen';
 import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { blockSummary, stringifyContent } from './blockSummary';

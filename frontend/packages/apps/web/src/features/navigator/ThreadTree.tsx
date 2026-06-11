@@ -1,9 +1,9 @@
 import {
   buildThreadTree,
-  type Thread,
   type ThreadId,
   type ThreadNode,
 } from '@delta/model';
+import type { Thread } from '@delta/wire-gen';
 import { Badge, cn } from '@delta/ui-kit';
 import { useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
@@ -52,7 +52,7 @@ function ThreadTreeNode({
   depth,
   onSelectThread,
 }: {
-  node: ThreadNode;
+  node: ThreadNode<Thread>;
   depth: number;
   onSelectThread: (threadId: ThreadId) => void;
 }) {

@@ -1,19 +1,20 @@
+import type { SessionId, ThreadId } from '@delta/model';
 import type {
+  CreateSendRequest,
   MessagesResponse,
   NewSessionResponse,
   SendRequest,
   SendResponse,
-  SessionId,
   SessionsResponse,
-  ThreadId,
   ThreadsResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
-} from '@delta/model';
+} from '@delta/wire-gen';
 
 /**
  * The single place in the codebase where `fetch` is allowed. All REST calls to
- * the Delta server are confined to this module and return `@delta/model` types.
+ * the Delta server are confined to this module and return the generated
+ * `@delta/wire-gen` types.
  */
 
 export interface ApiClientOptions {
@@ -170,10 +171,13 @@ export class ApiClient {
    * send sets `semantic_parent_uuid` on a {@link SendToThread} target.
    */
   createSend(body: SendRequest): Promise<SendResponse> {
+    // The discriminated SendRequest narrows the flat wire shape; this
+    // annotation keeps the narrowing assignable to the generated contract.
+    const wireBody: CreateSendRequest = body;
     return this.request<SendResponse>('/api/sends', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(wireBody),
     });
   }
 

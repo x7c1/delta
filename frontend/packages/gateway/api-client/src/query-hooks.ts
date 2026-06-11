@@ -7,18 +7,17 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
+import type { SessionId, ThreadId } from '@delta/model';
 import type {
   MessagesResponse,
   NewSessionResponse,
   SendRequest,
   SendResponse,
-  SessionId,
   SessionsResponse,
-  ThreadId,
   ThreadsResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
-} from '@delta/model';
+} from '@delta/wire-gen';
 import type { ApiClient } from './http';
 import { queryKeys } from './query-keys';
 

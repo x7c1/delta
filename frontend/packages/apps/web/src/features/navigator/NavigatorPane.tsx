@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { SessionListItem } from '@delta/model';
+import type { SessionListItem } from '@delta/wire-gen';
 import { Button, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
 import {
   useCloseSessionMutation,

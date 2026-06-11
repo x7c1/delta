@@ -12,7 +12,7 @@ import type {
   ThreadsResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
-} from '@delta/model';
+} from '@delta/wire-gen';
 import {
   MOCK_WORKDIR_HOME,
   recentWorkdirs,

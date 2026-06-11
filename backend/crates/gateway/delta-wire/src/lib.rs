@@ -1,18 +1,33 @@
 //! Browser-facing wire contract.
 //!
-//! This crate owns the JSON shapes the server sends to the browser and the
-//! TypeScript bindings generated from them. The domain layer stays
-//! serialization-free: [`WireSessionEvent`] mirrors the domain
-//! [`SessionEvent`](delta_usecase::SessionEvent) variant-for-variant and is the
-//! only type the WebSocket pump serializes.
+//! This crate owns the JSON shapes the server exchanges with the browser and
+//! the TypeScript bindings generated from them. The domain layer stays
+//! serialization-free: every `Wire*` type here mirrors a domain type
+//! field-for-field (or variant-for-variant) and is the only form the transport
+//! layer serializes.
 //!
-//! The `export-ts` binary (see `src/bin/export_ts.rs`) writes the TypeScript
-//! union and the `EVENT_KINDS` const into the frontend's `@delta/wire-gen`
-//! package, so the browser types can never drift from the Rust contract.
+//! - [`WireSessionEvent`] is the `/ws` stream contract.
+//! - The [`rest`] module owns the `/api/*` request and response shapes,
+//!   composed from the wire twins of the domain records ([`WireSession`],
+//!   [`WireThread`], [`WireMessage`], [`WirePendingSend`], …).
+//!
+//! The `export-ts` binary (see `src/bin/export-ts.rs`) writes the TypeScript
+//! types into the frontend's `@delta/wire-gen` package, so the browser types
+//! can never drift from the Rust contract.
 
+mod content_block;
+pub use content_block::WireContentBlock;
+mod message;
+pub use message::{WireMessage, WireRole};
+mod pending_send;
+pub use pending_send::{WirePendingSend, WirePendingSendStatus};
+pub mod rest;
+mod session;
+pub use session::{WireSession, WireSessionStatus};
 mod session_event;
-
 pub use session_event::{event_kinds, WireSessionEvent};
+mod thread;
+pub use thread::WireThread;
 
 use ts_rs::Config;
 
