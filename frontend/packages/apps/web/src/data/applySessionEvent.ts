@@ -104,5 +104,12 @@ export function applySessionEvent(
     case 'permission_resolved':
       // Pure UI notice (set/cleared); already handled by the store.
       break;
+    case 'spawn_failed':
+      // A freshly-spawned session never bound. Mark the optimistic new-session
+      // chip `failed` so it stops looking stuck and offers Retry / Dismiss. No
+      // session-list refetch: the spawn never registered, so the list never
+      // gained (and so cannot lose) a row for it.
+      store.failSpawn();
+      break;
   }
 }

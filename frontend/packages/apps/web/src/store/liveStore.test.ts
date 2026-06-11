@@ -503,4 +503,155 @@ describe('liveStore.applyEvent', () => {
     });
     expect(useLiveStore.getState().pending).toBe(before);
   });
+
+  it('marks the oldest unbound new-session pending as failed on failSpawn', () => {
+    const store = useLiveStore.getState();
+    // A bound (real-session) pending must be untouched; only the unbound
+    // new-session pending correlates to the failed spawn.
+    store.enqueueSend({
+      localId: 'bound',
+      sendId: 1,
+      sessionId: 'sess-1',
+      threadId: 1,
+      text: 'in a real session',
+      semanticParentUuid: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+    store.enqueueSend({
+      localId: 'spawn',
+      sendId: 2,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'start a new session',
+      semanticParentUuid: null,
+      workdir: '/work/dir',
+      status: 'queued',
+      createdAt: 1,
+    });
+
+    useLiveStore.getState().failSpawn();
+
+    const pending = useLiveStore.getState().pending;
+    expect(pending.find((item) => item.localId === 'spawn')?.status).toBe(
+      'failed',
+    );
+    expect(pending.find((item) => item.localId === 'bound')?.status).toBe(
+      'queued',
+    );
+  });
+
+  it('marks the oldest unbound new-session pending as failed on a spawn_failed event', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'spawn',
+      sendId: 0,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'start a new session',
+      semanticParentUuid: null,
+      workdir: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    // The router (`applySessionEvent`) calls `failSpawn` for a spawn_failed
+    // event; assert the action it routes to produces the failed chip.
+    useLiveStore.getState().failSpawn();
+
+    expect(useLiveStore.getState().pending[0].status).toBe('failed');
+  });
+
+  it('does not drain a failed spawn pending on turn_completed or turn_interrupted', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'spawn',
+      sendId: 0,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'start a new session',
+      semanticParentUuid: null,
+      workdir: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+    useLiveStore.getState().failSpawn();
+
+    // A failed chip is terminal: an unrelated turn ending must not silently
+    // remove it. It survives until the user retries or dismisses it.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-1',
+    });
+
+    const pending = useLiveStore.getState().pending;
+    expect(pending).toHaveLength(1);
+    expect(pending[0].status).toBe('failed');
+  });
+
+  it('does not bind a failed spawn pending to a later registered session', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'spawn',
+      sendId: 0,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'start a new session',
+      semanticParentUuid: null,
+      workdir: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+    useLiveStore.getState().failSpawn();
+
+    // A subsequent successful spawn must not resurrect the failed chip onto a
+    // real session; with no live unbound pending, binding is a no-op.
+    useLiveStore.getState().bindNewSessionPending('sess-9', 99);
+
+    const item = useLiveStore.getState().pending[0];
+    expect(item.status).toBe('failed');
+    expect(item.sessionId).toBeNull();
+  });
+
+  it('marks a second unbound new-session pending failed, skipping the already-failed one', () => {
+    const store = useLiveStore.getState();
+    store.enqueueSend({
+      localId: 'spawn-a',
+      sendId: 0,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'first',
+      semanticParentUuid: null,
+      workdir: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+    store.enqueueSend({
+      localId: 'spawn-b',
+      sendId: 0,
+      sessionId: null,
+      threadId: NEW_SESSION_DRAFT_KEY,
+      text: 'second',
+      semanticParentUuid: null,
+      workdir: null,
+      status: 'queued',
+      createdAt: 1,
+    });
+
+    useLiveStore.getState().failSpawn();
+    useLiveStore.getState().failSpawn();
+
+    const pending = useLiveStore.getState().pending;
+    expect(pending.find((item) => item.localId === 'spawn-a')?.status).toBe(
+      'failed',
+    );
+    expect(pending.find((item) => item.localId === 'spawn-b')?.status).toBe(
+      'failed',
+    );
+  });
 });
