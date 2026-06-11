@@ -456,7 +456,9 @@ export function TranscriptPane({
           </span>
         ) : isOnSubThread ? (
           <Breadcrumb items={breadcrumbItems} />
-        ) : null
+        ) : // `undefined` (not `null`) so Panel drops the header bar entirely:
+        // with nothing to show there is no empty 40px strip above the transcript.
+        undefined
       }
       overlay={
         <>
