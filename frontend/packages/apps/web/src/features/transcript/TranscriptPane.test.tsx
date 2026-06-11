@@ -6,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import {
   act,
@@ -142,6 +143,41 @@ describe('TranscriptPane', () => {
     expect(
       screen.queryByRole('navigation', { name: 'Breadcrumb' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('scrolls the origin chip into view when going up via the breadcrumb', async () => {
+    // jsdom does not implement scrollIntoView; spy on it for the assertion.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    const main = mockThreads.find((t) => t.id === MAIN_THREAD_ID)!;
+    const branch = mockThreads.find((t) => t.id === BRANCH_THREAD_ID)!;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const client = new ApiClient({ baseUrl: 'http://localhost' });
+    const ui = (active: typeof main) => (
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <TranscriptPane threads={mockThreads} activeThread={active} readOnly={false} />
+        </ApiProvider>
+      </QueryClientProvider>
+    );
+
+    // Start drilled into the sub-thread, then click "main" in the breadcrumb.
+    const { rerender } = render(ui(branch));
+    fireEvent.click(await screen.findByRole('button', { name: 'main' }));
+
+    // The workspace reconciles the active thread to main after the click.
+    rerender(ui(main));
+
+    // Once main (and the branch's origin chip) render, that chip — not the
+    // bottom of the parent — is scrolled into view.
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    const target = scrollIntoView.mock.instances[0] as HTMLElement;
+    expect(target.getAttribute('data-child-thread-id')).toBe(
+      String(BRANCH_THREAD_ID),
+    );
   });
 
   it('renders a branch chip where a child thread sprouts', async () => {

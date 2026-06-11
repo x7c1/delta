@@ -165,6 +165,14 @@ export function TranscriptPane({
   const stickRef = useRef(true);
   const prevPendingRef = useRef(pendingCount);
 
+  // When navigating UP to an ancestor via the breadcrumb, this holds the child
+  // thread one level down toward where we were. After the ancestor renders, the
+  // scroll effect brings that child's chip — where the branch sprouts — into
+  // view instead of jumping to the bottom of a possibly long parent.
+  const scrollToChildRef = useRef<ThreadId | null>(null);
+  // The child chip to briefly flash after such a scroll, so the eye catches it.
+  const [flashChildId, setFlashChildId] = useState<ThreadId | null>(null);
+
   // Recompute "is the user near the bottom?" on every scroll so the
   // stick-to-bottom effects know whether to follow new content.
   useLayoutEffect(() => {
@@ -198,8 +206,14 @@ export function TranscriptPane({
   // focused thread, and drop any lingering hover highlight (navigating away via
   // the navigator or breadcrumb does not fire the chip's mouseleave).
   useLayoutEffect(() => {
-    stickRef.current = true;
     setHoveredBranchTitle(null);
+    // A breadcrumb "go up" navigation wants to land on the origin chip, not the
+    // bottom: skip the stick-to-bottom jump and let the scroll effect take over.
+    if (scrollToChildRef.current !== null) {
+      stickRef.current = false;
+      return;
+    }
+    stickRef.current = true;
     const el = bodyRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
@@ -272,13 +286,56 @@ export function TranscriptPane({
     [threads, activeThread],
   );
 
-  // While a sub-thread chip is hovered, mark every occurrence of its text in
-  // the body so it is clear at a glance what that branch was about. Re-run when
-  // content changes (rendered text nodes are recreated) so the marks track
-  // streaming and refetches; clear on leave or unmount.
+  // After a breadcrumb "go up", bring the chip that leads back toward the thread
+  // we left into view and flash it, rather than landing at the bottom of a
+  // possibly long parent. Retries across renders until the ancestor's messages
+  // (and thus the chip) have rendered; clears the request once it lands.
+  useEffect(() => {
+    const childId = scrollToChildRef.current;
+    if (childId === null || !activeThread) {
+      return;
+    }
+    const chip = bodyRef.current?.querySelector(
+      `[data-child-thread-id="${childId}"]`,
+    );
+    if (!chip) {
+      return;
+    }
+    scrollToChildRef.current = null;
+    // Jump instantly (no smooth animation): the flash, not motion, draws the eye.
+    chip.scrollIntoView({ block: 'center' });
+    setFlashChildId(childId);
+  }, [activeThread?.id, renderedMessages, childMap]);
+
+  // Clear the post-navigation chip flash after a moment.
+  useEffect(() => {
+    if (flashChildId === null) {
+      return;
+    }
+    const timer = setTimeout(() => setFlashChildId(null), 1600);
+    return () => clearTimeout(timer);
+  }, [flashChildId]);
+
+  // The branch text to highlight in the body: the hovered chip, or — during the
+  // post-navigation flash — the chip we just scrolled to, so the same "where did
+  // this branch come from" marks appear without needing to hover.
+  const flashTitle = useMemo(
+    () =>
+      flashChildId === null
+        ? null
+        : threads.find((t) => t.id === flashChildId)?.title ?? null,
+    [flashChildId, threads],
+  );
+  const highlightTitle = hoveredBranchTitle ?? flashTitle;
+
+  // While a sub-thread chip is hovered (or just flashed after a breadcrumb "go
+  // up"), mark every occurrence of its text in the body so it is clear at a
+  // glance what that branch was about. Re-run when content changes (rendered
+  // text nodes are recreated) so the marks track streaming and refetches; clear
+  // on leave or unmount.
   useEffect(() => {
     const body = bodyRef.current;
-    if (!body || !hoveredBranchTitle) {
+    if (!body || !highlightTitle) {
       clearBranchHighlight();
       return;
     }
@@ -288,16 +345,23 @@ export function TranscriptPane({
     // highlight.
     const articles = body.querySelectorAll('[data-testid="message-item"]');
     const ranges = Array.from(articles).flatMap((article) =>
-      findAllQuoteRanges(article, hoveredBranchTitle),
+      findAllQuoteRanges(article, highlightTitle),
     );
     setBranchHighlight(ranges);
     return () => clearBranchHighlight();
-  }, [hoveredBranchTitle, messages.length, lastContentLength]);
+  }, [highlightTitle, messages.length, lastContentLength]);
 
-  const breadcrumbItems = ancestry.map((thread) => ({
+  const breadcrumbItems = ancestry.map((thread, index) => ({
     key: thread.id,
     label: thread.title,
-    onClick: () => setActiveThread(thread.id),
+    onClick: () => {
+      // Remember the child one level down toward where we are, so after landing
+      // on this ancestor the scroll effect reveals the chip where that branch
+      // sprouts (a long parent thread otherwise hides where the branch began).
+      const childOnPath = ancestry[index + 1];
+      scrollToChildRef.current = childOnPath ? childOnPath.id : null;
+      setActiveThread(thread.id);
+    },
   }));
 
   // Show the breadcrumb only when the active thread actually has ancestors, i.e.
@@ -463,7 +527,7 @@ export function TranscriptPane({
       // covers the last lines — an accepted trade for zero layout shift.
       // Reserve top space too when the breadcrumb card floats, so the first turn
       // clears it at rest (mirrors the bottom reserve for the composer).
-      bodyClassName={isOnSubThread ? 'pt-14 pb-48' : 'pb-48'}
+      bodyClassName={isOnSubThread ? 'pt-14 pb-56' : 'pb-56'}
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">
@@ -573,28 +637,42 @@ export function TranscriptPane({
             {children.length > 0 && (
               <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">
                 {children.map((child) => (
-                  <Chip
+                  // The wrapper carries the scroll target id so a breadcrumb
+                  // "go up" can bring this chip into view (see scrollToChildRef).
+                  <span
                     key={child.id}
-                    // The chip's clickable pill shape conveys that it enters the
-                    // branch, so no "[enter →]" label is shown. The accessible
-                    // name still says "Enter <title>" for screen readers (and to
-                    // distinguish it from the navigator tree node of the same
-                    // branch).
-                    ariaLabel={`Enter ${child.title}`}
-                    // Clear the hover highlight on click: entering the branch
-                    // does not fire mouseleave, so the mark would otherwise
-                    // linger across the whole child thread.
-                    onClick={() => {
-                      setHoveredBranchTitle(null);
-                      setActiveThread(child.id);
-                    }}
-                    // Hovering the chip marks every occurrence of its text in
-                    // the body, so it is clear what the branch was about.
-                    onMouseEnter={() => setHoveredBranchTitle(child.title)}
-                    onMouseLeave={() => setHoveredBranchTitle(null)}
+                    data-child-thread-id={child.id}
+                    className="inline-flex"
                   >
-                    ⤷ {child.title}
-                  </Chip>
+                    <Chip
+                      // The chip's clickable pill shape conveys that it enters
+                      // the branch, so no "[enter →]" label is shown. The
+                      // accessible name still says "Enter <title>" for screen
+                      // readers (and to distinguish it from the navigator tree
+                      // node of the same branch).
+                      ariaLabel={`Enter ${child.title}`}
+                      // Briefly ring the chip after a breadcrumb "go up" scrolls
+                      // it into view, so the eye catches where the branch began.
+                      className={
+                        flashChildId === child.id
+                          ? 'ring-2 ring-indigo-400 ring-offset-1'
+                          : undefined
+                      }
+                      // Clear the hover highlight on click: entering the branch
+                      // does not fire mouseleave, so the mark would otherwise
+                      // linger across the whole child thread.
+                      onClick={() => {
+                        setHoveredBranchTitle(null);
+                        setActiveThread(child.id);
+                      }}
+                      // Hovering the chip marks every occurrence of its text in
+                      // the body, so it is clear what the branch was about.
+                      onMouseEnter={() => setHoveredBranchTitle(child.title)}
+                      onMouseLeave={() => setHoveredBranchTitle(null)}
+                    >
+                      ⤷ {child.title}
+                    </Chip>
+                  </span>
                 ))}
               </div>
             )}
