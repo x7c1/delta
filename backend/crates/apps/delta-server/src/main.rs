@@ -53,6 +53,7 @@ fn config_from_env() -> Config {
         tmux_socket: std::env::var("DELTA_TMUX_SOCKET")
             .unwrap_or_else(|_| delta_bootstrap::DEFAULT_TMUX_SOCKET.to_owned()),
         port: env_port(),
+        launch: launch_from_env(),
     }
 }
 
@@ -61,4 +62,31 @@ fn env_port() -> u16 {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(7878)
+}
+
+/// Launch overrides from the environment, defaulting to production values.
+///
+/// - `DELTA_CLAUDE_BIN` substitutes the binary launched in each tmux session
+///   (default `claude`). Lets tests and alternative installs supply a stand-in
+///   or an out-of-`PATH` binary; the spawn command line is otherwise identical.
+/// - `DELTA_LAUNCH_DEADLINE_MS` shrinks (or stretches) the launch watchdog —
+///   both the unbound-fresh-spawn deadline and the resume-readiness deadline,
+///   which share the same production value — so a "launch never came up" path
+///   can be exercised quickly under test.
+fn launch_from_env() -> delta_usecase::LaunchConfig {
+    let mut launch = delta_usecase::LaunchConfig::default();
+    if let Ok(bin) = std::env::var("DELTA_CLAUDE_BIN") {
+        if !bin.is_empty() {
+            launch.claude_bin = bin;
+        }
+    }
+    if let Some(deadline) = std::env::var("DELTA_LAUNCH_DEADLINE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+    {
+        launch.pending_spawn_deadline = deadline;
+        launch.resume_ready_deadline = deadline;
+    }
+    launch
 }

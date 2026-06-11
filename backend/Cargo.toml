@@ -18,10 +18,12 @@ tmux-driver = { path = "crates/gateway/tmux-driver" }
 workspace-fs = { path = "crates/gateway/workspace-fs" }
 delta-wire = { path = "crates/gateway/delta-wire" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
+delta-server = { path = "crates/apps/delta-server" }
 
 # Shared third-party dependencies
 anyhow = "1"
 async-trait = "0.1"
+libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
 portable-pty = "0.8"

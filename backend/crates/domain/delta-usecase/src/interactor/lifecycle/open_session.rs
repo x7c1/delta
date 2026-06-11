@@ -8,7 +8,7 @@ use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::Interactor;
 
-use super::{RESUME_FLAG, SESSION_COMMAND, SETTINGS_FLAG};
+use super::{RESUME_FLAG, SETTINGS_FLAG};
 
 impl<T, X, S, W> Interactor<T, X, S, W>
 where
@@ -89,7 +89,7 @@ where
                 .write_session_settings(&self.session_settings_path, &self.session_settings_json)
                 .await?;
             let command = vec![
-                SESSION_COMMAND.to_owned(),
+                self.launch.claude_bin.clone(),
                 SETTINGS_FLAG.to_owned(),
                 self.session_settings_path.clone(),
                 RESUME_FLAG.to_owned(),

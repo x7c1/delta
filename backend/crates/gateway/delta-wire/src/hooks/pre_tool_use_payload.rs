@@ -1,9 +1,9 @@
 //! `PreToolUse` payload.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `PreToolUse` payload.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct PreToolUsePayload {
     pub session_id: String,
     pub tool_name: String,

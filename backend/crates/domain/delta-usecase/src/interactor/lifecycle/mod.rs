@@ -13,9 +13,6 @@ mod workdir_for;
 #[cfg(test)]
 mod tests;
 
-/// The command Delta launches in each tmux session.
-const SESSION_COMMAND: &str = "claude";
-
 /// The `--resume` flag passed to `claude` to reattach to a stored conversation.
 const RESUME_FLAG: &str = "--resume";
 

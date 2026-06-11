@@ -377,21 +377,28 @@ impl OpenSessions {
     /// bound map (its pane is being torn down). Mirrors [`Self::drain_stale_pending`]
     /// for resumes.
     ///
-    /// `now` is injected for deterministic tests. A resume is stale only when it
+    /// `now` is injected for deterministic tests, and `deadline` comes from the
+    /// caller's [`LaunchConfig`] ([`RESUME_READY_DEADLINE`] in production; tests
+    /// may shrink it). A resume is stale only when it
     /// is still not-ready (`ready_at == None`) AND `now - created_at` has reached
-    /// [`RESUME_READY_DEADLINE`]. A resume that became ready (`ready_at == Some`)
+    /// the deadline. A resume that became ready (`ready_at == Some`)
     /// is **not** reaped even past the deadline: it is merely pending dispatch on
     /// the tick (its keystroke is held while it settles past
     /// [`RESUME_DISPATCH_SETTLE`]), so reaping it would kill a healthy resume that
     /// is about to type its first prompt. Such a ready resume leaves the map via
     /// [`Self::drain_ready_for_dispatch`], not here.
-    pub fn drain_stale_resuming(&mut self, now: Instant) -> Vec<(SessionId, ResumingSession)> {
+    ///
+    /// [`LaunchConfig`]: crate::launch_config::LaunchConfig
+    pub fn drain_stale_resuming(
+        &mut self,
+        now: Instant,
+        deadline: Duration,
+    ) -> Vec<(SessionId, ResumingSession)> {
         let stale_ids: Vec<SessionId> = self
             .resuming
             .iter()
             .filter(|(_, r)| {
-                r.ready_at.is_none()
-                    && now.duration_since(r.created_at) >= RESUME_READY_DEADLINE
+                r.ready_at.is_none() && now.duration_since(r.created_at) >= deadline
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -461,15 +468,19 @@ impl OpenSessions {
     /// `now` is supplied by the caller rather than read here so the watchdog is
     /// deterministic under test: a test seeds spawns with controlled
     /// `created_at` values and passes an explicit `now`, instead of depending on
-    /// wall-clock elapsed time. A spawn is stale when `now - created_at` has
-    /// reached [`PENDING_SPAWN_DEADLINE`]. Only spawns still in `pending` are
+    /// wall-clock elapsed time. `deadline` likewise comes from the caller's
+    /// [`LaunchConfig`] ([`PENDING_SPAWN_DEADLINE`] in production; tests may
+    /// shrink it). A spawn is stale when `now - created_at` has
+    /// reached the deadline. Only spawns still in `pending` are
     /// considered: once a spawn binds it is moved out of `pending` into `bound`,
     /// so a bound session is never reaped.
-    pub fn drain_stale_pending(&mut self, now: Instant) -> Vec<PendingSpawn> {
+    ///
+    /// [`LaunchConfig`]: crate::launch_config::LaunchConfig
+    pub fn drain_stale_pending(&mut self, now: Instant, deadline: Duration) -> Vec<PendingSpawn> {
         let mut stale = Vec::new();
         let mut i = 0;
         while i < self.pending.len() {
-            if now.duration_since(self.pending[i].created_at) >= PENDING_SPAWN_DEADLINE {
+            if now.duration_since(self.pending[i].created_at) >= deadline {
                 stale.push(self.pending.remove(i));
             } else {
                 i += 1;

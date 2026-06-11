@@ -52,8 +52,8 @@ where
         let (stale_spawns, stale_resumes) = {
             let mut registry = self.open_sessions.lock().await;
             (
-                registry.drain_stale_pending(now),
-                registry.drain_stale_resuming(now),
+                registry.drain_stale_pending(now, self.launch.pending_spawn_deadline),
+                registry.drain_stale_resuming(now, self.launch.resume_ready_deadline),
             )
         };
         if stale_spawns.is_empty() && stale_resumes.is_empty() {

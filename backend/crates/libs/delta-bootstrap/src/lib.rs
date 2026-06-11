@@ -13,6 +13,11 @@ mod settings;
 pub use error::{Error, Result};
 pub use settings::render_session_settings;
 
+// Re-exported so a binary that only configures the server (a test harness,
+// the `delta-server` main) can name the launch settings without depending on
+// the use-case crate directly.
+pub use delta_usecase::LaunchConfig;
+
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{BoxedInteractor, Interactor};
@@ -47,6 +52,10 @@ pub struct Config {
     pub tmux_socket: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
     pub port: u16,
+    /// How sessions are launched (which binary) and how long the launch
+    /// watchdog waits. Defaults are production values; tests and alternative
+    /// installs override the binary and shrink the deadlines.
+    pub launch: delta_usecase::LaunchConfig,
 }
 
 impl Config {
@@ -91,7 +100,8 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
         config.session_workdir_base.clone(),
         config.session_settings_json(),
         config.session_settings_path(),
-    ))
+    )
+    .with_launch_config(config.launch.clone()))
 }
 
 #[cfg(test)]
@@ -104,6 +114,7 @@ mod tests {
             session_workdir_base: "/tmp/delta-session".into(),
             tmux_socket: DEFAULT_TMUX_SOCKET.into(),
             port: 7878,
+            launch: delta_usecase::LaunchConfig::default(),
         }
     }
 

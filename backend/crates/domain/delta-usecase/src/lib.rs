@@ -10,6 +10,7 @@
 
 mod error;
 mod interactor;
+mod launch_config;
 mod open_sessions;
 mod pane_token;
 mod ports;
@@ -19,6 +20,7 @@ mod session_page;
 
 pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor};
+pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use open_sessions::{OpenHandle, OpenSessions, PendingSpawn};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{

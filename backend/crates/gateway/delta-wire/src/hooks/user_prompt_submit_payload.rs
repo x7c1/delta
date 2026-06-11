@@ -1,9 +1,9 @@
 //! `UserPromptSubmit` payload.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `UserPromptSubmit` payload.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct UserPromptSubmitPayload {
     pub prompt: String,
     pub session_id: String,
