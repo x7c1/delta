@@ -44,11 +44,16 @@ export function PendingQueue({ threadId }: PendingQueueProps) {
             className="flex items-center justify-between gap-2"
             data-testid="pending-item"
           >
-            <span className="truncate text-slate-700">{item.text}</span>
+            <span className="min-w-0 flex-1 truncate text-slate-700">
+              {item.text}
+            </span>
             {item.status === 'in_progress' ? (
-              <Spinner label={STATUS_LABEL[item.status]} />
+              <Spinner className="shrink-0" label={STATUS_LABEL[item.status]} />
             ) : (
-              <Badge tone={item.status === 'failed' ? 'warning' : 'neutral'}>
+              <Badge
+                className="shrink-0"
+                tone={item.status === 'failed' ? 'warning' : 'neutral'}
+              >
                 {STATUS_LABEL[item.status]}
               </Badge>
             )}
