@@ -6,5 +6,8 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../../domain/model" }]
+  "references": [
+    { "path": "../../domain/model" },
+    { "path": "../../gateway/wire-gen" }
+  ]
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@delta/api-mocks",
+  "name": "@delta/wire-gen",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,10 +16,5 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "lint": "eslint ."
-  },
-  "dependencies": {
-    "@delta/model": "workspace:*",
-    "@delta/wire-gen": "workspace:*",
-    "msw": "^2.7.0"
   }
 }

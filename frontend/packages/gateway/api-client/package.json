@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@delta/model": "workspace:*",
+    "@delta/wire-gen": "workspace:*",
     "@tanstack/react-query": "^5.62.7"
   },
   "peerDependencies": {

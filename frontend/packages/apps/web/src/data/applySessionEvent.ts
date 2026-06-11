@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
-import type { SessionEvent, SessionId, ThreadId } from '@delta/model';
+import type { SessionId, ThreadId } from '@delta/model';
+import type { SessionEvent } from '@delta/wire-gen';
 import {
   invalidateSessions,
   invalidateSessionThreads,

@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import type { SessionEvent } from '@delta/model';
+import type { SessionEvent } from '@delta/wire-gen';
 import {
   MOCK_EVENT_CONTROL_KEY,
   MOCK_EVENT_SOURCE_KEY,

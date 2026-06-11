@@ -35,6 +35,9 @@ importers:
       '@delta/ui-kit':
         specifier: workspace:*
         version: link:../../ui/ui-kit
+      '@delta/wire-gen':
+        specifier: workspace:*
+        version: link:../../gateway/wire-gen
       '@tanstack/react-query':
         specifier: ^5.62.7
         version: 5.101.0(react@18.3.1)
@@ -119,6 +122,9 @@ importers:
       '@delta/model':
         specifier: workspace:*
         version: link:../../domain/model
+      '@delta/wire-gen':
+        specifier: workspace:*
+        version: link:../wire-gen
       '@tanstack/react-query':
         specifier: ^5.62.7
         version: 5.101.0(react@18.3.1)
@@ -130,11 +136,16 @@ importers:
         specifier: ^18.3.18
         version: 18.3.30
 
+  packages/gateway/wire-gen: {}
+
   packages/testing/api-mocks:
     dependencies:
       '@delta/model':
         specifier: workspace:*
         version: link:../../domain/model
+      '@delta/wire-gen':
+        specifier: workspace:*
+        version: link:../../gateway/wire-gen
       msw:
         specifier: ^2.7.0
         version: 2.14.6(@types/node@25.9.1)(typescript@5.9.3)

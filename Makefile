@@ -37,6 +37,22 @@ down:
 reset:
 	scripts/dev.sh --reset
 
+# --- Generated code -----------------------------------------------------------
+
+## gen: regenerate the TypeScript wire bindings (@delta/wire-gen) from the Rust wire contract
+.PHONY: gen
+gen:
+	cd backend && cargo run -p delta-wire --bin export-ts
+
+## gen-check: fail when the committed @delta/wire-gen bindings are stale (regenerate + diff)
+.PHONY: gen-check
+gen-check: gen
+	@if [ -n "$$(git status --porcelain -- frontend/packages/gateway/wire-gen)" ]; then \
+		git --no-pager diff -- frontend/packages/gateway/wire-gen; \
+		echo "error: generated wire bindings are stale — run 'make gen' and commit the result"; \
+		exit 1; \
+	fi
+
 # --- Quality gate -------------------------------------------------------------
 
 ## build: build backend and frontend
@@ -57,10 +73,11 @@ lint:
 	cd backend && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — backend build/test/clippy + frontend build/typecheck/test/lint
+## check: full pre-PR gate — backend build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint
 .PHONY: check
 check:
 	cd backend && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
+	$(MAKE) gen-check
 	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)

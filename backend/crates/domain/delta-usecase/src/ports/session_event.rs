@@ -1,12 +1,15 @@
 //! An event the Interactor emits for the browser to render.
 
-use serde::Serialize;
-
 use delta_model::{MessageUuid, SessionId, ThreadId};
 
 /// An event the Interactor emits for the browser to render.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+///
+/// This is the domain view of the event: it carries no serialization
+/// concerns. The JSON put on the WebSocket is defined by its wire twin
+/// (`WireSessionEvent` in the `delta-wire` crate), which mirrors these
+/// variants and owns the `kind`-tagged shape plus the generated TypeScript
+/// bindings.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SessionEvent {
     /// The session was registered (first `UserPromptSubmit`).
     ///
@@ -97,92 +100,4 @@ pub enum SessionEvent {
         session_id: SessionId,
         pane_token: String,
     },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn json(event: &SessionEvent) -> serde_json::Value {
-        serde_json::to_value(event).unwrap()
-    }
-
-    #[test]
-    fn open_and_closed_serialize_as_id_routed_tagged_events() {
-        assert_eq!(
-            json(&SessionEvent::SessionOpened {
-                session_id: SessionId::from("sess-1"),
-            }),
-            serde_json::json!({ "kind": "session_opened", "session_id": "sess-1" }),
-        );
-        assert_eq!(
-            json(&SessionEvent::SessionClosed {
-                session_id: SessionId::from("sess-1"),
-            }),
-            serde_json::json!({ "kind": "session_closed", "session_id": "sess-1" }),
-        );
-    }
-
-    #[test]
-    fn registered_keeps_its_wire_shape() {
-        assert_eq!(
-            json(&SessionEvent::SessionRegistered {
-                session_id: SessionId::from("sess-1"),
-            }),
-            serde_json::json!({ "kind": "session_registered", "session_id": "sess-1" }),
-        );
-    }
-
-    #[test]
-    fn turn_interrupted_serializes_as_id_routed_tagged_event() {
-        assert_eq!(
-            json(&SessionEvent::TurnInterrupted {
-                session_id: SessionId::from("sess-1"),
-            }),
-            serde_json::json!({ "kind": "turn_interrupted", "session_id": "sess-1" }),
-        );
-    }
-
-    #[test]
-    fn spawn_failed_serializes_with_id_and_pane_token() {
-        assert_eq!(
-            json(&SessionEvent::SpawnFailed {
-                session_id: SessionId::from("sess-1"),
-                pane_token: "delta-1".into(),
-            }),
-            serde_json::json!({
-                "kind": "spawn_failed",
-                "session_id": "sess-1",
-                "pane_token": "delta-1",
-            }),
-        );
-    }
-
-    #[test]
-    fn permission_requested_and_resolved_serialize_as_tagged_events() {
-        assert_eq!(
-            json(&SessionEvent::PermissionRequested {
-                session_id: SessionId::from("sess-1"),
-                request_id: 7,
-                tool_name: "Bash".into(),
-            }),
-            serde_json::json!({
-                "kind": "permission_requested",
-                "session_id": "sess-1",
-                "request_id": 7,
-                "tool_name": "Bash",
-            }),
-        );
-        assert_eq!(
-            json(&SessionEvent::PermissionResolved {
-                session_id: SessionId::from("sess-1"),
-                request_id: 7,
-            }),
-            serde_json::json!({
-                "kind": "permission_resolved",
-                "session_id": "sess-1",
-                "request_id": 7,
-            }),
-        );
-    }
 }

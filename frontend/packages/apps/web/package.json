@@ -17,6 +17,7 @@
     "@delta/api-client": "workspace:*",
     "@delta/model": "workspace:*",
     "@delta/ui-kit": "workspace:*",
+    "@delta/wire-gen": "workspace:*",
     "@tanstack/react-query": "^5.62.7",
     "@tanstack/react-virtual": "^3.14.2",
     "@xterm/addon-fit": "^0.10.0",

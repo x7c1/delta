@@ -1,4 +1,4 @@
-import type { SessionEvent } from '@delta/model';
+import { EVENT_KINDS, type SessionEvent } from '@delta/wire-gen';
 
 /**
  * The WebSocket client for the `/ws` live event stream. This is the only place
@@ -23,22 +23,12 @@ export interface SessionEventSource {
   close(): void;
 }
 
-const EVENT_KINDS: ReadonlySet<string> = new Set([
-  'session_registered',
-  'session_opened',
-  'session_closed',
-  'turn_started',
-  'external_input',
-  'turn_completed',
-  'turn_interrupted',
-  'permission_requested',
-  'permission_resolved',
-  'transcript_updated',
-  // Recognised-but-unhandled passthrough: an up-to-date backend emits this when
-  // a new spawn fails to bind. Listed here so its frames are not dropped; UI
-  // handling is a deliberate follow-up.
-  'spawn_failed',
-]);
+/**
+ * The recognised `kind` discriminants, generated from the backend's wire
+ * contract. Frames whose `kind` is not in this set (an older or newer backend)
+ * are dropped without throwing.
+ */
+const KNOWN_KINDS: ReadonlySet<string> = new Set(EVENT_KINDS);
 
 /** Parse a raw text frame into a `SessionEvent`, or `null` if unrecognised. */
 export function parseSessionEvent(data: string): SessionEvent | null {
@@ -53,7 +43,7 @@ export function parseSessionEvent(data: string): SessionEvent | null {
     parsed !== null &&
     'kind' in parsed &&
     typeof (parsed as { kind: unknown }).kind === 'string' &&
-    EVENT_KINDS.has((parsed as { kind: string }).kind)
+    KNOWN_KINDS.has((parsed as { kind: string }).kind)
   ) {
     return parsed as SessionEvent;
   }
