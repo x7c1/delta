@@ -1,3 +1,5 @@
+use delta_model::SessionId;
+
 use crate::interactor::testing::*;
 
 /// The navigator lists sessions most-recently-active first. The sort key is a
@@ -19,6 +21,15 @@ async fn list_sessions_orders_by_most_recent_activity() {
     ix.on_user_prompt_submit(submit_for("sess-quiet", "/tmp/quiet.jsonl", "seed"))
         .await
         .unwrap();
+    // Open each session so the tail (scoped to open sessions) ingests their
+    // seeded transcript growth below; the listing sort itself reads the store
+    // regardless of open/closed.
+    ix.bind_open_session("delta-old", &SessionId::from("sess-old"))
+        .await;
+    ix.bind_open_session("delta-new", &SessionId::from("sess-new"))
+        .await;
+    ix.bind_open_session("delta-quiet", &SessionId::from("sess-quiet"))
+        .await;
 
     // `sess-old` last spoke before the shared registration time; `sess-new`
     // spoke after it. `sess-quiet` has no messages, so it falls back to its

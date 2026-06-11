@@ -16,6 +16,11 @@ use super::support::{closed_session_with_pending_branch, ingested_thread};
 #[tokio::test]
 async fn db_behind_mis_seeds_carry_thread_to_main_for_a_leading_non_user_line() {
     let (ix, id, main, _child) = closed_session_with_pending_branch().await;
+    // Open the session so the tail (scoped to open sessions) ingests the batch
+    // below. The pending branch was written closed only to avoid resuming during
+    // setup; this test drives `poll_transcript` directly to exercise the
+    // `carry_thread` seeding, which is independent of open/closed.
+    ix.bind_open_session("delta-R", &id).await;
 
     // The DB is behind: no user row yet, so the latest user thread is unknown.
     assert!(

@@ -219,6 +219,17 @@ impl OpenSessions {
         self.bound.contains_key(id)
     }
 
+    /// The session ids of every currently-open (live-pane) session, in arbitrary
+    /// order.
+    ///
+    /// Bounds the background transcript tail to the sessions Delta is actively
+    /// running: only those need late-line/interrupt polling, so iterating this
+    /// set instead of the whole store keeps the tail's cost proportional to the
+    /// number of concurrently-open sessions rather than the total history.
+    pub fn open_session_ids(&self) -> Vec<SessionId> {
+        self.bound.keys().cloned().collect()
+    }
+
     /// Bind a freshly-spawned pane to a now-known session id.
     pub fn bind(&mut self, id: SessionId, handle: OpenHandle) {
         self.bound.insert(id, handle);
