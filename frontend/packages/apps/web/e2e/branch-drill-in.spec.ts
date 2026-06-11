@@ -15,9 +15,10 @@ test('clicking a branch chip switches the pane to the branch trunk', async ({
   await useManualEventControl(page);
   await page.goto('/');
 
-  // Start on main: its breadcrumb current location is "main".
+  // Start on main: the breadcrumb is hidden (a lone "main" crumb reads as noise
+  // with no tree to place it in), so there is no current-location marker yet.
   const current = page.locator('[aria-current="page"]');
-  await expect(current).toHaveText('main');
+  await expect(current).toHaveCount(0);
 
   // Drill into the child branch via its in-transcript chip. The chip's visible
   // label is just the title, but its accessible name is "Enter <title>", which
@@ -47,8 +48,10 @@ test('sending a branch from selected text switches the pane to the new branch', 
   await useManualEventControl(page);
   await page.goto('/');
 
+  // On main the breadcrumb is hidden, so there is no current-location marker
+  // until the send drills into the freshly-created child thread.
   const current = page.locator('[aria-current="page"]');
-  await expect(current).toHaveText('main');
+  await expect(current).toHaveCount(0);
 
   // Select a message's text and release the mouse over it, as a user
   // highlighting a passage would — MessageItem reads window.getSelection() on
