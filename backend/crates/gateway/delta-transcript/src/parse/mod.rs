@@ -38,8 +38,15 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         .and_then(|a| a.prompt.clone());
     let is_queued_command = queued_prompt.is_some();
 
+    // `isMeta` lines are harness-injected (skill bodies, system reminders,
+    // local-command output) recorded as `type: "user"` but not human-authored.
+    // Read it before `raw.message` is moved out below.
+    let is_meta = raw.is_meta == Some(true);
+
     let role = if is_queued_command {
         Role::User
+    } else if is_meta {
+        Role::Meta
     } else {
         raw.line_type
             .as_deref()
@@ -129,6 +136,27 @@ mod tests {
         let line = r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"hi"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn meta_user_line_parses_as_meta_role() {
+        // A harness-injected line: recorded as `type: "user"` but flagged
+        // `isMeta`. It must classify as `Role::Meta`, not a human turn.
+        let line = r#"{"uuid":"m1","type":"user","isMeta":true,"message":{"role":"user","content":"<system-reminder>injected body</system-reminder>"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Meta);
+        assert_eq!(
+            msg.flatten_text().as_deref(),
+            Some("<system-reminder>injected body</system-reminder>")
+        );
+        assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn ordinary_user_line_without_meta_is_user_role() {
+        let line = r#"{"uuid":"u3","type":"user","message":{"role":"user","content":"hi"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::User);
     }
 
     #[test]

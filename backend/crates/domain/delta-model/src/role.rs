@@ -11,6 +11,10 @@ pub enum Role {
     User,
     Assistant,
     System,
+    /// A harness-injected line recorded as `type: "user"` but flagged
+    /// `isMeta` (e.g. skill bodies, system reminders, local-command output).
+    /// Not a human-authored turn.
+    Meta,
     /// A transcript line whose kind Delta does not classify (e.g. summaries).
     Other,
 }
@@ -35,6 +39,7 @@ impl Role {
             Role::User => "user",
             Role::Assistant => "assistant",
             Role::System => "system",
+            Role::Meta => "meta",
             Role::Other => "other",
         }
     }
@@ -45,6 +50,7 @@ impl Role {
             "user" => Ok(Role::User),
             "assistant" => Ok(Role::Assistant),
             "system" => Ok(Role::System),
+            "meta" => Ok(Role::Meta),
             "other" => Ok(Role::Other),
             other => Err(Error::InvalidVariant {
                 kind: "Role",
@@ -60,7 +66,13 @@ mod tests {
 
     #[test]
     fn role_round_trips_through_string() {
-        for role in [Role::User, Role::Assistant, Role::System, Role::Other] {
+        for role in [
+            Role::User,
+            Role::Assistant,
+            Role::System,
+            Role::Meta,
+            Role::Other,
+        ] {
             assert_eq!(Role::parse(role.as_str()).unwrap(), role);
         }
     }
