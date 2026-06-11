@@ -432,10 +432,13 @@ export function TranscriptPane({
     );
   }
 
-  // Anchored to the bottom of the body, full width, with an opaque background so
-  // it occludes (rather than blends into) the transcript scrolling beneath it.
+  // A floating card near the bottom of the body: inset from the left, right, and
+  // bottom edges with a full border, rounded corners, and a shadow so it reads as
+  // lifted above (rather than fused to) the transcript. Its opaque background
+  // still occludes the transcript scrolling beneath it. The body reserves a fixed
+  // bottom padding (below) so resting content clears the card.
   const bottomOverlay = bottomContent && (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white px-3 py-2">
+    <div className="pointer-events-auto absolute inset-x-3 bottom-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg">
       {bottomContent}
     </div>
   );
