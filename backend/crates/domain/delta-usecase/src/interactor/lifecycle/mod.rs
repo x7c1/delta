@@ -1,6 +1,7 @@
 //! Session lifecycle use cases: spawn, ensure, resume (open), and close.
 
 mod close_session;
+mod dispatch_ready_resumes;
 mod ensure_session;
 mod mint_free_token;
 mod new_session;

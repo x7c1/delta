@@ -1,6 +1,9 @@
+use std::time::Instant;
+
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
+use crate::open_sessions::RESUME_DISPATCH_SETTLE;
 
 /// `enqueue_send` against a known-but-*closed* session resumes it as part of the
 /// send (the documented "Closed" branch): `ensure_open` finds no live pane, so
@@ -51,11 +54,33 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     );
     assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
 
-    // The session is now open and the message was dispatched into its pane.
+    // The session is open but resumed-but-not-ready, so the first prompt's
+    // keystroke is held — not dispatched within the `enqueue_send` call.
     let pane = ix.pane_for_session(&id).await.expect("now open after send");
+    assert!(
+        ix.tmux_fake().sent.lock().unwrap().is_empty(),
+        "the resume's first prompt is held until SessionStart(resume)"
+    );
+
+    // SessionStart(source=resume) only marks the resume ready (the hook blocks
+    // `claude`, so it must not type the keystroke itself): nothing is dispatched
+    // from the handler.
+    ix.on_session_start(session_start("sess-R", "resume"))
+        .await
+        .unwrap();
+    assert!(
+        ix.tmux_fake().sent.lock().unwrap().is_empty(),
+        "the readiness hook only marks ready; it does not dispatch from the handler"
+    );
+
+    // On the background tick, once the resume has settled, the held prompt is
+    // dispatched into the resumed pane on the normal `send_line` path.
+    ix.dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .await
+        .unwrap();
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(
         sent.iter().any(|(p, t)| p == &pane && t == "after resume"),
-        "the send dispatched into the resumed pane"
+        "the held first prompt dispatched into the resumed pane on the settle tick"
     );
 }

@@ -116,13 +116,26 @@ impl AppState {
     /// assistant reply that Claude Code flushes to the JSONL *after* the `Stop`
     /// hook fires, which the hook sync misses.
     ///
-    /// The same tick also runs the spawn watchdog: it reaps any fresh spawn that
-    /// never bound before its deadline and broadcasts the resulting
-    /// [`SessionEvent::SpawnFailed`]s, so a launch that crashed/hung before its
-    /// first `UserPromptSubmit` can no longer stall the UI on "pending" forever
-    /// (the `SessionEnd` hook catches the exited case immediately; this catches
-    /// the hang-forever case). The reap shares this loop rather than owning a
-    /// second task — both are cheap periodic sweeps over the same registry.
+    /// The same tick also runs two registry sweeps that must execute outside any
+    /// hook handler:
+    ///
+    /// - **Resume dispatch**: types the held first prompt of every resume that
+    ///   `SessionStart(source=resume)` marked ready and that has since settled.
+    ///   The readiness hook only *marks* the resume ready — it cannot type the
+    ///   prompt itself, because that hook blocks `claude` until it returns and a
+    ///   keystroke sent then is lost to a still-blocked TUI. Dispatching here, a
+    ///   beat after the hook returned, lands the keystroke once `claude` is
+    ///   input-ready.
+    /// - **Launch watchdog**: reaps any fresh spawn that never bound, and any
+    ///   resumed session that never became ready, before its deadline —
+    ///   broadcasting the resulting [`SessionEvent::SpawnFailed`]s, so a launch
+    ///   that crashed/hung (a fresh spawn before its first hook, or a
+    ///   `claude --resume` that never reached `SessionStart(resume)`) can no
+    ///   longer stall the UI on "pending" forever (the `SessionEnd` hook catches
+    ///   the exited case immediately; this catches the hang-forever case).
+    ///
+    /// Both sweeps share this loop rather than owning their own tasks — all are
+    /// cheap periodic passes over the same registry.
     ///
     /// The task clones the `Arc`-shared interactor and the broadcast sender, so
     /// it stays alive independently of any request. A poll or reap error is
@@ -135,10 +148,23 @@ impl AppState {
             let mut ticker = tokio::time::interval(TRANSCRIPT_POLL_INTERVAL);
             loop {
                 ticker.tick().await;
-                // Watchdog: reap spawns that never bound before their deadline.
-                // `Instant::now()` is the live clock here; tests drive
-                // `reap_stale_spawns` directly with an injected `now`.
-                match interactor.reap_stale_spawns(std::time::Instant::now()).await {
+                let now = std::time::Instant::now();
+                // Resume dispatch: type the held first prompt of every resume that
+                // `SessionStart(source=resume)` marked ready and that has since
+                // settled. This runs outside the (blocking) SessionStart hook
+                // handler, so by now `claude` has returned from the hook and is
+                // input-ready — the keystroke that would have been lost if typed
+                // inside the handler submits here. `Instant::now()` is the live
+                // clock; tests drive `dispatch_ready_resumes` directly with an
+                // injected `now`.
+                if let Err(err) = interactor.dispatch_ready_resumes(now).await {
+                    tracing::warn!(error = %err, "resume dispatch failed");
+                }
+                // Watchdog: reap fresh spawns that never bound and resumes that
+                // never became ready before their deadlines. `Instant::now()` is
+                // the live clock here; tests drive `reap_stale_spawns` directly
+                // with an injected `now`.
+                match interactor.reap_stale_spawns(now).await {
                     Ok(failed_events) => {
                         for event in failed_events {
                             let _ = events.send(event);

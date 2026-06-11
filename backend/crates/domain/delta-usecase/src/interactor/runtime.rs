@@ -115,4 +115,98 @@ where
             created_at,
         });
     }
+
+    /// Bind a live, ready pane for a session, as if it had been spawned and
+    /// become ready.
+    ///
+    /// Test-only seam: most enqueue/defer tests register `sess-1` then send to
+    /// it, and want it to behave like a normal *open and ready* session (sends
+    /// dispatch immediately). Registering via `on_user_prompt_submit` alone marks
+    /// it known-but-closed, so the next send would resume it and — under the
+    /// readiness gate — hold the first keystroke. This seam binds a ready pane up
+    /// front so those tests exercise the immediate-dispatch path, not the resume
+    /// gate (which has its own focused tests).
+    #[cfg(test)]
+    pub(crate) async fn bind_open_session(&self, token: &str, session_id: &SessionId) {
+        use crate::open_sessions::OpenHandle;
+        use crate::pane_token::PaneToken;
+        use crate::ports::pane_for;
+        self.open_sessions.lock().await.bind(
+            session_id.clone(),
+            OpenHandle {
+                token: PaneToken::from_raw(token),
+                pane: pane_for(token),
+                workdir: "/work".to_owned(),
+            },
+        );
+    }
+
+    /// The session ids currently resuming-but-not-ready, for resume-gate tests.
+    #[cfg(test)]
+    pub(crate) async fn resuming_session_ids(&self) -> Vec<SessionId> {
+        self.open_sessions.lock().await.resuming_session_ids()
+    }
+
+    /// Mark a resuming session ready at an explicit instant, for resume-dispatch
+    /// tests.
+    ///
+    /// Test-only seam mirroring [`Self::push_resuming_at`]: the production
+    /// `ready_at` is `Instant::now()` inside the `SessionStart(resume)` handler,
+    /// which a test cannot wind forwards/backwards. Dispatch-settle tests stamp a
+    /// chosen `ready_at` and then call `dispatch_ready_resumes(now)` with a
+    /// controlled `now`, so the `RESUME_DISPATCH_SETTLE` gate is deterministic.
+    /// Returns whether the id was resuming (the production hook's return).
+    #[cfg(test)]
+    pub(crate) async fn mark_resume_ready_at(
+        &self,
+        id: &SessionId,
+        ready_at: std::time::Instant,
+    ) -> bool {
+        self.open_sessions
+            .lock()
+            .await
+            .mark_resume_ready_at(id, ready_at)
+    }
+
+    /// Record a resuming (not-yet-ready) session with an explicit `created_at`,
+    /// for resume-watchdog tests.
+    ///
+    /// Test-only seam mirroring [`Self::push_pending_spawn_at`]: the production
+    /// `created_at` is `Instant::now()` at resume time, which a test cannot wind
+    /// backwards. Resume-reaper tests push a resuming session stamped at a chosen
+    /// instant and then call `reap_stale_spawns(now)` so the deadline check is
+    /// deterministic.
+    #[cfg(test)]
+    pub(crate) async fn push_resuming_at(
+        &self,
+        token: &str,
+        session_id: &SessionId,
+        held_prompt: Option<String>,
+        created_at: std::time::Instant,
+    ) {
+        use crate::open_sessions::{OpenHandle, ResumingSession};
+        use crate::pane_token::PaneToken;
+        use crate::ports::pane_for;
+        let mut registry = self.open_sessions.lock().await;
+        // A resuming session is also bound (its pane exists), so mirror
+        // production: bind the handle and record the resuming entry together.
+        registry.bind(
+            session_id.clone(),
+            OpenHandle {
+                token: PaneToken::from_raw(token),
+                pane: pane_for(token),
+                workdir: "/work".to_owned(),
+            },
+        );
+        registry.start_resuming(
+            session_id.clone(),
+            ResumingSession {
+                token: PaneToken::from_raw(token),
+                pane: pane_for(token),
+                held_prompt,
+                created_at,
+                ready_at: None,
+            },
+        );
+    }
 }

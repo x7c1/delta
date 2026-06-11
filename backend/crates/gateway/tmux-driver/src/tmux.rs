@@ -7,10 +7,6 @@ use delta_usecase::TmuxDriver;
 
 use crate::error::Error;
 
-/// How long to wait after creating the session before the first keystroke, to
-/// let the Claude TUI finish initializing so the first `send-keys` is not lost.
-const SESSION_SETTLE_DELAY: std::time::Duration = std::time::Duration::from_millis(750);
-
 /// Delta's fixed tmux configuration, loaded via `-f` when Delta's server starts.
 ///
 /// Starting the server with `-f <file>` makes tmux skip the user's
@@ -161,14 +157,15 @@ impl TmuxDriver for Tmux {
             .await
             .map_err(delta_usecase::Error::from)?;
 
-        // Settle delay: immediately after `tmux new-session ... claude`, the
-        // Claude TUI has not finished initializing its terminal, so the very
-        // first `send-keys` can be swallowed. We cannot screen-scrape the TUI to
-        // detect readiness, so we wait a short fixed interval before returning.
-        // This is intentionally on the create path only — reused sessions are
-        // already up and pay no delay. A keystroke that still arrives too early
-        // remains visible/answerable in the embedded terminal.
-        tokio::time::sleep(SESSION_SETTLE_DELAY).await;
+        // No post-launch settle delay. Readiness is now event-driven via the
+        // `SessionStart` hook, which fires when the TUI can actually accept
+        // input, so there is no keystroke to race against `new-session`'s return:
+        // a fresh spawn submits its first prompt as a launch positional argument
+        // (the server never types into a cold pane), and a resume holds its first
+        // keystroke until `SessionStart(source=resume)` arrives — measured ~2s
+        // after launch, far past the 750ms a fixed settle could safely wait. The
+        // 250ms `SUBMIT_ENTER_DELAY` in `send_line` is unrelated (it spaces the
+        // submit Enter past Claude's paste-burst window) and stays.
         Ok(())
     }
 

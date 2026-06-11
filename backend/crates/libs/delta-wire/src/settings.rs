@@ -1,8 +1,12 @@
 //! Rendering the Claude Code session settings JSON.
 //!
-//! The session needs native HTTP hooks pointing back at this server so Delta
-//! receives `UserPromptSubmit`, `Stop`, `PreToolUse`, `PermissionRequest`, and
-//! `SessionEnd` callbacks. The server
+//! The session needs hooks pointing back at this server so Delta receives
+//! `UserPromptSubmit`, `Stop`, `PreToolUse`, `PermissionRequest`, `SessionStart`,
+//! and `SessionEnd` callbacks. Most are native `http` hooks; `SessionStart` is
+//! the exception — Claude Code does NOT deliver `SessionStart` to `http` hooks
+//! (verified empirically: every other event arrives over http, `SessionStart`
+//! never does), so it is rendered as a `command` hook that `curl`s the same
+//! server endpoint. The server
 //! renders these settings itself (rather than copying a static template) so the
 //! hook URLs always match the port the server is actually listening on — there
 //! is no second source of truth to drift out of sync. The rendered JSON is
@@ -19,6 +23,26 @@ pub fn render_session_settings(port: u16) -> String {
         json!({
             "hooks": [
                 { "type": "http", "url": url(path), "timeout": 30 }
+            ]
+        })
+    };
+    // `SessionStart` is delivered only to `command` hooks (Claude Code does not
+    // POST it to `http` hooks), so this one forwards the hook's stdin JSON to the
+    // same server endpoint with `curl`. `-o /dev/null` discards the server's
+    // response so it is never fed back to Claude as hook output; `-m 5` bounds
+    // startup if the server is somehow unreachable; the `content-type` header
+    // lets the server's JSON extractor parse the body.
+    let command_post_hook = |path: &str| {
+        json!({
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": format!(
+                        "curl -sS -m 5 -o /dev/null -X POST {} \
+                         -H 'content-type: application/json' --data-binary @-",
+                        url(path)
+                    )
+                }
             ]
         })
     };
@@ -43,10 +67,20 @@ pub fn render_session_settings(port: u16) -> String {
             // the signal for "a human answer is genuinely pending". PreToolUse
             // fires for every call and only records the request.
             "PermissionRequest": [http_hook("permission-request")],
+            // SessionStart fires when a session's TUI is ready to accept input
+            // (source=startup on a fresh launch, source=resume after
+            // `claude --resume`). It is Delta's launch-readiness signal: it binds
+            // a fresh spawn immediately (even a prompt-less one) and releases a
+            // resumed session's held first prompt once the cold pane can accept
+            // it — replacing the old fixed post-launch settle. It MUST be a
+            // `command` hook (curl): Claude Code does not deliver SessionStart to
+            // `http` hooks, so an http hook here would never fire and a resumed
+            // session's held first prompt would never be released.
+            "SessionStart": [command_post_hook("session-start")],
             // SessionEnd fires when a session terminates. It is the precise early
-            // failure signal for a fresh spawn that exited before its first
-            // UserPromptSubmit ever bound it: that launch failed, so Delta reaps
-            // it immediately instead of waiting out the watchdog deadline.
+            // failure signal for a launch (fresh spawn or resume) that exited
+            // before it became ready: that launch failed, so Delta reaps it
+            // immediately instead of waiting out the watchdog deadline.
             "SessionEnd": [http_hook("session-end")],
         }
     });
@@ -84,6 +118,21 @@ mod tests {
             parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["url"],
             "http://127.0.0.1:9999/hooks/permission-request"
         );
+        // SessionStart is a `command` hook (Claude Code does not deliver it over
+        // http), curling the same server endpoint and forwarding the stdin
+        // payload. The server's response is discarded so it is not fed back to
+        // Claude as hook output.
+        assert_eq!(
+            parsed["hooks"]["SessionStart"][0]["hooks"][0]["type"],
+            "command"
+        );
+        let session_start_command = parsed["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(session_start_command.contains("http://127.0.0.1:9999/hooks/session-start"));
+        assert!(session_start_command.contains("--data-binary @-"));
+        assert!(session_start_command.contains("-o /dev/null"));
+
         assert_eq!(
             parsed["hooks"]["SessionEnd"][0]["hooks"][0]["url"],
             "http://127.0.0.1:9999/hooks/session-end"

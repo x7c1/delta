@@ -25,6 +25,8 @@ mod pre_tool_use_payload;
 pub use pre_tool_use_payload::PreToolUsePayload;
 mod session_end_payload;
 pub use session_end_payload::SessionEndPayload;
+mod session_start_payload;
+pub use session_start_payload::SessionStartPayload;
 mod stop_payload;
 pub use stop_payload::StopPayload;
 mod user_prompt_submit_payload;
@@ -37,7 +39,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 
-use delta_usecase::{SessionEndHook, SessionId, StopHook, UserPromptSubmitHook};
+use delta_usecase::{
+    SessionEndHook, SessionId, SessionStartHook, StopHook, UserPromptSubmitHook,
+};
 
 use crate::state::AppState;
 
@@ -132,6 +136,31 @@ pub async fn session_end(
     };
 
     match state.interactor().on_session_end(hook).await {
+        Ok(events) => {
+            state.broadcast(events);
+            StatusCode::OK.into_response()
+        }
+        Err(err) => internal_error(err).into_response(),
+    }
+}
+
+/// Handle a `SessionStart` hook: the session's TUI is ready to accept input.
+/// On `source=startup` it binds and registers a matching fresh spawn (even a
+/// prompt-less one); on `source=resume` it releases the held first prompt of a
+/// resumed session; `clear`/`compact` are safe no-ops. Broadcasts whatever
+/// events the bind produced (typically `SessionRegistered`).
+pub async fn session_start(
+    State(state): State<AppState>,
+    Json(payload): Json<SessionStartPayload>,
+) -> impl IntoResponse {
+    let hook = SessionStartHook {
+        session_id: SessionId::from(payload.session_id),
+        source: payload.source,
+        cwd: payload.cwd,
+        transcript_path: payload.transcript_path,
+    };
+
+    match state.interactor().on_session_start(hook).await {
         Ok(events) => {
             state.broadcast(events);
             StatusCode::OK.into_response()

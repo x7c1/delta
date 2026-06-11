@@ -40,15 +40,14 @@ where
     /// is already safe. Returns the minted token.
     ///
     /// The registry lock is taken only for the brief record/rollback steps, never
-    /// across the tmux/workspace I/O (which includes the create-session settle
-    /// delay), so a spawn does not serialize concurrent registry readers (hooks,
-    /// the PTY bridge) for the whole spawn duration. The `PendingSpawn` is
-    /// recorded *before* `create_session` launches `claude`, so the
-    /// `UserPromptSubmit` that the launch-submitted prompt triggers always finds a
-    /// spawn to bind rather than racing ahead and being misread as external input.
-    /// With the prompt on the command line the hook fires very soon after launch,
-    /// so this pre-launch ordering — not any delay inside `create_session` — is
-    /// what guarantees the spawn record already exists when the hook arrives. A
+    /// across the tmux/workspace I/O, so a spawn does not serialize concurrent
+    /// registry readers (hooks, the PTY bridge) for the whole spawn duration. The
+    /// `PendingSpawn` is recorded *before* `create_session` launches `claude`, so
+    /// the `UserPromptSubmit` (or `SessionStart`) that the launch triggers always
+    /// finds a spawn to bind rather than racing ahead and being misread as
+    /// external input. With the prompt on the command line the hook fires very
+    /// soon after launch, so this pre-launch ordering is what guarantees the spawn
+    /// record already exists when the hook arrives. A
     /// failed `create_session` rolls the just-recorded pending back, so no
     /// dangling spawn is left behind.
     ///

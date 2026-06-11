@@ -26,6 +26,7 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
@@ -147,7 +148,7 @@ impl Workspace for NoopWorkspace {
 
 /// Assemble the app with test-wired gateways and return the router plus the
 /// fake tmux driver (for asserting keystroke dispatch) and the transcript path.
-fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf) {
+fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
     let transcript_file = tempfile::Builder::new()
         .prefix("delta-e2e-transcript-")
         .suffix(".jsonl")
@@ -171,7 +172,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf) {
     );
 
     let state = AppState::from_interactor(interactor, "delta-e2e");
-    (router(state), tmux, transcript_path)
+    (router(state.clone()), tmux, transcript_path, state)
 }
 
 async fn post_json(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
@@ -212,7 +213,7 @@ async fn json_response(response: axum::response::Response) -> (StatusCode, Value
 
 #[tokio::test]
 async fn drives_session_send_and_turn_correlation_end_to_end() {
-    let (app, tmux, transcript_path) = build_app();
+    let (app, tmux, transcript_path, state) = build_app();
     let transcript_str = transcript_path.to_str().unwrap().to_owned();
     let session_id = "sess-e2e";
 
@@ -289,8 +290,52 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     assert_eq!(body["send"]["status"], "pending");
     assert_eq!(body["send"]["thread_id"].as_i64(), Some(main_thread_id));
     let pending_send_id = body["send"]["id"].as_i64().expect("pending send id");
-    // The send was dispatched into the (fake) tmux pane.
-    assert_eq!(tmux.sent.load(Ordering::SeqCst), 1);
+    // The session was hook-registered (closed), so this send resumed it via
+    // `claude --resume`. A resumed session holds its first prompt until its
+    // `SessionStart(source=resume)` readiness hook arrives, so the keystroke has
+    // NOT been dispatched yet.
+    assert_eq!(
+        tmux.sent.load(Ordering::SeqCst),
+        0,
+        "the resume's first prompt is held until SessionStart(resume)"
+    );
+
+    // Feed the readiness hook. SessionStart(source=resume) blocks `claude` until
+    // its handler returns, so the handler only *marks* the resume ready — it does
+    // NOT type the held prompt (a keystroke sent from inside the hook would be
+    // lost to a still-blocked TUI). So nothing is dispatched yet.
+    let (status, _) = post_json(
+        &app,
+        "/hooks/session-start",
+        json!({
+            "session_id": session_id,
+            "source": "resume",
+            "transcript_path": transcript_str,
+            "cwd": "/work/delta",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        tmux.sent.load(Ordering::SeqCst),
+        0,
+        "the readiness hook only marks ready; it does not dispatch from the handler"
+    );
+
+    // The held first prompt is dispatched on the background tick, a beat after the
+    // hook returned and `claude` is input-ready. Drive that tick directly with a
+    // `now` past the dispatch settle (the server loop normally calls this with
+    // `Instant::now()`); the keystroke now lands on the normal `send_line` path.
+    state
+        .interactor()
+        .dispatch_ready_resumes(Instant::now() + Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        tmux.sent.load(Ordering::SeqCst),
+        1,
+        "the held first prompt dispatched on the settle tick once the resume was ready"
+    );
 
     // 4. The session emits the corresponding transcript line. Append it so the
     //    correlation can find the matched uuid.
@@ -427,7 +472,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
 /// carries no persisted row yet (the real one is written when the spawn binds).
 #[tokio::test]
 async fn new_session_send_spawns_and_defers_first_prompt() {
-    let (app, tmux, transcript_path) = build_app();
+    let (app, tmux, transcript_path, _state) = build_app();
 
     let (status, body) = post_json(
         &app,
@@ -468,7 +513,7 @@ async fn new_session_send_spawns_and_defers_first_prompt() {
 /// A send that names neither a thread nor a new session is a malformed request.
 #[tokio::test]
 async fn send_without_a_target_is_bad_request() {
-    let (app, _tmux, transcript_path) = build_app();
+    let (app, _tmux, transcript_path, _state) = build_app();
 
     let (status, _) = post_json(&app, "/api/sends", json!({ "text": "no target" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -478,7 +523,7 @@ async fn send_without_a_target_is_bad_request() {
 
 #[tokio::test]
 async fn create_session_endpoint_reports_starting_then_ready() {
-    let (app, tmux, transcript_path) = build_app();
+    let (app, tmux, transcript_path, _state) = build_app();
 
     // No session exists yet, so the first POST /api/sessions spawns one and the
     // route serializes the lifecycle as "starting".

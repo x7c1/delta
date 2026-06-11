@@ -9,6 +9,10 @@ async fn failed_dispatch_rolls_back_pending_send_and_returns_error() {
     let ix = interactor_with_failing_tmux();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
+    // Bind a live, ready pane so the send dispatches immediately on the normal
+    // path (and fails there) rather than resuming the session — the resume gate
+    // would hold the keystroke and no dispatch error would surface.
+    ix.bind_open_session("delta-seed", &session).await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     // The dispatch fails, so the use case must surface the tmux error...

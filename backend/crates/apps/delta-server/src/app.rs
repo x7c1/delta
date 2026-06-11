@@ -19,6 +19,9 @@ pub fn router(state: AppState) -> Router {
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
         // Interactive permission dialog appeared (a human answer is pending).
         .route("/hooks/permission-request", post(hooks::permission_request))
+        // A session's TUI became ready (launch-readiness signal): binds a fresh
+        // spawn on startup, releases the held first prompt on resume.
+        .route("/hooks/session-start", post(hooks::session_start))
         // A session terminated; used to catch a spawn that died before binding.
         .route("/hooks/session-end", post(hooks::session_end))
         // Browser REST surface: queries and commands.
@@ -222,6 +225,33 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/hooks/pre-tool-use")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn session_start_hook_returns_ok() {
+        // A SessionStart for a session that is neither a pending spawn nor a
+        // resuming session is a safe no-op: the handler emits nothing and
+        // returns 200. (clear/compact and unknown ids take the same path.)
+        let body = serde_json::json!({
+            "session_id": "sess-1",
+            "source": "startup",
+            "transcript_path": "/tmp/does-not-exist.jsonl",
+            "cwd": "/work"
+        })
+        .to_string();
+
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/session-start")
                     .header("content-type", "application/json")
                     .body(Body::from(body))
                     .unwrap(),
