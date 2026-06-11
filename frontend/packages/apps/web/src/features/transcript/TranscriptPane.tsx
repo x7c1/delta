@@ -300,11 +300,11 @@ export function TranscriptPane({
     onClick: () => setActiveThread(thread.id),
   }));
 
-  // Until the session has branched, the breadcrumb is a lone "main" that reads
-  // as abrupt noise — there is no tree to place it in. Show it only once a
-  // sub-thread exists (a sub-thread is any thread with a parent), matching the
-  // navigator, which hides the standalone main node under the same condition.
-  const hasSubThreads = threads.some((t) => t.parent_thread_id !== null);
+  // Show the breadcrumb only when the active thread actually has ancestors, i.e.
+  // you are drilled into a sub-thread (ancestry is [main › … › current]). On the
+  // main thread the ancestry is just [main], a lone crumb that reads as abrupt
+  // noise — so it stays hidden even when the session has branched elsewhere.
+  const isOnSubThread = ancestry.length > 1;
 
   const showExternalInput =
     !newSession &&
@@ -454,9 +454,11 @@ export function TranscriptPane({
           <span className="text-sm font-semibold text-slate-700">
             New session
           </span>
-        ) : hasSubThreads ? (
+        ) : isOnSubThread ? (
           <Breadcrumb items={breadcrumbItems} />
-        ) : null
+        ) : // `undefined` (not `null`) so Panel drops the header bar entirely:
+        // with nothing to show there is no empty 40px strip above the transcript.
+        undefined
       }
       overlay={
         <>

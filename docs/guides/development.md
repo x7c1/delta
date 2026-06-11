@@ -87,9 +87,23 @@ from built output), then run the suite with `make e2e` — Playwright starts the
 mock-mode dev server itself.
 
 The suite puts the fake event source under manual control (no auto-replay) and
-feeds events explicitly, so every run is fast and deterministic. If the bundled
-Chromium does not target your OS, run against a locally installed Google Chrome
-instead: `E2E_CHROME_CHANNEL=chrome pnpm --filter @delta/web e2e`.
+feeds events explicitly, so every run is fast and deterministic.
+
+`make e2e` runs isolated: it pins a dedicated mock-server port (`E2E_PORT=5199`)
+so it cannot collide with a dev server on the default 5173, and the suite starts
+its own mock-mode build every run (it never reuses an already-running server).
+That last part matters — a live `make dev` server (real backend, tmux +
+`claude`) is indistinguishable from the suite's own mock build at the port, so
+adopting it would drive that **live session, sending real prompts to your real
+`claude`**. Hence the suite never reuses by default.
+
+For fast iteration you can reuse an already-running mock server (e.g. `make
+mock`) instead of spawning a fresh one per run: set `E2E_REUSE=1` and point the
+suite at that server's port — only ever a mock server, never `make dev`:
+
+```bash
+E2E_REUSE=1 E2E_PORT=5173 make e2e
+```
 
 ### Run the UI against the real backend
 

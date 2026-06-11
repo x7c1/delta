@@ -16,11 +16,6 @@ import { defineConfig, devices } from '@playwright/test';
 // the wrong, non-mock server).
 const PORT = Number(process.env.E2E_PORT ?? 5173);
 
-// CI installs and runs Playwright's bundled Chromium. On a dev machine whose OS
-// the bundled build does not target, set E2E_CHROME_CHANNEL=chrome to run the
-// same suite against a locally installed Google Chrome instead.
-const channel = process.env.E2E_CHROME_CHANNEL;
-
 export default defineConfig({
   testDir: './e2e',
   // Deterministic mock mode: fail fast on any flake rather than masking it.
@@ -35,14 +30,19 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], ...(channel ? { channel } : {}) },
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
   webServer: {
     command: `pnpm exec vite --port ${PORT} --strictPort`,
     env: { VITE_API_MOCK: '1' },
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    // Default to a fresh server every run so a stray process on the port is
+    // never adopted — in particular a live `make dev` (real backend) on 5173,
+    // which the suite cannot tell apart from its own mock build and would
+    // otherwise drive, sending real prompts to `claude`. Opt back in with
+    // E2E_REUSE=1 to reuse an already-running mock server for fast iteration.
+    reuseExistingServer: process.env.E2E_REUSE === '1',
     timeout: 120_000,
   },
 });
