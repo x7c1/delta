@@ -302,7 +302,8 @@ export function TranscriptPane({
       return;
     }
     scrollToChildRef.current = null;
-    chip.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Jump instantly (no smooth animation): the flash, not motion, draws the eye.
+    chip.scrollIntoView({ block: 'center' });
     setFlashChildId(childId);
   }, [activeThread?.id, renderedMessages, childMap]);
 
