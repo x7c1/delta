@@ -527,7 +527,7 @@ export function TranscriptPane({
       // covers the last lines — an accepted trade for zero layout shift.
       // Reserve top space too when the breadcrumb card floats, so the first turn
       // clears it at rest (mirrors the bottom reserve for the composer).
-      bodyClassName={isOnSubThread ? 'pt-14 pb-60' : 'pb-60'}
+      bodyClassName={isOnSubThread ? 'pt-14 pb-56' : 'pb-56'}
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">
