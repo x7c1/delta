@@ -1,0 +1,49 @@
+import { expect, type Page } from '@playwright/test';
+
+/**
+ * Fake-mode end-to-end support helpers.
+ *
+ * Each spec drives the real app against the real backend; the only scripted
+ * part is the `fake-claude` binary the backend spawns. The backend's wrapper
+ * script points `FAKE_CLAUDE_SCENARIO_DIR` at this suite's `scenarios/`
+ * directory, and the fake selects `<dir>/<first word of the first prompt>.json`
+ * — so the scenario a session follows is chosen by the first prompt each spec
+ * sends. Keep the first word of every spec's first prompt equal to a scenario
+ * file name.
+ */
+
+/**
+ * Start a new session whose first prompt is `prompt` (its first word selects
+ * the fake scenario): enter the new-session flow, choose the current directory
+ * in the picker, and send.
+ *
+ * Two entry states exist. On a cold, empty database the app lands directly in
+ * the new-session state with the (mandatory) picker already open — clicking
+ * "New" would be blocked by the modal backdrop. With existing sessions, "New"
+ * (re)starts the flow and opens the picker. The app's settled state is
+ * detected by which signal renders first: an existing session node, or the
+ * cold-start new-session placeholder.
+ */
+export async function startNewSession(page: Page, prompt: string): Promise<void> {
+  const newSessionEmpty = page.getByTestId('new-session-empty');
+  await expect(
+    page.getByTestId('session-node').first().or(newSessionEmpty),
+  ).toBeVisible();
+  if (!(await newSessionEmpty.isVisible())) {
+    await page.getByRole('button', { name: 'New', exact: true }).click();
+  }
+
+  await expect(page.getByTestId('workdir-picker')).toBeVisible();
+  await page.getByTestId('workdir-use-current').click();
+  await page.getByTestId('workdir-confirm').click();
+  await expect(newSessionEmpty).toBeVisible();
+
+  await page.getByRole('textbox').fill(prompt);
+  await page.getByRole('button', { name: 'Send' }).click();
+}
+
+/** Send a follow-up message into the focused (already started) session. */
+export async function sendMessage(page: Page, text: string): Promise<void> {
+  await page.getByRole('textbox').fill(text);
+  await page.getByRole('button', { name: 'Send' }).click();
+}

@@ -1,0 +1,8 @@
+{
+  "loop": true,
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "scripted reply" },
+    { "type": "stop" }
+  ]
+}

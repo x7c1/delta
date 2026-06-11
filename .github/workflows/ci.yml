@@ -31,6 +31,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # The fake-claude full-loop integration test drives a real tmux server;
+      # it skips silently where tmux is absent, so install tmux explicitly to
+      # guarantee CI always exercises it.
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
       - name: Build
         run: cargo build --locked
 
@@ -96,3 +102,58 @@ jobs:
 
       - name: E2E (mock mode)
         run: pnpm --filter @delta/web e2e
+
+  # Fake-mode e2e: the real backend + tmux with the scripted fake-claude
+  # binary behind it, driven by the browser. Complements (never replaces) the
+  # mock-mode e2e job above: that one isolates the frontend, this one proves
+  # the full loop (REST → spawn → tmux → hooks → transcript → tail → WS).
+  e2e-fake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tmux
+        run: sudo apt-get update && sudo apt-get install -y tmux
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('backend/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      # The Vite dev server the suite boots resolves the workspace libraries
+      # from their build output.
+      - name: Build frontend workspace libraries
+        run: pnpm -r build
+        working-directory: frontend
+
+      - name: Install Playwright browser
+        run: pnpm --filter @delta/web exec playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: E2E (fake mode)
+        run: make e2e-fake
