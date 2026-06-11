@@ -5,5 +5,6 @@ mod on_stop_routes_sync_by_hook_session_id;
 mod permission_request_correlates_and_notifies;
 mod pre_tool_use_records_request_without_notifying;
 mod submit_registers_each_session_id_independently;
+mod task_notification_prompt_is_not_external_input;
 mod unknown_session_without_pending_spawn_registers_external_closed;
 mod unmatched_prompt_is_external_input;

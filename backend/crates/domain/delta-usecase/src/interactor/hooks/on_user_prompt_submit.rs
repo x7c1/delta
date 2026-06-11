@@ -6,6 +6,11 @@ use crate::Interactor;
 
 use super::match_uuid_for_prompt;
 
+/// Prompt prefix Claude Code uses when it injects a background-task
+/// completion notification. Such a submission is a harness injection, not a
+/// human typing into the pane, so it must not be reported as external input.
+const TASK_NOTIFICATION_PREFIX: &str = "<task-notification>";
+
 impl<T, X, S, W> Interactor<T, X, S, W>
 where
     T: TmuxDriver,
@@ -29,7 +34,9 @@ where
     /// line to its queued send. A [`SessionEvent::TurnStarted`] is emitted when
     /// the user line for this prompt was attributed in this sync; otherwise the
     /// later `TurnCompleted` triggers the UI refetch. [`SessionEvent::ExternalInput`]
-    /// is emitted only when no queued send matched this prompt at all.
+    /// is emitted only when no queued send matched this prompt at all — except
+    /// for harness-injected task-notification prompts, which also match no send
+    /// but are not pane typing, so they are suppressed.
     ///
     /// Returns the events to broadcast and, when a locator quote should be
     /// injected, the `additionalContext` string for the hook response.
@@ -94,11 +101,16 @@ where
                 }
             }
             None => {
-                // No queued send matched this prompt at all: external input.
-                events.push(SessionEvent::ExternalInput {
-                    session_id: hook.session_id.clone(),
-                    prompt: hook.prompt.clone(),
-                });
+                // No queued send matched this prompt. A background-task
+                // notification is injected by the harness as a prompt
+                // submission, not typed into the pane, so it must not surface as
+                // external input.
+                if !hook.prompt.trim_start().starts_with(TASK_NOTIFICATION_PREFIX) {
+                    events.push(SessionEvent::ExternalInput {
+                        session_id: hook.session_id.clone(),
+                        prompt: hook.prompt.clone(),
+                    });
+                }
             }
         }
 
