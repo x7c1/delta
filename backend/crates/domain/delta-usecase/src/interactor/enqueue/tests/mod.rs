@@ -1,8 +1,12 @@
 //! Enqueue use-case tests.
 
 mod branch_send_creates_child_thread;
+mod branch_send_mid_turn_is_deferred_then_dispatched_on_stop;
 mod branch_send_titles_child_from_locator_quote;
 mod branch_send_to_unknown_thread_is_thread_not_found;
+mod branch_send_while_idle_dispatches_immediately;
+mod deferred_branch_send_dispatches_after_interrupt;
+mod plain_send_mid_turn_is_not_deferred;
 mod composer_first_send_defers_first_prompt_until_bind;
 mod composer_first_send_rolls_back_pending_spawn_on_dispatch_failure;
 mod enqueue_send_resumes_a_closed_session_then_dispatches;

@@ -25,6 +25,15 @@ where
         locator_quote: Option<&str>,
         branch_from: Option<&MessageUuid>,
     ) -> Result<PendingSend> {
+        // Idle-flush safety net: if the session is idle but a send is still
+        // `deferred` (a dispatch trigger was missed, e.g. an interrupt the tail
+        // had not tailed yet), release it now so it keeps its place ahead of
+        // this new send in FIFO order. Dispatching it sets the turn flag, which
+        // the defer check below then observes.
+        if !self.store.is_turn_active(session_id).await? {
+            self.dispatch_deferred_send(session_id).await?;
+        }
+
         // The target thread was already loaded by the caller to derive the
         // session, so its existence is established here (a stale/wrong id surfaced
         // as `ThreadNotFound` before reaching this point).
@@ -43,6 +52,28 @@ where
             }
             None => (thread_id, None),
         };
+
+        // Defer this send when a turn is in flight AND it carries thread context
+        // (a branch entry or a locator quote). Dispatching mid-turn would make
+        // Claude Code queue it, and a queued prompt fires no `UserPromptSubmit`
+        // hook — so its locator quote would never be injected. Instead record it
+        // as `deferred` (the branch child thread and the queued text persist) and
+        // let the turn-end triggers dispatch it as an ordinary prompt once idle.
+        // Plain main-line sends are not deferred: they need no quote, so Claude's
+        // own mid-turn queueing is harmless for them.
+        let carries_context = branch_from.is_some() || locator_quote.is_some();
+        if carries_context && self.store.is_turn_active(session_id).await? {
+            return self
+                .store
+                .enqueue_deferred_send(
+                    session_id,
+                    target_thread,
+                    semantic_parent.as_ref(),
+                    text,
+                    locator_quote,
+                )
+                .await;
+        }
 
         let pending = self
             .store
@@ -70,6 +101,9 @@ where
             let _ = self.store.cancel_send(pending.id).await;
             return Err(dispatch_err);
         }
+        // The send is on its way: mark the turn in flight so a following
+        // branch/quoted send defers behind it instead of dispatching mid-turn.
+        self.store.set_turn_active(session_id, true).await?;
         Ok(pending)
     }
 }

@@ -24,6 +24,7 @@ pub(crate) struct FakeStoreInner {
     pub(crate) permissions: Vec<PermissionRequest>,
     pub(crate) next_perm_id: i64,
     pub(crate) transcript_lines_read: HashMap<SessionId, usize>,
+    pub(crate) turn_active: HashMap<SessionId, bool>,
 }
 
 #[derive(Default)]
@@ -248,6 +249,68 @@ impl SessionStore for FakeStore {
         };
         g.sends.push(send.clone());
         Ok(send)
+    }
+
+    async fn enqueue_deferred_send(
+        &self,
+        session_id: &SessionId,
+        thread_id: ThreadId,
+        semantic_parent_uuid: Option<&MessageUuid>,
+        text: &str,
+        locator_quote: Option<&str>,
+    ) -> Result<PendingSend> {
+        let mut g = self.inner.lock().unwrap();
+        g.next_send_id += 1;
+        let send = PendingSend {
+            id: g.next_send_id,
+            session_id: session_id.clone(),
+            thread_id,
+            semantic_parent_uuid: semantic_parent_uuid.cloned(),
+            text: text.to_owned(),
+            locator_quote: locator_quote.map(str::to_owned),
+            status: PendingSendStatus::Deferred,
+            matched_uuid: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        g.sends.push(send.clone());
+        Ok(send)
+    }
+
+    async fn next_deferred_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.sends
+            .iter()
+            .filter(|s| &s.session_id == session_id && s.status == PendingSendStatus::Deferred)
+            .min_by_key(|s| s.id)
+            .cloned())
+    }
+
+    async fn promote_deferred_send(&self, id: i64) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
+            s.status = PendingSendStatus::Pending;
+        }
+        Ok(())
+    }
+
+    async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool> {
+        Ok(self
+            .inner
+            .lock()
+            .unwrap()
+            .turn_active
+            .get(session_id)
+            .copied()
+            .unwrap_or(false))
+    }
+
+    async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()> {
+        self.inner
+            .lock()
+            .unwrap()
+            .turn_active
+            .insert(session_id.clone(), active);
+        Ok(())
     }
 
     async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
