@@ -34,6 +34,10 @@ const EVENT_KINDS: ReadonlySet<string> = new Set([
   'permission_requested',
   'permission_resolved',
   'transcript_updated',
+  // Recognised-but-unhandled passthrough: an up-to-date backend emits this when
+  // a new spawn fails to bind. Listed here so its frames are not dropped; UI
+  // handling is a deliberate follow-up.
+  'spawn_failed',
 ]);
 
 /** Parse a raw text frame into a `SessionEvent`, or `null` if unrecognised. */

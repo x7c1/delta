@@ -23,6 +23,14 @@ impl PaneToken {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Construct a token from a raw session name, for tests that seed the
+    /// registry directly (the watchdog tests push a pending spawn whose token a
+    /// production minter would otherwise own).
+    #[cfg(test)]
+    pub(crate) fn from_raw(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
 }
 
 impl std::fmt::Display for PaneToken {

@@ -81,6 +81,25 @@ export interface TranscriptUpdatedEvent {
   thread_ids: ThreadId[];
 }
 
+/**
+ * A freshly-spawned session failed to come up: its launch ended (or hung) before
+ * it ever registered, so it never bound to a live session. The backend emits
+ * this from the `SessionEnd` hook (the launch exited while still unbound) or
+ * from the watchdog reaper (the spawn outlived its deadline without binding), so
+ * a new session can no longer stall on "pending" forever with no error. Carries
+ * the minted `session_id` to correlate with the optimistic pending chip and the
+ * `pane_token` of the torn-down tmux session.
+ *
+ * NOTE: this is currently a passthrough-only event — recognised and parsed so an
+ * up-to-date backend does not get its frames dropped, but not yet rendered. The
+ * failed-chip UI is a deliberate follow-up.
+ */
+export interface SpawnFailedEvent {
+  kind: 'spawn_failed';
+  session_id: SessionId;
+  pane_token: string;
+}
+
 export type SessionEvent =
   | SessionRegisteredEvent
   | SessionOpenedEvent
@@ -91,6 +110,7 @@ export type SessionEvent =
   | TurnInterruptedEvent
   | PermissionRequestedEvent
   | PermissionResolvedEvent
-  | TranscriptUpdatedEvent;
+  | TranscriptUpdatedEvent
+  | SpawnFailedEvent;
 
 export type SessionEventKind = SessionEvent['kind'];

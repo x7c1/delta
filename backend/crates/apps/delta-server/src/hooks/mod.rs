@@ -14,11 +14,17 @@
 //! - `PermissionRequest` fires only when an interactive permission dialog
 //!   actually appears (a human answer is genuinely pending); Delta notifies the
 //!   browser, correlating it to the request recorded at `PreToolUse`.
+//! - `SessionEnd` fires when a session terminates. Delta uses it as a precise
+//!   early failure signal: if the ending session is a fresh spawn that never
+//!   bound, the launch failed, so Delta reports `SpawnFailed`; an already-bound
+//!   session ending is a normal end and changes nothing.
 
 mod permission_request_payload;
 pub use permission_request_payload::PermissionRequestPayload;
 mod pre_tool_use_payload;
 pub use pre_tool_use_payload::PreToolUsePayload;
+mod session_end_payload;
+pub use session_end_payload::SessionEndPayload;
 mod stop_payload;
 pub use stop_payload::StopPayload;
 mod user_prompt_submit_payload;
@@ -31,7 +37,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 
-use delta_usecase::{SessionId, StopHook, UserPromptSubmitHook};
+use delta_usecase::{SessionEndHook, SessionId, StopHook, UserPromptSubmitHook};
 
 use crate::state::AppState;
 
@@ -104,6 +110,28 @@ pub async fn permission_request(
         .on_permission_request(&session_id, &payload.tool_name, &tool_input_json)
         .await
     {
+        Ok(events) => {
+            state.broadcast(events);
+            StatusCode::OK.into_response()
+        }
+        Err(err) => internal_error(err).into_response(),
+    }
+}
+
+/// Handle a `SessionEnd` hook: a session has terminated. When that session is a
+/// fresh spawn that never bound, the launch failed before it could register, so
+/// the use case removes it and emits `SpawnFailed`; an already-bound session
+/// ending is a normal end and emits nothing.
+pub async fn session_end(
+    State(state): State<AppState>,
+    Json(payload): Json<SessionEndPayload>,
+) -> impl IntoResponse {
+    let hook = SessionEndHook {
+        session_id: SessionId::from(payload.session_id),
+        reason: payload.reason,
+    };
+
+    match state.interactor().on_session_end(hook).await {
         Ok(events) => {
             state.broadcast(events);
             StatusCode::OK.into_response()

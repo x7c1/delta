@@ -89,4 +89,30 @@ where
     pub(crate) async fn pending_session_ids(&self) -> Vec<SessionId> {
         self.open_sessions.lock().await.pending_session_ids()
     }
+
+    /// Record a pending spawn with an explicit `created_at`, for watchdog tests.
+    ///
+    /// Test-only seam: the production `created_at` is `Instant::now()` at spawn
+    /// time, which a test cannot wind backwards. Reaper tests instead push a
+    /// spawn stamped at a chosen instant (e.g. `now - 31s`) and then call
+    /// `reap_stale_spawns(now)` so the deadline check is fully deterministic.
+    #[cfg(test)]
+    pub(crate) async fn push_pending_spawn_at(
+        &self,
+        token: &str,
+        session_id: &SessionId,
+        created_at: std::time::Instant,
+    ) {
+        use crate::open_sessions::PendingSpawn;
+        use crate::pane_token::PaneToken;
+        use crate::ports::pane_for;
+        self.open_sessions.lock().await.push_pending(PendingSpawn {
+            token: PaneToken::from_raw(token),
+            pane: pane_for(token),
+            session_id: session_id.clone(),
+            workdir: "/work".to_owned(),
+            first_prompt: None,
+            created_at,
+        });
+    }
 }
