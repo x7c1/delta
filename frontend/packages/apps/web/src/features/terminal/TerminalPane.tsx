@@ -176,15 +176,17 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
 
   const term = new Terminal({
     convertEol: true,
-    // A bare `monospace` resolves to a Latin-only face (e.g. DejaVu Sans Mono),
-    // so CJK glyphs fall back to whatever the browser picks — often a
-    // *proportional* CJK face that draws punctuation (`、` U+3001 / `。` U+3002)
-    // shoved into the left of the full-width cell instead of centered. Naming an
-    // explicit *monospaced* CJK face keeps Latin on the preferred mono face
-    // while CJK punctuation lands centered in its cell. The list degrades across
-    // OSes (Linux Noto, macOS Hiragino) before the generic `monospace`.
+    // font-family falls back per character, so the list must lead with a
+    // *monospaced* Latin face for each OS — otherwise Latin glyphs themselves
+    // fall through to the CJK face below, and when that face is *proportional*
+    // (macOS `Hiragino Sans`) the variable-width letters get crammed into
+    // xterm's fixed cells and the whole grid looks ragged. With a real mono
+    // face first (macOS `Menlo`, Windows `Consolas`, Linux `DejaVu Sans Mono`),
+    // Latin stays monospaced and only CJK drops to the explicit mono CJK face
+    // (`Noto Sans Mono CJK JP`) or `Hiragino Sans`, where full-width punctuation
+    // (`、` U+3001 / `。` U+3002) still lands centered in its cell.
     fontFamily:
-      "'DejaVu Sans Mono', 'Noto Sans Mono CJK JP', 'Hiragino Sans', monospace",
+      "Menlo, Consolas, 'DejaVu Sans Mono', 'Noto Sans Mono CJK JP', 'Hiragino Sans', monospace",
     fontSize: 13,
     theme: { background: '#0f172a' },
     // `term.unicode` is a proposed API that the Unicode 11 addon touches, so it
