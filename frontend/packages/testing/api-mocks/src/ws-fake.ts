@@ -1,4 +1,4 @@
-import type { SessionEvent } from '@delta/model';
+import type { SessionEvent } from '@delta/wire-gen';
 import { SESSION_ID, SESSION_ID_2 } from './fixtures';
 
 /**

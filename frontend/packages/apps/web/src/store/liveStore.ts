@@ -1,10 +1,6 @@
 import { create } from 'zustand';
-import type {
-  MessageUuid,
-  SessionEvent,
-  SessionId,
-  ThreadId,
-} from '@delta/model';
+import type { MessageUuid, SessionId, ThreadId } from '@delta/model';
+import type { SessionEvent } from '@delta/wire-gen';
 import type { ConnectionStatus } from '@delta/api-client';
 
 /**

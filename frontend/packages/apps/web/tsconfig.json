@@ -12,6 +12,7 @@
     { "path": "../../domain/model" },
     { "path": "../../ui/ui-kit" },
     { "path": "../../gateway/api-client" },
+    { "path": "../../gateway/wire-gen" },
     { "path": "../../testing/api-mocks" }
   ]
 }

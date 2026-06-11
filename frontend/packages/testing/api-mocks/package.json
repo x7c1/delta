@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@delta/model": "workspace:*",
+    "@delta/wire-gen": "workspace:*",
     "msw": "^2.7.0"
   }
 }

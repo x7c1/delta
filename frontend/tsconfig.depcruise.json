@@ -7,6 +7,7 @@
       "@delta/model": ["packages/domain/model/src/index.ts"],
       "@delta/ui-kit": ["packages/ui/ui-kit/src/index.ts"],
       "@delta/api-client": ["packages/gateway/api-client/src/index.ts"],
+      "@delta/wire-gen": ["packages/gateway/wire-gen/src/index.ts"],
       "@delta/api-mocks": ["packages/testing/api-mocks/src/index.ts"]
     }
   }

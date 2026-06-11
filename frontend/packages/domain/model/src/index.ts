@@ -47,16 +47,3 @@ export type {
   RecentWorkdirItem,
   WorkdirRecentResponse,
 } from './responses';
-export type {
-  SessionRegisteredEvent,
-  SessionOpenedEvent,
-  SessionClosedEvent,
-  TurnStartedEvent,
-  ExternalInputEvent,
-  TurnCompletedEvent,
-  PermissionRequestedEvent,
-  TranscriptUpdatedEvent,
-  SpawnFailedEvent,
-  SessionEvent,
-  SessionEventKind,
-} from './session-event';

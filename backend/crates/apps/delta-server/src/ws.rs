@@ -1,14 +1,19 @@
 //! Browser event WebSocket.
 //!
 //! Each connected browser subscribes to the process-wide event stream and
-//! receives JSON-encoded [`SessionEvent`]s: session registered, opened, closed,
+//! receives JSON-encoded session events: session registered, opened, closed,
 //! turn started, external input, turn completed, transcript updated, and
 //! permission requested. Every event is id-routed by `session_id`; focus is
 //! purely client-side, so there is no server-side focus event.
+//!
+//! Domain [`SessionEvent`](delta_usecase::SessionEvent)s are converted to
+//! their wire twin [`WireSessionEvent`] at this boundary; the wire crate owns
+//! the JSON shape and the TypeScript bindings generated from it.
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::IntoResponse;
+use delta_wire::WireSessionEvent;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::state::AppState;
@@ -26,7 +31,7 @@ async fn pump_events(mut socket: WebSocket, state: AppState) {
     loop {
         match rx.recv().await {
             Ok(event) => {
-                let payload = match serde_json::to_string(&event) {
+                let payload = match serde_json::to_string(&WireSessionEvent::from(event)) {
                     Ok(json) => json,
                     Err(err) => {
                         tracing::error!(error = %err, "failed to encode session event");

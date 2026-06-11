@@ -8,5 +8,5 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
-  "references": [{ "path": "../../domain/model" }]
+  "references": [{ "path": "../../domain/model" }, { "path": "../wire-gen" }]
 }

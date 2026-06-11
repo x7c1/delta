@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionEvent } from '@delta/model';
+import type { SessionEvent } from '@delta/wire-gen';
 import { FakeEventSource } from './ws-fake';
 
 describe('FakeEventSource', () => {
