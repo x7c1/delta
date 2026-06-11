@@ -16,11 +16,6 @@ import { defineConfig, devices } from '@playwright/test';
 // the wrong, non-mock server).
 const PORT = Number(process.env.E2E_PORT ?? 5173);
 
-// CI installs and runs Playwright's bundled Chromium. On a dev machine whose OS
-// the bundled build does not target, set E2E_CHROME_CHANNEL=chrome to run the
-// same suite against a locally installed Google Chrome instead.
-const channel = process.env.E2E_CHROME_CHANNEL;
-
 export default defineConfig({
   testDir: './e2e',
   // Deterministic mock mode: fail fast on any flake rather than masking it.
@@ -35,7 +30,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], ...(channel ? { channel } : {}) },
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
   webServer: {
