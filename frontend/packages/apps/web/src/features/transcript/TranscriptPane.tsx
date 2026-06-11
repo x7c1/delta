@@ -432,11 +432,24 @@ export function TranscriptPane({
     );
   }
 
-  // Anchored to the bottom of the body, full width, with an opaque background so
-  // it occludes (rather than blends into) the transcript scrolling beneath it.
+  // A floating card near the bottom of the body: inset from the left, right, and
+  // bottom edges with a full border, rounded corners, and a shadow so it reads as
+  // lifted above (rather than fused to) the transcript. Its opaque background
+  // still occludes the transcript scrolling beneath it. The body reserves a fixed
+  // bottom padding (below) so resting content clears the card.
   const bottomOverlay = bottomContent && (
-    <div className="pointer-events-auto absolute inset-x-0 bottom-0 border-t border-slate-200 bg-white px-3 py-2">
+    <div className="pointer-events-auto absolute inset-x-3 bottom-3 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-md">
       {bottomContent}
+    </div>
+  );
+
+  // The breadcrumb gets the same floating-card treatment as the composer, pinned
+  // at the top-left and hugging its own width (rather than a full-width header
+  // bar). It floats over the transcript; the body reserves a fixed top padding
+  // (below) so the first turn is not hidden behind it at rest.
+  const breadcrumbOverlay = isOnSubThread && (
+    <div className="pointer-events-auto absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-md border border-slate-200 bg-white px-3 py-1.5 shadow-md">
+      <Breadcrumb items={breadcrumbItems} />
     </div>
   );
 
@@ -448,20 +461,22 @@ export function TranscriptPane({
       // it never changes, so the composer growing or a banner appearing cannot
       // shift the transcript. When the overlay does grow past this, it briefly
       // covers the last lines — an accepted trade for zero layout shift.
-      bodyClassName="pb-48"
+      // Reserve top space too when the breadcrumb card floats, so the first turn
+      // clears it at rest (mirrors the bottom reserve for the composer).
+      bodyClassName={isOnSubThread ? 'pt-14 pb-48' : 'pb-48'}
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">
             New session
           </span>
-        ) : isOnSubThread ? (
-          <Breadcrumb items={breadcrumbItems} />
-        ) : // `undefined` (not `null`) so Panel drops the header bar entirely:
-        // with nothing to show there is no empty 40px strip above the transcript.
+        ) : // `undefined` (not `null`) so Panel drops the header bar entirely. The
+        // breadcrumb is rendered as a floating card via `overlay` instead, and on
+        // the main thread there is nothing to show — no empty strip above.
         undefined
       }
       overlay={
         <>
+          {breadcrumbOverlay}
           {permissionOverlay}
           {bottomOverlay}
         </>
