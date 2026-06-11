@@ -119,6 +119,15 @@ async fn run_bridge(socket: WebSocket, pane: String, tmux_socket: &str) -> anyho
     cmd.arg("attach-session");
     cmd.arg("-t");
     cmd.arg(&pane);
+    // Pin the attach client's TERM instead of inheriting the server's. The
+    // terminal on the other side of this PTY is always the browser's xterm.js
+    // (an xterm-compatible emulator), so xterm-256color describes it correctly
+    // no matter how the server was launched. Inheriting breaks headless
+    // launches (CI runners, service managers) where TERM is unset or `dumb`:
+    // tmux then refuses the attach ("open terminal failed: terminal does not
+    // support clear") and exits at once, leaving the bridge writing keystrokes
+    // into a dead client.
+    cmd.env("TERM", "xterm-256color");
     let mut child = pair.slave.spawn_command(cmd)?;
 
     // The blocking PTY reader/writer halves run on dedicated threads; bytes are

@@ -25,13 +25,22 @@ test('pressing Escape in the embedded terminal drains the stuck pending chip', a
   await expect(page.getByTestId('message-item')).toHaveCount(2);
   await expect(pending).toHaveCount(1);
 
-  // Open the embedded terminal and land Escape in the fake's stdin. The PTY
-  // attach is asynchronous with no observable "attached" signal in the DOM, so
-  // the press is retried until its observable effect (the chip draining)
-  // lands; extra Escapes are harmless, exactly as in the real TUI.
+  // Open the embedded terminal. The attach itself is observable: once the
+  // bridge's `tmux attach` client is connected, tmux redraws the pane into the
+  // browser terminal, and the fake's banner ends with an identifying line that
+  // sits on the cursor row — always in view however small the fitted viewport
+  // is. Asserting it first makes an attach failure (e.g. the bridge client
+  // dying at startup) fail HERE with a clear message, instead of below as an
+  // opaque Escape-retry timeout.
   await page.getByRole('button', { name: 'Terminal', exact: true }).click();
   const xtermInput = page.locator('.xterm-helper-textarea');
   await expect(xtermInput).toBeAttached();
+  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+
+  // Land Escape in the fake's stdin. The redraw above proves the attach, but
+  // input still crosses the WS bridge and tmux asynchronously, so the press is
+  // retried until its observable effect (the chip draining) lands; extra
+  // Escapes are harmless, exactly as in the real TUI.
   await expect(async () => {
     await xtermInput.focus();
     await xtermInput.press('Escape');
