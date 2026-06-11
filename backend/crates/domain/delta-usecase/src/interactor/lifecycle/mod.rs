@@ -6,6 +6,7 @@ mod mint_free_token;
 mod new_session;
 mod open_session;
 mod reap_stale_spawns;
+mod release_resumed_first_prompt;
 mod spawn_fresh;
 mod workdir_for;
 

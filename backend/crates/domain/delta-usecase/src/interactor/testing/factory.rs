@@ -63,13 +63,19 @@ pub(crate) fn interactor_with_failing_create_session(
 
 // Helper accessors used only in tests to reach into the fakes the interactor owns.
 impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
-    /// Register `sess-1` and return it to idle.
+    /// Register `sess-1` as an open, ready, idle session.
     ///
     /// Fires the first `UserPromptSubmit` (which registers the session) and then
     /// a `Stop`, so the registration turn completes and `turn_active` is clear.
     /// A bare `UserPromptSubmit` marks the turn in flight, so tests that go on to
     /// dispatch a branch/quoted send must start from an idle session — otherwise
     /// that send would be deferred behind the still-open registration turn.
+    ///
+    /// It also binds a live, ready pane for `sess-1`, so a following send
+    /// dispatches immediately on the normal path rather than resuming the session
+    /// (which, under the readiness gate, would hold the first keystroke). The
+    /// resume gate has its own focused tests; the defer/enqueue tests want a
+    /// plain open session.
     pub(crate) async fn seed_session(&self) {
         self.on_user_prompt_submit(super::submit("seed"))
             .await
@@ -80,6 +86,8 @@ impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
         })
         .await
         .unwrap();
+        self.bind_open_session("delta-seed", &delta_model::SessionId::from("sess-1"))
+            .await;
     }
 
     pub(crate) fn transcript_fake(&self) -> &FakeTranscript {

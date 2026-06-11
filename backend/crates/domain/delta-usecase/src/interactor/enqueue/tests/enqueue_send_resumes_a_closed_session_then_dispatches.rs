@@ -51,11 +51,22 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     );
     assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
 
-    // The session is now open and the message was dispatched into its pane.
+    // The session is open but resumed-but-not-ready, so the first prompt's
+    // keystroke is held — not dispatched within the `enqueue_send` call.
     let pane = ix.pane_for_session(&id).await.expect("now open after send");
+    assert!(
+        ix.tmux_fake().sent.lock().unwrap().is_empty(),
+        "the resume's first prompt is held until SessionStart(resume)"
+    );
+
+    // SessionStart(source=resume) releases the held prompt: it now dispatches
+    // into the resumed pane on the normal `send_line` path.
+    ix.on_session_start(session_start("sess-R", "resume"))
+        .await
+        .unwrap();
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(
         sent.iter().any(|(p, t)| p == &pane && t == "after resume"),
-        "the send dispatched into the resumed pane"
+        "the held first prompt dispatched into the resumed pane on readiness"
     );
 }

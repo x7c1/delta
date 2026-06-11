@@ -1,7 +1,9 @@
+use std::time::Instant;
+
 use delta_model::SessionId;
 
 use crate::error::{Error, Result};
-use crate::open_sessions::OpenHandle;
+use crate::open_sessions::{OpenHandle, ResumingSession};
 use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::Interactor;
@@ -23,6 +25,20 @@ where
     /// <id>` in the stored cwd, and binds the new pane to `id` immediately.
     /// Resuming an already-open session is a no-op
     /// that returns the existing handle's token (the double-open guard).
+    ///
+    /// It does **not** dispatch the first prompt here. `claude --resume` needs a
+    /// couple of seconds to replay the transcript before its TUI can accept input
+    /// — far longer than any safe fixed settle — so the resumed pane is recorded
+    /// as not-yet-ready ([`OpenSessions::start_resuming`]) and the caller's first
+    /// keystroke is held by `enqueue_into_open` until the resume's
+    /// `SessionStart(source=resume)` fires, at which point
+    /// `release_resumed_first_prompt` types it on the normal path. This closes the
+    /// stall where the first keystroke landed before the cold pane was ready and
+    /// was silently lost (no `UserPromptSubmit`, stuck "pending" forever). A
+    /// resume that never becomes ready is failed by the watchdog (see
+    /// [`Self::reap_stale_spawns`]).
+    ///
+    /// [`OpenSessions::start_resuming`]: crate::open_sessions::OpenSessions::start_resuming
     ///
     /// Before returning, the existing transcript is synced so the DB's message
     /// rows and read cursor catch up to whatever Claude Code already wrote for
@@ -86,8 +102,25 @@ where
                 id.clone(),
                 OpenHandle {
                     token: token.clone(),
-                    pane,
+                    pane: pane.clone(),
                     workdir,
+                },
+            );
+            // Record the resume as not-yet-ready: the pane is bound, but the
+            // first prompt is held until `SessionStart(source=resume)` confirms
+            // the cold TUI can accept input. `enqueue_into_open` parks the
+            // keystroke here (via `hold_first_prompt`) and
+            // `release_resumed_first_prompt` dispatches it on readiness; the
+            // watchdog fails the resume if readiness never arrives. A resume with
+            // no following send leaves `held_prompt` `None` — readiness just
+            // clears the gate.
+            registry.start_resuming(
+                id.clone(),
+                ResumingSession {
+                    token: token.clone(),
+                    pane,
+                    held_prompt: None,
+                    created_at: Instant::now(),
                 },
             );
             token

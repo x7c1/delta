@@ -10,6 +10,8 @@ mod new_session;
 pub use new_session::NewSession;
 mod session_end_hook;
 pub use session_end_hook::SessionEndHook;
+mod session_start_hook;
+pub use session_start_hook::SessionStartHook;
 mod session_event;
 pub use session_event::SessionEvent;
 mod session_lifecycle;

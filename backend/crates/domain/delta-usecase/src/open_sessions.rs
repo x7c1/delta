@@ -26,6 +26,34 @@ use crate::pane_token::PaneToken;
 /// coarse backstop for the hang-forever case the hook cannot observe.
 pub const PENDING_SPAWN_DEADLINE: Duration = Duration::from_secs(30);
 
+/// How long a resumed session may sit not-ready before the watchdog fails it.
+///
+/// `claude --resume <id>` is event-driven: Delta binds the pane immediately but
+/// holds the first prompt until the session's `SessionStart` (`source=resume`)
+/// hook signals the TUI is ready to accept input (measured ~2s after launch on
+/// a healthy resume). If that hook never arrives — the resume crashed, hung on
+/// auth, or failed to replay its transcript after the existence gate — nothing
+/// else would release the held prompt and the UI is stuck "pending" forever.
+/// This deadline is the backstop: a resume still not-ready past it is failed
+/// (pane killed, held prompt cancelled, `SpawnFailed` emitted). It is set
+/// generously above the observed readiness latency so a slow-but-healthy resume
+/// always becomes ready first via the hook. The `SessionEnd` hook is the precise
+/// early signal for an exited resume; this is the coarse backstop for the
+/// hang-forever case the hook cannot observe. Mirrors [`PENDING_SPAWN_DEADLINE`]
+/// for fresh spawns.
+pub const RESUME_READY_DEADLINE: Duration = Duration::from_secs(30);
+
+/// The result of an idempotent [`OpenSessions::bind_pending_spawn`] that
+/// actually performed a bind, carrying the just-bound spawn's deferred first
+/// prompt so the caller can write its `pending_send` row now that the session
+/// id is known.
+#[derive(Debug, Clone)]
+pub struct BindOutcome {
+    /// The deferred first send held on the spawn, if it was a composer-initiated
+    /// New; `None` for a prompt-less plain spawn.
+    pub first_prompt: Option<String>,
+}
+
 /// A live, bound session: its Claude `session_id` is known and it is mapped to
 /// the tmux pane driving it.
 #[derive(Debug, Clone)]
@@ -77,6 +105,35 @@ pub struct PendingSpawn {
     pub created_at: Instant,
 }
 
+/// A resumed-but-not-yet-ready session: its pane is bound, but its first prompt
+/// is held until the resume's `SessionStart` (`source=resume`) hook arrives.
+///
+/// Unlike a fresh spawn, a resume's `session_id` is known up front, so the pane
+/// binds immediately in [`OpenSessions::bound`]. But `claude --resume` needs a
+/// couple of seconds to replay the transcript and make its TUI input ready, far
+/// longer than any fixed settle could safely cover. So Delta does not type the
+/// first prompt at resume time; it records the resume here and dispatches the
+/// held keystroke only once `SessionStart(source=resume)` confirms readiness.
+/// The `pending_send` row for that first prompt is written normally (its thread,
+/// branch, and locator-quote semantics are persisted up front) — only the
+/// physical keystroke is held.
+#[derive(Debug, Clone)]
+pub struct ResumingSession {
+    /// The Delta-minted tmux session name backing the resumed pane, killed by
+    /// the watchdog if the resume never becomes ready.
+    pub token: PaneToken,
+    /// The pane the held first prompt is dispatched into once ready.
+    pub pane: String,
+    /// The held first prompt's keystroke text, if a send is waiting on this
+    /// resume's readiness. A resume opened with no immediate send (e.g. an
+    /// explicit `open_session` with no following dispatch) carries `None`.
+    pub held_prompt: Option<String>,
+    /// When the resume was recorded, for the readiness watchdog deadline. Like
+    /// [`PendingSpawn::created_at`] this is a monotonic `Instant`, so the
+    /// deadline check is immune to system-clock changes.
+    pub created_at: Instant,
+}
+
 /// The in-memory map of live panes.
 ///
 /// Held behind a mutex by the interactor. Rebuilt empty on every boot.
@@ -86,6 +143,16 @@ pub struct OpenSessions {
     bound: HashMap<SessionId, OpenHandle>,
     /// Spawned panes awaiting their first `UserPromptSubmit` to learn the id.
     pending: Vec<PendingSpawn>,
+    /// Resumed sessions awaiting their `SessionStart(source=resume)` before the
+    /// held first prompt is dispatched, keyed by the (already-known) session id.
+    ///
+    /// A session is in this map exactly while it is resumed-but-not-ready: it is
+    /// inserted by `open_session`, removed when `SessionStart(source=resume)`
+    /// marks it ready (the held prompt is dispatched then), and drained by the
+    /// watchdog if its readiness deadline passes. Membership here is the "not
+    /// ready yet, hold sends" flag; absence means the session is ready and sends
+    /// dispatch immediately.
+    resuming: HashMap<SessionId, ResumingSession>,
 }
 
 impl OpenSessions {
@@ -109,6 +176,110 @@ impl OpenSessions {
     /// Bind a freshly-spawned pane to a now-known session id.
     pub fn bind(&mut self, id: SessionId, handle: OpenHandle) {
         self.bound.insert(id, handle);
+    }
+
+    /// Idempotently bind the pending spawn matching `id`, returning its deferred
+    /// first prompt when it was bound by *this* call.
+    ///
+    /// This is the single, order-independent binding step shared by the two
+    /// signals that can register a fresh spawn — `SessionStart(source=startup)`
+    /// and the first `UserPromptSubmit`. Whichever arrives first moves the
+    /// matching [`PendingSpawn`] `pending → bound[id]` and yields its
+    /// `first_prompt` (so the caller can write the deferred `pending_send`);
+    /// whichever arrives second finds no pending spawn for `id`, so it returns
+    /// `None` and the already-bound session is left untouched. The boolean
+    /// distinguishes the two outcomes for the caller:
+    ///
+    /// - `Some(BindOutcome { first_prompt, .. })` — this call performed the bind.
+    /// - `None` — already bound by a prior call (or no such pending spawn at
+    ///   all); a no-op.
+    pub fn bind_pending_spawn(&mut self, id: &SessionId) -> Option<BindOutcome> {
+        let spawn = self.take_pending_for_session(id)?;
+        let first_prompt = spawn.first_prompt;
+        self.bind(
+            id.clone(),
+            OpenHandle {
+                token: spawn.token,
+                pane: spawn.pane,
+                workdir: spawn.workdir,
+            },
+        );
+        Some(BindOutcome { first_prompt })
+    }
+
+    /// Record a resumed session whose first prompt is held until its
+    /// `SessionStart(source=resume)` arrives. The pane is already bound; this
+    /// only tracks the not-ready state and the held keystroke for the watchdog.
+    pub fn start_resuming(&mut self, id: SessionId, resuming: ResumingSession) {
+        self.resuming.insert(id, resuming);
+    }
+
+    /// Whether a session is resumed but not yet ready (its first prompt is held).
+    /// `false` for a fresh-spawned or already-ready session, so sends to it
+    /// dispatch immediately.
+    pub fn is_resuming(&self, id: &SessionId) -> bool {
+        self.resuming.contains_key(id)
+    }
+
+    /// Attach a held first prompt to a resuming session, returning `true` when it
+    /// was recorded. Returns `false` when the session is not resuming (already
+    /// ready, or never resumed), so the caller dispatches the keystroke now
+    /// instead of holding it.
+    pub fn hold_first_prompt(&mut self, id: &SessionId, prompt: String) -> bool {
+        match self.resuming.get_mut(id) {
+            Some(resuming) => {
+                resuming.held_prompt = Some(prompt);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Mark a resuming session ready: remove it from the resuming map and return
+    /// its held first prompt (if any) so the caller can dispatch it now.
+    ///
+    /// Returns `None` when the id is not resuming — the readiness hook for a
+    /// session that already became ready, was never resumed, or is a fresh spawn
+    /// — making `SessionStart(source=resume)` an idempotent, safe no-op there.
+    pub fn mark_resume_ready(&mut self, id: &SessionId) -> Option<ResumingSession> {
+        self.resuming.remove(id)
+    }
+
+    /// The session ids currently resuming-but-not-ready, in arbitrary order.
+    ///
+    /// Test-only seam: lets a test confirm a resume is being held (or has been
+    /// released) without reaching into the private map.
+    #[cfg(test)]
+    pub(crate) fn resuming_session_ids(&self) -> Vec<SessionId> {
+        self.resuming.keys().cloned().collect()
+    }
+
+    /// Remove and return every resuming session whose readiness deadline has
+    /// passed as of `now`, also dropping each from the bound map (its pane is
+    /// being torn down). Mirrors [`Self::drain_stale_pending`] for resumes.
+    ///
+    /// `now` is injected for deterministic tests. A resume is stale when
+    /// `now - created_at` has reached [`RESUME_READY_DEADLINE`]. A resume that
+    /// became ready in time was already removed from `resuming` by
+    /// [`Self::mark_resume_ready`], so it is never drained here.
+    pub fn drain_stale_resuming(&mut self, now: Instant) -> Vec<(SessionId, ResumingSession)> {
+        let stale_ids: Vec<SessionId> = self
+            .resuming
+            .iter()
+            .filter(|(_, r)| now.duration_since(r.created_at) >= RESUME_READY_DEADLINE)
+            .map(|(id, _)| id.clone())
+            .collect();
+        stale_ids
+            .into_iter()
+            .map(|id| {
+                let resuming = self.resuming.remove(&id).expect("just collected");
+                // The pane is being killed by the caller, so drop it from the
+                // bound map too — otherwise a failed resume would linger as
+                // "open" with a dead pane.
+                self.bound.remove(&id);
+                (id, resuming)
+            })
+            .collect()
     }
 
     /// Record a freshly-spawned pane awaiting its first `UserPromptSubmit`.

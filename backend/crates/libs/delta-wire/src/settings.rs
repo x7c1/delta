@@ -1,8 +1,8 @@
 //! Rendering the Claude Code session settings JSON.
 //!
 //! The session needs native HTTP hooks pointing back at this server so Delta
-//! receives `UserPromptSubmit`, `Stop`, `PreToolUse`, `PermissionRequest`, and
-//! `SessionEnd` callbacks. The server
+//! receives `UserPromptSubmit`, `Stop`, `PreToolUse`, `PermissionRequest`,
+//! `SessionStart`, and `SessionEnd` callbacks. The server
 //! renders these settings itself (rather than copying a static template) so the
 //! hook URLs always match the port the server is actually listening on — there
 //! is no second source of truth to drift out of sync. The rendered JSON is
@@ -43,10 +43,17 @@ pub fn render_session_settings(port: u16) -> String {
             // the signal for "a human answer is genuinely pending". PreToolUse
             // fires for every call and only records the request.
             "PermissionRequest": [http_hook("permission-request")],
+            // SessionStart fires when a session's TUI is ready to accept input
+            // (source=startup on a fresh launch, source=resume after
+            // `claude --resume`). It is Delta's launch-readiness signal: it binds
+            // a fresh spawn immediately (even a prompt-less one) and releases a
+            // resumed session's held first prompt once the cold pane can accept
+            // it — replacing the old fixed post-launch settle.
+            "SessionStart": [http_hook("session-start")],
             // SessionEnd fires when a session terminates. It is the precise early
-            // failure signal for a fresh spawn that exited before its first
-            // UserPromptSubmit ever bound it: that launch failed, so Delta reaps
-            // it immediately instead of waiting out the watchdog deadline.
+            // failure signal for a launch (fresh spawn or resume) that exited
+            // before it became ready: that launch failed, so Delta reaps it
+            // immediately instead of waiting out the watchdog deadline.
             "SessionEnd": [http_hook("session-end")],
         }
     });
@@ -83,6 +90,10 @@ mod tests {
         assert_eq!(
             parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["url"],
             "http://127.0.0.1:9999/hooks/permission-request"
+        );
+        assert_eq!(
+            parsed["hooks"]["SessionStart"][0]["hooks"][0]["url"],
+            "http://127.0.0.1:9999/hooks/session-start"
         );
         assert_eq!(
             parsed["hooks"]["SessionEnd"][0]["hooks"][0]["url"],

@@ -86,6 +86,33 @@ where
             )
             .await?;
 
+        // Resume readiness gate: a session resumed by `claude --resume <id>` binds
+        // its pane immediately but is not ready to accept input until its
+        // `SessionStart(source=resume)` arrives (~2s later — far past any safe
+        // fixed settle). Dispatching the first keystroke into that still-cold pane
+        // would lose it, so hold this prompt's keystroke on the registry instead
+        // and let `release_resumed_first_prompt` type it once readiness fires. The
+        // `pending_send` row above is already written (its thread/branch/quote
+        // semantics persisted), so only the physical keystroke is deferred. The
+        // turn flag is still set, so anything composed before readiness defers
+        // behind this first prompt rather than racing it into the pane. A freshly
+        // resumed session has no active turn, so this readiness gate is the only
+        // gate in play until the first prompt dispatches; once ready (membership
+        // gone), later sends fall through to the immediate dispatch below.
+        if self
+            .open_sessions
+            .lock()
+            .await
+            .hold_first_prompt(session_id, text.to_owned())
+        {
+            tracing::info!(
+                session_id = %session_id,
+                "send held until resume readiness (SessionStart=resume); keystroke deferred"
+            );
+            self.store.set_turn_active(session_id, true).await?;
+            return Ok(pending);
+        }
+
         // If the keystrokes never reach the pane, the row we just wrote would
         // sit at the head of the FIFO forever and block all future
         // `UserPromptSubmit` correlation. Roll it back to `cancelled` so the

@@ -11,82 +11,88 @@ where
     S: SessionStore,
     W: Workspace,
 {
-    /// Handle a `SessionEnd` hook: catch a launch that died before it ever
-    /// registered, otherwise treat it as a normal end.
+    /// Handle a `SessionEnd` hook: catch a launch that died before it became
+    /// ready, otherwise treat it as a normal end.
     ///
     /// `SessionEnd` is the precise early failure signal that complements the
-    /// watchdog deadline. Two cases are distinguished by whether the hook's
-    /// session id still names an *unbound* pending spawn:
+    /// watchdog deadline. Three cases are distinguished:
     ///
-    /// - **Failed launch**: the id matches a spawn that is still in `pending`,
-    ///   so `claude` ended before its first `UserPromptSubmit` ever bound it.
-    ///   This is the silent-stall case the watchdog exists for, caught here
-    ///   immediately instead of at the full deadline. The spawn is removed, its
-    ///   tmux pane is torn down best-effort (it has usually already exited), and
-    ///   a [`SessionEvent::SpawnFailed`] is emitted so the browser can clear the
+    /// - **Failed fresh launch**: the id still names an *unbound* pending spawn,
+    ///   so `claude` ended before its first `UserPromptSubmit`/`SessionStart`
+    ///   ever bound it. This is the silent-stall case the watchdog exists for,
+    ///   caught here immediately instead of at the full deadline. The spawn is
+    ///   removed, its pane torn down best-effort, and a
+    ///   [`SessionEvent::SpawnFailed`] emitted so the browser clears the
     ///   optimistic pending chip.
-    /// - **Normal end**: no pending spawn carries this id — it is an
-    ///   already-bound/known session (or an unrelated id), so the launch
-    ///   succeeded and is simply ending. This handler deliberately does **not**
-    ///   touch close/teardown semantics for that case (those are owned by
-    ///   `close_session` and the registry); it just logs and returns cleanly.
+    /// - **Failed resume**: the id names a session that is resumed but not yet
+    ///   ready (its first prompt is still held awaiting
+    ///   `SessionStart(source=resume)`). The resume ended before readiness, so it
+    ///   is the same failure: the resuming entry is dropped, its pane torn down,
+    ///   any held prompt cancelled, and a `SpawnFailed` emitted. A resume creates
+    ///   no `PendingSpawn`, so without this it would be misread as a normal end.
+    /// - **Normal end**: neither — the id is an already-ready/bound session, or
+    ///   unknown. The launch succeeded and is simply ending; this handler does
+    ///   **not** touch close/teardown semantics (owned by `close_session` and the
+    ///   registry), it just logs and returns cleanly.
     ///
-    /// Failure detection is intentionally limited to the unbound-spawn case so
-    /// this hook can never tear down a healthy session.
+    /// Failure detection is limited to the not-yet-ready cases, so this hook can
+    /// never tear down a healthy, already-ready session.
     pub async fn on_session_end(&self, hook: SessionEndHook) -> Result<Vec<SessionEvent>> {
-        // Take the spawn under the registry lock; the tmux teardown runs after
-        // the lock is dropped, mirroring the reaper.
-        let spawn = self
-            .open_sessions
-            .lock()
-            .await
-            .take_unbound_pending_for_session(&hook.session_id);
-
-        let Some(spawn) = spawn else {
-            // Normal end (or an unrelated id): the session was bound or unknown,
-            // not a still-pending spawn. Leave close/teardown semantics alone.
-            tracing::info!(
-                session_id = %hook.session_id,
-                reason = hook.reason.as_deref().unwrap_or("<none>"),
-                "SessionEnd for a bound/unknown session; normal end, no failure handling"
-            );
-            return Ok(Vec::new());
+        // Resolve both failure candidates under one registry lock; the tmux
+        // teardown runs after the lock is dropped, mirroring the reaper.
+        let (spawn, resuming) = {
+            let mut registry = self.open_sessions.lock().await;
+            (
+                registry.take_unbound_pending_for_session(&hook.session_id),
+                registry.mark_resume_ready(&hook.session_id),
+            )
         };
 
-        tracing::warn!(
-            token = %spawn.token.as_str(),
-            session_id = %hook.session_id,
-            reason = hook.reason.as_deref().unwrap_or("<none>"),
-            "SessionEnd for a still-unbound spawn; treating it as a failed launch \
-             and reporting SpawnFailed"
-        );
-
-        // Best-effort teardown: a crashed/exited launch usually has no live tmux
-        // session left, so guard the kill with `has_session` and never let a
-        // teardown error suppress the failure report.
-        match self.tmux.has_session(spawn.token.as_str()).await {
-            Ok(true) => {
-                if let Err(err) = self.tmux.kill_session(spawn.token.as_str()).await {
-                    tracing::warn!(
-                        token = %spawn.token.as_str(),
-                        error = %err,
-                        "failed to kill the failed spawn's pane (continuing)"
-                    );
-                }
-            }
-            Ok(false) => {}
-            Err(err) => {
-                tracing::warn!(
-                    token = %spawn.token.as_str(),
-                    error = %err,
-                    "failed to probe the failed spawn's pane (continuing)"
-                );
-            }
+        if let Some(spawn) = spawn {
+            tracing::warn!(
+                token = %spawn.token.as_str(),
+                session_id = %hook.session_id,
+                reason = hook.reason.as_deref().unwrap_or("<none>"),
+                "SessionEnd for a still-unbound spawn; treating it as a failed launch \
+                 and reporting SpawnFailed"
+            );
+            self.kill_pane_best_effort(spawn.token.as_str()).await;
+            return Ok(vec![SessionEvent::SpawnFailed {
+                session_id: hook.session_id,
+                pane_token: spawn.token.as_str().to_owned(),
+            }]);
         }
 
-        Ok(vec![SessionEvent::SpawnFailed {
-            session_id: hook.session_id,
-            pane_token: spawn.token.as_str().to_owned(),
-        }])
+        if let Some(resuming) = resuming {
+            tracing::warn!(
+                token = %resuming.token.as_str(),
+                session_id = %hook.session_id,
+                reason = hook.reason.as_deref().unwrap_or("<none>"),
+                "SessionEnd for a resume that ended before becoming ready; \
+                 treating it as a failed resume and reporting SpawnFailed"
+            );
+            self.kill_pane_best_effort(resuming.token.as_str()).await;
+            // Cancel the held first prompt (if any) so its row does not block the
+            // FIFO on a later re-resume.
+            if resuming.held_prompt.is_some() {
+                if let Some(head) = self.store.head_pending_send(&hook.session_id).await? {
+                    let _ = self.store.cancel_send(head.id).await;
+                }
+                let _ = self.store.set_turn_active(&hook.session_id, false).await;
+            }
+            return Ok(vec![SessionEvent::SpawnFailed {
+                session_id: hook.session_id,
+                pane_token: resuming.token.as_str().to_owned(),
+            }]);
+        }
+
+        // Normal end (or an unrelated id): the session was ready/bound or unknown.
+        // Leave close/teardown semantics alone.
+        tracing::info!(
+            session_id = %hook.session_id,
+            reason = hook.reason.as_deref().unwrap_or("<none>"),
+            "SessionEnd for a ready/unknown session; normal end, no failure handling"
+        );
+        Ok(Vec::new())
     }
 }

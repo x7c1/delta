@@ -116,13 +116,15 @@ impl AppState {
     /// assistant reply that Claude Code flushes to the JSONL *after* the `Stop`
     /// hook fires, which the hook sync misses.
     ///
-    /// The same tick also runs the spawn watchdog: it reaps any fresh spawn that
-    /// never bound before its deadline and broadcasts the resulting
-    /// [`SessionEvent::SpawnFailed`]s, so a launch that crashed/hung before its
-    /// first `UserPromptSubmit` can no longer stall the UI on "pending" forever
-    /// (the `SessionEnd` hook catches the exited case immediately; this catches
-    /// the hang-forever case). The reap shares this loop rather than owning a
-    /// second task — both are cheap periodic sweeps over the same registry.
+    /// The same tick also runs the launch watchdog: it reaps any fresh spawn that
+    /// never bound, and any resumed session that never became ready, before its
+    /// deadline — broadcasting the resulting [`SessionEvent::SpawnFailed`]s, so a
+    /// launch that crashed/hung (a fresh spawn before its first hook, or a
+    /// `claude --resume` that never reached `SessionStart(resume)`) can no longer
+    /// stall the UI on "pending" forever (the `SessionEnd` hook catches the exited
+    /// case immediately; this catches the hang-forever case). The reap shares this
+    /// loop rather than owning a second task — both are cheap periodic sweeps over
+    /// the same registry.
     ///
     /// The task clones the `Arc`-shared interactor and the broadcast sender, so
     /// it stays alive independently of any request. A poll or reap error is
@@ -135,9 +137,10 @@ impl AppState {
             let mut ticker = tokio::time::interval(TRANSCRIPT_POLL_INTERVAL);
             loop {
                 ticker.tick().await;
-                // Watchdog: reap spawns that never bound before their deadline.
-                // `Instant::now()` is the live clock here; tests drive
-                // `reap_stale_spawns` directly with an injected `now`.
+                // Watchdog: reap fresh spawns that never bound and resumes that
+                // never became ready before their deadlines. `Instant::now()` is
+                // the live clock here; tests drive `reap_stale_spawns` directly
+                // with an injected `now`.
                 match interactor.reap_stale_spawns(std::time::Instant::now()).await {
                     Ok(failed_events) => {
                         for event in failed_events {

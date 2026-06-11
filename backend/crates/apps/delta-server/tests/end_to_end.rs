@@ -289,8 +289,35 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     assert_eq!(body["send"]["status"], "pending");
     assert_eq!(body["send"]["thread_id"].as_i64(), Some(main_thread_id));
     let pending_send_id = body["send"]["id"].as_i64().expect("pending send id");
-    // The send was dispatched into the (fake) tmux pane.
-    assert_eq!(tmux.sent.load(Ordering::SeqCst), 1);
+    // The session was hook-registered (closed), so this send resumed it via
+    // `claude --resume`. A resumed session holds its first prompt until its
+    // `SessionStart(source=resume)` readiness hook arrives, so the keystroke has
+    // NOT been dispatched yet.
+    assert_eq!(
+        tmux.sent.load(Ordering::SeqCst),
+        0,
+        "the resume's first prompt is held until SessionStart(resume)"
+    );
+
+    // Feed the readiness hook: the resumed pane is now ready, so the held first
+    // prompt is dispatched into the (fake) tmux pane on the normal path.
+    let (status, _) = post_json(
+        &app,
+        "/hooks/session-start",
+        json!({
+            "session_id": session_id,
+            "source": "resume",
+            "transcript_path": transcript_str,
+            "cwd": "/work/delta",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        tmux.sent.load(Ordering::SeqCst),
+        1,
+        "the held first prompt dispatched once the resume became ready"
+    );
 
     // 4. The session emits the corresponding transcript line. Append it so the
     //    correlation can find the matched uuid.

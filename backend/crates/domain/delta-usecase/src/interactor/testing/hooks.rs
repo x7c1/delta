@@ -1,8 +1,21 @@
-//! Builders for the `UserPromptSubmit` hooks the interactor tests fire.
+//! Builders for the hooks the interactor tests fire.
 
 use delta_model::SessionId;
 
-use crate::ports::UserPromptSubmitHook;
+use crate::ports::{SessionStartHook, UserPromptSubmitHook};
+
+/// A `SessionStart` hook for an explicit session id and source.
+///
+/// The `cwd`/`transcript_path` mirror the `submit` builder so a `startup` bind
+/// registers the same session row a `UserPromptSubmit` would.
+pub(crate) fn session_start(session_id: &str, source: &str) -> SessionStartHook {
+    SessionStartHook {
+        session_id: SessionId::from(session_id),
+        source: source.into(),
+        cwd: "/work".into(),
+        transcript_path: "/tmp/t.jsonl".into(),
+    }
+}
 
 pub(crate) fn submit(text: &str) -> UserPromptSubmitHook {
     UserPromptSubmitHook {
