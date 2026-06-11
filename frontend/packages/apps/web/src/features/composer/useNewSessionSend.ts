@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { SendRequest } from '@delta/model';
+import type { SendRequest } from '@delta/wire-gen';
 import { useCreateSendMutation } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { NEW_SESSION_DRAFT_KEY } from '../../store/composerStore';

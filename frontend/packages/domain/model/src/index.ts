@@ -1,49 +1,15 @@
-// Pure domain types for Delta. These mirror the wire JSON shapes documented in
-// docs/guides/api.md exactly. No React, no fetch, no side effects here.
+// Frontend-side domain helpers for Delta. No React, no fetch, no side
+// effects, and no dependency on any other workspace package.
 //
-// This is the package entry barrel: it only re-exports the concern modules.
-// Each domain concept lives in its own file alongside its closely related
-// helpers and id type aliases.
+// The wire JSON shapes (documented in docs/guides/api.md) are NOT defined
+// here: they are generated from the backend's `delta-wire` crate into
+// @delta/wire-gen. This package keeps only what the frontend adds on top —
+// identifier aliases and pure view-model helpers like the thread tree.
 
-export type { SessionId, SessionStatus, Session } from './session';
-export type { ThreadId, Thread } from './thread';
+export type { SessionId, ThreadId, MessageUuid } from './ids';
 export {
   buildThreadTree,
   threadAncestry,
+  type ThreadLike,
   type ThreadNode,
 } from './thread-tree';
-export type {
-  TextBlock,
-  ThinkingBlock,
-  ToolUseBlock,
-  ToolResultBlock,
-  OtherBlock,
-  ContentBlock,
-} from './content-block';
-export type {
-  MessageUuid,
-  PromptId,
-  MessageRole,
-  Message,
-} from './message';
-export type {
-  PendingSendId,
-  PendingSendStatus,
-  PendingSend,
-} from './pending-send';
-export type {
-  SessionListItem,
-  SessionsResponse,
-  SessionLifecycle,
-  NewSessionResponse,
-  ThreadsResponse,
-  MessagesResponse,
-  SendResponse,
-  SendToThread,
-  SendToNewSession,
-  SendRequest,
-  WorkdirEntry,
-  WorkdirListResponse,
-  RecentWorkdirItem,
-  WorkdirRecentResponse,
-} from './responses';

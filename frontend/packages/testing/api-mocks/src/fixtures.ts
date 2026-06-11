@@ -3,7 +3,7 @@ import type {
   PendingSend,
   Session,
   Thread,
-} from '@delta/model';
+} from '@delta/wire-gen';
 
 /**
  * A small but representative multi-session seed so the UI is fully developable

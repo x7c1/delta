@@ -18,7 +18,7 @@ import {
   mockThreads,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
-import type { Thread } from '@delta/model';
+import type { Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';

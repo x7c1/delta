@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { ContentBlock, Message, MessageRole } from '@delta/model';
+import type { ContentBlock, Message, MessageRole } from '@delta/wire-gen';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { MessageItem } from './MessageItem';
 

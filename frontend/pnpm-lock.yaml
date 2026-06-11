@@ -140,9 +140,6 @@ importers:
 
   packages/testing/api-mocks:
     dependencies:
-      '@delta/model':
-        specifier: workspace:*
-        version: link:../../domain/model
       '@delta/wire-gen':
         specifier: workspace:*
         version: link:../../gateway/wire-gen

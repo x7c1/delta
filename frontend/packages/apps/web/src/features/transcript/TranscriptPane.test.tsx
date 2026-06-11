@@ -19,7 +19,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import type { MessagesResponse } from '@delta/model';
+import type { MessagesResponse } from '@delta/wire-gen';
 import {
   BRANCH_THREAD_ID,
   MAIN_THREAD_ID,

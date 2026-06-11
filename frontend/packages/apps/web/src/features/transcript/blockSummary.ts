@@ -1,4 +1,4 @@
-import type { ContentBlock } from '@delta/model';
+import type { ContentBlock } from '@delta/wire-gen';
 
 /** A short one-line label for a collapsed content block. */
 export function blockSummary(block: ContentBlock): string {

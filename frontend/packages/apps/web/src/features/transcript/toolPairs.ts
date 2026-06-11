@@ -1,4 +1,4 @@
-import type { ContentBlock, Message, ToolResultBlock } from '@delta/model';
+import type { ContentBlock, Message, ToolResultBlock } from '@delta/wire-gen';
 
 /**
  * The link between a tool invocation and its result.

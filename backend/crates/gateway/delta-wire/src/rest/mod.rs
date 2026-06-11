@@ -1,0 +1,28 @@
+//! Request and response shapes of the browser REST surface (`/api/*`).
+//!
+//! Each module owns the wire form of one endpoint's payloads, converting
+//! to/from the domain types at the boundary: responses are built `From` the
+//! domain values the use cases return, and the one request body that flows
+//! inward ([`WireCreateSendRequest`]) resolves into a domain
+//! [`SendTarget`](delta_usecase::SendTarget). All of these are exported to
+//! TypeScript by the `export-ts` binary, so the browser types can never drift
+//! from the Rust contract.
+
+mod error_body;
+pub use error_body::WireErrorBody;
+mod messages_response;
+pub use messages_response::WireMessagesResponse;
+mod new_session_response;
+pub use new_session_response::{WireNewSessionResponse, WireSessionLifecycle};
+mod send_request;
+pub use send_request::{SendTargetError, WireCreateSendRequest};
+mod send_response;
+pub use send_response::WireSendResponse;
+mod sessions_response;
+pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
+mod threads_response;
+pub use threads_response::WireThreadsResponse;
+mod workdir_list_response;
+pub use workdir_list_response::{WireWorkdirEntry, WireWorkdirListResponse};
+mod workdir_recent_response;
+pub use workdir_recent_response::{WireRecentWorkdirItem, WireWorkdirRecentResponse};

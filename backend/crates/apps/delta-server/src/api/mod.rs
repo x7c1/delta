@@ -10,28 +10,17 @@
 //! closed by id, and threads and sends are routed to a specific session rather
 //! than an implicit "current" one.
 //!
+//! The JSON shapes themselves live in the `delta_wire` crate (its [`rest`]
+//! module), which also generates the frontend's TypeScript bindings. Handlers
+//! convert at this boundary: domain values in and out of the use cases, wire
+//! types on the HTTP surface.
+//!
 //! [`Interactor`]: delta_usecase::Interactor
+//! [`rest`]: delta_wire::rest
 
 mod api_error;
 pub(crate) use api_error::ApiError;
-mod create_send_request;
-pub use create_send_request::CreateSendRequest;
-mod create_send_response;
-pub use create_send_response::CreateSendResponse;
-mod ensure_session_response;
-pub use ensure_session_response::EnsureSessionResponse;
-mod error_body;
-mod messages_response;
-pub use messages_response::MessagesResponse;
 mod session_cursor;
-mod sessions_response;
-pub use sessions_response::{SessionListItem, SessionsResponse};
-mod threads_response;
-pub use threads_response::ThreadsResponse;
-mod workdir_list_response;
-pub use workdir_list_response::WorkdirListResponse;
-mod workdir_recent_response;
-pub use workdir_recent_response::{RecentWorkdirItem, WorkdirRecentResponse};
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -39,6 +28,11 @@ use axum::Json;
 use serde::Deserialize;
 
 use delta_usecase::{SessionId, ThreadId};
+use delta_wire::rest::{
+    WireCreateSendRequest, WireMessagesResponse, WireNewSessionResponse, WireRecentWorkdirItem,
+    WireSendResponse, WireSessionListItem, WireSessionsResponse, WireThreadsResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
+};
 
 use crate::state::AppState;
 
@@ -73,7 +67,7 @@ pub(crate) struct ListSessionsQuery {
 pub(crate) async fn list_sessions(
     State(state): State<AppState>,
     Query(query): Query<ListSessionsQuery>,
-) -> Result<Json<SessionsResponse>, ApiError> {
+) -> Result<Json<WireSessionsResponse>, ApiError> {
     let cursor = match query.cursor {
         Some(token) => Some(
             session_cursor::decode(&token)
@@ -87,8 +81,12 @@ pub(crate) async fn list_sessions(
         .clamp(1, MAX_PAGE_LIMIT);
 
     let page = state.interactor().list_sessions_page(cursor, limit).await?;
-    Ok(Json(SessionsResponse {
-        sessions: page.listings.into_iter().map(SessionListItem::from).collect(),
+    Ok(Json(WireSessionsResponse {
+        sessions: page
+            .listings
+            .into_iter()
+            .map(WireSessionListItem::from)
+            .collect(),
         next_cursor: page.next.as_ref().map(session_cursor::encode),
     }))
 }
@@ -102,11 +100,9 @@ pub(crate) async fn list_sessions(
 /// `Session` row yet (it appears in `GET /api/sessions` once registered).
 pub(crate) async fn create_session(
     State(state): State<AppState>,
-) -> Result<Json<EnsureSessionResponse>, ApiError> {
+) -> Result<Json<WireNewSessionResponse>, ApiError> {
     let status = state.ensure_session().await?;
-    Ok(Json(EnsureSessionResponse {
-        status: status.into(),
-    }))
+    Ok(Json(WireNewSessionResponse::from(status)))
 }
 
 /// `POST /api/sessions/{id}/open` — resume a closed, known session.
@@ -141,9 +137,9 @@ pub(crate) async fn close_session(
 pub(crate) async fn list_threads(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> Result<Json<ThreadsResponse>, ApiError> {
+) -> Result<Json<WireThreadsResponse>, ApiError> {
     let threads = state.interactor().threads_for(&SessionId::from(id)).await?;
-    Ok(Json(ThreadsResponse { threads }))
+    Ok(Json(WireThreadsResponse::from(threads)))
 }
 
 /// `GET /api/threads/{id}/messages` — a thread's messages for drill-down.
@@ -152,9 +148,9 @@ pub(crate) async fn list_threads(
 pub(crate) async fn thread_messages(
     State(state): State<AppState>,
     Path(thread_id): Path<i64>,
-) -> Result<Json<MessagesResponse>, ApiError> {
+) -> Result<Json<WireMessagesResponse>, ApiError> {
     let messages = state.interactor().thread_view(ThreadId(thread_id)).await?;
-    Ok(Json(MessagesResponse { messages }))
+    Ok(Json(WireMessagesResponse::from(messages)))
 }
 
 /// Query parameters for `GET /api/workdir/list`: the directory to browse.
@@ -175,12 +171,12 @@ pub(crate) struct WorkdirListQuery {
 pub(crate) async fn list_workdir(
     State(state): State<AppState>,
     Query(query): Query<WorkdirListQuery>,
-) -> Result<Json<WorkdirListResponse>, ApiError> {
+) -> Result<Json<WireWorkdirListResponse>, ApiError> {
     let listing = state
         .interactor()
         .browse_workdir(query.path.as_deref())
         .await?;
-    Ok(Json(WorkdirListResponse::from(listing)))
+    Ok(Json(WireWorkdirListResponse::from(listing)))
 }
 
 /// `GET /api/workdir/recent` — recently-used working directories for the picker.
@@ -189,10 +185,13 @@ pub(crate) async fn list_workdir(
 /// first, derived from existing session rows (Delta keeps no separate history).
 pub(crate) async fn recent_workdir(
     State(state): State<AppState>,
-) -> Result<Json<WorkdirRecentResponse>, ApiError> {
+) -> Result<Json<WireWorkdirRecentResponse>, ApiError> {
     let workdirs = state.interactor().recent_workdirs().await?;
-    Ok(Json(WorkdirRecentResponse {
-        workdirs: workdirs.into_iter().map(RecentWorkdirItem::from).collect(),
+    Ok(Json(WireWorkdirRecentResponse {
+        workdirs: workdirs
+            .into_iter()
+            .map(WireRecentWorkdirItem::from)
+            .collect(),
     }))
 }
 
@@ -203,8 +202,8 @@ pub(crate) async fn recent_workdir(
 /// confirmation arrives later via the `UserPromptSubmit` hook.
 pub(crate) async fn create_send(
     State(state): State<AppState>,
-    Json(req): Json<CreateSendRequest>,
-) -> Result<(StatusCode, Json<CreateSendResponse>), ApiError> {
+    Json(req): Json<WireCreateSendRequest>,
+) -> Result<(StatusCode, Json<WireSendResponse>), ApiError> {
     let (target, text, locator_quote) = req
         .into_target()
         .map_err(|err| ApiError::BadRequest(err.message().to_owned()))?;
@@ -212,5 +211,5 @@ pub(crate) async fn create_send(
         .interactor()
         .enqueue_send(target, &text, locator_quote.as_deref())
         .await?;
-    Ok((StatusCode::CREATED, Json(CreateSendResponse { send })))
+    Ok((StatusCode::CREATED, Json(WireSendResponse::from(send))))
 }

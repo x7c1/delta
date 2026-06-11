@@ -6,12 +6,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import {
-  threadAncestry,
-  type Message,
-  type Thread,
-  type ThreadId,
-} from '@delta/model';
+import { threadAncestry, type ThreadId } from '@delta/model';
+import type { Message, Thread } from '@delta/wire-gen';
 import { useThreadMessagesQuery } from '@delta/api-client';
 import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';

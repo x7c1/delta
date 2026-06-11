@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type Ref } from 'react';
-import type { SessionListItem, ThreadId } from '@delta/model';
+import type { ThreadId } from '@delta/model';
+import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';

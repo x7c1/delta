@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HttpHandler } from 'msw';
-import type { SessionsResponse } from '@delta/model';
+import type { SessionsResponse } from '@delta/wire-gen';
 import { createHandlers } from './handlers';
 import {
   SESSIONS_PAGE_SIZE,

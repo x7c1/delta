@@ -6,10 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+delta-model = { workspace = true }
 delta-usecase = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ts-rs = { workspace = true }
-
-[dev-dependencies]
-delta-model = { workspace = true }

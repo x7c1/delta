@@ -58,8 +58,9 @@ dependency-cruiser) is covered by `make check`, or the individual `make build` /
 ### Generated wire bindings (`@delta/wire-gen`)
 
 `frontend/packages/gateway/wire-gen` contains TypeScript generated from the
-backend's wire contract (the `delta-wire` crate): the `SessionEvent` union and
-the `EVENT_KINDS` const. Never edit the files under `src/generated/` by hand —
+backend's wire contract (the `delta-wire` crate): the REST request/response
+shapes, the `SessionEvent` union, and the `EVENT_KINDS` const. Never edit the
+files under `src/generated/` by hand —
 change the Rust types and run `make gen` to regenerate, then commit the result.
 `make check` (and CI) regenerates and fails on any diff, so stale bindings
 cannot land.

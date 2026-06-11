@@ -1,5 +1,6 @@
 import { useCallback, type FormEvent } from 'react';
-import type { SendRequest, Thread, ThreadId } from '@delta/model';
+import type { ThreadId } from '@delta/model';
+import type { SendRequest, Thread } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { ApiError, useCreateSendMutation } from '@delta/api-client';

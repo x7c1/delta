@@ -1,12 +1,25 @@
-import type { Thread, ThreadId } from './thread';
+import type { ThreadId } from './ids';
 
 /**
- * A node in the thread navigator tree. Derived from the flat `Thread[]` list;
+ * The minimal structural shape the thread-tree helpers need.
+ *
+ * The full thread record lives on the wire (`Thread` in @delta/wire-gen);
+ * this package is dependency-free, so the helpers are generic over anything
+ * carrying the tree edges. Callers pass the wire `Thread` and get its full
+ * shape back out.
+ */
+export interface ThreadLike {
+  id: ThreadId;
+  parent_thread_id: ThreadId | null;
+}
+
+/**
+ * A node in the thread navigator tree. Derived from the flat thread list;
  * children are ordered by creation (ascending id), matching the server order.
  */
-export interface ThreadNode {
-  thread: Thread;
-  children: ThreadNode[];
+export interface ThreadNode<T extends ThreadLike> {
+  thread: T;
+  children: ThreadNode<T>[];
 }
 
 /**
@@ -14,12 +27,14 @@ export interface ThreadNode {
  * threads with no parent (or whose parent is absent). Siblings preserve the
  * input order, which the server guarantees is ascending creation order.
  */
-export function buildThreadTree(threads: Thread[]): ThreadNode[] {
-  const nodes = new Map<ThreadId, ThreadNode>();
+export function buildThreadTree<T extends ThreadLike>(
+  threads: T[],
+): ThreadNode<T>[] {
+  const nodes = new Map<ThreadId, ThreadNode<T>>();
   for (const thread of threads) {
     nodes.set(thread.id, { thread, children: [] });
   }
-  const roots: ThreadNode[] = [];
+  const roots: ThreadNode<T>[] = [];
   for (const thread of threads) {
     const node = nodes.get(thread.id)!;
     const parentId = thread.parent_thread_id;
@@ -38,15 +53,15 @@ export function buildThreadTree(threads: Thread[]): ThreadNode[] {
  * root-first (so the last element is the thread itself). Used to render the
  * transcript breadcrumb. Threads whose parent is missing terminate the walk.
  */
-export function threadAncestry(
-  threads: Thread[],
+export function threadAncestry<T extends ThreadLike>(
+  threads: T[],
   threadId: ThreadId,
-): Thread[] {
-  const byId = new Map<ThreadId, Thread>();
+): T[] {
+  const byId = new Map<ThreadId, T>();
   for (const thread of threads) {
     byId.set(thread.id, thread);
   }
-  const chain: Thread[] = [];
+  const chain: T[] = [];
   let current = byId.get(threadId);
   const seen = new Set<ThreadId>();
   while (current && !seen.has(current.id)) {

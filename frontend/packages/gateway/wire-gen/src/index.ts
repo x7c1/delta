@@ -1,6 +1,44 @@
 // TypeScript bindings generated from the backend's wire contract (the
 // `delta-wire` crate). Everything under `generated/` is written by
-// `make gen`; this barrel is the only hand-maintained file in the package.
+// `make gen`; the barrel and the small hand-maintained helpers next to it
+// (`content-block.ts`, `send-request.ts`) only narrow the generated types,
+// never restate the wire shapes.
 
 export type { SessionEvent } from './generated/SessionEvent';
 export { EVENT_KINDS, type SessionEventKind } from './generated/event-kinds';
+
+export type { Session } from './generated/Session';
+export type { SessionStatus } from './generated/SessionStatus';
+export type { Thread } from './generated/Thread';
+export type { Message } from './generated/Message';
+export type { MessageRole } from './generated/MessageRole';
+export type { ContentBlock } from './generated/ContentBlock';
+export type { PendingSend } from './generated/PendingSend';
+export type { PendingSendStatus } from './generated/PendingSendStatus';
+
+export type { SessionListItem } from './generated/SessionListItem';
+export type { SessionsResponse } from './generated/SessionsResponse';
+export type { SessionLifecycle } from './generated/SessionLifecycle';
+export type { NewSessionResponse } from './generated/NewSessionResponse';
+export type { ThreadsResponse } from './generated/ThreadsResponse';
+export type { MessagesResponse } from './generated/MessagesResponse';
+export type { CreateSendRequest } from './generated/CreateSendRequest';
+export type { SendResponse } from './generated/SendResponse';
+export type { WorkdirEntry } from './generated/WorkdirEntry';
+export type { WorkdirListResponse } from './generated/WorkdirListResponse';
+export type { RecentWorkdirItem } from './generated/RecentWorkdirItem';
+export type { WorkdirRecentResponse } from './generated/WorkdirRecentResponse';
+export type { ErrorBody } from './generated/ErrorBody';
+
+export type {
+  TextBlock,
+  ThinkingBlock,
+  ToolUseBlock,
+  ToolResultBlock,
+  OtherBlock,
+} from './content-block';
+export type {
+  SendToThread,
+  SendToNewSession,
+  SendRequest,
+} from './send-request';

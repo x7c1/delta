@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ContentBlock, Message } from '@delta/model';
+import type { ContentBlock, Message } from '@delta/wire-gen';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 
 function message(uuid: string, content: ContentBlock[]): Message {

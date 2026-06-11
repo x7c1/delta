@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use super::error_body::ErrorBody;
+use delta_wire::rest::WireErrorBody;
 
 /// Stable machine-readable code for a resume-impossible session, carried in the
 /// error body so the frontend can distinguish it from a generic failure.
@@ -69,9 +69,9 @@ impl IntoResponse for ApiError {
         }
         (
             status,
-            Json(ErrorBody {
+            Json(WireErrorBody {
                 error: message,
-                code,
+                code: code.map(str::to_owned),
             }),
         )
             .into_response()

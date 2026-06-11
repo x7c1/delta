@@ -3,7 +3,7 @@ import {
   useSessionsQuery,
   useSessionThreadsQuery,
 } from '@delta/api-client';
-import type { SessionListItem } from '@delta/model';
+import type { SessionListItem } from '@delta/wire-gen';
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';

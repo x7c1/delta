@@ -1,4 +1,5 @@
-import type { MessageUuid, Thread, ThreadId } from '@delta/model';
+import type { MessageUuid, ThreadId } from '@delta/model';
+import type { Thread } from '@delta/wire-gen';
 
 /**
  * Map each message uuid to the child threads that branch from it. A child

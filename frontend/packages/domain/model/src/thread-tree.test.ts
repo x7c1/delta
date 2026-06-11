@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { buildThreadTree, threadAncestry } from './thread-tree';
-import type { Thread } from './thread';
+import { buildThreadTree, threadAncestry, type ThreadLike } from './thread-tree';
 
-function thread(id: number, parent: number | null): Thread {
+/**
+ * A wire-`Thread`-shaped fixture. The helpers are generic over {@link
+ * ThreadLike}, so the test mirrors how callers pass the richer wire record and
+ * get it back out (`title` rides along untouched).
+ */
+interface TestThread extends ThreadLike {
+  title: string;
+}
+
+function thread(id: number, parent: number | null): TestThread {
   return {
     id,
-    session_id: 'sess-1',
     title: id === 1 ? 'main' : `thread-${id}`,
     parent_thread_id: parent,
-    root_message_uuid: parent === null ? null : `uuid-${id}`,
-    created_at: `2026-01-01T00:00:0${id}Z`,
   };
 }
 

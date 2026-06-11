@@ -19,10 +19,11 @@ The server binds to `127.0.0.1` only; it is never exposed on a public
 interface. All request and response bodies are JSON unless noted otherwise.
 
 This document is the source of truth for the browser↔server contract. Field
-names below match the JSON exactly. The `/ws` session-event shapes are defined
-by the backend's `delta-wire` crate, which also generates the frontend's
-`@delta/wire-gen` TypeScript bindings (`make gen`); the remaining shapes are
-the serialized domain types.
+names below match the JSON exactly. Every shape on this surface — the `/api/*`
+request/response bodies and the `/ws` session events — is defined by the
+backend's `delta-wire` crate, which also generates the frontend's
+`@delta/wire-gen` TypeScript bindings (`make gen`), so the types below cannot
+drift from the implementation.
 
 ## Conventions
 

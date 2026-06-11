@@ -1,12 +1,14 @@
 //! Generates the frontend's `@delta/wire-gen` package from the Rust wire
 //! contract.
 //!
-//! Writes two files into `frontend/packages/gateway/wire-gen/src/generated/`:
+//! Writes into `frontend/packages/gateway/wire-gen/src/generated/`:
 //!
-//! - `SessionEvent.ts` — the discriminated union, exported by ts-rs from
+//! - `SessionEvent.ts` — the `/ws` discriminated union, exported by ts-rs from
 //!   [`WireSessionEvent`].
 //! - `event-kinds.ts` — the `EVENT_KINDS` const listing every `kind`
 //!   discriminant, derived from the same enum.
+//! - One file per REST request/response shape (and each wire twin they are
+//!   composed of), exported by ts-rs from the `delta_wire::rest` types.
 //!
 //! Run via `make gen` at the repo root. `make check` regenerates and fails on
 //! a dirty diff, so stale bindings cannot land.
@@ -14,6 +16,11 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use delta_wire::rest::{
+    WireCreateSendRequest, WireErrorBody, WireMessagesResponse, WireNewSessionResponse,
+    WireSendResponse, WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
+};
 use delta_wire::{event_kinds, export_config, WireSessionEvent};
 use ts_rs::TS;
 
@@ -28,6 +35,19 @@ fn main() {
     let config = export_config().with_out_dir(out_dir);
 
     WireSessionEvent::export_all(&config).expect("export SessionEvent.ts");
+
+    // The REST surface: exporting each endpoint's top-level request/response
+    // shape pulls in every wire twin it is composed of (Session, Thread,
+    // Message, ContentBlock, PendingSend, …) via `export_all`.
+    WireSessionsResponse::export_all(&config).expect("export SessionsResponse.ts");
+    WireNewSessionResponse::export_all(&config).expect("export NewSessionResponse.ts");
+    WireThreadsResponse::export_all(&config).expect("export ThreadsResponse.ts");
+    WireMessagesResponse::export_all(&config).expect("export MessagesResponse.ts");
+    WireCreateSendRequest::export_all(&config).expect("export CreateSendRequest.ts");
+    WireSendResponse::export_all(&config).expect("export SendResponse.ts");
+    WireWorkdirListResponse::export_all(&config).expect("export WorkdirListResponse.ts");
+    WireWorkdirRecentResponse::export_all(&config).expect("export WorkdirRecentResponse.ts");
+    WireErrorBody::export_all(&config).expect("export ErrorBody.ts");
 
     let event_kinds_path = out_dir.join("event-kinds.ts");
     std::fs::write(&event_kinds_path, render_event_kinds())

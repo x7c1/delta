@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import type { Thread } from '@delta/model';
+import type { Thread } from '@delta/wire-gen';
 import { ThreadTree } from './ThreadTree';
 import { useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
