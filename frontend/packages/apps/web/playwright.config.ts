@@ -37,7 +37,12 @@ export default defineConfig({
     command: `pnpm exec vite --port ${PORT} --strictPort`,
     env: { VITE_API_MOCK: '1' },
     url: `http://localhost:${PORT}`,
-    reuseExistingServer: !process.env.CI,
+    // Default to a fresh server every run so a stray process on the port is
+    // never adopted — in particular a live `make dev` (real backend) on 5173,
+    // which the suite cannot tell apart from its own mock build and would
+    // otherwise drive, sending real prompts to `claude`. Opt back in with
+    // E2E_REUSE=1 to reuse an already-running mock server for fast iteration.
+    reuseExistingServer: process.env.E2E_REUSE === '1',
     timeout: 120_000,
   },
 });

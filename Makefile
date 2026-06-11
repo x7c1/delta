@@ -64,6 +64,9 @@ check:
 	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
+# Pin a dedicated mock-server port so the suite never collides with a dev server
+# on the default 5173 (and never adopts a live, real-backend one — see
+# playwright.config.ts reuseExistingServer).
 .PHONY: e2e
 e2e:
-	cd frontend && pnpm --filter @delta/web e2e
+	cd frontend && E2E_PORT=5199 pnpm --filter @delta/web e2e

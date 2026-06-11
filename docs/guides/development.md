@@ -89,19 +89,21 @@ mock-mode dev server itself.
 The suite puts the fake event source under manual control (no auto-replay) and
 feeds events explicitly, so every run is fast and deterministic.
 
-The suite always serves its own mock-mode build, but `reuseExistingServer` is on
-outside CI: if a server already holds the port (5173 by default), the run reuses
-it instead of starting the mock build. So while a `make dev` server (real
-backend, tmux + `claude`) is up on 5173, a local e2e run drives that **live
-session — sending real prompts to your real `claude`** — not mocks. Run it
-isolated so it always starts its own mock server on a free port:
+`make e2e` runs isolated: it pins a dedicated mock-server port (`E2E_PORT=5199`)
+so it cannot collide with a dev server on the default 5173, and the suite starts
+its own mock-mode build every run (it never reuses an already-running server).
+That last part matters — a live `make dev` server (real backend, tmux +
+`claude`) is indistinguishable from the suite's own mock build at the port, so
+adopting it would drive that **live session, sending real prompts to your real
+`claude`**. Hence the suite never reuses by default.
+
+For fast iteration you can reuse an already-running mock server (e.g. `make
+mock`) instead of spawning a fresh one per run: set `E2E_REUSE=1` and point the
+suite at that server's port — only ever a mock server, never `make dev`:
 
 ```bash
-CI=1 E2E_PORT=5199 make e2e
+E2E_REUSE=1 E2E_PORT=5173 make e2e
 ```
-
-`CI=1` disables `reuseExistingServer` (never adopt a stray server); `E2E_PORT`
-moves the mock server off 5173 so it cannot collide with your dev server.
 
 ### Run the UI against the real backend
 
