@@ -16,6 +16,7 @@ pub(crate) fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
         created_at: Some("2026-01-01T00:00:00Z".into()),
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
+        is_queued_command: false,
     }
 }
 
@@ -29,6 +30,18 @@ pub(crate) fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
         created_at: Some("2026-01-01T00:00:00Z".into()),
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
+        is_queued_command: false,
+    }
+}
+
+/// A `queued_command` attachment line: a prompt the user composed while a turn
+/// was in flight. Claude records it only as this attachment (never as a normal
+/// user line), but Delta surfaces it as a user message that both displays and
+/// flows through send correlation. Mirrors `user_line` apart from the flag.
+pub(crate) fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        is_queued_command: true,
+        ..user_line(uuid, text)
     }
 }
 

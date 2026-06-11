@@ -156,6 +156,14 @@ where
                         carry_thread = pending.thread_id;
                         (pending.thread_id, pending.semantic_parent_uuid)
                     }
+                    None if line.is_queued_command => {
+                        // A queued command with no matching send is a
+                        // programmatic injection (e.g. a background task
+                        // notification), not stray pane typing, so it must not
+                        // tear the active turn back to `main` — inherit the
+                        // current thread the way a non-human line does.
+                        (carry_thread, None)
+                    }
                     None => {
                         carry_thread = main_thread;
                         (main_thread, None)

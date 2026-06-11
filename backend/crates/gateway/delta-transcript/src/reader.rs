@@ -186,15 +186,20 @@ mod tests {
     }
 
     /// A minimal temp-file helper avoiding an extra dependency.
+    ///
+    /// The suffix combines the pid with a process-global atomic counter rather
+    /// than a timestamp: tests run on parallel threads in one process, and two
+    /// that minted the same nanosecond stamp would collide on one path — then
+    /// one test's `Drop` deletes the file the other is still reading, surfacing
+    /// as a spurious "0 messages" failure. A monotonic counter is collision-free.
     fn tempfile_jsonl() -> TempJsonl {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let mut p = std::env::temp_dir();
         let unique = format!(
-            "delta-transcript-test-{}-{:?}.jsonl",
+            "delta-transcript-test-{}-{}.jsonl",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            COUNTER.fetch_add(1, Ordering::Relaxed),
         );
         p.push(unique);
         let file = std::fs::File::create(&p).unwrap();

@@ -24,7 +24,8 @@ pub(crate) use fake_workspace::FakeWorkspace;
 pub(crate) use hooks::{submit, submit_for, submit_in};
 pub(crate) use targets::{branch_off, to};
 pub(crate) use transcript_lines::{
-    assistant_line, assistant_line_at, interrupt_line, tool_result_line, tool_use_line, user_line,
+    assistant_line, assistant_line_at, interrupt_line, queued_command_line, tool_result_line,
+    tool_use_line, user_line,
 };
 
 // Re-exported so test files can call `SessionStore` methods on `ix.store()`

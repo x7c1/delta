@@ -23,6 +23,18 @@ pub struct TranscriptMessage {
     /// position even when earlier lines were skipped (blank, no-uuid, or
     /// unparsable). The reader assigns this; the Interactor persists it.
     pub seq: i64,
+    /// True when this line is a Claude Code `queued_command` attachment: a
+    /// prompt the user composed while a turn was in flight, which Claude records
+    /// *only* as this attachment (never as a normal `type: "user"` line) and
+    /// injects programmatically once the turn yields.
+    ///
+    /// It is surfaced as a [`Role::User`] message so it both displays and feeds
+    /// the send-correlation path. The flag matters for the *uncorrelated* case:
+    /// a queued command that matches no queued send must NOT reset attribution
+    /// to `main` the way stray pane typing does, because it is a programmatic
+    /// injection (e.g. a background task notification), not external input — it
+    /// inherits the active thread instead.
+    pub is_queued_command: bool,
 }
 
 impl TranscriptMessage {

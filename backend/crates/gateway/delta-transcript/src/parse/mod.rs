@@ -1,5 +1,6 @@
 //! Parsing a single JSONL transcript line into a [`TranscriptMessage`].
 
+mod raw_attachment;
 mod raw_content;
 mod raw_line;
 mod raw_message;
@@ -23,16 +24,37 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         return Ok(None);
     };
 
-    let role = raw
-        .line_type
-        .as_deref()
-        .map(Role::from_transcript_type)
-        .unwrap_or(Role::Other);
+    // A `queued_command` attachment is a prompt the user composed while a turn
+    // was in flight. Claude records it ONLY as this attachment line — never as a
+    // normal `type: "user"` line — so without special handling it parses as a
+    // contentless `Role::Other` line: invisible in the transcript and
+    // uncorrelatable to its queued send, which drops the whole turn (prompt and
+    // reply) onto `main`. Surface it as a user message carrying the queued
+    // prompt text so it both displays and flows through send correlation.
+    let queued_prompt = raw
+        .attachment
+        .as_ref()
+        .filter(|a| a.attachment_type.as_deref() == Some("queued_command"))
+        .and_then(|a| a.prompt.clone());
+    let is_queued_command = queued_prompt.is_some();
 
-    let content = match raw.message.and_then(|m| m.content) {
-        Some(RawContent::Text(text)) => vec![ContentBlock::Text { text }],
-        Some(RawContent::Blocks(blocks)) => blocks,
-        None => Vec::new(),
+    let role = if is_queued_command {
+        Role::User
+    } else {
+        raw.line_type
+            .as_deref()
+            .map(Role::from_transcript_type)
+            .unwrap_or(Role::Other)
+    };
+
+    let content = if let Some(prompt) = queued_prompt {
+        vec![ContentBlock::Text { text: prompt }]
+    } else {
+        match raw.message.and_then(|m| m.content) {
+            Some(RawContent::Text(text)) => vec![ContentBlock::Text { text }],
+            Some(RawContent::Blocks(blocks)) => blocks,
+            None => Vec::new(),
+        }
     };
 
     Ok(Some(TranscriptMessage {
@@ -45,6 +67,7 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         // The reader assigns the real line index; a standalone parse defaults to
         // 0 since it has no file position.
         seq: 0,
+        is_queued_command,
     }))
 }
 
@@ -71,6 +94,41 @@ mod tests {
         assert_eq!(msg.linear_parent_uuid, Some(MessageUuid::from("u1")));
         assert_eq!(msg.content.len(), 3);
         assert_eq!(msg.flatten_text().as_deref(), Some("hmm\nhi"));
+    }
+
+    #[test]
+    fn queued_command_attachment_parses_as_user_prompt() {
+        // A prompt queued while a turn was in flight: Claude records it only as
+        // this attachment, with no `message` content. It must surface as a user
+        // message carrying the queued prompt so it displays and correlates.
+        let line = r#"{"uuid":"q1","parentUuid":"a0","type":"attachment","timestamp":"2026-01-01T00:00:00Z","attachment":{"type":"queued_command","prompt":"queued while the turn was busy","commandMode":"prompt"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.uuid, MessageUuid::from("q1"));
+        assert_eq!(msg.role, Role::User);
+        assert_eq!(msg.linear_parent_uuid, Some(MessageUuid::from("a0")));
+        assert_eq!(
+            msg.flatten_text().as_deref(),
+            Some("queued while the turn was busy")
+        );
+        assert!(msg.is_queued_command);
+    }
+
+    #[test]
+    fn non_queued_attachment_is_inert_other_line() {
+        // An attachment that is not a queued command carries no prompt: it stays
+        // a contentless `Other` line and is not flagged as a queued command.
+        let line = r#"{"uuid":"x1","type":"attachment","attachment":{"type":"image","path":"/tmp/a.png"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Other);
+        assert!(msg.content.is_empty());
+        assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn ordinary_user_line_is_not_flagged_queued() {
+        let line = r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"hi"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert!(!msg.is_queued_command);
     }
 
     #[test]
