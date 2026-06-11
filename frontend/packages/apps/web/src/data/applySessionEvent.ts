@@ -76,6 +76,15 @@ export function applySessionEvent(
     case 'transcript_updated':
       // The continuous tail ingested new lines. Pure refetch: invalidate every
       // affected thread plus the focused active one, with no FIFO/unread change.
+      //
+      // New lines also move the session's last activity — and with it the
+      // session list's most-recently-active ordering — so refresh the list
+      // too. In particular, a just-spawned session whose registration refetch
+      // raced ahead of its first ingested line carries no activity stamp yet
+      // and may not sort to the head; without this refresh nothing re-orders
+      // the list afterwards, and the new-session flow (which detects its spawn
+      // as "a fresh head session") would never focus it.
+      invalidateSessions(queryClient);
       for (const threadId of event.thread_ids) {
         invalidateThreadMessages(queryClient, threadId);
       }
