@@ -438,7 +438,7 @@ export function TranscriptPane({
   // still occludes the transcript scrolling beneath it. The body reserves a fixed
   // bottom padding (below) so resting content clears the card.
   const bottomOverlay = bottomContent && (
-    <div className="pointer-events-auto absolute inset-x-3 bottom-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-lg">
+    <div className="pointer-events-auto absolute inset-x-3 bottom-3 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-lg">
       {bottomContent}
     </div>
   );
@@ -448,7 +448,7 @@ export function TranscriptPane({
   // bar). It floats over the transcript; the body reserves a fixed top padding
   // (below) so the first turn is not hidden behind it at rest.
   const breadcrumbOverlay = isOnSubThread && (
-    <div className="pointer-events-auto absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-lg">
+    <div className="pointer-events-auto absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-md border border-slate-200 bg-white px-3 py-1.5 shadow-lg">
       <Breadcrumb items={breadcrumbItems} />
     </div>
   );

@@ -131,7 +131,7 @@ export function SessionNode({
     >
       <div
         className={cn(
-          'rounded-lg border bg-white shadow-sm transition-colors',
+          'rounded-md border bg-white shadow-sm transition-colors',
           isFocused
             ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200'
             : 'border-slate-300 hover:border-slate-400',
