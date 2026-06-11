@@ -10,7 +10,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use tracing_subscriber::EnvFilter;
 
 use delta_server::{router, AppState};
-use delta_wire::Config;
+use delta_bootstrap::Config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -51,7 +51,7 @@ fn config_from_env() -> Config {
         session_workdir_base: std::env::var("DELTA_SESSION_WORKDIR")
             .unwrap_or_else(|_| ".tmp/session".to_owned()),
         tmux_socket: std::env::var("DELTA_TMUX_SOCKET")
-            .unwrap_or_else(|_| delta_wire::DEFAULT_TMUX_SOCKET.to_owned()),
+            .unwrap_or_else(|_| delta_bootstrap::DEFAULT_TMUX_SOCKET.to_owned()),
         port: env_port(),
     }
 }

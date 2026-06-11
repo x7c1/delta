@@ -53,7 +53,7 @@ mod tests {
     use super::*;
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
-    use delta_wire::Config;
+    use delta_bootstrap::Config;
     use tower::ServiceExt;
 
     fn test_state() -> AppState {

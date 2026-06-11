@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use delta_usecase::{SessionEvent, SessionLifecycle};
-use delta_wire::{AppInteractor, Config};
+use delta_bootstrap::{AppInteractor, Config};
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -34,7 +34,7 @@ pub struct AppState {
 impl AppState {
     /// Build the shared state from configuration, wiring the Interactor.
     pub fn build(config: &Config) -> anyhow::Result<Self> {
-        let interactor = delta_wire::build(config)?;
+        let interactor = delta_bootstrap::build(config)?;
         Ok(Self::from_interactor(interactor, &config.tmux_socket))
     }
 

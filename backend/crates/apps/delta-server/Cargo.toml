@@ -7,7 +7,7 @@ repository.workspace = true
 
 [dependencies]
 delta-usecase = { workspace = true }
-delta-wire = { workspace = true }
+delta-bootstrap = { workspace = true }
 anyhow = { workspace = true }
 axum = { workspace = true }
 futures-util = { workspace = true }

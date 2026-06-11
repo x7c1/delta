@@ -16,7 +16,7 @@ delta-sqlite = { path = "crates/gateway/delta-sqlite" }
 delta-transcript = { path = "crates/gateway/delta-transcript" }
 tmux-driver = { path = "crates/gateway/tmux-driver" }
 workspace-fs = { path = "crates/gateway/workspace-fs" }
-delta-wire = { path = "crates/libs/delta-wire" }
+delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
 
 # Shared third-party dependencies
 anyhow = "1"
