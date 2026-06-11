@@ -54,9 +54,51 @@ export function MessageItem({
   // A genuine human turn is a user-role message with author-written text. A
   // user-role message that only carries tool results (fed back to the model
   // after a tool_use) is not a human turn — render it on the assistant side.
+  // Meta is never a user turn (it is harness-injected), so it is excluded here.
   const isUserTurn =
     message.role === 'user' &&
     message.content.some((block) => block.type === 'text');
+
+  // A meta line is harness-injected (skill bodies, system reminders,
+  // local-command output) recorded as `type: "user"`. It is not a human turn:
+  // render it on the assistant side as a single collapsed card whose body is
+  // plain pre-wrapped text — these bodies are huge and not authored prose, so
+  // they are never Markdown-rendered and never a right-aligned user bubble.
+  if (message.role === 'meta') {
+    const text = message.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+    const firstLine =
+      text
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line !== '') ?? '';
+    return (
+      <article
+        className="px-3 text-sm"
+        data-role={message.role}
+        data-testid="message-item"
+      >
+        <Collapsible
+          defaultOpen={false}
+          summary={
+            <span className="flex items-center gap-1.5">
+              <Badge tone="neutral">meta</Badge>
+              <span className="text-slate-500">{firstLine}</span>
+            </span>
+          }
+        >
+          <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
+        </Collapsible>
+        {timestamp && (
+          <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
+            {timestamp}
+          </span>
+        )}
+      </article>
+    );
+  }
 
   const renderedBlocks = message.content.map((block, index) => {
     switch (block.type) {

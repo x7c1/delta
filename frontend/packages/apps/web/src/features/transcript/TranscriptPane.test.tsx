@@ -178,6 +178,19 @@ describe('TranscriptPane', () => {
               content: [{ type: 'text', text: 'OTHER NOISE' }],
               created_at: '2026-01-01T00:00:03Z',
             },
+            {
+              uuid: 'm-meta',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'meta',
+              linear_parent_uuid: 'm-other',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 3,
+              content_text: 'INJECTED META BODY',
+              content: [{ type: 'text', text: 'INJECTED META BODY' }],
+              created_at: '2026-01-01T00:00:04Z',
+            },
           ],
         };
         return HttpResponse.json(body);
@@ -191,6 +204,18 @@ describe('TranscriptPane', () => {
     );
     expect(screen.queryByText('SECRET SYSTEM NOISE')).not.toBeInTheDocument();
     expect(screen.queryByText('OTHER NOISE')).not.toBeInTheDocument();
+    // Meta lines are rendered (unlike system/other), but collapsed: the summary
+    // shows a `meta` badge plus the first line, and the disclosure starts closed.
+    expect(screen.getByText('meta')).toBeInTheDocument();
+    expect(screen.getByText('INJECTED META BODY')).toBeInTheDocument();
+    const metaItem = screen
+      .getByText('INJECTED META BODY')
+      .closest('[data-testid="message-item"]');
+    expect(metaItem).toHaveAttribute('data-role', 'meta');
+    expect(metaItem?.querySelector('button')).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
   });
 
   it('drops the composer and shows the cannot-resume notice for a resume-unavailable session', async () => {

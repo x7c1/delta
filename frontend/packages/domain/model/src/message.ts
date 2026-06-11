@@ -8,7 +8,12 @@ export type MessageUuid = string;
 /** String identifier for a prompt. */
 export type PromptId = string;
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'other';
+export type MessageRole =
+  | 'user'
+  | 'assistant'
+  | 'system'
+  | 'other'
+  | 'meta';
 
 export interface Message {
   uuid: MessageUuid;
