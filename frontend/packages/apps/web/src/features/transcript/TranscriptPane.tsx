@@ -316,13 +316,26 @@ export function TranscriptPane({
     return () => clearTimeout(timer);
   }, [flashChildId]);
 
-  // While a sub-thread chip is hovered, mark every occurrence of its text in
-  // the body so it is clear at a glance what that branch was about. Re-run when
-  // content changes (rendered text nodes are recreated) so the marks track
-  // streaming and refetches; clear on leave or unmount.
+  // The branch text to highlight in the body: the hovered chip, or — during the
+  // post-navigation flash — the chip we just scrolled to, so the same "where did
+  // this branch come from" marks appear without needing to hover.
+  const flashTitle = useMemo(
+    () =>
+      flashChildId === null
+        ? null
+        : threads.find((t) => t.id === flashChildId)?.title ?? null,
+    [flashChildId, threads],
+  );
+  const highlightTitle = hoveredBranchTitle ?? flashTitle;
+
+  // While a sub-thread chip is hovered (or just flashed after a breadcrumb "go
+  // up"), mark every occurrence of its text in the body so it is clear at a
+  // glance what that branch was about. Re-run when content changes (rendered
+  // text nodes are recreated) so the marks track streaming and refetches; clear
+  // on leave or unmount.
   useEffect(() => {
     const body = bodyRef.current;
-    if (!body || !hoveredBranchTitle) {
+    if (!body || !highlightTitle) {
       clearBranchHighlight();
       return;
     }
@@ -332,11 +345,11 @@ export function TranscriptPane({
     // highlight.
     const articles = body.querySelectorAll('[data-testid="message-item"]');
     const ranges = Array.from(articles).flatMap((article) =>
-      findAllQuoteRanges(article, hoveredBranchTitle),
+      findAllQuoteRanges(article, highlightTitle),
     );
     setBranchHighlight(ranges);
     return () => clearBranchHighlight();
-  }, [hoveredBranchTitle, messages.length, lastContentLength]);
+  }, [highlightTitle, messages.length, lastContentLength]);
 
   const breadcrumbItems = ancestry.map((thread, index) => ({
     key: thread.id,
