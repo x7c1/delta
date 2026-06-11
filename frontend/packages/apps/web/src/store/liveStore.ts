@@ -29,6 +29,12 @@ export interface PendingItem {
   threadId: ThreadId;
   text: string;
   semanticParentUuid: MessageUuid | null;
+  /**
+   * The working directory chosen for a new-session send, retained so a failed
+   * spawn can be retried with the same directory. `null`/absent for the default
+   * directory and for non-new-session sends (which have no directory choice).
+   */
+  workdir?: string | null;
   /** queued: waiting in the FIFO; in_progress: turn started; done/failed terminal. */
   status: 'queued' | 'in_progress' | 'done' | 'failed';
   createdAt: number;
@@ -100,6 +106,20 @@ export interface LiveState {
    */
   bindNewSessionPending: (sessionId: SessionId, threadId: ThreadId) => void;
   failSend: (localId: string) => void;
+  /**
+   * Mark a failed-spawn new-session pending as `failed`, surfacing the recoverable
+   * error chip. A spawn that never came up never registered, so its optimistic
+   * send is still an unbound new-session pending (`sessionId === null`). The
+   * `spawn_failed` event carries the minted `session_id`/`pane_token`, but the
+   * unbound pending never learned either id (binding only happens on a successful
+   * registration), so there is nothing to correlate against — we mark the OLDEST
+   * unbound new-session pending. With at most one new-session spawn in flight at a
+   * time this is exact; were several queued at once it could mismatch which one,
+   * but that is still strictly better than the silent stuck-pending status quo.
+   * Already-`failed` pendings are skipped so a second failure marks a different
+   * one. No-op when no unbound new-session pending remains.
+   */
+  failSpawn: () => void;
   /**
    * Drop an optimistic pending send outright (not merely mark it failed). Used
    * when a Send is rejected before it could ever queue server-side — e.g. a
@@ -231,7 +251,13 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   bindNewSessionPending: (sessionId, threadId) =>
     set((state) => {
-      const idx = state.pending.findIndex((item) => item.sessionId === null);
+      // Bind the oldest unbound new-session pending — but never a `failed` one:
+      // a failed spawn is terminal and waiting on the user to retry or dismiss,
+      // so a later successful spawn must bind to a live (queued/in_progress)
+      // pending, not resurrect the failed chip onto a real session.
+      const idx = state.pending.findIndex(
+        (item) => item.sessionId === null && item.status !== 'failed',
+      );
       if (idx === -1) {
         return state;
       }
@@ -246,6 +272,19 @@ export const useLiveStore = create<LiveState>((set) => ({
         item.localId === localId ? { ...item, status: 'failed' } : item,
       ),
     })),
+
+  failSpawn: () =>
+    set((state) => {
+      const idx = state.pending.findIndex(
+        (item) => item.sessionId === null && item.status !== 'failed',
+      );
+      if (idx === -1) {
+        return state;
+      }
+      const pending = state.pending.slice();
+      pending[idx] = { ...pending[idx], status: 'failed' };
+      return { pending };
+    }),
 
   removePending: (localId) =>
     set((state) => ({
@@ -387,6 +426,11 @@ export const useLiveStore = create<LiveState>((set) => ({
           delete permission[event.session_id];
           return { permission };
         }
+        case 'spawn_failed':
+          // The failed-spawn chip is driven by the dedicated `failSpawn` action,
+          // routed from `applySessionEvent` (it has no session-scoped FIFO drain
+          // semantics to share with the turn cases here). Nothing to do here.
+          return state;
         case 'external_input':
           // The external-input marker is session-scoped and only meaningful for
           // the focused session, so the router (`applySessionEvent`) records it

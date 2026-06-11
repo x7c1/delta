@@ -116,6 +116,9 @@ export function Composer({ mode }: ComposerProps) {
         threadId: optimisticThread,
         text,
         semanticParentUuid: branching ? branchOrigin.semanticParentUuid : null,
+        // Retain the chosen directory on a new-session send so a failed spawn can
+        // be retried with the same directory; omitted for non-new-session sends.
+        ...(isNew ? { workdir: newSessionWorkdir } : {}),
         status: 'queued',
         createdAt: Date.now(),
       });

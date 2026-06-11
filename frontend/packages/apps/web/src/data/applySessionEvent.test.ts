@@ -180,6 +180,33 @@ describe('applySessionEvent', () => {
     }
   });
 
+  it('marks the unbound new-session pending failed on spawn_failed without refetching sessions', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    useLiveStore.getState().enqueueSend({
+      localId: 'spawn',
+      sendId: 0,
+      sessionId: null,
+      threadId: -1,
+      text: 'new session',
+      semanticParentUuid: null,
+      workdir: null,
+      status: 'queued',
+      createdAt: 0,
+    });
+
+    applySessionEvent(
+      { kind: 'spawn_failed', session_id: FOCUSED, pane_token: 'pane-1' },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(useLiveStore.getState().pending[0].status).toBe('failed');
+    // The spawn never registered, so there is no session row to refetch.
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['sessions'] });
+  });
+
   it('routes a permission request to the store as a notice', () => {
     const queryClient = new QueryClient();
     applySessionEvent(
