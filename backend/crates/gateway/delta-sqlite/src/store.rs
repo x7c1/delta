@@ -5,11 +5,12 @@ use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
 use tokio::sync::Mutex;
 
 use delta_model::{
-    ContentBlock, Message, MessageUuid, PendingSend, PendingSendStatus, PermissionRequest,
+    Message, MessageUuid, PendingSend, PendingSendStatus, PermissionRequest,
     PermissionStatus, PromptId, Role, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow, SessionStore};
 
+use crate::content_record::{decode_content, encode_content};
 use crate::error::{Error, Result};
 use crate::schema::SCHEMA_SQL;
 use crate::time::now_iso8601;
@@ -149,8 +150,8 @@ fn pending_send_from_row(row: &Row<'_>) -> Result<PendingSend> {
 
 fn message_from_row(row: &Row<'_>) -> Result<Message> {
     let content_json: Option<String> = row.get(9)?;
-    let content: Vec<ContentBlock> = match content_json {
-        Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+    let content = match content_json {
+        Some(json) => decode_content(&json),
         None => Vec::new(),
     };
     Ok(Message {
@@ -681,7 +682,7 @@ impl SessionStore for SqliteStore {
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction().map_err(Error::from)?;
         for m in messages {
-            let content_json = serde_json::to_string(&m.content).unwrap_or_else(|_| "[]".into());
+            let content_json = encode_content(&m.content);
             // The API contract promises an ISO-8601 `created_at`. A transcript
             // line may omit its timestamp, which surfaces here as an empty
             // string; fall back to the ingest time so the stored (and served)

@@ -6,9 +6,10 @@
 //! permission requests. It performs no I/O, owns no async runtime, and knows
 //! nothing about how the data is stored or transported.
 //!
-//! `serde` derives are present so the same types can be reused for the JSONL
-//! transcript and the browser wire format, but there is no database mapping
-//! here — that belongs to the gateway crates.
+//! There is no serde here and no database mapping: how these types appear in
+//! the JSONL transcript, in SQLite, or on the browser wire is owned by the
+//! gateway crates' wire/record twins (`delta-transcript`, `delta-sqlite`,
+//! `delta-wire`).
 
 mod content;
 pub use content::ContentBlock;

@@ -1,12 +1,9 @@
 //! Disposition of a recorded permission request.
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::{Error, Result};
 
 /// Disposition of a recorded permission request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionStatus {
     /// Awaiting the user's decision in the TUI.
     Pending,

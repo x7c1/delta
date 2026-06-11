@@ -5,15 +5,13 @@
 //! incoming prompt against the head of this FIFO to confirm a turn start and
 //! correlate it with the resulting transcript message.
 
-use serde::{Deserialize, Serialize};
-
 use crate::message::MessageUuid;
 use crate::pending_send_status::PendingSendStatus;
 use crate::session::SessionId;
 use crate::thread::ThreadId;
 
 /// A queued user input awaiting correlation with the transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingSend {
     pub id: i64,
     pub session_id: SessionId,

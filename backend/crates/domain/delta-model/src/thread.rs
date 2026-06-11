@@ -2,14 +2,11 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-
 use crate::message::MessageUuid;
 use crate::session::SessionId;
 
 /// Identifier of a thread (an overlay Delta owns, issued by the store).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ThreadId(pub i64);
 
 impl ThreadId {
@@ -36,7 +33,7 @@ impl fmt::Display for ThreadId {
 /// `main` is the trunk thread. Child threads are created when a user branches
 /// off an existing message. A thread is identified by its [`ThreadId`] and
 /// knows its parent thread and the message its subtree is rooted at.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Thread {
     pub id: ThreadId,
     pub session_id: SessionId,

@@ -18,21 +18,9 @@
 //!   early failure signal: if the ending session is a fresh spawn that never
 //!   bound, the launch failed, so Delta reports `SpawnFailed`; an already-bound
 //!   session ending is a normal end and changes nothing.
-
-mod permission_request_payload;
-pub use permission_request_payload::PermissionRequestPayload;
-mod pre_tool_use_payload;
-pub use pre_tool_use_payload::PreToolUsePayload;
-mod session_end_payload;
-pub use session_end_payload::SessionEndPayload;
-mod session_start_payload;
-pub use session_start_payload::SessionStartPayload;
-mod stop_payload;
-pub use stop_payload::StopPayload;
-mod user_prompt_submit_payload;
-pub use user_prompt_submit_payload::UserPromptSubmitPayload;
-mod user_prompt_submit_response;
-pub use user_prompt_submit_response::UserPromptSubmitResponse;
+//!
+//! The payload shapes live in `delta_wire::hooks`; the handlers here convert
+//! them into the domain port types and broadcast the resulting events.
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -41,6 +29,10 @@ use axum::Json;
 
 use delta_usecase::{
     SessionEndHook, SessionId, SessionStartHook, StopHook, UserPromptSubmitHook,
+};
+use delta_wire::hooks::{
+    PermissionRequestPayload, PreToolUsePayload, SessionEndPayload, SessionStartPayload,
+    StopPayload, UserPromptSubmitPayload, UserPromptSubmitResponse,
 };
 
 use crate::state::AppState;

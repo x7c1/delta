@@ -2,6 +2,7 @@
 
 mod raw_attachment;
 mod raw_content;
+mod raw_content_block;
 mod raw_line;
 mod raw_message;
 
@@ -59,7 +60,9 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
     } else {
         match raw.message.and_then(|m| m.content) {
             Some(RawContent::Text(text)) => vec![ContentBlock::Text { text }],
-            Some(RawContent::Blocks(blocks)) => blocks,
+            Some(RawContent::Blocks(blocks)) => {
+                blocks.into_iter().map(ContentBlock::from).collect()
+            }
             None => Vec::new(),
         }
     };
@@ -101,6 +104,16 @@ mod tests {
         assert_eq!(msg.linear_parent_uuid, Some(MessageUuid::from("u1")));
         assert_eq!(msg.content.len(), 3);
         assert_eq!(msg.flatten_text().as_deref(), Some("hmm\nhi"));
+    }
+
+    #[test]
+    fn unknown_content_block_kind_parses_as_explicit_other() {
+        // Unknown block kinds must not fail the parse: they surface as the
+        // domain's explicit `Other` variant while known siblings still parse.
+        let line = r#"{"uuid":"a2","type":"assistant","message":{"role":"assistant","content":[{"type":"image","source":{"x":1}},{"type":"text","text":"hi"}]}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.content[0], ContentBlock::Other);
+        assert_eq!(msg.flatten_text().as_deref(), Some("hi"));
     }
 
     #[test]

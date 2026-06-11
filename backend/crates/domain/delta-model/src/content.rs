@@ -1,14 +1,13 @@
 //! Message content blocks.
 //!
 //! A Claude Code message carries an ordered list of typed content blocks. Delta
-//! models the kinds it cares about and keeps an `Other` escape hatch so unknown
-//! block types parse without error.
-
-use serde::{Deserialize, Serialize};
+//! models the kinds it cares about and keeps an explicit [`ContentBlock::Other`]
+//! variant so unknown block kinds are representable in the domain; the
+//! tolerance itself (parsing an unknown kind into `Other`) is implemented by
+//! the wire/record twins in the gateway crates.
 
 /// One content block within a message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentBlock {
     /// Plain assistant or user text.
     Text { text: String },
@@ -23,13 +22,10 @@ pub enum ContentBlock {
     /// The result of a previously requested tool invocation.
     ToolResult {
         tool_use_id: String,
-        #[serde(default)]
         content: serde_json::Value,
-        #[serde(default)]
         is_error: bool,
     },
     /// Any block kind Delta does not model explicitly.
-    #[serde(other)]
     Other,
 }
 
@@ -49,21 +45,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn content_block_unknown_type_parses_as_other() {
-        let block: ContentBlock =
-            serde_json::from_str(r#"{"type":"image","source":{"x":1}}"#).unwrap();
-        assert_eq!(block, ContentBlock::Other);
-    }
-
-    #[test]
-    fn content_block_tool_result_parses() {
-        let block: ContentBlock = serde_json::from_str(
-            r#"{"type":"tool_result","tool_use_id":"abc","content":"done","is_error":false}"#,
-        )
-        .unwrap();
-        match block {
-            ContentBlock::ToolResult { tool_use_id, .. } => assert_eq!(tool_use_id, "abc"),
-            other => panic!("unexpected: {other:?}"),
-        }
+    fn as_text_extracts_text_and_thinking_only() {
+        assert_eq!(
+            ContentBlock::Text { text: "hi".into() }.as_text(),
+            Some("hi")
+        );
+        assert_eq!(
+            ContentBlock::Thinking {
+                thinking: "hmm".into()
+            }
+            .as_text(),
+            Some("hmm")
+        );
+        assert_eq!(ContentBlock::Other.as_text(), None);
+        assert_eq!(
+            ContentBlock::ToolUse {
+                id: "t1".into(),
+                name: "Bash".into(),
+                input: serde_json::Value::Null,
+            }
+            .as_text(),
+            None
+        );
     }
 }

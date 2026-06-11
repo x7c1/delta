@@ -8,6 +8,7 @@
 //! connection is guarded by an async mutex and queries run inline. The amount
 //! of data is small and there is no cross-process contention.
 
+mod content_record;
 mod error;
 mod schema;
 mod store;

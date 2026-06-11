@@ -2,12 +2,12 @@
 
 use serde::Deserialize;
 
-use delta_model::ContentBlock;
+use super::raw_content_block::RawContentBlock;
 
 /// Content is either a bare string (user prompts) or an array of typed blocks.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub(super) enum RawContent {
     Text(String),
-    Blocks(Vec<ContentBlock>),
+    Blocks(Vec<RawContentBlock>),
 }

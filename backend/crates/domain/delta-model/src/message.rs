@@ -1,7 +1,5 @@
 //! A single message in the reconstructed thread graph.
 
-use serde::{Deserialize, Serialize};
-
 use crate::content::ContentBlock;
 use crate::newtype::string_newtype;
 use crate::role::Role;
@@ -27,7 +25,7 @@ string_newtype! {
 /// - `semantic_parent_uuid` is the `to:` reply edge. It is only set on user
 ///   branch messages and is usually `None`. A thread is a subtree of this
 ///   `to:` graph.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
     pub uuid: MessageUuid,
     pub session_id: SessionId,
