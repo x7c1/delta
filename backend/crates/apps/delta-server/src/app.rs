@@ -62,6 +62,7 @@ mod tests {
             session_workdir_base: "/tmp/delta-test-session".into(),
             tmux_socket: "delta-test".into(),
             port: 7878,
+            launch: delta_usecase::LaunchConfig::default(),
         })
         .unwrap()
     }

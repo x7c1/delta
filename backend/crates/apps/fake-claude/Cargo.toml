@@ -1,0 +1,23 @@
+[package]
+name = "fake-claude"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The hook wire contract only: the fake impersonates the external `claude`
+# program, so it speaks the same wire types the server parses but never
+# touches Delta's domain internals.
+delta-wire = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+delta-bootstrap = { workspace = true }
+delta-server = { workspace = true }
+axum = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }

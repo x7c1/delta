@@ -1,0 +1,244 @@
+//! Writing the JSONL transcript the way Claude Code does.
+//!
+//! Delta never sees the fake's process state — it reads the transcript file
+//! whose path the hook payloads report. So the lines written here mirror the
+//! shapes Claude Code writes (and Delta parses): `type: "user"`/`"assistant"`
+//! lines with a `uuid`/`parentUuid` chain and a `message.content` that is a
+//! bare string or an array of typed blocks, plus the `queued_command`
+//! attachment line and the `[Request interrupted by user]` marker.
+
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use serde_json::{json, Value};
+
+/// Text of the marker line Claude Code writes when the user interrupts the
+/// in-flight turn (the plain mid-response variant).
+pub const INTERRUPT_MARKER: &str = "[Request interrupted by user]";
+
+/// An append-only JSONL transcript with a consistent `uuid`/`parentUuid` chain.
+pub struct TranscriptWriter {
+    path: PathBuf,
+    session_id: String,
+    /// Sequence number of the next line, also seeding its uuid. Starts at the
+    /// existing line count so a resume continues the numbering.
+    next_seq: usize,
+    /// The previous line's uuid, recovered from the file on resume so appended
+    /// lines keep chaining.
+    last_uuid: Option<String>,
+}
+
+impl TranscriptWriter {
+    /// Open (or create) the transcript at `path`, scanning any existing lines
+    /// so appended lines continue the resume's uuid chain and numbering.
+    pub fn open(path: &Path, session_id: &str) -> Result<Self, String> {
+        let existing = match std::fs::read_to_string(path) {
+            Ok(content) => content,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(err) => return Err(format!("read transcript {}: {err}", path.display())),
+        };
+        let lines: Vec<&str> = existing.lines().filter(|l| !l.trim().is_empty()).collect();
+        let last_uuid = lines
+            .last()
+            .and_then(|line| serde_json::from_str::<Value>(line).ok())
+            .and_then(|value| value["uuid"].as_str().map(|s| s.to_owned()));
+        Ok(Self {
+            path: path.to_owned(),
+            session_id: session_id.to_owned(),
+            next_seq: lines.len(),
+            last_uuid,
+        })
+    }
+
+    /// Append a `type: "user"` line carrying a bare-string prompt.
+    pub fn user_text(&mut self, text: &str) -> Result<(), String> {
+        let message = json!({ "role": "user", "content": text });
+        self.append("user", json!({ "message": message }))
+    }
+
+    /// Append the interrupt marker (a `role: user` line belonging to the
+    /// aborted turn, not a new human turn).
+    pub fn interrupt_marker(&mut self) -> Result<(), String> {
+        self.user_text(INTERRUPT_MARKER)
+    }
+
+    /// Append a `type: "assistant"` line with typed content blocks.
+    pub fn assistant_blocks(&mut self, blocks: Vec<Value>) -> Result<(), String> {
+        let message = json!({ "role": "assistant", "content": blocks });
+        self.append("assistant", json!({ "message": message }))
+    }
+
+    /// Append the `tool_result` carrier: a `role: user` line with no
+    /// author-written text, belonging to the in-flight turn.
+    pub fn tool_result(&mut self, tool_use_id: &str, is_error: bool) -> Result<(), String> {
+        let message = json!({
+            "role": "user",
+            "content": [{
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "content": if is_error { "User rejected tool use" } else { "done" },
+                "is_error": is_error,
+            }],
+        });
+        self.append("user", json!({ "message": message }))
+    }
+
+    /// Append a `queued_command` attachment: a prompt the user composed while
+    /// a turn was in flight, recorded only as this attachment line.
+    pub fn queued_command(&mut self, prompt: &str) -> Result<(), String> {
+        self.append(
+            "attachment",
+            json!({
+                "attachment": {
+                    "type": "queued_command",
+                    "prompt": prompt,
+                    "commandMode": "prompt",
+                },
+            }),
+        )
+    }
+
+    /// Append one line of `line_type` with the common envelope (uuid chain,
+    /// session id, timestamp) merged over `extra`'s fields.
+    fn append(&mut self, line_type: &str, extra: Value) -> Result<(), String> {
+        let uuid = format!("{}-u{}", self.session_id, self.next_seq);
+        let mut line = json!({
+            "uuid": uuid,
+            "parentUuid": self.last_uuid,
+            "type": line_type,
+            "sessionId": self.session_id,
+            "timestamp": rfc3339_now(),
+        });
+        if let (Value::Object(target), Value::Object(fields)) = (&mut line, extra) {
+            target.extend(fields);
+        }
+
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|e| format!("open transcript {}: {e}", self.path.display()))?;
+        writeln!(file, "{line}").map_err(|e| format!("append transcript line: {e}"))?;
+
+        self.last_uuid = Some(uuid);
+        self.next_seq += 1;
+        Ok(())
+    }
+}
+
+/// The current wall-clock time as an RFC 3339 UTC timestamp (second
+/// precision), without pulling in a date-time dependency for one format.
+fn rfc3339_now() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    rfc3339_from_unix(secs as i64)
+}
+
+/// Format unix seconds as `YYYY-MM-DDTHH:MM:SSZ`.
+///
+/// Uses the standard civil-from-days algorithm (Howard Hinnant's
+/// `civil_from_days`) for the date part.
+fn rfc3339_from_unix(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let secs_of_day = secs.rem_euclid(86_400);
+
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { year + 1 } else { year };
+
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        secs_of_day / 3600,
+        (secs_of_day % 3600) / 60,
+        secs_of_day % 60,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("fake-claude-transcript-tests");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join(format!("{name}-{}.jsonl", std::process::id()))
+    }
+
+    fn read_lines(path: &Path) -> Vec<Value> {
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn chains_uuids_across_lines() {
+        let path = temp_path("chain");
+        let _ = std::fs::remove_file(&path);
+        let mut writer = TranscriptWriter::open(&path, "sess-1").unwrap();
+        writer.user_text("hello").unwrap();
+        writer
+            .assistant_blocks(vec![json!({"type": "text", "text": "hi"})])
+            .unwrap();
+
+        let lines = read_lines(&path);
+        assert_eq!(lines[0]["uuid"], "sess-1-u0");
+        assert_eq!(lines[0]["parentUuid"], Value::Null);
+        assert_eq!(lines[0]["type"], "user");
+        assert_eq!(lines[0]["message"]["content"], "hello");
+        assert_eq!(lines[1]["uuid"], "sess-1-u1");
+        assert_eq!(lines[1]["parentUuid"], "sess-1-u0");
+        assert_eq!(lines[1]["message"]["content"][0]["text"], "hi");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn reopening_continues_the_chain() {
+        let path = temp_path("reopen");
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut writer = TranscriptWriter::open(&path, "sess-2").unwrap();
+            writer.user_text("first").unwrap();
+        }
+        let mut writer = TranscriptWriter::open(&path, "sess-2").unwrap();
+        writer.user_text("second").unwrap();
+
+        let lines = read_lines(&path);
+        assert_eq!(lines[1]["uuid"], "sess-2-u1");
+        assert_eq!(lines[1]["parentUuid"], "sess-2-u0");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn queued_command_line_matches_the_attachment_shape() {
+        let path = temp_path("queued");
+        let _ = std::fs::remove_file(&path);
+        let mut writer = TranscriptWriter::open(&path, "sess-3").unwrap();
+        writer.queued_command("later please").unwrap();
+
+        let lines = read_lines(&path);
+        assert_eq!(lines[0]["type"], "attachment");
+        assert_eq!(lines[0]["attachment"]["type"], "queued_command");
+        assert_eq!(lines[0]["attachment"]["prompt"], "later please");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn formats_known_unix_seconds() {
+        assert_eq!(rfc3339_from_unix(0), "1970-01-01T00:00:00Z");
+        // 2026-01-01T00:00:00Z
+        assert_eq!(rfc3339_from_unix(1_767_225_600), "2026-01-01T00:00:00Z");
+    }
+}

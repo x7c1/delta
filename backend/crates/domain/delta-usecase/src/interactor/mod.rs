@@ -18,6 +18,7 @@ mod workdir;
 #[cfg(test)]
 mod testing;
 
+use crate::launch_config::LaunchConfig;
 use crate::open_sessions::OpenSessions;
 use crate::pane_token::PaneTokenMinter;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
@@ -52,6 +53,10 @@ pub struct Interactor<T, X, S, W> {
     /// directory so spawning/resuming in a real project never overwrites that
     /// project's own `.claude/settings.json`.
     session_settings_path: String,
+    /// How sessions are launched (which binary) and how long the watchdog
+    /// waits on a launch. Production defaults via [`LaunchConfig::default`];
+    /// overridden through [`Self::with_launch_config`].
+    launch: LaunchConfig,
     /// Mints unique [`PaneToken`]s for fresh spawns.
     ///
     /// [`PaneToken`]: crate::pane_token::PaneToken
@@ -104,9 +109,20 @@ where
             session_workdir_base: session_workdir_base.into(),
             session_settings_json: session_settings_json.into(),
             session_settings_path: session_settings_path.into(),
+            launch: LaunchConfig::default(),
             minter: PaneTokenMinter::new(),
             open_sessions: tokio::sync::Mutex::new(OpenSessions::default()),
             sync_lock: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// Replace the launch configuration (binary to spawn, watchdog deadlines).
+    ///
+    /// A builder-style override so the many existing constructor call sites
+    /// keep the production defaults without naming them; the composition root
+    /// applies whatever the environment configured.
+    pub fn with_launch_config(mut self, launch: LaunchConfig) -> Self {
+        self.launch = launch;
+        self
     }
 }

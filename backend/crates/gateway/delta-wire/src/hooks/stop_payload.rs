@@ -1,9 +1,9 @@
 //! `Stop` payload.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `Stop` payload.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct StopPayload {
     pub session_id: String,
     #[serde(default)]

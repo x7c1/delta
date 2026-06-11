@@ -12,6 +12,12 @@
 //! TypeScript: the hooks cross between the local Claude Code process and the
 //! server only, so the browser never sees them and `@delta/wire-gen` has no
 //! business carrying them.
+//!
+//! The payload types derive `Serialize` as well as `Deserialize`: a driver
+//! that impersonates Claude Code (such as the `fake-claude` test binary) or a
+//! test emitting hook traffic constructs these exact types and serializes
+//! them, so both sides of the contract share one definition instead of the
+//! emitter hand-rolling JSON that could drift from what the server parses.
 
 mod permission_request_payload;
 pub use permission_request_payload::PermissionRequestPayload;
