@@ -34,8 +34,9 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
         .collect();
     assert_eq!(
         ids,
-        vec!["sess-1", "sess-2"],
-        "equal recency falls back to the deterministic id tiebreaker"
+        vec!["sess-2", "sess-1"],
+        "equal recency falls back to the deterministic id tiebreaker \
+         (descending: time-ordered ids put the newest first)"
     );
     assert!(
         listings.iter().all(|l| !l.open),

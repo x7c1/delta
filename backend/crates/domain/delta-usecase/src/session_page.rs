@@ -14,8 +14,9 @@
 /// 1. `recency` — the row's last activity (`MAX(message.created_at)`), or its
 ///    own `created_at` when message-less. Sorted **descending**.
 /// 2. `created_at` — the session's creation timestamp. Sorted **descending**.
-/// 3. `id` — the session id, the final tiebreaker. Sorted **ascending**
-///    (opposite direction from the other two).
+/// 3. `id` — the session id, the final tiebreaker. Sorted **descending**:
+///    Delta-minted ids are time-ordered UUID v7, so on a full timestamp tie
+///    (both keys have second resolution) the newest session still sorts first.
 ///
 /// All three are ISO-8601 UTC text (and a string session id), which compare
 /// correctly as text, so no datetime casting is needed. The transport layer
@@ -27,7 +28,7 @@ pub struct SessionPageCursor {
     pub recency: String,
     /// The session's own `created_at` (descending key).
     pub created_at: String,
-    /// The session id (ascending tiebreaker).
+    /// The session id (descending tiebreaker).
     pub id: String,
 }
 

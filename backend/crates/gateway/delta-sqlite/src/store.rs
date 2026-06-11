@@ -265,12 +265,16 @@ impl SessionStore for SqliteStore {
 
         // `recency` is the row's last activity, falling back to its own
         // `created_at` when message-less. The ordering is `recency` DESC, then
-        // `created_at` DESC, then `id` ASC — three keys with mixed directions,
-        // so the cursor predicate is the expanded OR form rather than a
-        // row-value tuple comparison (SQLite tuple `<` is uniform-direction
-        // only). When there is no cursor, `:cursor_null = 1` short-circuits the
-        // predicate to select from the top. ISO-8601 UTC timestamps compare
-        // correctly as text, so no datetime casting is needed.
+        // `created_at` DESC, then `id` DESC. The final tiebreaker is descending
+        // because Delta-minted session ids are time-ordered UUID v7: when two
+        // sessions tie on both timestamps (they have second resolution, so a
+        // burst of activity ties easily), the *newest* session must still sort
+        // first — most-recently-active first all the way down. The cursor
+        // predicate is the expanded OR form (equivalent to a row-value tuple
+        // comparison) so each key's role stays explicit. When there is no
+        // cursor, `:cursor_null = 1` short-circuits the predicate to select
+        // from the top. ISO-8601 UTC timestamps compare correctly as text, so
+        // no datetime casting is needed.
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {SESSION_COLS}, \
@@ -281,8 +285,8 @@ impl SessionStore for SqliteStore {
                  FROM session \
                  WHERE :cursor_null = 1 \
                     OR recency < :r \
-                    OR (recency = :r AND (created_at < :c OR (created_at = :c AND id > :i))) \
-                 ORDER BY recency DESC, created_at DESC, id ASC \
+                    OR (recency = :r AND (created_at < :c OR (created_at = :c AND id < :i))) \
+                 ORDER BY recency DESC, created_at DESC, id DESC \
                  LIMIT :limit"
             ))
             .map_err(Error::from)?;
