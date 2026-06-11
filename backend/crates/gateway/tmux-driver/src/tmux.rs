@@ -361,6 +361,41 @@ mod tests {
     }
 
     #[test]
+    fn new_session_args_forwards_a_trailing_prompt_argument_unquoted() {
+        // A composer-first new session carries the first prompt as a trailing
+        // positional argv entry (`claude … <prompt>`), so a multi-line / quoted
+        // prompt reaches `claude` verbatim without shell quoting.
+        assert_eq!(
+            new_session_args(
+                "delta-1",
+                "/work/delta-1",
+                &[
+                    "claude".to_owned(),
+                    "--settings".to_owned(),
+                    "/run/delta/settings.json".to_owned(),
+                    "--session-id".to_owned(),
+                    "0190-uuid".to_owned(),
+                    "hello\nworld \"quoted\"".to_owned(),
+                ],
+            ),
+            vec![
+                "new-session",
+                "-d",
+                "-s",
+                "delta-1",
+                "-c",
+                "/work/delta-1",
+                "claude",
+                "--settings",
+                "/run/delta/settings.json",
+                "--session-id",
+                "0190-uuid",
+                "hello\nworld \"quoted\"",
+            ],
+        );
+    }
+
+    #[test]
     fn input_commands_clear_then_type_without_submitting() {
         // Typing is clear → literal text, with NO Enter: the submit is issued
         // separately after a delay so Claude's paste-burst detection cannot

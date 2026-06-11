@@ -44,6 +44,23 @@ pub(crate) fn interactor_with_failing_tmux(
     )
 }
 
+/// An interactor whose tmux session launch (`create_session`) always fails.
+pub(crate) fn interactor_with_failing_create_session(
+) -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+    Interactor::new(
+        FakeTmux {
+            fail_create: true,
+            ..Default::default()
+        },
+        FakeTranscript::default(),
+        FakeStore::default(),
+        FakeWorkspace::default(),
+        TEST_WORKDIR_BASE,
+        TEST_SETTINGS_JSON,
+        TEST_SETTINGS_PATH,
+    )
+}
+
 // Helper accessors used only in tests to reach into the fakes the interactor owns.
 impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
     /// Register `sess-1` and return it to idle.

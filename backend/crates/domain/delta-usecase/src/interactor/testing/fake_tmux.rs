@@ -24,6 +24,9 @@ pub(crate) struct FakeTmux {
     /// When set, `send_line` fails instead of recording the line, simulating a
     /// dispatch failure into the pane.
     pub(crate) fail: bool,
+    /// When set, `create_session` fails instead of recording the spawn,
+    /// simulating a failed session launch.
+    pub(crate) fail_create: bool,
     /// The session names currently "existing" for `has_session`.
     pub(crate) live: Mutex<Vec<String>>,
     /// The sessions `create_session` was called with, in order.
@@ -39,6 +42,9 @@ impl TmuxDriver for FakeTmux {
     }
 
     async fn create_session(&self, name: &str, workdir: &str, command: &[String]) -> Result<()> {
+        if self.fail_create {
+            return Err(crate::error::Error::Tmux("create failed".into()));
+        }
         self.created.lock().unwrap().push(CreatedSession {
             name: name.to_owned(),
             workdir: workdir.to_owned(),

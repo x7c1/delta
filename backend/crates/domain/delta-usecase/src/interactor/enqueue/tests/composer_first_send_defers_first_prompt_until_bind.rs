@@ -30,14 +30,19 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     assert_eq!(created[0].name, "delta-1");
     assert_eq!(created[0].workdir, "/work/delta-1");
 
-    // The deferred first prompt was actually typed into the spawned pane up
-    // front (otherwise Claude would sit idle and never fire the hook that binds
-    // the spawn).
-    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    // The first prompt rides on the launch command line as a trailing positional
+    // argument (claude auto-submits it at startup), NOT injected into the pane
+    // after launch. The last argv entry is the prompt, and no send_line keystroke
+    // dispatch happened during the fresh spawn.
     assert_eq!(
-        sent,
-        vec![("delta-1:0.0".to_owned(), "first message".to_owned())],
-        "the first prompt is dispatched into the fresh pane"
+        created[0].command.last().map(String::as_str),
+        Some("first message"),
+        "the first prompt is the trailing positional launch argument"
+    );
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert!(
+        sent.is_empty(),
+        "the fresh spawn submits the prompt at launch, not via send_line"
     );
 
     // Delta pinned the conversation's session id at spawn time; read it back so
