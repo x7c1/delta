@@ -1,4 +1,10 @@
-export { createHandlers, handlers } from './handlers';
+export {
+  createHandlers,
+  createMockApi,
+  handlers,
+  mockApi,
+  type MockApi,
+} from './handlers';
 export {
   FakeEventSource,
   defaultScript,
@@ -17,6 +23,7 @@ export {
   SESSION_ID_2,
   SESSION_ID_3,
   mockMessagesByThread,
+  mockSpawnSessionId,
   mockSession,
   mockSession2,
   mockSession3,

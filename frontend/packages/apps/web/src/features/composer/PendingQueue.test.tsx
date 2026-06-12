@@ -93,9 +93,10 @@ describe('PendingQueue failed spawn', () => {
     expect(fresh.workdir).toBe('/work/dir');
     expect(fresh.sessionId).toBeNull();
     expect(fresh.threadId).toBe(NEW_SESSION_DRAFT_KEY);
-    // The mock new-session POST resolves with id 0, attached after the request.
+    // The mock new-session POST mints real ids (eager rows), attached after
+    // the request resolves.
     await waitFor(() => {
-      expect(useLiveStore.getState().pending[0].sendId).toBe(0);
+      expect(useLiveStore.getState().pending[0].sendId).toBe(1);
     });
   });
 });

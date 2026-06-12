@@ -334,6 +334,16 @@ export const mockMessagesByThread: Record<number, Message[]> = {
   ],
 };
 
+/**
+ * Deterministic id of the `ordinal`-th session spawned by a mock new-session
+ * send within one {@link seedData} store. The real server mints a UUID; the
+ * mock keeps the id predictable so tests can address the spawn (e.g. emit a
+ * `spawn_failed` event carrying the same id the `POST /api/sends` returned).
+ */
+export function mockSpawnSessionId(ordinal: number): string {
+  return `sess-mock-spawn-${ordinal}`;
+}
+
 /** In-memory store shape shared by the MSW handlers within one render. */
 export interface MockStore {
   /** Sessions keyed by id, each with its open flag, threads, and main thread. */
@@ -349,11 +359,20 @@ export interface MockStore {
      * server's resume gate.
      */
     resumable?: boolean;
+    /**
+     * True for an eagerly-created new-session row whose spawn has not bound
+     * yet. Mirrors the real server's message-less `spawning` status: the row
+     * is addressable by id (its sends list works) but stays out of
+     * `GET /api/sessions` until a `session_registered` event activates it.
+     */
+    spawning?: boolean;
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: Send[];
   nextThreadId: number;
   nextSendId: number;
+  /** Ordinal of the next mock spawn (see {@link mockSpawnSessionId}). */
+  nextSpawnOrdinal: number;
 }
 
 /**
@@ -428,6 +447,7 @@ export function seedData(): MockStore {
     sends: [],
     nextThreadId: FIRST_FILLER_THREAD_ID + FILLER_SESSION_COUNT,
     nextSendId: 1,
+    nextSpawnOrdinal: 1,
   };
 }
 

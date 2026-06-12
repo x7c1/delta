@@ -18,6 +18,8 @@ mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;
 pub use send_response::WireSendResponse;
+mod sends_response;
+pub use sends_response::WireSendsResponse;
 mod sessions_response;
 pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
 mod threads_response;

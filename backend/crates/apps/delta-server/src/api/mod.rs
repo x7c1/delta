@@ -30,8 +30,8 @@ use serde::Deserialize;
 use delta_usecase::{SessionId, ThreadId};
 use delta_wire::rest::{
     WireCreateSendRequest, WireMessagesResponse, WireNewSessionResponse, WireRecentWorkdirItem,
-    WireSendResponse, WireSessionListItem, WireSessionsResponse, WireThreadsResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireSendResponse, WireSendsResponse, WireSessionListItem, WireSessionsResponse,
+    WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -140,6 +140,24 @@ pub(crate) async fn list_threads(
 ) -> Result<Json<WireThreadsResponse>, ApiError> {
     let threads = state.interactor().threads_for(&SessionId::from(id)).await?;
     Ok(Json(WireThreadsResponse::from(threads)))
+}
+
+/// `GET /api/sessions/{id}/sends` — a session's open (non-terminal) sends.
+///
+/// Returns the sends still in flight for the session — status `queued`
+/// (held back until the session goes idle) or `dispatched` (typed into the
+/// pane, awaiting transcript correlation) — oldest first. This is the source
+/// of truth for the browser's pending-send strip. An unknown session id is a
+/// `404`, so a reaped spawn is distinguishable from "nothing pending".
+pub(crate) async fn list_sends(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<WireSendsResponse>, ApiError> {
+    let sends = state
+        .interactor()
+        .open_sends_for(&SessionId::from(id))
+        .await?;
+    Ok(Json(WireSendsResponse::from(sends)))
 }
 
 /// `GET /api/threads/{id}/messages` — a thread's messages for drill-down.

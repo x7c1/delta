@@ -32,6 +32,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/open", post(api::open_session))
         .route("/api/sessions/{id}/close", post(api::close_session))
         .route("/api/sessions/{id}/threads", get(api::list_threads))
+        .route("/api/sessions/{id}/sends", get(api::list_sends))
         .route("/api/threads/{id}/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
         // Working-directory picker: browse and recents (read-only).

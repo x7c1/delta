@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { HttpHandler } from 'msw';
-import type { SessionsResponse } from '@delta/wire-gen';
-import { createHandlers } from './handlers';
+import type {
+  SendResponse,
+  SendsResponse,
+  SessionsResponse,
+} from '@delta/wire-gen';
+import { createHandlers, createMockApi } from './handlers';
 import {
+  mockSpawnSessionId,
   SESSIONS_PAGE_SIZE,
+  SESSION_ID,
   SESSION_ID_2,
   SESSION_ID_3,
+  MAIN_THREAD_ID,
   SESSION_3_MAIN_THREAD_ID,
 } from './fixtures';
 
@@ -150,5 +157,155 @@ describe('resume-unavailable session mock', () => {
     );
 
     expect(response.status).toBe(204);
+  });
+});
+
+/** Run a GET handler selected by a path pattern suffix. */
+async function runGet(
+  handlers: HttpHandler[],
+  pathSuffix: string,
+  url: string,
+): Promise<Response> {
+  const handler = handlers.find(
+    (h) => h.info.method === 'GET' && String(h.info.path).endsWith(pathSuffix),
+  );
+  if (!handler) {
+    throw new Error(`GET handler ending in ${pathSuffix} not found`);
+  }
+  const result = await handler.run({ request: new Request(url), requestId: 'test' });
+  const response = result?.response;
+  if (!response) {
+    throw new Error('handler did not produce a response');
+  }
+  return response;
+}
+
+/** A session's open sends via the mock `GET /api/sessions/{id}/sends`. */
+async function getOpenSends(
+  handlers: HttpHandler[],
+  sessionId: string,
+): Promise<SendsResponse> {
+  const response = await runGet(
+    handlers,
+    '/sends',
+    `http://localhost/api/sessions/${sessionId}/sends`,
+  );
+  expect(response.status).toBe(200);
+  return (await response.json()) as SendsResponse;
+}
+
+describe('GET /api/sessions/{id}/sends mock', () => {
+  it('lists only the session’s non-terminal sends, oldest first', async () => {
+    const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    // Two sends into the open session; both list, in submit order.
+    const first = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        thread_id: MAIN_THREAD_ID,
+        text: 'first',
+      })
+    ).json()) as SendResponse;
+    await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+      thread_id: MAIN_THREAD_ID,
+      text: 'second',
+    });
+
+    let sends = (await getOpenSends(httpHandlers, SESSION_ID)).sends;
+    expect(sends.map((s) => s.text)).toEqual(['first', 'second']);
+    expect(sends.every((s) => s.status === 'dispatched')).toBe(true);
+
+    // turn_started resolves the named send only.
+    applyEvent({
+      kind: 'turn_started',
+      session_id: SESSION_ID,
+      send_id: first.send.id,
+      matched_uuid: 'uuid-m1',
+    });
+    sends = (await getOpenSends(httpHandlers, SESSION_ID)).sends;
+    expect(sends.map((s) => s.text)).toEqual(['second']);
+
+    // turn_completed drains the rest of the session's open sends.
+    applyEvent({
+      kind: 'turn_completed',
+      session_id: SESSION_ID,
+      stop_reason: null,
+    });
+    sends = (await getOpenSends(httpHandlers, SESSION_ID)).sends;
+    expect(sends).toEqual([]);
+  });
+
+  it('responds 404 for an unknown session id', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runGet(
+      handlers,
+      '/sends',
+      'http://localhost/api/sessions/ghost/sends',
+    );
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('new-session send mock (eager rows)', () => {
+  it('mints real session/thread/send ids and keeps the spawning row unlisted', async () => {
+    const { handlers } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const body = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        new_session: true,
+        text: 'kick off',
+      })
+    ).json()) as SendResponse;
+
+    const sessionId = mockSpawnSessionId(1);
+    expect(body.send.session_id).toBe(sessionId);
+    expect(body.send.thread_id).toBeGreaterThan(0);
+    expect(body.send.id).toBeGreaterThan(0);
+    expect(body.send.status).toBe('dispatched');
+
+    // The spawning row stays out of the session list…
+    const page = await getSessionsPage(httpHandlers, '?limit=100');
+    expect(page.sessions.some((s) => s.session.id === sessionId)).toBe(false);
+
+    // …but its open sends are already queryable, so the pending chip can
+    // render from "server" state across the spawn window.
+    const sends = (await getOpenSends(httpHandlers, sessionId)).sends;
+    expect(sends.map((s) => s.text)).toEqual(['kick off']);
+  });
+
+  it('activates the row on session_registered and deletes it on spawn_failed', async () => {
+    const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+      new_session: true,
+      text: 'will register',
+    });
+    await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+      new_session: true,
+      text: 'will fail',
+    });
+    const registered = mockSpawnSessionId(1);
+    const failed = mockSpawnSessionId(2);
+
+    applyEvent({ kind: 'session_registered', session_id: registered });
+    const page = await getSessionsPage(httpHandlers, '?limit=100');
+    const listed = page.sessions.find((s) => s.session.id === registered);
+    expect(listed?.open).toBe(true);
+
+    // The reaped spawn disappears entirely: 404, exactly as the real server
+    // answers after deleting the contentless failed session.
+    applyEvent({
+      kind: 'spawn_failed',
+      session_id: failed,
+      pane_token: 'pane-x',
+    });
+    const response = await runGet(
+      httpHandlers,
+      '/sends',
+      `http://localhost/api/sessions/${failed}/sends`,
+    );
+    expect(response.status).toBe(404);
   });
 });

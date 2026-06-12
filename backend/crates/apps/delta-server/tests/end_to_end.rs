@@ -300,6 +300,18 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         "the resume's first prompt is held until SessionStart(resume)"
     );
 
+    // GET /api/sessions/{id}/sends mirrors the queue: the dispatched send is
+    // the session's one open send, so the browser's pending strip can render
+    // it from server state.
+    let (status, body) = get(&app, &format!("/api/sessions/{session_id}/sends")).await;
+    assert_eq!(status, StatusCode::OK);
+    let sends = body["sends"].as_array().expect("sends array");
+    assert_eq!(sends.len(), 1, "the dispatched send is open");
+    assert_eq!(sends[0]["id"].as_i64(), Some(send_id));
+    assert_eq!(sends[0]["text"], prompt);
+    assert_eq!(sends[0]["status"], "dispatched");
+    assert_eq!(sends[0]["thread_id"].as_i64(), Some(main_thread_id));
+
     // Feed the readiness hook. SessionStart(source=resume) blocks `claude` until
     // its handler returns, so the handler only *marks* the resume ready — it does
     // NOT type the held prompt (a keystroke sent from inside the hook would be
@@ -391,6 +403,15 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         "matched send injects its locator quote, framed, as additionalContext"
     );
 
+    // The matched send is terminal, so the session's open-send list is empty
+    // again — the pending strip drains from server state.
+    let (status, body) = get(&app, &format!("/api/sessions/{session_id}/sends")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body["sends"].as_array().expect("sends array").is_empty(),
+        "a matched send no longer lists as open"
+    );
+
     // 5. GET /api/sessions/{id}/threads exposes the main thread for the
     //    navigator, scoped to this session.
     let (status, body) = get(&app, &format!("/api/sessions/{session_id}/threads")).await;
@@ -463,6 +484,8 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
         StatusCode::NOT_FOUND,
         "threads of unknown id is 404"
     );
+    let (status, _) = get(&app, "/api/sessions/ghost/sends").await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "sends of unknown id is 404");
 
     let _ = std::fs::remove_file(&transcript_path);
 }
@@ -508,6 +531,16 @@ async fn new_session_send_spawns_and_persists_first_prompt() {
         sessions.is_empty(),
         "a message-less spawning session is not listed before its first hook"
     );
+    // The open-send list is queryable for the eager row even before it is
+    // listable: the browser keeps the first-send pending chip rendered from
+    // server state across the spawn window.
+    let (status, body) = get(&app, &format!("/api/sessions/{session_id}/sends")).await;
+    assert_eq!(status, StatusCode::OK);
+    let sends = body["sends"].as_array().expect("sends array");
+    assert_eq!(sends.len(), 1, "the first prompt is the one open send");
+    assert_eq!(sends[0]["text"], "kick off a new conversation");
+    assert_eq!(sends[0]["status"], "dispatched");
+
     // A fresh tmux session was spawned with the first prompt carried on its
     // launch command line (claude auto-submits it at startup), not injected via
     // post-launch keystrokes.

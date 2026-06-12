@@ -149,6 +149,14 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// the next held-back send to dispatch when the session becomes idle.
     async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
+    /// A session's open (non-terminal) sends — status `queued` or
+    /// `dispatched` — oldest first (ascending `id`).
+    ///
+    /// This is the server-side truth behind the browser's pending-send strip:
+    /// every send accepted for the session that has neither matched a
+    /// transcript line nor been cancelled yet.
+    async fn open_sends(&self, session_id: &SessionId) -> Result<Vec<Send>>;
+
     /// Promote a `queued` send to `dispatched`, marking it typed so the
     /// normal `UserPromptSubmit` correlation can match it.
     async fn promote_queued_send(&self, id: i64) -> Result<()>;
@@ -360,6 +368,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         (**self).next_queued_send(session_id).await
+    }
+
+    async fn open_sends(&self, session_id: &SessionId) -> Result<Vec<Send>> {
+        (**self).open_sends(session_id).await
     }
 
     async fn promote_queued_send(&self, id: i64) -> Result<()> {
