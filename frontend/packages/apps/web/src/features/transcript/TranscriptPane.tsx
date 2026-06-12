@@ -488,7 +488,7 @@ export function TranscriptPane({
   // still occludes the transcript scrolling beneath it. The body reserves a fixed
   // bottom padding (below) so resting content clears the card.
   const bottomOverlay = bottomContent && (
-    <div className="pointer-events-auto absolute inset-x-3 bottom-3 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-md">
+    <div className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset rounded-md border border-slate-200 bg-white px-3 py-2 shadow-md">
       {bottomContent}
     </div>
   );
@@ -498,7 +498,7 @@ export function TranscriptPane({
   // bar). It floats over the transcript; the body reserves a fixed top padding
   // (below) so the first turn is not hidden behind it at rest.
   const breadcrumbOverlay = isOnSubThread && (
-    <div className="pointer-events-auto absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-md border border-slate-200 bg-white px-3 py-1.5 shadow-md">
+    <div className="pointer-events-auto absolute left-overlay-inset top-overlay-inset max-w-[calc(100%-2*var(--delta-overlay-inset))] rounded-md border border-slate-200 bg-white px-3 py-1.5 shadow-md">
       <Breadcrumb items={breadcrumbItems} />
     </div>
   );
@@ -512,8 +512,14 @@ export function TranscriptPane({
       // shift the transcript. When the overlay does grow past this, it briefly
       // covers the last lines — an accepted trade for zero layout shift.
       // Reserve top space too when the breadcrumb card floats, so the first turn
-      // clears it at rest (mirrors the bottom reserve for the composer).
-      bodyClassName={isOnSubThread ? 'pt-14 pb-56' : 'pb-56'}
+      // clears it at rest (mirrors the bottom reserve for the composer). Both
+      // reserves derive from the same overlay-inset token the floating cards
+      // use (see src/index.css), so the paddings and the cards cannot drift.
+      bodyClassName={
+        isOnSubThread
+          ? 'pt-breadcrumb-reserve pb-composer-reserve'
+          : 'pb-composer-reserve'
+      }
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">

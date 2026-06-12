@@ -28,7 +28,7 @@ export function TerminalFallback({ onClose }: TerminalFallbackProps) {
           </Button>
         </div>
       }
-      bodyClassName="bg-slate-900"
+      bodyClassName="bg-terminal-bg"
     >
       <p className="p-3 text-xs text-slate-300">
         The terminal could not be displayed. It was isolated so it would not
