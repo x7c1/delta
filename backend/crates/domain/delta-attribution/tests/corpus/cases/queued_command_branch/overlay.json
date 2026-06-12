@@ -1,0 +1,8 @@
+{
+  "comment": "A branch send composed while a turn was in flight: Claude records it ONLY as a queued_command attachment (no UserPromptSubmit of its own), yet it must correlate to its send so prompt and reply land on the child.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "start the long task" },
+    { "id": 2, "thread_id": 2, "semantic_parent_uuid": "a1", "text": "branch off that first reply" }
+  ]
+}

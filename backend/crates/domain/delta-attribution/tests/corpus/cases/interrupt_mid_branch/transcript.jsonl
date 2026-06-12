@@ -1,0 +1,5 @@
+{"uuid":"u0","parentUuid":null,"type":"user","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"explore the side topic"}}
+{"uuid":"a1","parentUuid":"u0","type":"assistant","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"working on it"}]}}
+{"uuid":"u2","parentUuid":"a1","type":"user","sessionId":"corpus","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"[Request interrupted by user]"}}
+{"uuid":"u3","parentUuid":"u2","type":"user","sessionId":"corpus","promptId":"p1","timestamp":"2026-01-01T00:00:10Z","message":{"role":"user","content":"never mind, back to the trunk"}}
+{"uuid":"a4","parentUuid":"u3","type":"assistant","sessionId":"corpus","promptId":"p1","timestamp":"2026-01-01T00:00:11Z","message":{"role":"assistant","content":[{"type":"text","text":"back on the trunk"}]}}

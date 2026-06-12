@@ -1,0 +1,4 @@
+{"uuid":"u0","parentUuid":null,"type":"user","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"work on the branch"}}
+{"uuid":"a1","parentUuid":"u0","type":"assistant","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"branch work underway"}]}}
+{"uuid":"q2","parentUuid":"a1","type":"attachment","sessionId":"corpus","timestamp":"2026-01-01T00:00:02Z","attachment":{"type":"queued_command","prompt":"<task-notification>background build finished</task-notification>","commandMode":"prompt"}}
+{"uuid":"a3","parentUuid":"q2","type":"assistant","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"continuing after the notification"}]}}

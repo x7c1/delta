@@ -1,0 +1,8 @@
+{
+  "comment": "Captured from a real end-to-end run: delta-server spawning the scripted fake-claude binary (backend/crates/apps/fake-claude) through tmux, driven over REST with two sends — a new-session trunk turn, then a branch send off the trunk reply whose scenario continues with a tool_use/tool_result pair before replying. Scenario steps: await_prompt, reply('a quotable passage to branch from'), stop, await_prompt, tool_use(Bash ls), tool_result, reply('ran the tool on the branch'), stop. Only the session uuid was rewritten to 'fake-session'; the expected assignments equal the message rows the live system persisted, so this case pins fold == live ingestion.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "capture the trunk turn" },
+    { "id": 2, "thread_id": 2, "semantic_parent_uuid": "fake-session-u1", "text": "tell me more about that passage" }
+  ]
+}

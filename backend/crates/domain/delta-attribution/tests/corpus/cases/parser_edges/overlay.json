@@ -1,0 +1,7 @@
+{
+  "comment": "Every parser edge in one file: a no-uuid file-history-snapshot (skipped, leaving a seq gap), a user line with no timestamp, a blank line, an isMeta harness line, a system line, an unknown line type (summary), an unknown content block beside a text block, and a non-queued attachment. None of them is a human turn except the first prompt, so everything follows it on main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "first prompt" }
+  ]
+}

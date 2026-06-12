@@ -1,0 +1,8 @@
+{"type":"file-history-snapshot","messageId":"snap-1","snapshot":{}}
+{"uuid":"u1","parentUuid":null,"type":"user","sessionId":"corpus","message":{"role":"user","content":"first prompt"}}
+
+{"uuid":"m3","parentUuid":"u1","type":"user","isMeta":true,"sessionId":"corpus","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"<system-reminder>injected body</system-reminder>"}}
+{"uuid":"s4","parentUuid":"m3","type":"system","sessionId":"corpus","timestamp":"2026-01-01T00:00:03Z","message":{"role":"system","content":"a system note"}}
+{"uuid":"x5","parentUuid":"s4","type":"summary","sessionId":"corpus","summary":"a summary line"}
+{"uuid":"a6","parentUuid":"x5","type":"assistant","sessionId":"corpus","message":{"role":"assistant","content":[{"type":"image","source":{"data":"..."}},{"type":"text","text":"reply with an unknown sibling block"}]}}
+{"uuid":"x7","parentUuid":"a6","type":"attachment","sessionId":"corpus","timestamp":"2026-01-01T00:00:06Z","attachment":{"type":"image","path":"/tmp/shot.png"}}

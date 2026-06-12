@@ -4,6 +4,8 @@
 //! this module, using a different subset of it — hence the dead-code allow.
 #![allow(dead_code)]
 
+pub mod corpus;
+
 use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
 
 use delta_attribution::{Attributed, OutstandingSend, TranscriptMessage};

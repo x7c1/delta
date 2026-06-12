@@ -1,0 +1,58 @@
+{
+  "assignments": [
+    {
+      "uuid": "fake-session-u0",
+      "role": "user",
+      "seq": 0,
+      "thread_id": 1
+    },
+    {
+      "uuid": "fake-session-u1",
+      "role": "assistant",
+      "seq": 1,
+      "thread_id": 1
+    },
+    {
+      "uuid": "fake-session-u2",
+      "role": "user",
+      "seq": 2,
+      "thread_id": 2,
+      "semantic_parent_uuid": "fake-session-u1"
+    },
+    {
+      "uuid": "fake-session-u3",
+      "role": "assistant",
+      "seq": 3,
+      "thread_id": 2
+    },
+    {
+      "uuid": "fake-session-u4",
+      "role": "user",
+      "seq": 4,
+      "thread_id": 2
+    },
+    {
+      "uuid": "fake-session-u5",
+      "role": "assistant",
+      "seq": 5,
+      "thread_id": 2
+    }
+  ],
+  "effects": [
+    {
+      "kind": "send_matched",
+      "send_id": 1,
+      "matched_uuid": "fake-session-u0"
+    },
+    {
+      "kind": "send_matched",
+      "send_id": 2,
+      "matched_uuid": "fake-session-u2"
+    },
+    {
+      "kind": "resolve_permission",
+      "tool_use_id": "toolu_fake_0000",
+      "allowed": true
+    }
+  ]
+}

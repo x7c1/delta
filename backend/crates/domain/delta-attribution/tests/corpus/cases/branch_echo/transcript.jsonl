@@ -1,0 +1,4 @@
+{"uuid":"u0","parentUuid":null,"type":"user","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"set the scene"}}
+{"uuid":"a1","parentUuid":"u0","type":"assistant","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"a quotable passage to branch from"}]}}
+{"uuid":"u2","parentUuid":"a1","type":"user","sessionId":"corpus","promptId":"p1","timestamp":"2026-01-01T00:00:10Z","message":{"role":"user","content":"tell me more about that passage"}}
+{"uuid":"a3","parentUuid":"u2","type":"assistant","sessionId":"corpus","promptId":"p1","timestamp":"2026-01-01T00:00:11Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"branching"},{"type":"text","text":"more about it"}]}}

@@ -1,0 +1,7 @@
+{
+  "comment": "One Delta-dispatched turn on the trunk: the echo matches the outstanding send and the reply carries forward on main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "hello world" }
+  ]
+}
