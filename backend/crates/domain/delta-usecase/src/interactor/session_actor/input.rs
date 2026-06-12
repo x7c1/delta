@@ -22,7 +22,7 @@ use crate::pane_token::PaneToken;
 use crate::ports::{
     SessionEndHook, SessionEvent, SessionStartHook, StopHook, UserPromptSubmitHook,
 };
-use crate::turn::TurnState;
+use super::runtime::SessionLiveState;
 
 /// The reply channel for an input that produces a result.
 pub(in crate::interactor) type Reply<R> = oneshot::Sender<Result<R>>;
@@ -123,8 +123,12 @@ pub(in crate::interactor) enum SessionInput {
     /// Whether any pane is live for the session (bound, or spawned and
     /// awaiting its first hook). Drives the cold-start idempotence check.
     QueryIsLive { reply: oneshot::Sender<bool> },
-    /// The session's current turn state (the sends envelope reports it).
-    QueryTurnState { reply: oneshot::Sender<TurnState> },
+    /// The session's queryable live state — the turn phase plus the pending
+    /// permission dialog, snapshotted in one message so the sends envelope
+    /// reports a consistent pair.
+    QueryLiveState {
+        reply: oneshot::Sender<SessionLiveState>,
+    },
 
     /// Test seam: run a closure against the session's runtime state, in
     /// mailbox order like any other input. Replaces the lock-era seams that

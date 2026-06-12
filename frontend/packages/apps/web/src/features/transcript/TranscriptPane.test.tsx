@@ -30,7 +30,7 @@ import {
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
-import { useLiveStore } from '../../store/liveStore';
+import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import { TranscriptPane } from './TranscriptPane';
 
@@ -70,9 +70,7 @@ describe('TranscriptPane', () => {
       sending: [],
       localSends: {},
       spawns: [],
-      permission: {},
-      externalInput: {},
-      resumeUnavailable: {},
+      notices: {},
     });
     useComposerStore.setState({
       drafts: {},
@@ -280,8 +278,7 @@ describe('TranscriptPane', () => {
     // branch would just fail: the input is removed entirely and the session is a
     // read-only viewer with a pinned notice. The history stays readable.
     useLiveStore.setState({
-      externalInput: {},
-      resumeUnavailable: { [SESSION_ID]: true },
+      notices: { [SESSION_ID]: [{ kind: 'resume_unavailable' }] },
     });
 
     renderPane();
@@ -301,9 +298,15 @@ describe('TranscriptPane', () => {
 
   it('shows the external-input notice for the focused thread (pinned above the input)', async () => {
     useLiveStore.setState({
-      resumeUnavailable: {},
-      externalInput: {
-        [SESSION_ID]: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'external_input',
+            threadId: MAIN_THREAD_ID,
+            prompt: 'typed in the pane',
+            at: 0,
+          },
+        ],
       },
     });
 
@@ -318,9 +321,15 @@ describe('TranscriptPane', () => {
 
   it('dismisses the external-input notice via its Dismiss button', async () => {
     useLiveStore.setState({
-      resumeUnavailable: {},
-      externalInput: {
-        [SESSION_ID]: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'external_input',
+            threadId: MAIN_THREAD_ID,
+            prompt: 'typed in the pane',
+            at: 0,
+          },
+        ],
       },
     });
 
@@ -334,7 +343,7 @@ describe('TranscriptPane', () => {
     expect(
       screen.queryByTestId('external-input-notice'),
     ).not.toBeInTheDocument();
-    expect(useLiveStore.getState().externalInput).toEqual({});
+    expect(useLiveStore.getState().notices).toEqual({});
   });
 
   it('shows the permission notice with Allow/Deny and the input summary', async () => {
@@ -342,14 +351,16 @@ describe('TranscriptPane', () => {
     // an interactive dialog actually appears, so it is surfaced directly with no
     // debounce.
     useLiveStore.setState({
-      externalInput: {},
-      resumeUnavailable: {},
-      permission: {
-        [SESSION_ID]: {
-          requestId: 7,
-          toolName: 'Bash',
-          toolInput: '{"command":"rm -rf scratch"}',
-        },
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'permission',
+            requestId: 7,
+            toolName: 'Bash',
+            toolInput: '{"command":"rm -rf scratch"}',
+            dismissed: false,
+          },
+        ],
       },
     });
 
@@ -365,14 +376,16 @@ describe('TranscriptPane', () => {
 
   it('POSTs the decision on Allow and waits for the resolution event', async () => {
     useLiveStore.setState({
-      externalInput: {},
-      resumeUnavailable: {},
-      permission: {
-        [SESSION_ID]: {
-          requestId: 7,
-          toolName: 'Bash',
-          toolInput: '{"command":"rm -rf scratch"}',
-        },
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'permission',
+            requestId: 7,
+            toolName: 'Bash',
+            toolInput: '{"command":"rm -rf scratch"}',
+            dismissed: false,
+          },
+        ],
       },
     });
     const decisions: { id: string; body: unknown }[] = [];
@@ -406,14 +419,16 @@ describe('TranscriptPane', () => {
     // 409 permission_not_pending: the hook wait timed out, so the TUI prompt
     // owns the question now. The card swaps Allow/Deny for the guidance.
     useLiveStore.setState({
-      externalInput: {},
-      resumeUnavailable: {},
-      permission: {
-        [SESSION_ID]: {
-          requestId: 7,
-          toolName: 'Bash',
-          toolInput: '{"command":"rm -rf scratch"}',
-        },
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'permission',
+            requestId: 7,
+            toolName: 'Bash',
+            toolInput: '{"command":"rm -rf scratch"}',
+            dismissed: false,
+          },
+        ],
       },
     });
     server.use(
@@ -442,14 +457,16 @@ describe('TranscriptPane', () => {
 
   it('clears the permission notice when the request resolves', async () => {
     useLiveStore.setState({
-      externalInput: {},
-      resumeUnavailable: {},
-      permission: {
-        [SESSION_ID]: {
-          requestId: 7,
-          toolName: 'Bash',
-          toolInput: '{"command":"ls"}',
-        },
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'permission',
+            requestId: 7,
+            toolName: 'Bash',
+            toolInput: '{"command":"ls"}',
+            dismissed: false,
+          },
+        ],
       },
     });
 
@@ -465,6 +482,34 @@ describe('TranscriptPane', () => {
     });
 
     expect(screen.queryByTestId('permission-notice')).not.toBeInTheDocument();
+  });
+
+  it('hides the permission card on Dismiss without dropping the notice entry', async () => {
+    useLiveStore.setState({
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'permission',
+            requestId: 7,
+            toolName: 'Bash',
+            toolInput: '{"command":"ls"}',
+            dismissed: false,
+          },
+        ],
+      },
+    });
+
+    renderPane();
+    const notice = await screen.findByTestId('permission-notice');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Dismiss' }));
+
+    // The card goes away, but the entry stays (flagged): the request is still
+    // pending server-side, and removal would let the next sends refetch
+    // re-seed it and resurrect the card the user just closed.
+    expect(screen.queryByTestId('permission-notice')).not.toBeInTheDocument();
+    expect(
+      noticeOf(useLiveStore.getState().notices, SESSION_ID, 'permission'),
+    ).toMatchObject({ requestId: 7, dismissed: true });
   });
 
   it('auto-opens the workdir dialog on entering the new-session state', async () => {

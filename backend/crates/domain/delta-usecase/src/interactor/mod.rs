@@ -23,6 +23,7 @@ mod workdir;
 
 pub use hooks::PermissionWait;
 pub use permission_decision::PermissionDecision;
+pub use session_actor::runtime::{PendingPermission, SessionLiveState};
 
 #[cfg(test)]
 mod testing;

@@ -204,8 +204,8 @@ where
         SessionInput::QueryIsLive { reply } => {
             let _ = reply.send(ctx.state.has_live_pane());
         }
-        SessionInput::QueryTurnState { reply } => {
-            let _ = reply.send(ctx.state.turn());
+        SessionInput::QueryLiveState { reply } => {
+            let _ = reply.send(ctx.state.live_state());
         }
         #[cfg(test)]
         SessionInput::WithRuntime(f) => f(ctx.state),

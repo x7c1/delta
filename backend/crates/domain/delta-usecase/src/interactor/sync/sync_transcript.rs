@@ -109,6 +109,10 @@ where
                         .resolve_permission_by_tool_use_id(&session.id, &tool_use_id, allowed)
                         .await?
                     {
+                        // Keep the queryable runtime mirror in step with the
+                        // broadcast, so the sends envelope never reports a
+                        // dialog that already resolved.
+                        self.state.resolve_pending_permission(request_id);
                         events.push(SessionEvent::PermissionResolved {
                             session_id: session.id.clone(),
                             request_id,

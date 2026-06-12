@@ -3,7 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@delta/api-client';
 import type { Send } from '@delta/wire-gen';
 import { applySessionEvent } from './applySessionEvent';
-import { useLiveStore } from '../store/liveStore';
+import { noticeOf, useLiveStore } from '../store/liveStore';
 
 const FOCUSED = 'sess-1';
 
@@ -30,10 +30,8 @@ describe('applySessionEvent', () => {
       localSends: {},
       spawns: [],
       activeTurns: {},
-      permission: {},
+      notices: {},
       unread: {},
-      externalInput: {},
-      resumeUnavailable: {},
     });
   });
 
@@ -126,8 +124,10 @@ describe('applySessionEvent', () => {
     );
 
     expect(useLiveStore.getState().unread[9]).toBe(1);
-    // The marker is keyed by the focused session.
-    expect(useLiveStore.getState().externalInput[FOCUSED]).toMatchObject({
+    // The notice is keyed by the focused session.
+    expect(
+      noticeOf(useLiveStore.getState().notices, FOCUSED, 'external_input'),
+    ).toMatchObject({
       threadId: 9,
       prompt: 'typed',
     });
@@ -145,7 +145,7 @@ describe('applySessionEvent', () => {
     // A background session's typing must not badge or surface on the focused
     // transcript (regression: the marker used to be set unconditionally).
     expect(useLiveStore.getState().unread[9]).toBeUndefined();
-    expect(useLiveStore.getState().externalInput).toEqual({});
+    expect(useLiveStore.getState().notices).toEqual({});
   });
 
   it('invalidates the affected threads and the open sends on transcript_updated', () => {
@@ -262,8 +262,14 @@ describe('applySessionEvent', () => {
       FOCUSED,
     );
 
-    expect(useLiveStore.getState().permission).toEqual({
-      [FOCUSED]: { requestId: 2, toolName: 'Edit', toolInput: '{}' },
+    expect(
+      noticeOf(useLiveStore.getState().notices, FOCUSED, 'permission'),
+    ).toEqual({
+      kind: 'permission',
+      requestId: 2,
+      toolName: 'Edit',
+      toolInput: '{}',
+      dismissed: false,
     });
   });
 });

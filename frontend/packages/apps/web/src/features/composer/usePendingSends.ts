@@ -53,25 +53,33 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   const sendsQuery = useSessionSendsQuery(client, sessionId);
   const serverSends = sendsQuery.data?.sends;
   const serverTurn = sendsQuery.data?.turn;
+  const serverPermission = sendsQuery.data?.permission;
 
-  // Re-seed the session's active-turn flag from the response's queryable turn
-  // state. After a live-stream reconnect the event-reconstructed flag was
-  // dropped (the `turn_started` that set it may have been missed), and the
-  // resync refetches this query — so the flag heals here without any event.
-  // `seedActiveTurn` is set-only; clearing stays owned by the turn-end events.
+  // Re-seed the session's active-turn flag and permission notice from the
+  // response's queryable live state. After a live-stream reconnect the
+  // event-reconstructed flag and notice were dropped (the `turn_started` /
+  // `permission_requested` that set them may have been missed), and the
+  // resync refetches this query — so both heal here without any event. The
+  // seeds are set-only; clearing stays owned by the turn-end / resolution
+  // events.
   //
-  // `dataUpdatedAt` is a dependency on purpose: when the turn state did not
+  // `dataUpdatedAt` is a dependency on purpose: when the live state did not
   // change across the reconnect gap (it was `in_flight` before and still is),
-  // structural sharing hands back the identical `turn` object, so `serverTurn`
-  // alone would never re-trigger this effect — and the flag the reset just
-  // dropped would stay lost. The timestamp marks every fresh observation,
-  // identical payload or not.
+  // structural sharing hands back the identical objects, so `serverTurn` /
+  // `serverPermission` alone would never re-trigger this effect — and the
+  // state the reset just dropped would stay lost. The timestamp marks every
+  // fresh observation, identical payload or not.
   const sendsUpdatedAt = sendsQuery.dataUpdatedAt;
   useEffect(() => {
     if (sessionId !== null && serverTurn !== undefined) {
       useLiveStore.getState().seedActiveTurn(sessionId, serverTurn);
     }
   }, [sessionId, serverTurn, sendsUpdatedAt]);
+  useEffect(() => {
+    if (sessionId !== null && serverPermission !== undefined) {
+      useLiveStore.getState().seedPermission(sessionId, serverPermission);
+    }
+  }, [sessionId, serverPermission, sendsUpdatedAt]);
 
   return useMemo(() => {
     if (surface === null) {

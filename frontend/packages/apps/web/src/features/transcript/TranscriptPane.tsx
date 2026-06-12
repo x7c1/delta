@@ -13,7 +13,7 @@ import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
-import { useLiveStore } from '../../store/liveStore';
+import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
 import {
@@ -88,15 +88,20 @@ export function TranscriptPane({
   const closeWorkdirDialog = useComposerStore(
     (state) => state.closeWorkdirDialog,
   );
-  // The focused session's external-input marker, if any. Keyed per session like
+  // The focused session's external-input notice, if any. Keyed per session like
   // the permission notice; visibility is further gated to the active thread below.
   const externalInput = useLiveStore((state) =>
-    activeThread ? state.externalInput[activeThread.session_id] ?? null : null,
+    activeThread
+      ? noticeOf(state.notices, activeThread.session_id, 'external_input')
+      : null,
   );
   // Whether the focused (closed) session just failed to resume because its
   // transcript is gone; drives the inline "cannot be resumed" notice.
   const resumeUnavailable = useLiveStore((state) =>
-    activeThread ? Boolean(state.resumeUnavailable[activeThread.session_id]) : false,
+    activeThread
+      ? noticeOf(state.notices, activeThread.session_id, 'resume_unavailable') !==
+        null
+      : false,
   );
   // The focused session's pending permission prompt, if any. Emitted by the
   // `PermissionRequest` hook, which fires only when an interactive dialog
@@ -104,7 +109,9 @@ export function TranscriptPane({
   // directly — no debounce. It clears on dismiss, on resolution, or when the
   // turn completes.
   const permission = useLiveStore((state) =>
-    activeThread ? state.permission[activeThread.session_id] ?? null : null,
+    activeThread
+      ? noticeOf(state.notices, activeThread.session_id, 'permission')
+      : null,
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   const dismissExternalInput = useLiveStore(
@@ -405,9 +412,10 @@ export function TranscriptPane({
   // The permission notice floats at the top-right, deliberately away from the
   // conversation tail and the input. Pinned above the input (its old home) it
   // would sit exactly where the user reads. Kept narrow so it does not blanket
-  // the transcript. It clears on dismiss, on a decision/resolution, or when
-  // the turn completes.
-  const permissionOverlay = permission && activeThread && (
+  // the transcript. It clears on dismiss (the entry stays, flagged, so a
+  // refetch cannot resurrect the card), on a decision/resolution, or when the
+  // turn completes.
+  const permissionOverlay = permission && !permission.dismissed && activeThread && (
     <PermissionNoticeCard
       notice={permission}
       onOpenTerminal={() => setTerminalOpen(true)}

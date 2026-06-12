@@ -1,6 +1,7 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   MessagesResponse,
+  PendingPermission,
   NewSessionResponse,
   Send,
   SendRequest,
@@ -224,7 +225,13 @@ export function createMockApi(): MockApi {
       const turn: Turn = outstanding
         ? { state: 'awaiting_echo', send_id: outstanding.id }
         : { state: 'idle', send_id: null };
-      const body: SendsResponse = { sends, turn };
+      const body: SendsResponse = {
+        sends,
+        turn,
+        // The pending permission dialog rides along exactly as the real
+        // server reports it, so the reconnect re-seed path works in mock mode.
+        permission: entry.pendingPermission ?? null,
+      };
       return HttpResponse.json(body);
     }),
 
@@ -397,8 +404,30 @@ export function createMockApi(): MockApi {
     }
   };
 
+  const setPendingPermission = (
+    sessionId: string,
+    pending: PendingPermission | undefined,
+  ) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (entry) {
+      entry.pendingPermission = pending;
+    }
+  };
+
   const applyEvent = (event: SessionEvent): void => {
     switch (event.kind) {
+      case 'permission_requested':
+        // Mirror the dialog into queryable state, exactly as the real server
+        // keeps it in the session's runtime for the sends envelope.
+        setPendingPermission(event.session_id, {
+          request_id: event.request_id,
+          tool_name: event.tool_name,
+          tool_input: event.tool_input,
+        });
+        break;
+      case 'permission_resolved':
+        setPendingPermission(event.session_id, undefined);
+        break;
       case 'turn_started': {
         // The named send correlated with its transcript line: terminal.
         const send = store.sends.find((s) => s.id === event.send_id);
@@ -411,11 +440,14 @@ export function createMockApi(): MockApi {
       case 'turn_completed':
         // The mock has no transcript ingestion, so turn completion is the
         // moment its sends resolve (the real server matches them as the
-        // transcript lands during the turn).
+        // transcript lands during the turn). A pending dialog cannot outlive
+        // its turn, mirroring the server's runtime sweep.
         resolveOpenSends(event.session_id, 'matched');
+        setPendingPermission(event.session_id, undefined);
         break;
       case 'turn_interrupted':
         resolveOpenSends(event.session_id, 'cancelled');
+        setPendingPermission(event.session_id, undefined);
         break;
       case 'session_registered': {
         // The spawn bound: the row activates and becomes listable, with a
@@ -437,6 +469,11 @@ export function createMockApi(): MockApi {
         );
         if (entry) {
           entry.open = event.kind === 'session_opened';
+          if (event.kind === 'session_closed') {
+            // No live process, no dialog — the server clears its runtime
+            // mirror when the close drives the turn back to idle.
+            entry.pendingPermission = undefined;
+          }
         }
         break;
       }

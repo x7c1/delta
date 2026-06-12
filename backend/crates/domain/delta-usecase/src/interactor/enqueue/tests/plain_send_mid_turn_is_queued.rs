@@ -20,7 +20,7 @@ async fn plain_send_mid_turn_is_queued() {
     ix.enqueue_send(to(main), "first", None).await.unwrap();
     ix.transcript_fake().push(user_line("u-first", "first"));
     ix.on_user_prompt_submit(submit("first")).await.unwrap();
-    assert_ne!(ix.turn_state_for(&session).await, crate::turn::TurnState::Idle);
+    assert_ne!(ix.live_state_for(&session).await.turn, crate::turn::TurnState::Idle);
 
     // A plain main-line send mid-turn is held queued, not typed into the pane.
     let (second, _) = ix.enqueue_send(to(main), "second", None).await.unwrap();
