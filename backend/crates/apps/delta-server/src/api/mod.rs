@@ -29,9 +29,10 @@ use serde::Deserialize;
 
 use delta_usecase::{SessionId, ThreadId};
 use delta_wire::rest::{
-    WireCreateSendRequest, WireMessagesResponse, WireNewSessionResponse, WireRecentWorkdirItem,
-    WireSendResponse, WireSendsResponse, WireSessionListItem, WireSessionsResponse,
-    WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireCreateSendRequest, WireMessagesResponse, WireNewSessionResponse,
+    WirePermissionDecisionRequest, WireRecentWorkdirItem, WireSendResponse, WireSendsResponse,
+    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -237,4 +238,26 @@ pub(crate) async fn create_send(
     // transition immediately.
     state.broadcast(events);
     Ok((StatusCode::CREATED, Json(WireSendResponse::from(send))))
+}
+
+/// `POST /api/permissions/{id}/decision` — answer a pending tool-permission
+/// request from the browser.
+///
+/// Resolves the request row and wakes the blocked `PermissionRequest` hook
+/// response, which carries the decision back to Claude Code — so the tool
+/// proceeds (or is denied) without anyone touching the TUI prompt. Replies
+/// `409` when the request is no longer awaiting a browser decision (already
+/// decided, or its hook wait timed out and the TUI prompt owns it now); the
+/// browser then falls back to the answer-in-the-terminal guidance.
+pub(crate) async fn decide_permission(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<WirePermissionDecisionRequest>,
+) -> Result<StatusCode, ApiError> {
+    let events = state
+        .interactor()
+        .decide_permission(id, req.decision.into())
+        .await?;
+    state.broadcast(events);
+    Ok(StatusCode::NO_CONTENT)
 }

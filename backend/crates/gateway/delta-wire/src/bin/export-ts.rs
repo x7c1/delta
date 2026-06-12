@@ -18,8 +18,8 @@ use std::path::Path;
 
 use delta_wire::rest::{
     WireCreateSendRequest, WireErrorBody, WireMessagesResponse, WireNewSessionResponse,
-    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireThreadsResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WirePermissionDecisionRequest, WireSendResponse, WireSendsResponse, WireSessionsResponse,
+    WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireSessionEvent};
 use ts_rs::TS;
@@ -46,6 +46,7 @@ fn main() {
     WireCreateSendRequest::export_all(&config).expect("export CreateSendRequest.ts");
     WireSendResponse::export_all(&config).expect("export SendResponse.ts");
     WireSendsResponse::export_all(&config).expect("export SendsResponse.ts");
+    WirePermissionDecisionRequest::export_all(&config).expect("export PermissionDecisionRequest.ts");
     WireWorkdirListResponse::export_all(&config).expect("export WorkdirListResponse.ts");
     WireWorkdirRecentResponse::export_all(&config).expect("export WorkdirRecentResponse.ts");
     WireErrorBody::export_all(&config).expect("export ErrorBody.ts");

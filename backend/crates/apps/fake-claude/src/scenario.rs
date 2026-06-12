@@ -30,7 +30,7 @@
 //! | `await_prompt` | Block until a prompt is submitted (the launch's positional prompt counts), then fire `UserPromptSubmit` and write the user transcript line. |
 //! | `reply { text, thinking? }` | Write an assistant transcript line (optional `thinking` block before the text block). `{additional_context}` in `text` substitutes the `additionalContext` the most recent `UserPromptSubmit` hook response injected (empty when none). |
 //! | `tool_use { name, input? }` | Write an assistant `tool_use` line and fire `PreToolUse` with a fresh `tool_use_id`. |
-//! | `permission_request` | Fire `PermissionRequest` for the most recent `tool_use` (an interactive dialog appeared). |
+//! | `permission_request { on_allow?, on_deny? }` | Fire `PermissionRequest` for the most recent `tool_use` (an interactive dialog appeared) and BLOCK until the hook responds, exactly like the real `claude` awaiting its permission hook. A decision response (`hookSpecificOutput.decision.behavior`) runs the matching `on_allow`/`on_deny` sub-steps (default empty); an empty passthrough response runs neither — the following steps then play the TUI-answered path. |
 //! | `tool_result { is_error? }` | Write the `tool_result` carrier line for the most recent `tool_use`. |
 //! | `stop { stop_reason? }` | Fire the `Stop` hook: the turn completed. |
 //! | `await_interrupt` | Block until Escape arrives, then write the `[Request interrupted by user]` marker line. No `Stop` fires — exactly like a real interrupt. |
@@ -83,7 +83,12 @@ pub enum Step {
         #[serde(default)]
         input: Value,
     },
-    PermissionRequest,
+    PermissionRequest {
+        #[serde(default)]
+        on_allow: Vec<Step>,
+        #[serde(default)]
+        on_deny: Vec<Step>,
+    },
     ToolResult {
         #[serde(default)]
         is_error: bool,
@@ -173,7 +178,9 @@ mod tests {
                     { "type": "await_prompt" },
                     { "type": "reply", "text": "hi", "thinking": "hmm" },
                     { "type": "tool_use", "name": "Bash", "input": { "command": "ls" } },
-                    { "type": "permission_request" },
+                    { "type": "permission_request",
+                      "on_allow": [ { "type": "tool_result" } ],
+                      "on_deny": [ { "type": "reply", "text": "denied" } ] },
                     { "type": "tool_result", "is_error": true },
                     { "type": "stop", "stop_reason": "end_turn" },
                     { "type": "await_interrupt" },

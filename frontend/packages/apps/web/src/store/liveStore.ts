@@ -77,6 +77,8 @@ export interface SpawnItem {
 export interface PermissionNotice {
   requestId: number;
   toolName: string;
+  /** The tool input, serialized as JSON text (shown summarized). */
+  toolInput: string;
 }
 
 export interface ExternalInputMarker {
@@ -386,6 +388,7 @@ export const useLiveStore = create<LiveState>((set) => ({
               [event.session_id]: {
                 requestId: event.request_id,
                 toolName: event.tool_name,
+                toolInput: event.tool_input,
               },
             },
           };

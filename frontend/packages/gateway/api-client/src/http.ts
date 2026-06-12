@@ -3,6 +3,8 @@ import type {
   CreateSendRequest,
   MessagesResponse,
   NewSessionResponse,
+  PermissionDecision,
+  PermissionDecisionRequest,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -32,8 +34,13 @@ export interface ApiClientOptions {
  * local transcript file is gone, so `claude --resume` has nothing to replay.
  * Callers branch on this to keep the session closed and show a specific message
  * rather than a generic failure.
+ *
+ * `permission_not_pending` means a permission decision can no longer take
+ * effect: the request was already decided, or its hook wait timed out and the
+ * interactive TUI prompt owns it now. Callers branch on this to swap the
+ * Allow/Deny buttons for the answer-in-the-terminal guidance.
  */
-export type ApiErrorCode = 'resume_unavailable';
+export type ApiErrorCode = 'resume_unavailable' | 'permission_not_pending';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -193,6 +200,28 @@ export class ApiClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(wireBody),
     });
+  }
+
+  /**
+   * `POST /api/permissions/{id}/decision` — answer a pending tool-permission
+   * request (204). The decision wakes the blocked `PermissionRequest` hook,
+   * so the tool proceeds (or is denied) without touching the TUI prompt. A
+   * `409` with code `permission_not_pending` means no browser decision can
+   * reach the request anymore, surfaced as {@link ApiError}.
+   */
+  decidePermission(
+    requestId: number,
+    decision: PermissionDecision,
+  ): Promise<void> {
+    const body: PermissionDecisionRequest = { decision };
+    return this.requestNoContent(
+      `/api/permissions/${requestId}/decision`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
   }
 
   /**

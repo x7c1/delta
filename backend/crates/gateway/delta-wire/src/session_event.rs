@@ -62,6 +62,9 @@ pub enum WireSessionEvent {
         session_id: String,
         request_id: i64,
         tool_name: String,
+        /// The tool input, serialized as JSON text, so the notice can show
+        /// what the tool is about to do next to its Allow/Deny buttons.
+        tool_input: String,
     },
     /// A previously-requested tool permission was resolved.
     PermissionResolved {
@@ -128,10 +131,12 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id,
                 request_id,
                 tool_name,
+                tool_input_json,
             } => Self::PermissionRequested {
                 session_id: session_id.0,
                 request_id,
                 tool_name,
+                tool_input: tool_input_json,
             },
             SessionEvent::PermissionResolved {
                 session_id,
@@ -231,6 +236,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             session_id: session_id(),
             request_id: 1,
             tool_name: "Bash".to_owned(),
+            tool_input: "{\"command\":\"ls\"}".to_owned(),
         },
         WireSessionEvent::PermissionResolved {
             session_id: session_id(),
@@ -315,12 +321,14 @@ mod tests {
                 session_id: "sess-1".into(),
                 request_id: 7,
                 tool_name: "Bash".into(),
+                tool_input: "{\"command\":\"rm -i x\"}".into(),
             }),
             serde_json::json!({
                 "kind": "permission_requested",
                 "session_id": "sess-1",
                 "request_id": 7,
                 "tool_name": "Bash",
+                "tool_input": "{\"command\":\"rm -i x\"}",
             }),
         );
         assert_eq!(

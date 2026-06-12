@@ -101,13 +101,16 @@ where
         for line in read.messages {
             let content_text = Message::flatten_text(&line.content);
 
-            // Correlate any tool_result blocks on this line with an open
-            // permission request keyed by `tool_use_id`. Resolving on actual
-            // completion (rather than at `PreToolUse` time) is what lets an
-            // auto-approved tool's notice clear immediately while a genuine TUI
-            // prompt's notice persists until the human answers. A denied tool
-            // yields `is_error: true` ("User rejected tool use"), so the error
-            // flag infers allowed vs denied.
+            // Correlate any tool_result blocks on this line with the open
+            // permission requests they settle: the `PreToolUse`-recorded row
+            // keyed by `tool_use_id`, plus any pending dialog row the
+            // `PermissionRequest` hook owns (answered in the TUI after the
+            // browser-decision wait timed out). Resolving on actual completion
+            // (rather than at `PreToolUse` time) is what lets an auto-approved
+            // tool's notice clear immediately while a genuine prompt's notice
+            // persists until the human answers. A denied tool yields
+            // `is_error: true` ("User rejected tool use"), so the error flag
+            // infers allowed vs denied.
             for block in &line.content {
                 if let delta_model::ContentBlock::ToolResult {
                     tool_use_id,
@@ -115,7 +118,7 @@ where
                     ..
                 } = block
                 {
-                    if let Some(request_id) = self
+                    for request_id in self
                         .store
                         .resolve_permission_by_tool_use_id(&session.id, tool_use_id, !is_error)
                         .await?

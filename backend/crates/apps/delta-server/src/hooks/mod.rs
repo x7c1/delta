@@ -28,11 +28,12 @@ use axum::response::IntoResponse;
 use axum::Json;
 
 use delta_usecase::{
-    SessionEndHook, SessionId, SessionStartHook, StopHook, UserPromptSubmitHook,
+    PermissionDecision, SessionEndHook, SessionId, SessionStartHook, StopHook,
+    UserPromptSubmitHook,
 };
 use delta_wire::hooks::{
-    PermissionRequestPayload, PreToolUsePayload, SessionEndPayload, SessionStartPayload,
-    StopPayload, UserPromptSubmitPayload, UserPromptSubmitResponse,
+    PermissionRequestPayload, PermissionRequestResponse, PreToolUsePayload, SessionEndPayload,
+    SessionStartPayload, StopPayload, UserPromptSubmitPayload, UserPromptSubmitResponse,
 };
 
 use crate::state::AppState;
@@ -92,25 +93,65 @@ pub async fn stop(
 }
 
 /// Handle a `PermissionRequest` hook: an interactive permission dialog has
-/// appeared, so a human answer is genuinely pending. Correlate it to the request
-/// recorded at `PreToolUse` and broadcast the resulting `PermissionRequested` so
-/// the browser shows the notice.
+/// appeared, so a human answer is genuinely pending.
+///
+/// The use case records the request row and registers a decision waiter; the
+/// resulting `PermissionRequested` is broadcast *before* blocking so the
+/// browser can show the Allow/Deny notice it is being asked to answer. The
+/// response then blocks Claude Code until either:
+///
+/// - the browser decides (`POST /api/permissions/{id}/decision`), in which
+///   case the body carries `hookSpecificOutput.decision.behavior`
+///   (`allow`/`deny`) and Claude Code acts on it without a TUI prompt; or
+/// - the deadline passes, in which case the waiter is abandoned and the
+///   response is an empty `200` — no decision to report — so the tool call
+///   falls back to the interactive TUI prompt exactly as it would without
+///   this hook. The row stays `pending` and the eventual `tool_result`
+///   resolves it.
 pub async fn permission_request(
     State(state): State<AppState>,
     Json(payload): Json<PermissionRequestPayload>,
 ) -> impl IntoResponse {
     let session_id = SessionId::from(payload.session_id);
     let tool_input_json = payload.tool_input.to_string();
-    match state
+    let wait = match state
         .interactor()
         .on_permission_request(&session_id, &payload.tool_name, &tool_input_json)
         .await
     {
-        Ok(events) => {
-            state.broadcast(events);
+        Ok(wait) => wait,
+        Err(err) => return internal_error(err).into_response(),
+    };
+    state.broadcast(wait.events);
+
+    let deadline = state.interactor().permission_decision_deadline();
+    match tokio::time::timeout(deadline, wait.decision).await {
+        Ok(Ok(decision)) => {
+            tracing::info!(
+                request_id = wait.request_id,
+                ?decision,
+                "PermissionRequest: browser decision returned to Claude Code"
+            );
+            Json(PermissionRequestResponse::decided(
+                decision == PermissionDecision::Allow,
+            ))
+            .into_response()
+        }
+        // Timed out, or the waiter was dropped: no decision to report. The
+        // empty 200 is the deliberate passthrough — Claude Code continues
+        // through its normal interactive permission flow.
+        Ok(Err(_)) | Err(_) => {
+            state
+                .interactor()
+                .abandon_permission_decision(wait.request_id)
+                .await;
+            tracing::info!(
+                request_id = wait.request_id,
+                "PermissionRequest: no browser decision before the deadline; \
+                 passing through to the TUI prompt"
+            );
             StatusCode::OK.into_response()
         }
-        Err(err) => internal_error(err).into_response(),
     }
 }
 

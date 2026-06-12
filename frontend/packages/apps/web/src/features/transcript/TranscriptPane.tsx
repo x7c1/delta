@@ -22,6 +22,7 @@ import {
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { MessageItem } from './MessageItem';
+import { PermissionNoticeCard } from './PermissionNotice';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import {
@@ -404,31 +405,14 @@ export function TranscriptPane({
   // The permission notice floats at the top-right, deliberately away from the
   // conversation tail and the input. Pinned above the input (its old home) it
   // would sit exactly where the user reads. Kept narrow so it does not blanket
-  // the transcript. It clears on dismiss, on resolution, or when the turn
-  // completes.
+  // the transcript. It clears on dismiss, on a decision/resolution, or when
+  // the turn completes.
   const permissionOverlay = permission && activeThread && (
-    <div
-      className="pointer-events-auto absolute right-3 top-3 max-w-xs space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs shadow-md"
-      data-testid="permission-notice"
-      role="alert"
-    >
-      <p className="font-medium text-amber-800">
-        Permission requested: {permission.toolName}
-      </p>
-      <p className="text-slate-600">Answer the prompt in the terminal.</p>
-      <div className="flex gap-2">
-        <Button size="sm" onClick={() => setTerminalOpen(true)}>
-          Open terminal
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => dismissPermission(activeThread.session_id)}
-        >
-          Dismiss
-        </Button>
-      </div>
-    </div>
+    <PermissionNoticeCard
+      notice={permission}
+      onOpenTerminal={() => setTerminalOpen(true)}
+      onDismiss={() => dismissPermission(activeThread.session_id)}
+    />
   );
 
   // The bottom layer: the composer plus the notices that must stay next to the

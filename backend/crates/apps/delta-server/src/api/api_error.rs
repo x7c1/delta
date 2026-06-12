@@ -10,6 +10,12 @@ use delta_wire::rest::WireErrorBody;
 /// error body so the frontend can distinguish it from a generic failure.
 const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 
+/// Stable machine-readable code for a permission decision that can no longer
+/// take effect (already decided, or its hook wait timed out and fell back to
+/// the TUI prompt). The frontend switches the notice to the
+/// answer-in-the-terminal guidance on this code.
+const PERMISSION_NOT_PENDING_CODE: &str = "permission_not_pending";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -48,6 +54,14 @@ impl IntoResponse for ApiError {
                     // "cannot be resumed" message instead of a generic failure.
                     Error::ResumeUnavailable(_) => {
                         (StatusCode::CONFLICT, Some(RESUME_UNAVAILABLE_CODE))
+                    }
+                    // The permission request exists (or existed) but no browser
+                    // decision can reach it anymore: a conflict with current
+                    // state, with a stable code so the frontend swaps the
+                    // Allow/Deny buttons for the answer-in-the-terminal
+                    // guidance.
+                    Error::PermissionNotPending(_) => {
+                        (StatusCode::CONFLICT, Some(PERMISSION_NOT_PENDING_CODE))
                     }
                     // A user-selected directory that does not exist or is not a
                     // directory is a client error: the caller named a bad path.

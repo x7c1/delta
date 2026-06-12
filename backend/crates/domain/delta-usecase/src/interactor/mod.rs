@@ -11,10 +11,14 @@ mod enqueue;
 mod hooks;
 mod lifecycle;
 mod listing;
+mod permission_decision;
 mod runtime;
 mod sync;
 mod turn_input;
 mod workdir;
+
+pub use hooks::PermissionWait;
+pub use permission_decision::PermissionDecision;
 
 #[cfg(test)]
 mod testing;
@@ -72,6 +76,14 @@ pub struct Interactor<T, X, S, W> {
     /// has no turn in flight, so absence — which reads as `Idle` — is exactly
     /// right. See the `turn` module docs.
     turns: tokio::sync::Mutex<TurnRegistry>,
+    /// Oneshot waiters for permission requests the browser may decide, keyed
+    /// by request-row id. Registered by `on_permission_request` (whose hook
+    /// response blocks on the receiver), resolved by `decide_permission`, and
+    /// abandoned on the transport's timeout. Runtime-only by nature: a waiter
+    /// is meaningful only while its hook request is in flight.
+    pending_permissions: tokio::sync::Mutex<
+        std::collections::HashMap<i64, tokio::sync::oneshot::Sender<PermissionDecision>>,
+    >,
     /// Serializes [`Self::sync_transcript`] across callers.
     ///
     /// Both the hook handlers and the background transcript tail can sync
@@ -121,8 +133,15 @@ where
             minter: PaneTokenMinter::new(),
             open_sessions: tokio::sync::Mutex::new(OpenSessions::default()),
             turns: tokio::sync::Mutex::new(TurnRegistry::default()),
+            pending_permissions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             sync_lock: tokio::sync::Mutex::new(()),
         }
+    }
+
+    /// How long the `PermissionRequest` hook response may block waiting for a
+    /// browser decision before falling back to the TUI prompt.
+    pub fn permission_decision_deadline(&self) -> std::time::Duration {
+        self.launch.permission_decision_deadline
     }
 
     /// Replace the launch configuration (binary to spawn, watchdog deadlines).

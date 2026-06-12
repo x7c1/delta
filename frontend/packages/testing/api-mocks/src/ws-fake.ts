@@ -44,6 +44,7 @@ export function defaultScript(): SessionEvent[] {
       session_id: SESSION_ID,
       request_id: 1,
       tool_name: 'Bash',
+      tool_input: '{"command":"npm install"}',
     },
     { kind: 'turn_completed', session_id: SESSION_ID, stop_reason: null },
     {
@@ -65,6 +66,7 @@ export function defaultScript(): SessionEvent[] {
       session_id: SESSION_ID,
       request_id: 2,
       tool_name: 'Bash',
+      tool_input: '{"command":"rm -rf node_modules"}',
     },
   ];
 }

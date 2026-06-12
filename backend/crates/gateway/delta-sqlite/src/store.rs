@@ -118,6 +118,20 @@ fn send_from_row(row: &Row<'_>) -> Result<Send> {
     })
 }
 
+fn permission_request_from_row(row: &Row<'_>) -> Result<PermissionRequest> {
+    Ok(PermissionRequest {
+        id: row.get(0)?,
+        session_id: SessionId::from(row.get::<_, String>(1)?),
+        tool_name: row.get(2)?,
+        tool_input_json: row.get(3)?,
+        tool_use_id: row.get(4)?,
+        status: PermissionStatus::parse(&row.get::<_, String>(5)?)?,
+        decision_reason: row.get(6)?,
+        created_at: row.get(7)?,
+        decided_at: row.get(8)?,
+    })
+}
+
 fn message_from_row(row: &Row<'_>) -> Result<Message> {
     let content_json: Option<String> = row.get(9)?;
     let content = match content_json {
@@ -861,7 +875,7 @@ impl SessionStore for SqliteStore {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
-        tool_use_id: &str,
+        tool_use_id: Option<&str>,
     ) -> std::result::Result<PermissionRequest, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
@@ -884,7 +898,7 @@ impl SessionStore for SqliteStore {
             session_id: session_id.clone(),
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
-            tool_use_id: Some(tool_use_id.to_owned()),
+            tool_use_id: tool_use_id.map(str::to_owned),
             status: PermissionStatus::Pending,
             decision_reason: None,
             created_at: now,
@@ -892,37 +906,11 @@ impl SessionStore for SqliteStore {
         })
     }
 
-    async fn find_open_permission_request(
+    async fn decide_permission_request(
         &self,
-        session_id: &SessionId,
-        tool_name: &str,
-        tool_input_json: &str,
-    ) -> std::result::Result<Option<i64>, delta_usecase::Error> {
-        let conn = self.conn.lock().await;
-        // The `PermissionRequest` hook carries no `tool_use_id`, so correlate by
-        // (session, tool_name) among still-`pending` rows. `(tool_input_json =
-        // ?3) DESC` puts an exact tool_input match first; otherwise the most
-        // recent pending row for that tool wins.
-        let id = conn
-            .query_row(
-                "SELECT id FROM permission_request
-                 WHERE session_id = ?1 AND tool_name = ?2 AND status = 'pending'
-                 ORDER BY (tool_input_json = ?3) DESC, id DESC
-                 LIMIT 1",
-                params![session_id.as_str(), tool_name, tool_input_json],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(Error::from)?;
-        Ok(id)
-    }
-
-    async fn resolve_permission_by_tool_use_id(
-        &self,
-        session_id: &SessionId,
-        tool_use_id: &str,
+        request_id: i64,
         allowed: bool,
-    ) -> std::result::Result<Option<i64>, delta_usecase::Error> {
+    ) -> std::result::Result<Option<PermissionRequest>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         let status = if allowed {
@@ -930,22 +918,61 @@ impl SessionStore for SqliteStore {
         } else {
             PermissionStatus::Denied
         };
-        // Resolve only the still-`pending` request for this (session, tool_use_id),
-        // so a re-ingested tool_result cannot flip an already-decided row. The
-        // returned id is the row that transitioned, letting the caller emit a
-        // single `PermissionResolved`.
-        let id = conn
+        // Decide only a still-`pending` row, so a late decision can never flip
+        // one already settled (by an earlier decision or a tool_result).
+        let row = conn
             .query_row(
                 "UPDATE permission_request
                  SET status = ?1, decided_at = ?2
-                 WHERE session_id = ?3 AND tool_use_id = ?4 AND status = 'pending'
-                 RETURNING id",
-                params![status.as_str(), now, session_id.as_str(), tool_use_id],
-                |row| row.get::<_, i64>(0),
+                 WHERE id = ?3 AND status = 'pending'
+                 RETURNING id, session_id, tool_name, tool_input_json, tool_use_id,
+                           status, decision_reason, created_at, decided_at",
+                params![status.as_str(), now, request_id],
+                |r| Ok(permission_request_from_row(r)),
             )
             .optional()
             .map_err(Error::from)?;
-        Ok(id)
+        row.transpose().map_err(Into::into)
+    }
+
+    async fn resolve_permission_by_tool_use_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        allowed: bool,
+    ) -> std::result::Result<Vec<i64>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        let status = if allowed {
+            PermissionStatus::Allowed
+        } else {
+            PermissionStatus::Denied
+        };
+        // Resolve only still-`pending` rows, so a re-ingested tool_result
+        // cannot flip an already-decided row. Two kinds of row settle here:
+        // the `PreToolUse`-recorded row whose `tool_use_id` matches, and any
+        // pending dialog row owned by the `PermissionRequest` hook
+        // (`tool_use_id IS NULL`) — the dialog blocks the session, so the next
+        // tool_result to arrive is the one it gated. The returned ids are the
+        // rows that transitioned, one `PermissionResolved` each.
+        let mut stmt = conn
+            .prepare(
+                "UPDATE permission_request
+                 SET status = ?1, decided_at = ?2
+                 WHERE session_id = ?3 AND status = 'pending'
+                   AND (tool_use_id = ?4 OR tool_use_id IS NULL)
+                 RETURNING id",
+            )
+            .map_err(Error::from)?;
+        let ids = stmt
+            .query_map(
+                params![status.as_str(), now, session_id.as_str(), tool_use_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(Error::from)?
+            .collect::<std::result::Result<Vec<i64>, _>>()
+            .map_err(Error::from)?;
+        Ok(ids)
     }
 }
 

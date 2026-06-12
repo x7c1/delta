@@ -1,0 +1,19 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "tool_use", "name": "Bash", "input": { "command": "rm -rf scratch" } },
+    {
+      "type": "permission_request",
+      "on_allow": [
+        { "type": "tool_result" },
+        { "type": "reply", "text": "tool ran after allow" },
+        { "type": "stop" }
+      ],
+      "on_deny": [
+        { "type": "tool_result", "is_error": true },
+        { "type": "reply", "text": "tool was denied" },
+        { "type": "stop" }
+      ]
+    }
+  ]
+}

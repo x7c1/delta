@@ -299,9 +299,10 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 7,
       tool_name: 'Bash',
+      tool_input: '{}',
     });
     expect(useLiveStore.getState().permission).toEqual({
-      'sess-1': { requestId: 7, toolName: 'Bash' },
+      'sess-1': { requestId: 7, toolName: 'Bash', toolInput: '{}' },
     });
 
     useLiveStore.getState().dismissPermission('sess-1');
@@ -315,18 +316,20 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 1,
       tool_name: 'Bash',
+      tool_input: '{}',
     });
     store.applyEvent({
       kind: 'permission_requested',
       session_id: 'sess-2',
       request_id: 2,
       tool_name: 'Edit',
+      tool_input: '{}',
     });
 
     // Dismissing one session leaves the other's notice intact.
     useLiveStore.getState().dismissPermission('sess-1');
     expect(useLiveStore.getState().permission).toEqual({
-      'sess-2': { requestId: 2, toolName: 'Edit' },
+      'sess-2': { requestId: 2, toolName: 'Edit', toolInput: '{}' },
     });
   });
 
@@ -336,6 +339,7 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 7,
       tool_name: 'Bash',
+      tool_input: '{}',
     });
 
     useLiveStore.getState().applyEvent({
@@ -353,6 +357,7 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 7,
       tool_name: 'Bash',
+      tool_input: '{}',
     });
 
     useLiveStore.getState().applyEvent({
@@ -370,6 +375,7 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 8,
       tool_name: 'Bash',
+      tool_input: '{}',
     });
 
     // A stale resolution for an older request must not wipe the live notice.
@@ -379,7 +385,7 @@ describe('liveStore.applyEvent notices', () => {
       request_id: 7,
     });
     expect(useLiveStore.getState().permission).toEqual({
-      'sess-1': { requestId: 8, toolName: 'Bash' },
+      'sess-1': { requestId: 8, toolName: 'Bash', toolInput: '{}' },
     });
   });
 
@@ -389,6 +395,7 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 7,
       tool_name: 'Bash',
+      tool_input: '{}',
     });
 
     useLiveStore.getState().applyEvent({

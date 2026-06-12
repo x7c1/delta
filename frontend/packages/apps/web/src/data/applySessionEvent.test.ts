@@ -255,6 +255,7 @@ describe('applySessionEvent', () => {
         session_id: FOCUSED,
         request_id: 2,
         tool_name: 'Edit',
+        tool_input: '{}',
       },
       queryClient,
       1,
@@ -262,7 +263,7 @@ describe('applySessionEvent', () => {
     );
 
     expect(useLiveStore.getState().permission).toEqual({
-      [FOCUSED]: { requestId: 2, toolName: 'Edit' },
+      [FOCUSED]: { requestId: 2, toolName: 'Edit', toolInput: '{}' },
     });
   });
 });

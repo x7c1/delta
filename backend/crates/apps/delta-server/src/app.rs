@@ -35,6 +35,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/sends", get(api::list_sends))
         .route("/api/threads/{id}/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
+        // Answer a pending tool-permission request from the browser.
+        .route(
+            "/api/permissions/{id}/decision",
+            post(api::decide_permission),
+        )
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))
@@ -63,7 +68,12 @@ mod tests {
             session_workdir_base: "/tmp/delta-test-session".into(),
             tmux_socket: "delta-test".into(),
             port: 7878,
-            launch: delta_usecase::LaunchConfig::default(),
+            launch: delta_usecase::LaunchConfig {
+                // The permission-request hook test exercises the no-decision
+                // passthrough, which waits out this deadline; keep it short.
+                permission_decision_deadline: std::time::Duration::from_millis(50),
+                ..delta_usecase::LaunchConfig::default()
+            },
         })
         .unwrap()
     }
@@ -287,11 +297,39 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
+    /// Register `sess-1` through its first `UserPromptSubmit`, so the
+    /// permission-request hook (whose row references the session) has a
+    /// session row to attach to — as it always does in production.
+    async fn register_session(state: &AppState) {
+        let body = serde_json::json!({
+            "prompt": "hello",
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/does-not-exist.jsonl",
+            "cwd": "/work"
+        })
+        .to_string();
+        let response = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/user-prompt-submit")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
     #[tokio::test]
-    async fn permission_request_hook_returns_ok() {
-        // The hook carries no `tool_use_id`; the handler correlates by
-        // (session, tool_name, tool_input). With no recorded request it still
-        // returns 200 (emitting no notice).
+    async fn permission_request_hook_passes_through_on_timeout() {
+        // The hook registers a pending decision and blocks; with no browser
+        // decision before the (test-shortened) deadline it must answer an
+        // empty 200 — the deliberate passthrough that falls back to the
+        // interactive TUI prompt.
+        let state = test_state();
+        register_session(&state).await;
         let body = serde_json::json!({
             "session_id": "sess-1",
             "tool_name": "Bash",
@@ -299,7 +337,7 @@ mod tests {
         })
         .to_string();
 
-        let response = router(test_state())
+        let response = router(state)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -311,5 +349,90 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 1024).await.unwrap();
+        assert!(
+            bytes.is_empty(),
+            "the passthrough must carry no decision body, got {:?}",
+            String::from_utf8_lossy(&bytes)
+        );
+    }
+
+    #[tokio::test]
+    async fn permission_decision_resolves_the_blocked_hook() {
+        // One state shared by both requests: the hook blocks on it, the
+        // decision endpoint resolves it.
+        let state = test_state();
+        register_session(&state).await;
+        let hook_router = router(state.clone());
+        let api_router = router(state);
+
+        let hook_body = serde_json::json!({
+            "session_id": "sess-1",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf scratch"}
+        })
+        .to_string();
+        let hook = tokio::spawn(async move {
+            hook_router
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/hooks/permission-request")
+                        .header("content-type", "application/json")
+                        .body(Body::from(hook_body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+        });
+
+        // Give the hook a beat to register its waiter, then decide. The row id
+        // is 1: the in-memory store is fresh and this is its first request.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let decision = api_router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/permissions/1/decision")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{ "decision": "allow" }"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(decision.status(), StatusCode::NO_CONTENT);
+
+        // The blocked hook wakes with the decision envelope.
+        let response = hook.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.pointer("/hookSpecificOutput/decision/behavior")
+                .and_then(serde_json::Value::as_str),
+            Some("allow"),
+        );
+    }
+
+    #[tokio::test]
+    async fn permission_decision_for_an_unknown_request_is_a_conflict() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/permissions/999/decision")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{ "decision": "deny" }"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("code").and_then(serde_json::Value::as_str),
+            Some("permission_not_pending"),
+        );
     }
 }
