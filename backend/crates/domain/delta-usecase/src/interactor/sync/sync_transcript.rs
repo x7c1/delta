@@ -1,7 +1,7 @@
+use delta_attribution::{attribute_lines, AttributionState, Effect, OutstandingSend};
 use delta_model::{Message, Session};
 
 use crate::error::Result;
-use crate::interactor::claude_format;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -23,23 +23,13 @@ where
     /// parallel, which the old global sync lock forbade. The cursor is
     /// per-session state, so per-session serialization is exactly enough.
     ///
-    /// Attribution is driven by comparing a user line's trimmed text against
-    /// the session's ONE outstanding (`dispatched`) send — at most one exists
-    /// under the single-outstanding dispatch rule — so it is robust regardless
-    /// of which hook triggered the sync or whether the line was present when
-    /// `UserPromptSubmit` fired. Lines are processed in order while
-    /// maintaining `carry_thread`, the thread of the current turn:
-    ///
-    /// - A **human** user line (a user line carrying author-written text) that
-    ///   equals the outstanding send's text is attributed to that send's thread
-    ///   (the new child thread for a branch send), the send is marked matched,
-    ///   and `carry_thread` advances to it. A human user line matching no
-    ///   outstanding send is external input and lands on `main`, resetting
-    ///   `carry_thread`.
-    /// - Every other line follows `carry_thread` — the thread of the turn it
-    ///   belongs to. This covers assistant/system lines AND tool-result lines,
-    ///   which Claude delivers as `role: user` but which are part of the
-    ///   in-flight turn, not a new human turn.
+    /// This method is only the I/O shell. The attribution decisions — which
+    /// thread each line lands on, which send is consumed, which permission
+    /// rows a tool_result settles, whether the turn was interrupted — are
+    /// made by the pure fold [`delta_attribution::attribute_lines`], seeded
+    /// here from the store (the latest persisted user thread as
+    /// `carry_thread`, plus the at-most-one outstanding `dispatched` send)
+    /// and executed afterwards as [`Effect`]s.
     ///
     /// Returns the newly-ingested messages and any [`SessionEvent`]s that the
     /// ingest produced. Two events can arise here:
@@ -84,39 +74,39 @@ where
             return Ok((Vec::new(), Vec::new()));
         }
 
-        // The turn in progress when this batch starts: the thread of the most
-        // recent persisted user message, defaulting to `main`.
-        let mut carry_thread = self
+        // Seed the fold: the turn in progress when this batch starts (the
+        // thread of the most recent persisted user message, defaulting to
+        // `main`) plus the one outstanding dispatched send, if any.
+        let carry_thread = self
             .store
             .latest_user_thread(&session.id)
             .await?
             .unwrap_or(main_thread);
+        let outstanding = self
+            .store
+            .head_dispatched_send(&session.id)
+            .await?
+            .as_ref()
+            .map(OutstandingSend::from);
+        let state = AttributionState::new(carry_thread, outstanding);
 
-        let mut messages = Vec::with_capacity(read.messages.len());
+        let outcome = attribute_lines(&session.id, main_thread, state, read.messages);
+
+        // Execute the fold's effects in decision order, then persist.
         let mut events = Vec::new();
-        for line in read.messages {
-            let content_text = Message::flatten_text(&line.content);
-
-            // Correlate any tool_result blocks on this line with the open
-            // permission requests they settle: the `PreToolUse`-recorded row
-            // keyed by `tool_use_id`, plus any pending dialog row the
-            // `PermissionRequest` hook owns (answered in the TUI after the
-            // browser-decision wait timed out). Resolving on actual completion
-            // (rather than at `PreToolUse` time) is what lets an auto-approved
-            // tool's notice clear immediately while a genuine prompt's notice
-            // persists until the human answers. A denied tool yields
-            // `is_error: true` ("User rejected tool use"), so the error flag
-            // infers allowed vs denied.
-            for block in &line.content {
-                if let delta_model::ContentBlock::ToolResult {
+        for effect in outcome.effects {
+            match effect {
+                Effect::ResolvePermission {
                     tool_use_id,
-                    is_error,
-                    ..
-                } = block
-                {
+                    allowed,
+                } => {
+                    // Resolve the `PreToolUse`-recorded row keyed by
+                    // `tool_use_id`, plus any pending dialog row the
+                    // `PermissionRequest` hook owns (answered in the TUI after
+                    // the browser-decision wait timed out).
                     for request_id in self
                         .store
-                        .resolve_permission_by_tool_use_id(&session.id, tool_use_id, !is_error)
+                        .resolve_permission_by_tool_use_id(&session.id, &tool_use_id, allowed)
                         .await?
                     {
                         events.push(SessionEvent::PermissionResolved {
@@ -125,93 +115,28 @@ where
                         });
                     }
                 }
-            }
-
-            // A genuine human turn is a user line with author-written text.
-            // Claude delivers tool results as `role: user` lines too, but those
-            // belong to the in-flight turn, not a new human turn, so they must
-            // inherit `carry_thread` rather than reset it to `main`. (Mirrors the
-            // frontend's `isUserTurn`.) Treating a tool_result as a turn boundary
-            // used to drop the rest of a sub-thread's turn onto `main`.
-            //
-            // An interrupt marker is also a `role: user` line, but it belongs to
-            // the turn the user just aborted, not a new human turn — so it too
-            // inherits `carry_thread` and is excluded from `is_human_turn` (it
-            // must not run through send correlation nor reset to `main`).
-            let trimmed = content_text.as_deref().unwrap_or("").trim();
-            let is_interrupt_marker = matches!(line.role, delta_model::Role::User)
-                && claude_format::is_interrupt_marker(trimmed);
-            let is_human_turn = matches!(line.role, delta_model::Role::User)
-                && !trimmed.is_empty()
-                && !is_interrupt_marker;
-
-            // The interrupt is hook-independent (Claude's `Stop` hook does not
-            // fire on interrupt), so emit `TurnInterrupted` here to clear the
-            // stuck pending send in the browser.
-            //
-            // It also ends the turn: feed `Interrupt` into the turn machine
-            // (back to `Idle`). Dispatching any queued send is left to the
-            // caller (which acts on the returned `TurnInterrupted` after this
-            // sync returns), so no keystrokes are sent from inside the
-            // ingestion path.
-            if is_interrupt_marker {
-                self.apply_turn_input(crate::turn::TurnInput::Interrupt)
-                    .await?;
-                events.push(SessionEvent::TurnInterrupted {
-                    session_id: session.id.clone(),
-                });
-            }
-
-            // The one outstanding send, re-read per human line because a match
-            // below consumes it (`mark_send_matched` moves it out of
-            // `dispatched`).
-            let (thread_id, semantic_parent_uuid) = if is_human_turn {
-                let outstanding = self
-                    .store
-                    .head_dispatched_send(&session.id)
-                    .await?
-                    .filter(|send| send.text.trim() == trimmed);
-                match outstanding {
-                    Some(pending) => {
-                        self.store.mark_send_matched(pending.id, &line.uuid).await?;
-                        carry_thread = pending.thread_id;
-                        (pending.thread_id, pending.semantic_parent_uuid)
-                    }
-                    None if line.is_queued_command => {
-                        // A queued command with no matching send is a
-                        // programmatic injection (e.g. a background task
-                        // notification), not stray pane typing, so it must not
-                        // tear the active turn back to `main` — inherit the
-                        // current thread the way a non-human line does.
-                        (carry_thread, None)
-                    }
-                    None => {
-                        carry_thread = main_thread;
-                        (main_thread, None)
-                    }
+                Effect::TurnInterrupted => {
+                    // The interrupt ends the turn: feed `Interrupt` into the
+                    // turn machine (back to `Idle`). Dispatching any queued
+                    // send is left to the caller (which acts on the returned
+                    // `TurnInterrupted` after this sync returns), so no
+                    // keystrokes are sent from inside the ingestion path.
+                    self.apply_turn_input(crate::turn::TurnInput::Interrupt)
+                        .await?;
+                    events.push(SessionEvent::TurnInterrupted {
+                        session_id: session.id.clone(),
+                    });
                 }
-            } else {
-                (carry_thread, None)
-            };
-
-            messages.push(Message {
-                uuid: line.uuid,
-                session_id: session.id.clone(),
-                thread_id,
-                role: line.role,
-                linear_parent_uuid: line.linear_parent_uuid,
-                semantic_parent_uuid,
-                prompt_id: line.prompt_id,
-                // Persist the message's own transcript line index as its `seq`,
-                // so ordering follows true file position with no drift.
-                seq: line.seq,
-                content_text,
-                content: line.content,
-                created_at: line.created_at,
-            });
+                Effect::SendMatched {
+                    send_id,
+                    matched_uuid,
+                } => {
+                    self.store.mark_send_matched(send_id, &matched_uuid).await?;
+                }
+            }
         }
 
-        self.store.upsert_messages(&messages).await?;
-        Ok((messages, events))
+        self.store.upsert_messages(&outcome.messages).await?;
+        Ok((outcome.messages, events))
     }
 }

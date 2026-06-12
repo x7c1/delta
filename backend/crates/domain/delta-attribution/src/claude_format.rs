@@ -1,11 +1,10 @@
 //! Claude Code text-format detection, in one place.
 //!
 //! These are the textual conventions Claude Code uses on the wire Delta
-//! observes (the JSONL transcript and the hook payloads), gathered here so the
-//! transcript→input conversion is the only layer that knows them. The
-//! structural flags (e.g. `is_queued_command`) are already detected by the
-//! transcript parser in the gateway; these cover the conventions that are
-//! plain strings.
+//! observes (the JSONL transcript and the hook payloads), gathered here so
+//! attribution and the hook handlers share one definition. The structural
+//! flags (e.g. `is_queued_command`) are already detected by the transcript
+//! parser in the gateway; these cover the conventions that are plain strings.
 
 /// Prefix Claude Code writes to the transcript when the user interrupts the
 /// in-flight turn. It appears as a `role: user` line whose only text block is
@@ -22,12 +21,34 @@ const TASK_NOTIFICATION_PREFIX: &str = "<task-notification>";
 
 /// Whether a (trimmed) user-line text is the interrupt marker Claude Code
 /// writes when the user aborts the in-flight turn.
-pub(in crate::interactor) fn is_interrupt_marker(trimmed_text: &str) -> bool {
+pub fn is_interrupt_marker(trimmed_text: &str) -> bool {
     trimmed_text.starts_with(INTERRUPT_MARKER_PREFIX)
 }
 
 /// Whether a hook-submitted prompt is a harness-injected task notification
 /// rather than something typed into the pane.
-pub(in crate::interactor) fn is_task_notification(prompt: &str) -> bool {
+pub fn is_task_notification(prompt: &str) -> bool {
     prompt.trim_start().starts_with(TASK_NOTIFICATION_PREFIX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn both_interrupt_marker_variants_match_by_prefix() {
+        assert!(is_interrupt_marker("[Request interrupted by user]"));
+        assert!(is_interrupt_marker(
+            "[Request interrupted by user for tool use]"
+        ));
+        assert!(!is_interrupt_marker("a normal prompt"));
+        assert!(!is_interrupt_marker(""));
+    }
+
+    #[test]
+    fn task_notification_is_detected_with_leading_whitespace() {
+        assert!(is_task_notification("<task-notification>done</task-notification>"));
+        assert!(is_task_notification("  <task-notification>done"));
+        assert!(!is_task_notification("a normal prompt"));
+    }
 }

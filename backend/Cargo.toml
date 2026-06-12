@@ -10,6 +10,7 @@ repository = "https://github.com/x7c1/delta"
 
 [workspace.dependencies]
 # Internal crates
+delta-attribution = { path = "crates/domain/delta-attribution" }
 delta-model = { path = "crates/domain/delta-model" }
 delta-usecase = { path = "crates/domain/delta-usecase" }
 delta-sqlite = { path = "crates/gateway/delta-sqlite" }

@@ -24,8 +24,10 @@ mod tmux_driver;
 pub use tmux_driver::{pane_for, TmuxDriver};
 mod transcript;
 pub use transcript::Transcript;
-mod transcript_message;
-pub use transcript_message::TranscriptMessage;
+// The parsed-line type lives in `delta-attribution` (it is the pure fold's
+// input); re-exported here so the gateway keeps implementing the
+// [`Transcript`] port against `delta_usecase` types only.
+pub use delta_attribution::TranscriptMessage;
 mod transcript_read;
 pub use transcript_read::TranscriptRead;
 mod user_prompt_submit_hook;

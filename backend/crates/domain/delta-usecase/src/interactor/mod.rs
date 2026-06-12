@@ -8,7 +8,6 @@
 //! interactor. Per-session runtime state lives in the `session_actor` module
 //! (one actor task per session), reached through the `routing` impl.
 
-mod claude_format;
 mod context;
 mod enqueue;
 mod hooks;
