@@ -34,7 +34,34 @@ pub type RecentWorkdir = (String, Option<String>);
 pub trait SessionStore: std::marker::Send + Sync {
     /// Insert a session if absent and ensure its `main` thread exists, then
     /// return the session and the id of its `main` thread.
+    ///
+    /// When the row already exists as a Delta-launched `spawning` session
+    /// (written by [`Self::insert_spawning_session`] when the id was minted),
+    /// this first hook contact *activates* it: the status flips to `active` and
+    /// the hook-reported `transcript_path` (unknown at mint time) is filled in.
+    /// An already-active/ended row is left untouched.
     async fn register_session(&self, new: NewSession) -> Result<(Session, ThreadId)>;
+
+    /// Insert a brand-new `spawning` session row plus its `main` thread, before
+    /// `claude` is launched. The transcript path is `NULL` (it is owned by
+    /// Claude Code and only learned from the first hook, which activates the
+    /// row via [`Self::register_session`]). The id is freshly minted, so an
+    /// existing row with the same id is an error, not an upsert.
+    async fn insert_spawning_session(
+        &self,
+        id: &SessionId,
+        cwd: &str,
+    ) -> Result<(Session, ThreadId)>;
+
+    /// Delete a session row and everything it owns (threads, messages, sends,
+    /// permission requests, the sync cursor — removed by cascade). Used to reap
+    /// a `spawning` session whose launch failed before any data was ingested.
+    async fn delete_session(&self, id: &SessionId) -> Result<()>;
+
+    /// Mark a still-`spawning` session `failed` (its launch never bound before
+    /// the deadline). A no-op for any other status, so a stale reap can never
+    /// flip an already-active session.
+    async fn mark_session_failed(&self, id: &SessionId) -> Result<()>;
 
     /// All registered sessions, ordered by creation (ascending `created_at`).
     async fn list_sessions(&self) -> Result<Vec<Session>>;
@@ -228,6 +255,22 @@ pub trait SessionStore: std::marker::Send + Sync {
 impl SessionStore for Box<dyn SessionStore> {
     async fn register_session(&self, new: NewSession) -> Result<(Session, ThreadId)> {
         (**self).register_session(new).await
+    }
+
+    async fn insert_spawning_session(
+        &self,
+        id: &SessionId,
+        cwd: &str,
+    ) -> Result<(Session, ThreadId)> {
+        (**self).insert_spawning_session(id, cwd).await
+    }
+
+    async fn delete_session(&self, id: &SessionId) -> Result<()> {
+        (**self).delete_session(id).await
+    }
+
+    async fn mark_session_failed(&self, id: &SessionId) -> Result<()> {
+        (**self).mark_session_failed(id).await
     }
 
     async fn list_sessions(&self) -> Result<Vec<Session>> {

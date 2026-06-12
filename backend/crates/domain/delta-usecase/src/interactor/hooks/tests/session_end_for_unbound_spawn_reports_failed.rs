@@ -34,4 +34,10 @@ async fn session_end_for_unbound_spawn_reports_failed() {
         vec!["delta-1".to_owned()],
     );
     assert!(ix.pending_session_ids().await.is_empty());
+    // The eagerly-created `spawning` row ingested nothing, so the failure
+    // cleanup deleted it — same policy as the watchdog reap.
+    assert!(
+        ix.store().session(&id).await.unwrap().is_none(),
+        "the never-bound spawn's session row is deleted on SessionEnd"
+    );
 }

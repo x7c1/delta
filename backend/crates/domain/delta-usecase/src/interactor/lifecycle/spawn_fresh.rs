@@ -1,4 +1,4 @@
-use delta_model::SessionId;
+use delta_model::{Send, SessionId};
 
 use crate::error::Result;
 use crate::open_sessions::PendingSpawn;
@@ -7,6 +7,16 @@ use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::Interactor;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
+
+/// The result of a fresh spawn: the launch's pane token and — when the spawn
+/// carried a first prompt — the already-enqueued `send` row for it (which
+/// names the eagerly-created session row and its `main` thread).
+pub(in crate::interactor) struct FreshSpawn {
+    pub token: PaneToken,
+    /// The `dispatched` send row for the first prompt, written before the
+    /// launch; `None` for a prompt-less plain spawn.
+    pub first_send: Option<Send>,
+}
 
 impl<T, X, S, W> Interactor<T, X, S, W>
 where
@@ -18,26 +28,34 @@ where
     /// Spawn a fresh session, optionally dispatching a first prompt.
     ///
     /// Mints a token and a fresh Claude `session_id` (a time-ordered UUID v7, so
-    /// session ids sort chronologically by creation time), launches
-    /// `claude --settings <path> --session-id <uuid>` in the launch directory,
-    /// and records a
-    /// [`PendingSpawn`] carrying that minted id (the binding key) and
-    /// `first_prompt`. Pinning the id up front means the first `UserPromptSubmit`
-    /// hook reports exactly this id, so the spawn correlates to its session by id
-    /// rather than by working directory.
+    /// session ids sort chronologically by creation time), **eagerly inserts the
+    /// session row** (status `spawning`, transcript path unknown until the first
+    /// hook) with its `main` thread, enqueues the first prompt's `send` row when
+    /// one is given, and only then launches
+    /// `claude --settings <path> --session-id <uuid>` in the launch directory.
+    /// Because the row and the send exist before the launch, the REST response
+    /// for a composer-initiated New carries real ids instead of placeholders,
+    /// and the first `UserPromptSubmit` correlates through the normal FIFO
+    /// machinery with no bind-time row writing.
+    ///
+    /// A [`PendingSpawn`] is still recorded carrying the minted id (the binding
+    /// key): the first hook *activates* the eager row (`spawning` → `active`,
+    /// filling the transcript path) via the registry bind. Pinning the id up
+    /// front means the first `UserPromptSubmit` hook reports exactly this id, so
+    /// the spawn correlates to its session by id rather than by working
+    /// directory.
     ///
     /// When a `first_prompt` is present (a composer-initiated New), it is passed
     /// to `claude` as a trailing positional argument on the launch command line
     /// (`claude … <prompt>`) rather than typed into the pane after launch. An
     /// interactive `claude` invoked with a positional prompt auto-submits it at
-    /// startup, which fires the `UserPromptSubmit` hook that binds this spawn —
-    /// the hook then writes the held `send` row that lets the first
-    /// user line correlate. Submitting at launch avoids the failure mode of
-    /// injecting keystrokes after a fixed settle delay: on a slow cold start the
-    /// TUI input is not yet ready when the keystrokes land, they are lost, the
-    /// prompt is never submitted, and the spawn sits pending forever. The command
-    /// is forwarded as an argv tail (no shell), so a multi-line or quoted prompt
-    /// is already safe. Returns the minted token.
+    /// startup, which fires the `UserPromptSubmit` hook that binds this spawn.
+    /// Submitting at launch avoids the failure mode of injecting keystrokes
+    /// after a fixed settle delay: on a slow cold start the TUI input is not yet
+    /// ready when the keystrokes land, they are lost, the prompt is never
+    /// submitted, and the spawn sits pending forever. The command is forwarded
+    /// as an argv tail (no shell), so a multi-line or quoted prompt is already
+    /// safe.
     ///
     /// The registry lock is taken only for the brief record/rollback steps, never
     /// across the tmux/workspace I/O, so a spawn does not serialize concurrent
@@ -47,9 +65,10 @@ where
     /// finds a spawn to bind rather than racing ahead and being misread as
     /// external input. With the prompt on the command line the hook fires very
     /// soon after launch, so this pre-launch ordering is what guarantees the spawn
-    /// record already exists when the hook arrives. A
-    /// failed `create_session` rolls the just-recorded pending back, so no
-    /// dangling spawn is left behind.
+    /// record already exists when the hook arrives. A failed `create_session`
+    /// rolls back both the just-recorded pending *and* the eager session row
+    /// (the cascade removes its send), so no dangling spawn or orphan row is
+    /// left behind.
     ///
     /// When `workdir` is `Some`, it is a user-selected path: it is validated and
     /// canonicalized via [`Workspace::resolve_existing_dir`] *before* anything is
@@ -61,7 +80,7 @@ where
         &self,
         first_prompt: Option<String>,
         workdir: Option<String>,
-    ) -> Result<PaneToken> {
+    ) -> Result<FreshSpawn> {
         // Validate a user-selected workdir before minting or launching anything,
         // so an invalid path is rejected with no side effects. The canonical
         // path becomes the launch directory; `None` defers to `<base>/<token>`
@@ -70,10 +89,6 @@ where
             Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
             None => None,
         };
-
-        // Captured for tracing before `first_prompt` is moved into the spawn
-        // record below.
-        let has_first_prompt = first_prompt.is_some();
 
         // The minter is atomic, so token uniqueness needs no lock here.
         let token = self.mint_free_token().await?;
@@ -89,6 +104,23 @@ where
         // RFC 9562 UUID, and collision with an existing stored session is
         // astronomically unlikely.
         let session_id = SessionId::from(uuid::Uuid::now_v7().to_string());
+
+        // Eagerly create the session row and its `main` thread, then the first
+        // prompt's send row bound to those real ids. Hooks cannot arrive before
+        // the launch below, so nothing races this write; if the launch fails the
+        // row is deleted again in the rollback.
+        let (_session, main_thread_id) = self
+            .store
+            .insert_spawning_session(&session_id, &workdir)
+            .await?;
+        let first_send = match first_prompt.as_deref() {
+            Some(text) => Some(
+                self.store
+                    .enqueue_send(&session_id, main_thread_id, None, text, None)
+                    .await?,
+            ),
+            None => None,
+        };
 
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
@@ -121,7 +153,6 @@ where
             pane: pane.clone(),
             session_id: session_id.clone(),
             workdir: workdir.clone(),
-            first_prompt,
             // Stamp the spawn for the watchdog deadline. From here the only thing
             // that binds it is the first `UserPromptSubmit` hook; if that never
             // arrives, the reaper uses this instant to reap the stuck spawn.
@@ -129,9 +160,11 @@ where
         });
 
         // Launch the session. If `create_session` fails, the spawn never starts,
-        // so roll the just-recorded pending back (otherwise a later, unrelated
-        // `UserPromptSubmit` could mis-bind to this abandoned pane) and surface
-        // the error.
+        // so roll back the just-recorded pending (otherwise a later, unrelated
+        // `UserPromptSubmit` could mis-bind to this abandoned pane) and the eager
+        // session row (the cascade removes its main thread and first send), then
+        // surface the error. The REST caller gets the failure synchronously, so
+        // no `SpawnFailed` event is needed for this path.
         if let Err(spawn_err) = self
             .tmux
             .create_session(token.as_str(), &workdir, &command)
@@ -141,21 +174,23 @@ where
                 token = %token.as_str(),
                 session_id = %session_id,
                 error = %spawn_err,
-                "fresh spawn failed to launch; rolling back the pending spawn"
+                "fresh spawn failed to launch; rolling back the pending spawn and \
+                 the eager session row"
             );
             self.open_sessions
                 .lock()
                 .await
                 .remove_pending_for_token(&token);
+            self.store.delete_session(&session_id).await?;
             return Err(spawn_err);
         }
         tracing::info!(
             token = %token.as_str(),
             session_id = %session_id,
             workdir = %workdir,
-            has_first_prompt = has_first_prompt,
+            has_first_prompt = first_send.is_some(),
             "fresh spawn launched; awaiting first UserPromptSubmit to bind"
         );
-        Ok(token)
+        Ok(FreshSpawn { token, first_send })
     }
 }

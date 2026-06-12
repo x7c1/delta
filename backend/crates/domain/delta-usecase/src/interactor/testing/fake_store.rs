@@ -54,9 +54,17 @@ pub(crate) struct FakeStore {
 impl SessionStore for FakeStore {
     async fn register_session(&self, new: NewSession) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
-        // Insert-if-absent, mirroring the real store's `INSERT OR IGNORE`: a
-        // re-registration returns the existing session and its `main` thread.
-        if let Some(session) = g.sessions.iter().find(|s| s.id == new.id).cloned() {
+        // Insert-if-absent, mirroring the real store's upsert: a re-registration
+        // returns the existing session and its `main` thread, except that a
+        // still-`spawning` row is activated (status flips, the hook-reported
+        // transcript path is filled in).
+        if let Some(session) = g.sessions.iter_mut().find(|s| s.id == new.id) {
+            if session.status == SessionStatus::Spawning {
+                session.status = SessionStatus::Active;
+                session.cwd = new.cwd;
+                session.transcript_path = Some(new.transcript_path);
+            }
+            let session = session.clone();
             let main_id = g
                 .threads
                 .iter()
@@ -68,7 +76,7 @@ impl SessionStore for FakeStore {
         let session = Session {
             id: new.id.clone(),
             cwd: new.cwd,
-            transcript_path: new.transcript_path,
+            transcript_path: Some(new.transcript_path),
             title: None,
             status: SessionStatus::Active,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -85,6 +93,64 @@ impl SessionStore for FakeStore {
             created_at: "2026-01-01T00:00:00Z".into(),
         });
         Ok((session, main_id))
+    }
+
+    async fn insert_spawning_session(
+        &self,
+        id: &SessionId,
+        cwd: &str,
+    ) -> Result<(Session, ThreadId)> {
+        let mut g = self.inner.lock().unwrap();
+        assert!(
+            !g.sessions.iter().any(|s| &s.id == id),
+            "insert_spawning_session must not be called for an existing id"
+        );
+        let session = Session {
+            id: id.clone(),
+            cwd: cwd.to_owned(),
+            transcript_path: None,
+            title: None,
+            status: SessionStatus::Spawning,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        g.sessions.push(session.clone());
+        g.next_thread_id += 1;
+        let main_id = ThreadId(g.next_thread_id);
+        g.threads.push(Thread {
+            id: main_id,
+            session_id: id.clone(),
+            title: "main".into(),
+            parent_thread_id: None,
+            root_message_uuid: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+        Ok((session, main_id))
+    }
+
+    async fn delete_session(&self, id: &SessionId) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        // Mirror the real store's cascade: every child row goes with the
+        // session.
+        g.sessions.retain(|s| &s.id != id);
+        g.threads.retain(|t| &t.session_id != id);
+        g.sends.retain(|s| &s.session_id != id);
+        g.messages.retain(|m| &m.session_id != id);
+        g.permissions.retain(|p| &p.session_id != id);
+        g.transcript_lines_read.remove(id);
+        g.turn_active.remove(id);
+        Ok(())
+    }
+
+    async fn mark_session_failed(&self, id: &SessionId) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(session) = g
+            .sessions
+            .iter_mut()
+            .find(|s| &s.id == id && s.status == SessionStatus::Spawning)
+        {
+            session.status = SessionStatus::Failed;
+        }
+        Ok(())
     }
 
     async fn list_sessions(&self) -> Result<Vec<Session>> {
@@ -111,6 +177,12 @@ impl SessionStore for FakeStore {
                     .filter_map(|m| m.created_at.clone())
                     .max();
                 (s.clone(), last_activity_at)
+            })
+            // A `spawning` session that ingested nothing is excluded, mirroring
+            // the SQL page query (see `SqliteStore::list_sessions_page`).
+            .filter(|(s, _)| {
+                s.status != SessionStatus::Spawning
+                    || g.messages.iter().any(|m| m.session_id == s.id)
             })
             .collect();
         let recency = |row: &SessionPageRow| -> String {

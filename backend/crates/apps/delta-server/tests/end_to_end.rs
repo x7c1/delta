@@ -468,10 +468,13 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
 }
 
 /// A new-session send (`new_session: true`, no thread) spawns a fresh session
-/// and defers the first prompt onto its `main` thread. The synthetic response
-/// carries no persisted row yet (the real one is written when the spawn binds).
+/// with the first prompt enqueued onto its `main` thread before the launch:
+/// Delta mints the session id up front, so the response carries the real,
+/// already-persisted session/thread/send ids. The `spawning` row stays out of
+/// the session list until its first hook activates it (so the list gains the
+/// row exactly when it used to: at registration).
 #[tokio::test]
-async fn new_session_send_spawns_and_defers_first_prompt() {
+async fn new_session_send_spawns_and_persists_first_prompt() {
     let (app, tmux, transcript_path, _state) = build_app();
 
     let (status, body) = post_json(
@@ -483,10 +486,27 @@ async fn new_session_send_spawns_and_defers_first_prompt() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["send"]["text"], "kick off a new conversation");
     assert_eq!(body["send"]["status"], "dispatched");
-    assert_eq!(
-        body["send"]["id"].as_i64(),
-        Some(0),
-        "no row is persisted until the spawn binds to a session id"
+    assert!(
+        body["send"]["id"].as_i64().expect("send id") > 0,
+        "the send row is persisted before the spawn"
+    );
+    let session_id = body["send"]["session_id"]
+        .as_str()
+        .expect("a real session id");
+    assert!(!session_id.is_empty(), "a real session id is minted");
+    let thread_id = body["send"]["thread_id"].as_i64().expect("thread id");
+    assert!(thread_id > 0, "the send targets the real main thread");
+
+    // The eager row exists but stays out of the session list until its first
+    // hook activates it: a message-less `spawning` session is not listable
+    // (the browser could not open it, and the optimistic new-session chip
+    // would mis-bind to it).
+    let (status, list) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK);
+    let sessions = list["sessions"].as_array().expect("sessions array");
+    assert!(
+        sessions.is_empty(),
+        "a message-less spawning session is not listed before its first hook"
     );
     // A fresh tmux session was spawned with the first prompt carried on its
     // launch command line (claude auto-submits it at startup), not injected via

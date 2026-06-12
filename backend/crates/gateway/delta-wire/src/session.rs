@@ -13,15 +13,19 @@ use ts_rs::TS;
 #[serde(rename_all = "lowercase")]
 #[ts(rename = "SessionStatus")]
 pub enum WireSessionStatus {
+    Spawning,
     Active,
     Ended,
+    Failed,
 }
 
 impl From<SessionStatus> for WireSessionStatus {
     fn from(status: SessionStatus) -> Self {
         match status {
+            SessionStatus::Spawning => WireSessionStatus::Spawning,
             SessionStatus::Active => WireSessionStatus::Active,
             SessionStatus::Ended => WireSessionStatus::Ended,
+            SessionStatus::Failed => WireSessionStatus::Failed,
         }
     }
 }
@@ -38,6 +42,9 @@ impl From<SessionStatus> for WireSessionStatus {
 pub struct WireSession {
     pub id: String,
     pub cwd: String,
+    /// Path of the session's JSONL transcript; empty while the session is
+    /// still `spawning` (the domain stores `None` until the first hook reports
+    /// the path, but the wire keeps the pre-existing string shape).
     pub transcript_path: String,
     pub title: Option<String>,
     pub status: WireSessionStatus,
@@ -50,7 +57,7 @@ impl From<Session> for WireSession {
         WireSession {
             id: session.id.0,
             cwd: session.cwd,
-            transcript_path: session.transcript_path,
+            transcript_path: session.transcript_path.unwrap_or_default(),
             title: session.title,
             status: session.status.into(),
             created_at: session.created_at,
@@ -69,7 +76,7 @@ mod tests {
         let session = Session {
             id: SessionId::from("sess-1"),
             cwd: "/work/delta".into(),
-            transcript_path: "/tmp/t.jsonl".into(),
+            transcript_path: Some("/tmp/t.jsonl".into()),
             title: None,
             status: SessionStatus::Active,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -88,10 +95,17 @@ mod tests {
     }
 
     #[test]
-    fn status_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_value(WireSessionStatus::Ended).unwrap(),
-            serde_json::json!("ended"),
-        );
+    fn every_status_serializes_lowercase() {
+        for (status, expected) in [
+            (SessionStatus::Spawning, "spawning"),
+            (SessionStatus::Active, "active"),
+            (SessionStatus::Ended, "ended"),
+            (SessionStatus::Failed, "failed"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(WireSessionStatus::from(status)).unwrap(),
+                serde_json::json!(expected),
+            );
+        }
     }
 }

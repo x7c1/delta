@@ -50,34 +50,36 @@ impl SqliteStore {
     }
 }
 
-fn map_session(
-    row: &Row<'_>,
-) -> rusqlite::Result<(SessionId, String, String, Option<String>, String, String)> {
-    Ok((
-        SessionId::from(row.get::<_, String>(0)?),
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-    ))
-}
-
-fn session_from_parts(
+/// The raw `session` columns of one row, in `SESSION_COLS` order, before the
+/// status string is parsed into a domain [`Session`].
+struct SessionParts {
     id: SessionId,
     cwd: String,
-    transcript_path: String,
+    transcript_path: Option<String>,
     title: Option<String>,
     status: String,
     created_at: String,
-) -> Result<Session> {
+}
+
+fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
+    Ok(SessionParts {
+        id: SessionId::from(row.get::<_, String>(0)?),
+        cwd: row.get(1)?,
+        transcript_path: row.get(2)?,
+        title: row.get(3)?,
+        status: row.get(4)?,
+        created_at: row.get(5)?,
+    })
+}
+
+fn session_from_parts(parts: SessionParts) -> Result<Session> {
     Ok(Session {
-        id,
-        cwd,
-        transcript_path,
-        title,
-        status: SessionStatus::parse(&status)?,
-        created_at,
+        id: parts.id,
+        cwd: parts.cwd,
+        transcript_path: parts.transcript_path,
+        title: parts.title,
+        status: SessionStatus::parse(&parts.status)?,
+        created_at: parts.created_at,
     })
 }
 
@@ -86,14 +88,7 @@ fn session_from_parts(
 /// The query also selects the coalesced `recency` for its `WHERE`/`ORDER BY`,
 /// but that is derivable from `last_activity_at`/`created_at` and not returned.
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
-    let session = session_from_parts(
-        SessionId::from(row.get::<_, String>(0)?),
-        row.get(1)?,
-        row.get(2)?,
-        row.get(3)?,
-        row.get(4)?,
-        row.get(5)?,
-    )?;
+    let session = session_from_parts(map_session(row)?)?;
     let last_activity_at: Option<String> = row.get(6)?;
     Ok((session, last_activity_at))
 }
@@ -155,7 +150,7 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
         .optional()
         .map_err(Error::from)?;
     match parts {
-        Some(p) => Ok(Some(session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5)?)),
+        Some(parts) => Ok(Some(session_from_parts(parts)?)),
         None => Ok(None),
     }
 }
@@ -180,6 +175,30 @@ const SEND_COLS: &str =
     "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at";
 const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at";
 
+/// Ensure the session's `main` thread exists, returning its id.
+fn ensure_main_thread(conn: &Connection, id: &SessionId, now: &str) -> Result<ThreadId> {
+    let main_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM thread WHERE session_id = ?1 AND title = ?2 ORDER BY id LIMIT 1",
+            params![id.as_str(), MAIN_THREAD_TITLE],
+            |r| r.get(0),
+        )
+        .optional()?;
+
+    let main_id = match main_id {
+        Some(id) => id,
+        None => {
+            conn.execute(
+                "INSERT INTO thread (session_id, title, parent_thread_id, created_at)
+                 VALUES (?1, ?2, NULL, ?3)",
+                params![id.as_str(), MAIN_THREAD_TITLE, now],
+            )?;
+            conn.last_insert_rowid()
+        }
+    };
+    Ok(ThreadId(main_id))
+}
+
 #[async_trait]
 impl SessionStore for SqliteStore {
     async fn register_session(
@@ -189,41 +208,84 @@ impl SessionStore for SqliteStore {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
 
-        // Insert the session only if absent.
+        // Insert the session if absent. When the row already exists as a
+        // Delta-launched `spawning` session (inserted eagerly when the id was
+        // minted), this first hook contact activates it: the status flips to
+        // `active` and the hook-reported transcript path (unknown at mint time)
+        // is filled in. An already-active/ended row is left untouched.
         conn.execute(
-            "INSERT OR IGNORE INTO session (id, cwd, transcript_path, title, status, created_at)
-             VALUES (?1, ?2, ?3, NULL, 'active', ?4)",
+            "INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
+             VALUES (?1, ?2, ?3, NULL, 'active', ?4)
+             ON CONFLICT(id) DO UPDATE SET
+               cwd = excluded.cwd,
+               transcript_path = excluded.transcript_path,
+               status = 'active'
+             WHERE session.status = 'spawning'",
             params![new.id.as_str(), new.cwd, new.transcript_path, now],
         )
         .map_err(Error::from)?;
 
-        let session = query_session_by_id(&conn, &new.id)?
-            .expect("session row exists after INSERT OR IGNORE");
+        let session =
+            query_session_by_id(&conn, &new.id)?.expect("session row exists after upsert");
 
-        // Ensure a main thread exists.
-        let main_id: Option<i64> = conn
-            .query_row(
-                "SELECT id FROM thread WHERE session_id = ?1 AND title = ?2 ORDER BY id LIMIT 1",
-                params![new.id.as_str(), MAIN_THREAD_TITLE],
-                |r| r.get(0),
-            )
-            .optional()
+        let main_id = ensure_main_thread(&conn, &new.id, &now)?;
+        Ok((session, main_id))
+    }
+
+    async fn insert_spawning_session(
+        &self,
+        id: &SessionId,
+        cwd: &str,
+    ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        // A plain INSERT: the id is a freshly-minted UUID v7, so a conflict is
+        // a programming error worth surfacing, not a case to paper over.
+        conn.execute(
+            "INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
+             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3)",
+            params![id.as_str(), cwd, now],
+        )
+        .map_err(Error::from)?;
+        let main_id = ensure_main_thread(&conn, id, &now)?;
+        Ok((
+            Session {
+                id: id.clone(),
+                cwd: cwd.to_owned(),
+                transcript_path: None,
+                title: None,
+                status: SessionStatus::Spawning,
+                created_at: now,
+            },
+            main_id,
+        ))
+    }
+
+    async fn delete_session(
+        &self,
+        id: &SessionId,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Cascades clean every child row (threads, messages, sends, permission
+        // requests, the sync cursor).
+        conn.execute("DELETE FROM session WHERE id = ?1", params![id.as_str()])
             .map_err(Error::from)?;
+        Ok(())
+    }
 
-        let main_id = match main_id {
-            Some(id) => id,
-            None => {
-                conn.execute(
-                    "INSERT INTO thread (session_id, title, parent_thread_id, created_at)
-                     VALUES (?1, ?2, NULL, ?3)",
-                    params![new.id.as_str(), MAIN_THREAD_TITLE, now],
-                )
-                .map_err(Error::from)?;
-                conn.last_insert_rowid()
-            }
-        };
-
-        Ok((session, ThreadId(main_id)))
+    async fn mark_session_failed(
+        &self,
+        id: &SessionId,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Only a still-spawning session can fail to launch; an already-active
+        // session must never be flipped to `failed` by a stale reap.
+        conn.execute(
+            "UPDATE session SET status = 'failed' WHERE id = ?1 AND status = 'spawning'",
+            params![id.as_str()],
+        )
+        .map_err(Error::from)?;
+        Ok(())
     }
 
     async fn list_sessions(&self) -> std::result::Result<Vec<Session>, delta_usecase::Error> {
@@ -239,8 +301,8 @@ impl SessionStore for SqliteStore {
         let rows = stmt.query_map([], map_session).map_err(Error::from)?;
         let mut out = Vec::new();
         for row in rows {
-            let p = row.map_err(Error::from)?;
-            out.push(session_from_parts(p.0, p.1, p.2, p.3, p.4, p.5)?);
+            let parts = row.map_err(Error::from)?;
+            out.push(session_from_parts(parts)?);
         }
         Ok(out)
     }
@@ -252,6 +314,14 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<Vec<SessionPageRow>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
 
+        // A `spawning` session that has ingested nothing is excluded: its
+        // launch has not produced a single hook yet, so listing it would
+        // surface a row the browser cannot open, and the optimistic new-session
+        // pending chip would mis-bind to it before the spawn either activates
+        // (it then lists as `active`, exactly when it used to appear) or fails
+        // (the row is reaped). The message guard keeps the predicate honest if
+        // a spawning session ever held data.
+        //
         // `recency` is the row's last activity, falling back to its own
         // `created_at` when message-less. The ordering is `recency` DESC, then
         // `created_at` DESC, then `id` DESC. The final tiebreaker is descending
@@ -272,9 +342,11 @@ impl SessionStore for SqliteStore {
                  COALESCE((SELECT MAX(m.created_at) FROM message m WHERE m.session_id = session.id), \
                           created_at) AS recency \
                  FROM session \
-                 WHERE :cursor_null = 1 \
+                 WHERE NOT (status = 'spawning' \
+                            AND NOT EXISTS (SELECT 1 FROM message m WHERE m.session_id = session.id)) \
+                   AND (:cursor_null = 1 \
                     OR recency < :r \
-                    OR (recency = :r AND (created_at < :c OR (created_at = :c AND id < :i))) \
+                    OR (recency = :r AND (created_at < :c OR (created_at = :c AND id < :i)))) \
                  ORDER BY recency DESC, created_at DESC, id DESC \
                  LIMIT :limit"
             ))

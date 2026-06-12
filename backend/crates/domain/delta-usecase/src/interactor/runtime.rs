@@ -111,7 +111,6 @@ where
             pane: pane_for(token),
             session_id: session_id.clone(),
             workdir: "/work".to_owned(),
-            first_prompt: None,
             created_at,
         });
     }

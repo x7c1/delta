@@ -46,12 +46,24 @@ where
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let mut events = Vec::new();
 
-        // Register on first contact for THIS session id (Claude Code never fires
-        // SessionStart). Routing by id lets several Claude Code sessions register
-        // independently rather than assuming a single global one.
-        let session = match self.store.session(&hook.session_id).await? {
+        // Bind a pending Delta spawn for THIS session id, if one is waiting: the
+        // spawn's session row was created eagerly (status `spawning`) when the
+        // id was minted, so its existence cannot signal "already contacted" —
+        // the registry bind is what distinguishes first contact. The bind is
+        // idempotent and cheap (a registry lookup), so it runs on every hook;
+        // when nothing was pending, fall back to the stored row, registering an
+        // external session on its first contact. Routing by id lets several
+        // Claude Code sessions register independently rather than assuming a
+        // single global one.
+        let session = match self
+            .bind_pending_spawn(&hook.session_id, &hook.cwd, &hook.transcript_path, &mut events)
+            .await?
+        {
             Some(session) => session,
-            None => self.register_on_first_contact(&hook, &mut events).await?,
+            None => match self.store.session(&hook.session_id).await? {
+                Some(session) => session,
+                None => self.register_on_first_contact(&hook, &mut events).await?,
+            },
         };
 
         // Resolve this prompt's queued send *before* syncing, so the locator

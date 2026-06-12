@@ -5,8 +5,6 @@ use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::send_target::SendTarget;
 use crate::Interactor;
 
-use super::new_session_placeholder_send;
-
 impl<T, X, S, W> Interactor<T, X, S, W>
 where
     T: TmuxDriver,
@@ -31,13 +29,12 @@ where
     ///     resumed via [`Self::open_session`] (`claude --resume <id>`), then the
     ///     normal path runs.
     /// - [`SendTarget::NewSession`] — a composer-first message. A fresh session
-    ///   is spawned with the text held as its `first_prompt`. The
-    ///   `send` row cannot be written yet (it references a session id
-    ///   that does not exist), so it is held on the spawn and written when the
-    ///   first `UserPromptSubmit` binds the spawn. A synthetic, not-yet-persisted
-    ///   [`Send`] is returned so the REST surface has a response, carrying
-    ///   the still-unknown target thread as `0` (the real id is assigned at bind
-    ///   time on the new session's `main`).
+    ///   is spawned with the text delivered as its launch-time first prompt.
+    ///   Delta mints the session id before launching, so the session row
+    ///   (status `spawning`), its `main` thread, and the `send` row are all
+    ///   written *before* the spawn — the returned [`Send`] carries the real
+    ///   session/thread/send ids, and the first `UserPromptSubmit` correlates
+    ///   through the normal FIFO machinery.
     ///
     /// A branch send (the `branch_from` arm of [`SendTarget::Thread`]) requires
     /// an existing session — there must be a message to branch from — which the
@@ -77,20 +74,21 @@ where
                 .await
             }
             SendTarget::NewSession { workdir } => {
-                // No session yet: spawn one with the text held as its first
-                // prompt, in the user-selected `workdir` when given (validated by
-                // `spawn_fresh` before any pane is created) or the default
-                // per-spawn directory otherwise. The real `send` row is
-                // written when the first `UserPromptSubmit` binds the spawn.
+                // Spawn a fresh session with the text as its launch-time first
+                // prompt, in the user-selected `workdir` when given (validated
+                // by `spawn_fresh` before any row or pane is created) or the
+                // default per-spawn directory otherwise. `spawn_fresh` writes
+                // the session row, its `main` thread, and the send row before
+                // launching, so the returned send carries real ids.
                 //
-                // `locator_quote` is intentionally dropped here, not forwarded to
-                // the spawn: a brand-new session has no earlier passage to anchor,
-                // so there is nothing to locate. It is still echoed in the
-                // synthetic response below as a courtesy to the caller, but the
-                // held first prompt (and the row written at bind time) carry
-                // no quote.
-                self.spawn_fresh(Some(text.to_owned()), workdir).await?;
-                Ok(new_session_placeholder_send(text, locator_quote))
+                // `locator_quote` is intentionally dropped here, not forwarded
+                // to the spawn: a brand-new session has no earlier passage to
+                // anchor, so there is nothing to locate. The persisted row (and
+                // therefore the response) carries no quote.
+                let spawn = self.spawn_fresh(Some(text.to_owned()), workdir).await?;
+                Ok(spawn
+                    .first_send
+                    .expect("spawn_fresh enqueues a send when a first prompt is given"))
             }
         }
     }

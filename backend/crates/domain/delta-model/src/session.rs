@@ -13,7 +13,11 @@ string_newtype! {
 pub struct Session {
     pub id: SessionId,
     pub cwd: String,
-    pub transcript_path: String,
+    /// Path of the session's JSONL transcript. `None` while the session is
+    /// still [`SessionStatus::Spawning`]: the path is owned by Claude Code and
+    /// only learned from the first hook, which fills it as it activates the
+    /// session.
+    pub transcript_path: Option<String>,
     pub title: Option<String>,
     pub status: SessionStatus,
     /// ISO-8601 timestamp.

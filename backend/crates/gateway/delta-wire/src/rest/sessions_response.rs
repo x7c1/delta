@@ -54,7 +54,7 @@ mod tests {
             session: Session {
                 id: SessionId::from("sess-1"),
                 cwd: "/work".into(),
-                transcript_path: "/tmp/t.jsonl".into(),
+                transcript_path: Some("/tmp/t.jsonl".into()),
                 title: Some("title".into()),
                 status: SessionStatus::Active,
                 created_at: "2026-01-01T00:00:00Z".into(),

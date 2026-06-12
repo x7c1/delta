@@ -19,12 +19,19 @@
 /// queue and permission history — is the irreplaceable data; message content
 /// and the linear parent are a cache rebuildable from the JSONL transcript.
 pub const SCHEMA_SQL: &str = r#"
+-- Status lifecycle: a Delta-launched session is INSERTed as 'spawning' when
+-- the id is minted (before `claude` is up), flips to 'active' when the first
+-- hook binds the spawn, and becomes 'failed' if the spawn never binds before
+-- its deadline (a failed session with zero ingested messages is deleted at
+-- reap time instead). `transcript_path` is NULL while 'spawning': the path is
+-- owned by Claude Code and only learned from the first hook.
 CREATE TABLE IF NOT EXISTS session (
   id              TEXT PRIMARY KEY,
   cwd             TEXT NOT NULL,
-  transcript_path TEXT NOT NULL,
+  transcript_path TEXT,
   title           TEXT,
-  status          TEXT NOT NULL CHECK (status IN ('active','ended')),
+  status          TEXT NOT NULL
+                    CHECK (status IN ('spawning','active','ended','failed')),
   -- 1 while a turn is in flight (a send was dispatched / a turn started and no
   -- Stop or interrupt has been observed since). Branch/quoted sends issued
   -- while this is set are queued rather than dispatched mid-turn.

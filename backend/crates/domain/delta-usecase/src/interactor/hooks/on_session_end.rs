@@ -57,6 +57,9 @@ where
                  and reporting SpawnFailed"
             );
             self.kill_pane_best_effort(spawn.token.as_str()).await;
+            // The spawn never bound, so its eagerly-created `spawning` row (and
+            // children, by cascade) is deleted — same cleanup as the watchdog.
+            self.clean_up_failed_spawn_row(&hook.session_id).await?;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
                 pane_token: spawn.token.as_str().to_owned(),
