@@ -2,14 +2,14 @@ use crate::error::Result;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_listing::SessionListing;
 use crate::session_page::{SessionPage, SessionPageCursor};
-use crate::interactor::InteractorCore;
+use crate::Interactor;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> Interactor<T, X, S, W>
 where
-    T: TmuxDriver,
-    X: Transcript,
-    S: SessionStore,
-    W: Workspace,
+    T: TmuxDriver + 'static,
+    X: Transcript + 'static,
+    S: SessionStore + 'static,
+    W: Workspace + 'static,
 {
     /// One page of the session list, ordered most-recently-active first, with
     /// an opaque-able cursor to fetch the next page.

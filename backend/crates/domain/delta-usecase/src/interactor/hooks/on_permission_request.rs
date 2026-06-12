@@ -2,8 +2,8 @@ use tokio::sync::oneshot;
 
 use crate::error::Result;
 use crate::interactor::permission_decision::PermissionDecision;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::interactor::InteractorCore;
 
 /// What `on_permission_request` hands the transport: the request row's id, a
 /// receiver the transport awaits (with its own deadline) for the browser's
@@ -16,7 +16,7 @@ pub struct PermissionWait {
     pub events: Vec<SessionEvent>,
 }
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -30,9 +30,10 @@ where
     ///
     /// The handler creates and owns the request row directly (the hook payload
     /// carries no `tool_use_id`, so the row records none) and registers a
-    /// oneshot waiter for the browser's decision. The transport broadcasts the
-    /// returned `PermissionRequested`, then blocks the hook response on the
-    /// receiver with a deadline ([`Self::permission_decision_deadline`]):
+    /// oneshot waiter for the browser's decision on this actor's state. The
+    /// transport broadcasts the returned `PermissionRequested`, then blocks
+    /// the hook response on the receiver with a deadline
+    /// (`permission_decision_deadline`):
     ///
     /// - A browser decision (`decide_permission`) resolves the row and the
     ///   hook answers Claude Code with `hookSpecificOutput.decision`.
@@ -41,28 +42,24 @@ where
     ///   passthrough: Claude Code falls back to its interactive TUI prompt
     ///   exactly as before, the row stays `pending`, and the eventual
     ///   `tool_result` resolves it (see `sync_transcript`).
-    pub async fn on_permission_request(
-        &self,
-        session_id: &delta_model::SessionId,
+    pub(in crate::interactor) async fn on_permission_request(
+        &mut self,
         tool_name: &str,
         tool_input_json: &str,
     ) -> Result<PermissionWait> {
         let request = self
             .store
-            .record_permission_request(session_id, tool_name, tool_input_json, None)
+            .record_permission_request(self.id, tool_name, tool_input_json, None)
             .await?;
 
         let (sender, receiver) = oneshot::channel();
-        self.pending_permissions
-            .lock()
-            .await
-            .insert(request.id, sender);
+        self.state.insert_permission_waiter(request.id, sender);
 
         Ok(PermissionWait {
             request_id: request.id,
             decision: receiver,
             events: vec![SessionEvent::PermissionRequested {
-                session_id: session_id.clone(),
+                session_id: self.id.clone(),
                 request_id: request.id,
                 tool_name: tool_name.to_owned(),
                 tool_input_json: tool_input_json.to_owned(),

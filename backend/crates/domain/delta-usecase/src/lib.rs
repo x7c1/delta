@@ -11,7 +11,6 @@
 mod error;
 mod interactor;
 mod launch_config;
-mod open_sessions;
 mod pane_token;
 mod ports;
 mod send_target;
@@ -22,7 +21,6 @@ mod turn;
 pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor, PermissionDecision, PermissionWait};
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
-pub use open_sessions::{OpenHandle, OpenSessions, PendingSpawn};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
     pane_for, DirEntry, DirListing, NewSession, RecentWorkdir, SessionEndHook, SessionEvent,
@@ -32,7 +30,7 @@ pub use ports::{
 pub use send_target::SendTarget;
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};
-pub use turn::{transition, OrphanedSend, Transition, TurnInput, TurnRegistry, TurnState};
+pub use turn::{transition, OrphanedSend, Transition, TurnInput, TurnState};
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for

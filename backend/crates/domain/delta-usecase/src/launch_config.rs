@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::open_sessions::{PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
+use crate::interactor::session_actor::runtime::{PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
 
 /// The command Delta launches in each tmux session by default.
 pub const DEFAULT_SESSION_COMMAND: &str = "claude";

@@ -1,9 +1,9 @@
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, Workspace};
 use crate::turn::TurnInput;
-use crate::interactor::InteractorCore;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -12,12 +12,13 @@ where
 {
     /// Handle a `Stop` hook: ingest the final transcript lines and report the
     /// turn as completed.
-    pub async fn on_stop(&self, hook: StopHook) -> Result<Vec<SessionEvent>> {
+    pub(in crate::interactor) async fn on_stop(&mut self, hook: StopHook) -> Result<Vec<SessionEvent>> {
         let mut events = Vec::new();
-        // Route by the hook's own session id so the right session's transcript is
-        // synced, even when several sessions are registered. The final transcript
-        // lines often include the last tool_result, so the `Stop` sync is a key
-        // place permission requests resolve.
+        // The hook was routed here by its own session id, so the right
+        // session's transcript is synced even when several sessions are
+        // registered. The final transcript lines often include the last
+        // tool_result, so the `Stop` sync is a key place permission requests
+        // resolve.
         if let Some(session) = self.store.session(&hook.session_id).await? {
             let (_messages, resolved_events) = self.sync_transcript(&session).await?;
             events.extend(resolved_events);
@@ -26,9 +27,8 @@ where
         // then release the next queued send — one at a time, the
         // single-outstanding rule — now that the session is idle. Dispatching
         // it moves the machine to `AwaitingEcho` for its own turn.
-        self.apply_turn_input(&hook.session_id, TurnInput::Stop)
-            .await?;
-        if let Some(event) = self.dispatch_queued_send(&hook.session_id).await? {
+        self.apply_turn_input(TurnInput::Stop).await?;
+        if let Some(event) = self.dispatch_queued_send().await? {
             events.push(event);
         }
         events.push(SessionEvent::TurnCompleted {

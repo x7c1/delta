@@ -1,14 +1,14 @@
 use crate::error::Result;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_listing::SessionListing;
-use crate::interactor::InteractorCore;
+use crate::Interactor;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> Interactor<T, X, S, W>
 where
-    T: TmuxDriver,
-    X: Transcript,
-    S: SessionStore,
-    W: Workspace,
+    T: TmuxDriver + 'static,
+    X: Transcript + 'static,
+    S: SessionStore + 'static,
+    W: Workspace + 'static,
 {
     /// Every registered session, annotated with its live state and `main` thread.
     ///

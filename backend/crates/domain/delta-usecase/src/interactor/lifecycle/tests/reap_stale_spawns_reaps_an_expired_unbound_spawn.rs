@@ -3,7 +3,7 @@ use std::time::Instant;
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
-use crate::open_sessions::PENDING_SPAWN_DEADLINE;
+use crate::interactor::session_actor::runtime::PENDING_SPAWN_DEADLINE;
 use crate::ports::SessionEvent;
 
 /// An unbound spawn whose deadline has passed is reaped: its pane is killed, it

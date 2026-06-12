@@ -73,7 +73,8 @@ impl IntoResponse for ApiError {
                     Error::Tmux(_)
                     | Error::Transcript(_)
                     | Error::Store(_)
-                    | Error::Workspace(_) => (StatusCode::INTERNAL_SERVER_ERROR, None),
+                    | Error::Workspace(_)
+                    | Error::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, None),
                 };
                 (status, err.to_string(), code)
             }

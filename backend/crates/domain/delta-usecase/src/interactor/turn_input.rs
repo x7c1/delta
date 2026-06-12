@@ -3,46 +3,31 @@
 //! The transitions themselves live in the `turn` module (one exhaustive
 //! table); this file is the single place that *executes* a transition's side
 //! effects — the orphaned-send disposition and the anomaly logging — so every
-//! call site feeds the machine the same way.
-
-use delta_model::SessionId;
+//! call site feeds the machine the same way. It runs inside the session's
+//! actor, where the turn state is plain owned data: the mailbox already
+//! serialized every input that can move it.
 
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{OrphanedSend, TurnInput, TurnState};
-use crate::interactor::InteractorCore;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
 {
-    /// The current turn state of a session.
-    ///
-    /// Public because the REST surface reports it (the sends envelope carries
-    /// `turn`, so the browser can rebuild its in-progress indicator after a
-    /// reconnect).
-    pub async fn turn_state_for(&self, id: &SessionId) -> TurnState {
-        self.turns.lock().await.state(id)
-    }
-
-    /// Apply one input to a session's turn state machine, executing the
+    /// Apply one input to the session's turn state machine, executing the
     /// transition's orphan disposition and logging anomalies. Returns the next
     /// state.
-    ///
-    /// The registry lock is held only for the transition itself; the orphan's
-    /// store write runs after it is released.
     pub(in crate::interactor) async fn apply_turn_input(
-        &self,
-        id: &SessionId,
+        &mut self,
         input: TurnInput,
     ) -> Result<TurnState> {
-        let result = {
-            let mut turns = self.turns.lock().await;
-            turns.apply(id, input)
-        };
+        let id = self.id;
+        let result = self.state.apply_turn(input);
         if result.anomalous {
             tracing::warn!(
                 session_id = %id,
@@ -80,10 +65,10 @@ where
                 // turn (leaving `dispatched`); this defensive sweep only fires
                 // when that line never appeared, so a stale `dispatched` row
                 // cannot shadow the next dispatch's correlation.
-                if let Some(head) = self.store.head_dispatched_send(id).await? {
+                if let Some(head) = self.store.head_dispatched_send(self.id).await? {
                     if head.id == send_id {
                         tracing::warn!(
-                            session_id = %id,
+                            session_id = %self.id,
                             send_id,
                             "turn ended but its send never matched a transcript line; \
                              cancelling the stale dispatched row"
@@ -94,12 +79,5 @@ where
             }
         }
         Ok(result.next)
-    }
-
-    /// Drop a session's turn state without orphan handling, for paths that
-    /// delete the session row outright (its sends are removed by cascade, so
-    /// there is no row left to requeue or cancel).
-    pub(in crate::interactor) async fn forget_turn(&self, id: &SessionId) {
-        self.turns.lock().await.forget(id);
     }
 }

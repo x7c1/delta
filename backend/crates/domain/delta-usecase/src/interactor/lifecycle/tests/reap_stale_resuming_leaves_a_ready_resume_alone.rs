@@ -3,7 +3,7 @@ use std::time::Instant;
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
-use crate::open_sessions::RESUME_READY_DEADLINE;
+use crate::interactor::session_actor::runtime::RESUME_READY_DEADLINE;
 
 /// A resume that became ready in time is not failed by the watchdog. Even past
 /// the read-deadline instant, once `SessionStart(source=resume)` has stamped its

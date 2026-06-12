@@ -1,18 +1,18 @@
 use std::time::Instant;
 
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::interactor::InteractorCore;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
 {
-    /// Dispatch the held first prompt of every resume that is ready *and* has
-    /// settled, on the background tick.
+    /// Dispatch this session's held first prompt if its resume is ready *and*
+    /// has settled, on the background tick.
     ///
     /// This is the second stage of the resume readiness gate (see
     /// [`Self::open_session`]). It exists because `SessionStart(source=resume)`
@@ -26,67 +26,58 @@ where
     /// outside any hook handler, after the hook has returned and `claude` is
     /// input-ready.
     ///
-    /// For each resume whose `now - ready_at` has reached
-    /// [`RESUME_DISPATCH_SETTLE`], this drains it from the resuming map and, if a
+    /// When the resume's `now - ready_at` has reached
+    /// [`RESUME_DISPATCH_SETTLE`], this takes it off the runtime state and, if a
     /// first prompt was held, types it into the resumed pane via the normal
     /// [`TmuxDriver::send_line`] path — the same path every other send takes. The
-    /// `send` row for that prompt was already written (with its
+    /// `send` row for that first prompt was already written (with its
     /// thread/branch/quote semantics) when the send was first enqueued; only the
     /// physical keystroke was held, so this completes a normal send.
     ///
     /// On a `send_line` failure it mirrors the other dispatch sites so a failed
     /// dispatch cannot wedge the queue: the `DispatchFailed` turn input cancels
     /// the now-undeliverable outstanding send and returns the turn to idle. The
-    /// failure is logged and the loop continues to the next ready resume rather
-    /// than aborting the whole tick.
+    /// failure is logged rather than propagated, so one pane's send failure
+    /// cannot strand the other sessions' ticks.
     ///
     /// `now` is injected (rather than read here) so the dispatch is deterministic
-    /// under test, mirroring [`Self::reap_stale_spawns`]: the server loop passes
+    /// under test, mirroring the watchdog reap: the server loop passes
     /// `Instant::now()`, while tests advance a controlled instant.
     ///
-    /// [`RESUME_DISPATCH_SETTLE`]: crate::open_sessions::RESUME_DISPATCH_SETTLE
-    pub async fn dispatch_ready_resumes(&self, now: Instant) -> Result<()> {
-        // Take the registry lock only long enough to drain the settled resumes;
-        // the per-pane `send_line` below runs without the lock so it cannot
-        // serialize the hooks or the PTY bridge against per-pane I/O.
-        let ready = {
-            let mut registry = self.open_sessions.lock().await;
-            registry.drain_ready_for_dispatch(now)
+    /// [`RESUME_DISPATCH_SETTLE`]: crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE
+    pub(in crate::interactor) async fn dispatch_ready_resume(&mut self, now: Instant) -> Result<()> {
+        let Some(resuming) = self.state.take_ready_for_dispatch(now) else {
+            return Ok(());
         };
 
-        for (session_id, resuming) in ready {
-            let Some(text) = resuming.held_prompt else {
-                tracing::info!(
-                    session_id = %session_id,
-                    "resume settled with no held first prompt; nothing to dispatch"
-                );
-                continue;
-            };
-
+        let Some(text) = resuming.held_prompt else {
             tracing::info!(
-                session_id = %session_id,
-                pane = %resuming.pane,
-                "resume settled after SessionStart(resume); dispatching the held first prompt"
+                session_id = %self.id,
+                "resume settled with no held first prompt; nothing to dispatch"
             );
-            // The turn machine moved to `AwaitingEcho` when the send was
-            // enqueued (its keystroke was held, not its bookkeeping), so a
-            // dispatch failure here must feed `DispatchFailed` — which cancels
-            // the now-undeliverable row and returns the turn to idle,
-            // mirroring the other dispatch sites, so a failed dispatch cannot
-            // wedge the queue.
-            if let Err(err) = self.tmux.send_line(&resuming.pane, &text).await {
-                tracing::warn!(
-                    session_id = %session_id,
-                    error = %err,
-                    "failed to dispatch the held resume first prompt; cancelling its pending send"
-                );
-                let _ = self
-                    .apply_turn_input(&session_id, crate::turn::TurnInput::DispatchFailed)
-                    .await;
-                // Keep dispatching the remaining ready resumes: one pane's send
-                // failure must not strand the others queued on this tick.
-                continue;
-            }
+            return Ok(());
+        };
+
+        tracing::info!(
+            session_id = %self.id,
+            pane = %resuming.pane,
+            "resume settled after SessionStart(resume); dispatching the held first prompt"
+        );
+        // The turn machine moved to `AwaitingEcho` when the send was
+        // enqueued (its keystroke was held, not its bookkeeping), so a
+        // dispatch failure here must feed `DispatchFailed` — which cancels
+        // the now-undeliverable row and returns the turn to idle,
+        // mirroring the other dispatch sites, so a failed dispatch cannot
+        // wedge the queue.
+        if let Err(err) = self.tmux.send_line(&resuming.pane, &text).await {
+            tracing::warn!(
+                session_id = %self.id,
+                error = %err,
+                "failed to dispatch the held resume first prompt; cancelling its pending send"
+            );
+            let _ = self
+                .apply_turn_input(crate::turn::TurnInput::DispatchFailed)
+                .await;
         }
         Ok(())
     }

@@ -1,14 +1,17 @@
-//! Session lifecycle use cases: spawn, ensure, resume (open), and close.
+//! Session lifecycle use cases: spawn, resume (open), close, and the
+//! launch-readiness ticks. The `ensure`/`new` entry points live on the
+//! interactor's routing layer (they mint the session id and pick the actor);
+//! everything here runs inside a session's actor.
 
 mod close_session;
 mod dispatch_ready_resumes;
-mod ensure_session;
 mod mint_free_token;
-mod new_session;
 mod open_session;
 mod reap_stale_spawns;
 mod spawn_fresh;
 mod workdir_for;
+
+pub(in crate::interactor) use spawn_fresh::FreshSpawn;
 
 #[cfg(test)]
 mod tests;

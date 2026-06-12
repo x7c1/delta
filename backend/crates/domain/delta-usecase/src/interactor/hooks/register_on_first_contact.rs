@@ -22,7 +22,7 @@ where
     /// known-but-closed data session (no [`OpenHandle`]) and a warning is
     /// logged, preserving today's external-input behaviour.
     ///
-    /// [`OpenHandle`]: crate::open_sessions::OpenHandle
+    /// [`OpenHandle`]: crate::interactor::session_actor::runtime::OpenHandle
     pub(in crate::interactor::hooks) async fn register_on_first_contact(
         &self,
         hook: &UserPromptSubmitHook,

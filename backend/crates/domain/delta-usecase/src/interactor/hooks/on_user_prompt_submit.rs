@@ -1,18 +1,14 @@
 use crate::error::Result;
+use crate::interactor::claude_format;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
     SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
 };
 use crate::turn::TurnInput;
-use crate::interactor::InteractorCore;
 
 use super::match_uuid_for_prompt;
 
-/// Prompt prefix Claude Code uses when it injects a background-task
-/// completion notification. Such a submission is a harness injection, not a
-/// human typing into the pane, so it must not be reported as external input.
-const TASK_NOTIFICATION_PREFIX: &str = "<task-notification>";
-
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -23,7 +19,7 @@ where
     ///
     /// The first hook for a given `session_id` registers that session
     /// (SessionStart never fires); routing by id lets several Claude Code
-    /// sessions register independently.
+    /// sessions register independently — each lands on its own actor.
     ///
     /// Correlation is against the ONE outstanding send: under the
     /// single-outstanding dispatch rule at most one `dispatched` send exists
@@ -49,8 +45,8 @@ where
     ///
     /// Returns the events to broadcast and, when a locator quote should be
     /// injected, the `additionalContext` string for the hook response.
-    pub async fn on_user_prompt_submit(
-        &self,
+    pub(in crate::interactor) async fn on_user_prompt_submit(
+        &mut self,
         hook: UserPromptSubmitHook,
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let mut events = Vec::new();
@@ -58,14 +54,12 @@ where
         // Bind a pending Delta spawn for THIS session id, if one is waiting: the
         // spawn's session row was created eagerly (status `spawning`) when the
         // id was minted, so its existence cannot signal "already contacted" —
-        // the registry bind is what distinguishes first contact. The bind is
-        // idempotent and cheap (a registry lookup), so it runs on every hook;
-        // when nothing was pending, fall back to the stored row, registering an
-        // external session on its first contact. Routing by id lets several
-        // Claude Code sessions register independently rather than assuming a
-        // single global one.
+        // the runtime bind is what distinguishes first contact. The bind is
+        // idempotent and cheap, so it runs on every hook; when nothing was
+        // pending, fall back to the stored row, registering an external
+        // session on its first contact.
         let session = match self
-            .bind_pending_spawn(&hook.session_id, &hook.cwd, &hook.transcript_path, &mut events)
+            .bind_pending_spawn(&hook.cwd, &hook.transcript_path, &mut events)
             .await?
         {
             Some(session) => session,
@@ -108,12 +102,9 @@ where
         // returns that send to `queued` and is logged loudly.
         match pending {
             Some(pending) => {
-                self.apply_turn_input(
-                    &hook.session_id,
-                    TurnInput::EchoMatched {
-                        send_id: pending.id,
-                    },
-                )
+                self.apply_turn_input(TurnInput::EchoMatched {
+                    send_id: pending.id,
+                })
                 .await?;
                 // The outstanding send matches this prompt. If its user line
                 // was attributed in this very sync, announce the turn now;
@@ -140,13 +131,12 @@ where
                          prompt as external input (the turn machine requeues the send)"
                     );
                 }
-                self.apply_turn_input(&hook.session_id, TurnInput::ExternalPrompt)
-                    .await?;
+                self.apply_turn_input(TurnInput::ExternalPrompt).await?;
                 // No outstanding send matched this prompt. A background-task
                 // notification is injected by the harness as a prompt
                 // submission, not typed into the pane, so it must not surface as
                 // external input.
-                if !hook.prompt.trim_start().starts_with(TASK_NOTIFICATION_PREFIX) {
+                if !claude_format::is_task_notification(&hook.prompt) {
                     events.push(SessionEvent::ExternalInput {
                         session_id: hook.session_id.clone(),
                         prompt: hook.prompt.clone(),
