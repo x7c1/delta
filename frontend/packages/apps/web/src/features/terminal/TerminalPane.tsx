@@ -8,6 +8,7 @@ import { Button, Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
 import { useNavStore } from '../../store/navStore';
+import { terminalBackground, terminalFontFamily } from '../../theme';
 
 export interface TerminalPaneProps {
   /**
@@ -155,7 +156,7 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
           </Button>
         </div>
       }
-      bodyClassName="bg-slate-900"
+      bodyClassName="bg-terminal-bg"
     >
       {/* The per-session xterm elements are appended into this container; the
           note overlays it only while no pane is attachable. */}
@@ -176,19 +177,13 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
 
   const term = new Terminal({
     convertEol: true,
-    // font-family falls back per character, so the list must lead with a
-    // *monospaced* Latin face for each OS — otherwise Latin glyphs themselves
-    // fall through to the CJK face below, and when that face is *proportional*
-    // (macOS `Hiragino Sans`) the variable-width letters get crammed into
-    // xterm's fixed cells and the whole grid looks ragged. With a real mono
-    // face first (macOS `Menlo`, Windows `Consolas`, Linux `DejaVu Sans Mono`),
-    // Latin stays monospaced and only CJK drops to the explicit mono CJK face
-    // (`Noto Sans Mono CJK JP`) or `Hiragino Sans`, where full-width punctuation
-    // (`、` U+3001 / `。` U+3002) still lands centered in its cell.
-    fontFamily:
-      "Menlo, Consolas, 'DejaVu Sans Mono', 'Noto Sans Mono CJK JP', 'Hiragino Sans', monospace",
+    // The design tokens own the stack and the background (tailwind.config.js
+    // `fontFamily.terminal` / `--delta-terminal-bg`); xterm takes them as
+    // JavaScript options, so they are read off the document here instead of
+    // being restated. See the config for the per-OS font reasoning.
+    fontFamily: terminalFontFamily(),
     fontSize: 13,
-    theme: { background: '#0f172a' },
+    theme: { background: terminalBackground() },
     // `term.unicode` is a proposed API that the Unicode 11 addon touches, so it
     // must be opted into or `loadAddon`/`activeVersion` throws at attach time.
     allowProposedApi: true,
