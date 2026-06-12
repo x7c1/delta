@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 
 use delta_model::{
-    Message, MessageUuid, PendingSend, PermissionRequest, Session, SessionId, Thread, ThreadId,
+    Message, MessageUuid, PermissionRequest, Send, Session, SessionId, Thread, ThreadId,
 };
 
 use crate::error::Result;
@@ -28,8 +28,10 @@ pub type RecentWorkdir = (String, Option<String>);
 /// This is the irreplaceable data: thread assignment, the semantic-parent
 /// graph, the send queue and permission history. Message content and linear
 /// parents are a cache rebuildable from the JSONL.
+// `delta_model::Send` (imported above) shadows the `std::marker::Send` prelude
+// trait in this module, so the auto-trait bound is spelled out explicitly.
 #[async_trait]
-pub trait SessionStore: Send + Sync {
+pub trait SessionStore: std::marker::Send + Sync {
     /// Insert a session if absent and ensure its `main` thread exists, then
     /// return the session and the id of its `main` thread.
     async fn register_session(&self, new: NewSession) -> Result<(Session, ThreadId)>;
@@ -80,16 +82,20 @@ pub trait SessionStore: Send + Sync {
     /// All threads for a session, ordered by creation (ascending `id`).
     async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>>;
 
-    /// Create a new child thread branching off `root_message_uuid`.
+    /// Create a new child thread under `parent_thread_id`.
+    ///
+    /// The message the thread branches from is NOT passed here: the branch edge
+    /// lives on the thread's first send/message as `semantic_parent_uuid`, and
+    /// [`Thread::root_message_uuid`] is derived from it on read.
     async fn create_thread(
         &self,
         session_id: &SessionId,
         title: &str,
         parent_thread_id: Option<ThreadId>,
-        root_message_uuid: Option<&MessageUuid>,
     ) -> Result<Thread>;
 
-    /// Enqueue a send into the FIFO and return the created row.
+    /// Record a send in the `dispatched` state (its keystrokes are about to be
+    /// typed into the pane) and return the created row.
     async fn enqueue_send(
         &self,
         session_id: &SessionId,
@@ -97,46 +103,46 @@ pub trait SessionStore: Send + Sync {
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<PendingSend>;
+    ) -> Result<Send>;
 
-    /// Enqueue a send held in the `deferred` state: its row is recorded (so the
+    /// Record a send held in the `queued` state: its row is recorded (so the
     /// branch thread and the queued text persist) but its keystrokes are not
-    /// dispatched yet. Delta promotes it with [`Self::promote_deferred_send`]
+    /// dispatched yet. Delta promotes it with [`Self::promote_queued_send`]
     /// and dispatches it once the session goes idle.
-    async fn enqueue_deferred_send(
+    async fn enqueue_queued_send(
         &self,
         session_id: &SessionId,
         thread_id: ThreadId,
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<PendingSend>;
+    ) -> Result<Send>;
 
-    /// The oldest still-`deferred` send for a session (FIFO), if any. This is
+    /// The oldest still-`queued` send for a session (FIFO), if any. This is
     /// the next held-back send to dispatch when the session becomes idle.
-    async fn next_deferred_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>>;
+    async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
-    /// Promote a `deferred` send to `pending`, marking it dispatched so the
+    /// Promote a `queued` send to `dispatched`, marking it typed so the
     /// normal `UserPromptSubmit` correlation can match it.
-    async fn promote_deferred_send(&self, id: i64) -> Result<()>;
+    async fn promote_queued_send(&self, id: i64) -> Result<()>;
 
     /// Whether a turn is currently in flight for this session. Set when Delta
     /// dispatches a send and when a `UserPromptSubmit` arrives (so turns typed
     /// straight into the pane are tracked too), and cleared when the turn
     /// completes (`Stop`) or is interrupted. A branch/quoted send issued while
-    /// this is set is deferred rather than dispatched mid-turn.
+    /// this is set is queued rather than dispatched mid-turn.
     async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool>;
 
     /// Set the in-flight-turn flag for a session.
     async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()>;
 
-    /// The oldest pending send for a session (FIFO head), if any.
-    async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>>;
+    /// The oldest dispatched send for a session (FIFO head), if any.
+    async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
-    /// Mark a pending send matched to a transcript message uuid.
+    /// Mark a dispatched send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
 
-    /// Find the oldest still-`pending` send for a session whose trimmed text
+    /// Find the oldest still-`dispatched` send for a session whose trimmed text
     /// equals `trimmed_text`, if any.
     ///
     /// Drives thread attribution during ingestion: a user transcript line is
@@ -144,23 +150,24 @@ pub trait SessionStore: Send + Sync {
     /// thread regardless of which hook triggered the sync or whether the line
     /// was present when `UserPromptSubmit` fired. `trimmed_text` is expected to
     /// be already trimmed by the caller.
-    async fn match_pending_send(
+    async fn match_dispatched_send(
         &self,
         session_id: &SessionId,
         trimmed_text: &str,
-    ) -> Result<Option<PendingSend>>;
+    ) -> Result<Option<Send>>;
 
     /// The thread of the latest already-persisted **user** message in a
     /// session, used as the carry-forward thread for following non-user lines.
     /// Returns `None` when the session has no user message yet.
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>>;
 
-    /// Cancel a queued send by marking the row `cancelled`.
+    /// Cancel a send by marking the row `cancelled`.
     ///
     /// The row is kept (rather than deleted) for audit, and because
-    /// [`Self::head_pending_send`] only considers `pending` rows, a cancelled
-    /// row no longer blocks the FIFO head. Used to roll back a `pending` row
-    /// whose keystrokes were never delivered (e.g. a failed tmux dispatch).
+    /// [`Self::head_dispatched_send`] only considers `dispatched` rows, a
+    /// cancelled row no longer blocks the FIFO head. Used to roll back a
+    /// `dispatched` row whose keystrokes were never delivered (e.g. a failed
+    /// tmux dispatch).
     async fn cancel_send(&self, id: i64) -> Result<()>;
 
     /// Upsert a batch of messages (content cache + overlay columns).
@@ -264,10 +271,9 @@ impl SessionStore for Box<dyn SessionStore> {
         session_id: &SessionId,
         title: &str,
         parent_thread_id: Option<ThreadId>,
-        root_message_uuid: Option<&MessageUuid>,
     ) -> Result<Thread> {
         (**self)
-            .create_thread(session_id, title, parent_thread_id, root_message_uuid)
+            .create_thread(session_id, title, parent_thread_id)
             .await
     }
 
@@ -278,7 +284,7 @@ impl SessionStore for Box<dyn SessionStore> {
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<PendingSend> {
+    ) -> Result<Send> {
         (**self)
             .enqueue_send(
                 session_id,
@@ -290,16 +296,16 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
-    async fn enqueue_deferred_send(
+    async fn enqueue_queued_send(
         &self,
         session_id: &SessionId,
         thread_id: ThreadId,
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<PendingSend> {
+    ) -> Result<Send> {
         (**self)
-            .enqueue_deferred_send(
+            .enqueue_queued_send(
                 session_id,
                 thread_id,
                 semantic_parent_uuid,
@@ -309,12 +315,12 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
-    async fn next_deferred_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
-        (**self).next_deferred_send(session_id).await
+    async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
+        (**self).next_queued_send(session_id).await
     }
 
-    async fn promote_deferred_send(&self, id: i64) -> Result<()> {
-        (**self).promote_deferred_send(id).await
+    async fn promote_queued_send(&self, id: i64) -> Result<()> {
+        (**self).promote_queued_send(id).await
     }
 
     async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool> {
@@ -325,20 +331,20 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).set_turn_active(session_id, active).await
     }
 
-    async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
-        (**self).head_pending_send(session_id).await
+    async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
+        (**self).head_dispatched_send(session_id).await
     }
 
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         (**self).mark_send_matched(id, matched_uuid).await
     }
 
-    async fn match_pending_send(
+    async fn match_dispatched_send(
         &self,
         session_id: &SessionId,
         trimmed_text: &str,
-    ) -> Result<Option<PendingSend>> {
-        (**self).match_pending_send(session_id, trimmed_text).await
+    ) -> Result<Option<Send>> {
+        (**self).match_dispatched_send(session_id, trimmed_text).await
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {

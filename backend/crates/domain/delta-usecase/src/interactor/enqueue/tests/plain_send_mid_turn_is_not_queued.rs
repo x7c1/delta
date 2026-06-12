@@ -1,4 +1,4 @@
-use delta_model::{PendingSendStatus, SessionId};
+use delta_model::{SendStatus, SessionId};
 
 use crate::interactor::testing::*;
 
@@ -7,7 +7,7 @@ use crate::interactor::testing::*;
 /// Claude Code's own mid-turn queueing is harmless for it: it dispatches
 /// immediately rather than being held back.
 #[tokio::test]
-async fn plain_send_mid_turn_is_not_deferred() {
+async fn plain_send_mid_turn_is_not_queued() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
     ix.seed_session().await;
@@ -19,7 +19,7 @@ async fn plain_send_mid_turn_is_not_deferred() {
 
     // A plain main-line send mid-turn (no branch, no quote) dispatches now.
     let second = ix.enqueue_send(to(main), "second", None).await.unwrap();
-    assert_eq!(second.status, PendingSendStatus::Pending);
+    assert_eq!(second.status, SendStatus::Dispatched);
     assert_eq!(
         ix.tmux_fake().sent.lock().unwrap().len(),
         2,
@@ -27,7 +27,7 @@ async fn plain_send_mid_turn_is_not_deferred() {
     );
     assert!(ix
         .store()
-        .next_deferred_send(&session)
+        .next_queued_send(&session)
         .await
         .unwrap()
         .is_none());

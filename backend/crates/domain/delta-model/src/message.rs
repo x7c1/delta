@@ -41,8 +41,8 @@ pub struct Message {
     pub content_text: Option<String>,
     /// The full ordered content blocks.
     pub content: Vec<ContentBlock>,
-    /// ISO-8601 timestamp.
-    pub created_at: String,
+    /// ISO-8601 timestamp, or `None` when the transcript line carried none.
+    pub created_at: Option<String>,
 }
 
 impl Message {

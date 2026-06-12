@@ -25,6 +25,8 @@ content_text: string | null,
  */
 content: Array<ContentBlock>, 
 /**
- * ISO-8601 timestamp.
+ * ISO-8601 timestamp; empty when the transcript line carried none. The
+ * domain stores `None` for a missing timestamp, but the wire keeps the
+ * pre-existing empty-string contract so the browser shape is unchanged.
  */
 created_at: string, };

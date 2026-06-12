@@ -36,7 +36,7 @@ export function defaultScript(): SessionEvent[] {
     {
       kind: 'turn_started',
       session_id: SESSION_ID,
-      pending_send_id: 1,
+      send_id: 1,
       matched_uuid: 'uuid-u2',
     },
     {

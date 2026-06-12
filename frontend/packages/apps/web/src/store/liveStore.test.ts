@@ -31,7 +31,7 @@ describe('liveStore.applyEvent', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
-      pending_send_id: 1,
+      send_id: 1,
       matched_uuid: 'uuid-1',
     });
     expect(useLiveStore.getState().pending[0].status).toBe('in_progress');
@@ -62,7 +62,7 @@ describe('liveStore.applyEvent', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
-      pending_send_id: 1,
+      send_id: 1,
       matched_uuid: 'uuid-1',
     });
     expect(useLiveStore.getState().pending[0].status).toBe('in_progress');

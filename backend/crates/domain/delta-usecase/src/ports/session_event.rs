@@ -30,7 +30,7 @@ pub enum SessionEvent {
     /// A queued send was confirmed as a turn start.
     TurnStarted {
         session_id: SessionId,
-        pending_send_id: i64,
+        send_id: i64,
         matched_uuid: MessageUuid,
     },
     /// External input was detected (typed directly into the pane).

@@ -13,14 +13,14 @@ async fn branch_send_creates_child_thread() {
         .unwrap();
 
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let send = ix
         .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();
 
-    assert_ne!(pending.thread_id, main, "branch send targets a new thread");
-    assert_eq!(pending.semantic_parent_uuid, Some(parent.clone()));
-    let child = ix.store().thread(pending.thread_id).await.unwrap().unwrap();
+    assert_ne!(send.thread_id, main, "branch send targets a new thread");
+    assert_eq!(send.semantic_parent_uuid, Some(parent.clone()));
+    let child = ix.store().thread(send.thread_id).await.unwrap().unwrap();
     assert_eq!(child.parent_thread_id, Some(main));
     assert_eq!(child.root_message_uuid, Some(parent));
 }

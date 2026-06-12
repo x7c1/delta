@@ -24,8 +24,8 @@ where
     /// - **Fresh spawn binding**: a [`PendingSpawn`] whose Delta-minted
     ///   `session_id` (pinned via `claude --session-id`) equals the hook's
     ///   `session_id` is bound and registered through [`Self::bind_pending_spawn`]
-    ///   — which also writes any deferred `first_prompt` *before* the caller's
-    ///   `match_pending_send` runs, so the first prompt correlates through the
+    ///   — which also writes any held `first_prompt` *before* the caller's
+    ///   `match_dispatched_send` runs, so the first prompt correlates through the
     ///   normal FIFO machinery.
     /// - **External claude**: no pending spawn carries this session id, so this
     ///   is a `claude` started outside Delta. The session is registered as a
@@ -41,7 +41,7 @@ where
     ) -> Result<Session> {
         // Idempotent bind+register shared with `SessionStart(source=startup)`. A
         // matching pending spawn is bound and registered here (writing any
-        // deferred first prompt); `None` means there was no pending spawn for
+        // held first prompt); `None` means there was no pending spawn for
         // this id, so it is an external claude.
         if let Some(session) = self
             .bind_pending_spawn(&hook.session_id, &hook.cwd, &hook.transcript_path, events)

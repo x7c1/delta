@@ -24,7 +24,7 @@ describe('applySessionEvent', () => {
       {
         kind: 'turn_started',
         session_id: FOCUSED,
-        pending_send_id: 1,
+        send_id: 1,
         matched_uuid: 'uuid-1',
       },
       queryClient,

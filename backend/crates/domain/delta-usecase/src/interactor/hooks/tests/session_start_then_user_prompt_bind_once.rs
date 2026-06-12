@@ -2,7 +2,7 @@ use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
 /// `SessionStart(startup)` then `UserPromptSubmit` (and the reverse order) both
-/// end with exactly one bound session and the deferred first prompt written
+/// end with exactly one bound session and the held first prompt written
 /// once. The bind step is idempotent: whichever signal arrives first binds, the
 /// other is a no-op for binding while still doing its own work.
 #[tokio::test]
@@ -10,7 +10,7 @@ async fn session_start_then_user_prompt_bind_once() {
     // Order A: SessionStart(startup) first, then the matching UserPromptSubmit.
     {
         let ix = interactor();
-        // A composer-initiated New carries a deferred first prompt.
+        // A composer-initiated New carries a held first prompt.
         ix.enqueue_send(
             crate::SendTarget::NewSession { workdir: None },
             "first prompt",
@@ -20,7 +20,7 @@ async fn session_start_then_user_prompt_bind_once() {
         .unwrap();
         let session_id = ix.pending_session_ids().await.remove(0);
 
-        // SessionStart binds + registers + writes the deferred first prompt.
+        // SessionStart binds + registers + writes the held first prompt.
         let events = ix
             .on_session_start(session_start(session_id.as_str(), "startup"))
             .await
@@ -47,15 +47,15 @@ async fn session_start_then_user_prompt_bind_once() {
             "the already-bound session does not re-register on UserPromptSubmit"
         );
 
-        // Exactly one session, one bound pane, one deferred-first pending row.
+        // Exactly one session, one bound pane, one held-first send row.
         assert_eq!(ix.store().list_sessions().await.unwrap().len(), 1);
         assert!(ix.pane_for_session(&session_id).await.is_some());
         let head = ix
             .store()
-            .head_pending_send(&session_id)
+            .head_dispatched_send(&session_id)
             .await
             .unwrap()
-            .expect("the deferred first prompt was written once");
+            .expect("the held first prompt was written once");
         assert_eq!(head.text, "first prompt");
     }
 

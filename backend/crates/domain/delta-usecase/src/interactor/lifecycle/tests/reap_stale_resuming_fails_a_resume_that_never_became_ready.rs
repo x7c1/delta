@@ -16,7 +16,7 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
     let now = Instant::now();
     let session_id = SessionId::from("sess-stuck-resume");
 
-    // Register the session so a pending_send (the held first prompt) can be
+    // Register the session so a send (the held first prompt) can be
     // written against it, then seed a resuming entry one second past its
     // deadline with a held prompt and a live tmux pane.
     ix.on_user_prompt_submit(submit_in(
@@ -59,7 +59,7 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
     // The held first prompt was cancelled so it cannot block a later re-resume.
     assert!(
         ix.store()
-            .head_pending_send(&session_id)
+            .head_dispatched_send(&session_id)
             .await
             .unwrap()
             .is_none(),

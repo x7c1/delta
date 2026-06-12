@@ -3,11 +3,11 @@ use delta_model::{MessageUuid, SessionId};
 use crate::interactor::testing::*;
 
 /// An interrupt ends the turn but fires no `Stop` hook, so the background tail
-/// is where it is observed. A branch send deferred during that turn must be
+/// is where it is observed. A branch send queued during that turn must be
 /// dispatched once the tail ingests the interrupt marker — the user need not
 /// send anything first.
 #[tokio::test]
-async fn deferred_branch_send_dispatches_after_interrupt() {
+async fn queued_branch_send_dispatches_after_interrupt() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
     ix.seed_session().await;
@@ -22,7 +22,7 @@ async fn deferred_branch_send_dispatches_after_interrupt() {
     assert_eq!(ix.tmux_fake().sent.lock().unwrap().len(), 1);
 
     // The user interrupts: Claude writes the marker, no Stop fires. The tail
-    // ingests it and releases the deferred send.
+    // ingests it and releases the queued send.
     ix.transcript_fake().push(interrupt_line("uuid-interrupt"));
     ix.poll_transcript().await.unwrap();
 
@@ -32,12 +32,12 @@ async fn deferred_branch_send_dispatches_after_interrupt() {
     };
     assert_eq!(
         count, 2,
-        "the deferred send is dispatched once the interrupt is tailed"
+        "the queued send is dispatched once the interrupt is tailed"
     );
     assert_eq!(second.as_deref(), Some("branch text"));
     assert!(ix
         .store()
-        .next_deferred_send(&session)
+        .next_queued_send(&session)
         .await
         .unwrap()
         .is_none());

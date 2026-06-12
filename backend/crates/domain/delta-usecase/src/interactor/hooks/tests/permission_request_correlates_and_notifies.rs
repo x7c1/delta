@@ -18,7 +18,7 @@ async fn permission_request_correlates_to_the_recorded_request() {
         let g = ix.store().inner.lock().unwrap();
         g.permissions
             .iter()
-            .find(|r| r.tool_use_id == "toolu_01")
+            .find(|r| r.tool_use_id.as_deref() == Some("toolu_01"))
             .expect("the request is recorded")
             .id
     };
@@ -56,7 +56,7 @@ async fn permission_request_falls_back_to_the_latest_pending_for_the_tool() {
         let g = ix.store().inner.lock().unwrap();
         g.permissions
             .iter()
-            .find(|r| r.tool_use_id == "toolu_01")
+            .find(|r| r.tool_use_id.as_deref() == Some("toolu_01"))
             .expect("the request is recorded")
             .id
     };

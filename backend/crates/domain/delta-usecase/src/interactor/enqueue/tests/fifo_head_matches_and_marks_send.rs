@@ -1,4 +1,4 @@
-use delta_model::{MessageUuid, PendingSendStatus, SessionId};
+use delta_model::{MessageUuid, SendStatus, SessionId};
 
 use crate::interactor::context::{frame_branch_entry_context, frame_locator_context};
 use crate::interactor::testing::*;
@@ -16,11 +16,11 @@ async fn fifo_head_matches_and_marks_send() {
         .unwrap();
 
     // Queue a send (also dispatches to fake tmux).
-    let pending = ix
+    let send = ix
         .enqueue_send(to(main), "hello world", Some("[quote]"))
         .await
         .unwrap();
-    assert_eq!(pending.status, PendingSendStatus::Pending);
+    assert_eq!(send.status, SendStatus::Dispatched);
 
     // The transcript now contains the matching user line.
     ix.transcript_fake()
@@ -39,19 +39,19 @@ async fn fifo_head_matches_and_marks_send() {
         .find_map(|e| match e {
             SessionEvent::TurnStarted {
                 matched_uuid,
-                pending_send_id,
+                send_id,
                 ..
-            } => Some((matched_uuid.clone(), *pending_send_id)),
+            } => Some((matched_uuid.clone(), *send_id)),
             _ => None,
         })
         .expect("turn started event");
     assert_eq!(started.0, MessageUuid::from("uuid-1"));
-    assert_eq!(started.1, pending.id);
+    assert_eq!(started.1, send.id);
 
     // Marked matched; no longer the head.
     let head = ix
         .store()
-        .head_pending_send(&SessionId::from("sess-1"))
+        .head_dispatched_send(&SessionId::from("sess-1"))
         .await
         .unwrap();
     assert!(head.is_none());

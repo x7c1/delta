@@ -4,7 +4,7 @@ use crate::SendTarget;
 
 /// Composer-first send with no prior session: it spawns a fresh session,
 /// defers the first prompt, and once a `UserPromptSubmit` binds the spawn the
-/// deferred `pending_send` is written and the first user line correlates (the
+/// held `send` is written and the first user line correlates (the
 /// turn starts) through the normal machinery.
 #[tokio::test]
 async fn composer_first_send_defers_first_prompt_until_bind() {
@@ -24,7 +24,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     assert_eq!(returned.text, "first message");
 
     // The spawn created exactly one tmux session in its own workdir, and no
-    // pending_send row was written yet (the session id does not exist).
+    // send row was written yet (the session id does not exist).
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].name, "delta-1");
@@ -51,7 +51,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
 
     // The first UserPromptSubmit reports that pinned session id. It binds the
     // spawn to the now-known session id, registers the session, and writes the
-    // deferred pending_send BEFORE attribution — so the user line correlates.
+    // held send BEFORE attribution — so the user line correlates.
     ix.transcript_fake()
         .push_to("/work/delta-1/t.jsonl", user_line("u-1", "first message"));
     let (events, _) = ix
@@ -64,7 +64,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
         .await
         .unwrap();
 
-    // The session registered and the first turn started (the deferred send was
+    // The session registered and the first turn started (the held send was
     // written and matched the user line).
     assert!(events.contains(&SessionEvent::SessionRegistered {
         session_id: session_id.clone(),
@@ -72,12 +72,12 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     let started = events
         .iter()
         .any(|e| matches!(e, SessionEvent::TurnStarted { .. }));
-    assert!(started, "the deferred first prompt correlates into a turn");
+    assert!(started, "the held first prompt correlates into a turn");
     assert!(
         !events
             .iter()
             .any(|e| matches!(e, SessionEvent::ExternalInput { .. })),
-        "a bound deferred send is not external input"
+        "a bound held send is not external input"
     );
 
     // The user line landed on main and the send is now matched (FIFO clear).
@@ -86,7 +86,7 @@ async fn composer_first_send_defers_first_prompt_until_bind() {
     assert!(view.iter().any(|m| m.uuid.as_str() == "u-1"));
     assert!(ix
         .store()
-        .head_pending_send(&session_id)
+        .head_dispatched_send(&session_id)
         .await
         .unwrap()
         .is_none());

@@ -21,8 +21,8 @@ where
     /// [`PendingSpawn`] `pending → bound[session_id]`
     /// (via [`OpenSessions::bind_pending_spawn`]); then it registers the session
     /// row (emitting [`SessionEvent::SessionRegistered`]) and, when the spawn
-    /// carried a deferred `first_prompt` (a composer-initiated New), writes that
-    /// held `pending_send` now that the session id exists — so the first prompt
+    /// carried a held `first_prompt` (a composer-initiated New), writes that
+    /// held `send` now that the session id exists — so the first prompt
     /// correlates through the normal FIFO machinery whenever its
     /// `UserPromptSubmit` is processed.
     ///
@@ -41,7 +41,7 @@ where
         transcript_path: &str,
         events: &mut Vec<SessionEvent>,
     ) -> Result<Option<Session>> {
-        // Take the deferred first prompt with the bind, under the registry lock.
+        // Take the held first prompt with the bind, under the registry lock.
         // A `None` here means no *pending* spawn carries this id — either it was
         // already bound (idempotent re-entry) or it is an external/unknown id.
         let Some(outcome) = self
@@ -57,7 +57,7 @@ where
             .register_session_row(session_id, cwd, transcript_path, events)
             .await?;
 
-        // Write the deferred first send now that the session id is known, so the
+        // Write the held first send now that the session id is known, so the
         // matching `UserPromptSubmit` finds it and the first prompt correlates
         // through the normal machinery. The text was already delivered into the
         // pane by the spawn's launch-time positional prompt (#61), so this only

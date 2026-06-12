@@ -31,7 +31,7 @@ where
     /// (`claude … <prompt>`) rather than typed into the pane after launch. An
     /// interactive `claude` invoked with a positional prompt auto-submits it at
     /// startup, which fires the `UserPromptSubmit` hook that binds this spawn —
-    /// the hook then writes the deferred `pending_send` row that lets the first
+    /// the hook then writes the held `send` row that lets the first
     /// user line correlate. Submitting at launch avoids the failure mode of
     /// injecting keystrokes after a fixed settle delay: on a slow cold start the
     /// TUI input is not yet ready when the keystrokes land, they are lost, the

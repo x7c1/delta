@@ -3,7 +3,7 @@ use delta_model::SessionId;
 use crate::interactor::testing::*;
 
 #[tokio::test]
-async fn failed_dispatch_rolls_back_pending_send_and_returns_error() {
+async fn failed_dispatch_rolls_back_send_and_returns_error() {
     use crate::error::Error;
 
     let ix = interactor_with_failing_tmux();
@@ -24,7 +24,7 @@ async fn failed_dispatch_rolls_back_pending_send_and_returns_error() {
 
     // ...and the just-written row must not block the FIFO head: it was rolled
     // back to `cancelled`, so the head is clear for future correlation.
-    let head = ix.store().head_pending_send(&session).await.unwrap();
+    let head = ix.store().head_dispatched_send(&session).await.unwrap();
     assert!(
         head.is_none(),
         "the cancelled row must not remain the FIFO head"

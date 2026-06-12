@@ -17,8 +17,9 @@ pub struct PermissionRequest {
     pub tool_input_json: String,
     /// The id of the tool call this request gates (Claude Code's `tool_use_id`).
     /// It correlates the request with the matching `tool_result` transcript line
-    /// so the request can be resolved the moment the tool completes.
-    pub tool_use_id: String,
+    /// so the request can be resolved the moment the tool completes. `None`
+    /// means the request was recorded without a correlating tool call id.
+    pub tool_use_id: Option<String>,
     pub status: PermissionStatus,
     pub decision_reason: Option<String>,
     /// ISO-8601 timestamp.

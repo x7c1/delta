@@ -1,4 +1,4 @@
-use delta_model::{MessageUuid, PendingSendStatus, SessionId};
+use delta_model::{MessageUuid, SendStatus, SessionId};
 
 use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
@@ -69,10 +69,10 @@ async fn interrupt_marker_emits_turn_interrupted_and_stays_on_thread() {
     // (c) The unrelated pending send is left untouched (still pending).
     let head = ix
         .store()
-        .head_pending_send(&session)
+        .head_dispatched_send(&session)
         .await
         .unwrap()
         .expect("the unrelated send is still pending");
     assert_eq!(head.id, unrelated.id);
-    assert_eq!(head.status, PendingSendStatus::Pending);
+    assert_eq!(head.status, SendStatus::Dispatched);
 }

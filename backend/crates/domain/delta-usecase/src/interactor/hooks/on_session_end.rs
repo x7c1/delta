@@ -75,7 +75,7 @@ where
             // Cancel the held first prompt (if any) so its row does not block the
             // FIFO on a later re-resume.
             if resuming.held_prompt.is_some() {
-                if let Some(head) = self.store.head_pending_send(&hook.session_id).await? {
+                if let Some(head) = self.store.head_dispatched_send(&hook.session_id).await? {
                     let _ = self.store.cancel_send(head.id).await;
                 }
                 let _ = self.store.set_turn_active(&hook.session_id, false).await;

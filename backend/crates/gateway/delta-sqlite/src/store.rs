@@ -5,8 +5,8 @@ use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
 use tokio::sync::Mutex;
 
 use delta_model::{
-    Message, MessageUuid, PendingSend, PendingSendStatus, PermissionRequest,
-    PermissionStatus, PromptId, Role, Session, SessionId, SessionStatus, Thread, ThreadId,
+    Message, MessageUuid, PermissionRequest, PermissionStatus, PromptId, Role, Send, SendStatus,
+    Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow, SessionStore};
 
@@ -24,7 +24,7 @@ pub struct SqliteStore {
 }
 
 impl SqliteStore {
-    /// Open (or create) a store at `path`, applying the schema migration.
+    /// Open (or create) a store at `path`, creating the schema if absent.
     pub fn open(path: &str) -> Result<Self> {
         let conn = Connection::open(path)?;
         Self::init(conn)
@@ -37,42 +37,17 @@ impl SqliteStore {
     }
 
     fn init(conn: Connection) -> Result<Self> {
+        // WAL keeps readers unblocked during writes. The pragma reports the
+        // resulting mode as a result row, so it must be read with `query_row`;
+        // an in-memory database legitimately reports `memory` instead of
+        // `wal`, so the returned value is informational, not asserted.
+        let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.execute_batch(SCHEMA_SQL)?;
-        // Forward-migrate databases created before `session.turn_active` existed.
-        // The `CREATE TABLE IF NOT EXISTS` above adds the column on fresh
-        // databases but never alters an existing table, so add it here when
-        // absent. SQLite has no `ADD COLUMN IF NOT EXISTS`, hence the probe.
-        add_column_if_missing(
-            &conn,
-            "session",
-            "turn_active",
-            "INTEGER NOT NULL DEFAULT 0",
-        )?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
-}
-
-/// Add `column` (with the given type/constraint clause) to `table` when it is
-/// not already present, so opening an older database forward-migrates it. The
-/// `PRAGMA table_info` probe makes this idempotent across both fresh databases
-/// (where the column already exists from the `CREATE TABLE`) and older ones.
-fn add_column_if_missing(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    decl: &str,
-) -> Result<()> {
-    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
-    let exists = stmt
-        .query_map([], |row| row.get::<_, String>(1))?
-        .any(|name| name.map(|n| n == column).unwrap_or(false));
-    if !exists {
-        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
-    }
-    Ok(())
 }
 
 fn map_session(
@@ -134,15 +109,15 @@ fn thread_from_row(row: &Row<'_>) -> Result<Thread> {
     })
 }
 
-fn pending_send_from_row(row: &Row<'_>) -> Result<PendingSend> {
-    Ok(PendingSend {
+fn send_from_row(row: &Row<'_>) -> Result<Send> {
+    Ok(Send {
         id: row.get(0)?,
         session_id: SessionId::from(row.get::<_, String>(1)?),
         thread_id: ThreadId(row.get(2)?),
         semantic_parent_uuid: row.get::<_, Option<String>>(3)?.map(MessageUuid::from),
         text: row.get(4)?,
         locator_quote: row.get(5)?,
-        status: PendingSendStatus::parse(&row.get::<_, String>(6)?)?,
+        status: SendStatus::parse(&row.get::<_, String>(6)?)?,
         matched_uuid: row.get::<_, Option<String>>(7)?.map(MessageUuid::from),
         created_at: row.get(8)?,
     })
@@ -186,8 +161,22 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
 }
 
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at";
-const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, root_message_uuid, created_at";
-const PENDING_COLS: &str =
+/// Thread columns plus the derived `root_message_uuid`: the branch edge's
+/// canonical home is `message.semantic_parent_uuid`, so the root is computed
+/// from the thread's first semantically parented message — falling back to the
+/// thread's earliest semantically parented send for the window between the
+/// branch send being recorded and its user line being ingested. Requires the
+/// query to select `FROM thread` (both thread queries do).
+const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
+     COALESCE( \
+       (SELECT m.semantic_parent_uuid FROM message m \
+         WHERE m.thread_id = thread.id AND m.semantic_parent_uuid IS NOT NULL \
+         ORDER BY m.seq LIMIT 1), \
+       (SELECT s.semantic_parent_uuid FROM send s \
+         WHERE s.thread_id = thread.id AND s.semantic_parent_uuid IS NOT NULL \
+         ORDER BY s.id LIMIT 1) \
+     ) AS root_message_uuid, created_at";
+const SEND_COLS: &str =
     "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at";
 const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at";
 
@@ -225,8 +214,8 @@ impl SessionStore for SqliteStore {
             Some(id) => id,
             None => {
                 conn.execute(
-                    "INSERT INTO thread (session_id, title, parent_thread_id, root_message_uuid, created_at)
-                     VALUES (?1, ?2, NULL, NULL, ?3)",
+                    "INSERT INTO thread (session_id, title, parent_thread_id, created_at)
+                     VALUES (?1, ?2, NULL, ?3)",
                     params![new.id.as_str(), MAIN_THREAD_TITLE, now],
                 )
                 .map_err(Error::from)?;
@@ -421,18 +410,16 @@ impl SessionStore for SqliteStore {
         session_id: &SessionId,
         title: &str,
         parent_thread_id: Option<ThreadId>,
-        root_message_uuid: Option<&MessageUuid>,
     ) -> std::result::Result<Thread, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         conn.execute(
-            "INSERT INTO thread (session_id, title, parent_thread_id, root_message_uuid, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO thread (session_id, title, parent_thread_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
             params![
                 session_id.as_str(),
                 title,
                 parent_thread_id.map(ThreadId::value),
-                root_message_uuid.map(MessageUuid::as_str),
                 now,
             ],
         )
@@ -443,7 +430,9 @@ impl SessionStore for SqliteStore {
             session_id: session_id.clone(),
             title: title.to_owned(),
             parent_thread_id,
-            root_message_uuid: root_message_uuid.cloned(),
+            // Derived from the thread's branch send/message, neither of which
+            // exists yet at creation time.
+            root_message_uuid: None,
             created_at: now,
         })
     }
@@ -455,13 +444,13 @@ impl SessionStore for SqliteStore {
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> std::result::Result<PendingSend, delta_usecase::Error> {
+    ) -> std::result::Result<Send, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         conn.execute(
-            "INSERT INTO pending_send
+            "INSERT INTO send
              (session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'pending', NULL, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, 'dispatched', NULL, ?6)",
             params![
                 session_id.as_str(),
                 thread_id.value(),
@@ -473,33 +462,33 @@ impl SessionStore for SqliteStore {
         )
         .map_err(Error::from)?;
         let id = conn.last_insert_rowid();
-        Ok(PendingSend {
+        Ok(Send {
             id,
             session_id: session_id.clone(),
             thread_id,
             semantic_parent_uuid: semantic_parent_uuid.cloned(),
             text: text.to_owned(),
             locator_quote: locator_quote.map(str::to_owned),
-            status: PendingSendStatus::Pending,
+            status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: now,
         })
     }
 
-    async fn enqueue_deferred_send(
+    async fn enqueue_queued_send(
         &self,
         session_id: &SessionId,
         thread_id: ThreadId,
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> std::result::Result<PendingSend, delta_usecase::Error> {
+    ) -> std::result::Result<Send, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         conn.execute(
-            "INSERT INTO pending_send
+            "INSERT INTO send
              (session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, 'deferred', NULL, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, 'queued', NULL, ?6)",
             params![
                 session_id.as_str(),
                 thread_id.value(),
@@ -511,43 +500,43 @@ impl SessionStore for SqliteStore {
         )
         .map_err(Error::from)?;
         let id = conn.last_insert_rowid();
-        Ok(PendingSend {
+        Ok(Send {
             id,
             session_id: session_id.clone(),
             thread_id,
             semantic_parent_uuid: semantic_parent_uuid.cloned(),
             text: text.to_owned(),
             locator_quote: locator_quote.map(str::to_owned),
-            status: PendingSendStatus::Deferred,
+            status: SendStatus::Queued,
             matched_uuid: None,
             created_at: now,
         })
     }
 
-    async fn next_deferred_send(
+    async fn next_queued_send(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<PendingSend>, delta_usecase::Error> {
+    ) -> std::result::Result<Option<Send>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let row = conn
             .query_row(
                 &format!(
-                    "SELECT {PENDING_COLS} FROM pending_send
-                     WHERE session_id = ?1 AND status = 'deferred'
+                    "SELECT {SEND_COLS} FROM send
+                     WHERE session_id = ?1 AND status = 'queued'
                      ORDER BY id LIMIT 1"
                 ),
                 params![session_id.as_str()],
-                |r| Ok(pending_send_from_row(r)),
+                |r| Ok(send_from_row(r)),
             )
             .optional()
             .map_err(Error::from)?;
         row.transpose().map_err(Into::into)
     }
 
-    async fn promote_deferred_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
+    async fn promote_queued_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE pending_send SET status = 'pending' WHERE id = ?1 AND status = 'deferred'",
+            "UPDATE send SET status = 'dispatched' WHERE id = ?1 AND status = 'queued'",
             params![id],
         )
         .map_err(Error::from)?;
@@ -584,20 +573,20 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
-    async fn head_pending_send(
+    async fn head_dispatched_send(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<PendingSend>, delta_usecase::Error> {
+    ) -> std::result::Result<Option<Send>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let row = conn
             .query_row(
                 &format!(
-                    "SELECT {PENDING_COLS} FROM pending_send
-                     WHERE session_id = ?1 AND status = 'pending'
+                    "SELECT {SEND_COLS} FROM send
+                     WHERE session_id = ?1 AND status = 'dispatched'
                      ORDER BY id LIMIT 1"
                 ),
                 params![session_id.as_str()],
-                |r| Ok(pending_send_from_row(r)),
+                |r| Ok(send_from_row(r)),
             )
             .optional()
             .map_err(Error::from)?;
@@ -614,32 +603,32 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE pending_send SET status = 'matched', matched_uuid = ?2 WHERE id = ?1",
+            "UPDATE send SET status = 'matched', matched_uuid = ?2 WHERE id = ?1",
             params![id, matched_uuid.as_str()],
         )
         .map_err(Error::from)?;
         Ok(())
     }
 
-    async fn match_pending_send(
+    async fn match_dispatched_send(
         &self,
         session_id: &SessionId,
         trimmed_text: &str,
-    ) -> std::result::Result<Option<PendingSend>, delta_usecase::Error> {
+    ) -> std::result::Result<Option<Send>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         // SQLite's `TRIM` only strips spaces (not all Unicode whitespace such as
-        // `\n`), so to match Rust's `str::trim` semantics we scan the pending
+        // `\n`), so to match Rust's `str::trim` semantics we scan the dispatched
         // sends in FIFO order and compare trimmed text in Rust.
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT {PENDING_COLS} FROM pending_send
-                 WHERE session_id = ?1 AND status = 'pending'
+                "SELECT {SEND_COLS} FROM send
+                 WHERE session_id = ?1 AND status = 'dispatched'
                  ORDER BY id"
             ))
             .map_err(Error::from)?;
         let rows = stmt
             .query_map(params![session_id.as_str()], |r| {
-                Ok(pending_send_from_row(r))
+                Ok(send_from_row(r))
             })
             .map_err(Error::from)?;
         for row in rows {
@@ -672,7 +661,7 @@ impl SessionStore for SqliteStore {
     async fn cancel_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE pending_send SET status = 'cancelled' WHERE id = ?1",
+            "UPDATE send SET status = 'cancelled' WHERE id = ?1",
             params![id],
         )
         .map_err(Error::from)?;
@@ -687,42 +676,36 @@ impl SessionStore for SqliteStore {
         let tx = conn.transaction().map_err(Error::from)?;
         for m in messages {
             let content_json = encode_content(&m.content);
-            // The API contract promises an ISO-8601 `created_at`. A transcript
-            // line may omit its timestamp, which surfaces here as an empty
-            // string; fall back to the ingest time so the stored (and served)
-            // value is always a valid timestamp rather than `""`.
-            let created_at = if m.created_at.is_empty() {
-                now_iso8601()
-            } else {
-                m.created_at.clone()
-            };
             tx.execute(
                 &format!(
                     // `thread_id` and `semantic_parent_uuid` form the thread
                     // overlay: they are authoritative once assigned on the
                     // FIRST ingest of a line and must NOT be overwritten on a
                     // re-ingest. Branch attribution only ever happens on the
-                    // first ingest, because the pending send is enqueued before
+                    // first ingest, because the send row is recorded before
                     // the keystrokes are dispatched, so by the time the user
-                    // line appears in the transcript its pending send is still
-                    // `pending` and `match_pending_send` attaches it to the
-                    // branch thread. A second ingest of the same line (e.g.
+                    // line appears in the transcript its send is still
+                    // `dispatched` and `match_dispatched_send` attaches it to
+                    // the branch thread. A second ingest of the same line (e.g.
                     // hook-sync racing the background tail, or a re-sync) finds
-                    // the pending already `matched`, so `sync_transcript` falls
+                    // the send already `matched`, so `sync_transcript` falls
                     // back to the external-input branch and recomputes
                     // `(thread_id, semantic_parent) = (main, None)`. Overwriting
                     // here would clobber the correct branch attribution back to
                     // main and leave branch threads empty. The remaining columns
                     // are transcript-derived cache and may keep refreshing.
+                    // `created_at` may be NULL: a transcript line without a
+                    // timestamp is stored as such, never as a sentinel.
                     "INSERT INTO message ({MESSAGE_COLS}) VALUES
                      (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-                     ON CONFLICT(uuid) DO UPDATE SET
+                     ON CONFLICT(session_id, uuid) DO UPDATE SET
                        role = excluded.role,
                        linear_parent_uuid = excluded.linear_parent_uuid,
                        prompt_id = excluded.prompt_id,
                        seq = excluded.seq,
                        content_text = excluded.content_text,
-                       content_json = excluded.content_json"
+                       content_json = excluded.content_json,
+                       created_at = excluded.created_at"
                 ),
                 params![
                     m.uuid.as_str(),
@@ -735,7 +718,7 @@ impl SessionStore for SqliteStore {
                     m.seq,
                     m.content_text,
                     content_json,
-                    created_at,
+                    m.created_at,
                 ],
             )
             .map_err(Error::from)?;
@@ -780,14 +763,18 @@ impl SessionStore for SqliteStore {
         session_id: &SessionId,
     ) -> std::result::Result<usize, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        let lines: i64 = conn
+        // The cursor lives in `sync_cursor`, written lazily on the first sync:
+        // a session with no cursor row simply has not been synced yet, so it
+        // reads as zero.
+        let lines: Option<i64> = conn
             .query_row(
-                "SELECT transcript_lines_read FROM session WHERE id = ?1",
+                "SELECT lines_read FROM sync_cursor WHERE session_id = ?1",
                 params![session_id.as_str()],
                 |r| r.get(0),
             )
+            .optional()
             .map_err(Error::from)?;
-        Ok(lines as usize)
+        Ok(lines.unwrap_or(0) as usize)
     }
 
     async fn set_transcript_lines_read(
@@ -797,7 +784,8 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE session SET transcript_lines_read = ?2 WHERE id = ?1",
+            "INSERT INTO sync_cursor (session_id, lines_read) VALUES (?1, ?2)
+             ON CONFLICT(session_id) DO UPDATE SET lines_read = excluded.lines_read",
             params![session_id.as_str(), lines as i64],
         )
         .map_err(Error::from)?;
@@ -852,7 +840,7 @@ impl SessionStore for SqliteStore {
             session_id: session_id.clone(),
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
-            tool_use_id: tool_use_id.to_owned(),
+            tool_use_id: Some(tool_use_id.to_owned()),
             status: PermissionStatus::Pending,
             decision_reason: None,
             created_at: now,

@@ -49,14 +49,14 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
     assert_eq!(resume.workdir, "/elsewhere", "resumes in the stored cwd");
     let pane = ix.pane_for_session(&id).await.expect("now open");
 
-    // A send writes the pending_send (normal path) but its keystroke is held: the
+    // A send writes the send (normal path) but its keystroke is held: the
     // pane is resumed-but-not-ready, so nothing is dispatched yet.
     let main = ix.store().main_thread_id(&id).await.unwrap();
-    let pending = ix
+    let send = ix
         .enqueue_send(to(main), "after resume", None)
         .await
         .unwrap();
-    assert_ne!(pending.id, 0, "a real pending_send row was written");
+    assert_ne!(send.id, 0, "a real send row was written");
     assert!(
         ix.tmux_fake().sent.lock().unwrap().is_empty(),
         "the first prompt is held until SessionStart(resume), not dispatched yet"

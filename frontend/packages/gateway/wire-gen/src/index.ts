@@ -13,8 +13,8 @@ export type { Thread } from './generated/Thread';
 export type { Message } from './generated/Message';
 export type { MessageRole } from './generated/MessageRole';
 export type { ContentBlock } from './generated/ContentBlock';
-export type { PendingSend } from './generated/PendingSend';
-export type { PendingSendStatus } from './generated/PendingSendStatus';
+export type { Send } from './generated/Send';
+export type { SendStatus } from './generated/SendStatus';
 
 export type { SessionListItem } from './generated/SessionListItem';
 export type { SessionsResponse } from './generated/SessionsResponse';

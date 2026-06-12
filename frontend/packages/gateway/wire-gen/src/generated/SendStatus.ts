@@ -3,9 +3,9 @@
 /**
  * JSON shape of a queued send's correlation status.
  *
- * Mirrors the domain [`PendingSendStatus`] variant-for-variant; see that type
+ * Mirrors the domain [`SendStatus`] variant-for-variant; see that type
  * for the semantics of each status. This wire twin carries the serialization
  * concerns the domain type must not know about: the lowercase variant names
  * and the TypeScript export.
  */
-export type PendingSendStatus = "deferred" | "pending" | "matched" | "cancelled";
+export type SendStatus = "queued" | "dispatched" | "matched" | "cancelled";

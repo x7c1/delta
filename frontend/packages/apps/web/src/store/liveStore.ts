@@ -364,7 +364,7 @@ export const useLiveStore = create<LiveState>((set) => ({
             event.session_id,
             (item) =>
               item.status === 'queued' &&
-              (item.sendId === event.pending_send_id || item.sendId === null),
+              (item.sendId === event.send_id || item.sendId === null),
           );
           if (idx === -1) {
             return state;

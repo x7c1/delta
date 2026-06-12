@@ -38,7 +38,7 @@ fn main() {
 
     // The REST surface: exporting each endpoint's top-level request/response
     // shape pulls in every wire twin it is composed of (Session, Thread,
-    // Message, ContentBlock, PendingSend, …) via `export_all`.
+    // Message, ContentBlock, Send, …) via `export_all`.
     WireSessionsResponse::export_all(&config).expect("export SessionsResponse.ts");
     WireNewSessionResponse::export_all(&config).expect("export NewSessionResponse.ts");
     WireThreadsResponse::export_all(&config).expect("export ThreadsResponse.ts");

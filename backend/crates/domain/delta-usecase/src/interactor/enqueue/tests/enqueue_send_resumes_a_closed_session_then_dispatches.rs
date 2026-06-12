@@ -29,11 +29,11 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
 
     let main = ix.store().main_thread_id(&id).await.unwrap();
-    let pending = ix
+    let send = ix
         .enqueue_send(to(main), "after resume", None)
         .await
         .unwrap();
-    assert_ne!(pending.id, 0, "a real pending_send row was written");
+    assert_ne!(send.id, 0, "a real send row was written");
 
     // The send resumed the session: a `claude --resume sess-R` spawn was
     // recorded in the stored cwd, with no prior explicit open_session call.

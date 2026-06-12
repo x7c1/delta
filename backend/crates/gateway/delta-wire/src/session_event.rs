@@ -30,7 +30,7 @@ pub enum WireSessionEvent {
     /// A queued send was confirmed as a turn start.
     TurnStarted {
         session_id: String,
-        pending_send_id: i64,
+        send_id: i64,
         matched_uuid: String,
     },
     /// External input was detected (typed directly into the pane).
@@ -84,11 +84,11 @@ impl From<SessionEvent> for WireSessionEvent {
             },
             SessionEvent::TurnStarted {
                 session_id,
-                pending_send_id,
+                send_id,
                 matched_uuid,
             } => Self::TurnStarted {
                 session_id: session_id.0,
-                pending_send_id,
+                send_id,
                 matched_uuid: matched_uuid.0,
             },
             SessionEvent::ExternalInput { session_id, prompt } => Self::ExternalInput {
@@ -192,7 +192,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::TurnStarted {
             session_id: session_id(),
-            pending_send_id: 1,
+            send_id: 1,
             matched_uuid: "uuid-sample".to_owned(),
         },
         WireSessionEvent::ExternalInput {
@@ -324,13 +324,13 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::TurnStarted {
                 session_id: SessionId::from("sess-1"),
-                pending_send_id: 42,
+                send_id: 42,
                 matched_uuid: MessageUuid::from("uuid-1"),
             })),
             serde_json::json!({
                 "kind": "turn_started",
                 "session_id": "sess-1",
-                "pending_send_id": 42,
+                "send_id": 42,
                 "matched_uuid": "uuid-1",
             }),
         );

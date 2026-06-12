@@ -1,4 +1,4 @@
-use delta_model::{ContentBlock, Message, MessageUuid, PendingSendStatus, Role, SessionId};
+use delta_model::{ContentBlock, Message, MessageUuid, SendStatus, Role, SessionId};
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
 use super::SqliteStore;
@@ -81,7 +81,7 @@ async fn register_is_idempotent_and_creates_main_thread() {
 }
 
 #[tokio::test]
-async fn pending_send_fifo_and_match() {
+async fn dispatched_send_fifo_and_match() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
@@ -94,7 +94,7 @@ async fn pending_send_fifo_and_match() {
         .await
         .unwrap();
 
-    let head = store.head_pending_send(&session.id).await.unwrap().unwrap();
+    let head = store.head_dispatched_send(&session.id).await.unwrap().unwrap();
     assert_eq!(head.id, first.id, "FIFO returns the oldest");
     assert_eq!(head.locator_quote.as_deref(), Some("[q]"));
 
@@ -103,16 +103,16 @@ async fn pending_send_fifo_and_match() {
         .await
         .unwrap();
 
-    let head = store.head_pending_send(&session.id).await.unwrap().unwrap();
+    let head = store.head_dispatched_send(&session.id).await.unwrap().unwrap();
     assert_eq!(head.text, "second", "matched send leaves the queue");
 }
 
 #[tokio::test]
-async fn match_pending_send_finds_oldest_pending_by_trimmed_text() {
+async fn match_dispatched_send_finds_oldest_pending_by_trimmed_text() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    // Two pending sends with the same trimmed text; the oldest must win.
+    // Two dispatched sends with the same trimmed text; the oldest must win.
     let first = store
         .enqueue_send(&session.id, main, None, "  hello world\n", None)
         .await
@@ -128,11 +128,11 @@ async fn match_pending_send_finds_oldest_pending_by_trimmed_text() {
 
     // Trimmed comparison ignores surrounding whitespace on the stored text.
     let matched = store
-        .match_pending_send(&session.id, "hello world")
+        .match_dispatched_send(&session.id, "hello world")
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(matched.id, first.id, "returns the oldest matching pending");
+    assert_eq!(matched.id, first.id, "returns the oldest matching dispatched send");
 
     // Marking it matched removes it from the candidate set.
     store
@@ -140,15 +140,15 @@ async fn match_pending_send_finds_oldest_pending_by_trimmed_text() {
         .await
         .unwrap();
     let matched = store
-        .match_pending_send(&session.id, "hello world")
+        .match_dispatched_send(&session.id, "hello world")
         .await
         .unwrap()
         .unwrap();
     assert_eq!(matched.id, _second.id, "skips the already-matched send");
 
-    // No pending send for a foreign text.
+    // No dispatched send for a foreign text.
     assert!(store
-        .match_pending_send(&session.id, "nope")
+        .match_dispatched_send(&session.id, "nope")
         .await
         .unwrap()
         .is_none());
@@ -172,7 +172,7 @@ async fn message_upsert_and_thread_view() {
         content: vec![ContentBlock::Text {
             text: "hello".into(),
         }],
-        created_at: "2026-01-01T00:00:00Z".into(),
+        created_at: Some("2026-01-01T00:00:00Z".into()),
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -214,7 +214,7 @@ async fn last_activity_at_returns_latest_message_timestamp() {
         seq,
         content_text: Some("hi".into()),
         content: vec![ContentBlock::Text { text: "hi".into() }],
-        created_at: created_at.into(),
+        created_at: Some(created_at.into()),
     };
     store
         .upsert_messages(&[
@@ -266,7 +266,7 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
         seq: 0,
         content_text: Some("hi".into()),
         content: vec![ContentBlock::Text { text: "hi".into() }],
-        created_at: created_at.into(),
+        created_at: Some(created_at.into()),
     };
 
     // `/projects/a` had its latest activity at 00:10; `/projects/b`'s most
@@ -327,15 +327,14 @@ async fn upsert_preserves_thread_overlay_on_reingest() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    let root = MessageUuid::from("u-root");
     let branch = store
-        .create_thread(&session.id, "branch", Some(main), Some(&root))
+        .create_thread(&session.id, "branch", Some(main))
         .await
         .unwrap();
     let semantic_parent = MessageUuid::from("u-root");
 
     // First ingest: the line is correctly attributed to the branch thread,
-    // mirroring `match_pending_send` attaching it on its first (pending) hit.
+    // mirroring `match_dispatched_send` attaching it on its first (pending) hit.
     let msg = Message {
         uuid: MessageUuid::from("u-1"),
         session_id: session.id.clone(),
@@ -349,7 +348,7 @@ async fn upsert_preserves_thread_overlay_on_reingest() {
         content: vec![ContentBlock::Text {
             text: "hello".into(),
         }],
-        created_at: "2026-01-01T00:00:00Z".into(),
+        created_at: Some("2026-01-01T00:00:00Z".into()),
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -413,11 +412,12 @@ async fn transcript_lines_read_defaults_to_zero_and_persists_updates() {
 }
 
 #[tokio::test]
-async fn upsert_fills_missing_created_at() {
+async fn upsert_keeps_missing_created_at_null() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    // A transcript line without a timestamp arrives with an empty `created_at`.
+    // A transcript line without a timestamp stores NULL — never a sentinel
+    // value — and round-trips back as `None`.
     let msg = Message {
         uuid: MessageUuid::from("u-no-ts"),
         session_id: session.id.clone(),
@@ -431,32 +431,61 @@ async fn upsert_fills_missing_created_at() {
         content: vec![ContentBlock::Text {
             text: "hello".into(),
         }],
-        created_at: String::new(),
+        created_at: None,
     };
     store.upsert_messages(&[msg]).await.unwrap();
 
     let view = store.thread_messages(main).await.unwrap();
     assert_eq!(view.len(), 1);
-    // The contract promises an ISO-8601 timestamp, never an empty string.
-    let stored = &view[0].created_at;
-    assert!(!stored.is_empty(), "created_at must be filled in");
-    assert!(
-        stored.ends_with('Z') && stored.contains('T'),
-        "created_at must be ISO-8601, got {stored:?}"
-    );
+    assert_eq!(view[0].created_at, None);
+    // A timestamp-less message contributes no activity (MAX skips NULL).
+    assert_eq!(store.last_activity_at(&session.id).await.unwrap(), None);
 }
 
 #[tokio::test]
-async fn branch_thread_records_parent_and_root() {
+async fn branch_thread_derives_root_from_send_then_message() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
     let root = MessageUuid::from("u-root");
     let child = store
-        .create_thread(&session.id, "branch", Some(main), Some(&root))
+        .create_thread(&session.id, "branch", Some(main))
+        .await
+        .unwrap();
+    assert_eq!(child.parent_thread_id, Some(main));
+    assert_eq!(
+        child.root_message_uuid, None,
+        "no branch send or message exists yet to derive the root from"
+    );
+
+    // Once the branch send is recorded, the thread's root is derived from it.
+    store
+        .enqueue_send(&session.id, child.id, Some(&root), "branch reply", None)
         .await
         .unwrap();
     let fetched = store.thread(child.id).await.unwrap().unwrap();
     assert_eq!(fetched.parent_thread_id, Some(main));
+    assert_eq!(fetched.root_message_uuid, Some(root.clone()));
+
+    // Once the branch message itself is ingested, it becomes the source.
+    store
+        .upsert_messages(&[Message {
+            uuid: MessageUuid::from("u-branch-1"),
+            session_id: session.id.clone(),
+            thread_id: child.id,
+            role: Role::User,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: Some(root.clone()),
+            prompt_id: None,
+            seq: 0,
+            content_text: Some("branch reply".into()),
+            content: vec![ContentBlock::Text {
+                text: "branch reply".into(),
+            }],
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        }])
+        .await
+        .unwrap();
+    let fetched = store.thread(child.id).await.unwrap().unwrap();
     assert_eq!(fetched.root_message_uuid, Some(root));
 }
 
@@ -477,7 +506,7 @@ async fn session_active_at(store: &SqliteStore, id: &str, activity_at: &str) -> 
             seq: 0,
             content_text: Some("hi".into()),
             content: vec![ContentBlock::Text { text: "hi".into() }],
-            created_at: activity_at.into(),
+            created_at: Some(activity_at.into()),
         }])
         .await
         .unwrap();
@@ -592,7 +621,7 @@ async fn permission_request_is_recorded() {
         .await
         .unwrap();
     assert_eq!(req.tool_name, "Bash");
-    assert_eq!(req.tool_use_id, "toolu_01");
+    assert_eq!(req.tool_use_id.as_deref(), Some("toolu_01"));
     assert!(req.id > 0);
 }
 
@@ -715,90 +744,97 @@ async fn turn_active_flag_defaults_false_and_round_trips() {
 }
 
 #[tokio::test]
-async fn deferred_send_is_held_then_promoted_to_pending() {
+async fn queued_send_is_held_then_promoted_to_dispatched() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    // A deferred send is recorded but stays out of the pending FIFO and the
+    // A queued send is recorded but stays out of the dispatched FIFO and the
     // text-match candidate set until it is promoted.
-    let deferred = store
-        .enqueue_deferred_send(&session.id, main, None, "branch text", Some("quote"))
+    let queued = store
+        .enqueue_queued_send(&session.id, main, None, "branch text", Some("quote"))
         .await
         .unwrap();
-    assert_eq!(deferred.status, PendingSendStatus::Deferred);
+    assert_eq!(queued.status, SendStatus::Queued);
     assert!(
-        store.head_pending_send(&session.id).await.unwrap().is_none(),
-        "a deferred send is not a pending FIFO head"
+        store.head_dispatched_send(&session.id).await.unwrap().is_none(),
+        "a queued send is not a dispatched FIFO head"
     );
     assert!(
         store
-            .match_pending_send(&session.id, "branch text")
+            .match_dispatched_send(&session.id, "branch text")
             .await
             .unwrap()
             .is_none(),
-        "a deferred send is not matchable until promoted"
+        "a queued send is not matchable until promoted"
     );
 
     let next = store
-        .next_deferred_send(&session.id)
+        .next_queued_send(&session.id)
         .await
         .unwrap()
-        .expect("the deferred send is the next to dispatch");
-    assert_eq!(next.id, deferred.id);
+        .expect("the queued send is the next to dispatch");
+    assert_eq!(next.id, queued.id);
 
-    // Promotion flips it to pending, so it now correlates as an ordinary send.
-    store.promote_deferred_send(deferred.id).await.unwrap();
+    // Promotion flips it to dispatched, so it now correlates as an ordinary send.
+    store.promote_queued_send(queued.id).await.unwrap();
     assert!(
-        store.next_deferred_send(&session.id).await.unwrap().is_none(),
-        "no deferred sends remain after promotion"
+        store.next_queued_send(&session.id).await.unwrap().is_none(),
+        "no queued sends remain after promotion"
     );
     let matched = store
-        .match_pending_send(&session.id, "branch text")
+        .match_dispatched_send(&session.id, "branch text")
         .await
         .unwrap()
         .expect("the promoted send is now matchable");
-    assert_eq!(matched.id, deferred.id);
-    assert_eq!(matched.status, PendingSendStatus::Pending);
+    assert_eq!(matched.id, queued.id);
+    assert_eq!(matched.status, SendStatus::Dispatched);
     assert_eq!(matched.locator_quote.as_deref(), Some("quote"));
 }
 
-#[tokio::test]
-async fn opening_a_pre_turn_active_database_adds_the_column() {
-    // Simulate a database created before `session.turn_active` existed: a
-    // `session` table with the older column set. Opening the store must
-    // forward-migrate it (add the column) rather than fail.
-    let mut path = std::env::temp_dir();
-    let unique = format!(
-        "delta-sqlite-migration-test-{}.db",
-        std::process::id() as u64 * 1_000_000 + line!() as u64
-    );
-    path.push(unique);
-    let path_str = path.to_string_lossy().into_owned();
-    let _ = std::fs::remove_file(&path);
-
-    {
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE session (
-               id TEXT PRIMARY KEY,
-               cwd TEXT NOT NULL,
-               transcript_path TEXT NOT NULL,
-               title TEXT,
-               status TEXT NOT NULL DEFAULT 'active',
-               transcript_lines_read INTEGER NOT NULL DEFAULT 0,
-               created_at TEXT NOT NULL
-             );",
-        )
+/// All `message_fts` rowids matching `query`, via the trigger-maintained index.
+async fn fts_hits(store: &SqliteStore, query: &str) -> Vec<i64> {
+    let conn = store.conn.lock().await;
+    let mut stmt = conn
+        .prepare("SELECT rowid FROM message_fts WHERE message_fts MATCH ?1")
         .unwrap();
-    }
+    let rows = stmt.query_map([query], |r| r.get(0)).unwrap();
+    rows.map(Result::unwrap).collect()
+}
 
-    // Opening applies the schema (other tables) and the guarded ALTER for the
-    // missing column, so the turn-active flag works on the migrated database.
-    let store = SqliteStore::open(&path_str).unwrap();
-    let (session, _main) = store.register_session(new_session()).await.unwrap();
-    assert!(!store.is_turn_active(&session.id).await.unwrap());
-    store.set_turn_active(&session.id, true).await.unwrap();
-    assert!(store.is_turn_active(&session.id).await.unwrap());
+#[tokio::test]
+async fn message_fts_indexes_inserts_and_updates() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    let _ = std::fs::remove_file(&path);
+    let msg = Message {
+        uuid: MessageUuid::from("u-1"),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("the quick brown fox".into()),
+        content: vec![ContentBlock::Text {
+            text: "the quick brown fox".into(),
+        }],
+        created_at: Some("2026-01-01T00:00:00Z".into()),
+    };
+    store
+        .upsert_messages(std::slice::from_ref(&msg))
+        .await
+        .unwrap();
+    assert_eq!(fts_hits(&store, "quick").await.len(), 1);
+
+    // A re-ingest with refreshed content replaces the indexed text rather than
+    // duplicating or stranding the old entry.
+    let mut updated = msg;
+    updated.content_text = Some("a lazy dog".into());
+    updated.content = vec![ContentBlock::Text {
+        text: "a lazy dog".into(),
+    }];
+    store.upsert_messages(&[updated]).await.unwrap();
+    assert!(fts_hits(&store, "quick").await.is_empty());
+    assert_eq!(fts_hits(&store, "lazy").await.len(), 1);
 }

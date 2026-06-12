@@ -1,4 +1,4 @@
-use delta_model::PendingSend;
+use delta_model::Send;
 
 use crate::interactor::testing::*;
 use crate::{Interactor, SendTarget};
@@ -13,7 +13,7 @@ pub(super) async fn round_trip(
     text: &str,
     quote: Option<&str>,
     uuid: &str,
-) -> (PendingSend, Option<String>) {
+) -> (Send, Option<String>) {
     let pending = ix.enqueue_send(target, text, quote).await.unwrap();
     ix.transcript_fake().push(user_line(uuid, text));
     let (_events, additional) = ix.on_user_prompt_submit(submit(text)).await.unwrap();

@@ -37,7 +37,7 @@ describe('parseSessionEvent', () => {
       JSON.stringify({
         kind: 'turn_started',
         session_id: 'sess-1',
-        pending_send_id: 1,
+        send_id: 1,
         matched_uuid: 'uuid-1',
       }),
     );
@@ -45,7 +45,7 @@ describe('parseSessionEvent', () => {
     expect(event).toEqual({
       kind: 'turn_started',
       session_id: 'sess-1',
-      pending_send_id: 1,
+      send_id: 1,
       matched_uuid: 'uuid-1',
     });
   });

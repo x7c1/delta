@@ -1,4 +1,4 @@
-use delta_model::{MessageUuid, PendingSendStatus, SessionId};
+use delta_model::{MessageUuid, SendStatus, SessionId};
 
 use crate::interactor::testing::*;
 use crate::ports::StopHook;
@@ -8,9 +8,9 @@ use crate::ports::StopHook;
 /// `UserPromptSubmit` hook reaches Delta. A composer branch/quoted send arriving
 /// during it must defer just as it would during a Delta-dispatched turn, so its
 /// locator quote is not lost to Claude Code's mid-turn queueing. When the
-/// external turn ends, the deferred send is dispatched.
+/// external turn ends, the queued send is dispatched.
 #[tokio::test]
-async fn branch_send_during_external_turn_is_deferred() {
+async fn branch_send_during_external_turn_is_queued() {
     let ix = interactor();
     let session = SessionId::from("sess-1");
     ix.seed_session().await;
@@ -29,18 +29,18 @@ async fn branch_send_during_external_turn_is_deferred() {
 
     // A composer branch send during that external turn must defer.
     let parent = MessageUuid::from("uuid-parent");
-    let deferred = ix
+    let queued = ix
         .enqueue_send(branch_off(main, &parent), "branch text", Some("quote"))
         .await
         .unwrap();
-    assert_eq!(deferred.status, PendingSendStatus::Deferred);
+    assert_eq!(queued.status, SendStatus::Queued);
     assert_eq!(
         ix.tmux_fake().sent.lock().unwrap().len(),
         sent_before,
-        "no keystrokes are dispatched while deferred"
+        "no keystrokes are dispatched while queued"
     );
 
-    // The external turn ends: the deferred send is dispatched.
+    // The external turn ends: the queued send is dispatched.
     ix.on_stop(StopHook {
         session_id: session.clone(),
         stop_reason: None,
@@ -54,7 +54,7 @@ async fn branch_send_during_external_turn_is_deferred() {
     assert_eq!(dispatched.as_deref(), Some("branch text"));
     assert!(ix
         .store()
-        .next_deferred_send(&session)
+        .next_queued_send(&session)
         .await
         .unwrap()
         .is_none());
