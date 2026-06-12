@@ -80,6 +80,7 @@ export class FakeEventSource {
   private readonly autoPlay: boolean;
   private index = 0;
   private closed = false;
+  private status: FakeStatus = 'connecting';
 
   constructor(options: FakeEventSourceOptions = {}) {
     this.script = options.script ?? defaultScript();
@@ -136,6 +137,7 @@ export class FakeEventSource {
   }
 
   private emitStatus(status: FakeStatus): void {
+    this.status = status;
     for (const listener of this.statusListeners) {
       listener(status);
     }
@@ -146,8 +148,18 @@ export class FakeEventSource {
     return () => this.eventListeners.delete(listener);
   }
 
+  /**
+   * Subscribe to connection-status changes. A subscriber that arrives after
+   * the handshake already settled is told the current status immediately —
+   * the app may construct this source behind a dynamic import and subscribe a
+   * microtask later than the constructor's handshake, and it must not be left
+   * believing the source is still `connecting`.
+   */
   onStatus(listener: FakeStatusListener): () => void {
     this.statusListeners.add(listener);
+    if (this.status !== 'connecting') {
+      listener(this.status);
+    }
     return () => this.statusListeners.delete(listener);
   }
 

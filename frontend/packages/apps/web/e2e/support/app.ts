@@ -28,13 +28,20 @@ export async function useManualEventControl(page: Page): Promise<void> {
 
 /**
  * Feed one scripted event to the app, exactly as the live channel would. Only
- * valid under {@link useManualEventControl}, after the app has mounted (which
- * is what publishes the source on `window`).
+ * valid under {@link useManualEventControl}. The mock source loads behind a
+ * dynamic import (it is excluded from the production bundle), so it can be
+ * published on `window` a moment after first paint — wait for it rather than
+ * racing it.
  */
 export async function emitEvent(
   page: Page,
   event: SessionEvent,
 ): Promise<void> {
+  await page.waitForFunction(
+    (key: string) =>
+      (window as unknown as Record<string, unknown>)[key] !== undefined,
+    MOCK_EVENT_SOURCE_KEY,
+  );
   await page.evaluate(
     ([key, evt]) => {
       const source = (

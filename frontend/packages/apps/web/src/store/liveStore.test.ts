@@ -12,6 +12,7 @@ function reset() {
     unread: {},
     externalInput: {},
     resumeUnavailable: {},
+    earlySpawnFailures: {},
   });
 }
 
@@ -240,7 +241,7 @@ describe('liveStore spawn tracking', () => {
     expect(useLiveStore.getState().localSends).toEqual({});
   });
 
-  it('ignores spawn_failed for a session it never tracked', () => {
+  it('leaves tracked spawns alone on spawn_failed for an unknown session', () => {
     trackOne();
 
     useLiveStore.getState().applyEvent({
@@ -249,6 +250,71 @@ describe('liveStore spawn tracking', () => {
       pane_token: 'pane-x',
     });
     expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
+  });
+
+  it('fails a spawn whose spawn_failed event outran its POST response', () => {
+    // The live channel and the POST response are independent: the watchdog's
+    // broadcast can land before this client processes the response that
+    // carries the spawn's ids. The failure must be buffered, not dropped, or
+    // the chip spins forever (regression: it was dropped).
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+    expect(useLiveStore.getState().spawns).toHaveLength(0);
+
+    // The POST resolves: the send is tracked, then the spawn — which lands
+    // already failed, with its Retry payload intact and the doomed local send
+    // dropped.
+    useLiveStore.getState().recordLocalSend(
+      localSend({ sendId: 7, sessionId: 'sess-spawn-1', threadId: 42 }),
+    );
+    trackOne();
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.text).toBe('start a new session');
+    expect(spawn.workdir).toBe('/work/dir');
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().earlySpawnFailures).toEqual({});
+  });
+
+  it('drops a buffered early failure once that session registers', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-foreign',
+      pane_token: 'pane-x',
+    });
+    expect(useLiveStore.getState().earlySpawnFailures).toEqual({
+      'sess-foreign': true,
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-foreign',
+    });
+    expect(useLiveStore.getState().earlySpawnFailures).toEqual({});
+
+    // A later spawn tracked for a clean id starts `spawning` as usual.
+    trackOne('sess-foreign');
+    expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
+  });
+
+  it('does not buffer a duplicate spawn_failed for an already-failed spawn', () => {
+    trackOne();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+    expect(useLiveStore.getState().spawns[0].status).toBe('failed');
+    expect(useLiveStore.getState().earlySpawnFailures).toEqual({});
   });
 
   it('keeps a failed spawn through unrelated turn events until dismissed', () => {

@@ -25,45 +25,70 @@ export function useSessionEvents(): void {
   const setConnection = useLiveStore((state) => state.setConnection);
 
   useEffect(() => {
-    const source: SessionEventSource = isMockMode()
-      ? createMockEventSource()
-      : new WsEventSource({ url: wsUrl('/ws') });
+    let disposed = false;
+    let source: SessionEventSource | null = null;
+    const teardowns: Array<() => void> = [];
 
-    const offEvent = source.onEvent((event) => {
-      // Read the latest focus at event time, not at subscribe time. The
-      // new-session sentinel has no real id yet, so map it to null for routing.
-      const { activeThreadId, focusedSessionId } = useNavStore.getState();
-      const focusedRealSessionId =
-        focusedSessionId === null || focusedSessionId === NEW_SESSION_FOCUS
-          ? null
-          : focusedSessionId;
-      applySessionEvent(
-        event,
-        queryClient,
-        activeThreadId,
-        focusedRealSessionId,
+    const attach = (s: SessionEventSource) => {
+      source = s;
+      teardowns.push(
+        s.onEvent((event) => {
+          // Read the latest focus at event time, not at subscribe time. The
+          // new-session sentinel has no real id yet, so map it to null for
+          // routing.
+          const { activeThreadId, focusedSessionId } = useNavStore.getState();
+          const focusedRealSessionId =
+            focusedSessionId === null || focusedSessionId === NEW_SESSION_FOCUS
+              ? null
+              : focusedSessionId;
+          applySessionEvent(
+            event,
+            queryClient,
+            activeThreadId,
+            focusedRealSessionId,
+          );
+        }),
       );
-    });
 
-    // Track connections so a *re*-open (not the first) triggers a resync.
-    let hasConnected = false;
-    const offStatus = source.onStatus((status) => {
-      setConnection(status);
-      if (status !== 'open') {
-        return;
-      }
-      if (hasConnected) {
-        // Reconnected after a gap: heal the missed window.
-        void queryClient.invalidateQueries();
-        useLiveStore.getState().resetTurnEphemera();
-      }
-      hasConnected = true;
-    });
+      // Track connections so a *re*-open (not the first) triggers a resync.
+      let hasConnected = false;
+      teardowns.push(
+        s.onStatus((status) => {
+          setConnection(status);
+          if (status !== 'open') {
+            return;
+          }
+          if (hasConnected) {
+            // Reconnected after a gap: heal the missed window.
+            void queryClient.invalidateQueries();
+            useLiveStore.getState().resetTurnEphemera();
+          }
+          hasConnected = true;
+        }),
+      );
+    };
+
+    if (isMockMode()) {
+      // The dev fake lives behind a dynamic import (`@delta/api-mocks` stays
+      // out of the production bundle), so attaching is deferred until it
+      // loads — and skipped entirely if this effect was cleaned up meanwhile.
+      void createMockEventSource().then((s) => {
+        if (disposed) {
+          s.close();
+          return;
+        }
+        attach(s);
+      });
+    } else {
+      attach(new WsEventSource({ url: wsUrl('/ws') }));
+    }
 
     return () => {
-      offEvent();
-      offStatus();
-      source.close();
+      disposed = true;
+      for (const teardown of teardowns) {
+        teardown();
+      }
+      source?.close();
     };
   }, [queryClient, setConnection]);
 }
