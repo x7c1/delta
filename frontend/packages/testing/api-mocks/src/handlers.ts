@@ -2,7 +2,7 @@ import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   MessagesResponse,
   NewSessionResponse,
-  PendingSend,
+  Send,
   SendRequest,
   SendResponse,
   SendToNewSession,
@@ -190,14 +190,14 @@ export function createHandlers(): RequestHandler[] {
       // synthetic placeholder send (id 0, empty session id, thread 0) until the
       // session registers. `locator_quote` is ignored for this target.
       if (isNewSessionSend(payload)) {
-        const send: PendingSend = {
+        const send: Send = {
           id: 0,
           session_id: '',
           thread_id: 0,
           semantic_parent_uuid: null,
           text: payload.text,
           locator_quote: null,
-          status: 'pending',
+          status: 'dispatched',
           matched_uuid: null,
           created_at: new Date().toISOString(),
         };
@@ -235,14 +235,14 @@ export function createHandlers(): RequestHandler[] {
         threadId = child.id;
       }
 
-      const send: PendingSend = {
+      const send: Send = {
         id: store.nextSendId++,
         session_id: session.session.id,
         thread_id: threadId,
         semantic_parent_uuid: target.semantic_parent_uuid ?? null,
         text: target.text,
         locator_quote: target.locator_quote ?? null,
-        status: 'pending',
+        status: 'dispatched',
         matched_uuid: null,
         created_at: new Date().toISOString(),
       };

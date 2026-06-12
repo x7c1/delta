@@ -30,7 +30,7 @@ pub(super) async fn closed_session_with_pending_branch() -> (
     let parent = MessageUuid::from("uuid-parent");
     let child = ix
         .store()
-        .create_thread(&id, "prior branch prompt", Some(main), Some(&parent))
+        .create_thread(&id, "prior branch prompt", Some(main))
         .await
         .unwrap()
         .id;

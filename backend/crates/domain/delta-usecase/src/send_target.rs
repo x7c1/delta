@@ -25,10 +25,10 @@ pub enum SendTarget {
     /// Start a fresh session, landing the first message on its `main` thread.
     ///
     /// No thread (and no session) exists yet: a session is spawned with the text
-    /// deferred as its first prompt, and the conversational id is learned when
+    /// held as its first prompt, and the conversational id is learned when
     /// the first `UserPromptSubmit` hook binds the spawn. Any `locator_quote` is
     /// ignored — a brand-new session has no earlier passage to anchor — so the
-    /// deferred first prompt carries no quote.
+    /// held first prompt carries no quote.
     NewSession {
         /// The working directory the session should launch in. When `Some`, it
         /// is a user-selected path validated (and canonicalized) before launch;

@@ -5,20 +5,38 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use delta_model::{
-    Message, MessageUuid, PendingSend, PendingSendStatus, PermissionRequest, PermissionStatus,
-    Role, Session, SessionId, SessionStatus, Thread, ThreadId,
+    Message, MessageUuid, PermissionRequest, PermissionStatus, Role, Send, SendStatus, Session,
+    SessionId, SessionStatus, Thread, ThreadId,
 };
 
 use crate::error::Result;
 use crate::ports::{NewSession, SessionPageRow, SessionStore};
 use crate::SessionPageCursor;
 
+/// Derive a thread's `root_message_uuid` the way the SQL store does: the
+/// `semantic_parent_uuid` of the thread's first semantically parented message,
+/// falling back to its earliest semantically parented send.
+fn derive_root_message_uuid(g: &FakeStoreInner, thread_id: ThreadId) -> Option<MessageUuid> {
+    g.messages
+        .iter()
+        .filter(|m| m.thread_id == thread_id && m.semantic_parent_uuid.is_some())
+        .min_by_key(|m| m.seq)
+        .and_then(|m| m.semantic_parent_uuid.clone())
+        .or_else(|| {
+            g.sends
+                .iter()
+                .filter(|s| s.thread_id == thread_id && s.semantic_parent_uuid.is_some())
+                .min_by_key(|s| s.id)
+                .and_then(|s| s.semantic_parent_uuid.clone())
+        })
+}
+
 #[derive(Default)]
 pub(crate) struct FakeStoreInner {
     pub(crate) sessions: Vec<Session>,
     pub(crate) threads: Vec<Thread>,
     pub(crate) next_thread_id: i64,
-    pub(crate) sends: Vec<PendingSend>,
+    pub(crate) sends: Vec<Send>,
     pub(crate) next_send_id: i64,
     pub(crate) messages: Vec<Message>,
     pub(crate) permissions: Vec<PermissionRequest>,
@@ -90,7 +108,7 @@ impl SessionStore for FakeStore {
                     .messages
                     .iter()
                     .filter(|m| m.session_id == s.id)
-                    .map(|m| m.created_at.clone())
+                    .filter_map(|m| m.created_at.clone())
                     .max();
                 (s.clone(), last_activity_at)
             })
@@ -136,7 +154,7 @@ impl SessionStore for FakeStore {
         Ok(g.messages
             .iter()
             .filter(|m| &m.session_id == session_id)
-            .map(|m| m.created_at.clone())
+            .filter_map(|m| m.created_at.clone())
             .max())
     }
 
@@ -161,7 +179,7 @@ impl SessionStore for FakeStore {
                 .messages
                 .iter()
                 .filter(|m| m.session_id == s.id)
-                .map(|m| m.created_at.clone())
+                .filter_map(|m| m.created_at.clone())
                 .max()
                 .unwrap_or_else(|| s.created_at.clone());
             by_cwd
@@ -183,14 +201,11 @@ impl SessionStore for FakeStore {
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
-            .threads
-            .iter()
-            .find(|t| t.id == id)
-            .cloned())
+        let g = self.inner.lock().unwrap();
+        Ok(g.threads.iter().find(|t| t.id == id).cloned().map(|mut t| {
+            t.root_message_uuid = derive_root_message_uuid(&g, t.id);
+            t
+        }))
     }
 
     async fn list_threads(&self, session_id: &SessionId) -> Result<Vec<Thread>> {
@@ -200,6 +215,10 @@ impl SessionStore for FakeStore {
             .iter()
             .filter(|t| &t.session_id == session_id)
             .cloned()
+            .map(|mut t| {
+                t.root_message_uuid = derive_root_message_uuid(&g, t.id);
+                t
+            })
             .collect();
         out.sort_by_key(|t| t.id);
         Ok(out)
@@ -210,7 +229,6 @@ impl SessionStore for FakeStore {
         session_id: &SessionId,
         title: &str,
         parent_thread_id: Option<ThreadId>,
-        root_message_uuid: Option<&MessageUuid>,
     ) -> Result<Thread> {
         let mut g = self.inner.lock().unwrap();
         g.next_thread_id += 1;
@@ -219,7 +237,9 @@ impl SessionStore for FakeStore {
             session_id: session_id.clone(),
             title: title.to_owned(),
             parent_thread_id,
-            root_message_uuid: root_message_uuid.cloned(),
+            // Derived on read (from the thread's branch send/message), mirroring
+            // the real store; see `derive_root_message_uuid`.
+            root_message_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
         };
         g.threads.push(thread.clone());
@@ -233,17 +253,17 @@ impl SessionStore for FakeStore {
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<PendingSend> {
+    ) -> Result<Send> {
         let mut g = self.inner.lock().unwrap();
         g.next_send_id += 1;
-        let send = PendingSend {
+        let send = Send {
             id: g.next_send_id,
             session_id: session_id.clone(),
             thread_id,
             semantic_parent_uuid: semantic_parent_uuid.cloned(),
             text: text.to_owned(),
             locator_quote: locator_quote.map(str::to_owned),
-            status: PendingSendStatus::Pending,
+            status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
         };
@@ -251,24 +271,24 @@ impl SessionStore for FakeStore {
         Ok(send)
     }
 
-    async fn enqueue_deferred_send(
+    async fn enqueue_queued_send(
         &self,
         session_id: &SessionId,
         thread_id: ThreadId,
         semantic_parent_uuid: Option<&MessageUuid>,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<PendingSend> {
+    ) -> Result<Send> {
         let mut g = self.inner.lock().unwrap();
         g.next_send_id += 1;
-        let send = PendingSend {
+        let send = Send {
             id: g.next_send_id,
             session_id: session_id.clone(),
             thread_id,
             semantic_parent_uuid: semantic_parent_uuid.cloned(),
             text: text.to_owned(),
             locator_quote: locator_quote.map(str::to_owned),
-            status: PendingSendStatus::Deferred,
+            status: SendStatus::Queued,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
         };
@@ -276,19 +296,19 @@ impl SessionStore for FakeStore {
         Ok(send)
     }
 
-    async fn next_deferred_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
+    async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         let g = self.inner.lock().unwrap();
         Ok(g.sends
             .iter()
-            .filter(|s| &s.session_id == session_id && s.status == PendingSendStatus::Deferred)
+            .filter(|s| &s.session_id == session_id && s.status == SendStatus::Queued)
             .min_by_key(|s| s.id)
             .cloned())
     }
 
-    async fn promote_deferred_send(&self, id: i64) -> Result<()> {
+    async fn promote_queued_send(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
-            s.status = PendingSendStatus::Pending;
+            s.status = SendStatus::Dispatched;
         }
         Ok(())
     }
@@ -313,11 +333,11 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn head_pending_send(&self, session_id: &SessionId) -> Result<Option<PendingSend>> {
+    async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         let g = self.inner.lock().unwrap();
         Ok(g.sends
             .iter()
-            .filter(|s| &s.session_id == session_id && s.status == PendingSendStatus::Pending)
+            .filter(|s| &s.session_id == session_id && s.status == SendStatus::Dispatched)
             .min_by_key(|s| s.id)
             .cloned())
     }
@@ -325,23 +345,23 @@ impl SessionStore for FakeStore {
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
-            s.status = PendingSendStatus::Matched;
+            s.status = SendStatus::Matched;
             s.matched_uuid = Some(matched_uuid.clone());
         }
         Ok(())
     }
 
-    async fn match_pending_send(
+    async fn match_dispatched_send(
         &self,
         session_id: &SessionId,
         trimmed_text: &str,
-    ) -> Result<Option<PendingSend>> {
+    ) -> Result<Option<Send>> {
         let g = self.inner.lock().unwrap();
         Ok(g.sends
             .iter()
             .filter(|s| {
                 &s.session_id == session_id
-                    && s.status == PendingSendStatus::Pending
+                    && s.status == SendStatus::Dispatched
                     && s.text.trim() == trimmed_text
             })
             .min_by_key(|s| s.id)
@@ -360,7 +380,7 @@ impl SessionStore for FakeStore {
     async fn cancel_send(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
-            s.status = PendingSendStatus::Cancelled;
+            s.status = SendStatus::Cancelled;
         }
         Ok(())
     }
@@ -431,7 +451,7 @@ impl SessionStore for FakeStore {
             session_id: session_id.clone(),
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
-            tool_use_id: tool_use_id.to_owned(),
+            tool_use_id: Some(tool_use_id.to_owned()),
             status: PermissionStatus::Pending,
             decision_reason: None,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -471,7 +491,7 @@ impl SessionStore for FakeStore {
         let mut g = self.inner.lock().unwrap();
         let req = g.permissions.iter_mut().find(|r| {
             &r.session_id == session_id
-                && r.tool_use_id == tool_use_id
+                && r.tool_use_id.as_deref() == Some(tool_use_id)
                 && r.status == PermissionStatus::Pending
         });
         match req {

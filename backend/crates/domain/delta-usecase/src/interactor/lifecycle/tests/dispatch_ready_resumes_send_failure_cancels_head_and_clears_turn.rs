@@ -50,7 +50,7 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
         .unwrap();
 
     // The undeliverable pending row was cancelled (no longer the pending head)...
-    let head = ix.store().head_pending_send(&session_id).await.unwrap();
+    let head = ix.store().head_dispatched_send(&session_id).await.unwrap();
     assert!(
         head.is_none(),
         "the head pending send was cancelled on dispatch failure"

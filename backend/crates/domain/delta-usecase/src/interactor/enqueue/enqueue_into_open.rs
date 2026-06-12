@@ -1,4 +1,4 @@
-use delta_model::{MessageUuid, PendingSend, SessionId, ThreadId};
+use delta_model::{MessageUuid, Send, SessionId, ThreadId};
 
 use crate::error::Result;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
@@ -13,7 +13,7 @@ where
     S: SessionStore,
     W: Workspace,
 {
-    /// Write the `pending_send` row and dispatch the keystrokes for an open
+    /// Write the `send` row and dispatch the keystrokes for an open
     /// session, with the cancel-on-dispatch-failure rollback.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::interactor::enqueue) async fn enqueue_into_open(
@@ -24,14 +24,14 @@ where
         text: &str,
         locator_quote: Option<&str>,
         branch_from: Option<&MessageUuid>,
-    ) -> Result<PendingSend> {
+    ) -> Result<Send> {
         // Idle-flush safety net: if the session is idle but a send is still
-        // `deferred` (a dispatch trigger was missed, e.g. an interrupt the tail
+        // `queued` (a dispatch trigger was missed, e.g. an interrupt the tail
         // had not tailed yet), release it now so it keeps its place ahead of
         // this new send in FIFO order. Dispatching it sets the turn flag, which
         // the defer check below then observes.
         if !self.store.is_turn_active(session_id).await? {
-            self.dispatch_deferred_send(session_id).await?;
+            self.dispatch_queued_send(session_id).await?;
         }
 
         // The target thread was already loaded by the caller to derive the
@@ -46,7 +46,7 @@ where
                 let title = provisional_branch_title(locator_quote);
                 let thread = self
                     .store
-                    .create_thread(session_id, &title, Some(thread_id), Some(parent))
+                    .create_thread(session_id, &title, Some(thread_id))
                     .await?;
                 (thread.id, Some(parent.clone()))
             }
@@ -57,15 +57,15 @@ where
         // (a branch entry or a locator quote). Dispatching mid-turn would make
         // Claude Code queue it, and a queued prompt fires no `UserPromptSubmit`
         // hook — so its locator quote would never be injected. Instead record it
-        // as `deferred` (the branch child thread and the queued text persist) and
+        // as `queued` (the branch child thread and the held text persist) and
         // let the turn-end triggers dispatch it as an ordinary prompt once idle.
-        // Plain main-line sends are not deferred: they need no quote, so Claude's
+        // Plain main-line sends are not queued: they need no quote, so Claude's
         // own mid-turn queueing is harmless for them.
         let carries_context = branch_from.is_some() || locator_quote.is_some();
         if carries_context && self.store.is_turn_active(session_id).await? {
             return self
                 .store
-                .enqueue_deferred_send(
+                .enqueue_queued_send(
                     session_id,
                     target_thread,
                     semantic_parent.as_ref(),
@@ -75,7 +75,7 @@ where
                 .await;
         }
 
-        let pending = self
+        let send = self
             .store
             .enqueue_send(
                 session_id,
@@ -94,8 +94,8 @@ where
         // and let `dispatch_ready_resumes` type it on the background tick once
         // `SessionStart(resume)` has marked the resume ready and it has settled.
         // The
-        // `pending_send` row above is already written (its thread/branch/quote
-        // semantics persisted), so only the physical keystroke is deferred. The
+        // `send` row above is already written (its thread/branch/quote
+        // semantics persisted), so only the physical keystroke is held. The
         // turn flag is still set, so anything composed before readiness defers
         // behind this first prompt rather than racing it into the pane. A freshly
         // resumed session has no active turn, so this readiness gate is the only
@@ -109,10 +109,10 @@ where
         {
             tracing::info!(
                 session_id = %session_id,
-                "send held until resume readiness (SessionStart=resume); keystroke deferred"
+                "send held until resume readiness (SessionStart=resume); keystroke held"
             );
             self.store.set_turn_active(session_id, true).await?;
-            return Ok(pending);
+            return Ok(send);
         }
 
         // If the keystrokes never reach the pane, the row we just wrote would
@@ -124,15 +124,15 @@ where
         // (the caller's actionable failure) rather than masking it with a store
         // error. We do *not* roll back the just-created branch child thread: an
         // empty, unnamed thread is harmless overlay data and may legitimately be
-        // reused by a retry, whereas the FIFO-blocking pending row is the actual
+        // reused by a retry, whereas the FIFO-blocking dispatched row is the actual
         // hazard this guard exists to clear.
         if let Err(dispatch_err) = self.tmux.send_line(pane, text).await {
-            let _ = self.store.cancel_send(pending.id).await;
+            let _ = self.store.cancel_send(send.id).await;
             return Err(dispatch_err);
         }
         // The send is on its way: mark the turn in flight so a following
         // branch/quoted send defers behind it instead of dispatching mid-turn.
         self.store.set_turn_active(session_id, true).await?;
-        Ok(pending)
+        Ok(send)
     }
 }

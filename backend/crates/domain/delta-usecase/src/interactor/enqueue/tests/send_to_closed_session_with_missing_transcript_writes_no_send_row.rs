@@ -2,13 +2,13 @@ use delta_model::SessionId;
 
 use crate::interactor::testing::*;
 
-/// A Send to a closed session whose transcript is gone fails before any pending
+/// A Send to a closed session whose transcript is gone fails before any send
 /// row is written: `ensure_open` resumes via `open_session`, which now refuses
 /// with `ResumeUnavailable`, so `enqueue_into_open` never runs. This is the
-/// fix for the "stuck waiting indicator" — without an optimistic pending row,
+/// fix for the "stuck waiting indicator" — without an optimistic send row,
 /// the UI has nothing to leave hanging.
 #[tokio::test]
-async fn send_to_closed_session_with_missing_transcript_writes_no_pending_row() {
+async fn send_to_closed_session_with_missing_transcript_writes_no_send_row() {
     use crate::error::Error;
 
     let ix = interactor();
@@ -33,11 +33,11 @@ async fn send_to_closed_session_with_missing_transcript_writes_no_pending_row() 
         "the failure propagates as ResumeUnavailable, got: {err:?}"
     );
 
-    // The key assertion: no optimistic pending row sits at the FIFO head waiting
+    // The key assertion: no optimistic send row sits at the FIFO head waiting
     // for a hook that will never fire.
     assert!(
-        ix.store().head_pending_send(&id).await.unwrap().is_none(),
-        "no pending send row was enqueued"
+        ix.store().head_dispatched_send(&id).await.unwrap().is_none(),
+        "no send row was enqueued"
     );
     assert!(
         ix.tmux_fake().sent.lock().unwrap().is_empty(),

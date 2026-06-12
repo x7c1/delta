@@ -238,7 +238,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
 
     // That first prompt started a turn; complete it with a Stop so the session
     // is idle before the next send. Otherwise the quoted send below would be
-    // deferred (held back behind the in-flight turn) rather than dispatched.
+    // queued (held back behind the in-flight turn) rather than dispatched.
     let (status, _) = post_json(
         &app,
         "/hooks/stop",
@@ -287,9 +287,9 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["send"]["text"], prompt);
-    assert_eq!(body["send"]["status"], "pending");
+    assert_eq!(body["send"]["status"], "dispatched");
     assert_eq!(body["send"]["thread_id"].as_i64(), Some(main_thread_id));
-    let pending_send_id = body["send"]["id"].as_i64().expect("pending send id");
+    let send_id = body["send"]["id"].as_i64().expect("dispatched send id");
     // The session was hook-registered (closed), so this send resumed it via
     // `claude --resume`. A resumed session holds its first prompt until its
     // `SessionStart(source=resume)` readiness hook arrives, so the keystroke has
@@ -430,7 +430,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     assert_eq!(tmux.sent.load(Ordering::SeqCst), 1);
 
     // The matched send id remained stable across the flow.
-    assert!(pending_send_id > 0);
+    assert!(send_id > 0);
 
     // 6. Close the session: the pane is torn down (here a no-op, since this
     //    external session never had a live pane) but the data is kept. It still
@@ -482,7 +482,7 @@ async fn new_session_send_spawns_and_defers_first_prompt() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["send"]["text"], "kick off a new conversation");
-    assert_eq!(body["send"]["status"], "pending");
+    assert_eq!(body["send"]["status"], "dispatched");
     assert_eq!(
         body["send"]["id"].as_i64(),
         Some(0),

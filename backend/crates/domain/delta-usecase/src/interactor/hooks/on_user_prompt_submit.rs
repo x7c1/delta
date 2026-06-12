@@ -25,7 +25,7 @@ where
     /// sessions register independently.
     ///
     /// The locator quote to inject as `additionalContext` is resolved *before*
-    /// syncing, by matching the prompt text against the queued `pending_send`
+    /// syncing, by matching the prompt text against the queued `send`
     /// (by text, not FIFO position). This is timing-independent: the quote is
     /// returned even when the user's transcript line has not been written yet.
     ///
@@ -61,7 +61,7 @@ where
         // or misfire external-input detection.
         let pending = self
             .store
-            .match_pending_send(&hook.session_id, hook.prompt.trim())
+            .match_dispatched_send(&hook.session_id, hook.prompt.trim())
             .await?;
         // Resolve the `additionalContext` note *before* syncing, so the current
         // user line is not yet ingested and `latest_user_thread` still reports
@@ -95,7 +95,7 @@ where
                 if let Some(uuid) = match_uuid_for_prompt(&new_messages, &hook.prompt) {
                     events.push(SessionEvent::TurnStarted {
                         session_id: hook.session_id.clone(),
-                        pending_send_id: pending.id,
+                        send_id: pending.id,
                         matched_uuid: uuid,
                     });
                 }

@@ -59,7 +59,7 @@ async fn session_end_for_resuming_session_reports_failed() {
     );
     assert!(
         ix.store()
-            .head_pending_send(&session_id)
+            .head_dispatched_send(&session_id)
             .await
             .unwrap()
             .is_none(),

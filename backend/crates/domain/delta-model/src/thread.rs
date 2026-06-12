@@ -40,6 +40,12 @@ pub struct Thread {
     pub title: String,
     pub parent_thread_id: Option<ThreadId>,
     /// The message this thread branches from, if any.
+    ///
+    /// Derived, not stored: the canonical home of the branch edge is
+    /// `Message::semantic_parent_uuid`. The store computes this from the
+    /// thread's first semantically parented message (or, before that message is
+    /// ingested, from the thread's recorded send), so a freshly created thread
+    /// reports `None` until its branch send is recorded.
     pub root_message_uuid: Option<MessageUuid>,
     /// ISO-8601 timestamp.
     pub created_at: String,

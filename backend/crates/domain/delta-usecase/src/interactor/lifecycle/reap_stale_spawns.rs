@@ -87,7 +87,7 @@ where
             // readiness) so it does not block the FIFO when the session is later
             // resumed again.
             if resuming.held_prompt.is_some() {
-                if let Some(head) = self.store.head_pending_send(&session_id).await? {
+                if let Some(head) = self.store.head_dispatched_send(&session_id).await? {
                     let _ = self.store.cancel_send(head.id).await;
                 }
                 let _ = self.store.set_turn_active(&session_id, false).await;

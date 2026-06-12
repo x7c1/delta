@@ -27,7 +27,7 @@ async fn pre_tool_use_records_request_without_notifying() {
     let recorded = g
         .permissions
         .iter()
-        .find(|r| r.tool_use_id == "toolu_01")
+        .find(|r| r.tool_use_id.as_deref() == Some("toolu_01"))
         .expect("the request is recorded");
     assert_eq!(recorded.tool_name, "Bash");
     assert_eq!(recorded.tool_input_json, r#"{"command":"ls"}"#);

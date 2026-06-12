@@ -1,4 +1,4 @@
-use delta_model::{PendingSend, SessionId};
+use delta_model::{Send, SessionId};
 
 use crate::error::Result;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
@@ -39,7 +39,7 @@ where
     pub(in crate::interactor) async fn thread_switch_context(
         &self,
         session_id: &SessionId,
-        pending: Option<&PendingSend>,
+        pending: Option<&Send>,
     ) -> Result<Option<String>> {
         // Case 1: external input — no queued send to attribute → inject nothing.
         let Some(pending) = pending else {
@@ -77,9 +77,10 @@ where
 
         // Case 3: thread switch / re-visit. Cite the target thread's root quote
         // so the re-focus survives even if the original binding scrolled out of
-        // context. `main` has no root quote, so it is cited by name only.
+        // context. Only branch threads (those with a parent) have a root quote;
+        // `main` has none, so it is cited by name only.
         let root_quote = match self.store.thread(cur).await? {
-            Some(thread) => thread.root_message_uuid.is_some().then_some(thread.title),
+            Some(thread) => thread.parent_thread_id.is_some().then_some(thread.title),
             None => None,
         };
         Ok(Some(frame_thread_switch_context(

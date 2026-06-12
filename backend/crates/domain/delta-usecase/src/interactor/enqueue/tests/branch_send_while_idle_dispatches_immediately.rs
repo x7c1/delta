@@ -1,4 +1,4 @@
-use delta_model::{MessageUuid, PendingSendStatus, SessionId};
+use delta_model::{MessageUuid, SendStatus, SessionId};
 
 use crate::interactor::testing::*;
 
@@ -16,12 +16,12 @@ async fn branch_send_while_idle_dispatches_immediately() {
     assert!(!ix.store().is_turn_active(&session).await.unwrap());
 
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let send = ix
         .enqueue_send(branch_off(main, &parent), "branch text", Some("quote"))
         .await
         .unwrap();
-    assert_eq!(pending.status, PendingSendStatus::Pending);
-    assert_ne!(pending.thread_id, main);
+    assert_eq!(send.status, SendStatus::Dispatched);
+    assert_ne!(send.thread_id, main);
     assert_eq!(
         ix.tmux_fake().sent.lock().unwrap().len(),
         1,

@@ -64,12 +64,12 @@ pub const RESUME_READY_DEADLINE: Duration = Duration::from_secs(30);
 pub const RESUME_DISPATCH_SETTLE: Duration = Duration::from_millis(200);
 
 /// The result of an idempotent [`OpenSessions::bind_pending_spawn`] that
-/// actually performed a bind, carrying the just-bound spawn's deferred first
-/// prompt so the caller can write its `pending_send` row now that the session
+/// actually performed a bind, carrying the just-bound spawn's held first
+/// prompt so the caller can write its `send` row now that the session
 /// id is known.
 #[derive(Debug, Clone)]
 pub struct BindOutcome {
-    /// The deferred first send held on the spawn, if it was a composer-initiated
+    /// The first send held on the spawn, if it was a composer-initiated
     /// New; `None` for a prompt-less plain spawn.
     pub first_prompt: Option<String>,
 }
@@ -108,9 +108,9 @@ pub struct PendingSpawn {
     /// bind time and is kept as informational data; it is no longer the match
     /// key (correlation is by [`Self::session_id`]).
     pub workdir: String,
-    /// The deferred first send, if this spawn was initiated by a composer send.
+    /// The held first send, if this spawn was initiated by a composer send.
     ///
-    /// The `pending_send` row cannot be written before the spawn binds (it
+    /// The `send` row cannot be written before the spawn binds (it
     /// references `session(id)`, which does not exist yet), so the text is held
     /// here and enqueued once the binding supplies the session id.
     pub first_prompt: Option<String>,
@@ -147,7 +147,7 @@ pub struct PendingSpawn {
 ///    the normal `send_line` path. By then the hook has returned and `claude`
 ///    is input-ready, so the keystroke submits.
 ///
-/// The `pending_send` row for that first prompt is written normally (its thread,
+/// The `send` row for that first prompt is written normally (its thread,
 /// branch, and locator-quote semantics are persisted up front) — only the
 /// physical keystroke is held.
 #[derive(Debug, Clone)]
@@ -235,14 +235,14 @@ impl OpenSessions {
         self.bound.insert(id, handle);
     }
 
-    /// Idempotently bind the pending spawn matching `id`, returning its deferred
+    /// Idempotently bind the pending spawn matching `id`, returning its held
     /// first prompt when it was bound by *this* call.
     ///
     /// This is the single, order-independent binding step shared by the two
     /// signals that can register a fresh spawn — `SessionStart(source=startup)`
     /// and the first `UserPromptSubmit`. Whichever arrives first moves the
     /// matching [`PendingSpawn`] `pending → bound[id]` and yields its
-    /// `first_prompt` (so the caller can write the deferred `pending_send`);
+    /// `first_prompt` (so the caller can write the held `send`);
     /// whichever arrives second finds no pending spawn for `id`, so it returns
     /// `None` and the already-bound session is left untouched. The boolean
     /// distinguishes the two outcomes for the caller:

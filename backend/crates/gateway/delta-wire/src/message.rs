@@ -58,7 +58,9 @@ pub struct WireMessage {
     pub content_text: Option<String>,
     /// The full ordered content blocks.
     pub content: Vec<WireContentBlock>,
-    /// ISO-8601 timestamp.
+    /// ISO-8601 timestamp; empty when the transcript line carried none. The
+    /// domain stores `None` for a missing timestamp, but the wire keeps the
+    /// pre-existing empty-string contract so the browser shape is unchanged.
     pub created_at: String,
 }
 
@@ -79,7 +81,7 @@ impl From<Message> for WireMessage {
                 .into_iter()
                 .map(WireContentBlock::from)
                 .collect(),
-            created_at: message.created_at,
+            created_at: message.created_at.unwrap_or_default(),
         }
     }
 }
@@ -105,7 +107,7 @@ mod tests {
             content: vec![ContentBlock::Text {
                 text: "hello".into(),
             }],
-            created_at: "2026-01-01T00:00:00Z".into(),
+            created_at: Some("2026-01-01T00:00:00Z".into()),
         };
         assert_eq!(
             serde_json::to_value(WireMessage::from(message)).unwrap(),

@@ -23,7 +23,7 @@ where
     /// attributing each to the right thread as it is ingested.
     ///
     /// Attribution is driven by matching a user line's trimmed text to a queued
-    /// `pending_send`, so it is robust regardless of which hook triggered the
+    /// `send`, so it is robust regardless of which hook triggered the
     /// sync or whether the line was present when `UserPromptSubmit` fired.
     /// Lines are processed in order while maintaining `carry_thread`, the thread
     /// of the current turn:
@@ -132,7 +132,7 @@ where
             // An interrupt marker is also a `role: user` line, but it belongs to
             // the turn the user just aborted, not a new human turn — so it too
             // inherits `carry_thread` and is excluded from `is_human_turn` (it
-            // must not run through `match_pending_send` nor reset to `main`).
+            // must not run through `match_dispatched_send` nor reset to `main`).
             let trimmed = content_text.as_deref().unwrap_or("").trim();
             let is_interrupt_marker = matches!(line.role, delta_model::Role::User)
                 && trimmed.starts_with(INTERRUPT_MARKER_PREFIX);
@@ -145,7 +145,7 @@ where
             // stuck pending send in the browser.
             //
             // It also ends the turn, so clear the in-flight flag. Dispatching any
-            // deferred send is left to the caller (which acts on the returned
+            // queued send is left to the caller (which acts on the returned
             // `TurnInterrupted` once this sync's lock is released), so no
             // keystrokes are sent from inside the ingestion path.
             if is_interrupt_marker {
@@ -156,7 +156,7 @@ where
             }
 
             let (thread_id, semantic_parent_uuid) = if is_human_turn {
-                match self.store.match_pending_send(&session.id, trimmed).await? {
+                match self.store.match_dispatched_send(&session.id, trimmed).await? {
                     Some(pending) => {
                         self.store.mark_send_matched(pending.id, &line.uuid).await?;
                         carry_thread = pending.thread_id;
@@ -192,7 +192,7 @@ where
                 seq: line.seq,
                 content_text,
                 content: line.content,
-                created_at: line.created_at.unwrap_or_default(),
+                created_at: line.created_at,
             });
         }
 

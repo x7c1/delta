@@ -21,7 +21,7 @@ where
     /// the caller can announce the transcript growth.
     ///
     /// **Scoped to open sessions only.** The late-line, interrupt, and
-    /// deferred-send releases this tail catches can only happen on a session
+    /// queued-send releases this tail catches can only happen on a session
     /// Delta is actively running, so it iterates the open-session registry
     /// (sessions with a live pane) rather than the whole store. This keeps the
     /// tail's cost proportional to the number of concurrently-open sessions
@@ -62,7 +62,7 @@ where
             };
             let (messages, resolved_events) = self.sync_transcript(&session).await?;
             // An interrupt ends the turn but fires no `Stop` hook, so the tail is
-            // where it is observed. Release any deferred send now that the
+            // where it is observed. Release any queued send now that the
             // session is idle — done here, after `sync_transcript` has returned
             // and dropped its lock, so dispatching sends no keystrokes from
             // inside the ingestion path.
@@ -74,7 +74,7 @@ where
                 groups.push(messages);
             }
             if interrupted {
-                self.dispatch_deferred_send(&session.id).await?;
+                self.dispatch_queued_send(&session.id).await?;
             }
         }
         Ok((groups, events))

@@ -1,4 +1,4 @@
-use delta_model::{MessageUuid, PendingSendStatus, SessionId};
+use delta_model::{MessageUuid, SendStatus, SessionId};
 
 use crate::interactor::context::{frame_branch_entry_context, frame_locator_context};
 use crate::interactor::testing::*;
@@ -51,7 +51,7 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
         "a queued send matched, so this is not external input"
     );
     // Still pending: nothing was matched yet.
-    let head = ix.store().head_pending_send(&session).await.unwrap();
+    let head = ix.store().head_dispatched_send(&session).await.unwrap();
     assert_eq!(head.map(|p| p.id), Some(pending.id));
 
     // Later (at Stop) BOTH the user line and the assistant reply arrive in one
@@ -93,7 +93,7 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
         .find(|s| s.id == pending.id)
         .cloned()
         .unwrap();
-    assert_eq!(send.status, PendingSendStatus::Matched);
+    assert_eq!(send.status, SendStatus::Matched);
     assert_eq!(send.matched_uuid, Some(MessageUuid::from("u-b")));
 
     // Neither leaked onto main.

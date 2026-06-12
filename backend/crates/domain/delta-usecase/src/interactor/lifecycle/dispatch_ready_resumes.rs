@@ -30,7 +30,7 @@ where
     /// [`RESUME_DISPATCH_SETTLE`], this drains it from the resuming map and, if a
     /// first prompt was held, types it into the resumed pane via the normal
     /// [`TmuxDriver::send_line`] path — the same path every other send takes. The
-    /// `pending_send` row for that prompt was already written (with its
+    /// `send` row for that prompt was already written (with its
     /// thread/branch/quote semantics) when the send was first enqueued; only the
     /// physical keystroke was held, so this completes a normal send.
     ///
@@ -77,7 +77,7 @@ where
                     error = %err,
                     "failed to dispatch the held resume first prompt; cancelling its pending send"
                 );
-                if let Some(head) = self.store.head_pending_send(&session_id).await? {
+                if let Some(head) = self.store.head_dispatched_send(&session_id).await? {
                     let _ = self.store.cancel_send(head.id).await;
                 }
                 let _ = self.store.set_turn_active(&session_id, false).await;

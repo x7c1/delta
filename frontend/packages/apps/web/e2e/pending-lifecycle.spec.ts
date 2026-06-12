@@ -29,7 +29,7 @@ test('the running indicator appears then clears as a turn completes', async ({
   await emitEvent(page, {
     kind: 'turn_started',
     session_id: SESSION_ID,
-    pending_send_id: 1,
+    send_id: 1,
     matched_uuid: null,
   });
   await expect(running).toBeVisible();
@@ -67,7 +67,7 @@ test('the running indicator clears when a turn is interrupted', async ({
   await emitEvent(page, {
     kind: 'turn_started',
     session_id: SESSION_ID,
-    pending_send_id: 1,
+    send_id: 1,
     matched_uuid: null,
   });
   await expect(running).toBeVisible();

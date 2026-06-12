@@ -1,6 +1,6 @@
 import type {
   Message,
-  PendingSend,
+  Send,
   Session,
   Thread,
 } from '@delta/wire-gen';
@@ -351,7 +351,7 @@ export interface MockStore {
     resumable?: boolean;
   }[];
   messagesByThread: Record<number, Message[]>;
-  sends: PendingSend[];
+  sends: Send[];
   nextThreadId: number;
   nextSendId: number;
 }

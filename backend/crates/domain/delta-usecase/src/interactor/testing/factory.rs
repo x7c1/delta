@@ -69,7 +69,7 @@ impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
     /// a `Stop`, so the registration turn completes and `turn_active` is clear.
     /// A bare `UserPromptSubmit` marks the turn in flight, so tests that go on to
     /// dispatch a branch/quoted send must start from an idle session — otherwise
-    /// that send would be deferred behind the still-open registration turn.
+    /// that send would be queued behind the still-open registration turn.
     ///
     /// It also binds a live, ready pane for `sess-1`, so a following send
     /// dispatches immediately on the normal path rather than resuming the session

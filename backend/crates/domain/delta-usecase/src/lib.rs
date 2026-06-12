@@ -35,4 +35,4 @@ pub use session_page::{SessionPage, SessionPageCursor};
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for
 // these identifiers and value types.
-pub use delta_model::{Message, MessageUuid, PendingSend, Session, SessionId, Thread, ThreadId};
+pub use delta_model::{Message, MessageUuid, Send, Session, SessionId, Thread, ThreadId};

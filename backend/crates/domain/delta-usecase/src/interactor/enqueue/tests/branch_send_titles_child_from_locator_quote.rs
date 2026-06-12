@@ -15,7 +15,7 @@ async fn branch_send_titles_child_from_locator_quote() {
         .unwrap();
 
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let send = ix
         .enqueue_send(
             branch_off(main, &parent),
             "branch text",
@@ -23,17 +23,17 @@ async fn branch_send_titles_child_from_locator_quote() {
         )
         .await
         .unwrap();
-    let child = ix.store().thread(pending.thread_id).await.unwrap().unwrap();
+    let child = ix.store().thread(send.thread_id).await.unwrap().unwrap();
     assert_eq!(child.title, "the quoted source line");
 
     // With no quote, the title falls back to "untitled".
-    let pending2 = ix
+    let send2 = ix
         .enqueue_send(branch_off(main, &parent), "branch text 2", None)
         .await
         .unwrap();
     let child2 = ix
         .store()
-        .thread(pending2.thread_id)
+        .thread(send2.thread_id)
         .await
         .unwrap()
         .unwrap();

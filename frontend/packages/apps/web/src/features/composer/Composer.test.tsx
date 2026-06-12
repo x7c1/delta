@@ -369,7 +369,7 @@ describe('Composer', () => {
               semantic_parent_uuid: null,
               text: 'irrelevant',
               locator_quote: null,
-              status: 'pending',
+              status: 'dispatched',
               matched_uuid: null,
               created_at: '2026-01-01T00:00:00Z',
             },
