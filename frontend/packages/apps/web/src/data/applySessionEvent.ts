@@ -3,8 +3,10 @@ import type { SessionId, ThreadId } from '@delta/model';
 import type { SessionEvent } from '@delta/wire-gen';
 import {
   invalidateSessions,
+  invalidateSessionSends,
   invalidateSessionThreads,
   invalidateThreadMessages,
+  removeSessionSends,
 } from '@delta/api-client';
 import { useLiveStore } from '../store/liveStore';
 
@@ -14,19 +16,21 @@ import { useLiveStore } from '../store/liveStore';
  * - **Query cache** (`@tanstack/react-query`): incremental REST-resource growth.
  *   The `/ws` events do not carry message bodies, so we patch the cache by
  *   invalidating the affected `messages`/`session-threads` queries, which
- *   refetches the freshly-ingested transcript lines. Lifecycle events
- *   (`session_registered`/`session_opened`/`session_closed`) invalidate the
- *   session list so a newly-spawned, resumed, or closed session's presence and
- *   open flag stay in sync.
+ *   refetches the freshly-ingested transcript lines. Send-affecting events
+ *   (the turn lifecycle, transcript growth, a close) also invalidate the
+ *   session's open-send list — the server-side truth behind the pending strip.
+ *   Lifecycle events (`session_registered`/`session_opened`/`session_closed`)
+ *   invalidate the session list so a newly-spawned, resumed, or closed
+ *   session's presence and open flag stay in sync.
  * - **Live store** (Zustand): ephemeral UI signals that are not REST resources
- *   — the pending-send FIFO, permission notice, unread badges, external input,
- *   and the per-session resuming marker.
+ *   — turn tracking, the spawn registry, permission notices, unread badges,
+ *   external input, and the per-session resuming marker.
  *
  * Transcript/turn events are scoped to the focused session: `activeThreadId`
  * selects which transcript to refetch and which thread to badge, and
  * `focusedSessionId` selects whose thread tree to refresh. Events for a
- * non-focused session still refresh the session list but never touch the
- * focused transcript.
+ * non-focused session still refresh the session list and that session's
+ * open-send list, but never touch the focused transcript.
  */
 export function applySessionEvent(
   event: SessionEvent,
@@ -36,8 +40,9 @@ export function applySessionEvent(
 ): void {
   const store = useLiveStore.getState();
 
-  // Session-scoped ephemeral signals (pending FIFO, permission, resuming) always
-  // go to the store; focus-dependent signals are handled below under a guard.
+  // Session-scoped ephemeral signals (turn tracking, spawn registry,
+  // permission) always go to the store; focus-dependent signals are handled
+  // below under a guard.
   store.applyEvent(event);
 
   const isFocused = focusedSessionId !== null && event.session_id === focusedSessionId;
@@ -52,6 +57,10 @@ export function applySessionEvent(
     case 'turn_started':
     case 'turn_completed':
     case 'turn_interrupted':
+      // The send queue moved (a send matched, or the turn that drains it
+      // ended); refetch the session's open-send list regardless of focus so a
+      // background session's pending strip is correct the moment it is viewed.
+      invalidateSessionSends(queryClient, event.session_id);
       // Transcript grew on the focused session: refetch the active thread. An
       // interrupt also appends the `[Request interrupted by user]` marker line,
       // so it refetches the same way a completed turn does.
@@ -75,16 +84,15 @@ export function applySessionEvent(
       break;
     case 'transcript_updated':
       // The continuous tail ingested new lines. Pure refetch: invalidate every
-      // affected thread plus the focused active one, with no FIFO/unread change.
+      // affected thread plus the focused active one, with no store change.
       //
       // New lines also move the session's last activity — and with it the
       // session list's most-recently-active ordering — so refresh the list
-      // too. In particular, a just-spawned session whose registration refetch
-      // raced ahead of its first ingested line carries no activity stamp yet
-      // and may not sort to the head; without this refresh nothing re-orders
-      // the list afterwards, and the new-session flow (which detects its spawn
-      // as "a fresh head session") would never focus it.
+      // too. And an ingested user line is what matches a dispatched send
+      // (terminal — it leaves the open list), so the session's open-send list
+      // refetches here as well.
       invalidateSessions(queryClient);
+      invalidateSessionSends(queryClient, event.session_id);
       for (const threadId of event.thread_ids) {
         invalidateThreadMessages(queryClient, threadId);
       }
@@ -106,6 +114,11 @@ export function applySessionEvent(
       // list so its presence and open flag update, and refresh the focused
       // session's threads if it is the one affected.
       invalidateSessions(queryClient);
+      if (event.kind === 'session_closed') {
+        // Closing cancels/strands nothing silently: refetch so the pending
+        // strip reflects whatever the server did with the queue.
+        invalidateSessionSends(queryClient, event.session_id);
+      }
       if (isFocused) {
         refreshFocusedThreads();
       }
@@ -115,11 +128,12 @@ export function applySessionEvent(
       // Pure UI notice (set/cleared); already handled by the store.
       break;
     case 'spawn_failed':
-      // A freshly-spawned session never bound. Mark the optimistic new-session
-      // chip `failed` so it stops looking stuck and offers Retry / Dismiss. No
-      // session-list refetch: the spawn never registered, so the list never
-      // gained (and so cannot lose) a row for it.
-      store.failSpawn();
+      // A freshly-spawned session never bound; the server reaped its row (the
+      // store flips the tracked spawn to a Retry/Dismiss chip). Drop the
+      // session's cached open sends — the row is gone, so a refetch would only
+      // 404. No session-list refetch: a message-less spawning session was
+      // never listed, so the list cannot lose a row for it.
+      removeSessionSends(queryClient, event.session_id);
       break;
   }
 }

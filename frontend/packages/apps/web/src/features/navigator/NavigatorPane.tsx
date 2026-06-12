@@ -125,8 +125,8 @@ export function NavigatorPane({
   // badge on each session's row so a request on a non-focused session is still
   // discoverable.
   const permissions = useLiveStore((state) => state.permission);
-  const hasInProgress = useLiveStore((state) =>
-    state.pending.some((item) => item.status === 'in_progress'),
+  const hasInProgress = useLiveStore(
+    (state) => Object.keys(state.activeTurns).length > 0,
   );
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);

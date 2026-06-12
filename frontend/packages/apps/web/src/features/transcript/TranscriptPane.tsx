@@ -12,13 +12,14 @@ import { useThreadMessagesQuery } from '@delta/api-client';
 import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
-import {
-  NEW_SESSION_DRAFT_KEY,
-  useComposerStore,
-} from '../../store/composerStore';
+import { useComposerStore } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
 import { PendingQueue } from '../composer/PendingQueue';
+import {
+  usePendingSends,
+  type PendingSurface,
+} from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { MessageItem } from './MessageItem';
 import { childThreadsByMessage } from './branches';
@@ -114,16 +115,21 @@ export function TranscriptPane({
     null,
   );
 
-  // The key the pending queue renders under for this view.
-  const pendingThreadId: ThreadId | null = newSession
-    ? NEW_SESSION_DRAFT_KEY
-    : activeThread?.id ?? null;
-  const pendingCount = useLiveStore((state) =>
-    pendingThreadId === null
-      ? 0
-      : state.pending.filter((item) => item.threadId === pendingThreadId)
-          .length,
-  );
+  // The surface the pending strip renders for in this view: the new-session
+  // screen, or the active thread. The merged rows (server open sends plus the
+  // thin client complements) drive both the strip and the count used by
+  // stick-to-bottom / the empty-state gate.
+  const pendingSurface: PendingSurface | null = newSession
+    ? { kind: 'new-session' }
+    : activeThread
+      ? {
+          kind: 'thread',
+          sessionId: activeThread.session_id,
+          threadId: activeThread.id,
+        }
+      : null;
+  const pendingEntries = usePendingSends(pendingSurface);
+  const pendingCount = pendingEntries.length;
 
   const messagesQuery = useThreadMessagesQuery(
     client,
@@ -486,7 +492,7 @@ export function TranscriptPane({
             renders nothing when no directory is selected, so there is no button
             to (re)open the picker from here — that is done via "New". */}
         {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
-        <PendingQueue threadId={pendingThreadId} />
+        <PendingQueue entries={pendingEntries} />
         {composer}
       </div>
     );

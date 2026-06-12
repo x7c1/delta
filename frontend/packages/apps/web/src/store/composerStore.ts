@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import type { MessageUuid, ThreadId } from '@delta/model';
 
 /**
- * Stable draft / pending-queue key for the new-session composer state, which has
- * no real thread id yet (a fresh spawn has no thread until its first hook
- * binds). Negative so it never collides with a server-issued thread id.
+ * Stable DRAFT key for the new-session composer state, which has no real
+ * thread id yet. Negative so it never collides with a server-issued thread id.
+ * Used only for the pre-submit draft text (the UI compose state) — pending
+ * sends never key on it: they carry the real ids the server returns.
  */
 export const NEW_SESSION_DRAFT_KEY = -1 as ThreadId;
 

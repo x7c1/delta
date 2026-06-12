@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   useSessionsQuery,
   useSessionThreadsQuery,
@@ -63,9 +63,8 @@ export function WorkspaceScreen() {
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
-  const bindNewSessionPending = useLiveStore(
-    (state) => state.bindNewSessionPending,
-  );
+  const spawns = useLiveStore((state) => state.spawns);
+  const clearSpawn = useLiveStore((state) => state.clearSpawn);
 
   const isLargeScreen = useMediaQuery('(min-width: 1024px)');
 
@@ -83,21 +82,40 @@ export function WorkspaceScreen() {
     [threadsQuery.data],
   );
 
-  // Snapshot the session ids present when the new-session state was entered, so
-  // the registration of the just-spawned session can be detected as "a new id
-  // that was not in the baseline" and focused automatically.
-  const newSessionBaselineRef = useRef<Set<string> | null>(null);
+  // Hand a tracked spawn over to normal navigation once it registers. The
+  // `POST /api/sends` response named the spawned session's real id, so when
+  // that id appears in the refetched session list the spawn is over: focus it
+  // directly — but only when the user is still waiting on the new-session
+  // screen (they may have navigated elsewhere meanwhile) — and stop tracking
+  // it (the pending chip continues from the session's open-send list).
   useEffect(() => {
-    if (isNewSessionFocus) {
-      if (newSessionBaselineRef.current === null) {
-        newSessionBaselineRef.current = new Set(
-          sessions.map((item) => item.session.id),
-        );
-      }
-    } else {
-      newSessionBaselineRef.current = null;
+    if (!sessionsQuery.isSuccess) {
+      return;
     }
-  }, [isNewSessionFocus, sessions]);
+    const listed = spawns.filter(
+      (spawn) =>
+        spawn.status === 'spawning' &&
+        sessions.some((item) => item.session.id === spawn.sessionId),
+    );
+    if (listed.length === 0) {
+      return;
+    }
+    if (isNewSessionFocus) {
+      // Several spawns can only pile up via quick Retry cycles; the newest is
+      // the one the user is waiting on.
+      setFocusedSession(listed[listed.length - 1].sessionId);
+    }
+    for (const spawn of listed) {
+      clearSpawn(spawn.sessionId);
+    }
+  }, [
+    sessionsQuery.isSuccess,
+    sessions,
+    spawns,
+    isNewSessionFocus,
+    setFocusedSession,
+    clearSpawn,
+  ]);
 
   // Resolve focus once the session list loads.
   useEffect(() => {
@@ -105,23 +123,9 @@ export function WorkspaceScreen() {
       return;
     }
     if (isNewSessionFocus) {
-      // The new-session send spawned a session; when it registers, the sessions
-      // query is invalidated and the fresh session — being the most-recently
-      // active — refetches to the head of the list. So the spawn is "the head
-      // session, absent from the baseline". We must check only the head, not the
-      // whole list: while in the new-session state the windowed list may keep
-      // paginating in *older* sessions (they land at the tail), and those are
-      // not the spawn — focusing one would wrongly drop the new-session state.
-      const baseline = newSessionBaselineRef.current;
-      const head = sessions[0];
-      if (baseline && head && !baseline.has(head.session.id)) {
-        // The spawn just registered. Re-key its optimistic pending send onto the
-        // real session and main thread before focusing it, so the "waiting"
-        // strip stays visible through the first turn instead of vanishing the
-        // moment focus leaves the new-session state for the real thread.
-        bindNewSessionPending(head.session.id, head.main_thread_id);
-        setFocusedSession(head.session.id);
-      }
+      // The new-session screen keeps focus until its spawn registers (handled
+      // above) or the user navigates away; the cold-start reconciliation below
+      // must not stomp it.
       return;
     }
     const stillExists =
@@ -150,7 +154,6 @@ export function WorkspaceScreen() {
     focusedSessionId,
     isNewSessionFocus,
     setFocusedSession,
-    bindNewSessionPending,
   ]);
 
   // Reconcile the active thread against the focused session's threads. Default

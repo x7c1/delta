@@ -67,7 +67,9 @@ describe('TranscriptPane', () => {
       preNewSessionFocus: null,
     });
     useLiveStore.setState({
-      pending: [],
+      sending: [],
+      localSends: {},
+      spawns: [],
       permission: {},
       externalInput: {},
       resumeUnavailable: {},
@@ -278,7 +280,6 @@ describe('TranscriptPane', () => {
     // branch would just fail: the input is removed entirely and the session is a
     // read-only viewer with a pinned notice. The history stays readable.
     useLiveStore.setState({
-      pending: [],
       externalInput: {},
       resumeUnavailable: { [SESSION_ID]: true },
     });
@@ -300,7 +301,6 @@ describe('TranscriptPane', () => {
 
   it('shows the external-input notice for the focused thread (pinned above the input)', async () => {
     useLiveStore.setState({
-      pending: [],
       resumeUnavailable: {},
       externalInput: {
         [SESSION_ID]: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
@@ -318,7 +318,6 @@ describe('TranscriptPane', () => {
 
   it('dismisses the external-input notice via its Dismiss button', async () => {
     useLiveStore.setState({
-      pending: [],
       resumeUnavailable: {},
       externalInput: {
         [SESSION_ID]: { threadId: MAIN_THREAD_ID, prompt: 'typed in the pane', at: 0 },
@@ -343,7 +342,6 @@ describe('TranscriptPane', () => {
     // an interactive dialog actually appears, so it is surfaced directly with no
     // debounce.
     useLiveStore.setState({
-      pending: [],
       externalInput: {},
       resumeUnavailable: {},
       permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
@@ -357,7 +355,6 @@ describe('TranscriptPane', () => {
 
   it('clears the permission notice when the request resolves', async () => {
     useLiveStore.setState({
-      pending: [],
       externalInput: {},
       resumeUnavailable: {},
       permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },

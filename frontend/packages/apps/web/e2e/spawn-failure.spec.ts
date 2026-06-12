@@ -1,13 +1,15 @@
 import { test, expect } from '@playwright/test';
+import { mockSpawnSessionId } from '@delta/api-mocks';
 import { emitEvent, useManualEventControl } from './support/app';
 
 /**
  * A new session whose launch never comes up surfaces a recoverable failure.
  *
- * The user starts a new session (the optimistic "pending" chip appears), then the
- * backend's watchdog reaps the spawn that never bound and emits `spawn_failed`.
- * The chip must stop looking stuck: it turns into a distinct error row offering
- * Retry and Dismiss. Dismiss clears it.
+ * The user starts a new session (the pending chip appears). The session row is
+ * created eagerly, so `POST /api/sends` returned its real id; the backend's
+ * watchdog then reaps the spawn that never bound and emits `spawn_failed`
+ * carrying that same id. The chip must stop looking stuck: it turns into a
+ * distinct error row offering Retry and Dismiss. Dismiss clears it.
  */
 test('a failed spawn turns the pending chip into a Retry / Dismiss error row', async ({
   page,
@@ -28,12 +30,12 @@ test('a failed spawn turns the pending chip into a Retry / Dismiss error row', a
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
 
-  // The spawn never bound; the backend reaps it and emits spawn_failed. The
-  // event's ids cannot be correlated to the still-unbound pending, so the oldest
-  // unbound new-session pending is the one marked failed.
+  // The spawn never bound; the backend reaps it and emits spawn_failed with
+  // the REAL session id the POST response carried (the mock mints
+  // deterministic spawn ids, so the first spawn's id is known here).
   await emitEvent(page, {
     kind: 'spawn_failed',
-    session_id: 'sess-never-bound',
+    session_id: mockSpawnSessionId(1),
     pane_token: 'pane-never-bound',
   });
 

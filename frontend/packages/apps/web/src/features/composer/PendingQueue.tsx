@@ -1,47 +1,73 @@
-import type { ThreadId } from '@delta/model';
+import type { ReactNode } from 'react';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
-import { useLiveStore, type PendingItem } from '../../store/liveStore';
-import { NEW_SESSION_DRAFT_KEY } from '../../store/composerStore';
+import { useLiveStore } from '../../store/liveStore';
 import { useNewSessionSend } from './useNewSessionSend';
+import type { PendingEntry } from './usePendingSends';
 
 export interface PendingQueueProps {
-  /** The thread whose pending sends to show, or null to render nothing. */
-  threadId: ThreadId | null;
-}
-
-const STATUS_LABEL: Record<PendingItem['status'], string> = {
-  queued: 'queued',
-  in_progress: 'in progress',
-  done: 'done',
-  failed: 'failed',
-};
-
-/** A failed-spawn send keys off the new-session sentinel thread and can be retried. */
-function isRetriableSpawn(item: PendingItem): boolean {
-  return item.status === 'failed' && item.threadId === NEW_SESSION_DRAFT_KEY;
+  /** The merged pending rows for the active surface (see `usePendingSends`). */
+  entries: PendingEntry[];
 }
 
 /**
- * Makes the FIFO serialization explicit: "N waiting → in progress → done".
- * Renders the optimistic pending sends for the active thread in submit order. A
- * `failed` send (e.g. a new-session spawn that never came up) renders a distinct
- * error row with Retry / Dismiss so it stops looking stuck and can be recovered.
+ * The pending-send strip above the composer, a view over the server's
+ * open-send list plus the thin client-side complements (see `usePendingSends`):
+ *
+ * - a `queued` send is parked server-side and dispatches when the session goes
+ *   idle — labelled so it reads as deliberate waiting, not a failure (queued
+ *   sends used to look stuck and provoked duplicate resubmits);
+ * - a `dispatched` send and an in-flight submit show a spinner (on its way);
+ * - a send whose turn is running keeps an in-progress spinner until the
+ *   turn-end event lands;
+ * - a rejected submit or a reaped spawn renders a distinct error row with
+ *   Dismiss (and Retry for a new-session launch) so it is recoverable.
  */
-export function PendingQueue({ threadId }: PendingQueueProps) {
-  const allPending = useLiveStore((state) => state.pending);
-  const removePending = useLiveStore((state) => state.removePending);
+export function PendingQueue({ entries }: PendingQueueProps) {
+  const removeSending = useLiveStore((state) => state.removeSending);
+  const clearSpawn = useLiveStore((state) => state.clearSpawn);
   const retrySpawn = useNewSessionSend();
 
-  const pending =
-    threadId === null
-      ? []
-      : allPending.filter((item) => item.threadId === threadId);
-
-  if (pending.length === 0) {
+  if (entries.length === 0) {
     return null;
   }
 
-  const waiting = pending.filter((item) => item.status === 'queued').length;
+  // Sends parked server-side until the session is idle.
+  const waiting = entries.filter(
+    (entry) => entry.kind === 'server' && entry.send.status === 'queued',
+  ).length;
+
+  const failureRow = (
+    key: string,
+    text: string,
+    message: string,
+    actions: ReactNode,
+  ) => (
+    <li
+      key={key}
+      className="space-y-1 rounded border border-rose-200 bg-rose-50 px-2 py-1.5"
+      data-testid="pending-item"
+    >
+      <div className="flex items-start gap-2">
+        <Badge className="shrink-0" tone="warning">
+          failed
+        </Badge>
+        <span className="min-w-0 flex-1 truncate text-slate-700">{text}</span>
+      </div>
+      <p className="text-rose-700">{message}</p>
+      <div className="flex justify-end gap-2">{actions}</div>
+    </li>
+  );
+
+  const sendRow = (key: string, text: string, status: ReactNode) => (
+    <li
+      key={key}
+      className="flex items-center justify-between gap-2"
+      data-testid="pending-item"
+    >
+      <span className="min-w-0 flex-1 truncate text-slate-700">{text}</span>
+      {status}
+    </li>
+  );
 
   return (
     <div className="space-y-1 rounded border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs">
@@ -50,72 +76,105 @@ export function PendingQueue({ threadId }: PendingQueueProps) {
         {waiting > 0 && <Badge tone="warning">{waiting} waiting</Badge>}
       </div>
       <ul className="space-y-1">
-        {pending.map((item) =>
-          item.status === 'failed' ? (
-            <li
-              key={item.localId}
-              className="space-y-1 rounded border border-rose-200 bg-rose-50 px-2 py-1.5"
-              data-testid="pending-item"
-            >
-              <div className="flex items-start gap-2">
-                <Badge className="shrink-0" tone="warning">
-                  failed
-                </Badge>
-                <span className="min-w-0 flex-1 truncate text-slate-700">
-                  {item.text}
-                </span>
-              </div>
-              <p className="text-rose-700">
-                The session failed to start.
-                {isRetriableSpawn(item) ? ' Retry or dismiss it.' : ''}
-              </p>
-              <div className="flex justify-end gap-2">
-                {isRetriableSpawn(item) && (
+        {entries.map((entry) => {
+          switch (entry.kind) {
+            case 'server':
+              return entry.send.status === 'queued'
+                ? sendRow(
+                    entry.key,
+                    entry.send.text,
+                    // Parked on purpose: the server holds it until the
+                    // session's current turn ends, then dispatches it.
+                    <Badge className="shrink-0" tone="neutral">
+                      queued — sends when idle
+                    </Badge>,
+                  )
+                : sendRow(
+                    entry.key,
+                    entry.send.text,
+                    <Spinner className="shrink-0" label="sending" />,
+                  );
+            case 'local':
+              // Accepted and already matched into the transcript; its turn is
+              // still running.
+              return sendRow(
+                entry.key,
+                entry.send.text,
+                <Spinner className="shrink-0" label="in progress" />,
+              );
+            case 'sending':
+              if (entry.item.status === 'failed') {
+                const target = entry.item.target;
+                return failureRow(
+                  entry.key,
+                  entry.item.text,
+                  target.kind === 'new-session'
+                    ? 'The session failed to start. Retry or dismiss it.'
+                    : 'The message could not be sent.',
+                  <>
+                    {target.kind === 'new-session' && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          // Re-attempt the identical launch (same text and
+                          // chosen directory), then drop the failed chip so
+                          // only the fresh attempt shows.
+                          retrySpawn({
+                            text: entry.item.text,
+                            workdir: target.workdir,
+                          });
+                          removeSending(entry.item.id);
+                        }}
+                      >
+                        Retry
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => removeSending(entry.item.id)}
+                    >
+                      Dismiss
+                    </Button>
+                  </>,
+                );
+              }
+              return sendRow(
+                entry.key,
+                entry.item.text,
+                <Spinner className="shrink-0" label="sending" />,
+              );
+            case 'spawn-failed':
+              return failureRow(
+                entry.key,
+                entry.spawn.text,
+                'The session failed to start. Retry or dismiss it.',
+                <>
                   <Button
                     size="sm"
                     variant="secondary"
                     onClick={() => {
-                      // Re-attempt the identical new-session launch (same text and
-                      // chosen directory), then drop the failed chip so the FIFO
-                      // shows only the fresh attempt.
-                      retrySpawn({ text: item.text, workdir: item.workdir ?? null });
-                      removePending(item.localId);
+                      retrySpawn({
+                        text: entry.spawn.text,
+                        workdir: entry.spawn.workdir,
+                      });
+                      clearSpawn(entry.spawn.sessionId);
                     }}
                   >
                     Retry
                   </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => removePending(item.localId)}
-                >
-                  Dismiss
-                </Button>
-              </div>
-            </li>
-          ) : (
-            <li
-              key={item.localId}
-              className="flex items-center justify-between gap-2"
-              data-testid="pending-item"
-            >
-              <span className="min-w-0 flex-1 truncate text-slate-700">
-                {item.text}
-              </span>
-              {item.status === 'in_progress' ? (
-                <Spinner
-                  className="shrink-0"
-                  label={STATUS_LABEL[item.status]}
-                />
-              ) : (
-                <Badge className="shrink-0" tone="neutral">
-                  {STATUS_LABEL[item.status]}
-                </Badge>
-              )}
-            </li>
-          ),
-        )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => clearSpawn(entry.spawn.sessionId)}
+                  >
+                    Dismiss
+                  </Button>
+                </>,
+              );
+          }
+        })}
       </ul>
     </div>
   );
