@@ -125,6 +125,36 @@ describe('ApiClient', () => {
     );
   });
 
+  it('fetches a session’s open sends by id', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        sends: [
+          {
+            id: 7,
+            session_id: 'sess-1',
+            thread_id: 3,
+            semantic_parent_uuid: null,
+            text: 'hi',
+            locator_quote: null,
+            status: 'queued',
+            matched_uuid: null,
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getSessionSends('sess-1');
+
+    expect(result.sends).toHaveLength(1);
+    expect(result.sends[0].status).toBe('queued');
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/sessions/sess-1/sends',
+      undefined,
+    );
+  });
+
   it('posts a thread-targeted send and returns the pending send', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse(

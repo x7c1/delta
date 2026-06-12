@@ -57,7 +57,9 @@ describe('Composer', () => {
   beforeEach(() => {
     useNavStore.setState({ activeThreadId: MAIN_THREAD_ID });
     useLiveStore.setState({
-      pending: [],
+      sending: [],
+      localSends: {},
+      spawns: [],
       externalInput: {},
       unread: {},
       resumeUnavailable: {},
@@ -101,10 +103,10 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'plain message' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // The optimistic FIFO entry confirms the send fired; the active thread must
-    // stay on main.
+    // The accepted send is tracked locally (chip continuity through its turn);
+    // the active thread must stay on main.
     await waitFor(() => {
-      expect(useLiveStore.getState().pending.length).toBe(1);
+      expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
     });
     expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
   });
@@ -132,11 +134,13 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'resume please' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // A resume send queues optimistically against the active thread (here main).
+    // A resume send is accepted and tracked against the active thread (main).
     await waitFor(() => {
-      expect(useLiveStore.getState().pending.length).toBe(1);
+      expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
     });
-    expect(useLiveStore.getState().pending[0]?.threadId).toBe(MAIN_THREAD_ID);
+    expect(Object.values(useLiveStore.getState().localSends)[0]?.threadId).toBe(
+      MAIN_THREAD_ID,
+    );
   });
 
   it('resumes a closed session onto the active SUB-thread, not main', async () => {
@@ -167,9 +171,11 @@ describe('Composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(useLiveStore.getState().pending.length).toBe(1);
+      expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
     });
-    expect(useLiveStore.getState().pending[0]?.threadId).toBe(BRANCH_THREAD_ID);
+    expect(Object.values(useLiveStore.getState().localSends)[0]?.threadId).toBe(
+      BRANCH_THREAD_ID,
+    );
   });
 
   it('branches from a closed (read-only) session, drilling into the new child', async () => {
@@ -243,10 +249,10 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'resume please' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // The optimistic entry is marked failed when the resume request errors.
+    // The submit chip is marked failed when the resume request errors.
     await waitFor(() => {
-      const pending = useLiveStore.getState().pending;
-      expect(pending[0]?.status).toBe('failed');
+      const sending = useLiveStore.getState().sending;
+      expect(sending[0]?.status).toBe('failed');
     });
   });
 
@@ -293,7 +299,7 @@ describe('Composer', () => {
     });
     // No lingering chip: a resume-unavailable send is removed outright, not
     // marked failed.
-    expect(useLiveStore.getState().pending).toHaveLength(0);
+    expect(useLiveStore.getState().sending).toHaveLength(0);
   });
 
   it('targets a new session when in new-session mode', async () => {
@@ -315,12 +321,19 @@ describe('Composer', () => {
     fireEvent.change(textarea, { target: { value: 'start fresh' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
-    // The optimistic send is enqueued; the synthetic id:0 attaches on success.
+    // The accepted spawn is tracked under the REAL ids the server returned, so
+    // the workspace can focus the new session directly and the chip survives
+    // through the first turn.
     await waitFor(() => {
-      const pending = useLiveStore.getState().pending;
-      expect(pending.length).toBe(1);
-      expect(pending[0].text).toBe('start fresh');
+      const spawns = useLiveStore.getState().spawns;
+      expect(spawns).toHaveLength(1);
+      expect(spawns[0].text).toBe('start fresh');
+      expect(spawns[0].sessionId).not.toBe('');
+      expect(spawns[0].status).toBe('spawning');
     });
+    const locals = Object.values(useLiveStore.getState().localSends);
+    expect(locals).toHaveLength(1);
+    expect(locals[0].text).toBe('start fresh');
   });
 
   it('disables Send for a new session until a workdir is selected', async () => {

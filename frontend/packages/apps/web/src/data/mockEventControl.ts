@@ -1,6 +1,7 @@
 import type { SessionEvent } from '@delta/wire-gen';
 import {
   FakeEventSource,
+  mockApi,
   type FakeEventSourceOptions,
 } from '@delta/api-mocks';
 
@@ -69,6 +70,13 @@ export function createMockEventSource(): FakeEventSource {
   }
 
   const source = new FakeEventSource(options);
+  // Mirror every event into the shared mock REST store BEFORE the app's own
+  // subscriber sees it (listeners fire in subscription order, and this one is
+  // registered first): the app reacts to events by refetching, and the
+  // refetch must observe the state the event implies — e.g. `turn_completed`
+  // resolves the session's open sends, exactly as the real backend's
+  // ingestion would have during the turn.
+  source.onEvent((event) => mockApi.applyEvent(event));
   if (typeof window !== 'undefined') {
     window[MOCK_EVENT_SOURCE_KEY] = source;
   }

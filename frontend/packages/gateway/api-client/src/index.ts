@@ -23,6 +23,7 @@ export { queryKeys } from './query-keys';
 export {
   useSessionsQuery,
   useSessionThreadsQuery,
+  useSessionSendsQuery,
   useNewSessionMutation,
   useOpenSessionMutation,
   useCloseSessionMutation,
@@ -34,7 +35,10 @@ export {
 } from './query-hooks';
 export {
   appendMessage,
+  appendSessionSend,
   invalidateSessions,
   invalidateSessionThreads,
+  invalidateSessionSends,
   invalidateThreadMessages,
+  removeSessionSends,
 } from './cache';

@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
-import type { Message, MessagesResponse } from '@delta/wire-gen';
+import type { Message, MessagesResponse, Send, SendsResponse } from '@delta/wire-gen';
 import { queryKeys } from './query-keys';
 
 /**
@@ -61,4 +61,49 @@ export function invalidateThreadMessages(
   void queryClient.invalidateQueries({
     queryKey: queryKeys.messages(threadId),
   });
+}
+
+/** Mark a single session's open-send list stale so it refetches. */
+export function invalidateSessionSends(
+  queryClient: QueryClient,
+  sessionId: SessionId,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.sessionSends(sessionId),
+  });
+}
+
+/**
+ * Insert a just-accepted send into its session's cached open-send list (or
+ * create the cache entry), de-duplicating by id and keeping submit (id) order.
+ * Applied from the `POST /api/sends` response so the chip is render-ready the
+ * instant any view mounts the session's send query — no fetch gap — and the
+ * follow-up invalidation reconciles against the server.
+ */
+export function appendSessionSend(
+  queryClient: QueryClient,
+  sessionId: SessionId,
+  send: Send,
+): void {
+  queryClient.setQueryData<SendsResponse>(
+    queryKeys.sessionSends(sessionId),
+    (previous) => {
+      const withoutDup = (previous?.sends ?? []).filter(
+        (existing) => existing.id !== send.id,
+      );
+      return { sends: [...withoutDup, send].sort((a, b) => a.id - b.id) };
+    },
+  );
+}
+
+/**
+ * Drop a session's cached open-send list entirely. Used when the session row
+ * itself is gone (a reaped spawn): a refetch would only 404, and the failure
+ * chip is rendered from client state instead.
+ */
+export function removeSessionSends(
+  queryClient: QueryClient,
+  sessionId: SessionId,
+): void {
+  queryClient.removeQueries({ queryKey: queryKeys.sessionSends(sessionId) });
 }

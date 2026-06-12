@@ -12,6 +12,10 @@ export const queryKeys = {
     ['session-threads', sessionId] as const,
   /** Placeholder key used while no session is focused (query disabled). */
   sessionThreadsNone: ['session-threads', 'none'] as const,
+  /** A single session's open sends (`GET /api/sessions/{id}/sends`). */
+  sessionSends: (sessionId: SessionId) => ['session-sends', sessionId] as const,
+  /** Placeholder key used while no session is focused (query disabled). */
+  sessionSendsNone: ['session-sends', 'none'] as const,
   messages: (threadId: ThreadId) => ['messages', threadId] as const,
   /** Placeholder key used while no thread is selected (query disabled). */
   messagesNone: ['messages', 'none'] as const,

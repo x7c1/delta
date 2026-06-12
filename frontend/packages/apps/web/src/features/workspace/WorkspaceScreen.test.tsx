@@ -23,6 +23,7 @@ import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
+import { useLiveStore } from '../../store/liveStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { WorkspaceScreen } from './WorkspaceScreen';
 
@@ -87,6 +88,58 @@ describe('WorkspaceScreen multi-session', () => {
       newSessionWorkdir: null,
       workdirDialogOpen: false,
     });
+    useLiveStore.setState({ spawns: [] });
+  });
+
+  it('focuses a tracked spawn by its real id once it appears in the list', async () => {
+    // The new-session POST returned real ids and the spawn was tracked; the
+    // user is still on the new-session screen. When the spawned session
+    // registers (here: it is simply present in the list), the workspace must
+    // focus exactly that id — not whatever happens to be at the head — and
+    // stop tracking the spawn.
+    useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    useLiveStore.setState({
+      spawns: [
+        {
+          sessionId: SESSION_ID_2,
+          threadId: SESSION_2_MAIN_THREAD_ID,
+          text: 'first message',
+          workdir: null,
+          status: 'spawning' as const,
+        },
+      ],
+    });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2),
+    );
+    expect(useLiveStore.getState().spawns).toHaveLength(0);
+  });
+
+  it('does not steal focus for a registering spawn when the user moved on', async () => {
+    // The spawn registers while the user is viewing another session: the
+    // tracked spawn is released (its chip is over) but focus must stay put.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useLiveStore.setState({
+      spawns: [
+        {
+          sessionId: SESSION_ID_2,
+          threadId: SESSION_2_MAIN_THREAD_ID,
+          text: 'first message',
+          workdir: null,
+          status: 'spawning' as const,
+        },
+      ],
+    });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useLiveStore.getState().spawns).toHaveLength(0),
+    );
+    expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
   });
 
   it('shows the first page of sessions when more remain', async () => {

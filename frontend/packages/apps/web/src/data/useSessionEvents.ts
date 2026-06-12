@@ -14,9 +14,11 @@ import { createMockEventSource } from './mockEventControl';
  *
  * The source reconnects on its own after a dropped socket. Events broadcast
  * during the gap are lost (the server does not replay), so on every *re*-open
- * we resync: refetch all REST resources (sessions, threads, messages catch up)
- * and clear the optimistic pending FIFO whose `turn_completed` drains may have
- * been missed — otherwise a stuck "waiting" chip would linger until a reload.
+ * we resync: refetch all REST resources — sessions, threads, messages, and the
+ * open-send lists behind the pending strip all catch up — and drop the
+ * event-reconstructed turn ephemera (tracked local sends, active-turn flags),
+ * whose turn-end drains may have been missed and cannot be recovered by any
+ * refetch; otherwise a stuck "in progress" chip would linger until a reload.
  */
 export function useSessionEvents(): void {
   const queryClient = useQueryClient();
@@ -53,7 +55,7 @@ export function useSessionEvents(): void {
       if (hasConnected) {
         // Reconnected after a gap: heal the missed window.
         void queryClient.invalidateQueries();
-        useLiveStore.getState().clearPending();
+        useLiveStore.getState().resetTurnEphemera();
       }
       hasConnected = true;
     });

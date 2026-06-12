@@ -1,255 +1,106 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useLiveStore } from './liveStore';
-import { NEW_SESSION_DRAFT_KEY } from './composerStore';
+import { useLiveStore, type LocalSend } from './liveStore';
 
 function reset() {
   useLiveStore.setState({
     connection: 'connecting',
-    pending: [],
+    sending: [],
+    localSends: {},
+    spawns: [],
+    activeTurns: {},
     permission: {},
     unread: {},
     externalInput: {},
+    resumeUnavailable: {},
   });
 }
 
-describe('liveStore.applyEvent', () => {
+function localSend(overrides: Partial<LocalSend> = {}): LocalSend {
+  return {
+    sendId: 1,
+    sessionId: 'sess-1',
+    threadId: 1,
+    text: 'hi',
+    createdAt: 0,
+    ...overrides,
+  };
+}
+
+describe('liveStore turn tracking', () => {
   beforeEach(reset);
 
-  it('walks a queued send through in-progress to done over the FIFO', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'hi',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
+  it('flags the session running on turn_started and clears it on turn_completed', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
-    expect(useLiveStore.getState().pending[0].status).toBe('in_progress');
+    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
 
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
       stop_reason: null,
     });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
+    expect(useLiveStore.getState().activeTurns).toEqual({});
   });
 
-  it('clears the in-flight pending send on turn_interrupted', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'hi',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    // The turn starts, then the user interrupts it. The `Stop` hook never fires
-    // on interrupt, so `turn_interrupted` must drain the stuck pending chip.
+  it('clears the running flag on turn_interrupted', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
-    expect(useLiveStore.getState().pending[0].status).toBe('in_progress');
 
     useLiveStore.getState().applyEvent({
       kind: 'turn_interrupted',
       session_id: 'sess-1',
     });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
+    expect(useLiveStore.getState().activeTurns).toEqual({});
   });
 
-  it('drops a still-queued send on turn_interrupted when turn_started never fired', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'interrupted before start',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
+  it('drains the tracked local send when its turn completes', () => {
+    useLiveStore.getState().recordLocalSend(localSend());
 
-    useLiveStore.getState().applyEvent({
-      kind: 'turn_interrupted',
-      session_id: 'sess-1',
-    });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
-  });
-
-  it('does not drain another session queue on a foreign turn_interrupted', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'a1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'session one send',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    useLiveStore.getState().applyEvent({
-      kind: 'turn_interrupted',
-      session_id: 'sess-2',
-    });
-    expect(useLiveStore.getState().pending).toHaveLength(1);
-    expect(useLiveStore.getState().pending[0].localId).toBe('a1');
-  });
-
-  it('retargets a pending send to a new thread, keeping it queued', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1, // enqueued under the parent thread
-      text: 'branch follow-up',
-      semanticParentUuid: 'uuid-origin',
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    // The branch send created child thread 7; move the pending entry onto it.
-    useLiveStore.getState().retargetSend('l1', 7);
-
-    const item = useLiveStore.getState().pending[0];
-    expect(item.threadId).toBe(7);
-    expect(item.status).toBe('queued');
-    expect(item.text).toBe('branch follow-up');
-  });
-
-  it('binds the unbound new-session send to its spawned session and main thread', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 0, // placeholder id from the new-session POST response
-      sessionId: null, // unbound: the spawn has no real session id yet
-      threadId: NEW_SESSION_DRAFT_KEY, // enqueued under the new-session sentinel
-      text: 'first message',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    // The spawn registered as sess-9 with main thread 42; bind the pending to it
-    // so the optimistic strip survives the focus jump to the real thread.
-    useLiveStore.getState().bindNewSessionPending('sess-9', 42);
-
-    const item = useLiveStore.getState().pending[0];
-    expect(item.sessionId).toBe('sess-9');
-    expect(item.threadId).toBe(42);
-    expect(item.status).toBe('queued');
-    expect(item.text).toBe('first message');
-  });
-
-  it('keeps the bound new-session send drainable on its first turn_completed', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 0,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'first message',
-      semanticParentUuid: null,
-      status: 'in_progress',
-      createdAt: 0,
-    });
-    useLiveStore.getState().bindNewSessionPending('sess-9', 42);
-
-    // The first turn finishes: the now-bound send drains by exact session match.
-    useLiveStore.getState().applyEvent({
-      kind: 'turn_completed',
-      session_id: 'sess-9',
-      stop_reason: null,
-    });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
-  });
-
-  it('leaves the queue untouched when no unbound new-session send exists', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: 'sess-1', // already bound
-      threadId: 1,
-      text: 'bound send',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    useLiveStore.getState().bindNewSessionPending('sess-9', 42);
-
-    const item = useLiveStore.getState().pending[0];
-    expect(item.sessionId).toBe('sess-1');
-    expect(item.threadId).toBe(1);
-  });
-
-  it('drops a still-queued send on turn_completed when turn_started never fired', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'これはテスト送信です',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    // No turn_started (the common timing case: the user line was not ingested
-    // in the UserPromptSubmit sync). The completed turn must still clear it.
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
       stop_reason: null,
     });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
+    expect(useLiveStore.getState().localSends).toEqual({});
   });
 
-  it('does not drain another session queue on a foreign turn_completed', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'a1',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'session one send',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
+  it('drains the tracked local send on turn_interrupted, even without turn_started', () => {
+    // The common timing case: the user line was not ingested in the
+    // UserPromptSubmit sync, so turn_started never fired. The turn-end event
+    // must still clear the tracked send.
+    useLiveStore.getState().recordLocalSend(localSend());
 
-    // A turn completes in a DIFFERENT session that has no pending send here.
-    // It must leave sess-1's queued item untouched (regression: the matcher
-    // used to drop the first queued item regardless of session).
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
+  it('does not drain another session’s tracked sends on a foreign turn end', () => {
+    useLiveStore.getState().recordLocalSend(localSend());
+
+    // A turn ending in a DIFFERENT session must leave sess-1's send untouched
+    // (regression: the FIFO matcher used to drop the first item regardless of
+    // session).
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-2',
       stop_reason: null,
     });
-    expect(useLiveStore.getState().pending).toHaveLength(1);
-    expect(useLiveStore.getState().pending[0].localId).toBe('a1');
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-2',
+    });
+    expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
 
     // The turn for the OWNING session still clears it.
     useLiveStore.getState().applyEvent({
@@ -257,53 +108,165 @@ describe('liveStore.applyEvent', () => {
       session_id: 'sess-1',
       stop_reason: null,
     });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
+    expect(useLiveStore.getState().localSends).toEqual({});
   });
 
-  it('reconciles an unbound new-session send via its turn, not a foreign one', () => {
-    const store = useLiveStore.getState();
-    // An optimistic new-session send: no bound session id yet.
-    store.enqueueSend({
-      localId: 'new1',
-      sendId: 0,
-      sessionId: null,
-      threadId: -1,
-      text: 'start fresh',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-    // A bound send for an existing session sits in front of it.
-    store.enqueueSend({
-      localId: 'bound1',
-      sendId: 5,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'existing',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 1,
+  it('drains turn state when the session closes', () => {
+    useLiveStore.getState().recordLocalSend(localSend());
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      send_id: 1,
+      matched_uuid: 'uuid-1',
     });
 
-    // sess-1's turn must clear ITS item, not the unbound new-session item that
-    // happens to be older in FIFO order.
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().activeTurns).toEqual({});
+  });
+
+  it('resetTurnEphemera drops tracked sends and running flags, nothing else', () => {
+    useLiveStore.getState().recordLocalSend(localSend());
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      send_id: 1,
+      matched_uuid: 'uuid-1',
+    });
+    useLiveStore.getState().beginSending({
+      id: 'l1',
+      target: { kind: 'thread', sessionId: 'sess-1', threadId: 1 },
+      text: 'in flight',
+      status: 'sending',
+      createdAt: 0,
+    });
+    useLiveStore.getState().trackSpawn({
+      sessionId: 'sess-9',
+      threadId: 42,
+      text: 'first message',
+      workdir: null,
+    });
+
+    // A reconnect cannot reconcile event-reconstructed turn state, but the
+    // in-flight POST and the tracked spawn heal on their own (the POST
+    // resolves; the spawn registers via the refetched session list).
+    useLiveStore.getState().resetTurnEphemera();
+
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().activeTurns).toEqual({});
+    expect(useLiveStore.getState().sending).toHaveLength(1);
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
+  });
+});
+
+describe('liveStore sending (pre-acceptance submits)', () => {
+  beforeEach(reset);
+
+  it('walks a submit through sending → failed → dismissed', () => {
+    useLiveStore.getState().beginSending({
+      id: 'l1',
+      target: { kind: 'thread', sessionId: 'sess-1', threadId: 1 },
+      text: 'hello',
+      status: 'sending',
+      createdAt: 0,
+    });
+    expect(useLiveStore.getState().sending[0].status).toBe('sending');
+
+    useLiveStore.getState().failSending('l1');
+    expect(useLiveStore.getState().sending[0].status).toBe('failed');
+
+    useLiveStore.getState().removeSending('l1');
+    expect(useLiveStore.getState().sending).toHaveLength(0);
+  });
+});
+
+describe('liveStore spawn tracking', () => {
+  beforeEach(reset);
+
+  function trackOne(sessionId = 'sess-spawn-1') {
+    useLiveStore.getState().trackSpawn({
+      sessionId,
+      threadId: 42,
+      text: 'start a new session',
+      workdir: '/work/dir',
+    });
+  }
+
+  it('flips the tracked spawn to failed on its spawn_failed event', () => {
+    trackOne();
+    useLiveStore.getState().recordLocalSend(
+      localSend({ sendId: 7, sessionId: 'sess-spawn-1', threadId: 42 }),
+    );
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+
+    const spawn = useLiveStore.getState().spawns[0];
+    expect(spawn.status).toBe('failed');
+    expect(spawn.text).toBe('start a new session');
+    expect(spawn.workdir).toBe('/work/dir');
+    // The first send's turn will never end; its tracked twin goes with it.
+    expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
+  it('ignores spawn_failed for a session it never tracked', () => {
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-someone-elses',
+      pane_token: 'pane-x',
+    });
+    expect(useLiveStore.getState().spawns[0].status).toBe('spawning');
+  });
+
+  it('keeps a failed spawn through unrelated turn events until dismissed', () => {
+    trackOne();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+
+    // A failed chip is terminal: an unrelated turn ending must not silently
+    // remove it. It survives until the user retries or dismisses it.
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
       stop_reason: null,
     });
-    const pending = useLiveStore.getState().pending;
-    expect(pending).toHaveLength(1);
-    expect(pending[0].localId).toBe('new1');
+    expect(useLiveStore.getState().spawns[0].status).toBe('failed');
 
-    // The newly-registered session's turn then clears the unbound item.
-    useLiveStore.getState().applyEvent({
-      kind: 'turn_completed',
-      session_id: 'sess-new',
-      stop_reason: null,
-    });
-    expect(useLiveStore.getState().pending).toHaveLength(0);
+    useLiveStore.getState().clearSpawn('sess-spawn-1');
+    expect(useLiveStore.getState().spawns).toHaveLength(0);
   });
+
+  it('fails each spawn by its own id, leaving the others alone', () => {
+    trackOne('sess-spawn-1');
+    trackOne('sess-spawn-2');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-2',
+      pane_token: 'pane-2',
+    });
+
+    const byId = Object.fromEntries(
+      useLiveStore.getState().spawns.map((spawn) => [spawn.sessionId, spawn]),
+    );
+    expect(byId['sess-spawn-1'].status).toBe('spawning');
+    expect(byId['sess-spawn-2'].status).toBe('failed');
+  });
+});
+
+describe('liveStore.applyEvent notices', () => {
+  beforeEach(reset);
 
   it('records a permission notice per session and clears it on dismiss', () => {
     useLiveStore.getState().applyEvent({
@@ -494,164 +457,17 @@ describe('liveStore.applyEvent', () => {
   });
 
   it('ignores session lifecycle events for ephemeral state', () => {
-    // session_registered / session_opened / session_closed are reflected by the
-    // sessions query, not the live store, so applying them is a no-op here.
-    const before = useLiveStore.getState().pending;
+    // session_registered / session_opened are reflected by the sessions query,
+    // not the live store, so applying them is a no-op here.
+    const before = useLiveStore.getState().spawns;
     useLiveStore.getState().applyEvent({
       kind: 'session_opened',
       session_id: 'sess-1',
     });
-    expect(useLiveStore.getState().pending).toBe(before);
-  });
-
-  it('marks the oldest unbound new-session pending as failed on failSpawn', () => {
-    const store = useLiveStore.getState();
-    // A bound (real-session) pending must be untouched; only the unbound
-    // new-session pending correlates to the failed spawn.
-    store.enqueueSend({
-      localId: 'bound',
-      sendId: 1,
-      sessionId: 'sess-1',
-      threadId: 1,
-      text: 'in a real session',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-    store.enqueueSend({
-      localId: 'spawn',
-      sendId: 2,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'start a new session',
-      semanticParentUuid: null,
-      workdir: '/work/dir',
-      status: 'queued',
-      createdAt: 1,
-    });
-
-    useLiveStore.getState().failSpawn();
-
-    const pending = useLiveStore.getState().pending;
-    expect(pending.find((item) => item.localId === 'spawn')?.status).toBe(
-      'failed',
-    );
-    expect(pending.find((item) => item.localId === 'bound')?.status).toBe(
-      'queued',
-    );
-  });
-
-  it('marks the oldest unbound new-session pending as failed on a spawn_failed event', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'spawn',
-      sendId: 0,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'start a new session',
-      semanticParentUuid: null,
-      workdir: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-
-    // The router (`applySessionEvent`) calls `failSpawn` for a spawn_failed
-    // event; assert the action it routes to produces the failed chip.
-    useLiveStore.getState().failSpawn();
-
-    expect(useLiveStore.getState().pending[0].status).toBe('failed');
-  });
-
-  it('does not drain a failed spawn pending on turn_completed or turn_interrupted', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'spawn',
-      sendId: 0,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'start a new session',
-      semanticParentUuid: null,
-      workdir: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-    useLiveStore.getState().failSpawn();
-
-    // A failed chip is terminal: an unrelated turn ending must not silently
-    // remove it. It survives until the user retries or dismisses it.
     useLiveStore.getState().applyEvent({
-      kind: 'turn_completed',
-      session_id: 'sess-1',
-      stop_reason: null,
-    });
-    useLiveStore.getState().applyEvent({
-      kind: 'turn_interrupted',
+      kind: 'session_registered',
       session_id: 'sess-1',
     });
-
-    const pending = useLiveStore.getState().pending;
-    expect(pending).toHaveLength(1);
-    expect(pending[0].status).toBe('failed');
-  });
-
-  it('does not bind a failed spawn pending to a later registered session', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'spawn',
-      sendId: 0,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'start a new session',
-      semanticParentUuid: null,
-      workdir: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-    useLiveStore.getState().failSpawn();
-
-    // A subsequent successful spawn must not resurrect the failed chip onto a
-    // real session; with no live unbound pending, binding is a no-op.
-    useLiveStore.getState().bindNewSessionPending('sess-9', 99);
-
-    const item = useLiveStore.getState().pending[0];
-    expect(item.status).toBe('failed');
-    expect(item.sessionId).toBeNull();
-  });
-
-  it('marks a second unbound new-session pending failed, skipping the already-failed one', () => {
-    const store = useLiveStore.getState();
-    store.enqueueSend({
-      localId: 'spawn-a',
-      sendId: 0,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'first',
-      semanticParentUuid: null,
-      workdir: null,
-      status: 'queued',
-      createdAt: 0,
-    });
-    store.enqueueSend({
-      localId: 'spawn-b',
-      sendId: 0,
-      sessionId: null,
-      threadId: NEW_SESSION_DRAFT_KEY,
-      text: 'second',
-      semanticParentUuid: null,
-      workdir: null,
-      status: 'queued',
-      createdAt: 1,
-    });
-
-    useLiveStore.getState().failSpawn();
-    useLiveStore.getState().failSpawn();
-
-    const pending = useLiveStore.getState().pending;
-    expect(pending.find((item) => item.localId === 'spawn-a')?.status).toBe(
-      'failed',
-    );
-    expect(pending.find((item) => item.localId === 'spawn-b')?.status).toBe(
-      'failed',
-    );
+    expect(useLiveStore.getState().spawns).toBe(before);
   });
 });

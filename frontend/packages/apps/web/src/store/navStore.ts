@@ -25,9 +25,15 @@ export function clampTerminalWidth(
 }
 
 /**
- * The id of the focused session, or a sentinel for the cold-start / "New"
- * composer state that has no session id yet (a fresh spawn has no id until its
- * first hook binds it — see the multi-session design notes in the workspace).
+ * The id of the focused session, or the new-session marker: the cold-start /
+ * "New" composer state, where the user is composing a first message and no
+ * session exists yet.
+ *
+ * This is purely a UI screen mode — the navigation analogue of "no session is
+ * focused; show the new-session screen". No DATA may key on it: once the first
+ * Send is accepted, every send/spawn record uses the REAL session id the
+ * server returned, and the workspace focuses that id directly when the spawn
+ * registers.
  */
 export const NEW_SESSION_FOCUS = '__new__';
 export type FocusedSession = SessionId | typeof NEW_SESSION_FOCUS | null;

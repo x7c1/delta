@@ -1,22 +1,43 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@delta/api-client';
+import type { Send } from '@delta/wire-gen';
 import { applySessionEvent } from './applySessionEvent';
 import { useLiveStore } from '../store/liveStore';
 
 const FOCUSED = 'sess-1';
 
+function serverSend(overrides: Partial<Send> = {}): Send {
+  return {
+    id: 1,
+    session_id: FOCUSED,
+    thread_id: 5,
+    semantic_parent_uuid: null,
+    text: 'hi',
+    locator_quote: null,
+    status: 'dispatched',
+    matched_uuid: null,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
 describe('applySessionEvent', () => {
   beforeEach(() => {
     useLiveStore.setState({
       connection: 'connecting',
-      pending: [],
+      sending: [],
+      localSends: {},
+      spawns: [],
+      activeTurns: {},
       permission: {},
       unread: {},
       externalInput: {},
+      resumeUnavailable: {},
     });
   });
 
-  it('invalidates the focused active thread and its session threads on turn_started', () => {
+  it('invalidates the focused active thread, its session threads, and its open sends on turn_started', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
@@ -36,21 +57,21 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-threads', FOCUSED],
     });
+    // A matched send left the open list; the pending strip refetches.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', FOCUSED],
+    });
   });
 
-  it('ignores a turn event for a non-focused session', () => {
+  it('refetches the open sends of a non-focused session on its turn events', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-
-    // The focused session has a queued send in the FIFO.
-    useLiveStore.getState().enqueueSend({
-      localId: 'focused1',
-      sendId: 1,
+    // The focused session has a tracked local send.
+    useLiveStore.getState().recordLocalSend({
+      sendId: 9,
       sessionId: FOCUSED,
       threadId: 5,
       text: 'mine',
-      semanticParentUuid: null,
-      status: 'queued',
       createdAt: 0,
     });
 
@@ -65,11 +86,14 @@ describe('applySessionEvent', () => {
       FOCUSED,
     );
 
-    // No transcript/thread invalidation for a session the user is not viewing.
+    // No transcript invalidation for a session the user is not viewing — but
+    // its open-send list still refetches so its strip is right when viewed.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
-    // And the foreign turn must not drain the focused session's queue.
-    expect(useLiveStore.getState().pending).toHaveLength(1);
-    expect(useLiveStore.getState().pending[0].localId).toBe('focused1');
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', 'other-session'],
+    });
+    // And the foreign turn must not drain the focused session's tracked send.
+    expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
   });
 
   it('badges the focused active thread on external_input', () => {
@@ -104,20 +128,9 @@ describe('applySessionEvent', () => {
     expect(useLiveStore.getState().externalInput).toEqual({});
   });
 
-  it('invalidates the affected threads on transcript_updated without touching the FIFO', () => {
+  it('invalidates the affected threads and the open sends on transcript_updated', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-
-    useLiveStore.getState().enqueueSend({
-      localId: 'l1',
-      sendId: 1,
-      sessionId: FOCUSED,
-      threadId: 2,
-      text: 'hi',
-      semanticParentUuid: null,
-      status: 'queued',
-      createdAt: 0,
-    });
     useLiveStore.getState().bumpUnread(2);
 
     applySessionEvent(
@@ -133,10 +146,13 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-threads', FOCUSED],
     });
+    // An ingested user line is what matches a dispatched send, so the open
+    // list refetches here too.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', FOCUSED],
+    });
 
-    // No FIFO / unread mutation for this event.
-    expect(useLiveStore.getState().pending).toHaveLength(1);
-    expect(useLiveStore.getState().pending[0].status).toBe('queued');
+    // No unread mutation for this event.
     expect(useLiveStore.getState().unread[2]).toBe(1);
   });
 
@@ -180,29 +196,33 @@ describe('applySessionEvent', () => {
     }
   });
 
-  it('marks the unbound new-session pending failed on spawn_failed without refetching sessions', () => {
+  it('fails the tracked spawn and drops its cached sends on spawn_failed', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
-    useLiveStore.getState().enqueueSend({
-      localId: 'spawn',
-      sendId: 0,
-      sessionId: null,
-      threadId: -1,
+    // The spawn was accepted with real ids; its first send is in the cache.
+    useLiveStore.getState().trackSpawn({
+      sessionId: 'sess-spawned',
+      threadId: 42,
       text: 'new session',
-      semanticParentUuid: null,
       workdir: null,
-      status: 'queued',
-      createdAt: 0,
+    });
+    queryClient.setQueryData(queryKeys.sessionSends('sess-spawned'), {
+      sends: [serverSend({ session_id: 'sess-spawned', thread_id: 42 })],
     });
 
     applySessionEvent(
-      { kind: 'spawn_failed', session_id: FOCUSED, pane_token: 'pane-1' },
+      { kind: 'spawn_failed', session_id: 'sess-spawned', pane_token: 'pane-1' },
       queryClient,
       null,
       FOCUSED,
     );
 
-    expect(useLiveStore.getState().pending[0].status).toBe('failed');
+    expect(useLiveStore.getState().spawns[0].status).toBe('failed');
+    // The server deleted the row; the cached open sends go with it (a refetch
+    // would only 404).
+    expect(
+      queryClient.getQueryData(queryKeys.sessionSends('sess-spawned')),
+    ).toBeUndefined();
     // The spawn never registered, so there is no session row to refetch.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['sessions'] });
   });

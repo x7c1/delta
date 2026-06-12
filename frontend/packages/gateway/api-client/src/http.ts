@@ -5,6 +5,7 @@ import type {
   NewSessionResponse,
   SendRequest,
   SendResponse,
+  SendsResponse,
   SessionsResponse,
   ThreadsResponse,
   WorkdirListResponse,
@@ -155,6 +156,19 @@ export class ApiClient {
   getSessionThreads(sessionId: SessionId): Promise<ThreadsResponse> {
     return this.request<ThreadsResponse>(
       `/api/sessions/${encodeURIComponent(sessionId)}/threads`,
+    );
+  }
+
+  /**
+   * `GET /api/sessions/{id}/sends` — a session's open (non-terminal) sends,
+   * oldest first: status `queued` (held until the session goes idle) or
+   * `dispatched` (typed into the pane, awaiting transcript correlation). The
+   * server-side truth behind the pending-send strip. An unknown id is a `404`
+   * (e.g. a reaped spawn), surfaced as {@link ApiError}.
+   */
+  getSessionSends(sessionId: SessionId): Promise<SendsResponse> {
+    return this.request<SendsResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/sends`,
     );
   }
 

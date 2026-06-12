@@ -13,11 +13,13 @@ import type {
   NewSessionResponse,
   SendRequest,
   SendResponse,
+  SendsResponse,
   SessionsResponse,
   ThreadsResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
+import { appendSessionSend } from './cache';
 import type { ApiClient } from './http';
 import { queryKeys } from './query-keys';
 
@@ -81,6 +83,32 @@ export function useSessionThreadsQuery(
     queryFn: () => client.getSessionThreads(sessionId as SessionId),
     enabled: sessionId !== null,
     staleTime: SESSION_THREADS_STALE_TIME,
+  });
+}
+
+/**
+ * A single session's open (non-terminal) sends — the server-side truth behind
+ * the pending-send strip. Disabled until a real session id is supplied.
+ *
+ * Freshness is event-driven: send-affecting session events (turn lifecycle,
+ * transcript growth, spawn failure, close) invalidate this key, and a
+ * `POST /api/sends` response is patched in via {@link appendSessionSend}, so
+ * no `staleTime` tuning is needed.
+ */
+export function useSessionSendsQuery(
+  client: ApiClient,
+  sessionId: SessionId | null,
+): UseQueryResult<SendsResponse> {
+  return useQuery({
+    queryKey:
+      sessionId === null
+        ? queryKeys.sessionSendsNone
+        : queryKeys.sessionSends(sessionId),
+    queryFn: () => client.getSessionSends(sessionId as SessionId),
+    enabled: sessionId !== null,
+    // A 404 (the session row is gone, e.g. a reaped spawn) will never heal by
+    // retrying; surface it immediately so the view falls back to client state.
+    retry: false,
   });
 }
 
@@ -212,17 +240,21 @@ export function useCreateSendMutation(
       // send eventually adds a session; refresh the session list so the tree
       // picks up the change.
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      // Also refresh the affected session's thread tree so a freshly-branched
+      // Refresh the affected session's thread tree so a freshly-branched
       // child appears immediately. Without this the new thread is absent from
       // the cached list, and the workspace reverts the active thread back to
-      // main instead of drilling into the new branch. A new-session send has
-      // no bound session yet (synthetic id 0 / empty session id), so it only
-      // refreshes once the session registers via the list.
-      if (send.session_id) {
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.sessionThreads(send.session_id),
-        });
-      }
+      // main instead of drilling into the new branch. Every send carries a
+      // real session id (a new-session send returns the eagerly-created row's
+      // ids).
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionThreads(send.session_id),
+      });
+      // Patch the accepted send straight into its session's open-send cache so
+      // the pending chip renders without waiting for a refetch.
+      appendSessionSend(queryClient, send.session_id, send);
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionSends(send.session_id),
+      });
     },
   });
 }

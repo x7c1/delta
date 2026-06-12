@@ -2,14 +2,13 @@ import { useCallback, type FormEvent } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SendRequest, Thread } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
-import { useApiClient } from '../../data/apiContext';
-import { ApiError, useCreateSendMutation } from '@delta/api-client';
 import {
   NEW_SESSION_DRAFT_KEY,
   useComposerStore,
 } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
+import { useSubmitSend } from './useSubmitSend';
 
 /**
  * Send target for the composer:
@@ -36,11 +35,11 @@ export interface ComposerProps {
 
 /**
  * The bottom composer: text input bound to a per-thread draft and submit wired
- * to `POST /api/sends`. The send target depends on {@link ComposerMode}.
+ * to `POST /api/sends` (via the shared submission path, which keeps the
+ * pending strip honest). The send target depends on {@link ComposerMode}.
  */
 export function Composer({ mode }: ComposerProps) {
-  const client = useApiClient();
-  const mutation = useCreateSendMutation(client);
+  const submitSend = useSubmitSend();
 
   const isNew = mode.kind === 'new-session';
   const activeThread = mode.kind === 'thread' ? mode.activeThread : null;
@@ -61,13 +60,8 @@ export function Composer({ mode }: ComposerProps) {
     (state) => state.setNewSessionWorkdir,
   );
 
-  const enqueueSend = useLiveStore((state) => state.enqueueSend);
-  const attachSendId = useLiveStore((state) => state.attachSendId);
-  const retargetSend = useLiveStore((state) => state.retargetSend);
-  const failSend = useLiveStore((state) => state.failSend);
-  const removePending = useLiveStore((state) => state.removePending);
-  const markResumeUnavailable = useLiveStore(
-    (state) => state.markResumeUnavailable,
+  const sendInFlight = useLiveStore((state) =>
+    state.sending.some((item) => item.status === 'sending'),
   );
   const clearResumeUnavailable = useLiveStore(
     (state) => state.clearResumeUnavailable,
@@ -90,7 +84,6 @@ export function Composer({ mode }: ComposerProps) {
       if (!text) {
         return;
       }
-      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
       // A fresh attempt against this session clears any stale "cannot be
       // resumed" notice up front, so a retry (e.g. after the transcript is
@@ -98,31 +91,6 @@ export function Composer({ mode }: ComposerProps) {
       if (activeThread) {
         clearResumeUnavailable(activeThread.session_id);
       }
-
-      // The optimistic FIFO entry is keyed by the thread the pending queue
-      // renders under. A branch send keys to the active (parent) thread and is
-      // retargeted to the child once the backend creates it; a plain send keys
-      // to the active thread directly. Only the new-session send, which has no
-      // thread yet, uses the sentinel key.
-      const optimisticThread: ThreadId = activeThread
-        ? activeThread.id
-        : NEW_SESSION_DRAFT_KEY;
-
-      enqueueSend({
-        localId,
-        sendId: null,
-        // A new-session send has no bound session yet; turn events for the
-        // session it spawns reconcile this once it registers.
-        sessionId: activeThread ? activeThread.session_id : null,
-        threadId: optimisticThread,
-        text,
-        semanticParentUuid: branching ? branchOrigin.semanticParentUuid : null,
-        // Retain the chosen directory on a new-session send so a failed spawn can
-        // be retried with the same directory; omitted for non-new-session sends.
-        ...(isNew ? { workdir: newSessionWorkdir } : {}),
-        status: 'queued',
-        createdAt: Date.now(),
-      });
       clearDraft(draftKey);
 
       // Build the send target. A branch carries the semantic parent; otherwise
@@ -152,38 +120,34 @@ export function Composer({ mode }: ComposerProps) {
       }
 
       try {
-        const { send } = await mutation.mutateAsync(body);
-        attachSendId(localId, send.id);
+        const send = await submitSend({
+          target: activeThread
+            ? {
+                kind: 'thread',
+                sessionId: activeThread.session_id,
+                threadId: activeThread.id,
+              }
+            : { kind: 'new-session', workdir: newSessionWorkdir },
+          text,
+          body,
+        });
         if (isNew) {
           // The spawn was accepted; reset the picker selection so the next new
-          // session starts from the default again.
+          // session starts from the default again. (The accepted spawn itself
+          // is tracked by the submission path; the workspace focuses it by its
+          // real id once it registers.)
           setNewSessionWorkdir(null);
         }
         if (branching) {
           // The backend created a fresh child thread for this branch send and
-          // returns its id. The pending entry was enqueued under the parent
-          // thread (the child did not exist yet), so move it onto the child and
-          // drill into it — otherwise the "waiting" indicator would stay on the
-          // parent while the user is looking at the new sub-thread.
-          retargetSend(localId, send.thread_id);
+          // returns its id; drill into it. The pending chip needs no re-keying:
+          // the accepted send already carries the child thread id.
           setActiveThread(send.thread_id);
           setBranchOrigin(null);
         }
-      } catch (error) {
-        // A resume-unavailable session can never start this turn (its transcript
-        // is gone), so drop the optimistic chip outright instead of leaving a
-        // "failed" one, keep the session closed, and surface the inline notice.
-        // Any other failure keeps today's behaviour: mark the chip failed.
-        if (
-          error instanceof ApiError &&
-          error.code === 'resume_unavailable' &&
-          activeThread
-        ) {
-          removePending(localId);
-          markResumeUnavailable(activeThread.session_id);
-        } else {
-          failSend(localId);
-        }
+      } catch {
+        // The submission path already surfaced the failure (a recoverable
+        // failed chip, or the resume-unavailable notice); nothing more to do.
       }
     },
     [
@@ -194,17 +158,11 @@ export function Composer({ mode }: ComposerProps) {
       branching,
       branchOrigin,
       newSessionWorkdir,
-      enqueueSend,
       clearDraft,
-      mutation,
-      attachSendId,
-      retargetSend,
+      submitSend,
       setBranchOrigin,
       setNewSessionWorkdir,
       setActiveThread,
-      failSend,
-      removePending,
-      markResumeUnavailable,
       clearResumeUnavailable,
     ],
   );
@@ -257,7 +215,7 @@ export function Composer({ mode }: ComposerProps) {
           variant="primary"
           disabled={
             draft.trim().length === 0 ||
-            mutation.isPending ||
+            sendInFlight ||
             // A new session must start in a chosen directory: selection is
             // mandatory, so Send stays disabled until the picker commits one.
             (isNew && !newSessionWorkdir)
