@@ -17,7 +17,7 @@ async fn branch_send_attributes_late_arriving_lines_to_child() {
 
     // Queue a branch send. The user line is NOT in the transcript yet.
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let (pending, _) = ix
         .enqueue_send(
             branch_off(main, &parent),
             "branch text",

@@ -32,10 +32,6 @@ CREATE TABLE IF NOT EXISTS session (
   title           TEXT,
   status          TEXT NOT NULL
                     CHECK (status IN ('spawning','active','ended','failed')),
-  -- 1 while a turn is in flight (a send was dispatched / a turn started and no
-  -- Stop or interrupt has been observed since). Branch/quoted sends issued
-  -- while this is set are queued rather than dispatched mid-turn.
-  turn_active     INTEGER NOT NULL DEFAULT 0 CHECK (turn_active IN (0,1)),
   created_at      TEXT NOT NULL
 ) STRICT;
 

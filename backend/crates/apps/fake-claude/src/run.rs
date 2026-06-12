@@ -76,6 +76,7 @@ pub fn run() -> Result<(), String> {
         pending_prompt: args.prompt,
         last_tool_use: None,
         tool_use_seq: 0,
+        last_additional_context: String::new(),
     };
 
     let source = if is_resume { "resume" } else { "startup" };
@@ -142,6 +143,12 @@ struct Engine {
     pending_prompt: Option<String>,
     last_tool_use: Option<ToolUse>,
     tool_use_seq: usize,
+    /// The `additionalContext` the most recent `UserPromptSubmit` hook response
+    /// injected (empty when none): the real `claude` folds it into the model
+    /// prompt, so the fake records it and exposes it to `reply` steps via the
+    /// `{additional_context}` placeholder — letting a test observe, end to end,
+    /// exactly what context the server delivered.
+    last_additional_context: String,
 }
 
 impl Engine {
@@ -152,7 +159,7 @@ impl Engine {
                 // Hook first, then the transcript line: the real `claude` fires
                 // `UserPromptSubmit` before the user line lands in the JSONL
                 // (the server is built to tolerate — and expects — that order).
-                self.fire(
+                let body = self.fire(
                     "UserPromptSubmit",
                     &self.endpoints.user_prompt_submit,
                     &UserPromptSubmitPayload {
@@ -162,9 +169,25 @@ impl Engine {
                         cwd: self.cwd.clone(),
                     },
                 );
+                // Record any injected `additionalContext`, like the real
+                // `claude` consuming the hook response. Exposed to `reply`
+                // steps via the `{additional_context}` placeholder.
+                self.last_additional_context = body
+                    .as_deref()
+                    .and_then(|b| serde_json::from_str::<Value>(b).ok())
+                    .and_then(|v| {
+                        v.pointer("/hookSpecificOutput/additionalContext")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_default();
                 self.transcript.user_text(&prompt)
             }
             Step::Reply { text, thinking } => {
+                // `{additional_context}` substitutes the context the most
+                // recent `UserPromptSubmit` response injected, so a scenario
+                // can surface it in the visible conversation for assertions.
+                let text = text.replace("{additional_context}", &self.last_additional_context);
                 let mut blocks = Vec::new();
                 if let Some(thinking) = thinking {
                     blocks.push(json!({ "type": "thinking", "thinking": thinking }));
@@ -299,12 +322,20 @@ impl Engine {
 
     /// Fire one hook, logging (but tolerating) delivery failures — a real
     /// `claude` keeps running when a hook endpoint misbehaves, and the
-    /// scenario's later assertions will surface the breakage.
-    fn fire<P: serde::Serialize>(&self, event: &str, url: &str, payload: &P) {
+    /// scenario's later assertions will surface the breakage. Returns the
+    /// response body on a 2xx (the hooks whose response `claude` consumes need
+    /// it), `None` otherwise.
+    fn fire<P: serde::Serialize>(&self, event: &str, url: &str, payload: &P) -> Option<String> {
         match post_json(url, payload) {
-            Ok(status) if (200..300).contains(&status) => {}
-            Ok(status) => eprintln!("fake-claude: {event} hook returned HTTP {status}"),
-            Err(err) => eprintln!("fake-claude: {event} hook failed: {err}"),
+            Ok((status, body)) if (200..300).contains(&status) => Some(body),
+            Ok((status, _)) => {
+                eprintln!("fake-claude: {event} hook returned HTTP {status}");
+                None
+            }
+            Err(err) => {
+                eprintln!("fake-claude: {event} hook failed: {err}");
+                None
+            }
         }
     }
 }

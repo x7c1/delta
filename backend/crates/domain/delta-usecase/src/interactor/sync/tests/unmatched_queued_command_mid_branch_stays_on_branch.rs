@@ -16,7 +16,7 @@ async fn unmatched_queued_command_mid_branch_stays_on_branch() {
 
     // Establish a branch turn: match its send so carry_thread is the child.
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let (pending, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();

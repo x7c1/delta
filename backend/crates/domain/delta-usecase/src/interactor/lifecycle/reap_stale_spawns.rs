@@ -69,6 +69,9 @@ where
                  killing its pane and reporting SpawnFailed"
             );
             self.kill_pane_best_effort(spawn.token.as_str()).await;
+            // The row (and any first send, by cascade) is deleted; drop the
+            // turn entry with it.
+            self.forget_turn(&spawn.session_id).await;
             self.clean_up_failed_spawn_row(&spawn.session_id).await?;
             events.push(SessionEvent::SpawnFailed {
                 session_id: spawn.session_id,
@@ -84,15 +87,13 @@ where
                  killing its pane, cancelling any held prompt, reporting SpawnFailed"
             );
             self.kill_pane_best_effort(resuming.token.as_str()).await;
-            // Cancel the held first prompt's pending row (if a send was waiting on
-            // readiness) so it does not block the FIFO when the session is later
+            // The session's pane is gone: feed `Close` into the turn machine,
+            // which cancels the held first prompt's outstanding send (if any)
+            // so its row does not shadow correlation when the session is later
             // resumed again.
-            if resuming.held_prompt.is_some() {
-                if let Some(head) = self.store.head_dispatched_send(&session_id).await? {
-                    let _ = self.store.cancel_send(head.id).await;
-                }
-                let _ = self.store.set_turn_active(&session_id, false).await;
-            }
+            let _ = self
+                .apply_turn_input(&session_id, crate::turn::TurnInput::Close)
+                .await;
             events.push(SessionEvent::SpawnFailed {
                 session_id,
                 pane_token: resuming.token.as_str().to_owned(),

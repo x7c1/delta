@@ -153,11 +153,13 @@ pub(crate) async fn list_sends(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<WireSendsResponse>, ApiError> {
-    let sends = state
-        .interactor()
-        .open_sends_for(&SessionId::from(id))
-        .await?;
-    Ok(Json(WireSendsResponse::from(sends)))
+    let id = SessionId::from(id);
+    let sends = state.interactor().open_sends_for(&id).await?;
+    // The turn state rides along so a reconnecting client can rebuild its
+    // in-progress indicator from this one refetch (events broadcast while the
+    // socket was down are not replayed).
+    let turn = state.interactor().turn_state_for(&id).await;
+    Ok(Json(WireSendsResponse::new(sends, turn)))
 }
 
 /// `GET /api/threads/{id}/messages` — a thread's messages for drill-down.
@@ -216,8 +218,9 @@ pub(crate) async fn recent_workdir(
 /// `POST /api/sends` — enqueue a send into a session named by the request.
 ///
 /// The session is derived from the target thread for an existing send, or
-/// created for a `new_session` send. No event is broadcast here; turn
-/// confirmation arrives later via the `UserPromptSubmit` hook.
+/// created for a `new_session` send. Turn confirmation arrives later via the
+/// `UserPromptSubmit` hook; only enqueue-time events (e.g. `send_dispatched`
+/// from the idle-flush) are broadcast here.
 pub(crate) async fn create_send(
     State(state): State<AppState>,
     Json(req): Json<WireCreateSendRequest>,
@@ -225,9 +228,13 @@ pub(crate) async fn create_send(
     let (target, text, locator_quote) = req
         .into_target()
         .map_err(|err| ApiError::BadRequest(err.message().to_owned()))?;
-    let send = state
+    let (send, events) = state
         .interactor()
         .enqueue_send(target, &text, locator_quote.as_deref())
         .await?;
+    // The enqueue may have promoted a previously-queued send (the idle-flush
+    // safety net); broadcast so the browser sees the queued->dispatched
+    // transition immediately.
+    state.broadcast(events);
     Ok((StatusCode::CREATED, Json(WireSendResponse::from(send))))
 }

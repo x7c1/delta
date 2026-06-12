@@ -160,6 +160,31 @@ describe('liveStore turn tracking', () => {
     expect(useLiveStore.getState().sending).toHaveLength(1);
     expect(useLiveStore.getState().spawns).toHaveLength(1);
   });
+
+  it('seedActiveTurn sets the running flag from a non-idle turn, and only sets', () => {
+    // After a reconnect the refetched sends envelope reports the turn state;
+    // a non-idle phase re-seeds the flag the dropped events would have set.
+    useLiveStore
+      .getState()
+      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1 });
+    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+
+    // An idle report never clears: turn-end events own clearing, so a
+    // momentarily-stale refetch cannot wipe a flag an event just set.
+    useLiveStore
+      .getState()
+      .seedActiveTurn('sess-1', { state: 'idle', send_id: null });
+    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+  });
+
+  it('seedActiveTurn ignores awaiting_echo: the turn has not started yet', () => {
+    // A dispatched-but-unechoed send is what `send_dispatched` reports live —
+    // it never set the running flag, so the refetch must not either.
+    useLiveStore
+      .getState()
+      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 });
+    expect(useLiveStore.getState().activeTurns).toEqual({});
+  });
 });
 
 describe('liveStore sending (pre-acceptance submits)', () => {

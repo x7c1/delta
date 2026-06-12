@@ -63,6 +63,26 @@ describe('applySessionEvent', () => {
     });
   });
 
+  it('refetches the open sends on send_dispatched and touches nothing else', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      { kind: 'send_dispatched', session_id: FOCUSED, send_id: 3 },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    // The queued→dispatched flip lives in the open-send list; the transcript
+    // has not changed (the echo has not even fired yet).
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', FOCUSED],
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
+    expect(useLiveStore.getState().activeTurns).toEqual({});
+  });
+
   it('refetches the open sends of a non-focused session on its turn events', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');

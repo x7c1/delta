@@ -52,7 +52,7 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
     // A send writes the send (normal path) but its keystroke is held: the
     // pane is resumed-but-not-ready, so nothing is dispatched yet.
     let main = ix.store().main_thread_id(&id).await.unwrap();
-    let send = ix
+    let (send, _) = ix
         .enqueue_send(to(main), "after resume", None)
         .await
         .unwrap();
@@ -85,7 +85,27 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
         "the held first prompt dispatched into the resumed pane on the settle tick"
     );
 
-    // The session is now ready, so a second send dispatches immediately (no gate).
+    // The first prompt's turn runs and completes (echo, line, Stop), so the
+    // session is idle again.
+    ix.transcript_fake()
+        .push_to("/elsewhere/t.jsonl", user_line("u-resume", "after resume"));
+    ix.on_user_prompt_submit(submit_in(
+        "sess-R",
+        "/elsewhere/t.jsonl",
+        "/elsewhere",
+        "after resume",
+    ))
+    .await
+    .unwrap();
+    ix.on_stop(crate::ports::StopHook {
+        session_id: id.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    // The session is ready and idle, so a second send dispatches immediately
+    // (no resume gate, no turn to defer behind).
     ix.enqueue_send(to(main), "second send", None).await.unwrap();
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(

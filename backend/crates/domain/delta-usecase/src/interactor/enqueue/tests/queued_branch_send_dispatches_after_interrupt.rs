@@ -13,8 +13,11 @@ async fn queued_branch_send_dispatches_after_interrupt() {
     ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    // Start a turn, then defer a branch send behind it.
+    // Start a turn (the dispatch echoes back and its user line is ingested,
+    // the realistic ordering), then defer a branch send behind it.
     ix.enqueue_send(to(main), "first", None).await.unwrap();
+    ix.transcript_fake().push(user_line("u-first", "first"));
+    ix.on_user_prompt_submit(submit("first")).await.unwrap();
     let parent = MessageUuid::from("uuid-parent");
     ix.enqueue_send(branch_off(main, &parent), "branch text", Some("quote"))
         .await

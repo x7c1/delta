@@ -14,14 +14,18 @@ async fn branch_send_mid_turn_is_queued_then_dispatched_on_stop() {
     ix.seed_session().await;
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    // A first send is dispatched immediately and marks the turn in flight.
+    // A first send is dispatched immediately and marks the turn in flight;
+    // its echo arrives (the realistic ordering: the hook fires within
+    // milliseconds of the keystrokes landing).
     ix.enqueue_send(to(main), "first", None).await.unwrap();
-    assert!(ix.store().is_turn_active(&session).await.unwrap());
+    assert_ne!(ix.turn_state_for(&session).await, crate::turn::TurnState::Idle);
     assert_eq!(ix.tmux_fake().sent.lock().unwrap().len(), 1);
+    ix.transcript_fake().push(user_line("u-first", "first"));
+    ix.on_user_prompt_submit(submit("first")).await.unwrap();
 
     // A branch send arrives mid-turn: queued, not dispatched.
     let parent = MessageUuid::from("uuid-parent");
-    let queued = ix
+    let (queued, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", Some("quote"))
         .await
         .unwrap();

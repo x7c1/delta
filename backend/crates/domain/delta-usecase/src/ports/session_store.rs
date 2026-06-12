@@ -161,35 +161,26 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// normal `UserPromptSubmit` correlation can match it.
     async fn promote_queued_send(&self, id: i64) -> Result<()>;
 
-    /// Whether a turn is currently in flight for this session. Set when Delta
-    /// dispatches a send and when a `UserPromptSubmit` arrives (so turns typed
-    /// straight into the pane are tracked too), and cleared when the turn
-    /// completes (`Stop`) or is interrupted. A branch/quoted send issued while
-    /// this is set is queued rather than dispatched mid-turn.
-    async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool>;
+    /// Return a `dispatched` send to `queued`. A no-op for any other status.
+    ///
+    /// Used when the turn state machine orphans an outstanding send whose echo
+    /// never arrived (see `OrphanedSend::Requeue`): the row keeps its
+    /// thread/branch/quote semantics and re-dispatches when the session is
+    /// next idle, so a composed message is never silently lost.
+    async fn requeue_send(&self, id: i64) -> Result<()>;
 
-    /// Set the in-flight-turn flag for a session.
-    async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()>;
-
-    /// The oldest dispatched send for a session (FIFO head), if any.
+    /// The outstanding dispatched send for a session, if any.
+    ///
+    /// Under the single-outstanding dispatch rule at most one `dispatched` row
+    /// exists per session, so this *is* the send `UserPromptSubmit` correlation
+    /// and transcript attribution compare against (by trimmed-text equality at
+    /// the call sites). Defined as the oldest `dispatched` row so that, should
+    /// the invariant ever be violated, the comparison still deterministically
+    /// picks the earliest.
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
     /// Mark a dispatched send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
-
-    /// Find the oldest still-`dispatched` send for a session whose trimmed text
-    /// equals `trimmed_text`, if any.
-    ///
-    /// Drives thread attribution during ingestion: a user transcript line is
-    /// matched to its queued send by text, so it is attributed to that send's
-    /// thread regardless of which hook triggered the sync or whether the line
-    /// was present when `UserPromptSubmit` fired. `trimmed_text` is expected to
-    /// be already trimmed by the caller.
-    async fn match_dispatched_send(
-        &self,
-        session_id: &SessionId,
-        trimmed_text: &str,
-    ) -> Result<Option<Send>>;
 
     /// The thread of the latest already-persisted **user** message in a
     /// session, used as the carry-forward thread for following non-user lines.
@@ -378,12 +369,8 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).promote_queued_send(id).await
     }
 
-    async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool> {
-        (**self).is_turn_active(session_id).await
-    }
-
-    async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()> {
-        (**self).set_turn_active(session_id, active).await
+    async fn requeue_send(&self, id: i64) -> Result<()> {
+        (**self).requeue_send(id).await
     }
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
@@ -392,14 +379,6 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         (**self).mark_send_matched(id, matched_uuid).await
-    }
-
-    async fn match_dispatched_send(
-        &self,
-        session_id: &SessionId,
-        trimmed_text: &str,
-    ) -> Result<Option<Send>> {
-        (**self).match_dispatched_send(session_id, trimmed_text).await
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {

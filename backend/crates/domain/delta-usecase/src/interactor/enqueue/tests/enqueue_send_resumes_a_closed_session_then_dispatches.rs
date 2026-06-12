@@ -29,7 +29,7 @@ async fn enqueue_send_resumes_a_closed_session_then_dispatches() {
     assert!(ix.pane_for_session(&id).await.is_none(), "starts closed");
 
     let main = ix.store().main_thread_id(&id).await.unwrap();
-    let send = ix
+    let (send, _) = ix
         .enqueue_send(to(main), "after resume", None)
         .await
         .unwrap();

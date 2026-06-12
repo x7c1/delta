@@ -27,6 +27,11 @@ pub enum WireSessionEvent {
     SessionClosed {
         session_id: String,
     },
+    /// A held (`queued`) send was promoted to `dispatched` and typed.
+    SendDispatched {
+        session_id: String,
+        send_id: i64,
+    },
     /// A queued send was confirmed as a turn start.
     TurnStarted {
         session_id: String,
@@ -81,6 +86,13 @@ impl From<SessionEvent> for WireSessionEvent {
             },
             SessionEvent::SessionClosed { session_id } => Self::SessionClosed {
                 session_id: session_id.0,
+            },
+            SessionEvent::SendDispatched {
+                session_id,
+                send_id,
+            } => Self::SendDispatched {
+                session_id: session_id.0,
+                send_id,
             },
             SessionEvent::TurnStarted {
                 session_id,
@@ -168,6 +180,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             WireSessionEvent::SessionRegistered { .. }
             | WireSessionEvent::SessionOpened { .. }
             | WireSessionEvent::SessionClosed { .. }
+            | WireSessionEvent::SendDispatched { .. }
             | WireSessionEvent::TurnStarted { .. }
             | WireSessionEvent::ExternalInput { .. }
             | WireSessionEvent::TurnCompleted { .. }
@@ -189,6 +202,10 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::SessionClosed {
             session_id: session_id(),
+        },
+        WireSessionEvent::SendDispatched {
+            session_id: session_id(),
+            send_id: 1,
         },
         WireSessionEvent::TurnStarted {
             session_id: session_id(),
@@ -320,6 +337,21 @@ mod tests {
     }
 
     #[test]
+    fn send_dispatched_serializes_with_id_and_send_id() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::SendDispatched {
+                session_id: SessionId::from("sess-1"),
+                send_id: 42,
+            })),
+            serde_json::json!({
+                "kind": "send_dispatched",
+                "session_id": "sess-1",
+                "send_id": 42,
+            }),
+        );
+    }
+
+    #[test]
     fn turn_events_keep_their_payload_fields_on_the_wire() {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::TurnStarted {
@@ -377,6 +409,7 @@ mod tests {
                 "session_registered",
                 "session_opened",
                 "session_closed",
+                "send_dispatched",
                 "turn_started",
                 "external_input",
                 "turn_completed",

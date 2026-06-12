@@ -35,9 +35,10 @@ where
     /// physical keystroke was held, so this completes a normal send.
     ///
     /// On a `send_line` failure it mirrors the other dispatch sites so a failed
-    /// dispatch cannot wedge the FIFO: it cancels the now-undeliverable head
-    /// pending send and clears the turn-active flag. The failure is logged and the
-    /// loop continues to the next ready resume rather than aborting the whole tick.
+    /// dispatch cannot wedge the queue: the `DispatchFailed` turn input cancels
+    /// the now-undeliverable outstanding send and returns the turn to idle. The
+    /// failure is logged and the loop continues to the next ready resume rather
+    /// than aborting the whole tick.
     ///
     /// `now` is injected (rather than read here) so the dispatch is deterministic
     /// under test, mirroring [`Self::reap_stale_spawns`]: the server loop passes
@@ -67,20 +68,21 @@ where
                 pane = %resuming.pane,
                 "resume settled after SessionStart(resume); dispatching the held first prompt"
             );
-            // The turn flag was set when the send was enqueued (its keystroke was
-            // held, not its bookkeeping), so a dispatch failure here must clear it
-            // and cancel the now-undeliverable row, mirroring the other dispatch
-            // sites, so a failed dispatch cannot wedge the FIFO.
+            // The turn machine moved to `AwaitingEcho` when the send was
+            // enqueued (its keystroke was held, not its bookkeeping), so a
+            // dispatch failure here must feed `DispatchFailed` — which cancels
+            // the now-undeliverable row and returns the turn to idle,
+            // mirroring the other dispatch sites, so a failed dispatch cannot
+            // wedge the queue.
             if let Err(err) = self.tmux.send_line(&resuming.pane, &text).await {
                 tracing::warn!(
                     session_id = %session_id,
                     error = %err,
                     "failed to dispatch the held resume first prompt; cancelling its pending send"
                 );
-                if let Some(head) = self.store.head_dispatched_send(&session_id).await? {
-                    let _ = self.store.cancel_send(head.id).await;
-                }
-                let _ = self.store.set_turn_active(&session_id, false).await;
+                let _ = self
+                    .apply_turn_input(&session_id, crate::turn::TurnInput::DispatchFailed)
+                    .await;
                 // Keep dispatching the remaining ready resumes: one pane's send
                 // failure must not strand the others queued on this tick.
                 continue;

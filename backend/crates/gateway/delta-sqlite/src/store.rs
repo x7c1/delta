@@ -637,31 +637,11 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
-    async fn is_turn_active(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<bool, delta_usecase::Error> {
-        let conn = self.conn.lock().await;
-        let active: Option<i64> = conn
-            .query_row(
-                "SELECT turn_active FROM session WHERE id = ?1",
-                params![session_id.as_str()],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(Error::from)?;
-        Ok(active.unwrap_or(0) != 0)
-    }
-
-    async fn set_turn_active(
-        &self,
-        session_id: &SessionId,
-        active: bool,
-    ) -> std::result::Result<(), delta_usecase::Error> {
+    async fn requeue_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(
-            "UPDATE session SET turn_active = ?1 WHERE id = ?2",
-            params![active as i64, session_id.as_str()],
+            "UPDATE send SET status = 'queued' WHERE id = ?1 AND status = 'dispatched'",
+            params![id],
         )
         .map_err(Error::from)?;
         Ok(())
@@ -702,36 +682,6 @@ impl SessionStore for SqliteStore {
         )
         .map_err(Error::from)?;
         Ok(())
-    }
-
-    async fn match_dispatched_send(
-        &self,
-        session_id: &SessionId,
-        trimmed_text: &str,
-    ) -> std::result::Result<Option<Send>, delta_usecase::Error> {
-        let conn = self.conn.lock().await;
-        // SQLite's `TRIM` only strips spaces (not all Unicode whitespace such as
-        // `\n`), so to match Rust's `str::trim` semantics we scan the dispatched
-        // sends in FIFO order and compare trimmed text in Rust.
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT {SEND_COLS} FROM send
-                 WHERE session_id = ?1 AND status = 'dispatched'
-                 ORDER BY id"
-            ))
-            .map_err(Error::from)?;
-        let rows = stmt
-            .query_map(params![session_id.as_str()], |r| {
-                Ok(send_from_row(r))
-            })
-            .map_err(Error::from)?;
-        for row in rows {
-            let send = row.map_err(Error::from)??;
-            if send.text.trim() == trimmed_text {
-                return Ok(Some(send));
-            }
-        }
-        Ok(None)
     }
 
     async fn latest_user_thread(

@@ -17,6 +17,7 @@ mod ports;
 mod send_target;
 mod session_listing;
 mod session_page;
+mod turn;
 
 pub use error::{Error, Result};
 pub use interactor::{BoxedInteractor, Interactor};
@@ -31,6 +32,7 @@ pub use ports::{
 pub use send_target::SendTarget;
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};
+pub use turn::{transition, OrphanedSend, Transition, TurnInput, TurnRegistry, TurnState};
 
 // Re-export the domain types the transport layer needs, so the server can
 // depend on the use-case surface without reaching across to delta-model for

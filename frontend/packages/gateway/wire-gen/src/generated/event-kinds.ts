@@ -7,6 +7,7 @@ export const EVENT_KINDS = [
   'session_registered',
   'session_opened',
   'session_closed',
+  'send_dispatched',
   'turn_started',
   'external_input',
   'turn_completed',

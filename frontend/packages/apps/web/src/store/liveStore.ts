@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
-import type { SessionEvent } from '@delta/wire-gen';
+import type { SessionEvent, Turn } from '@delta/wire-gen';
 import type { ConnectionStatus } from '@delta/api-client';
 
 /**
@@ -157,9 +157,20 @@ export interface LiveState {
    * active-turn flags). Used on a live-stream reconnect: the turn-end events
    * that would have drained these were broadcast while the socket was down and
    * are not replayed, so they can no longer be reconciled from events. The
-   * server's open-send list recovers by refetch and is untouched.
+   * server's open-send list recovers by refetch, and {@link seedActiveTurn}
+   * re-seeds the active-turn flag from that refetch's `turn` field.
    */
   resetTurnEphemera: () => void;
+  /**
+   * Seed a session's active-turn flag from the server's queryable turn state
+   * (the `turn` field of `GET /api/sessions/{id}/sends`). Set-only, and only
+   * for `in_flight` — the phase `turn_started` would have announced (healing
+   * a reconnect that missed it). `awaiting_echo` is a dispatch whose turn has
+   * not started yet, exactly like a live `send_dispatched`, and `idle`
+   * changes nothing — clearing is owned by the turn-end events, so a
+   * momentarily-stale refetch can never wipe a flag an event just set.
+   */
+  seedActiveTurn: (sessionId: SessionId, turn: Turn) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
   /** Record an external (direct-pane) input marker for a session/thread. */
@@ -285,6 +296,14 @@ export const useLiveStore = create<LiveState>((set) => ({
     }),
 
   resetTurnEphemera: () => set({ localSends: {}, activeTurns: {} }),
+
+  seedActiveTurn: (sessionId, turn) =>
+    set((state) => {
+      if (turn.state !== 'in_flight' || state.activeTurns[sessionId]) {
+        return state;
+      }
+      return { activeTurns: { ...state.activeTurns, [sessionId]: true } };
+    }),
 
   bumpUnread: (threadId) =>
     set((state) => ({

@@ -1,7 +1,7 @@
 use delta_model::Send;
 
 use crate::error::{Error, Result};
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::send_target::SendTarget;
 use crate::Interactor;
 
@@ -39,12 +39,16 @@ where
     /// A branch send (the `branch_from` arm of [`SendTarget::Thread`]) requires
     /// an existing session — there must be a message to branch from — which the
     /// thread target inherently provides.
+    ///
+    /// Returns the created send plus any [`SessionEvent`]s the enqueue produced
+    /// (e.g. a `send_dispatched` when the idle-flush promoted a previously
+    /// queued send); the transport broadcasts them.
     pub async fn enqueue_send(
         &self,
         target: SendTarget,
         text: &str,
         locator_quote: Option<&str>,
-    ) -> Result<Send> {
+    ) -> Result<(Send, Vec<SessionEvent>)> {
         match target {
             SendTarget::Thread {
                 thread_id,
@@ -86,9 +90,10 @@ where
                 // anchor, so there is nothing to locate. The persisted row (and
                 // therefore the response) carries no quote.
                 let spawn = self.spawn_fresh(Some(text.to_owned()), workdir).await?;
-                Ok(spawn
+                let send = spawn
                     .first_send
-                    .expect("spawn_fresh enqueues a send when a first prompt is given"))
+                    .expect("spawn_fresh enqueues a send when a first prompt is given");
+                Ok((send, Vec::new()))
             }
         }
     }

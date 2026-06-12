@@ -21,7 +21,7 @@ async fn interrupt_marker_emits_turn_interrupted_and_stays_on_thread() {
     // Start a branch turn and match its user line onto the child thread, so
     // `carry_thread` is the child when the interrupt lands.
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let (pending, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();
@@ -34,7 +34,7 @@ async fn interrupt_marker_emits_turn_interrupted_and_stays_on_thread() {
 
     // An unrelated, still-pending send is queued. Its text must not collide with
     // the interrupt marker, so the marker must not match or cancel it.
-    let unrelated = ix
+    let (unrelated, _) = ix
         .enqueue_send(to(main), "unrelated prompt", None)
         .await
         .unwrap();

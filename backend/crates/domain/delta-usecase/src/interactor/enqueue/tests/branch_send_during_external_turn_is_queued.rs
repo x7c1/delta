@@ -21,15 +21,16 @@ async fn branch_send_during_external_turn_is_queued() {
     ix.on_user_prompt_submit(submit("typed in the pane"))
         .await
         .unwrap();
-    assert!(
-        ix.store().is_turn_active(&session).await.unwrap(),
+    assert_ne!(
+        ix.turn_state_for(&session).await,
+        crate::turn::TurnState::Idle,
         "a pane-typed turn marks the session busy via its hook"
     );
     let sent_before = ix.tmux_fake().sent.lock().unwrap().len();
 
     // A composer branch send during that external turn must defer.
     let parent = MessageUuid::from("uuid-parent");
-    let queued = ix
+    let (queued, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", Some("quote"))
         .await
         .unwrap();
