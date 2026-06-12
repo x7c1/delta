@@ -1,14 +1,10 @@
 import type { SessionEvent } from '@delta/wire-gen';
-import {
-  FakeEventSource,
-  mockApi,
-  type FakeEventSourceOptions,
-} from '@delta/api-mocks';
+import type { FakeEventSource, FakeEventSourceOptions } from '@delta/api-mocks';
 
 /**
  * Test seam for the mock-mode event source.
  *
- * In mock mode the app drives its live channel from a {@link FakeEventSource}.
+ * In mock mode the app drives its live channel from a `FakeEventSource`.
  * By default that source auto-replays a scripted sequence on a 1500 ms timer —
  * fine for human-facing dev, but too slow and unobservable for an automated
  * end-to-end run. This module lets an external driver (a Playwright spec)
@@ -18,6 +14,11 @@ import {
  * The seam is engaged only when a test sets {@link MOCK_EVENT_CONTROL_KEY} on
  * `window` before the app boots. With no override present the source behaves
  * exactly as in production dev, so this has zero effect on the shipped app.
+ *
+ * `@delta/api-mocks` (and its `msw` dependency) is loaded with a dynamic
+ * import so it never reaches the production bundle: the static imports above
+ * are type-only (erased at compile time), and the value import happens inside
+ * {@link createMockEventSource}, which only runs in mock mode.
  */
 
 /** `window` property a test sets (pre-boot) to override the fake event source. */
@@ -52,11 +53,19 @@ function readControl(): MockEventControl {
 }
 
 /**
- * Build the mock-mode {@link FakeEventSource}, honouring any test overrides. If
- * the test disabled auto-play it also publishes the source on `window` so the
- * test can feed events with {@link FakeEventSource.emit}.
+ * Build the mock-mode {@link FakeEventSource}, honouring any test overrides,
+ * and publish it on `window` so a test can feed events with
+ * {@link FakeEventSource.emit}.
+ *
+ * Async because the mock machinery is fetched on demand (see the module doc).
+ * No event can slip through the gap: in manual mode the driver feeds events
+ * only after the source appears on `window`, and the publication below is
+ * separated from the caller's subscription by microtasks alone — an external
+ * driver's task cannot interleave them. In auto-play mode the first scripted
+ * event fires on a macrotask timer, well after the caller subscribed.
  */
-export function createMockEventSource(): FakeEventSource {
+export async function createMockEventSource(): Promise<FakeEventSource> {
+  const { FakeEventSource, mockApi } = await import('@delta/api-mocks');
   const control = readControl();
   const options: FakeEventSourceOptions = {};
   if (control.intervalMs !== undefined) {

@@ -138,6 +138,17 @@ export interface LiveState {
    * no optimistic pending chip is shown. Cleared when the session opens.
    */
   resumeUnavailable: Record<SessionId, true>;
+  /**
+   * Spawn failures whose `spawn_failed` event arrived before {@link trackSpawn}
+   * registered the spawn. The event is broadcast on the live channel while the
+   * `POST /api/sends` response travels back separately, so the failure can
+   * legitimately outrun the registration; dropping it would leave the chip
+   * spinning forever. Buffered here and consumed by {@link trackSpawn}, which
+   * then registers the spawn as `failed` directly. An entry for a spawn this
+   * client never tracks (e.g. another client's) is cleaned up if the session
+   * registers, and is otherwise inert.
+   */
+  earlySpawnFailures: Record<SessionId, true>;
 
   setConnection: (status: ConnectionStatus) => void;
   /** Record a submit whose `POST /api/sends` is about to fly. */
@@ -148,7 +159,11 @@ export interface LiveState {
   removeSending: (id: string) => void;
   /** Track an accepted send until its turn ends (real ids from the POST). */
   recordLocalSend: (send: LocalSend) => void;
-  /** Track a new-session spawn (real ids from the POST response). */
+  /**
+   * Track a new-session spawn (real ids from the POST response). If the
+   * spawn's failure already arrived (see {@link LiveState.earlySpawnFailures}),
+   * the spawn is registered as `failed` immediately.
+   */
   trackSpawn: (spawn: Omit<SpawnItem, 'status'>) => void;
   /** Drop a tracked spawn (it registered, or its failure was dismissed). */
   clearSpawn: (sessionId: SessionId) => void;
@@ -206,19 +221,31 @@ export interface LiveState {
  * (the transcript-detected interrupt), which can occasionally both arrive, so
  * the drain is idempotent (a no-match is a no-op).
  */
+/**
+ * Drop the tracked local sends of one session, returning the changed slice
+ * (empty object when nothing matched). Used when the session's spawn failed —
+ * its turn will never end, so nothing else drains those sends.
+ */
+function dropLocalSendsForSession(
+  state: LiveState,
+  sessionId: SessionId,
+): Partial<LiveState> {
+  const remaining = Object.values(state.localSends).filter(
+    (send) => send.sessionId !== sessionId,
+  );
+  if (remaining.length === Object.keys(state.localSends).length) {
+    return {};
+  }
+  return {
+    localSends: Object.fromEntries(remaining.map((send) => [send.sendId, send])),
+  };
+}
+
 function endTurnForSession(
   state: LiveState,
   sessionId: SessionId,
 ): Partial<LiveState> {
-  const next: Partial<LiveState> = {};
-  const remaining = Object.values(state.localSends).filter(
-    (send) => send.sessionId !== sessionId,
-  );
-  if (remaining.length !== Object.keys(state.localSends).length) {
-    next.localSends = Object.fromEntries(
-      remaining.map((send) => [send.sendId, send]),
-    );
-  }
+  const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
   if (state.activeTurns[sessionId]) {
     const activeTurns = { ...state.activeTurns };
     delete activeTurns[sessionId];
@@ -247,6 +274,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   unread: {},
   externalInput: {},
   resumeUnavailable: {},
+  earlySpawnFailures: {},
 
   setConnection: (status) => set({ connection: status }),
 
@@ -271,9 +299,22 @@ export const useLiveStore = create<LiveState>((set) => ({
     })),
 
   trackSpawn: (spawn) =>
-    set((state) => ({
-      spawns: [...state.spawns, { ...spawn, status: 'spawning' }],
-    })),
+    set((state) => {
+      if (!state.earlySpawnFailures[spawn.sessionId]) {
+        return { spawns: [...state.spawns, { ...spawn, status: 'spawning' }] };
+      }
+      // The failure outran the POST response: register the spawn already
+      // failed (the Retry/Dismiss chip surfaces right away), consume the
+      // buffered failure, and drop the just-recorded local send for it — its
+      // turn will never end.
+      const earlySpawnFailures = { ...state.earlySpawnFailures };
+      delete earlySpawnFailures[spawn.sessionId];
+      return {
+        spawns: [...state.spawns, { ...spawn, status: 'failed' }],
+        earlySpawnFailures,
+        ...dropLocalSendsForSession(state, spawn.sessionId),
+      };
+    }),
 
   clearSpawn: (sessionId) =>
     set((state) => ({
@@ -414,39 +455,55 @@ export const useLiveStore = create<LiveState>((set) => ({
           // Flip the tracked spawn to `failed` so the recoverable chip with
           // Retry / Dismiss surfaces, and drop any tracked local send for it —
           // its turn will never end. The event carries the REAL session id the
-          // POST response returned, so this is an exact match; an untracked id
-          // (e.g. another client's spawn) is a no-op.
+          // POST response returned, so this is an exact match. An id with no
+          // tracked spawn at all is buffered, NOT dropped: the broadcast can
+          // outrun this client's own POST response, in which case `trackSpawn`
+          // consumes the buffer moments later (a genuinely foreign id — e.g.
+          // another client's spawn — leaves an inert entry).
           const idx = state.spawns.findIndex(
             (spawn) =>
               spawn.sessionId === event.session_id &&
               spawn.status === 'spawning',
           );
           if (idx === -1) {
-            return state;
+            const alreadyTracked = state.spawns.some(
+              (spawn) => spawn.sessionId === event.session_id,
+            );
+            // A duplicate event for an already-failed spawn changes nothing.
+            return alreadyTracked
+              ? state
+              : {
+                  earlySpawnFailures: {
+                    ...state.earlySpawnFailures,
+                    [event.session_id]: true,
+                  },
+                };
           }
           const spawns = state.spawns.slice();
           spawns[idx] = { ...spawns[idx], status: 'failed' };
-          const next: Partial<LiveState> = { spawns };
-          const remaining = Object.values(state.localSends).filter(
-            (send) => send.sessionId !== event.session_id,
-          );
-          if (remaining.length !== Object.keys(state.localSends).length) {
-            next.localSends = Object.fromEntries(
-              remaining.map((send) => [send.sendId, send]),
-            );
-          }
-          return next;
+          return {
+            spawns,
+            ...dropLocalSendsForSession(state, event.session_id),
+          };
         }
         case 'external_input':
           // The external-input marker is session-scoped and only meaningful for
           // the focused session, so the router (`applySessionEvent`) records it
           // via `noteExternalInput` under a focus guard. Nothing to do here.
           return state;
-        case 'session_registered':
+        case 'session_registered': {
           // Open/closed lifecycle is reflected by the sessions query, and the
           // tracked spawn is cleared by the workspace once it can focus the
-          // freshly-listed session (it needs the id until then).
-          return state;
+          // freshly-listed session (it needs the id until then). A registered
+          // session can no longer fail to spawn, so a buffered early failure
+          // for it (necessarily foreign — ids are unique) is stale: drop it.
+          if (!state.earlySpawnFailures[event.session_id]) {
+            return state;
+          }
+          const earlySpawnFailures = { ...state.earlySpawnFailures };
+          delete earlySpawnFailures[event.session_id];
+          return { earlySpawnFailures };
+        }
         case 'session_opened': {
           // The session resumed successfully, so any stale "cannot be resumed"
           // notice for it is now wrong — clear it. Open/closed itself is
