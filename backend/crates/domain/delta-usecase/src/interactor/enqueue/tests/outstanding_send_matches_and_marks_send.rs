@@ -5,7 +5,7 @@ use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
 #[tokio::test]
-async fn fifo_head_matches_and_marks_send() {
+async fn outstanding_send_matches_and_marks_send() {
     let ix = interactor();
     // Register and obtain main thread, idle (the registration turn completed).
     ix.seed_session().await;
@@ -16,7 +16,7 @@ async fn fifo_head_matches_and_marks_send() {
         .unwrap();
 
     // Queue a send (also dispatches to fake tmux).
-    let send = ix
+    let (send, _) = ix
         .enqueue_send(to(main), "hello world", Some("[quote]"))
         .await
         .unwrap();
@@ -48,7 +48,7 @@ async fn fifo_head_matches_and_marks_send() {
     assert_eq!(started.0, MessageUuid::from("uuid-1"));
     assert_eq!(started.1, send.id);
 
-    // Marked matched; no longer the head.
+    // Marked matched; no longer outstanding.
     let head = ix
         .store()
         .head_dispatched_send(&SessionId::from("sess-1"))

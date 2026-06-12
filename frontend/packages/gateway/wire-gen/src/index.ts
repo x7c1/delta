@@ -25,6 +25,8 @@ export type { MessagesResponse } from './generated/MessagesResponse';
 export type { CreateSendRequest } from './generated/CreateSendRequest';
 export type { SendResponse } from './generated/SendResponse';
 export type { SendsResponse } from './generated/SendsResponse';
+export type { Turn } from './generated/Turn';
+export type { TurnPhase } from './generated/TurnPhase';
 export type { WorkdirEntry } from './generated/WorkdirEntry';
 export type { WorkdirListResponse } from './generated/WorkdirListResponse';
 export type { RecentWorkdirItem } from './generated/RecentWorkdirItem';

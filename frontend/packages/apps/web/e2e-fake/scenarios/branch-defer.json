@@ -1,0 +1,10 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "a quotable passage to branch from" },
+    { "type": "await_interrupt" },
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "context received: {additional_context}" },
+    { "type": "stop" }
+  ]
+}

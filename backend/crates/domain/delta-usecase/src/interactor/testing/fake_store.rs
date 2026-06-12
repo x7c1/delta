@@ -42,7 +42,6 @@ pub(crate) struct FakeStoreInner {
     pub(crate) permissions: Vec<PermissionRequest>,
     pub(crate) next_perm_id: i64,
     pub(crate) transcript_lines_read: HashMap<SessionId, usize>,
-    pub(crate) turn_active: HashMap<SessionId, bool>,
 }
 
 #[derive(Default)]
@@ -137,7 +136,6 @@ impl SessionStore for FakeStore {
         g.messages.retain(|m| &m.session_id != id);
         g.permissions.retain(|p| &p.session_id != id);
         g.transcript_lines_read.remove(id);
-        g.turn_active.remove(id);
         Ok(())
     }
 
@@ -400,23 +398,15 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn is_turn_active(&self, session_id: &SessionId) -> Result<bool> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
-            .turn_active
-            .get(session_id)
-            .copied()
-            .unwrap_or(false))
-    }
-
-    async fn set_turn_active(&self, session_id: &SessionId, active: bool) -> Result<()> {
-        self.inner
-            .lock()
-            .unwrap()
-            .turn_active
-            .insert(session_id.clone(), active);
+    async fn requeue_send(&self, id: i64) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Dispatched)
+        {
+            s.status = SendStatus::Queued;
+        }
         Ok(())
     }
 
@@ -436,23 +426,6 @@ impl SessionStore for FakeStore {
             s.matched_uuid = Some(matched_uuid.clone());
         }
         Ok(())
-    }
-
-    async fn match_dispatched_send(
-        &self,
-        session_id: &SessionId,
-        trimmed_text: &str,
-    ) -> Result<Option<Send>> {
-        let g = self.inner.lock().unwrap();
-        Ok(g.sends
-            .iter()
-            .filter(|s| {
-                &s.session_id == session_id
-                    && s.status == SendStatus::Dispatched
-                    && s.text.trim() == trimmed_text
-            })
-            .min_by_key(|s| s.id)
-            .cloned())
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {

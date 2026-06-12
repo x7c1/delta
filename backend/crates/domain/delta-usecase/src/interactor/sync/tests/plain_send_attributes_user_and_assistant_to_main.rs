@@ -9,7 +9,7 @@ async fn plain_send_attributes_user_and_assistant_to_main() {
     let session = SessionId::from("sess-1");
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
-    let pending = ix
+    let (pending, _) = ix
         .enqueue_send(to(main), "hello world", None)
         .await
         .unwrap();

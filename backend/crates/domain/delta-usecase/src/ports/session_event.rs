@@ -27,6 +27,13 @@ pub enum SessionEvent {
     SessionOpened { session_id: SessionId },
     /// An open session was closed: its pane was torn down but its data remains.
     SessionClosed { session_id: SessionId },
+    /// A held (`queued`) send was promoted to `dispatched` and its keystrokes
+    /// typed: the session went idle and the send took its turn.
+    ///
+    /// Lets the browser refetch the open-send list the moment the
+    /// queued→dispatched transition happens, instead of waiting for the next
+    /// turn-lifecycle event.
+    SendDispatched { session_id: SessionId, send_id: i64 },
     /// A queued send was confirmed as a turn start.
     TurnStarted {
         session_id: SessionId,

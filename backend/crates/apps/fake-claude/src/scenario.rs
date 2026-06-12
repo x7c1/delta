@@ -28,7 +28,7 @@
 //! | step | effect |
 //! |---|---|
 //! | `await_prompt` | Block until a prompt is submitted (the launch's positional prompt counts), then fire `UserPromptSubmit` and write the user transcript line. |
-//! | `reply { text, thinking? }` | Write an assistant transcript line (optional `thinking` block before the text block). |
+//! | `reply { text, thinking? }` | Write an assistant transcript line (optional `thinking` block before the text block). `{additional_context}` in `text` substitutes the `additionalContext` the most recent `UserPromptSubmit` hook response injected (empty when none). |
 //! | `tool_use { name, input? }` | Write an assistant `tool_use` line and fire `PreToolUse` with a fresh `tool_use_id`. |
 //! | `permission_request` | Fire `PermissionRequest` for the most recent `tool_use` (an interactive dialog appeared). |
 //! | `tool_result { is_error? }` | Write the `tool_result` carrier line for the most recent `tool_use`. |

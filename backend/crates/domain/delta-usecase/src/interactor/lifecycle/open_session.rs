@@ -135,6 +135,15 @@ where
             token
         };
 
+        // The session was closed until this resume, and a closed session has no
+        // turn in flight — but its last life may have left stale turn state
+        // behind (e.g. a `claude` that ended mid-turn without ever delivering a
+        // `Stop`). Feed `Close` now so the resumed session starts from a clean
+        // `Idle` (any stale outstanding send is swept) instead of deferring its
+        // first prompt behind a phantom turn forever.
+        self.apply_turn_input(id, crate::turn::TurnInput::Close)
+            .await?;
+
         // Catch the DB up to the existing transcript before the resume's first
         // prompt can arrive, so thread context resolves against the user's real
         // last thread rather than a DB-behind `None`. Released the registry lock

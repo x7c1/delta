@@ -17,7 +17,7 @@ async fn queued_command_send_attributes_user_and_assistant_to_child() {
 
     // Branch off an existing message and queue the first branch send.
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let (pending, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();

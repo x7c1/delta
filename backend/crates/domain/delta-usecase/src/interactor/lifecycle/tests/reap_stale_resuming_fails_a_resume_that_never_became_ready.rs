@@ -28,10 +28,19 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
     .await
     .unwrap();
     let main = ix.store().main_thread_id(&session_id).await.unwrap();
-    ix.store()
+    let held = ix
+        .store()
         .enqueue_send(&session_id, main, None, "held prompt", None)
         .await
         .unwrap();
+    // The held prompt counts as dispatched (its row is out awaiting its echo),
+    // exactly as `enqueue_into_open` records it.
+    ix.apply_turn_input(
+        &session_id,
+        crate::turn::TurnInput::Dispatch { send_id: held.id },
+    )
+    .await
+    .unwrap();
     ix.push_resuming_at(
         "delta-7",
         &session_id,

@@ -7,9 +7,9 @@ use crate::open_sessions::RESUME_DISPATCH_SETTLE;
 use crate::ports::SessionStore;
 
 /// When the tick dispatch's `send_line` fails, the held first prompt's pending
-/// row is cancelled and the turn-active flag is cleared, mirroring the other
-/// dispatch sites so a failed dispatch cannot wedge the FIFO. The resume is
-/// still removed from the resuming map (it was drained before the send).
+/// row is cancelled and the turn returns to idle, mirroring the other dispatch
+/// sites so a failed dispatch cannot wedge the queue. The resume is still
+/// removed from the resuming map (it was drained before the send).
 #[tokio::test]
 async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
     // An interactor whose tmux `send_line` always fails.
@@ -28,11 +28,17 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
     .await
     .unwrap();
     let main = ix.store().main_thread_id(&session_id).await.unwrap();
-    ix.store()
+    let held = ix
+        .store()
         .enqueue_send(&session_id, main, None, "held prompt", None)
         .await
         .unwrap();
-    ix.store().set_turn_active(&session_id, true).await.unwrap();
+    ix.apply_turn_input(
+        &session_id,
+        crate::turn::TurnInput::Dispatch { send_id: held.id },
+    )
+    .await
+    .unwrap();
 
     // Mark it resuming-but-not-ready with a held prompt, then ready at `ready_at`.
     ix.push_resuming_at(
@@ -55,10 +61,11 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
         head.is_none(),
         "the head pending send was cancelled on dispatch failure"
     );
-    // ...the turn flag was cleared so a later send is not stranded behind it...
-    assert!(
-        !ix.store().is_turn_active(&session_id).await.unwrap(),
-        "the turn-active flag was cleared on dispatch failure"
+    // ...the turn returned to idle so a later send is not stranded behind it...
+    assert_eq!(
+        ix.turn_state_for(&session_id).await,
+        crate::turn::TurnState::Idle,
+        "the turn returned to idle on dispatch failure"
     );
     // ...and the resume left the resuming map (it was drained before the send).
     assert!(ix.resuming_session_ids().await.is_empty());

@@ -13,6 +13,7 @@ mod lifecycle;
 mod listing;
 mod runtime;
 mod sync;
+mod turn_input;
 mod workdir;
 
 #[cfg(test)]
@@ -22,6 +23,7 @@ use crate::launch_config::LaunchConfig;
 use crate::open_sessions::OpenSessions;
 use crate::pane_token::PaneTokenMinter;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::turn::TurnRegistry;
 
 /// Holds the injected capabilities and exposes Delta's use cases.
 ///
@@ -64,6 +66,12 @@ pub struct Interactor<T, X, S, W> {
     /// The in-memory registry of live (open) panes. Rebuilt empty on boot, so
     /// open/closed is process-runtime state and never persisted.
     open_sessions: tokio::sync::Mutex<OpenSessions>,
+    /// The per-session turn state machine. Like [`Self::open_sessions`] this is
+    /// process-runtime state rebuilt empty on boot: after a restart every
+    /// session is closed (the registry above is empty), and a closed session
+    /// has no turn in flight, so absence — which reads as `Idle` — is exactly
+    /// right. See the `turn` module docs.
+    turns: tokio::sync::Mutex<TurnRegistry>,
     /// Serializes [`Self::sync_transcript`] across callers.
     ///
     /// Both the hook handlers and the background transcript tail can sync
@@ -112,6 +120,7 @@ where
             launch: LaunchConfig::default(),
             minter: PaneTokenMinter::new(),
             open_sessions: tokio::sync::Mutex::new(OpenSessions::default()),
+            turns: tokio::sync::Mutex::new(TurnRegistry::default()),
             sync_lock: tokio::sync::Mutex::new(()),
         }
     }

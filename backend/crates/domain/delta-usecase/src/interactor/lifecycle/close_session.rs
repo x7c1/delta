@@ -46,6 +46,11 @@ where
         if let Some(handle) = handle {
             self.tmux.kill_session(handle.token.as_str()).await?;
         }
+        // The pane is gone, so whatever turn was in flight can no longer
+        // progress: feed `Close` into the turn machine (an unechoed outstanding
+        // send is cancelled; an in-flight one is swept if it never matched).
+        self.apply_turn_input(id, crate::turn::TurnInput::Close)
+            .await?;
         Ok(())
     }
 }

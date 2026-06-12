@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { SessionId, ThreadId } from '@delta/model';
 import type { Send } from '@delta/wire-gen';
 import { useSessionSendsQuery } from '@delta/api-client';
@@ -52,6 +52,18 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   const sessionId = surface?.kind === 'thread' ? surface.sessionId : null;
   const sendsQuery = useSessionSendsQuery(client, sessionId);
   const serverSends = sendsQuery.data?.sends;
+  const serverTurn = sendsQuery.data?.turn;
+
+  // Re-seed the session's active-turn flag from the response's queryable turn
+  // state. After a live-stream reconnect the event-reconstructed flag was
+  // dropped (the `turn_started` that set it may have been missed), and the
+  // resync refetches this query — so the flag heals here without any event.
+  // `seedActiveTurn` is set-only; clearing stays owned by the turn-end events.
+  useEffect(() => {
+    if (sessionId !== null && serverTurn !== undefined) {
+      useLiveStore.getState().seedActiveTurn(sessionId, serverTurn);
+    }
+  }, [sessionId, serverTurn]);
 
   return useMemo(() => {
     if (surface === null) {

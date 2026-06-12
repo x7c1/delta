@@ -59,6 +59,9 @@ where
             self.kill_pane_best_effort(spawn.token.as_str()).await;
             // The spawn never bound, so its eagerly-created `spawning` row (and
             // children, by cascade) is deleted — same cleanup as the watchdog.
+            // Its turn entry (set when the first prompt's send was enqueued) is
+            // dropped with it.
+            self.forget_turn(&hook.session_id).await;
             self.clean_up_failed_spawn_row(&hook.session_id).await?;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
@@ -75,14 +78,12 @@ where
                  treating it as a failed resume and reporting SpawnFailed"
             );
             self.kill_pane_best_effort(resuming.token.as_str()).await;
-            // Cancel the held first prompt (if any) so its row does not block the
-            // FIFO on a later re-resume.
-            if resuming.held_prompt.is_some() {
-                if let Some(head) = self.store.head_dispatched_send(&hook.session_id).await? {
-                    let _ = self.store.cancel_send(head.id).await;
-                }
-                let _ = self.store.set_turn_active(&hook.session_id, false).await;
-            }
+            // The session's pane is gone: feed `Close` into the turn machine,
+            // which cancels the held first prompt's outstanding send (if any)
+            // so its row does not shadow correlation on a later re-resume.
+            let _ = self
+                .apply_turn_input(&hook.session_id, crate::turn::TurnInput::Close)
+                .await;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
                 pane_token: resuming.token.as_str().to_owned(),
@@ -90,12 +91,17 @@ where
         }
 
         // Normal end (or an unrelated id): the session was ready/bound or unknown.
-        // Leave close/teardown semantics alone.
+        // Leave close/teardown semantics alone, but the `claude` process is
+        // gone, so whatever turn state it had can no longer progress — feed
+        // `Close` so the turn machine does not hold a phantom in-flight turn
+        // (a no-op for an idle/unknown id).
         tracing::info!(
             session_id = %hook.session_id,
             reason = hook.reason.as_deref().unwrap_or("<none>"),
             "SessionEnd for a ready/unknown session; normal end, no failure handling"
         );
+        self.apply_turn_input(&hook.session_id, crate::turn::TurnInput::Close)
+            .await?;
         Ok(Vec::new())
     }
 }

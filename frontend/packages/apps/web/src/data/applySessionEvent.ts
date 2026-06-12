@@ -54,6 +54,12 @@ export function applySessionEvent(
   };
 
   switch (event.kind) {
+    case 'send_dispatched':
+      // A held (`queued`) send was promoted to `dispatched` and typed. Only
+      // the send queue moved (no transcript change yet), so refetch the
+      // session's open-send list to show the chip's queued→dispatched flip.
+      invalidateSessionSends(queryClient, event.session_id);
+      break;
     case 'turn_started':
     case 'turn_completed':
     case 'turn_interrupted':

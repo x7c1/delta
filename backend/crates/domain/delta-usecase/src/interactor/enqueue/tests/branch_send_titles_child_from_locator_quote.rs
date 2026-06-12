@@ -15,7 +15,7 @@ async fn branch_send_titles_child_from_locator_quote() {
         .unwrap();
 
     let parent = MessageUuid::from("uuid-parent");
-    let send = ix
+    let (send, _) = ix
         .enqueue_send(
             branch_off(main, &parent),
             "branch text",
@@ -27,7 +27,7 @@ async fn branch_send_titles_child_from_locator_quote() {
     assert_eq!(child.title, "the quoted source line");
 
     // With no quote, the title falls back to "untitled".
-    let send2 = ix
+    let (send2, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text 2", None)
         .await
         .unwrap();

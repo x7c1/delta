@@ -108,50 +108,42 @@ async fn dispatched_send_fifo_and_match() {
 }
 
 #[tokio::test]
-async fn match_dispatched_send_finds_oldest_pending_by_trimmed_text() {
+async fn requeue_send_returns_a_dispatched_send_to_queued() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    // Two dispatched sends with the same trimmed text; the oldest must win.
-    let first = store
-        .enqueue_send(&session.id, main, None, "  hello world\n", None)
-        .await
-        .unwrap();
-    let _second = store
+    let send = store
         .enqueue_send(&session.id, main, None, "hello world", None)
         .await
         .unwrap();
-    let _other = store
-        .enqueue_send(&session.id, main, None, "different", None)
-        .await
-        .unwrap();
+    assert_eq!(send.status, SendStatus::Dispatched);
 
-    // Trimmed comparison ignores surrounding whitespace on the stored text.
-    let matched = store
-        .match_dispatched_send(&session.id, "hello world")
+    // Requeue moves it out of the dispatched slot and back into the queue.
+    store.requeue_send(send.id).await.unwrap();
+    assert!(
+        store.head_dispatched_send(&session.id).await.unwrap().is_none(),
+        "a requeued send is no longer outstanding"
+    );
+    let next = store
+        .next_queued_send(&session.id)
         .await
         .unwrap()
-        .unwrap();
-    assert_eq!(matched.id, first.id, "returns the oldest matching dispatched send");
+        .expect("the requeued send is the next to dispatch");
+    assert_eq!(next.id, send.id);
+    assert_eq!(next.status, SendStatus::Queued);
 
-    // Marking it matched removes it from the candidate set.
+    // Requeue is dispatched-only: a matched send is terminal-for-correlation
+    // and must not be pulled back into the queue.
+    store.promote_queued_send(send.id).await.unwrap();
     store
-        .mark_send_matched(first.id, &MessageUuid::from("u-1"))
+        .mark_send_matched(send.id, &MessageUuid::from("u-1"))
         .await
         .unwrap();
-    let matched = store
-        .match_dispatched_send(&session.id, "hello world")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(matched.id, _second.id, "skips the already-matched send");
-
-    // No dispatched send for a foreign text.
-    assert!(store
-        .match_dispatched_send(&session.id, "nope")
-        .await
-        .unwrap()
-        .is_none());
+    store.requeue_send(send.id).await.unwrap();
+    assert!(
+        store.next_queued_send(&session.id).await.unwrap().is_none(),
+        "a matched send is not requeued"
+    );
 }
 
 #[tokio::test]
@@ -334,7 +326,7 @@ async fn upsert_preserves_thread_overlay_on_reingest() {
     let semantic_parent = MessageUuid::from("u-root");
 
     // First ingest: the line is correctly attributed to the branch thread,
-    // mirroring `match_dispatched_send` attaching it on its first (pending) hit.
+    // mirroring the outstanding-send correlation attaching it on its first hit.
     let msg = Message {
         uuid: MessageUuid::from("u-1"),
         session_id: session.id.clone(),
@@ -756,29 +748,12 @@ async fn permission_request_resolves_by_tool_use_id() {
 }
 
 #[tokio::test]
-async fn turn_active_flag_defaults_false_and_round_trips() {
-    let store = SqliteStore::open_in_memory().unwrap();
-    let (session, _main) = store.register_session(new_session()).await.unwrap();
-
-    assert!(
-        !store.is_turn_active(&session.id).await.unwrap(),
-        "a fresh session is idle"
-    );
-
-    store.set_turn_active(&session.id, true).await.unwrap();
-    assert!(store.is_turn_active(&session.id).await.unwrap());
-
-    store.set_turn_active(&session.id, false).await.unwrap();
-    assert!(!store.is_turn_active(&session.id).await.unwrap());
-}
-
-#[tokio::test]
 async fn queued_send_is_held_then_promoted_to_dispatched() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
-    // A queued send is recorded but stays out of the dispatched FIFO and the
-    // text-match candidate set until it is promoted.
+    // A queued send is recorded but stays out of the outstanding (dispatched)
+    // slot until it is promoted.
     let queued = store
         .enqueue_queued_send(&session.id, main, None, "branch text", Some("quote"))
         .await
@@ -787,14 +762,6 @@ async fn queued_send_is_held_then_promoted_to_dispatched() {
     assert!(
         store.head_dispatched_send(&session.id).await.unwrap().is_none(),
         "a queued send is not a dispatched FIFO head"
-    );
-    assert!(
-        store
-            .match_dispatched_send(&session.id, "branch text")
-            .await
-            .unwrap()
-            .is_none(),
-        "a queued send is not matchable until promoted"
     );
 
     let next = store
@@ -811,10 +778,10 @@ async fn queued_send_is_held_then_promoted_to_dispatched() {
         "no queued sends remain after promotion"
     );
     let matched = store
-        .match_dispatched_send(&session.id, "branch text")
+        .head_dispatched_send(&session.id)
         .await
         .unwrap()
-        .expect("the promoted send is now matchable");
+        .expect("the promoted send is now the outstanding dispatched send");
     assert_eq!(matched.id, queued.id);
     assert_eq!(matched.status, SendStatus::Dispatched);
     assert_eq!(matched.locator_quote.as_deref(), Some("quote"));

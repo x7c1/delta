@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::ports::{SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, Workspace};
+use crate::turn::TurnInput;
 use crate::Interactor;
 
 impl<T, X, S, W> Interactor<T, X, S, W>
@@ -21,11 +22,15 @@ where
             let (_messages, resolved_events) = self.sync_transcript(&session).await?;
             events.extend(resolved_events);
         }
-        // The turn ended: clear the in-flight flag, then release the next
-        // queued send (if any) now that the session is idle. Dispatching it
-        // sets the flag again for its own turn.
-        self.store.set_turn_active(&hook.session_id, false).await?;
-        self.dispatch_queued_send(&hook.session_id).await?;
+        // The turn ended: feed `Stop` into the turn machine (back to `Idle`),
+        // then release the next queued send — one at a time, the
+        // single-outstanding rule — now that the session is idle. Dispatching
+        // it moves the machine to `AwaitingEcho` for its own turn.
+        self.apply_turn_input(&hook.session_id, TurnInput::Stop)
+            .await?;
+        if let Some(event) = self.dispatch_queued_send(&hook.session_id).await? {
+            events.push(event);
+        }
         events.push(SessionEvent::TurnCompleted {
             session_id: hook.session_id,
             stop_reason: hook.stop_reason,

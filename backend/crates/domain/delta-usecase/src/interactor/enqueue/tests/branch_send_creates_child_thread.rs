@@ -13,7 +13,7 @@ async fn branch_send_creates_child_thread() {
         .unwrap();
 
     let parent = MessageUuid::from("uuid-parent");
-    let send = ix
+    let (send, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();

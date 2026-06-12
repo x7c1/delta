@@ -74,7 +74,9 @@ where
                 groups.push(messages);
             }
             if interrupted {
-                self.dispatch_queued_send(&session.id).await?;
+                if let Some(event) = self.dispatch_queued_send(&session.id).await? {
+                    events.push(event);
+                }
             }
         }
         Ok((groups, events))

@@ -15,7 +15,7 @@ async fn tool_result_mid_branch_turn_stays_on_the_branch() {
 
     // Start a branch turn and match its user line onto the child thread.
     let parent = MessageUuid::from("uuid-parent");
-    let pending = ix
+    let (pending, _) = ix
         .enqueue_send(branch_off(main, &parent), "branch text", None)
         .await
         .unwrap();

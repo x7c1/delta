@@ -1,7 +1,8 @@
 use delta_model::{MessageUuid, Send, SessionId, ThreadId};
 
 use crate::error::Result;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::turn::{TurnInput, TurnState};
 use crate::Interactor;
 
 use super::provisional_branch_title;
@@ -15,6 +16,10 @@ where
 {
     /// Write the `send` row and dispatch the keystrokes for an open
     /// session, with the cancel-on-dispatch-failure rollback.
+    ///
+    /// Returns the created send plus any [`SessionEvent`]s the enqueue
+    /// produced (the idle-flush below may promote a previously-queued send,
+    /// which the caller must broadcast as `send_dispatched`).
     #[allow(clippy::too_many_arguments)]
     pub(in crate::interactor::enqueue) async fn enqueue_into_open(
         &self,
@@ -24,14 +29,18 @@ where
         text: &str,
         locator_quote: Option<&str>,
         branch_from: Option<&MessageUuid>,
-    ) -> Result<Send> {
-        // Idle-flush safety net: if the session is idle but a send is still
+    ) -> Result<(Send, Vec<SessionEvent>)> {
+        let mut events = Vec::new();
+
+        // Idle-flush safety net: if the turn is idle but a send is still
         // `queued` (a dispatch trigger was missed, e.g. an interrupt the tail
         // had not tailed yet), release it now so it keeps its place ahead of
-        // this new send in FIFO order. Dispatching it sets the turn flag, which
-        // the defer check below then observes.
-        if !self.store.is_turn_active(session_id).await? {
-            self.dispatch_queued_send(session_id).await?;
+        // this new send in FIFO order. Dispatching it moves the turn machine
+        // to `AwaitingEcho`, which the defer check below then observes.
+        if self.turn_state_for(session_id).await == TurnState::Idle {
+            if let Some(event) = self.dispatch_queued_send(session_id).await? {
+                events.push(event);
+            }
         }
 
         // The target thread was already loaded by the caller to derive the
@@ -53,17 +62,16 @@ where
             None => (thread_id, None),
         };
 
-        // Defer this send when a turn is in flight AND it carries thread context
-        // (a branch entry or a locator quote). Dispatching mid-turn would make
-        // Claude Code queue it, and a queued prompt fires no `UserPromptSubmit`
-        // hook — so its locator quote would never be injected. Instead record it
-        // as `queued` (the branch child thread and the held text persist) and
-        // let the turn-end triggers dispatch it as an ordinary prompt once idle.
-        // Plain main-line sends are not queued: they need no quote, so Claude's
-        // own mid-turn queueing is harmless for them.
-        let carries_context = branch_from.is_some() || locator_quote.is_some();
-        if carries_context && self.store.is_turn_active(session_id).await? {
-            return self
+        // Defer this send when the turn is not idle (single-outstanding
+        // dispatch): only one send may be out per turn, so anything composed
+        // while a dispatch is outstanding or a turn is running is held
+        // `queued` (the branch child thread and the held text persist) and
+        // dispatched by the turn-end triggers, one at a time. This also keeps
+        // every quoted/branch send out of Claude Code's own mid-turn queue,
+        // where its `UserPromptSubmit` hook — and therefore its locator quote
+        // — would be lost.
+        if self.turn_state_for(session_id).await != TurnState::Idle {
+            let send = self
                 .store
                 .enqueue_queued_send(
                     session_id,
@@ -72,7 +80,8 @@ where
                     text,
                     locator_quote,
                 )
-                .await;
+                .await?;
+            return Ok((send, events));
         }
 
         let send = self
@@ -93,14 +102,14 @@ where
         // would lose it, so hold this prompt's keystroke on the registry instead
         // and let `dispatch_ready_resumes` type it on the background tick once
         // `SessionStart(resume)` has marked the resume ready and it has settled.
-        // The
-        // `send` row above is already written (its thread/branch/quote
+        // The `send` row above is already written (its thread/branch/quote
         // semantics persisted), so only the physical keystroke is held. The
-        // turn flag is still set, so anything composed before readiness defers
-        // behind this first prompt rather than racing it into the pane. A freshly
-        // resumed session has no active turn, so this readiness gate is the only
-        // gate in play until the first prompt dispatches; once ready (membership
-        // gone), later sends fall through to the immediate dispatch below.
+        // turn machine still moves to `AwaitingEcho`, so anything composed
+        // before readiness defers behind this first prompt rather than racing
+        // it into the pane. A freshly resumed session has an idle turn, so
+        // this readiness gate is the only gate in play until the first prompt
+        // dispatches; once ready (membership gone), later sends fall through
+        // to the immediate dispatch below.
         if self
             .open_sessions
             .lock()
@@ -111,28 +120,36 @@ where
                 session_id = %session_id,
                 "send held until resume readiness (SessionStart=resume); keystroke held"
             );
-            self.store.set_turn_active(session_id, true).await?;
-            return Ok(send);
+            self.apply_turn_input(session_id, TurnInput::Dispatch { send_id: send.id })
+                .await?;
+            return Ok((send, events));
         }
 
+        // The send is on its way: move the turn machine to `AwaitingEcho`
+        // BEFORE typing, so the `UserPromptSubmit` echo (which can fire within
+        // milliseconds of the keystrokes landing) always finds the dispatch
+        // recorded, and a following send defers behind it instead of
+        // dispatching mid-turn.
+        self.apply_turn_input(session_id, TurnInput::Dispatch { send_id: send.id })
+            .await?;
+
         // If the keystrokes never reach the pane, the row we just wrote would
-        // sit at the head of the FIFO forever and block all future
-        // `UserPromptSubmit` correlation. Roll it back to `cancelled` so the
-        // head clears, then surface the original dispatch error.
-        //
-        // Best-effort: if the rollback itself fails we keep the dispatch error
-        // (the caller's actionable failure) rather than masking it with a store
-        // error. We do *not* roll back the just-created branch child thread: an
-        // empty, unnamed thread is harmless overlay data and may legitimately be
-        // reused by a retry, whereas the FIFO-blocking dispatched row is the actual
-        // hazard this guard exists to clear.
+        // sit outstanding forever and shadow all future `UserPromptSubmit`
+        // correlation. The `DispatchFailed` transition cancels it so the
+        // outstanding slot clears, then the original dispatch error surfaces.
+        // We do *not* roll back the just-created branch child thread: an
+        // empty, unnamed thread is harmless overlay data and may legitimately
+        // be reused by a retry, whereas the correlation-shadowing dispatched
+        // row is the actual hazard this guard exists to clear.
         if let Err(dispatch_err) = self.tmux.send_line(pane, text).await {
-            let _ = self.store.cancel_send(send.id).await;
+            // Best-effort: if the cleanup itself fails we keep the dispatch
+            // error (the caller's actionable failure) rather than masking it
+            // with a store error.
+            let _ = self
+                .apply_turn_input(session_id, TurnInput::DispatchFailed)
+                .await;
             return Err(dispatch_err);
         }
-        // The send is on its way: mark the turn in flight so a following
-        // branch/quoted send defers behind it instead of dispatching mid-turn.
-        self.store.set_turn_active(session_id, true).await?;
-        Ok(send)
+        Ok((send, events))
     }
 }

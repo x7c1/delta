@@ -14,6 +14,7 @@ import type {
   ThreadsResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
+  Turn,
 } from '@delta/wire-gen';
 import {
   MOCK_WORKDIR_HOME,
@@ -215,7 +216,15 @@ export function createMockApi(): MockApi {
             (send.status === 'queued' || send.status === 'dispatched'),
         )
         .sort((a, b) => a.id - b.id);
-      const body: SendsResponse = { sends };
+      // Derive the turn state the way the server reports it: a `dispatched`
+      // send is the one outstanding dispatch awaiting its echo (`in_flight`
+      // only begins at the echo match, which the mock cannot observe); with
+      // none outstanding, the session is idle.
+      const outstanding = sends.find((send) => send.status === 'dispatched');
+      const turn: Turn = outstanding
+        ? { state: 'awaiting_echo', send_id: outstanding.id }
+        : { state: 'idle', send_id: null };
+      const body: SendsResponse = { sends, turn };
       return HttpResponse.json(body);
     }),
 

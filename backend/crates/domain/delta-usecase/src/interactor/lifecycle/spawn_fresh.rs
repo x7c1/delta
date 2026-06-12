@@ -121,6 +121,17 @@ where
             ),
             None => None,
         };
+        // The first prompt is delivered on the launch command line below, so it
+        // is already "dispatched": move the turn machine to `AwaitingEcho` now,
+        // before the launch, so the first `UserPromptSubmit` the auto-submitted
+        // prompt fires always finds the dispatch recorded.
+        if let Some(send) = &first_send {
+            self.apply_turn_input(
+                &session_id,
+                crate::turn::TurnInput::Dispatch { send_id: send.id },
+            )
+            .await?;
+        }
 
         self.workspace
             .write_session_settings(&self.session_settings_path, &self.session_settings_json)
@@ -181,6 +192,9 @@ where
                 .lock()
                 .await
                 .remove_pending_for_token(&token);
+            // The session row (and its first send, by cascade) is deleted, so
+            // the turn entry is dropped without orphan handling.
+            self.forget_turn(&session_id).await;
             self.store.delete_session(&session_id).await?;
             return Err(spawn_err);
         }

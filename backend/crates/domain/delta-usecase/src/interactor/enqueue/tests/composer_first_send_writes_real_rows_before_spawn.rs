@@ -17,7 +17,7 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
     // No session exists yet. The send spawns a fresh session and returns the
     // real, already-persisted send row bound to the new session and its main
     // thread.
-    let returned = ix
+    let (returned, _) = ix
         .enqueue_send(
             SendTarget::NewSession { workdir: None },
             "first message",

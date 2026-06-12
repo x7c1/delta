@@ -19,7 +19,7 @@ pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;
 pub use send_response::WireSendResponse;
 mod sends_response;
-pub use sends_response::WireSendsResponse;
+pub use sends_response::{WireSendsResponse, WireTurn, WireTurnPhase};
 mod sessions_response;
 pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
 mod threads_response;
