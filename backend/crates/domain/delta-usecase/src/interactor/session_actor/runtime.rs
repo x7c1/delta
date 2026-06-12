@@ -151,6 +151,35 @@ pub struct ResumingSession {
     pub ready_at: Option<Instant>,
 }
 
+/// A permission dialog currently awaiting a human answer — in the browser
+/// (the notice's Allow/Deny) or in the TUI prompt after the browser-decision
+/// wait timed out.
+///
+/// This is the queryable counterpart of the `PermissionRequested` broadcast:
+/// the event is lost for a client whose socket was down when it fired, so the
+/// sends envelope (`GET /api/sessions/{id}/sends`) reports this state and a
+/// reconnecting client rebuilds its notice from a plain refetch, exactly like
+/// the turn state. Cleared when the request resolves (a browser decision or
+/// the correlated `tool_result`) and whenever the turn returns to idle — a
+/// dialog cannot outlive its turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPermission {
+    /// The `permission_request` row id (the decision endpoint's key).
+    pub request_id: i64,
+    pub tool_name: String,
+    /// The tool input, serialized as JSON text.
+    pub tool_input_json: String,
+}
+
+/// One consistent snapshot of the runtime state the sends envelope reports:
+/// the turn phase plus the pending permission dialog, read in a single actor
+/// message so the two can never disagree within one response.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionLiveState {
+    pub turn: TurnState,
+    pub pending_permission: Option<PendingPermission>,
+}
+
 /// All of one session's runtime state, owned exclusively by its actor.
 ///
 /// The actor's mailbox is the only way in, so no lock guards any of this: the
@@ -175,6 +204,12 @@ pub struct SessionRuntime {
     /// response blocks on the receiver), resolved by a browser decision, and
     /// abandoned on the transport's timeout.
     permission_waiters: HashMap<i64, oneshot::Sender<PermissionDecision>>,
+    /// The permission dialog currently awaiting an answer, if any. Unlike a
+    /// waiter (which only lives while the hook response blocks on a browser
+    /// decision), this survives the decision-wait timeout: the TUI prompt is
+    /// still up, so the question is still genuinely pending. At most one
+    /// exists — `claude` shows one dialog at a time.
+    pending_permission: Option<PendingPermission>,
 }
 
 impl SessionRuntime {
@@ -189,6 +224,7 @@ impl SessionRuntime {
             && self.resuming.is_none()
             && self.turn == TurnState::Idle
             && self.permission_waiters.is_empty()
+            && self.pending_permission.is_none()
     }
 
     /// Whether a pane is live: bound to the session, or spawned and awaiting
@@ -408,12 +444,29 @@ impl SessionRuntime {
         self.turn
     }
 
+    /// Snapshot the queryable live state (turn phase + pending permission)
+    /// in one read, for the sends envelope.
+    pub fn live_state(&self) -> SessionLiveState {
+        SessionLiveState {
+            turn: self.turn,
+            pending_permission: self.pending_permission.clone(),
+        }
+    }
+
     /// Apply one input to the turn state machine, returning the full
     /// transition (the caller executes the orphan disposition and logs
     /// anomalies). The transition table lives in the `turn` module.
+    ///
+    /// A transition back to [`TurnState::Idle`] (stop, interrupt, close) also
+    /// drops any pending permission dialog: the dialog blocked that turn, so
+    /// the turn ending — however it ended — means the question is moot. This
+    /// is the same lifecycle the browser notice has.
     pub fn apply_turn(&mut self, input: TurnInput) -> Transition {
         let result = transition(self.turn, input);
         self.turn = result.next;
+        if result.next == TurnState::Idle {
+            self.pending_permission = None;
+        }
         result
     }
 
@@ -421,6 +474,7 @@ impl SessionRuntime {
     /// row itself is being deleted (its sends go with it by cascade).
     pub fn forget_turn(&mut self) {
         self.turn = TurnState::Idle;
+        self.pending_permission = None;
     }
 
     /// Register a oneshot waiter for a permission request the browser may
@@ -442,6 +496,26 @@ impl SessionRuntime {
     ) -> Option<oneshot::Sender<PermissionDecision>> {
         self.permission_waiters.remove(&request_id)
     }
+
+    /// Record the permission dialog now awaiting an answer (a new dialog
+    /// replaces a stale one — `claude` shows one at a time).
+    pub fn set_pending_permission(&mut self, pending: PendingPermission) {
+        self.pending_permission = Some(pending);
+    }
+
+    /// Drop the pending dialog if `request_id` is the one it tracks. Keyed so
+    /// a stale resolution can never wipe a newer dialog's state — the same
+    /// guard the browser notice applies to `permission_resolved`.
+    pub fn resolve_pending_permission(&mut self, request_id: i64) {
+        if self
+            .pending_permission
+            .as_ref()
+            .is_some_and(|p| p.request_id == request_id)
+        {
+            self.pending_permission = None;
+        }
+    }
+
 
     /// The pending spawn, for the test seams that read launch state back.
     #[cfg(test)]

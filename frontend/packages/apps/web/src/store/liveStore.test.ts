@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useLiveStore, type LocalSend } from './liveStore';
+import { noticeOf, useLiveStore, type LocalSend } from './liveStore';
 
 function reset() {
   useLiveStore.setState({
@@ -8,12 +8,14 @@ function reset() {
     localSends: {},
     spawns: [],
     activeTurns: {},
-    permission: {},
+    notices: {},
     unread: {},
-    externalInput: {},
-    resumeUnavailable: {},
-    earlySpawnFailures: {},
   });
+}
+
+/** The notices map, for `noticeOf` lookups in assertions. */
+function notices() {
+  return useLiveStore.getState().notices;
 }
 
 function localSend(overrides: Partial<LocalSend> = {}): LocalSend {
@@ -129,7 +131,7 @@ describe('liveStore turn tracking', () => {
     expect(useLiveStore.getState().activeTurns).toEqual({});
   });
 
-  it('resetTurnEphemera drops tracked sends and running flags, nothing else', () => {
+  it('resetTurnEphemera drops tracked sends, running flags, and permission notices, nothing else', () => {
     useLiveStore.getState().recordLocalSend(localSend());
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
@@ -150,16 +152,31 @@ describe('liveStore turn tracking', () => {
       text: 'first message',
       workdir: null,
     });
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_requested',
+      session_id: 'sess-1',
+      request_id: 7,
+      tool_name: 'Bash',
+      tool_input: '{}',
+    });
+    useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
+    useLiveStore.getState().markResumeUnavailable('sess-2');
 
-    // A reconnect cannot reconcile event-reconstructed turn state, but the
-    // in-flight POST and the tracked spawn heal on their own (the POST
-    // resolves; the spawn registers via the refetched session list).
+    // A reconnect cannot reconcile event-reconstructed turn state (including
+    // the permission notice, whose resolution may have been missed — it is
+    // re-seeded from the refetched sends envelope). The in-flight POST and
+    // the tracked spawn heal on their own (the POST resolves; the spawn
+    // registers via the refetched session list), and the notices with no
+    // server counterpart stay: each has a non-event escape hatch.
     useLiveStore.getState().resetTurnEphemera();
 
     expect(useLiveStore.getState().localSends).toEqual({});
     expect(useLiveStore.getState().activeTurns).toEqual({});
     expect(useLiveStore.getState().sending).toHaveLength(1);
     expect(useLiveStore.getState().spawns).toHaveLength(1);
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).not.toBeNull();
+    expect(noticeOf(notices(), 'sess-2', 'resume_unavailable')).not.toBeNull();
   });
 
   it('seedActiveTurn sets the running flag from a non-idle turn, and only sets', () => {
@@ -277,7 +294,9 @@ describe('liveStore spawn tracking', () => {
     expect(spawn.text).toBe('start a new session');
     expect(spawn.workdir).toBe('/work/dir');
     expect(useLiveStore.getState().localSends).toEqual({});
-    expect(useLiveStore.getState().earlySpawnFailures).toEqual({});
+    expect(
+      noticeOf(notices(), 'sess-spawn-1', 'spawn_failure_buffered'),
+    ).toBeNull();
   });
 
   it('drops a buffered early failure once that session registers', () => {
@@ -286,15 +305,17 @@ describe('liveStore spawn tracking', () => {
       session_id: 'sess-foreign',
       pane_token: 'pane-x',
     });
-    expect(useLiveStore.getState().earlySpawnFailures).toEqual({
-      'sess-foreign': true,
-    });
+    expect(
+      noticeOf(notices(), 'sess-foreign', 'spawn_failure_buffered'),
+    ).not.toBeNull();
 
     useLiveStore.getState().applyEvent({
       kind: 'session_registered',
       session_id: 'sess-foreign',
     });
-    expect(useLiveStore.getState().earlySpawnFailures).toEqual({});
+    expect(
+      noticeOf(notices(), 'sess-foreign', 'spawn_failure_buffered'),
+    ).toBeNull();
 
     // A later spawn tracked for a clean id starts `spawning` as usual.
     trackOne('sess-foreign');
@@ -314,7 +335,9 @@ describe('liveStore spawn tracking', () => {
       pane_token: 'pane-1',
     });
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
-    expect(useLiveStore.getState().earlySpawnFailures).toEqual({});
+    expect(
+      noticeOf(notices(), 'sess-spawn-1', 'spawn_failure_buffered'),
+    ).toBeNull();
   });
 
   it('keeps a failed spawn through unrelated turn events until dismissed', () => {
@@ -359,54 +382,54 @@ describe('liveStore spawn tracking', () => {
 describe('liveStore.applyEvent notices', () => {
   beforeEach(reset);
 
-  it('records a permission notice per session and clears it on dismiss', () => {
+  const PERMISSION_NOTICE = {
+    kind: 'permission',
+    requestId: 7,
+    toolName: 'Bash',
+    toolInput: '{}',
+    dismissed: false,
+  } as const;
+
+  function requestPermission(sessionId = 'sess-1', requestId = 7) {
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',
-      session_id: 'sess-1',
-      request_id: 7,
+      session_id: sessionId,
+      request_id: requestId,
       tool_name: 'Bash',
       tool_input: '{}',
     });
-    expect(useLiveStore.getState().permission).toEqual({
-      'sess-1': { requestId: 7, toolName: 'Bash', toolInput: '{}' },
-    });
+  }
 
+  it('records a permission notice per session and flags it dismissed on dismiss', () => {
+    requestPermission();
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual(
+      PERMISSION_NOTICE,
+    );
+
+    // Dismissing keeps the entry, flagged: removal would let the next sends
+    // refetch re-seed the same still-pending request and resurrect the card.
     useLiveStore.getState().dismissPermission('sess-1');
-    expect(useLiveStore.getState().permission).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      ...PERMISSION_NOTICE,
+      dismissed: true,
+    });
   });
 
   it('keeps permission notices for different sessions independent', () => {
-    const store = useLiveStore.getState();
-    store.applyEvent({
-      kind: 'permission_requested',
-      session_id: 'sess-1',
-      request_id: 1,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
-    store.applyEvent({
-      kind: 'permission_requested',
-      session_id: 'sess-2',
-      request_id: 2,
-      tool_name: 'Edit',
-      tool_input: '{}',
-    });
+    requestPermission('sess-1', 1);
+    requestPermission('sess-2', 2);
 
     // Dismissing one session leaves the other's notice intact.
     useLiveStore.getState().dismissPermission('sess-1');
-    expect(useLiveStore.getState().permission).toEqual({
-      'sess-2': { requestId: 2, toolName: 'Edit', toolInput: '{}' },
+    expect(noticeOf(notices(), 'sess-1', 'permission')?.dismissed).toBe(true);
+    expect(noticeOf(notices(), 'sess-2', 'permission')).toEqual({
+      ...PERMISSION_NOTICE,
+      requestId: 2,
     });
   });
 
   it('clears a session permission notice when its turn completes', () => {
-    useLiveStore.getState().applyEvent({
-      kind: 'permission_requested',
-      session_id: 'sess-1',
-      request_id: 7,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
+    requestPermission();
 
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
@@ -414,17 +437,11 @@ describe('liveStore.applyEvent notices', () => {
       stop_reason: null,
     });
     // The turn ended, so the prompt that was blocking the session is resolved.
-    expect(useLiveStore.getState().permission).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
   });
 
   it('clears a session permission notice when its request resolves', () => {
-    useLiveStore.getState().applyEvent({
-      kind: 'permission_requested',
-      session_id: 'sess-1',
-      request_id: 7,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
+    requestPermission();
 
     useLiveStore.getState().applyEvent({
       kind: 'permission_resolved',
@@ -432,17 +449,11 @@ describe('liveStore.applyEvent notices', () => {
       request_id: 7,
     });
     // The correlated tool_result was ingested, so the notice is cleared.
-    expect(useLiveStore.getState().permission).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
   });
 
   it('ignores a resolution for a different request than the current notice', () => {
-    useLiveStore.getState().applyEvent({
-      kind: 'permission_requested',
-      session_id: 'sess-1',
-      request_id: 8,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
+    requestPermission('sess-1', 8);
 
     // A stale resolution for an older request must not wipe the live notice.
     useLiveStore.getState().applyEvent({
@@ -450,54 +461,99 @@ describe('liveStore.applyEvent notices', () => {
       session_id: 'sess-1',
       request_id: 7,
     });
-    expect(useLiveStore.getState().permission).toEqual({
-      'sess-1': { requestId: 8, toolName: 'Bash', toolInput: '{}' },
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      ...PERMISSION_NOTICE,
+      requestId: 8,
     });
   });
 
   it('clears a session permission notice when the session closes', () => {
-    useLiveStore.getState().applyEvent({
-      kind: 'permission_requested',
-      session_id: 'sess-1',
-      request_id: 7,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
+    requestPermission();
 
     useLiveStore.getState().applyEvent({
       kind: 'session_closed',
       session_id: 'sess-1',
     });
-    expect(useLiveStore.getState().permission).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
   });
 
-  it('records an external-input marker keyed by session and clears it on dismiss', () => {
+  it('seedPermission re-creates the notice the missed event would have set', () => {
+    // After a reconnect the refetched sends envelope reports the pending
+    // dialog; a non-null report re-seeds the notice the dropped
+    // `permission_requested` would have set.
+    useLiveStore.getState().seedPermission('sess-1', {
+      request_id: 7,
+      tool_name: 'Bash',
+      tool_input: '{}',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual(
+      PERMISSION_NOTICE,
+    );
+  });
+
+  it('seedPermission never clears, and never un-dismisses the shown request', () => {
+    requestPermission();
+    useLiveStore.getState().dismissPermission('sess-1');
+
+    // A report of the SAME request changes nothing — in particular it must
+    // not resurrect the card the user just dismissed.
+    useLiveStore.getState().seedPermission('sess-1', {
+      request_id: 7,
+      tool_name: 'Bash',
+      tool_input: '{}',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'permission')?.dismissed).toBe(true);
+
+    // A null report clears nothing: clearing is owned by the events and the
+    // lifecycle sweeps, so a momentarily-stale refetch cannot wipe a notice
+    // an event just set.
+    useLiveStore.getState().seedPermission('sess-1', null);
+    expect(noticeOf(notices(), 'sess-1', 'permission')).not.toBeNull();
+
+    // A DIFFERENT pending request is a new question: it replaces the entry,
+    // un-dismissed.
+    useLiveStore.getState().seedPermission('sess-1', {
+      request_id: 9,
+      tool_name: 'Edit',
+      tool_input: '{}',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      kind: 'permission',
+      requestId: 9,
+      toolName: 'Edit',
+      toolInput: '{}',
+      dismissed: false,
+    });
+  });
+
+  it('records an external-input notice keyed by session and clears it on dismiss', () => {
     // The focus guard lives in the router (`applySessionEvent`); the store
-    // action just records the marker for whichever session/thread it is given.
+    // action just records the notice for whichever session/thread it is given.
     useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
-    expect(useLiveStore.getState().externalInput['sess-1']).toMatchObject({
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).toMatchObject({
       threadId: 3,
       prompt: 'typed',
     });
 
     useLiveStore.getState().dismissExternalInput('sess-1');
-    expect(useLiveStore.getState().externalInput).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).toBeNull();
   });
 
-  it('keeps external-input markers for different sessions independent', () => {
+  it('keeps external-input notices for different sessions independent', () => {
     const store = useLiveStore.getState();
     store.noteExternalInput('sess-1', 1, 'one');
     store.noteExternalInput('sess-2', 2, 'two');
 
-    // Dismissing one session leaves the other's marker intact.
+    // Dismissing one session leaves the other's notice intact.
     useLiveStore.getState().dismissExternalInput('sess-1');
-    expect(useLiveStore.getState().externalInput).toMatchObject({
-      'sess-2': { threadId: 2, prompt: 'two' },
+    expect(noticeOf(notices(), 'sess-2', 'external_input')).toMatchObject({
+      threadId: 2,
+      prompt: 'two',
     });
-    expect(useLiveStore.getState().externalInput['sess-1']).toBeUndefined();
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).toBeNull();
   });
 
-  it('clears a session external-input marker when its turn completes', () => {
+  it('clears a session external-input notice when its turn completes', () => {
     useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
 
     useLiveStore.getState().applyEvent({
@@ -506,43 +562,68 @@ describe('liveStore.applyEvent notices', () => {
       stop_reason: null,
     });
     // The turn ended, so the external-input notice has served its purpose.
-    expect(useLiveStore.getState().externalInput).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).toBeNull();
   });
 
-  it('leaves a foreign session external-input marker on turn_completed', () => {
+  it('leaves a foreign session external-input notice on turn_completed', () => {
     useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
 
-    // A turn completing in a different session must not clear sess-1's marker.
+    // A turn completing in a different session must not clear sess-1's notice.
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-2',
       stop_reason: null,
     });
-    expect(useLiveStore.getState().externalInput['sess-1']).toMatchObject({
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).toMatchObject({
       threadId: 3,
       prompt: 'typed',
     });
   });
 
-  it('clears a session external-input marker when the session closes', () => {
+  it('clears a session external-input notice when the session closes', () => {
     useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
 
     useLiveStore.getState().applyEvent({
       kind: 'session_closed',
       session_id: 'sess-1',
     });
-    expect(useLiveStore.getState().externalInput).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'external_input')).toBeNull();
   });
 
-  it('does not set an external-input marker straight from applyEvent', () => {
-    // applyEvent is session-scoped only; the external-input marker is focus-
+  it('does not set an external-input notice straight from applyEvent', () => {
+    // applyEvent is session-scoped only; the external-input notice is focus-
     // dependent and must not be set here for an unfocused background session.
     useLiveStore.getState().applyEvent({
       kind: 'external_input',
       session_id: 'sess-1',
       prompt: 'typed',
     });
-    expect(useLiveStore.getState().externalInput).toEqual({});
+    expect(notices()).toEqual({});
+  });
+
+  it('keeps the resume-unavailable notice across turn ends and clears it on open', () => {
+    useLiveStore.getState().markResumeUnavailable('sess-1');
+    expect(noticeOf(notices(), 'sess-1', 'resume_unavailable')).not.toBeNull();
+
+    // A resume-impossible session is closed and turn-less; neither sweep that
+    // drains the turn-scoped notices may touch it.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'resume_unavailable')).not.toBeNull();
+
+    // Only a successful open proves the flag stale.
+    useLiveStore.getState().applyEvent({
+      kind: 'session_opened',
+      session_id: 'sess-1',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'resume_unavailable')).toBeNull();
   });
 
   it('bumps and clears unread counts', () => {

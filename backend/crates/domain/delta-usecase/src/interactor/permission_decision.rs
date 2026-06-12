@@ -51,6 +51,10 @@ where
             .take_permission_waiter(request_id)
             .ok_or(Error::PermissionNotPending(request_id))?;
 
+        // The dialog is being answered: drop its queryable runtime mirror
+        // (keyed, so a stale id cannot wipe a newer dialog's state).
+        self.state.resolve_pending_permission(request_id);
+
         let allowed = decision == PermissionDecision::Allow;
         let Some(request) = self.store.decide_permission_request(request_id, allowed).await? else {
             // The waiter existed but the row is not `pending` — it was already

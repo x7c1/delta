@@ -30,7 +30,7 @@ async fn a_scripted_input_sequence_executes_in_mailbox_order() {
         },
     );
     let (mid_tx, mid_rx) = oneshot::channel();
-    ix.sessions.post(&id, SessionInput::QueryTurnState { reply: mid_tx });
+    ix.sessions.post(&id, SessionInput::QueryLiveState { reply: mid_tx });
     let (stop_tx, stop_rx) = oneshot::channel();
     ix.sessions.post(
         &id,
@@ -43,17 +43,17 @@ async fn a_scripted_input_sequence_executes_in_mailbox_order() {
         },
     );
     let (end_tx, end_rx) = oneshot::channel();
-    ix.sessions.post(&id, SessionInput::QueryTurnState { reply: end_tx });
+    ix.sessions.post(&id, SessionInput::QueryLiveState { reply: end_tx });
 
     let (_events, _context) = prompt_rx.await.unwrap().unwrap();
     assert_eq!(
-        mid_rx.await.unwrap(),
+        mid_rx.await.unwrap().turn,
         TurnState::InFlight { send_id: None },
         "the first query runs strictly after the prompt, before the stop"
     );
     stop_rx.await.unwrap().unwrap();
     assert_eq!(
-        end_rx.await.unwrap(),
+        end_rx.await.unwrap().turn,
         TurnState::Idle,
         "the second query runs strictly after the stop"
     );

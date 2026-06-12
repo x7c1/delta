@@ -22,7 +22,7 @@ async fn branch_send_during_external_turn_is_queued() {
         .await
         .unwrap();
     assert_ne!(
-        ix.turn_state_for(&session).await,
+        ix.live_state_for(&session).await.turn,
         crate::turn::TurnState::Idle,
         "a pane-typed turn marks the session busy via its hook"
     );

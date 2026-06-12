@@ -16,9 +16,13 @@ import { createMockEventSource } from './mockEventControl';
  * during the gap are lost (the server does not replay), so on every *re*-open
  * we resync: refetch all REST resources — sessions, threads, messages, and the
  * open-send lists behind the pending strip all catch up — and drop the
- * event-reconstructed turn ephemera (tracked local sends, active-turn flags),
- * whose turn-end drains may have been missed and cannot be recovered by any
- * refetch; otherwise a stuck "in progress" chip would linger until a reload.
+ * event-reconstructed turn ephemera (tracked local sends, active-turn flags,
+ * permission notices), whose turn-end / resolution drains may have been missed
+ * and cannot be recovered by any refetch; otherwise a stuck "in progress" chip
+ * or a stale permission card would linger until a reload. The active-turn flag
+ * and the permission notice are then re-seeded from the refetched sends
+ * envelope (see `usePendingSends`), so state the server still holds — a turn
+ * in flight, a dialog raised entirely during the outage — comes back.
  */
 export function useSessionEvents(): void {
   const queryClient = useQueryClient();

@@ -19,7 +19,10 @@ mod session_page;
 mod turn;
 
 pub use error::{Error, Result};
-pub use interactor::{BoxedInteractor, Interactor, PermissionDecision, PermissionWait};
+pub use interactor::{
+    BoxedInteractor, Interactor, PendingPermission, PermissionDecision, PermissionWait,
+    SessionLiveState,
+};
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{

@@ -13,7 +13,7 @@ async fn branch_send_while_idle_dispatches_immediately() {
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     // The session is idle (the registration turn completed, none in flight).
-    assert_eq!(ix.turn_state_for(&session).await, crate::turn::TurnState::Idle);
+    assert_eq!(ix.live_state_for(&session).await.turn, crate::turn::TurnState::Idle);
 
     let parent = MessageUuid::from("uuid-parent");
     let (send, _) = ix
@@ -28,7 +28,7 @@ async fn branch_send_while_idle_dispatches_immediately() {
         "the branch send is dispatched immediately when idle"
     );
     assert_eq!(
-        ix.turn_state_for(&session).await,
+        ix.live_state_for(&session).await.turn,
         crate::turn::TurnState::AwaitingEcho { send_id: send.id },
         "the dispatched send is the one outstanding echo"
     );

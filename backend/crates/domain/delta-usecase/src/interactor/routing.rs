@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 use crate::error::{Error, Result};
 use crate::interactor::hooks::PermissionWait;
 use crate::interactor::session_actor::input::{Reply, SessionInput};
+use crate::interactor::session_actor::runtime::SessionLiveState;
 use crate::interactor::{Interactor, PermissionDecision};
 use crate::pane_token::PaneToken;
 use crate::ports::{
@@ -228,16 +229,21 @@ where
             .await
     }
 
-    /// The current turn state of a session.
+    /// The queryable live state of a session: its turn phase plus the
+    /// pending permission dialog, snapshotted in one actor message.
     ///
-    /// Public because the REST surface reports it (the sends envelope carries
-    /// `turn`, so the browser can rebuild its in-progress indicator after a
-    /// reconnect). A session with no actor has no turn in flight.
-    pub async fn turn_state_for(&self, id: &SessionId) -> TurnState {
+    /// Public because the REST surface reports it (the sends envelope
+    /// carries `turn` and `permission`, so the browser can rebuild its
+    /// in-progress indicator and permission notice after a reconnect). A
+    /// session with no actor is idle with nothing pending by definition.
+    pub async fn live_state_for(&self, id: &SessionId) -> SessionLiveState {
         self.query(
             id,
-            |reply| SessionInput::QueryTurnState { reply },
-            TurnState::Idle,
+            |reply| SessionInput::QueryLiveState { reply },
+            SessionLiveState {
+                turn: TurnState::Idle,
+                pending_permission: None,
+            },
         )
         .await
     }

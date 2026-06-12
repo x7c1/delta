@@ -21,7 +21,7 @@ import { ApiClient } from '@delta/api-client';
 import type { Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
-import { useLiveStore } from '../../store/liveStore';
+import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import { Composer } from './Composer';
 
@@ -60,9 +60,8 @@ describe('Composer', () => {
       sending: [],
       localSends: {},
       spawns: [],
-      externalInput: {},
+      notices: {},
       unread: {},
-      resumeUnavailable: {},
     });
     useComposerStore.setState({
       drafts: {},
@@ -294,8 +293,12 @@ describe('Composer', () => {
 
     await waitFor(() => {
       expect(
-        useLiveStore.getState().resumeUnavailable[mainThread.session_id],
-      ).toBe(true);
+        noticeOf(
+          useLiveStore.getState().notices,
+          mainThread.session_id,
+          'resume_unavailable',
+        ),
+      ).not.toBeNull();
     });
     // No lingering chip: a resume-unavailable send is removed outright, not
     // marked failed.

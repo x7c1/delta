@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
-import type { SessionEvent, Turn } from '@delta/wire-gen';
+import type { PendingPermission, SessionEvent, Turn } from '@delta/wire-gen';
 import type { ConnectionStatus } from '@delta/api-client';
 
 /**
@@ -24,6 +24,12 @@ import type { ConnectionStatus } from '@delta/api-client';
  *   response until it registers or fails. The server deletes a failed spawn's
  *   contentless row at reap, so the failure chip (and its Retry payload)
  *   cannot be server-rendered.
+ *
+ * Per-session notices (the permission prompt, the external-input marker, the
+ * resume-impossible flag, the buffered early spawn failure) live in one
+ * {@link LiveState.notices} map as a discriminated union, with each kind's
+ * clearing rule declared in {@link NOTICE_LIFECYCLE} — one add path, one clear
+ * path, instead of a separate `Record<SessionId, …>` per kind.
  */
 
 /**
@@ -74,17 +80,173 @@ export interface SpawnItem {
   status: 'spawning' | 'failed';
 }
 
+/**
+ * A pending permission prompt blocking its session until it is answered — in
+ * the browser (the notice's Allow/Deny) or in the terminal. The focused
+ * session's notice drives the floating card over the transcript, and any
+ * session's drives a badge on its navigator row.
+ *
+ * Set by `permission_requested` and re-seeded from the sends envelope's
+ * `permission` field after a reconnect (the event is not replayed). Removed on
+ * `permission_resolved` (same request only), when the turn ends, and when the
+ * session closes. A user dismiss only flags the entry {@link dismissed} —
+ * removing it would let the next refetch re-seed the same still-pending
+ * request and resurrect the card the user just closed.
+ */
 export interface PermissionNotice {
+  kind: 'permission';
   requestId: number;
   toolName: string;
   /** The tool input, serialized as JSON text (shown summarized). */
   toolInput: string;
+  /** True once the user dismissed the card; the entry stays for de-dup. */
+  dismissed: boolean;
 }
 
-export interface ExternalInputMarker {
+/**
+ * Someone typed straight into the session's embedded terminal (rather than
+ * sending through the composer); surfaces an inline notice above the
+ * composer. Recorded by the router under a focus guard, removed on dismiss,
+ * when the turn ends, and when the session closes — otherwise the notice
+ * would linger forever once shown. The retained `threadId` lets the
+ * transcript pane gate visibility to the focused thread.
+ */
+export interface ExternalInputNotice {
+  kind: 'external_input';
   threadId: ThreadId;
   prompt: string;
   at: number;
+}
+
+/**
+ * A Send/open just failed to resume this session because its transcript is
+ * gone (the server's `resume_unavailable`). Drives the inline "cannot be
+ * resumed" notice; the session stays closed and no optimistic pending chip is
+ * shown. Survives turn ends and closes (the session is already closed);
+ * removed when the session opens after all.
+ */
+export interface ResumeUnavailableNotice {
+  kind: 'resume_unavailable';
+}
+
+/**
+ * A `spawn_failed` that arrived before {@link LiveState.trackSpawn} registered
+ * the spawn. The event is broadcast on the live channel while the
+ * `POST /api/sends` response travels back separately, so the failure can
+ * legitimately outrun the registration; dropping it would leave the chip
+ * spinning forever. Never rendered: buffered here and consumed by
+ * {@link LiveState.trackSpawn}, which then registers the spawn as `failed`
+ * directly. An entry for a spawn this client never tracks (e.g. another
+ * client's) is removed if the session registers, and is otherwise inert.
+ */
+export interface SpawnFailureBufferedNotice {
+  kind: 'spawn_failure_buffered';
+}
+
+/** One per-session notice; at most one of each kind exists per session. */
+export type SessionNotice =
+  | PermissionNotice
+  | ExternalInputNotice
+  | ResumeUnavailableNotice
+  | SpawnFailureBufferedNotice;
+
+export type SessionNoticeKind = SessionNotice['kind'];
+
+/**
+ * The lifecycle moments a notice kind can subscribe to for clearing. Explicit
+ * dismissal and event-specific removals (`permission_resolved`) are handled
+ * separately; this table covers the session-lifecycle sweeps so adding a
+ * notice kind means declaring its policy here instead of threading a new map
+ * through every event handler.
+ *
+ * - `turn_end` — `turn_completed` / `turn_interrupted` for the session.
+ * - `session_closed` — the session's pane went away (its turn is over too).
+ * - `session_opened` — the session resumed successfully.
+ * - `session_registered` — the spawned session bound and became listable.
+ */
+type NoticeClearTrigger =
+  | 'turn_end'
+  | 'session_closed'
+  | 'session_opened'
+  | 'session_registered';
+
+const NOTICE_LIFECYCLE: Record<
+  SessionNoticeKind,
+  readonly NoticeClearTrigger[]
+> = {
+  // A pending prompt blocks its turn, so the turn ending (or the session
+  // closing — no live process, no dialog) means the question is moot.
+  permission: ['turn_end', 'session_closed'],
+  // Same scope as the permission prompt: once the turn it interleaved with is
+  // over (or the session is gone), the marker has served its purpose.
+  external_input: ['turn_end', 'session_closed'],
+  // A resume-impossible session is closed and turn-less; only a successful
+  // open proves the flag stale.
+  resume_unavailable: ['session_opened'],
+  // A registered session can no longer fail to spawn, so a buffered failure
+  // for it (necessarily foreign — ids are unique) is stale.
+  spawn_failure_buffered: ['session_registered'],
+};
+
+/**
+ * The notice of `kind` for a session, narrowed to its union member, or `null`.
+ */
+export function noticeOf<K extends SessionNoticeKind>(
+  notices: Record<SessionId, SessionNotice[]>,
+  sessionId: SessionId,
+  kind: K,
+): Extract<SessionNotice, { kind: K }> | null {
+  const found = (notices[sessionId] ?? []).find(
+    (notice) => notice.kind === kind,
+  );
+  return (found as Extract<SessionNotice, { kind: K }> | undefined) ?? null;
+}
+
+/** Upsert a session's notice of its kind (at most one per kind). */
+function withNotice(
+  notices: Record<SessionId, SessionNotice[]>,
+  sessionId: SessionId,
+  notice: SessionNotice,
+): Record<SessionId, SessionNotice[]> {
+  const rest = (notices[sessionId] ?? []).filter(
+    (existing) => existing.kind !== notice.kind,
+  );
+  return { ...notices, [sessionId]: [...rest, notice] };
+}
+
+/**
+ * Remove a session's notices matching `predicate`, dropping the session's
+ * (then empty) list entirely. Returns the changed slice, or an empty object
+ * when nothing matched so callers can keep the identity-stable state.
+ */
+function removeNotices(
+  notices: Record<SessionId, SessionNotice[]>,
+  sessionId: SessionId,
+  predicate: (notice: SessionNotice) => boolean,
+): { notices: Record<SessionId, SessionNotice[]> } | Record<string, never> {
+  const current = notices[sessionId] ?? [];
+  const remaining = current.filter((notice) => !predicate(notice));
+  if (remaining.length === current.length) {
+    return {};
+  }
+  const next = { ...notices };
+  if (remaining.length === 0) {
+    delete next[sessionId];
+  } else {
+    next[sessionId] = remaining;
+  }
+  return { notices: next };
+}
+
+/** Apply one lifecycle trigger to a session's notices via the policy table. */
+function clearNoticesOn(
+  notices: Record<SessionId, SessionNotice[]>,
+  sessionId: SessionId,
+  trigger: NoticeClearTrigger,
+): { notices: Record<SessionId, SessionNotice[]> } | Record<string, never> {
+  return removeNotices(notices, sessionId, (notice) =>
+    NOTICE_LIFECYCLE[notice.kind].includes(trigger),
+  );
 }
 
 export interface LiveState {
@@ -109,46 +271,13 @@ export interface LiveState {
    */
   activeTurns: Record<SessionId, true>;
   /**
-   * Permission requests keyed by the session blocked on them. A pending
-   * permission dialog blocks its session until it is answered — in the
-   * browser (the notice's Allow/Deny) or in the terminal — so the notice is
-   * per-session: the focused session's drives the floating notice over the
-   * transcript, and any session's drives a badge on its navigator row.
-   * Cleared on dismiss, on `permission_resolved` (a browser decision or the
-   * correlated tool_result), when the session's turn completes, and when the
-   * session closes.
+   * Per-session notices, at most one per {@link SessionNoticeKind} per
+   * session. Read through {@link noticeOf}; lifecycle clearing follows
+   * {@link NOTICE_LIFECYCLE}.
    */
-  permission: Record<SessionId, PermissionNotice>;
+  notices: Record<SessionId, SessionNotice[]>;
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
   unread: Record<ThreadId, number>;
-  /**
-   * External (direct-pane) input markers keyed by the session they landed on.
-   * Someone typing straight into a session's embedded terminal (rather than
-   * sending through the composer) surfaces an inline notice above the composer.
-   * Like {@link permission}, the marker is per-session and cleared on dismiss,
-   * when the session's turn completes, and when the session closes — otherwise
-   * the notice would linger forever once shown. The retained `threadId` lets the
-   * transcript pane gate visibility to the focused thread.
-   */
-  externalInput: Record<SessionId, ExternalInputMarker>;
-  /**
-   * Sessions a Send/open just failed to resume because their transcript is gone
-   * (the server's `resume_unavailable`). The focused session's presence here
-   * drives an inline "cannot be resumed" notice; the session stays closed and
-   * no optimistic pending chip is shown. Cleared when the session opens.
-   */
-  resumeUnavailable: Record<SessionId, true>;
-  /**
-   * Spawn failures whose `spawn_failed` event arrived before {@link trackSpawn}
-   * registered the spawn. The event is broadcast on the live channel while the
-   * `POST /api/sends` response travels back separately, so the failure can
-   * legitimately outrun the registration; dropping it would leave the chip
-   * spinning forever. Buffered here and consumed by {@link trackSpawn}, which
-   * then registers the spawn as `failed` directly. An entry for a spawn this
-   * client never tracks (e.g. another client's) is cleaned up if the session
-   * registers, and is otherwise inert.
-   */
-  earlySpawnFailures: Record<SessionId, true>;
 
   setConnection: (status: ConnectionStatus) => void;
   /** Record a submit whose `POST /api/sends` is about to fly. */
@@ -161,7 +290,7 @@ export interface LiveState {
   recordLocalSend: (send: LocalSend) => void;
   /**
    * Track a new-session spawn (real ids from the POST response). If the
-   * spawn's failure already arrived (see {@link LiveState.earlySpawnFailures}),
+   * spawn's failure already arrived (see {@link SpawnFailureBufferedNotice}),
    * the spawn is registered as `failed` immediately.
    */
   trackSpawn: (spawn: Omit<SpawnItem, 'status'>) => void;
@@ -172,12 +301,16 @@ export interface LiveState {
   /** Clear a session's resume-impossible flag (e.g. once it opens). */
   clearResumeUnavailable: (sessionId: SessionId) => void;
   /**
-   * Drop the event-reconstructed turn state (tracked local sends and the
-   * active-turn flags). Used on a live-stream reconnect: the turn-end events
-   * that would have drained these were broadcast while the socket was down and
-   * are not replayed, so they can no longer be reconciled from events. The
-   * server's open-send list recovers by refetch, and {@link seedActiveTurn}
-   * re-seeds the active-turn flag from that refetch's `turn` field.
+   * Drop the event-reconstructed turn-scoped state: tracked local sends, the
+   * active-turn flags, and the permission notices. Used on a live-stream
+   * reconnect: the turn-end / `permission_resolved` events that would have
+   * drained these were broadcast while the socket was down and are not
+   * replayed, so they can no longer be reconciled from events. All three
+   * recover from the refetched sends envelope — the open-send list by
+   * refetch, the active-turn flag via {@link seedActiveTurn}, and the
+   * permission notice via {@link seedPermission}. Other notice kinds stay:
+   * they cannot be re-seeded, and each has a non-event escape hatch (a user
+   * dismiss or a lifecycle trigger).
    */
   resetTurnEphemera: () => void;
   /**
@@ -190,37 +323,40 @@ export interface LiveState {
    * momentarily-stale refetch can never wipe a flag an event just set.
    */
   seedActiveTurn: (sessionId: SessionId, turn: Turn) => void;
+  /**
+   * Seed a session's permission notice from the server's queryable pending
+   * dialog (the `permission` field of `GET /api/sessions/{id}/sends`).
+   * Mirrors {@link seedActiveTurn}: set-only (`null` clears nothing —
+   * clearing is owned by the events and the lifecycle sweeps), and a report
+   * of the request the notice already shows changes nothing, so a refetch can
+   * neither resurrect a notice an event just resolved nor un-dismiss one the
+   * user closed.
+   */
+  seedPermission: (
+    sessionId: SessionId,
+    permission: PendingPermission | null,
+  ) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
-  /** Record an external (direct-pane) input marker for a session/thread. */
+  /** Record an external (direct-pane) input notice for a session/thread. */
   noteExternalInput: (
     sessionId: SessionId,
     threadId: ThreadId,
     prompt: string,
   ) => void;
-  /** Dismiss the permission notice for a session. */
+  /** Dismiss the permission notice for a session (kept, flagged dismissed). */
   dismissPermission: (sessionId: SessionId) => void;
   /** Dismiss the external-input notice for a session. */
   dismissExternalInput: (sessionId: SessionId) => void;
   /**
    * Apply a live session event, mutating only session-scoped ephemeral state
    * (turn tracking, the spawn registry, the permission notice). Focus-dependent
-   * signals (the external-input marker, unread badges) are recorded by the
+   * signals (the external-input notice, unread badges) are recorded by the
    * router under a focus guard, not here.
    */
   applyEvent: (event: SessionEvent) => void;
 }
 
-/**
- * Compute the state changes for a turn ending in `sessionId`: drop the tracked
- * local sends for that session (the server's open list is the remaining truth
- * — anything still queued there keeps its chip) and clear any session-scoped
- * permission / external-input notices. Returns only the changed slices (empty
- * object when nothing matched, so the caller can keep the identity-stable
- * `state`). Shared by `turn_completed` (the `Stop` hook) and `turn_interrupted`
- * (the transcript-detected interrupt), which can occasionally both arrive, so
- * the drain is idempotent (a no-match is a no-op).
- */
 /**
  * Drop the tracked local sends of one session, returning the changed slice
  * (empty object when nothing matched). Used when the session's spawn failed —
@@ -241,9 +377,21 @@ function dropLocalSendsForSession(
   };
 }
 
+/**
+ * Compute the state changes for a turn ending in `sessionId`: drop the tracked
+ * local sends for that session (the server's open list is the remaining truth
+ * — anything still queued there keeps its chip), clear the running flag, and
+ * sweep the turn-scoped notices (see {@link NOTICE_LIFECYCLE}). Returns only
+ * the changed slices (empty object when nothing matched, so the caller can
+ * keep the identity-stable `state`). Shared by `turn_completed` (the `Stop`
+ * hook), `turn_interrupted` (the transcript-detected interrupt) — which can
+ * occasionally both arrive, so the drain is idempotent — and `session_closed`
+ * (a closed session has no live process, so its turn is over too).
+ */
 function endTurnForSession(
   state: LiveState,
   sessionId: SessionId,
+  trigger: 'turn_end' | 'session_closed',
 ): Partial<LiveState> {
   const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
   if (state.activeTurns[sessionId]) {
@@ -251,17 +399,7 @@ function endTurnForSession(
     delete activeTurns[sessionId];
     next.activeTurns = activeTurns;
   }
-  if (state.permission[sessionId]) {
-    const permission = { ...state.permission };
-    delete permission[sessionId];
-    next.permission = permission;
-  }
-  if (state.externalInput[sessionId]) {
-    const externalInput = { ...state.externalInput };
-    delete externalInput[sessionId];
-    next.externalInput = externalInput;
-  }
-  return next;
+  return { ...next, ...clearNoticesOn(state.notices, sessionId, trigger) };
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
@@ -270,11 +408,8 @@ export const useLiveStore = create<LiveState>((set) => ({
   localSends: {},
   spawns: [],
   activeTurns: {},
-  permission: {},
+  notices: {},
   unread: {},
-  externalInput: {},
-  resumeUnavailable: {},
-  earlySpawnFailures: {},
 
   setConnection: (status) => set({ connection: status }),
 
@@ -300,18 +435,20 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   trackSpawn: (spawn) =>
     set((state) => {
-      if (!state.earlySpawnFailures[spawn.sessionId]) {
+      if (!noticeOf(state.notices, spawn.sessionId, 'spawn_failure_buffered')) {
         return { spawns: [...state.spawns, { ...spawn, status: 'spawning' }] };
       }
       // The failure outran the POST response: register the spawn already
       // failed (the Retry/Dismiss chip surfaces right away), consume the
       // buffered failure, and drop the just-recorded local send for it — its
       // turn will never end.
-      const earlySpawnFailures = { ...state.earlySpawnFailures };
-      delete earlySpawnFailures[spawn.sessionId];
       return {
         spawns: [...state.spawns, { ...spawn, status: 'failed' }],
-        earlySpawnFailures,
+        ...removeNotices(
+          state.notices,
+          spawn.sessionId,
+          (notice) => notice.kind === 'spawn_failure_buffered',
+        ),
         ...dropLocalSendsForSession(state, spawn.sessionId),
       };
     }),
@@ -323,24 +460,38 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   markResumeUnavailable: (sessionId) =>
     set((state) =>
-      state.resumeUnavailable[sessionId]
+      noticeOf(state.notices, sessionId, 'resume_unavailable')
         ? state
         : {
-            resumeUnavailable: { ...state.resumeUnavailable, [sessionId]: true },
+            notices: withNotice(state.notices, sessionId, {
+              kind: 'resume_unavailable',
+            }),
           },
     ),
 
   clearResumeUnavailable: (sessionId) =>
     set((state) => {
-      if (!state.resumeUnavailable[sessionId]) {
-        return state;
-      }
-      const next = { ...state.resumeUnavailable };
-      delete next[sessionId];
-      return { resumeUnavailable: next };
+      const next = removeNotices(
+        state.notices,
+        sessionId,
+        (notice) => notice.kind === 'resume_unavailable',
+      );
+      return Object.keys(next).length > 0 ? next : state;
     }),
 
-  resetTurnEphemera: () => set({ localSends: {}, activeTurns: {} }),
+  resetTurnEphemera: () =>
+    set((state) => {
+      const notices: Record<SessionId, SessionNotice[]> = {};
+      for (const [sessionId, list] of Object.entries(state.notices)) {
+        const remaining = list.filter(
+          (notice) => notice.kind !== 'permission',
+        );
+        if (remaining.length > 0) {
+          notices[sessionId] = remaining;
+        }
+      }
+      return { localSends: {}, activeTurns: {}, notices };
+    }),
 
   seedActiveTurn: (sessionId, turn) =>
     set((state) => {
@@ -348,6 +499,26 @@ export const useLiveStore = create<LiveState>((set) => ({
         return state;
       }
       return { activeTurns: { ...state.activeTurns, [sessionId]: true } };
+    }),
+
+  seedPermission: (sessionId, permission) =>
+    set((state) => {
+      if (permission === null) {
+        return state;
+      }
+      const current = noticeOf(state.notices, sessionId, 'permission');
+      if (current?.requestId === permission.request_id) {
+        return state;
+      }
+      return {
+        notices: withNotice(state.notices, sessionId, {
+          kind: 'permission',
+          requestId: permission.request_id,
+          toolName: permission.tool_name,
+          toolInput: permission.tool_input,
+          dismissed: false,
+        }),
+      };
     }),
 
   bumpUnread: (threadId) =>
@@ -367,30 +538,38 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   noteExternalInput: (sessionId, threadId, prompt) =>
     set((state) => ({
-      externalInput: {
-        ...state.externalInput,
-        [sessionId]: { threadId, prompt, at: Date.now() },
-      },
+      notices: withNotice(state.notices, sessionId, {
+        kind: 'external_input',
+        threadId,
+        prompt,
+        at: Date.now(),
+      }),
     })),
 
   dismissPermission: (sessionId) =>
     set((state) => {
-      if (!state.permission[sessionId]) {
+      const current = noticeOf(state.notices, sessionId, 'permission');
+      if (!current || current.dismissed) {
         return state;
       }
-      const permission = { ...state.permission };
-      delete permission[sessionId];
-      return { permission };
+      // Keep the entry, flagged: removal would let the next sends refetch
+      // re-seed the same still-pending request and resurrect the card.
+      return {
+        notices: withNotice(state.notices, sessionId, {
+          ...current,
+          dismissed: true,
+        }),
+      };
     }),
 
   dismissExternalInput: (sessionId) =>
     set((state) => {
-      if (!state.externalInput[sessionId]) {
-        return state;
-      }
-      const externalInput = { ...state.externalInput };
-      delete externalInput[sessionId];
-      return { externalInput };
+      const next = removeNotices(
+        state.notices,
+        sessionId,
+        (notice) => notice.kind === 'external_input',
+      );
+      return Object.keys(next).length > 0 ? next : state;
     }),
 
   applyEvent: (event) =>
@@ -406,13 +585,12 @@ export const useLiveStore = create<LiveState>((set) => ({
                 activeTurns: { ...state.activeTurns, [event.session_id]: true },
               };
         case 'turn_completed': {
-          // The turn ended: any permission prompt that was blocking THIS
-          // session is resolved, any external-input notice has served its
-          // purpose, and the session's tracked local sends are drained — the
-          // server's open-send list (refetched by the router) is the
-          // remaining truth for anything still queued. Scoped by session so a
+          // The turn ended: the session's tracked local sends are drained —
+          // the server's open-send list (refetched by the router) is the
+          // remaining truth for anything still queued — and the turn-scoped
+          // notices are swept (see NOTICE_LIFECYCLE). Scoped by session so a
           // turn in one session never drains another session's chips.
-          const next = endTurnForSession(state, event.session_id);
+          const next = endTurnForSession(state, event.session_id, 'turn_end');
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'turn_interrupted': {
@@ -421,34 +599,34 @@ export const useLiveStore = create<LiveState>((set) => ({
           // `turn_completed` never arrives; the backend detects the interrupt
           // from the transcript and emits this hook-independent signal. Drain
           // exactly as a completed turn would.
-          const next = endTurnForSession(state, event.session_id);
+          const next = endTurnForSession(state, event.session_id, 'turn_end');
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':
           return {
-            permission: {
-              ...state.permission,
-              [event.session_id]: {
-                requestId: event.request_id,
-                toolName: event.tool_name,
-                toolInput: event.tool_input,
-              },
-            },
+            notices: withNotice(state.notices, event.session_id, {
+              kind: 'permission',
+              requestId: event.request_id,
+              toolName: event.tool_name,
+              toolInput: event.tool_input,
+              dismissed: false,
+            }),
           };
         case 'permission_resolved': {
-          // The correlated tool_result was ingested, so the request is done.
-          // Clear the notice only when it is the SAME request that resolved, so
-          // a stale resolution never wipes a newer pending prompt for the same
-          // session. An auto-approved tool resolves almost immediately, so this
-          // clears the brief notice (hidden by the render debounce); a genuine
+          // The request was answered (a browser decision or the correlated
+          // tool_result). Remove the notice only when it is the SAME request
+          // that resolved, so a stale resolution never wipes a newer pending
+          // prompt for the same session. An auto-approved tool resolves
+          // almost immediately, so this clears the brief notice; a genuine
           // prompt has no resolution until the human answers.
-          const current = state.permission[event.session_id];
-          if (!current || current.requestId !== event.request_id) {
-            return state;
-          }
-          const permission = { ...state.permission };
-          delete permission[event.session_id];
-          return { permission };
+          const next = removeNotices(
+            state.notices,
+            event.session_id,
+            (notice) =>
+              notice.kind === 'permission' &&
+              notice.requestId === event.request_id,
+          );
+          return Object.keys(next).length > 0 ? next : state;
         }
         case 'spawn_failed': {
           // The spawn never bound and the server reaped it (the row is gone).
@@ -473,10 +651,9 @@ export const useLiveStore = create<LiveState>((set) => ({
             return alreadyTracked
               ? state
               : {
-                  earlySpawnFailures: {
-                    ...state.earlySpawnFailures,
-                    [event.session_id]: true,
-                  },
+                  notices: withNotice(state.notices, event.session_id, {
+                    kind: 'spawn_failure_buffered',
+                  }),
                 };
           }
           const spawns = state.spawns.slice();
@@ -487,40 +664,44 @@ export const useLiveStore = create<LiveState>((set) => ({
           };
         }
         case 'external_input':
-          // The external-input marker is session-scoped and only meaningful for
-          // the focused session, so the router (`applySessionEvent`) records it
-          // via `noteExternalInput` under a focus guard. Nothing to do here.
+          // The external-input notice is session-scoped and only meaningful
+          // for the focused session, so the router (`applySessionEvent`)
+          // records it via `noteExternalInput` under a focus guard. Nothing
+          // to do here.
           return state;
         case 'session_registered': {
           // Open/closed lifecycle is reflected by the sessions query, and the
           // tracked spawn is cleared by the workspace once it can focus the
-          // freshly-listed session (it needs the id until then). A registered
-          // session can no longer fail to spawn, so a buffered early failure
-          // for it (necessarily foreign — ids are unique) is stale: drop it.
-          if (!state.earlySpawnFailures[event.session_id]) {
-            return state;
-          }
-          const earlySpawnFailures = { ...state.earlySpawnFailures };
-          delete earlySpawnFailures[event.session_id];
-          return { earlySpawnFailures };
+          // freshly-listed session (it needs the id until then). The notice
+          // sweep drops a stale buffered spawn failure (see NOTICE_LIFECYCLE).
+          const next = clearNoticesOn(
+            state.notices,
+            event.session_id,
+            'session_registered',
+          );
+          return Object.keys(next).length > 0 ? next : state;
         }
         case 'session_opened': {
-          // The session resumed successfully, so any stale "cannot be resumed"
-          // notice for it is now wrong — clear it. Open/closed itself is
-          // reflected by the sessions query, not ephemeral here.
-          if (!state.resumeUnavailable[event.session_id]) {
-            return state;
-          }
-          const resumeUnavailable = { ...state.resumeUnavailable };
-          delete resumeUnavailable[event.session_id];
-          return { resumeUnavailable };
+          // The session resumed successfully; the sweep drops a stale "cannot
+          // be resumed" notice. Open/closed itself is reflected by the
+          // sessions query, not ephemeral here.
+          const next = clearNoticesOn(
+            state.notices,
+            event.session_id,
+            'session_opened',
+          );
+          return Object.keys(next).length > 0 ? next : state;
         }
         case 'session_closed': {
           // Closed state itself is reflected by the sessions query. But a
           // closed session has no live process, so its turn (if any) is over
-          // and any permission prompt or stale external-input notice for it is
-          // moot — drain exactly as a turn end would.
-          const next = endTurnForSession(state, event.session_id);
+          // and its turn-scoped notices are moot — drain exactly as a turn
+          // end would.
+          const next = endTurnForSession(
+            state,
+            event.session_id,
+            'session_closed',
+          );
           return Object.keys(next).length > 0 ? next : state;
         }
         default:

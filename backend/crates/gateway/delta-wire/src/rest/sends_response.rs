@@ -1,7 +1,7 @@
 //! Response for `GET /api/sessions/{id}/sends`.
 
 use delta_model::Send;
-use delta_usecase::TurnState;
+use delta_usecase::{PendingPermission, SessionLiveState, TurnState};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -51,21 +51,51 @@ impl From<TurnState> for WireTurn {
     }
 }
 
+/// A permission dialog currently awaiting a human answer, as reported on the
+/// REST surface.
+///
+/// This is the queryable counterpart of the `permission_requested` event
+/// (same fields, minus the session id the URL already names): the event is
+/// lost for a client whose socket was down when it fired, so a reconnecting
+/// client rebuilds its permission notice from this instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(rename = "PendingPermission")]
+pub struct WirePendingPermission {
+    /// The request row id `POST /api/permissions/{id}/decision` answers.
+    pub request_id: i64,
+    pub tool_name: String,
+    /// The tool input, serialized as JSON text.
+    pub tool_input: String,
+}
+
+impl From<PendingPermission> for WirePendingPermission {
+    fn from(pending: PendingPermission) -> Self {
+        WirePendingPermission {
+            request_id: pending.request_id,
+            tool_name: pending.tool_name,
+            tool_input: pending.tool_input_json,
+        }
+    }
+}
+
 /// Response for `GET /api/sessions/{id}/sends`: the session's open
 /// (non-terminal) sends — status `queued` or `dispatched` — oldest first, plus
-/// the session's current turn state.
+/// the session's queryable live state (the current turn state and the pending
+/// permission dialog, if one awaits an answer).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "SendsResponse")]
 pub struct WireSendsResponse {
     pub sends: Vec<WireSend>,
     pub turn: WireTurn,
+    pub permission: Option<WirePendingPermission>,
 }
 
 impl WireSendsResponse {
-    pub fn new(sends: Vec<Send>, turn: TurnState) -> Self {
+    pub fn new(sends: Vec<Send>, live: SessionLiveState) -> Self {
         WireSendsResponse {
             sends: sends.into_iter().map(WireSend::from).collect(),
-            turn: turn.into(),
+            turn: live.turn.into(),
+            permission: live.pending_permission.map(WirePendingPermission::from),
         }
     }
 }
@@ -96,13 +126,47 @@ mod tests {
     }
 
     #[test]
-    fn sends_response_carries_sends_and_turn() {
-        let body = WireSendsResponse::new(Vec::new(), TurnState::Idle);
+    fn sends_response_carries_sends_turn_and_permission() {
+        let body = WireSendsResponse::new(
+            Vec::new(),
+            SessionLiveState {
+                turn: TurnState::Idle,
+                pending_permission: None,
+            },
+        );
         assert_eq!(
             serde_json::to_value(body).unwrap(),
             serde_json::json!({
                 "sends": [],
                 "turn": { "state": "idle", "send_id": null },
+                "permission": null,
+            }),
+        );
+    }
+
+    #[test]
+    fn sends_response_reports_the_pending_permission_dialog() {
+        let body = WireSendsResponse::new(
+            Vec::new(),
+            SessionLiveState {
+                turn: TurnState::InFlight { send_id: Some(7) },
+                pending_permission: Some(PendingPermission {
+                    request_id: 3,
+                    tool_name: "Bash".to_owned(),
+                    tool_input_json: "{\"command\":\"rm -rf scratch\"}".to_owned(),
+                }),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            serde_json::json!({
+                "sends": [],
+                "turn": { "state": "in_flight", "send_id": 7 },
+                "permission": {
+                    "request_id": 3,
+                    "tool_name": "Bash",
+                    "tool_input": "{\"command\":\"rm -rf scratch\"}",
+                },
             }),
         );
     }

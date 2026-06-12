@@ -93,10 +93,12 @@ export function appendSessionSend(
       );
       return {
         sends: [...withoutDup, send].sort((a, b) => a.id - b.id),
-        // Turn state is server-reported; an optimistic insert learns nothing
-        // about it, so keep what the last fetch said (or idle before any
-        // fetch) and let the follow-up invalidation reconcile.
+        // The live state (turn phase, pending permission) is server-reported;
+        // an optimistic insert learns nothing about it, so keep what the last
+        // fetch said (or idle/none before any fetch) and let the follow-up
+        // invalidation reconcile.
         turn: previous?.turn ?? { state: 'idle', send_id: null },
+        permission: previous?.permission ?? null,
       };
     },
   );

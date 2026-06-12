@@ -18,7 +18,7 @@ async fn branch_send_mid_turn_is_queued_then_dispatched_on_stop() {
     // its echo arrives (the realistic ordering: the hook fires within
     // milliseconds of the keystrokes landing).
     ix.enqueue_send(to(main), "first", None).await.unwrap();
-    assert_ne!(ix.turn_state_for(&session).await, crate::turn::TurnState::Idle);
+    assert_ne!(ix.live_state_for(&session).await.turn, crate::turn::TurnState::Idle);
     assert_eq!(ix.tmux_fake().sent.lock().unwrap().len(), 1);
     ix.transcript_fake().push(user_line("u-first", "first"));
     ix.on_user_prompt_submit(submit("first")).await.unwrap();
