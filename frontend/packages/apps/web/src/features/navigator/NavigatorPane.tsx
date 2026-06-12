@@ -152,10 +152,21 @@ export function NavigatorPane({
       header={
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <StatusDot
-              tone={CONNECTION_TONE[connection]}
-              title={CONNECTION_TITLE[connection]}
-            />
+            {/*
+              data-connection exposes the live connection state structurally so
+              the e2e suites can wait on disconnect/reconnect transitions
+              without depending on the dot's color classes or title wording.
+            */}
+            <span
+              className="inline-flex"
+              data-testid="connection-indicator"
+              data-connection={connection}
+            >
+              <StatusDot
+                tone={CONNECTION_TONE[connection]}
+                title={CONNECTION_TITLE[connection]}
+              />
+            </span>
             <span className="text-sm font-semibold text-slate-700">
               Sessions
             </span>
