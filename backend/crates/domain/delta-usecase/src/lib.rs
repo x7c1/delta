@@ -20,7 +20,7 @@ mod session_page;
 mod turn;
 
 pub use error::{Error, Result};
-pub use interactor::{BoxedInteractor, Interactor};
+pub use interactor::{BoxedInteractor, Interactor, PermissionDecision, PermissionWait};
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use open_sessions::{OpenHandle, OpenSessions, PendingSpawn};
 pub use pane_token::{PaneToken, PaneTokenMinter};

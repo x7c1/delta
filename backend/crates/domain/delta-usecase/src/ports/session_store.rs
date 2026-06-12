@@ -216,38 +216,44 @@ pub trait SessionStore: std::marker::Send + Sync {
     async fn thread_messages(&self, thread_id: ThreadId) -> Result<Vec<Message>>;
 
     /// Record a tool-permission request and return the created row.
+    ///
+    /// `tool_use_id` is `Some` for the row `PreToolUse` records for every tool
+    /// call (the id later correlates the matching `tool_result`), and `None`
+    /// for the row the `PermissionRequest` hook owns for a genuine interactive
+    /// dialog (that hook's payload carries no tool-call id).
     async fn record_permission_request(
         &self,
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
-        tool_use_id: &str,
+        tool_use_id: Option<&str>,
     ) -> Result<PermissionRequest>;
 
-    /// Find the open (`pending`) permission request that a `PermissionRequest`
-    /// hook refers to. The hook carries no `tool_use_id`, so match by
-    /// (session, tool_name) and prefer an exact `tool_input_json` match, falling
-    /// back to the most recent pending request for that tool. Returns its id.
-    async fn find_open_permission_request(
+    /// Decide a still-`pending` permission request from the browser, recording
+    /// `allowed`/`denied` plus `decided_at`. Returns the decided row, or
+    /// `None` when the row is unknown or no longer `pending` (an
+    /// already-decided row is never flipped).
+    async fn decide_permission_request(
         &self,
-        session_id: &SessionId,
-        tool_name: &str,
-        tool_input_json: &str,
-    ) -> Result<Option<i64>>;
+        request_id: i64,
+        allowed: bool,
+    ) -> Result<Option<PermissionRequest>>;
 
-    /// Resolve the open (`pending`) permission request for this session whose
-    /// `tool_use_id` matches the just-ingested `tool_result`, if any.
+    /// Resolve the open (`pending`) permission requests settled by a
+    /// just-ingested `tool_result`: the `PreToolUse`-recorded row whose
+    /// `tool_use_id` matches, plus any pending dialog row for the same session
+    /// (`tool_use_id IS NULL` — the dialog blocks the session, so the next
+    /// tool_result to arrive is the one it gated).
     ///
     /// `allowed` records the disposition inferred from the tool_result's error
-    /// flag (`false` → the tool was denied). Returns the resolved request's id
-    /// when a pending request matched, or `None` when there was nothing to
-    /// resolve (already decided, or no such request).
+    /// flag (`false` → the tool was denied). Returns the ids of the rows that
+    /// transitioned (empty when there was nothing to resolve).
     async fn resolve_permission_by_tool_use_id(
         &self,
         session_id: &SessionId,
         tool_use_id: &str,
         allowed: bool,
-    ) -> Result<Option<i64>>;
+    ) -> Result<Vec<i64>>;
 }
 
 #[async_trait]
@@ -414,22 +420,19 @@ impl SessionStore for Box<dyn SessionStore> {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
-        tool_use_id: &str,
+        tool_use_id: Option<&str>,
     ) -> Result<PermissionRequest> {
         (**self)
             .record_permission_request(session_id, tool_name, tool_input_json, tool_use_id)
             .await
     }
 
-    async fn find_open_permission_request(
+    async fn decide_permission_request(
         &self,
-        session_id: &SessionId,
-        tool_name: &str,
-        tool_input_json: &str,
-    ) -> Result<Option<i64>> {
-        (**self)
-            .find_open_permission_request(session_id, tool_name, tool_input_json)
-            .await
+        request_id: i64,
+        allowed: bool,
+    ) -> Result<Option<PermissionRequest>> {
+        (**self).decide_permission_request(request_id, allowed).await
     }
 
     async fn resolve_permission_by_tool_use_id(
@@ -437,7 +440,7 @@ impl SessionStore for Box<dyn SessionStore> {
         session_id: &SessionId,
         tool_use_id: &str,
         allowed: bool,
-    ) -> Result<Option<i64>> {
+    ) -> Result<Vec<i64>> {
         (**self)
             .resolve_permission_by_tool_use_id(session_id, tool_use_id, allowed)
             .await

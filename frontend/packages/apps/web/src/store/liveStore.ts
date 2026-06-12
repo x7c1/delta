@@ -77,6 +77,8 @@ export interface SpawnItem {
 export interface PermissionNotice {
   requestId: number;
   toolName: string;
+  /** The tool input, serialized as JSON text (shown summarized). */
+  toolInput: string;
 }
 
 export interface ExternalInputMarker {
@@ -107,12 +109,14 @@ export interface LiveState {
    */
   activeTurns: Record<SessionId, true>;
   /**
-   * Permission requests keyed by the session blocked on them. A tool's
-   * PreToolUse hook blocks that session until the prompt is answered in its
-   * terminal, so the notice is per-session: the focused session's drives the
-   * inline notice above the composer, and any session's drives a badge on its
-   * navigator row. Cleared on dismiss, when the session's turn completes, and
-   * when the session closes.
+   * Permission requests keyed by the session blocked on them. A pending
+   * permission dialog blocks its session until it is answered — in the
+   * browser (the notice's Allow/Deny) or in the terminal — so the notice is
+   * per-session: the focused session's drives the floating notice over the
+   * transcript, and any session's drives a badge on its navigator row.
+   * Cleared on dismiss, on `permission_resolved` (a browser decision or the
+   * correlated tool_result), when the session's turn completes, and when the
+   * session closes.
    */
   permission: Record<SessionId, PermissionNotice>;
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
@@ -386,6 +390,7 @@ export const useLiveStore = create<LiveState>((set) => ({
               [event.session_id]: {
                 requestId: event.request_id,
                 toolName: event.tool_name,
+                toolInput: event.tool_input,
               },
             },
           };

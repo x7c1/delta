@@ -15,7 +15,9 @@ where
     /// the request here carries the `tool_use_id` needed to resolve it once the
     /// matching `tool_result` is later ingested. The browser notice is emitted by
     /// the `PermissionRequest` hook instead, which fires only for genuine
-    /// interactive prompts. Delta never returns allow/deny — the TUI owns that.
+    /// interactive prompts (and owns its own row plus the Allow/Deny wait —
+    /// see `on_permission_request`). PreToolUse itself never returns
+    /// allow/deny.
     pub async fn on_pre_tool_use(
         &self,
         session_id: &delta_model::SessionId,
@@ -24,7 +26,7 @@ where
         tool_use_id: &str,
     ) -> Result<Vec<SessionEvent>> {
         self.store
-            .record_permission_request(session_id, tool_name, tool_input_json, tool_use_id)
+            .record_permission_request(session_id, tool_name, tool_input_json, Some(tool_use_id))
             .await?;
         Ok(vec![])
     }

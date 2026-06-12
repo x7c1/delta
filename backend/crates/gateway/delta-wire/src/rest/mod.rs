@@ -14,6 +14,8 @@ mod messages_response;
 pub use messages_response::WireMessagesResponse;
 mod new_session_response;
 pub use new_session_response::{WireNewSessionResponse, WireSessionLifecycle};
+mod permission_decision_request;
+pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;

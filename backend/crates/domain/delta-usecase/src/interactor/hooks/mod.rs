@@ -15,4 +15,6 @@ mod register_session_row;
 #[cfg(test)]
 mod tests;
 
+pub use on_permission_request::PermissionWait;
+
 pub(in crate::interactor::hooks) use match_uuid_for_prompt::match_uuid_for_prompt;

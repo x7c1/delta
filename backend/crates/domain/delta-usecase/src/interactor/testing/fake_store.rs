@@ -502,7 +502,7 @@ impl SessionStore for FakeStore {
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
-        tool_use_id: &str,
+        tool_use_id: Option<&str>,
     ) -> Result<PermissionRequest> {
         let mut g = self.inner.lock().unwrap();
         g.next_perm_id += 1;
@@ -511,7 +511,7 @@ impl SessionStore for FakeStore {
             session_id: session_id.clone(),
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
-            tool_use_id: Some(tool_use_id.to_owned()),
+            tool_use_id: tool_use_id.map(str::to_owned),
             status: PermissionStatus::Pending,
             decision_reason: None,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -521,39 +521,16 @@ impl SessionStore for FakeStore {
         Ok(req)
     }
 
-    async fn find_open_permission_request(
+    async fn decide_permission_request(
         &self,
-        session_id: &SessionId,
-        tool_name: &str,
-        tool_input_json: &str,
-    ) -> Result<Option<i64>> {
-        let g = self.inner.lock().unwrap();
-        // Mirror the SQL ordering `(tool_input_json = ?) DESC, id DESC`: among
-        // pending rows for this (session, tool_name), prefer an exact tool_input
-        // match, else fall back to the most recent pending row (highest id).
-        Ok(g.permissions
-            .iter()
-            .filter(|r| {
-                &r.session_id == session_id
-                    && r.tool_name == tool_name
-                    && r.status == PermissionStatus::Pending
-            })
-            .max_by_key(|r| (r.tool_input_json == tool_input_json, r.id))
-            .map(|r| r.id))
-    }
-
-    async fn resolve_permission_by_tool_use_id(
-        &self,
-        session_id: &SessionId,
-        tool_use_id: &str,
+        request_id: i64,
         allowed: bool,
-    ) -> Result<Option<i64>> {
+    ) -> Result<Option<PermissionRequest>> {
         let mut g = self.inner.lock().unwrap();
-        let req = g.permissions.iter_mut().find(|r| {
-            &r.session_id == session_id
-                && r.tool_use_id.as_deref() == Some(tool_use_id)
-                && r.status == PermissionStatus::Pending
-        });
+        let req = g
+            .permissions
+            .iter_mut()
+            .find(|r| r.id == request_id && r.status == PermissionStatus::Pending);
         match req {
             Some(req) => {
                 req.status = if allowed {
@@ -562,9 +539,35 @@ impl SessionStore for FakeStore {
                     PermissionStatus::Denied
                 };
                 req.decided_at = Some("2026-01-01T00:00:00Z".into());
-                Ok(Some(req.id))
+                Ok(Some(req.clone()))
             }
             None => Ok(None),
         }
+    }
+
+    async fn resolve_permission_by_tool_use_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        allowed: bool,
+    ) -> Result<Vec<i64>> {
+        let mut g = self.inner.lock().unwrap();
+        // Mirror the SQL: settle the PreToolUse row matching `tool_use_id` AND
+        // any pending dialog row (`tool_use_id: None`) for the same session.
+        let mut resolved = Vec::new();
+        for req in g.permissions.iter_mut().filter(|r| {
+            &r.session_id == session_id
+                && r.status == PermissionStatus::Pending
+                && (r.tool_use_id.as_deref() == Some(tool_use_id) || r.tool_use_id.is_none())
+        }) {
+            req.status = if allowed {
+                PermissionStatus::Allowed
+            } else {
+                PermissionStatus::Denied
+            };
+            req.decided_at = Some("2026-01-01T00:00:00Z".into());
+            resolved.push(req.id);
+        }
+        Ok(resolved)
     }
 }

@@ -337,27 +337,120 @@ describe('TranscriptPane', () => {
     expect(useLiveStore.getState().externalInput).toEqual({});
   });
 
-  it('shows the permission notice as soon as a permission is requested', async () => {
+  it('shows the permission notice with Allow/Deny and the input summary', async () => {
     // The notice is driven by the `PermissionRequest` hook, which fires only when
     // an interactive dialog actually appears, so it is surfaced directly with no
     // debounce.
     useLiveStore.setState({
       externalInput: {},
       resumeUnavailable: {},
-      permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+      permission: {
+        [SESSION_ID]: {
+          requestId: 7,
+          toolName: 'Bash',
+          toolInput: '{"command":"rm -rf scratch"}',
+        },
+      },
     });
 
     renderPane();
 
     const notice = await screen.findByTestId('permission-notice');
     expect(notice).toHaveTextContent('Permission requested: Bash');
+    // The input summary shows WHAT the tool wants to do, not raw JSON.
+    expect(notice).toHaveTextContent('rm -rf scratch');
+    expect(within(notice).getByRole('button', { name: 'Allow' })).toBeEnabled();
+    expect(within(notice).getByRole('button', { name: 'Deny' })).toBeEnabled();
+  });
+
+  it('POSTs the decision on Allow and waits for the resolution event', async () => {
+    useLiveStore.setState({
+      externalInput: {},
+      resumeUnavailable: {},
+      permission: {
+        [SESSION_ID]: {
+          requestId: 7,
+          toolName: 'Bash',
+          toolInput: '{"command":"rm -rf scratch"}',
+        },
+      },
+    });
+    const decisions: { id: string; body: unknown }[] = [];
+    server.use(
+      http.post('*/api/permissions/:id/decision', async ({ params, request }) => {
+        decisions.push({ id: String(params.id), body: await request.json() });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderPane();
+    const notice = await screen.findByTestId('permission-notice');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Allow' }));
+
+    await waitFor(() =>
+      expect(decisions).toEqual([{ id: '7', body: { decision: 'allow' } }]),
+    );
+    // The notice itself is cleared by the broadcast `permission_resolved`,
+    // exactly like a TUI-answered prompt — not by the POST response.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'permission_resolved',
+        session_id: SESSION_ID,
+        request_id: 7,
+      });
+    });
+    expect(screen.queryByTestId('permission-notice')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the terminal guidance when the decision is a conflict', async () => {
+    // 409 permission_not_pending: the hook wait timed out, so the TUI prompt
+    // owns the question now. The card swaps Allow/Deny for the guidance.
+    useLiveStore.setState({
+      externalInput: {},
+      resumeUnavailable: {},
+      permission: {
+        [SESSION_ID]: {
+          requestId: 7,
+          toolName: 'Bash',
+          toolInput: '{"command":"rm -rf scratch"}',
+        },
+      },
+    });
+    server.use(
+      http.post('*/api/permissions/:id/decision', () =>
+        HttpResponse.json(
+          { error: 'not pending', code: 'permission_not_pending' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderPane();
+    const notice = await screen.findByTestId('permission-notice');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Deny' }));
+
+    expect(
+      await within(notice).findByText('Answer the prompt in the terminal.'),
+    ).toBeInTheDocument();
+    expect(
+      within(notice).queryByRole('button', { name: 'Allow' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(notice).getByRole('button', { name: 'Open terminal' }),
+    ).toBeInTheDocument();
   });
 
   it('clears the permission notice when the request resolves', async () => {
     useLiveStore.setState({
       externalInput: {},
       resumeUnavailable: {},
-      permission: { [SESSION_ID]: { requestId: 7, toolName: 'Bash' } },
+      permission: {
+        [SESSION_ID]: {
+          requestId: 7,
+          toolName: 'Bash',
+          toolInput: '{"command":"ls"}',
+        },
+      },
     });
 
     renderPane();

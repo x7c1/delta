@@ -77,14 +77,20 @@ pub enum SessionEvent {
         session_id: SessionId,
         request_id: i64,
         tool_name: String,
+        /// The tool input, serialized as JSON text, so the notice can show
+        /// what the tool is about to do (e.g. the command a `Bash` call runs)
+        /// next to its Allow/Deny buttons.
+        tool_input_json: String,
     },
     /// A previously-requested tool permission was resolved.
     ///
-    /// Emitted when the `tool_result` correlated with an open
-    /// [`Self::PermissionRequested`] is ingested. An auto-approved tool resolves
-    /// almost immediately (the result lands right away), so the browser clears
-    /// the notice promptly; a genuine TUI prompt yields no result until the
-    /// human answers, so the notice persists until then.
+    /// Emitted when the browser decides via
+    /// `POST /api/permissions/{id}/decision`, or when the `tool_result`
+    /// correlated with an open [`Self::PermissionRequested`] is ingested. An
+    /// auto-approved tool resolves almost immediately (the result lands right
+    /// away), so the browser clears the notice promptly; a genuine TUI prompt
+    /// yields no result until the human answers (there or in the browser), so
+    /// the notice persists until then.
     PermissionResolved {
         session_id: SessionId,
         request_id: i64,

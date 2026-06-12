@@ -221,7 +221,7 @@ impl Engine {
                 });
                 Ok(())
             }
-            Step::PermissionRequest => {
+            Step::PermissionRequest { on_allow, on_deny } => {
                 let tool_use = self
                     .last_tool_use
                     .as_ref()
@@ -231,11 +231,41 @@ impl Engine {
                     tool_name: tool_use.name.clone(),
                     tool_input: tool_use.input.clone(),
                 };
-                self.fire(
+                // `fire` reads the whole response before returning, so this
+                // BLOCKS until the server's permission hook responds — exactly
+                // like the real `claude` awaiting its permission hook. The
+                // server holds the response until a browser decision or its
+                // decision deadline (env-shrunk under e2e, well inside the
+                // socket read timeout in hooks.rs); the body then either
+                // carries `hookSpecificOutput.decision.behavior` or is the
+                // empty passthrough.
+                let body = self.fire(
                     "PermissionRequest",
                     &self.endpoints.permission_request,
                     &payload,
                 );
+                let behavior = body
+                    .as_deref()
+                    .and_then(|b| serde_json::from_str::<Value>(b).ok())
+                    .and_then(|v| {
+                        v.pointer("/hookSpecificOutput/decision/behavior")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    });
+                let branch = match behavior.as_deref() {
+                    Some("allow") => on_allow,
+                    Some("deny") => on_deny,
+                    Some(other) => {
+                        return Err(format!("unknown permission decision behavior: {other}"))
+                    }
+                    // Empty passthrough: no decision was made in the browser,
+                    // so the dialog stays with the TUI — the scenario's
+                    // following steps script that path.
+                    None => return Ok(()),
+                };
+                for step in branch {
+                    self.execute(step)?;
+                }
                 Ok(())
             }
             Step::ToolResult { is_error } => {

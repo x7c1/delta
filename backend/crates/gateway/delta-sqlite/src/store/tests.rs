@@ -1,4 +1,7 @@
-use delta_model::{ContentBlock, Message, MessageUuid, Role, SendStatus, SessionId, SessionStatus};
+use delta_model::{
+    ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus, SessionId,
+    SessionStatus,
+};
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
 use super::SqliteStore;
@@ -637,77 +640,21 @@ async fn list_sessions_page_signals_more_via_full_page_only() {
 async fn permission_request_is_recorded() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, _) = store.register_session(new_session()).await.unwrap();
+    // The PreToolUse row carries the correlating tool_use_id...
     let req = store
-        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, "toolu_01")
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, Some("toolu_01"))
         .await
         .unwrap();
     assert_eq!(req.tool_name, "Bash");
     assert_eq!(req.tool_use_id.as_deref(), Some("toolu_01"));
     assert!(req.id > 0);
-}
-
-#[tokio::test]
-async fn find_open_permission_request_prefers_exact_input_then_latest() {
-    let store = SqliteStore::open_in_memory().unwrap();
-    let (session, _) = store.register_session(new_session()).await.unwrap();
-
-    // Two pending Bash requests with different inputs.
-    let ls = store
-        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, "toolu_01")
+    // ...and the PermissionRequest-owned dialog row records none (NULL, never
+    // an empty-string sentinel).
+    let dialog = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, None)
         .await
         .unwrap();
-    let pwd = store
-        .record_permission_request(&session.id, "Bash", r#"{"command":"pwd"}"#, "toolu_02")
-        .await
-        .unwrap();
-
-    // An exact tool_input match wins over the latest row.
-    assert_eq!(
-        store
-            .find_open_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
-            .await
-            .unwrap(),
-        Some(ls.id),
-    );
-
-    // Without an exact match, the most recent pending row for the tool wins.
-    assert_eq!(
-        store
-            .find_open_permission_request(&session.id, "Bash", r#"{"command":"echo"}"#)
-            .await
-            .unwrap(),
-        Some(pwd.id),
-    );
-
-    // Resolved rows are not candidates; once both are decided, nothing matches.
-    store
-        .resolve_permission_by_tool_use_id(&session.id, "toolu_01", true)
-        .await
-        .unwrap();
-    store
-        .resolve_permission_by_tool_use_id(&session.id, "toolu_02", true)
-        .await
-        .unwrap();
-    assert_eq!(
-        store
-            .find_open_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
-            .await
-            .unwrap(),
-        None,
-    );
-
-    // A different tool name does not match either.
-    let _ = store
-        .record_permission_request(&session.id, "Read", r#"{"path":"/a"}"#, "toolu_03")
-        .await
-        .unwrap();
-    assert_eq!(
-        store
-            .find_open_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#)
-            .await
-            .unwrap(),
-        None,
-    );
+    assert_eq!(dialog.tool_use_id, None);
 }
 
 #[tokio::test]
@@ -715,7 +662,7 @@ async fn permission_request_resolves_by_tool_use_id() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, _) = store.register_session(new_session()).await.unwrap();
     let req = store
-        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, "toolu_01")
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, Some("toolu_01"))
         .await
         .unwrap();
 
@@ -725,7 +672,7 @@ async fn permission_request_resolves_by_tool_use_id() {
             .resolve_permission_by_tool_use_id(&session.id, "toolu_other", true)
             .await
             .unwrap(),
-        None,
+        Vec::<i64>::new(),
     );
 
     // The matching, still-pending request resolves and returns its id.
@@ -734,7 +681,7 @@ async fn permission_request_resolves_by_tool_use_id() {
             .resolve_permission_by_tool_use_id(&session.id, "toolu_01", true)
             .await
             .unwrap(),
-        Some(req.id),
+        vec![req.id],
     );
 
     // A second resolve is a no-op: the request is no longer pending.
@@ -743,8 +690,65 @@ async fn permission_request_resolves_by_tool_use_id() {
             .resolve_permission_by_tool_use_id(&session.id, "toolu_01", true)
             .await
             .unwrap(),
-        None,
+        Vec::<i64>::new(),
     );
+}
+
+#[tokio::test]
+async fn resolve_settles_the_pending_dialog_row_too() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _) = store.register_session(new_session()).await.unwrap();
+    // The PreToolUse row and the hook-owned dialog row for the same call.
+    let pre = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"rm x"}"#, Some("toolu_01"))
+        .await
+        .unwrap();
+    let dialog = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"rm x"}"#, None)
+        .await
+        .unwrap();
+
+    // The tool_result settles both: the matching PreToolUse row and the
+    // session's pending dialog row (the dialog blocked the session, so this
+    // result is the one it gated).
+    let mut resolved = store
+        .resolve_permission_by_tool_use_id(&session.id, "toolu_01", false)
+        .await
+        .unwrap();
+    resolved.sort_unstable();
+    assert_eq!(resolved, vec![pre.id, dialog.id]);
+}
+
+#[tokio::test]
+async fn decide_permission_request_decides_only_a_pending_row() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _) = store.register_session(new_session()).await.unwrap();
+    let req = store
+        .record_permission_request(&session.id, "Bash", r#"{"command":"ls"}"#, None)
+        .await
+        .unwrap();
+
+    // The first decision lands: status + decided_at recorded, row returned.
+    let decided = store
+        .decide_permission_request(req.id, true)
+        .await
+        .unwrap()
+        .expect("the pending row is decided");
+    assert_eq!(decided.status, PermissionStatus::Allowed);
+    assert!(decided.decided_at.is_some());
+    assert_eq!(decided.session_id, session.id);
+
+    // A second decision (or one for an unknown id) decides nothing.
+    assert!(store
+        .decide_permission_request(req.id, false)
+        .await
+        .unwrap()
+        .is_none());
+    assert!(store
+        .decide_permission_request(9999, true)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

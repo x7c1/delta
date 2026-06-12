@@ -241,6 +241,13 @@ export function createMockApi(): MockApi {
       return HttpResponse.json(body);
     }),
 
+    // Answer a pending tool-permission request. The mock has no blocked hook
+    // to wake, so it just accepts the decision; the notice clears when the
+    // scripted `permission_resolved` event arrives, mirroring the live flow.
+    http.post('*/api/permissions/:id/decision', () => {
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     http.post('*/api/sends', async ({ request }) => {
       const payload = (await request.json()) as SendRequest;
       if (typeof payload?.text !== 'string' || payload.text.length === 0) {
