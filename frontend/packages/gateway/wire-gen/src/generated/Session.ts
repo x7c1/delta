@@ -10,7 +10,13 @@ import type { SessionStatus } from "./SessionStatus";
  * TypeScript export. Ids are plain `String` here because that is exactly what
  * crosses the wire.
  */
-export type Session = { id: string, cwd: string, transcript_path: string, title: string | null, status: SessionStatus, 
+export type Session = { id: string, cwd: string, 
+/**
+ * Path of the session's JSONL transcript; empty while the session is
+ * still `spawning` (the domain stores `None` until the first hook reports
+ * the path, but the wire keeps the pre-existing string shape).
+ */
+transcript_path: string, title: string | null, status: SessionStatus, 
 /**
  * ISO-8601 timestamp.
  */

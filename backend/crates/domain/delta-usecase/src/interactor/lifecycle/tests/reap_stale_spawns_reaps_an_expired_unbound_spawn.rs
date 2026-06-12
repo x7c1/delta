@@ -7,16 +7,22 @@ use crate::open_sessions::PENDING_SPAWN_DEADLINE;
 use crate::ports::SessionEvent;
 
 /// An unbound spawn whose deadline has passed is reaped: its pane is killed, it
-/// is removed from the registry, and a `SpawnFailed` carrying its id and token
-/// is returned.
+/// is removed from the registry, its eagerly-created `spawning` session row
+/// (which ingested nothing) is deleted, and a `SpawnFailed` carrying its id and
+/// token is returned.
 #[tokio::test]
 async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     let ix = interactor();
     let now = Instant::now();
     let session_id = SessionId::from("sess-stuck");
 
-    // Seed a spawn stamped one second past its deadline, with a live tmux
-    // session so the reaper actually issues (and we can observe) the kill.
+    // Seed the eager `spawning` row a real spawn would have written, then a
+    // spawn stamped one second past its deadline, with a live tmux session so
+    // the reaper actually issues (and we can observe) the kill.
+    ix.store()
+        .insert_spawning_session(&session_id, "/work")
+        .await
+        .unwrap();
     ix.push_pending_spawn_at(
         "delta-1",
         &session_id,
@@ -43,4 +49,10 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     // The spawn is gone from the registry: a later UserPromptSubmit for that id
     // can no longer bind it.
     assert!(ix.pending_session_ids().await.is_empty());
+    // The eager session row ingested nothing, so the reap deleted it (and its
+    // children, by cascade) rather than leaving a dead `spawning` row behind.
+    assert!(
+        ix.store().session(&session_id).await.unwrap().is_none(),
+        "the never-bound spawn's session row is deleted at reap time"
+    );
 }

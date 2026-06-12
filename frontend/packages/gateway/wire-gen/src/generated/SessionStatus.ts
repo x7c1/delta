@@ -7,4 +7,4 @@
  * carries the serialization concerns the domain type must not know about:
  * the lowercase variant names and the TypeScript export.
  */
-export type SessionStatus = "active" | "ended";
+export type SessionStatus = "spawning" | "active" | "ended" | "failed";

@@ -75,7 +75,13 @@ where
             // leaving the UI stuck on a "waiting" pending row that never clears.
             // Refuse here — before minting a token, writing settings, or spawning
             // — so no pane is created and no optimistic pending send is enqueued.
-            if !self.transcript.exists(&session.transcript_path).await? {
+            // A session still `spawning` has no transcript path at all (the
+            // first hook never bound it), so it is equally unresumable.
+            let resumable = match session.transcript_path.as_deref() {
+                Some(path) => self.transcript.exists(path).await?,
+                None => false,
+            };
+            if !resumable {
                 return Err(Error::ResumeUnavailable(id.as_str().to_owned()));
             }
 

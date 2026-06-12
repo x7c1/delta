@@ -1,4 +1,4 @@
-use delta_model::{ContentBlock, Message, MessageUuid, SendStatus, Role, SessionId};
+use delta_model::{ContentBlock, Message, MessageUuid, Role, SendStatus, SessionId, SessionStatus};
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
 use super::SqliteStore;
@@ -58,7 +58,7 @@ async fn session_looks_up_by_id() {
         .unwrap()
         .expect("registered session is found by id");
     assert_eq!(found.id.as_str(), "sess-1");
-    assert_eq!(found.transcript_path, "/tmp/sess-1.jsonl");
+    assert_eq!(found.transcript_path.as_deref(), Some("/tmp/sess-1.jsonl"));
 
     // An unknown id resolves to None.
     assert!(store
@@ -598,6 +598,35 @@ async fn list_sessions_page_falls_back_to_created_at_for_message_less_session() 
 }
 
 #[tokio::test]
+async fn list_sessions_page_excludes_message_less_spawning_sessions() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
+    let spawning = SessionId::from("sess-spawn");
+    store
+        .insert_spawning_session(&spawning, "/work")
+        .await
+        .unwrap();
+
+    // The message-less spawning session stays out of the list: the browser
+    // cannot open it, and the optimistic new-session chip must not bind to it.
+    let page = store.list_sessions_page(None, 10).await.unwrap();
+    assert_eq!(page_ids(&page), vec!["sess-live"]);
+
+    // Activation (the first hook) makes it listable, exactly when a session
+    // used to first appear.
+    store
+        .register_session(NewSession {
+            id: spawning.clone(),
+            cwd: "/work".into(),
+            transcript_path: "/tmp/spawn.jsonl".into(),
+        })
+        .await
+        .unwrap();
+    let page = store.list_sessions_page(None, 10).await.unwrap();
+    assert_eq!(page.len(), 2, "the activated session is listed");
+}
+
+#[tokio::test]
 async fn list_sessions_page_signals_more_via_full_page_only() {
     let store = SqliteStore::open_in_memory().unwrap();
     session_active_at(&store, "sess-a", "2026-02-01T00:00:00Z").await;
@@ -789,6 +818,106 @@ async fn queued_send_is_held_then_promoted_to_dispatched() {
     assert_eq!(matched.id, queued.id);
     assert_eq!(matched.status, SendStatus::Dispatched);
     assert_eq!(matched.locator_quote.as_deref(), Some("quote"));
+}
+
+#[tokio::test]
+async fn spawning_session_inserts_then_activates_on_register() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let id = SessionId::from("sess-spawn");
+
+    // The eager insert: status `spawning`, no transcript path yet, and the
+    // main thread already created so a first send can target real ids.
+    let (session, main) = store.insert_spawning_session(&id, "/work").await.unwrap();
+    assert_eq!(session.status, SessionStatus::Spawning);
+    assert_eq!(session.transcript_path, None);
+    assert_eq!(store.main_thread_id(&id).await.unwrap(), main);
+
+    // The first hook activates the row: status flips and the hook-reported
+    // transcript path is filled in; the main thread is reused, not duplicated.
+    let (activated, main2) = store
+        .register_session(NewSession {
+            id: id.clone(),
+            cwd: "/work/real".into(),
+            transcript_path: "/tmp/spawn.jsonl".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(activated.status, SessionStatus::Active);
+    assert_eq!(activated.transcript_path.as_deref(), Some("/tmp/spawn.jsonl"));
+    assert_eq!(activated.cwd, "/work/real");
+    assert_eq!(main2, main, "the eagerly-created main thread is reused");
+
+    // A later re-registration must not clobber the activated row.
+    let (again, _) = store
+        .register_session(NewSession {
+            id: id.clone(),
+            cwd: "/elsewhere".into(),
+            transcript_path: "/tmp/other.jsonl".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(again.transcript_path.as_deref(), Some("/tmp/spawn.jsonl"));
+    assert_eq!(again.cwd, "/work/real");
+}
+
+#[tokio::test]
+async fn delete_session_cascades_to_children() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    store
+        .enqueue_send(&session.id, main, None, "hello", None)
+        .await
+        .unwrap();
+    store
+        .upsert_messages(&[Message {
+            uuid: MessageUuid::from("u-1"),
+            session_id: session.id.clone(),
+            thread_id: main,
+            role: Role::User,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: None,
+            prompt_id: None,
+            seq: 0,
+            content_text: Some("hello".into()),
+            content: vec![ContentBlock::Text {
+                text: "hello".into(),
+            }],
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        }])
+        .await
+        .unwrap();
+    store.set_transcript_lines_read(&session.id, 3).await.unwrap();
+
+    store.delete_session(&session.id).await.unwrap();
+
+    // The row and everything it owned are gone.
+    assert!(store.session(&session.id).await.unwrap().is_none());
+    assert!(store.list_threads(&session.id).await.unwrap().is_empty());
+    assert_eq!(store.message_count(&session.id).await.unwrap(), 0);
+    assert!(store
+        .head_dispatched_send(&session.id)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(store.transcript_lines_read(&session.id).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn mark_session_failed_flips_only_a_spawning_session() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // A spawning session fails.
+    let id = SessionId::from("sess-spawn");
+    store.insert_spawning_session(&id, "/work").await.unwrap();
+    store.mark_session_failed(&id).await.unwrap();
+    let failed = store.session(&id).await.unwrap().unwrap();
+    assert_eq!(failed.status, SessionStatus::Failed);
+
+    // An active session is untouched by a stale failure mark.
+    let (active, _) = store.register_session(new_session()).await.unwrap();
+    store.mark_session_failed(&active.id).await.unwrap();
+    let still = store.session(&active.id).await.unwrap().unwrap();
+    assert_eq!(still.status, SessionStatus::Active);
 }
 
 /// All `message_fts` rowids matching `query`, via the trigger-maintained index.

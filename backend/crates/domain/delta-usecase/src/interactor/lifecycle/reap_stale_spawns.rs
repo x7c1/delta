@@ -69,6 +69,7 @@ where
                  killing its pane and reporting SpawnFailed"
             );
             self.kill_pane_best_effort(spawn.token.as_str()).await;
+            self.clean_up_failed_spawn_row(&spawn.session_id).await?;
             events.push(SessionEvent::SpawnFailed {
                 session_id: spawn.session_id,
                 pane_token: spawn.token.as_str().to_owned(),
@@ -98,6 +99,28 @@ where
             });
         }
         Ok(events)
+    }
+
+    /// Clean up the eagerly-created session row of a spawn that never bound.
+    ///
+    /// The row was INSERTed (status `spawning`) when the id was minted, before
+    /// `claude` launched. A spawn that never bound ingested nothing, so the row
+    /// — and its main thread plus any first prompt's send, removed by cascade —
+    /// is deleted outright rather than kept as a `failed` tombstone; the
+    /// composer's Retry/Dismiss flow holds the prompt text browser-side, so
+    /// nothing is lost. The `failed` status is kept only for the defensive case
+    /// of a session that somehow already ingested messages (data worth
+    /// keeping), which a never-bound spawn cannot normally reach.
+    pub(in crate::interactor) async fn clean_up_failed_spawn_row(
+        &self,
+        session_id: &delta_model::SessionId,
+    ) -> Result<()> {
+        if self.store.message_count(session_id).await? == 0 {
+            self.store.delete_session(session_id).await?;
+        } else {
+            self.store.mark_session_failed(session_id).await?;
+        }
+        Ok(())
     }
 
     /// Best-effort pane teardown shared by the watchdog sweeps and the

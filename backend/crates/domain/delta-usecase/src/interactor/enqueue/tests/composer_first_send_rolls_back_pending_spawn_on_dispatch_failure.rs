@@ -33,6 +33,12 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
         ix.pending_session_ids().await.is_empty(),
         "the failed spawn left no pending entry behind"
     );
+    // The eager session row (and its send, by cascade) was rolled back too: the
+    // caller got the error synchronously, so nothing must linger in the store.
+    assert!(
+        ix.store().list_sessions().await.unwrap().is_empty(),
+        "the failed spawn left no session row behind"
+    );
     let (events, _) = ix
         .on_user_prompt_submit(submit_in(
             "sess-late",

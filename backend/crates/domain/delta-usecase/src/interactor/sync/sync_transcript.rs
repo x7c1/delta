@@ -59,7 +59,11 @@ where
         // double-ingest or race the cursor (see `sync_lock`).
         let _guard = self.sync_lock.lock().await;
 
-        let transcript_path = &session.transcript_path;
+        // A still-`spawning` session has no transcript path yet (the first hook
+        // never bound it), so there is nothing to sync.
+        let Some(transcript_path) = session.transcript_path.as_deref() else {
+            return Ok((Vec::new(), Vec::new()));
+        };
         let main_thread = self.store.main_thread_id(&session.id).await?;
 
         // Resume from the line-based cursor so each transcript line is read

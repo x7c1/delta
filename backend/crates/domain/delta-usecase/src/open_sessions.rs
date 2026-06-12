@@ -63,17 +63,6 @@ pub const RESUME_READY_DEADLINE: Duration = Duration::from_secs(30);
 /// deadlines, so it is testable without wall-clock sleeps.
 pub const RESUME_DISPATCH_SETTLE: Duration = Duration::from_millis(200);
 
-/// The result of an idempotent [`OpenSessions::bind_pending_spawn`] that
-/// actually performed a bind, carrying the just-bound spawn's held first
-/// prompt so the caller can write its `send` row now that the session
-/// id is known.
-#[derive(Debug, Clone)]
-pub struct BindOutcome {
-    /// The first send held on the spawn, if it was a composer-initiated
-    /// New; `None` for a prompt-less plain spawn.
-    pub first_prompt: Option<String>,
-}
-
 /// A live, bound session: its Claude `session_id` is known and it is mapped to
 /// the tmux pane driving it.
 #[derive(Debug, Clone)]
@@ -93,8 +82,9 @@ pub struct OpenHandle {
 /// `UserPromptSubmit` hook reports exactly that id. The spawn is correlated to
 /// its session by matching the hook's `session_id` against [`Self::session_id`]
 /// — independent of the working directory, so two spawns may share a `cwd`
-/// without mis-correlating. If the spawn was initiated by a composer send,
-/// [`Self::first_prompt`] carries the text to enqueue once the session binds.
+/// without mis-correlating. The session row (and any first prompt's send row)
+/// is written eagerly at spawn time, so binding only activates that row and
+/// maps the pane.
 #[derive(Debug, Clone)]
 pub struct PendingSpawn {
     /// The Delta-minted tmux session name.
@@ -108,12 +98,6 @@ pub struct PendingSpawn {
     /// bind time and is kept as informational data; it is no longer the match
     /// key (correlation is by [`Self::session_id`]).
     pub workdir: String,
-    /// The held first send, if this spawn was initiated by a composer send.
-    ///
-    /// The `send` row cannot be written before the spawn binds (it
-    /// references `session(id)`, which does not exist yet), so the text is held
-    /// here and enqueued once the binding supplies the session id.
-    pub first_prompt: Option<String>,
     /// When this spawn was recorded, for the watchdog deadline.
     ///
     /// A spawn is fire-and-forget: only the first `UserPromptSubmit` hook binds
@@ -235,24 +219,20 @@ impl OpenSessions {
         self.bound.insert(id, handle);
     }
 
-    /// Idempotently bind the pending spawn matching `id`, returning its held
-    /// first prompt when it was bound by *this* call.
+    /// Idempotently bind the pending spawn matching `id`, returning whether the
+    /// bind was performed by *this* call.
     ///
     /// This is the single, order-independent binding step shared by the two
     /// signals that can register a fresh spawn — `SessionStart(source=startup)`
     /// and the first `UserPromptSubmit`. Whichever arrives first moves the
-    /// matching [`PendingSpawn`] `pending → bound[id]` and yields its
-    /// `first_prompt` (so the caller can write the held `send`);
+    /// matching [`PendingSpawn`] `pending → bound[id]` and returns `true`;
     /// whichever arrives second finds no pending spawn for `id`, so it returns
-    /// `None` and the already-bound session is left untouched. The boolean
-    /// distinguishes the two outcomes for the caller:
-    ///
-    /// - `Some(BindOutcome { first_prompt, .. })` — this call performed the bind.
-    /// - `None` — already bound by a prior call (or no such pending spawn at
-    ///   all); a no-op.
-    pub fn bind_pending_spawn(&mut self, id: &SessionId) -> Option<BindOutcome> {
-        let spawn = self.take_pending_for_session(id)?;
-        let first_prompt = spawn.first_prompt;
+    /// `false` and the already-bound session is left untouched (a no-op,
+    /// including for ids that never had a pending spawn at all).
+    pub fn bind_pending_spawn(&mut self, id: &SessionId) -> bool {
+        let Some(spawn) = self.take_pending_for_session(id) else {
+            return false;
+        };
         self.bind(
             id.clone(),
             OpenHandle {
@@ -261,7 +241,7 @@ impl OpenSessions {
                 workdir: spawn.workdir,
             },
         );
-        Some(BindOutcome { first_prompt })
+        true
     }
 
     /// Record a resumed session whose first prompt is held until its
