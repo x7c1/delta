@@ -1,0 +1,9 @@
+{
+  "comment": "A whole session history with three sends in dispatch order (two trunk turns, then a branch off the first reply) and a trailing external prompt: replaying from line 0 consumes each send in turn, keeps the tool round-trip on the trunk, opens the child for the branch, and resets to main for the stray typing.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "first trunk prompt" },
+    { "id": 2, "thread_id": 1, "text": "second trunk prompt, with a tool" },
+    { "id": 3, "thread_id": 2, "semantic_parent_uuid": "a1", "text": "branch off the first reply" }
+  ]
+}

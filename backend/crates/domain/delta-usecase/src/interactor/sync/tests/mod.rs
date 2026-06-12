@@ -1,4 +1,10 @@
 //! Transcript-sync use-case tests.
+//!
+//! These exercise the I/O shell around the pure attribution fold: cursor
+//! handling, seed reads, effect execution, event broadcast, and the hook /
+//! poll entry points. The attribution *rules* themselves (which thread a
+//! line lands on) are pinned by the pure `delta-attribution` test suite;
+//! purely-attributional cases live there, not here.
 
 mod support;
 
@@ -17,5 +23,3 @@ mod poll_transcript_only_polls_open_sessions;
 mod poll_transcript_without_session_is_empty;
 mod queued_command_send_attributes_user_and_assistant_to_child;
 mod skipped_line_does_not_stall_later_turn_ingestion;
-mod tool_result_mid_branch_turn_stays_on_the_branch;
-mod unmatched_queued_command_mid_branch_stays_on_branch;

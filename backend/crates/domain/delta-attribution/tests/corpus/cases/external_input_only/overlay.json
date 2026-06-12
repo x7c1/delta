@@ -1,0 +1,5 @@
+{
+  "comment": "A session with no Delta sends at all: every human prompt is external input and the whole conversation lands on main.",
+  "main_thread": 1,
+  "sends": []
+}

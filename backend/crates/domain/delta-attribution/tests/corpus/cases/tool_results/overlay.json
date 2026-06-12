@@ -1,0 +1,7 @@
+{
+  "comment": "tool_use/tool_result pairs inside one turn: the result carriers are role:user lines that stay on the turn's thread, and each result resolves its permission with allowed inferred from is_error (t1 allowed, t2 denied).",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "run both tools" }
+  ]
+}

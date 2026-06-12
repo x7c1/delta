@@ -1,5 +1,6 @@
+use delta_attribution::claude_format;
+
 use crate::error::Result;
-use crate::interactor::claude_format;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
     SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,

@@ -1,0 +1,23 @@
+{
+  "assignments": [
+    {
+      "uuid": "u0",
+      "role": "user",
+      "seq": 0,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a1",
+      "role": "assistant",
+      "seq": 1,
+      "thread_id": 1
+    }
+  ],
+  "effects": [
+    {
+      "kind": "send_matched",
+      "send_id": 1,
+      "matched_uuid": "u0"
+    }
+  ]
+}

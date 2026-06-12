@@ -1,0 +1,8 @@
+{
+  "comment": "A trunk turn followed by a branch send off the assistant reply: the branch echo opens the child thread, carries the semantic parent, and pulls the reply with it.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "set the scene" },
+    { "id": 2, "thread_id": 2, "semantic_parent_uuid": "a1", "text": "tell me more about that passage" }
+  ]
+}

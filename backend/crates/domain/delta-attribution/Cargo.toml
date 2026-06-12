@@ -1,0 +1,19 @@
+[package]
+name = "delta-attribution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+delta-model = { workspace = true }
+
+[dev-dependencies]
+# The golden-corpus tests feed sanitized raw JSONL fixtures through the real
+# transcript parser (`delta_transcript::parse_line`) before folding, so the
+# corpus pins the parser→fold pipeline, not a hand-rolled re-encoding. A
+# dev-dependency cycle through delta-usecase is fine: it only affects test
+# builds.
+delta-transcript = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

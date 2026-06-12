@@ -1,0 +1,87 @@
+{
+  "assignments": [
+    {
+      "uuid": "u0",
+      "role": "user",
+      "seq": 0,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a1",
+      "role": "assistant",
+      "seq": 1,
+      "thread_id": 1
+    },
+    {
+      "uuid": "u2",
+      "role": "user",
+      "seq": 2,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a3",
+      "role": "assistant",
+      "seq": 3,
+      "thread_id": 1
+    },
+    {
+      "uuid": "u4",
+      "role": "user",
+      "seq": 4,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a5",
+      "role": "assistant",
+      "seq": 5,
+      "thread_id": 1
+    },
+    {
+      "uuid": "u6",
+      "role": "user",
+      "seq": 6,
+      "thread_id": 2,
+      "semantic_parent_uuid": "a1"
+    },
+    {
+      "uuid": "a7",
+      "role": "assistant",
+      "seq": 7,
+      "thread_id": 2
+    },
+    {
+      "uuid": "u8",
+      "role": "user",
+      "seq": 8,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a9",
+      "role": "assistant",
+      "seq": 9,
+      "thread_id": 1
+    }
+  ],
+  "effects": [
+    {
+      "kind": "send_matched",
+      "send_id": 1,
+      "matched_uuid": "u0"
+    },
+    {
+      "kind": "send_matched",
+      "send_id": 2,
+      "matched_uuid": "u2"
+    },
+    {
+      "kind": "resolve_permission",
+      "tool_use_id": "t1",
+      "allowed": true
+    },
+    {
+      "kind": "send_matched",
+      "send_id": 3,
+      "matched_uuid": "u6"
+    }
+  ]
+}

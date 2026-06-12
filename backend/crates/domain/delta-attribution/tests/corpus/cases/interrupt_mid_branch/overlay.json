@@ -1,0 +1,7 @@
+{
+  "comment": "A branch turn is interrupted mid-flight: the marker line belongs to the aborted branch turn (not main), and the human prompt typed afterwards is external input that resets attribution to main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "explore the side topic" }
+  ]
+}

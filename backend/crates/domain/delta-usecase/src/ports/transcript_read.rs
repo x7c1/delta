@@ -1,7 +1,7 @@
 //! The result of reading a transcript: the parsed messages plus the file's
 //! true line count.
 
-use crate::ports::transcript_message::TranscriptMessage;
+use delta_attribution::TranscriptMessage;
 
 /// The outcome of a single transcript read.
 ///

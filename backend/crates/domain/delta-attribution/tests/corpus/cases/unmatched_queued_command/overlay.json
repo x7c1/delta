@@ -1,0 +1,7 @@
+{
+  "comment": "A queued_command matching no send (a harness-injected task notification) arrives mid-branch: a programmatic injection inherits the active child thread instead of tearing the turn back to main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "work on the branch" }
+  ]
+}

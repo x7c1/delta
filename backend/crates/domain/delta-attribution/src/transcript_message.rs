@@ -4,9 +4,9 @@ use delta_model::{ContentBlock, Message, MessageUuid, PromptId, Role};
 
 /// A parsed transcript line, before Delta assigns it a thread.
 ///
-/// The transcript gateway produces these from the raw JSONL; the Interactor
-/// turns them into [`Message`] values by attaching the active `thread_id` and
-/// any known semantic parent.
+/// The transcript gateway produces these from the raw JSONL; the attribution
+/// fold turns them into [`Message`] values by attaching the active
+/// `thread_id` and any known semantic parent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptMessage {
     pub uuid: MessageUuid,
@@ -21,7 +21,7 @@ pub struct TranscriptMessage {
     ///
     /// Used as the persisted `seq`, so it reflects the line's true file
     /// position even when earlier lines were skipped (blank, no-uuid, or
-    /// unparsable). The reader assigns this; the Interactor persists it.
+    /// unparsable). The reader assigns this; the fold persists it.
     pub seq: i64,
     /// True when this line is a Claude Code `queued_command` attachment: a
     /// prompt the user composed while a turn was in flight, which Claude records

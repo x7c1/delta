@@ -54,18 +54,6 @@ pub(crate) fn assistant_line_at(uuid: &str, text: &str, created_at: &str) -> Tra
     }
 }
 
-/// An assistant transcript line that issues a tool call (no author text).
-pub(crate) fn tool_use_line(uuid: &str, id: &str, name: &str) -> TranscriptMessage {
-    TranscriptMessage {
-        content: vec![ContentBlock::ToolUse {
-            id: id.into(),
-            name: name.into(),
-            input: serde_json::Value::Null,
-        }],
-        ..assistant_line(uuid, "")
-    }
-}
-
 /// An interrupt-marker line. Claude writes this as a `role: user` line whose
 /// only text block is `[Request interrupted by user...]` when the user aborts
 /// the in-flight turn; it belongs to the interrupted turn, not a new human turn.
