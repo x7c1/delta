@@ -821,6 +821,63 @@ async fn queued_send_is_held_then_promoted_to_dispatched() {
 }
 
 #[tokio::test]
+async fn open_sends_lists_non_terminal_sends_oldest_first_per_session() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    let (other, other_main) = store
+        .register_session(new_session_with("sess-2"))
+        .await
+        .unwrap();
+
+    // Mix of statuses for the session under test: a dispatched send, a queued
+    // send, a matched one, and a cancelled one. Only the first two are open.
+    let dispatched = store
+        .enqueue_send(&session.id, main, None, "dispatched", None)
+        .await
+        .unwrap();
+    let queued = store
+        .enqueue_queued_send(&session.id, main, None, "queued", None)
+        .await
+        .unwrap();
+    let matched = store
+        .enqueue_send(&session.id, main, None, "matched", None)
+        .await
+        .unwrap();
+    store
+        .mark_send_matched(matched.id, &MessageUuid::from("u-1"))
+        .await
+        .unwrap();
+    let cancelled = store
+        .enqueue_send(&session.id, main, None, "cancelled", None)
+        .await
+        .unwrap();
+    store.cancel_send(cancelled.id).await.unwrap();
+    // A foreign session's open send must never leak into this session's list.
+    store
+        .enqueue_send(&other.id, other_main, None, "foreign", None)
+        .await
+        .unwrap();
+
+    let open = store.open_sends(&session.id).await.unwrap();
+    let ids: Vec<i64> = open.iter().map(|s| s.id).collect();
+    assert_eq!(
+        ids,
+        vec![dispatched.id, queued.id],
+        "only queued/dispatched sends, oldest first"
+    );
+    assert_eq!(open[0].status, SendStatus::Dispatched);
+    assert_eq!(open[1].status, SendStatus::Queued);
+
+    // A session with no open sends yields an empty list, not an error.
+    store
+        .mark_send_matched(dispatched.id, &MessageUuid::from("u-2"))
+        .await
+        .unwrap();
+    store.cancel_send(queued.id).await.unwrap();
+    assert!(store.open_sends(&session.id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn spawning_session_inserts_then_activates_on_register() {
     let store = SqliteStore::open_in_memory().unwrap();
     let id = SessionId::from("sess-spawn");

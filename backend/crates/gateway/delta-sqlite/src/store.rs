@@ -605,6 +605,28 @@ impl SessionStore for SqliteStore {
         row.transpose().map_err(Into::into)
     }
 
+    async fn open_sends(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Vec<Send>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {SEND_COLS} FROM send
+                 WHERE session_id = ?1 AND status IN ('queued', 'dispatched')
+                 ORDER BY id"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![session_id.as_str()], |r| Ok(send_from_row(r)))
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)??);
+        }
+        Ok(out)
+    }
+
     async fn promote_queued_send(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute(

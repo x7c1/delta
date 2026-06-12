@@ -377,6 +377,21 @@ impl SessionStore for FakeStore {
             .cloned())
     }
 
+    async fn open_sends(&self, session_id: &SessionId) -> Result<Vec<Send>> {
+        let g = self.inner.lock().unwrap();
+        let mut out: Vec<Send> = g
+            .sends
+            .iter()
+            .filter(|s| {
+                &s.session_id == session_id
+                    && matches!(s.status, SendStatus::Queued | SendStatus::Dispatched)
+            })
+            .cloned()
+            .collect();
+        out.sort_by_key(|s| s.id);
+        Ok(out)
+    }
+
     async fn promote_queued_send(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {
