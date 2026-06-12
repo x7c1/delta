@@ -156,11 +156,12 @@ pub(crate) async fn list_sends(
 ) -> Result<Json<WireSendsResponse>, ApiError> {
     let id = SessionId::from(id);
     let sends = state.interactor().open_sends_for(&id).await?;
-    // The turn state rides along so a reconnecting client can rebuild its
-    // in-progress indicator from this one refetch (events broadcast while the
+    // The queryable live state (turn phase + pending permission dialog) rides
+    // along so a reconnecting client can rebuild its in-progress indicator and
+    // its permission notice from this one refetch (events broadcast while the
     // socket was down are not replayed).
-    let turn = state.interactor().turn_state_for(&id).await;
-    Ok(Json(WireSendsResponse::new(sends, turn)))
+    let live = state.interactor().live_state_for(&id).await;
+    Ok(Json(WireSendsResponse::new(sends, live)))
 }
 
 /// `GET /api/threads/{id}/messages` — a thread's messages for drill-down.

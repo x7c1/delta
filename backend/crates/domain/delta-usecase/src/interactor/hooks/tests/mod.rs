@@ -2,6 +2,7 @@
 
 mod first_submit_registers_session;
 mod on_stop_routes_sync_by_hook_session_id;
+mod pending_permission_is_queryable_live_state;
 mod permission_request_registers_dialog_and_decision_resolves;
 mod pre_tool_use_records_request_without_notifying;
 mod session_end_for_bound_session_is_a_normal_end;

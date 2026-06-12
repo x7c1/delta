@@ -3,6 +3,7 @@ use tokio::sync::oneshot;
 use crate::error::Result;
 use crate::interactor::permission_decision::PermissionDecision;
 use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::session_actor::runtime::PendingPermission;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 /// What `on_permission_request` hands the transport: the request row's id, a
@@ -54,6 +55,14 @@ where
 
         let (sender, receiver) = oneshot::channel();
         self.state.insert_permission_waiter(request.id, sender);
+        // Mirror the broadcast below into queryable runtime state, so a client
+        // that misses the event (socket down) can rebuild the notice from the
+        // sends envelope. Cleared on resolution or when the turn ends.
+        self.state.set_pending_permission(PendingPermission {
+            request_id: request.id,
+            tool_name: tool_name.to_owned(),
+            tool_input_json: tool_input_json.to_owned(),
+        });
 
         Ok(PermissionWait {
             request_id: request.id,

@@ -7,7 +7,7 @@ import {
   type ConnectionStatus,
 } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
-import { useLiveStore } from '../../store/liveStore';
+import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
@@ -120,11 +120,12 @@ export function NavigatorPane({
   ]);
 
   const connection = useLiveStore((state) => state.connection);
-  // Per-session permission requests. The notice itself now lives in the focused
-  // session's conversation pane (above the composer); here it only drives a
-  // badge on each session's row so a request on a non-focused session is still
-  // discoverable.
-  const permissions = useLiveStore((state) => state.permission);
+  // Per-session notices. A pending permission request drives a badge on its
+  // session's row (the notice card itself lives in the focused session's
+  // conversation pane), so a request on a non-focused session is still
+  // discoverable. A dismissed notice keeps its badge: the request is still
+  // genuinely awaiting an answer.
+  const notices = useLiveStore((state) => state.notices);
   const hasInProgress = useLiveStore(
     (state) => Object.keys(state.activeTurns).length > 0,
   );
@@ -227,7 +228,9 @@ export function NavigatorPane({
               }}
               item={item}
               isFocused={focusedSessionId === item.session.id}
-              needsPermission={Boolean(permissions[item.session.id])}
+              needsPermission={
+                noticeOf(notices, item.session.id, 'permission') !== null
+              }
               onFocus={() => {
                 setFocusedSession(item.session.id);
                 // The main thread is not listed in the tree, so clicking the

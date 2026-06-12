@@ -1,5 +1,6 @@
 import type {
   Message,
+  PendingPermission,
   Send,
   Session,
   Thread,
@@ -366,6 +367,13 @@ export interface MockStore {
      * `GET /api/sessions` until a `session_registered` event activates it.
      */
     spawning?: boolean;
+    /**
+     * The permission dialog currently awaiting an answer, mirrored from the
+     * scripted `permission_requested`/`permission_resolved` events so the
+     * sends envelope reports it the way the real server does (see
+     * `applyEvent`). Absent means nothing is pending.
+     */
+    pendingPermission?: PendingPermission;
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: Send[];

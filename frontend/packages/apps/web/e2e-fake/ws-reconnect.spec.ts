@@ -22,7 +22,10 @@ import { fetchMessageCount, fetchSends, latestSession } from './support/rest';
  *   regression guard: pending sends are a server resource, so a reconnect is
  *   a refetch, never a wipe) and the running indicator is re-seeded from the
  *   queryable turn state;
- * - a pending permission notice survives the reconnect, exactly once.
+ * - a pending permission notice survives the reconnect, exactly once;
+ * - a permission raised entirely DURING the outage appears after reconnect,
+ *   re-seeded from the sends envelope's queryable `permission` field (the
+ *   `permission_requested` broadcast was lost with the socket).
  */
 
 /**
@@ -170,5 +173,61 @@ test('a pending permission notice survives a reconnect, exactly once', async ({
   // pass-through.
   await expect(notice).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByTestId('message-item')).toHaveCount(3);
+  await expect(page.getByTestId('pending-item')).toHaveCount(0);
+});
+
+test('a permission raised entirely during the outage appears after reconnect', async ({
+  page,
+}) => {
+  await interceptLiveSocket(page);
+  await page.goto('/');
+  // Scenario `ws-reconnect-permission-outage`: the first turn completes
+  // normally; the second prompt triggers a tool call whose permission dialog
+  // holds for a scripted beat before the tool result resolves it.
+  await startNewSession(page, 'ws-reconnect-permission-outage first turn');
+
+  const messages = page.getByTestId('message-item');
+  const notice = page.getByTestId('permission-notice');
+  await expect(messages).toHaveCount(2);
+  await expect(notice).toHaveCount(0);
+  const session = await latestSession(page);
+
+  // Drop the socket, then send the permission-raising prompt while dark: the
+  // `permission_requested` broadcast is lost with the socket, so the notice
+  // is unrecoverable from events alone.
+  await dropLiveSocket(page);
+  await expect(page.getByTestId('connection-indicator')).not.toHaveAttribute(
+    'data-connection',
+    'open',
+  );
+  await sendMessage(page, 'now raise a permission while dark');
+
+  // Observe over REST that the server holds the pending dialog — the
+  // queryable counterpart of the lost event. (The page itself may even show
+  // the notice already: REST keeps working during the outage, so any sends
+  // refetch — e.g. the one the send's own POST triggers — can seed it early.
+  // The guarantee under test is convergence, not pre-reconnect staleness.)
+  await expect(async () => {
+    const sends = await fetchSends(page, session.id);
+    expect(sends.permission).not.toBeNull();
+    expect(sends.permission?.tool_name).toBe('Bash');
+  }).toPass({ timeout: 10_000 });
+
+  // Reconnect. The resync drops the event-reconstructed permission notices
+  // (their resolution may have been missed) and re-seeds from the refetched
+  // sends envelope — so the dialog raised while dark must be up, exactly
+  // once, regardless of whether an outage-window refetch already showed it.
+  await restoreLiveSocket(page);
+  await expectReconnected(page);
+  await expect(notice).toHaveCount(1);
+  await expect(notice).toContainText('Permission requested: Bash');
+
+  // The scripted tool_result lands: the notice resolves (the live
+  // `permission_resolved` is back) and the second turn completes — the first
+  // turn's two messages plus prompt, tool call, and closing reply. The
+  // generous timeout covers the scenario's deliberate 10 s hold plus the
+  // decision-deadline pass-through.
+  await expect(notice).toHaveCount(0, { timeout: 20_000 });
+  await expect(messages).toHaveCount(5);
   await expect(page.getByTestId('pending-item')).toHaveCount(0);
 });

@@ -63,7 +63,7 @@ async fn dispatch_ready_resumes_send_failure_cancels_head_and_clears_turn() {
     );
     // ...the turn returned to idle so a later send is not stranded behind it...
     assert_eq!(
-        ix.turn_state_for(&session_id).await,
+        ix.live_state_for(&session_id).await.turn,
         crate::turn::TurnState::Idle,
         "the turn returned to idle on dispatch failure"
     );
