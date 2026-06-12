@@ -743,8 +743,8 @@ impl SessionStore for SqliteStore {
                     // first ingest, because the send row is recorded before
                     // the keystrokes are dispatched, so by the time the user
                     // line appears in the transcript its send is still
-                    // `dispatched` and `match_dispatched_send` attaches it to
-                    // the branch thread. A second ingest of the same line (e.g.
+                    // `dispatched` and the prompt-echo correlation attaches it
+                    // to the branch thread. A second ingest of the same line (e.g.
                     // hook-sync racing the background tail, or a re-sync) finds
                     // the send already `matched`, so `sync_transcript` falls
                     // back to the external-input branch and recomputes
