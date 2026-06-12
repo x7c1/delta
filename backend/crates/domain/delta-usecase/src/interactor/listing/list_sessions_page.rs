@@ -2,9 +2,9 @@ use crate::error::Result;
 use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::session_listing::SessionListing;
 use crate::session_page::{SessionPage, SessionPageCursor};
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

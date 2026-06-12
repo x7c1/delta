@@ -9,7 +9,7 @@
 
 use crate::error::{Error, Result};
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
 /// The browser's answer to a pending permission request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub enum PermissionDecision {
     Deny,
 }
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

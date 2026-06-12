@@ -3,11 +3,11 @@ use delta_model::{MessageUuid, Send, SessionId, ThreadId};
 use crate::error::Result;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{TurnInput, TurnState};
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
 use super::provisional_branch_title;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

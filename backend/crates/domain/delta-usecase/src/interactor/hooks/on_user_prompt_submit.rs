@@ -3,7 +3,7 @@ use crate::ports::{
     SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
 };
 use crate::turn::TurnInput;
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
 use super::match_uuid_for_prompt;
 
@@ -12,7 +12,7 @@ use super::match_uuid_for_prompt;
 /// human typing into the pane, so it must not be reported as external input.
 const TASK_NOTIFICATION_PREFIX: &str = "<task-notification>";
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

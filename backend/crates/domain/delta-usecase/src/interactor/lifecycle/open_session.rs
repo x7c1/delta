@@ -6,11 +6,11 @@ use crate::error::{Error, Result};
 use crate::open_sessions::{OpenHandle, ResumingSession};
 use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
 use super::{RESUME_FLAG, SETTINGS_FLAG};
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

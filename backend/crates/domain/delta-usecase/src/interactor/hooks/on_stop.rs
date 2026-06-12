@@ -1,9 +1,9 @@
 use crate::error::Result;
 use crate::ports::{SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, Workspace};
 use crate::turn::TurnInput;
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::open_sessions::PendingSpawn;
 use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
 
@@ -18,7 +18,7 @@ pub(in crate::interactor) struct FreshSpawn {
     pub first_send: Option<Send>,
 }
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,

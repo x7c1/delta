@@ -2,7 +2,7 @@ use delta_model::{Message, Session};
 
 use crate::error::Result;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
 /// Prefix Claude Code writes to the transcript when the user interrupts the
 /// in-flight turn. It appears as a `role: user` line whose only text block is
@@ -12,7 +12,7 @@ use crate::Interactor;
 /// without enumerating each exact string.
 const INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user";
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
