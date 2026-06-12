@@ -31,11 +31,20 @@ pub(crate) struct FakeTranscript {
     /// test marks a path missing via [`Self::mark_missing`] to exercise the
     /// resume-unavailable path.
     missing: Mutex<Vec<String>>,
+    /// Barriers a read of the keyed path must pass before returning, set via
+    /// [`Self::gate_reads`]. Lets a concurrency test prove two sessions'
+    /// ingests are genuinely in flight at the same time: each read parks on
+    /// the shared barrier, so the test only completes if they overlap.
+    read_gates: Mutex<HashMap<String, std::sync::Arc<tokio::sync::Barrier>>>,
 }
 
 #[async_trait]
 impl Transcript for FakeTranscript {
     async fn read_from(&self, path: &str, from_line: usize) -> Result<TranscriptRead> {
+        let gate = self.read_gates.lock().unwrap().get(path).cloned();
+        if let Some(gate) = gate {
+            gate.wait().await;
+        }
         let by_path = self.by_path.lock().unwrap();
         let lines = by_path.get(path).cloned().unwrap_or_default();
         let messages = lines
@@ -81,6 +90,16 @@ impl FakeTranscript {
     /// `claude --resume` impossible.
     pub(crate) fn mark_missing(&self, path: &str) {
         self.missing.lock().unwrap().push(path.to_owned());
+    }
+
+    /// Park every future read of `path` on `gate` until enough participants
+    /// arrive (see [`tokio::sync::Barrier`]). Sharing one barrier across two
+    /// paths is how a test asserts those two reads overlap in time.
+    pub(crate) fn gate_reads(&self, path: &str, gate: std::sync::Arc<tokio::sync::Barrier>) {
+        self.read_gates
+            .lock()
+            .unwrap()
+            .insert(path.to_owned(), gate);
     }
 
     /// Append a line that produces no message but still occupies a line and

@@ -1,10 +1,10 @@
-use delta_model::{Send, SessionId};
+use delta_model::Send;
 
 use crate::error::Result;
-use crate::open_sessions::PendingSpawn;
+use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::session_actor::runtime::PendingSpawn;
 use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
 
@@ -18,32 +18,34 @@ pub(in crate::interactor) struct FreshSpawn {
     pub first_send: Option<Send>,
 }
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
 {
-    /// Spawn a fresh session, optionally dispatching a first prompt.
+    /// Spawn this freshly-minted session's pane, optionally dispatching a
+    /// first prompt.
     ///
-    /// Mints a token and a fresh Claude `session_id` (a time-ordered UUID v7, so
-    /// session ids sort chronologically by creation time), **eagerly inserts the
-    /// session row** (status `spawning`, transcript path unknown until the first
-    /// hook) with its `main` thread, enqueues the first prompt's `send` row when
-    /// one is given, and only then launches
+    /// The routing layer minted the session id (a time-ordered UUID v7) and
+    /// spawned this actor for it; pinning the id up front via
+    /// `claude --session-id <uuid>` means the first `UserPromptSubmit` hook
+    /// reports exactly this id, so the launch's hooks route straight back to
+    /// this actor — correlation by id, never by working directory.
+    ///
+    /// This **eagerly inserts the session row** (status `spawning`, transcript
+    /// path unknown until the first hook) with its `main` thread, enqueues the
+    /// first prompt's `send` row when one is given, and only then launches
     /// `claude --settings <path> --session-id <uuid>` in the launch directory.
     /// Because the row and the send exist before the launch, the REST response
     /// for a composer-initiated New carries real ids instead of placeholders,
-    /// and the first `UserPromptSubmit` correlates through the normal FIFO
-    /// machinery with no bind-time row writing.
+    /// and the first `UserPromptSubmit` correlates through the normal
+    /// single-outstanding machinery with no bind-time row writing.
     ///
-    /// A [`PendingSpawn`] is still recorded carrying the minted id (the binding
-    /// key): the first hook *activates* the eager row (`spawning` → `active`,
-    /// filling the transcript path) via the registry bind. Pinning the id up
-    /// front means the first `UserPromptSubmit` hook reports exactly this id, so
-    /// the spawn correlates to its session by id rather than by working
-    /// directory.
+    /// A [`PendingSpawn`] is recorded on this actor's runtime state: the first
+    /// hook *activates* the eager row (`spawning` → `active`, filling the
+    /// transcript path) via [`SessionRuntime::bind_pending_spawn`].
     ///
     /// When a `first_prompt` is present (a composer-initiated New), it is passed
     /// to `claude` as a trailing positional argument on the launch command line
@@ -57,18 +59,13 @@ where
     /// as an argv tail (no shell), so a multi-line or quoted prompt is already
     /// safe.
     ///
-    /// The registry lock is taken only for the brief record/rollback steps, never
-    /// across the tmux/workspace I/O, so a spawn does not serialize concurrent
-    /// registry readers (hooks, the PTY bridge) for the whole spawn duration. The
-    /// `PendingSpawn` is recorded *before* `create_session` launches `claude`, so
-    /// the `UserPromptSubmit` (or `SessionStart`) that the launch triggers always
-    /// finds a spawn to bind rather than racing ahead and being misread as
-    /// external input. With the prompt on the command line the hook fires very
-    /// soon after launch, so this pre-launch ordering is what guarantees the spawn
-    /// record already exists when the hook arrives. A failed `create_session`
-    /// rolls back both the just-recorded pending *and* the eager session row
-    /// (the cascade removes its send), so no dangling spawn or orphan row is
-    /// left behind.
+    /// The `PendingSpawn` is recorded *before* `create_session` launches
+    /// `claude`, so the `UserPromptSubmit` (or `SessionStart`) that the launch
+    /// triggers always finds a spawn to bind rather than racing ahead and being
+    /// misread as external input — those hooks land on this same mailbox,
+    /// strictly after this message. A failed `create_session` rolls back both
+    /// the just-recorded pending *and* the eager session row (the cascade
+    /// removes its send), so no dangling spawn or orphan row is left behind.
     ///
     /// When `workdir` is `Some`, it is a user-selected path: it is validated and
     /// canonicalized via [`Workspace::resolve_existing_dir`] *before* anything is
@@ -76,11 +73,14 @@ where
     /// pane, and no pending spawn left behind (mirroring the resume gate in
     /// [`Self::open_session`]). When `None`, the spawn falls back to its default
     /// per-token `<base>/<token>` directory.
+    ///
+    /// [`SessionRuntime::bind_pending_spawn`]: crate::interactor::session_actor::runtime::SessionRuntime::bind_pending_spawn
     pub(in crate::interactor) async fn spawn_fresh(
-        &self,
+        &mut self,
         first_prompt: Option<String>,
         workdir: Option<String>,
     ) -> Result<FreshSpawn> {
+        let session_id = self.id.clone();
         // Validate a user-selected workdir before minting or launching anything,
         // so an invalid path is rejected with no side effects. The canonical
         // path becomes the launch directory; `None` defers to `<base>/<token>`
@@ -90,25 +90,16 @@ where
             None => None,
         };
 
-        // The minter is atomic, so token uniqueness needs no lock here.
+        // The minter is atomic, so token uniqueness needs no coordination here.
         let token = self.mint_free_token().await?;
         let workdir = requested_workdir.unwrap_or_else(|| self.workdir_for(&token));
         let pane = pane_for(token.as_str());
 
-        // Mint and pin the conversation's session id up front. `claude
-        // --session-id <uuid>` makes the first `UserPromptSubmit` hook report
-        // exactly this id, so the spawn correlates to its session by id rather
-        // than by working directory. The id is a time-ordered UUID v7 (a 48-bit
-        // millisecond timestamp prefix followed by random bits), so session ids
-        // sort chronologically by creation time while remaining a fully valid
-        // RFC 9562 UUID, and collision with an existing stored session is
-        // astronomically unlikely.
-        let session_id = SessionId::from(uuid::Uuid::now_v7().to_string());
-
         // Eagerly create the session row and its `main` thread, then the first
         // prompt's send row bound to those real ids. Hooks cannot arrive before
-        // the launch below, so nothing races this write; if the launch fails the
-        // row is deleted again in the rollback.
+        // the launch below (and would queue behind this message anyway), so
+        // nothing races this write; if the launch fails the row is deleted
+        // again in the rollback.
         let (_session, main_thread_id) = self
             .store
             .insert_spawning_session(&session_id, &workdir)
@@ -126,11 +117,8 @@ where
         // before the launch, so the first `UserPromptSubmit` the auto-submitted
         // prompt fires always finds the dispatch recorded.
         if let Some(send) = &first_send {
-            self.apply_turn_input(
-                &session_id,
-                crate::turn::TurnInput::Dispatch { send_id: send.id },
-            )
-            .await?;
+            self.apply_turn_input(crate::turn::TurnInput::Dispatch { send_id: send.id })
+                .await?;
         }
 
         self.workspace
@@ -159,11 +147,9 @@ where
         // prompt on the command line the hook fires very soon after launch, so
         // this ordering — not any delay inside `create_session` — is what makes
         // the spawn record reliably present when the hook arrives.
-        self.open_sessions.lock().await.push_pending(PendingSpawn {
+        self.state.push_pending(PendingSpawn {
             token: token.clone(),
             pane: pane.clone(),
-            session_id: session_id.clone(),
-            workdir: workdir.clone(),
             // Stamp the spawn for the watchdog deadline. From here the only thing
             // that binds it is the first `UserPromptSubmit` hook; if that never
             // arrives, the reaper uses this instant to reap the stuck spawn.
@@ -172,10 +158,10 @@ where
 
         // Launch the session. If `create_session` fails, the spawn never starts,
         // so roll back the just-recorded pending (otherwise a later, unrelated
-        // `UserPromptSubmit` could mis-bind to this abandoned pane) and the eager
-        // session row (the cascade removes its main thread and first send), then
-        // surface the error. The REST caller gets the failure synchronously, so
-        // no `SpawnFailed` event is needed for this path.
+        // hook could mis-bind to this abandoned pane) and the eager session row
+        // (the cascade removes its main thread and first send), then surface
+        // the error. The REST caller gets the failure synchronously, so no
+        // `SpawnFailed` event is needed for this path.
         if let Err(spawn_err) = self
             .tmux
             .create_session(token.as_str(), &workdir, &command)
@@ -188,13 +174,10 @@ where
                 "fresh spawn failed to launch; rolling back the pending spawn and \
                  the eager session row"
             );
-            self.open_sessions
-                .lock()
-                .await
-                .remove_pending_for_token(&token);
+            self.state.remove_pending_for_token(&token);
             // The session row (and its first send, by cascade) is deleted, so
             // the turn entry is dropped without orphan handling.
-            self.forget_turn(&session_id).await;
+            self.state.forget_turn();
             self.store.delete_session(&session_id).await?;
             return Err(spawn_err);
         }

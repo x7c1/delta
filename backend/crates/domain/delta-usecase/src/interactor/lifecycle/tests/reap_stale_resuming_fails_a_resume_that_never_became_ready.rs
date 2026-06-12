@@ -3,7 +3,7 @@ use std::time::Instant;
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
-use crate::open_sessions::RESUME_READY_DEADLINE;
+use crate::interactor::session_actor::runtime::RESUME_READY_DEADLINE;
 use crate::ports::SessionEvent;
 
 /// A resumed session that never became ready before its deadline is failed by

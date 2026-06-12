@@ -1,10 +1,10 @@
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
     SessionEndHook, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
 };
-use crate::Interactor;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -17,36 +17,34 @@ where
     /// `SessionEnd` is the precise early failure signal that complements the
     /// watchdog deadline. Three cases are distinguished:
     ///
-    /// - **Failed fresh launch**: the id still names an *unbound* pending spawn,
+    /// - **Failed fresh launch**: an *unbound* pending spawn is still recorded,
     ///   so `claude` ended before its first `UserPromptSubmit`/`SessionStart`
     ///   ever bound it. This is the silent-stall case the watchdog exists for,
     ///   caught here immediately instead of at the full deadline. The spawn is
     ///   removed, its pane torn down best-effort, and a
     ///   [`SessionEvent::SpawnFailed`] emitted so the browser clears the
     ///   optimistic pending chip.
-    /// - **Failed resume**: the id names a session that is resumed but not yet
-    ///   ready (its first prompt is still held awaiting
-    ///   `SessionStart(source=resume)`). The resume ended before readiness, so it
-    ///   is the same failure: the resuming entry is dropped, its pane torn down,
-    ///   any held prompt cancelled, and a `SpawnFailed` emitted. A resume creates
-    ///   no `PendingSpawn`, so without this it would be misread as a normal end.
-    /// - **Normal end**: neither — the id is an already-ready/bound session, or
+    /// - **Failed resume**: the session is resumed but not yet ready (its first
+    ///   prompt is still held awaiting `SessionStart(source=resume)`). The
+    ///   resume ended before readiness, so it is the same failure: the resuming
+    ///   entry is dropped, its pane torn down, any held prompt cancelled, and a
+    ///   `SpawnFailed` emitted. A resume records no pending spawn, so without
+    ///   this it would be misread as a normal end.
+    /// - **Normal end**: neither — the session is already-ready/bound, or
     ///   unknown. The launch succeeded and is simply ending; this handler does
-    ///   **not** touch close/teardown semantics (owned by `close_session` and the
-    ///   registry), it just logs and returns cleanly.
+    ///   **not** touch close/teardown semantics (owned by `close_session`), it
+    ///   just logs and returns cleanly.
     ///
     /// Failure detection is limited to the not-yet-ready cases, so this hook can
     /// never tear down a healthy, already-ready session.
-    pub async fn on_session_end(&self, hook: SessionEndHook) -> Result<Vec<SessionEvent>> {
-        // Resolve both failure candidates under one registry lock; the tmux
-        // teardown runs after the lock is dropped, mirroring the reaper.
-        let (spawn, resuming) = {
-            let mut registry = self.open_sessions.lock().await;
-            (
-                registry.take_unbound_pending_for_session(&hook.session_id),
-                registry.take_resuming(&hook.session_id),
-            )
-        };
+    pub(in crate::interactor) async fn on_session_end(
+        &mut self,
+        hook: SessionEndHook,
+    ) -> Result<Vec<SessionEvent>> {
+        // Both failure candidates live on this actor's state; the tmux
+        // teardown runs after they are taken, mirroring the reaper.
+        let spawn = self.state.take_unbound_pending();
+        let resuming = self.state.take_resuming();
 
         if let Some(spawn) = spawn {
             tracing::warn!(
@@ -61,7 +59,7 @@ where
             // children, by cascade) is deleted — same cleanup as the watchdog.
             // Its turn entry (set when the first prompt's send was enqueued) is
             // dropped with it.
-            self.forget_turn(&hook.session_id).await;
+            self.state.forget_turn();
             self.clean_up_failed_spawn_row(&hook.session_id).await?;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
@@ -82,7 +80,7 @@ where
             // which cancels the held first prompt's outstanding send (if any)
             // so its row does not shadow correlation on a later re-resume.
             let _ = self
-                .apply_turn_input(&hook.session_id, crate::turn::TurnInput::Close)
+                .apply_turn_input(crate::turn::TurnInput::Close)
                 .await;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
@@ -94,14 +92,13 @@ where
         // Leave close/teardown semantics alone, but the `claude` process is
         // gone, so whatever turn state it had can no longer progress — feed
         // `Close` so the turn machine does not hold a phantom in-flight turn
-        // (a no-op for an idle/unknown id).
+        // (a no-op for an idle/unknown session).
         tracing::info!(
             session_id = %hook.session_id,
             reason = hook.reason.as_deref().unwrap_or("<none>"),
             "SessionEnd for a ready/unknown session; normal end, no failure handling"
         );
-        self.apply_turn_input(&hook.session_id, crate::turn::TurnInput::Close)
-            .await?;
+        self.apply_turn_input(crate::turn::TurnInput::Close).await?;
         Ok(Vec::new())
     }
 }

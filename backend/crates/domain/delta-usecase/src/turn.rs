@@ -21,13 +21,14 @@
 //!
 //! ## Runtime-only, never persisted
 //!
-//! Turn state lives in the interactor's memory ([`TurnRegistry`]), alongside
-//! the open-sessions registry, and is rebuilt empty on boot. That is correct by
-//! construction: the open-sessions registry is also rebuilt empty on boot, so
-//! after a server restart every session is *closed* (its pane, if any, is no
-//! longer driven by this process) — and a closed session cannot have a turn in
-//! flight from Delta's point of view. Absence from the registry therefore reads
-//! as [`TurnState::Idle`], which is exactly the state a freshly-(re)opened
+//! Turn state lives on each session actor's runtime state
+//! (`SessionRuntime::turn`), alongside that session's pane binding, and is
+//! rebuilt [`TurnState::Idle`] on boot. That is correct by construction: the
+//! pane bindings are also rebuilt empty on boot, so after a server restart
+//! every session is *closed* (its pane, if any, is no longer driven by this
+//! process) — and a closed session cannot have a turn in flight from Delta's
+//! point of view. A session with no actor therefore reads as
+//! [`TurnState::Idle`], which is exactly the state a freshly-(re)opened
 //! session must start in. Persisting the old boolean was in fact a liability: a
 //! stale `turn_active = 1` surviving a restart could defer sends forever.
 //!
@@ -51,10 +52,6 @@
 //!   and normally matched its transcript line before the turn ended; this is a
 //!   defensive sweep for the rare case it never did, so a stale `dispatched`
 //!   row cannot break the single-outstanding invariant for the next dispatch.
-
-use std::collections::HashMap;
-
-use delta_model::SessionId;
 
 /// The turn state of one session. See the module docs for the lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -260,43 +257,6 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
     }
 }
 
-/// The in-memory map of per-session turn states.
-///
-/// Held behind a mutex by the interactor, alongside the open-sessions
-/// registry. Rebuilt empty on every boot (see the module docs for why that is
-/// sound). Absence reads as [`TurnState::Idle`], and transitions back to idle
-/// remove the entry, so the map only ever holds sessions with an active turn.
-#[derive(Debug, Default)]
-pub struct TurnRegistry {
-    states: HashMap<SessionId, TurnState>,
-}
-
-impl TurnRegistry {
-    /// The current turn state of a session ([`TurnState::Idle`] when untracked).
-    pub fn state(&self, id: &SessionId) -> TurnState {
-        self.states.get(id).copied().unwrap_or_default()
-    }
-
-    /// Apply one input to a session's turn state, returning the full
-    /// transition (the caller executes the orphan disposition and logs
-    /// anomalies).
-    pub fn apply(&mut self, id: &SessionId, input: TurnInput) -> Transition {
-        let result = transition(self.state(id), input);
-        if result.next == TurnState::Idle {
-            self.states.remove(id);
-        } else {
-            self.states.insert(id.clone(), result.next);
-        }
-        result
-    }
-
-    /// Drop a session's turn state without any orphan handling. Used when the
-    /// session row itself is being deleted (its sends go with it by cascade).
-    pub fn forget(&mut self, id: &SessionId) {
-        self.states.remove(id);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::OrphanedSend::{Cancel, CancelIfUnmatched, Requeue};
@@ -409,40 +369,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn registry_defaults_to_idle_and_drops_idle_entries() {
-        let mut registry = TurnRegistry::default();
-        let id = SessionId::from("sess-1");
-        assert_eq!(registry.state(&id), S::Idle);
-
-        registry.apply(&id, I::Dispatch { send_id: 1 });
-        assert_eq!(registry.state(&id), S::AwaitingEcho { send_id: 1 });
-
-        registry.apply(&id, I::EchoMatched { send_id: 1 });
-        assert_eq!(registry.state(&id), S::InFlight { send_id: Some(1) });
-
-        registry.apply(&id, I::Stop);
-        assert_eq!(registry.state(&id), S::Idle);
-        // Back to idle means the entry is gone, not parked as an Idle value.
-        assert!(registry.states.is_empty());
-    }
-
-    #[test]
-    fn registry_forget_drops_without_orphan_handling() {
-        let mut registry = TurnRegistry::default();
-        let id = SessionId::from("sess-1");
-        registry.apply(&id, I::Dispatch { send_id: 1 });
-        registry.forget(&id);
-        assert_eq!(registry.state(&id), S::Idle);
-    }
-
-    #[test]
-    fn registry_tracks_sessions_independently() {
-        let mut registry = TurnRegistry::default();
-        let a = SessionId::from("sess-a");
-        let b = SessionId::from("sess-b");
-        registry.apply(&a, I::ExternalPrompt);
-        assert_eq!(registry.state(&a), S::InFlight { send_id: None });
-        assert_eq!(registry.state(&b), S::Idle);
-    }
 }

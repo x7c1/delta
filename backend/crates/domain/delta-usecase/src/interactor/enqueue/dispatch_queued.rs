@@ -1,19 +1,17 @@
-use delta_model::SessionId;
-
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{TurnInput, TurnState};
-use crate::Interactor;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
 {
-    /// Dispatch the oldest `queued` send for a session, if the session's turn
-    /// is idle, one is recorded, and the session has a live pane.
+    /// Dispatch the session's oldest `queued` send, if its turn is idle, one
+    /// is recorded, and the session has a live pane.
     ///
     /// A queued send is one that was composed while a turn was in flight and
     /// held back rather than dispatched mid-turn (which would make Claude Code
@@ -42,31 +40,29 @@ where
     /// was promoted, so the browser sees the queued→dispatched transition
     /// immediately.
     pub(in crate::interactor) async fn dispatch_queued_send(
-        &self,
-        session_id: &SessionId,
+        &mut self,
     ) -> Result<Option<SessionEvent>> {
-        if self.turn_state_for(session_id).await != TurnState::Idle {
+        if self.state.turn() != TurnState::Idle {
             return Ok(None);
         }
-        let Some(send) = self.store.next_queued_send(session_id).await? else {
+        let Some(send) = self.store.next_queued_send(self.id).await? else {
             return Ok(None);
         };
-        let Some(pane) = self.pane_for_session(session_id).await else {
+        let Some(pane) = self.state.handle().map(|h| h.pane.clone()) else {
             return Ok(None);
         };
 
         self.store.promote_queued_send(send.id).await?;
-        self.apply_turn_input(session_id, TurnInput::Dispatch { send_id: send.id })
+        self.apply_turn_input(TurnInput::Dispatch { send_id: send.id })
             .await?;
         if let Err(err) = self.tmux.send_line(&pane, &send.text).await {
             // The DispatchFailed transition cancels the orphaned row, so the
             // failed send cannot wedge the queue.
-            self.apply_turn_input(session_id, TurnInput::DispatchFailed)
-                .await?;
+            self.apply_turn_input(TurnInput::DispatchFailed).await?;
             return Err(err);
         }
         Ok(Some(SessionEvent::SendDispatched {
-            session_id: session_id.clone(),
+            session_id: self.id.clone(),
             send_id: send.id,
         }))
     }

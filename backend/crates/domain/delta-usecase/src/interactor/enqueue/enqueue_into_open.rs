@@ -1,13 +1,13 @@
-use delta_model::{MessageUuid, Send, SessionId, ThreadId};
+use delta_model::{MessageUuid, Send, ThreadId};
 
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{TurnInput, TurnState};
-use crate::Interactor;
 
 use super::provisional_branch_title;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -20,10 +20,8 @@ where
     /// Returns the created send plus any [`SessionEvent`]s the enqueue
     /// produced (the idle-flush below may promote a previously-queued send,
     /// which the caller must broadcast as `send_dispatched`).
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::interactor::enqueue) async fn enqueue_into_open(
-        &self,
-        session_id: &SessionId,
+        &mut self,
         pane: &str,
         thread_id: ThreadId,
         text: &str,
@@ -37,15 +35,15 @@ where
         // had not tailed yet), release it now so it keeps its place ahead of
         // this new send in FIFO order. Dispatching it moves the turn machine
         // to `AwaitingEcho`, which the defer check below then observes.
-        if self.turn_state_for(session_id).await == TurnState::Idle {
-            if let Some(event) = self.dispatch_queued_send(session_id).await? {
+        if self.state.turn() == TurnState::Idle {
+            if let Some(event) = self.dispatch_queued_send().await? {
                 events.push(event);
             }
         }
 
-        // The target thread was already loaded by the caller to derive the
-        // session, so its existence is established here (a stale/wrong id surfaced
-        // as `ThreadNotFound` before reaching this point).
+        // The target thread was already loaded by the routing layer to derive
+        // the session, so its existence is established here (a stale/wrong id
+        // surfaced as `ThreadNotFound` before reaching this point).
         let (target_thread, semantic_parent) = match branch_from {
             Some(parent) => {
                 // Give the new branch child a provisional title derived from the
@@ -55,7 +53,7 @@ where
                 let title = provisional_branch_title(locator_quote);
                 let thread = self
                     .store
-                    .create_thread(session_id, &title, Some(thread_id))
+                    .create_thread(self.id, &title, Some(thread_id))
                     .await?;
                 (thread.id, Some(parent.clone()))
             }
@@ -70,11 +68,11 @@ where
         // every quoted/branch send out of Claude Code's own mid-turn queue,
         // where its `UserPromptSubmit` hook — and therefore its locator quote
         // — would be lost.
-        if self.turn_state_for(session_id).await != TurnState::Idle {
+        if self.state.turn() != TurnState::Idle {
             let send = self
                 .store
                 .enqueue_queued_send(
-                    session_id,
+                    self.id,
                     target_thread,
                     semantic_parent.as_ref(),
                     text,
@@ -87,7 +85,7 @@ where
         let send = self
             .store
             .enqueue_send(
-                session_id,
+                self.id,
                 target_thread,
                 semantic_parent.as_ref(),
                 text,
@@ -99,28 +97,23 @@ where
         // its pane immediately but is not ready to accept input until its
         // `SessionStart(source=resume)` arrives (~2s later — far past any safe
         // fixed settle). Dispatching the first keystroke into that still-cold pane
-        // would lose it, so hold this prompt's keystroke on the registry instead
-        // and let `dispatch_ready_resumes` type it on the background tick once
-        // `SessionStart(resume)` has marked the resume ready and it has settled.
-        // The `send` row above is already written (its thread/branch/quote
-        // semantics persisted), so only the physical keystroke is held. The
-        // turn machine still moves to `AwaitingEcho`, so anything composed
-        // before readiness defers behind this first prompt rather than racing
-        // it into the pane. A freshly resumed session has an idle turn, so
-        // this readiness gate is the only gate in play until the first prompt
-        // dispatches; once ready (membership gone), later sends fall through
-        // to the immediate dispatch below.
-        if self
-            .open_sessions
-            .lock()
-            .await
-            .hold_first_prompt(session_id, text.to_owned())
-        {
+        // would lose it, so hold this prompt's keystroke on the runtime state
+        // instead and let the resume tick type it once `SessionStart(resume)`
+        // has marked the resume ready and it has settled. The `send` row above
+        // is already written (its thread/branch/quote semantics persisted), so
+        // only the physical keystroke is held. The turn machine still moves to
+        // `AwaitingEcho`, so anything composed before readiness defers behind
+        // this first prompt rather than racing it into the pane. A freshly
+        // resumed session has an idle turn, so this readiness gate is the only
+        // gate in play until the first prompt dispatches; once ready
+        // (the resuming entry gone), later sends fall through to the immediate
+        // dispatch below.
+        if self.state.hold_first_prompt(text.to_owned()) {
             tracing::info!(
-                session_id = %session_id,
+                session_id = %self.id,
                 "send held until resume readiness (SessionStart=resume); keystroke held"
             );
-            self.apply_turn_input(session_id, TurnInput::Dispatch { send_id: send.id })
+            self.apply_turn_input(TurnInput::Dispatch { send_id: send.id })
                 .await?;
             return Ok((send, events));
         }
@@ -130,7 +123,7 @@ where
         // milliseconds of the keystrokes landing) always finds the dispatch
         // recorded, and a following send defers behind it instead of
         // dispatching mid-turn.
-        self.apply_turn_input(session_id, TurnInput::Dispatch { send_id: send.id })
+        self.apply_turn_input(TurnInput::Dispatch { send_id: send.id })
             .await?;
 
         // If the keystrokes never reach the pane, the row we just wrote would
@@ -145,9 +138,7 @@ where
             // Best-effort: if the cleanup itself fails we keep the dispatch
             // error (the caller's actionable failure) rather than masking it
             // with a store error.
-            let _ = self
-                .apply_turn_input(session_id, TurnInput::DispatchFailed)
-                .await;
+            let _ = self.apply_turn_input(TurnInput::DispatchFailed).await;
             return Err(dispatch_err);
         }
         Ok((send, events))

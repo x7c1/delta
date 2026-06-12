@@ -1,34 +1,34 @@
 use std::time::Instant;
 
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::InteractorCore;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
 {
-    /// Reap launches that never became ready before their deadline (the watchdog
-    /// sweep), covering both fresh spawns and resumed sessions.
+    /// Reap this session's launch if it never became ready before its deadline
+    /// (the watchdog sweep), covering both a fresh spawn and a resume.
     ///
     /// Two fire-and-forget launch shapes can stall the UI on "pending" forever:
     ///
     /// - **Fresh spawn**: `claude` is launched in a tmux pane and the only thing
     ///   that registers/binds it is its first `UserPromptSubmit` (or
     ///   `SessionStart`) hook. If it crashes, exits, or hangs on auth before that
-    ///   hook fires, nothing else would time the dangling spawn out. This sweep
-    ///   removes every unbound spawn whose [`PENDING_SPAWN_DEADLINE`] has elapsed.
+    ///   hook fires, nothing else would time the dangling spawn out. The sweep
+    ///   removes an unbound spawn whose deadline has elapsed.
     /// - **Resumed session**: `claude --resume <id>` binds the pane immediately
     ///   but the first prompt is held until `SessionStart(source=resume)` signals
     ///   readiness. A resume that never becomes ready (the resume crashes/hangs,
     ///   or transcript replay fails after the existence gate) leaves that held
-    ///   prompt parked forever — and a resume creates no `PendingSpawn`, so the
-    ///   spawn sweep above does not cover it. This sweep removes every resuming
-    ///   session whose [`RESUME_READY_DEADLINE`] has elapsed, releasing/cancelling
-    ///   its held first prompt.
+    ///   prompt parked forever — and a resume records no pending spawn, so the
+    ///   spawn sweep above does not cover it. The sweep removes a resuming entry
+    ///   whose readiness deadline has elapsed, cancelling its held first prompt.
     ///
     /// For each stale launch it kills the tmux pane (best-effort, guarded by
     /// `has_session`) and produces a [`SessionEvent::SpawnFailed`] so the browser
@@ -39,49 +39,42 @@ where
     /// sibling event would add a wire variant without adding information.
     ///
     /// `now` is injected (rather than read here) so the watchdog is deterministic
-    /// under test. The reap mirrors [`Self::poll_transcript`]: the usecase
-    /// returns the events to broadcast and stays free of `tokio::spawn` — the
-    /// server owns the periodic tick that calls this and broadcasts the result.
-    ///
-    /// [`PENDING_SPAWN_DEADLINE`]: crate::open_sessions::PENDING_SPAWN_DEADLINE
-    /// [`RESUME_READY_DEADLINE`]: crate::open_sessions::RESUME_READY_DEADLINE
-    pub async fn reap_stale_spawns(&self, now: Instant) -> Result<Vec<SessionEvent>> {
-        // Take the registry lock only long enough to drain the stale launches;
-        // the tmux teardown below runs without the lock so it cannot serialize
-        // the hooks or the PTY bridge against per-pane I/O.
-        let (stale_spawns, stale_resumes) = {
-            let mut registry = self.open_sessions.lock().await;
-            (
-                registry.drain_stale_pending(now, self.launch.pending_spawn_deadline),
-                registry.drain_stale_resuming(now, self.launch.resume_ready_deadline),
-            )
-        };
-        if stale_spawns.is_empty() && stale_resumes.is_empty() {
-            return Ok(Vec::new());
-        }
+    /// under test. The usecase returns the events to broadcast — the server owns
+    /// the periodic tick that fans this out and broadcasts the result.
+    pub(in crate::interactor) async fn reap_stale_launch(
+        &mut self,
+        now: Instant,
+    ) -> Result<Vec<SessionEvent>> {
+        let stale_spawn = self
+            .state
+            .take_stale_pending(now, self.launch.pending_spawn_deadline);
+        let stale_resume = self
+            .state
+            .take_stale_resuming(now, self.launch.resume_ready_deadline);
 
-        let mut events = Vec::with_capacity(stale_spawns.len() + stale_resumes.len());
-        for spawn in stale_spawns {
+        let mut events = Vec::new();
+        if let Some(spawn) = stale_spawn {
             tracing::warn!(
                 token = %spawn.token.as_str(),
-                session_id = %spawn.session_id,
+                session_id = %self.id,
                 "reaping a spawn that never bound before its deadline; \
                  killing its pane and reporting SpawnFailed"
             );
             self.kill_pane_best_effort(spawn.token.as_str()).await;
             // The row (and any first send, by cascade) is deleted; drop the
             // turn entry with it.
-            self.forget_turn(&spawn.session_id).await;
-            self.clean_up_failed_spawn_row(&spawn.session_id).await?;
+            self.state.forget_turn();
+            let session_id = self.id.clone();
+            self.clean_up_failed_spawn_row(&session_id).await?;
             events.push(SessionEvent::SpawnFailed {
-                session_id: spawn.session_id,
+                session_id,
                 pane_token: spawn.token.as_str().to_owned(),
             });
         }
-        for (session_id, resuming) in stale_resumes {
+        if let Some(resuming) = stale_resume {
             tracing::warn!(
                 token = %resuming.token.as_str(),
-                session_id = %session_id,
+                session_id = %self.id,
                 had_held_prompt = resuming.held_prompt.is_some(),
                 "reaping a resume that never became ready before its deadline; \
                  killing its pane, cancelling any held prompt, reporting SpawnFailed"
@@ -92,16 +85,24 @@ where
             // so its row does not shadow correlation when the session is later
             // resumed again.
             let _ = self
-                .apply_turn_input(&session_id, crate::turn::TurnInput::Close)
+                .apply_turn_input(crate::turn::TurnInput::Close)
                 .await;
             events.push(SessionEvent::SpawnFailed {
-                session_id,
+                session_id: self.id.clone(),
                 pane_token: resuming.token.as_str().to_owned(),
             });
         }
         Ok(events)
     }
+}
 
+impl<T, X, S, W> InteractorCore<T, X, S, W>
+where
+    T: TmuxDriver,
+    X: Transcript,
+    S: SessionStore,
+    W: Workspace,
+{
     /// Clean up the eagerly-created session row of a spawn that never bound.
     ///
     /// The row was INSERTed (status `spawning`) when the id was minted, before
@@ -127,7 +128,8 @@ where
     /// Best-effort pane teardown shared by the watchdog sweeps and the
     /// `SessionEnd` failure path: probe with `has_session` and kill if present,
     /// never letting a teardown error mask the failure report (the launch is
-    /// already removed from the registry, so the failure event must still fire).
+    /// already removed from the runtime state, so the failure event must still
+    /// fire).
     pub(in crate::interactor) async fn kill_pane_best_effort(&self, token: &str) {
         match self.tmux.has_session(token).await {
             Ok(true) => {

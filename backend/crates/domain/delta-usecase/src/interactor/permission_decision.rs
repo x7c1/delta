@@ -6,10 +6,15 @@
 //! transport's deadline passes — in which case the waiter is abandoned and the
 //! hook responds with an empty passthrough, falling back to the interactive
 //! TUI prompt exactly as before this endpoint existed.
+//!
+//! Both paths execute inside the session's actor: the routing layer resolves
+//! the request id to its owning session (the interactor's permission index)
+//! and posts here, so a decision, an abandonment, and the hook registration
+//! can never interleave for one session.
 
 use crate::error::{Error, Result};
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
 
 /// The browser's answer to a pending permission request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +23,7 @@ pub enum PermissionDecision {
     Deny,
 }
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -27,25 +32,23 @@ where
 {
     /// Resolve a pending permission request with the browser's decision.
     ///
-    /// Claims the registered waiter first (an atomic take, so two racing
-    /// decisions cannot both win), then records the decision on the request
-    /// row and wakes the blocked hook handler, which answers Claude Code with
-    /// the corresponding `hookSpecificOutput.decision`.
+    /// Claims the registered waiter first (the mailbox serializes racing
+    /// decisions, so only the first finds it), then records the decision on
+    /// the request row and wakes the blocked hook handler, which answers
+    /// Claude Code with the corresponding `hookSpecificOutput.decision`.
     ///
     /// Returns [`Error::PermissionNotPending`] when no waiter is registered:
-    /// the request is unknown, was already decided, or its hook wait timed
-    /// out and fell back to the TUI prompt — in every case a UI decision can
-    /// no longer take effect, and the caller surfaces that as a conflict.
-    pub async fn decide_permission(
-        &self,
+    /// the request was already decided, or its hook wait timed out and fell
+    /// back to the TUI prompt — in either case a UI decision can no longer
+    /// take effect, and the caller surfaces that as a conflict.
+    pub(in crate::interactor) async fn decide_permission(
+        &mut self,
         request_id: i64,
         decision: PermissionDecision,
     ) -> Result<Vec<SessionEvent>> {
         let sender = self
-            .pending_permissions
-            .lock()
-            .await
-            .remove(&request_id)
+            .state
+            .take_permission_waiter(request_id)
             .ok_or(Error::PermissionNotPending(request_id))?;
 
         let allowed = decision == PermissionDecision::Allow;
@@ -64,7 +67,7 @@ where
         };
 
         // A dropped receiver means the hook handler gave up (its timeout fired
-        // between our registry take and now). The row is decided either way;
+        // between the waiter take and now). The row is decided either way;
         // Claude Code falls back to the TUI prompt for the actual gating.
         if sender.send(decision).is_err() {
             tracing::warn!(
@@ -85,7 +88,7 @@ where
     /// The row stays `pending`: the hook responds with an empty passthrough,
     /// Claude Code shows its interactive TUI prompt, and the eventual
     /// `tool_result` resolves the row (see `sync_transcript`).
-    pub async fn abandon_permission_decision(&self, request_id: i64) {
-        self.pending_permissions.lock().await.remove(&request_id);
+    pub(in crate::interactor) fn abandon_permission_decision(&mut self, request_id: i64) {
+        self.state.take_permission_waiter(request_id);
     }
 }

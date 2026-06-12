@@ -3,7 +3,7 @@ use std::time::Instant;
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
-use crate::open_sessions::RESUME_DISPATCH_SETTLE;
+use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
 
 /// `SessionStart(source=resume)` only *marks* the resume ready: it must NOT type
 /// the held first prompt from the handler. That hook blocks `claude` until it

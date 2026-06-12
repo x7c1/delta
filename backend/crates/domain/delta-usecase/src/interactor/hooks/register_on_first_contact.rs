@@ -4,9 +4,9 @@ use crate::error::Result;
 use crate::ports::{
     SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
 };
-use crate::Interactor;
+use crate::interactor::InteractorCore;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> InteractorCore<T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -22,7 +22,7 @@ where
     /// known-but-closed data session (no [`OpenHandle`]) and a warning is
     /// logged, preserving today's external-input behaviour.
     ///
-    /// [`OpenHandle`]: crate::open_sessions::OpenHandle
+    /// [`OpenHandle`]: crate::interactor::session_actor::runtime::OpenHandle
     pub(in crate::interactor::hooks) async fn register_on_first_contact(
         &self,
         hook: &UserPromptSubmitHook,

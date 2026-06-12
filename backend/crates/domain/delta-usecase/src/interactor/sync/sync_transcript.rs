@@ -1,18 +1,11 @@
 use delta_model::{Message, Session};
 
 use crate::error::Result;
+use crate::interactor::claude_format;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
 
-/// Prefix Claude Code writes to the transcript when the user interrupts the
-/// in-flight turn. It appears as a `role: user` line whose only text block is
-/// either `[Request interrupted by user]` (plain mid-response interrupt) or
-/// `[Request interrupted by user for tool use]` (interrupt during a tool use).
-/// Matching on the shared prefix covers both variants (and any future suffix)
-/// without enumerating each exact string.
-const INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user";
-
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -21,6 +14,14 @@ where
 {
     /// Pull new transcript lines from disk and persist them as messages,
     /// attributing each to the right thread as it is ingested.
+    ///
+    /// Runs inside the session's actor, which is what serializes the
+    /// read-cursor → read-file → ingest → set-cursor sequence: every caller
+    /// (hook handlers, the background tail, open/close) reaches it through
+    /// the same mailbox, so two syncs of one session can never interleave and
+    /// double-ingest or race the cursor — and *different* sessions ingest in
+    /// parallel, which the old global sync lock forbade. The cursor is
+    /// per-session state, so per-session serialization is exactly enough.
     ///
     /// Attribution is driven by comparing a user line's trimmed text against
     /// the session's ONE outstanding (`dispatched`) send — at most one exists
@@ -53,14 +54,9 @@ where
     ///
     /// The caller is responsible for broadcasting these events.
     pub(in crate::interactor) async fn sync_transcript(
-        &self,
+        &mut self,
         session: &Session,
     ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
-        // Serialize the whole cursor → read → ingest → cursor sequence so the
-        // hook handlers and the background tail cannot interleave and
-        // double-ingest or race the cursor (see `sync_lock`).
-        let _guard = self.sync_lock.lock().await;
-
         // A still-`spawning` session has no transcript path yet (the first hook
         // never bound it), so there is nothing to sync.
         let Some(transcript_path) = session.transcript_path.as_deref() else {
@@ -144,7 +140,7 @@ where
             // must not run through send correlation nor reset to `main`).
             let trimmed = content_text.as_deref().unwrap_or("").trim();
             let is_interrupt_marker = matches!(line.role, delta_model::Role::User)
-                && trimmed.starts_with(INTERRUPT_MARKER_PREFIX);
+                && claude_format::is_interrupt_marker(trimmed);
             let is_human_turn = matches!(line.role, delta_model::Role::User)
                 && !trimmed.is_empty()
                 && !is_interrupt_marker;
@@ -155,11 +151,11 @@ where
             //
             // It also ends the turn: feed `Interrupt` into the turn machine
             // (back to `Idle`). Dispatching any queued send is left to the
-            // caller (which acts on the returned `TurnInterrupted` once this
-            // sync's lock is released), so no keystrokes are sent from inside
-            // the ingestion path.
+            // caller (which acts on the returned `TurnInterrupted` after this
+            // sync returns), so no keystrokes are sent from inside the
+            // ingestion path.
             if is_interrupt_marker {
-                self.apply_turn_input(&session.id, crate::turn::TurnInput::Interrupt)
+                self.apply_turn_input(crate::turn::TurnInput::Interrupt)
                     .await?;
                 events.push(SessionEvent::TurnInterrupted {
                     session_id: session.id.clone(),

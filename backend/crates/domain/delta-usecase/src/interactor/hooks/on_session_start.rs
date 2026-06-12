@@ -1,10 +1,10 @@
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
     SessionEvent, SessionStartHook, SessionStore, TmuxDriver, Transcript, Workspace,
 };
-use crate::Interactor;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -17,39 +17,35 @@ where
     /// post-launch settle. Behaviour is gated on `source`:
     ///
     /// - **`startup`** — a fresh launch reached its prompt. If a [`PendingSpawn`]
-    ///   matches this `session_id`, bind and register it now (the idempotent
+    ///   is recorded for this session, bind and register it now (the idempotent
     ///   [`Self::bind_pending_spawn`] shared with the first `UserPromptSubmit`),
     ///   so even a prompt-less plain spawn registers immediately instead of
-    ///   waiting for a first prompt that may never come. A no-op when no pending
-    ///   spawn matches (already bound by the `UserPromptSubmit`, or an external
-    ///   id).
+    ///   waiting for a first prompt that may never come. A no-op when nothing is
+    ///   pending (already bound by the `UserPromptSubmit`, or an external id).
     /// - **`resume`** — `claude --resume <id>` finished replaying and is ready.
     ///   Mark the session ready (stamp its `ready_at`) and return immediately;
     ///   the held first prompt is **not** dispatched here. This hook blocks
     ///   `claude` until the handler returns, so a keystroke typed now would land
     ///   while `claude` is still inside the hook and not accepting input, and be
     ///   silently lost. Instead the held prompt is dispatched a beat later by
-    ///   [`Self::dispatch_ready_resumes`] on the background tick, after the hook
-    ///   has returned and `claude` is input-ready (see [`Self::open_session`]). A
-    ///   no-op when the session is not resuming (already dispatched, or never
-    ///   resumed under Delta).
+    ///   the resume tick, after the hook has returned and `claude` is
+    ///   input-ready (see [`Self::open_session`]). A no-op when the session is
+    ///   not resuming (already dispatched, or never resumed under Delta).
     /// - **`clear` / `compact`** — fire mid-session on an already-live session
     ///   (the user cleared the context, or it was auto/manually compacted). These
     ///   are not launches, so they must not be treated as a new launch: handled
     ///   as explicit, safe no-ops.
     ///
-    /// [`PendingSpawn`]: crate::open_sessions::PendingSpawn
-    pub async fn on_session_start(&self, hook: SessionStartHook) -> Result<Vec<SessionEvent>> {
+    /// [`PendingSpawn`]: crate::interactor::session_actor::runtime::PendingSpawn
+    pub(in crate::interactor) async fn on_session_start(
+        &mut self,
+        hook: SessionStartHook,
+    ) -> Result<Vec<SessionEvent>> {
         let mut events = Vec::new();
         match hook.source.as_str() {
             SessionStartHook::SOURCE_STARTUP => {
                 match self
-                    .bind_pending_spawn(
-                        &hook.session_id,
-                        &hook.cwd,
-                        &hook.transcript_path,
-                        &mut events,
-                    )
+                    .bind_pending_spawn(&hook.cwd, &hook.transcript_path, &mut events)
                     .await?
                 {
                     Some(_) => {
@@ -70,14 +66,9 @@ where
             SessionStartHook::SOURCE_RESUME => {
                 // Only mark ready and return immediately — do NOT dispatch the
                 // held prompt here. This hook blocks `claude` until the handler
-                // returns; the held keystroke is dispatched later by
-                // `dispatch_ready_resumes` on the background tick, after `claude`
-                // has left the hook and is input-ready.
-                let marked = self
-                    .open_sessions
-                    .lock()
-                    .await
-                    .mark_resume_ready_at(&hook.session_id, std::time::Instant::now());
+                // returns; the held keystroke is dispatched later by the resume
+                // tick, after `claude` has left the hook and is input-ready.
+                let marked = self.state.mark_resume_ready_at(std::time::Instant::now());
                 if marked {
                     tracing::info!(
                         session_id = %hook.session_id,

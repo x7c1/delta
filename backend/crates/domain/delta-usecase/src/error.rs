@@ -60,6 +60,12 @@ pub enum Error {
     /// Preparing the session working directory failed.
     #[error("workspace error: {0}")]
     Workspace(String),
+
+    /// An internal coordination failure: a session actor went away before
+    /// answering (only reachable during tear-down, or after an actor panic).
+    /// Surfaced as `500`.
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 /// Convenience result alias for this crate.

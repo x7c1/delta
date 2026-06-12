@@ -3,7 +3,7 @@ use std::time::Instant;
 use delta_model::SessionId;
 
 use crate::interactor::testing::*;
-use crate::open_sessions::RESUME_DISPATCH_SETTLE;
+use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
 
 /// `open_session` resumes a closed known session: it spawns `claude --resume
 /// <id>` (asserted via the recorded argv) and binds it, but does NOT dispatch

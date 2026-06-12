@@ -1,8 +1,8 @@
 use crate::error::Result;
+use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::Interactor;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W> SessionContext<'_, T, X, S, W>
 where
     T: TmuxDriver,
     X: Transcript,
@@ -17,16 +17,16 @@ where
     /// the `PermissionRequest` hook instead, which fires only for genuine
     /// interactive prompts (and owns its own row plus the Allow/Deny wait —
     /// see `on_permission_request`). PreToolUse itself never returns
-    /// allow/deny.
-    pub async fn on_pre_tool_use(
-        &self,
-        session_id: &delta_model::SessionId,
+    /// allow/deny. Routed through the session's mailbox so the record is
+    /// ordered before any ingest that could resolve it.
+    pub(in crate::interactor) async fn on_pre_tool_use(
+        &mut self,
         tool_name: &str,
         tool_input_json: &str,
         tool_use_id: &str,
     ) -> Result<Vec<SessionEvent>> {
         self.store
-            .record_permission_request(session_id, tool_name, tool_input_json, Some(tool_use_id))
+            .record_permission_request(self.id, tool_name, tool_input_json, Some(tool_use_id))
             .await?;
         Ok(vec![])
     }
