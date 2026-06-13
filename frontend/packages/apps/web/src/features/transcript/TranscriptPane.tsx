@@ -397,14 +397,15 @@ export function TranscriptPane({
     externalInput !== null &&
     externalInput.threadId === activeThread.id;
 
-  // Show the live assistant preview only on the thread it belongs to, while the
-  // turn is still streaming (not yet done) and it has text. Once the turn ends
-  // the store clears it and the persisted message renders instead.
+  // Show the live assistant preview on the thread it belongs to whenever a
+  // preview exists with text. `done` only means every chunk of the message has
+  // arrived, NOT that the turn ended — the preview stays until the turn ends
+  // (which clears the buffer entirely) and the persisted message renders, so it
+  // is the buffer's presence, not `done`, that gates visibility.
   const showStreaming =
     !newSession &&
     activeThread !== null &&
     streaming !== null &&
-    !streaming.done &&
     streaming.threadId === activeThread.id &&
     streaming.text.length > 0;
 

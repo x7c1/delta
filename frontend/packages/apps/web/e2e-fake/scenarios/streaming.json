@@ -2,7 +2,7 @@
   "steps": [
     { "type": "await_prompt" },
     { "type": "stream_text", "deltas": ["Streaming ", "this reply ", "live."] },
-    { "type": "delay", "ms": 1200 },
+    { "type": "delay", "ms": 3000 },
     { "type": "reply", "text": "Streaming this reply live." },
     { "type": "stop" }
   ]
