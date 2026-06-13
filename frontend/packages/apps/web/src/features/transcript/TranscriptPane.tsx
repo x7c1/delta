@@ -21,6 +21,7 @@ import {
   type PendingSurface,
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
+import { AssistantMarkdown } from './AssistantMarkdown';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { childThreadsByMessage } from './branches';
@@ -717,10 +718,15 @@ export function TranscriptPane({
 
       {/* The provisional live assistant bubble, appended at the tail while the
           turn streams. It mirrors MessageItem's assistant styling (left, plain
-          bubble) but carries its own testid so it never inflates message-item
-          counts, and renders the partial text verbatim (whitespace preserved)
-          to avoid partial-Markdown flicker as chunks arrive. A blinking caret
-          marks it as still generating. It is dropped on turn end, when the
+          bubble) and renders the partial text as Markdown via the same shared
+          AssistantMarkdown component as the persisted message, so streamed
+          prose looks identical live and after handoff. It carries its own
+          testid so it never inflates message-item counts. Chunks are
+          line-grained, so partial Markdown is usually coherent; any transient
+          oddness while a code fence/table is still building resolves on the
+          next chunk. The blinking caret renders as a SIBLING after the
+          Markdown (not inside its text), so an in-progress final line never
+          corrupts Markdown parsing. It is dropped on turn end, when the
           persisted message takes over. */}
       {showStreaming && streaming && (
         <div className="pt-1.5 pb-2">
@@ -730,8 +736,8 @@ export function TranscriptPane({
             data-testid="streaming-message"
           >
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
-              <div className="whitespace-pre-wrap text-slate-800">
-                {streaming.text}
+              <div className="flex items-end">
+                <AssistantMarkdown text={streaming.text} />
                 <span
                   className="ml-0.5 inline-block animate-pulse text-slate-400"
                   aria-hidden="true"

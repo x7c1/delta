@@ -155,6 +155,31 @@ describe('TranscriptPane', () => {
     expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
   });
 
+  it('renders the live streaming bubble as Markdown', async () => {
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+
+    // A streamed delta carrying Markdown renders through AssistantMarkdown, the
+    // same component the persisted message uses, so `**bold**` becomes a real
+    // <strong> inside the provisional bubble — not raw asterisks.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'assistant_streaming',
+        session_id: SESSION_ID,
+        thread_id: MAIN_THREAD_ID,
+        message_id: 'm1',
+        index: 0,
+        final: false,
+        delta: 'hello **bold**',
+      });
+    });
+    const bubble = screen.getByTestId('streaming-message');
+    const strong = within(bubble).getByText('bold');
+    expect(strong.tagName).toBe('STRONG');
+  });
+
   it('hides the live bubble once its text is persisted, even before turn end', async () => {
     // The handoff bug: the transcript refetch can persist the assistant reply
     // BEFORE the turn-end event clears the streaming buffer, so for a moment
