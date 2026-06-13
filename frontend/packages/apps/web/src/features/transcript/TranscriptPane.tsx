@@ -21,11 +21,13 @@ import {
   type PendingSurface,
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
+import { AssistantMarkdown } from './AssistantMarkdown';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
+import { persistedHasStreamedText } from './streamingHandoff';
 import {
   clearBranchHighlight,
   findAllQuoteRanges,
@@ -112,6 +114,15 @@ export function TranscriptPane({
   const permission = useLiveStore((state) =>
     activeThread
       ? noticeOf(state.notices, activeThread.session_id, 'permission')
+      : null,
+  );
+  // The focused session's live assistant preview, if a turn is streaming. It is
+  // shown as a provisional bubble at the conversation tail while the turn
+  // generates, then dropped when the turn ends (the persisted message renders
+  // via the normal pipeline). Gated to the active thread below.
+  const streaming = useLiveStore((state) =>
+    activeThread
+      ? state.streamingMessages[activeThread.session_id] ?? null
       : null,
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
@@ -271,7 +282,9 @@ export function TranscriptPane({
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages.length, lastContentLength, pendingCount]);
+    // The live preview grows in place (its own bubble, not a `messages` entry),
+    // so its text length is a content-change signal too — keep following it.
+  }, [messages.length, lastContentLength, pendingCount, streaming?.text.length]);
 
   // The Panel footer (notifications, Composer, queue, chips) sits outside the
   // scroll region and has a variable height: when a notice appears or the
@@ -397,6 +410,29 @@ export function TranscriptPane({
     activeThread !== null &&
     externalInput !== null &&
     externalInput.threadId === activeThread.id;
+
+  // Show the live assistant preview on the thread it belongs to whenever a
+  // preview exists with text. `done` only means every chunk of the message has
+  // arrived, NOT that the turn ended — the preview stays until the persisted
+  // message renders, so it is the buffer's presence (not `done`) that gates
+  // visibility.
+  //
+  // The final guard makes visibility a function of the current persisted state,
+  // not of event timing: once the thread's persisted messages already contain
+  // an assistant message with the streamed text, the live bubble is suppressed.
+  // The persisted line can land via the transcript refetch BEFORE the turn-end
+  // event clears the preview buffer (and a turn can persist an earlier message
+  // while `turn_completed` only fires at the very end), so without this guard
+  // the same text would briefly show twice — the live bubble and the persisted
+  // copy. The turn-end clear in liveStore stays as cleanup; this guard is what
+  // eliminates the visible duplicate regardless of event/refetch ordering.
+  const showStreaming =
+    !newSession &&
+    activeThread !== null &&
+    streaming !== null &&
+    streaming.threadId === activeThread.id &&
+    streaming.text.length > 0 &&
+    !persistedHasStreamedText(messages, streaming.text, streaming.done);
 
   // The new-session state has no session id yet; the composer targets a fresh
   // spawn. An existing thread targets that thread (a resume on a closed session).
@@ -715,6 +751,48 @@ export function TranscriptPane({
           </div>
         );
       })}
+
+      {/* The provisional live assistant bubble, appended at the tail while the
+          turn streams. It mirrors MessageItem's assistant styling (left, plain
+          bubble) and renders the partial text as Markdown via the same shared
+          AssistantMarkdown component as the persisted message, so streamed
+          prose looks identical live and after handoff. It carries its own
+          testid so it never inflates message-item counts. Chunks are
+          line-grained, so partial Markdown is usually coherent; any transient
+          oddness while a code fence/table is still building resolves on the
+          next chunk. The blinking caret renders as a SIBLING after the
+          Markdown (not inside its text), so an in-progress final line never
+          corrupts Markdown parsing. It is dropped on turn end, when the
+          persisted message takes over. */}
+      {showStreaming && streaming && (
+        <div className="pt-1.5 pb-2">
+          <article
+            className="px-3 text-sm"
+            data-role="assistant"
+            data-testid="streaming-message"
+          >
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <div className="flex items-end">
+                <AssistantMarkdown text={streaming.text} />
+                {/* The blinking caret signals "still generating", so it shows
+                    only while the stream is in progress (!done). Once the final
+                    chunk has arrived the bubble lingers (caret-less) until the
+                    persisted message lands and suppression swaps it out, so a
+                    completed reply never shows a misleading "generating" caret
+                    during the handoff. */}
+                {!streaming.done && (
+                  <span
+                    className="ml-0.5 inline-block animate-caret-blink text-slate-600"
+                    aria-hidden="true"
+                  >
+                    ▌
+                  </span>
+                )}
+              </div>
+            </div>
+          </article>
+        </div>
+      )}
     </Panel>
   );
 }

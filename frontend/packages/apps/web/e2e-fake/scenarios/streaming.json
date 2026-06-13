@@ -1,0 +1,12 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "stream_text", "deltas": ["Streaming ", "this reply ", "live."] },
+    { "type": "delay", "ms": 3000 },
+    { "type": "reply", "text": "Streaming this reply live." },
+    { "type": "tool_use", "name": "Bash", "input": { "command": "ls" } },
+    { "type": "delay", "ms": 3000 },
+    { "type": "tool_result" },
+    { "type": "stop" }
+  ]
+}

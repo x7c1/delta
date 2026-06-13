@@ -15,6 +15,7 @@ pub struct HookEndpoints {
     pub session_start: String,
     pub user_prompt_submit: String,
     pub stop: String,
+    pub message_display: String,
     pub pre_tool_use: String,
     pub permission_request: String,
 }
@@ -26,6 +27,7 @@ impl HookEndpoints {
             session_start: hook_url(settings, "SessionStart")?,
             user_prompt_submit: hook_url(settings, "UserPromptSubmit")?,
             stop: hook_url(settings, "Stop")?,
+            message_display: hook_url(settings, "MessageDisplay")?,
             pre_tool_use: hook_url(settings, "PreToolUse")?,
             permission_request: hook_url(settings, "PermissionRequest")?,
         })
@@ -70,6 +72,9 @@ mod tests {
                 ],
                 "Stop": [
                     { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/stop" } ] }
+                ],
+                "MessageDisplay": [
+                    { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/message-display" } ] }
                 ],
                 "PreToolUse": [
                     { "matcher": "*", "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/pre-tool-use" } ] }

@@ -20,8 +20,8 @@ use crate::interactor::session_actor::runtime::SessionLiveState;
 use crate::interactor::{Interactor, PermissionDecision};
 use crate::pane_token::PaneToken;
 use crate::ports::{
-    SessionEndHook, SessionEvent, SessionLifecycle, SessionStartHook, SessionStore, StopHook,
-    TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
+    MessageDisplayHook, SessionEndHook, SessionEvent, SessionLifecycle, SessionStartHook,
+    SessionStore, StopHook, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
 };
 use crate::send_target::SendTarget;
 use crate::turn::TurnState;
@@ -269,6 +269,17 @@ where
     pub async fn on_stop(&self, hook: StopHook) -> Result<Vec<SessionEvent>> {
         let id = hook.session_id.clone();
         self.request(&id, move |reply| SessionInput::Stop { hook, reply })
+            .await
+    }
+
+    /// Handle a `MessageDisplay` hook: buffer one chunk of the in-flight turn's
+    /// assistant message and return the `AssistantStreaming` event to broadcast.
+    pub async fn on_message_display(
+        &self,
+        hook: MessageDisplayHook,
+    ) -> Result<Vec<SessionEvent>> {
+        let id = hook.session_id.clone();
+        self.request(&id, move |reply| SessionInput::MessageDisplay { hook, reply })
             .await
     }
 

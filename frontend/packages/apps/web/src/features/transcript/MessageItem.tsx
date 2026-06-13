@@ -1,9 +1,8 @@
 import { useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { Message } from '@delta/wire-gen';
 import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
+import { AssistantMarkdown } from './AssistantMarkdown';
 import { blockSummary, stringifyContent } from './blockSummary';
 import { messageRendersNothing, type ToolPairing } from './toolPairs';
 
@@ -111,19 +110,7 @@ export function MessageItem({
             {block.text}
           </div>
         ) : (
-          <div
-            key={index}
-            // A small, chat-tuned Markdown stylesheet scoped to this class
-            // (see index.css) — just the elements Claude emits, styled
-            // modestly, rather than a full typography framework.
-            className="markdown-body text-slate-800"
-          >
-            {/* GFM enables tables, strikethrough, task lists, and
-                autolinks, which Claude routinely emits. */}
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {block.text}
-            </ReactMarkdown>
-          </div>
+          <AssistantMarkdown key={index} text={block.text} />
         );
       case 'thinking':
         // Claude Code records a signed reference for thinking but leaves

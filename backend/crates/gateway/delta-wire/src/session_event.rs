@@ -85,6 +85,18 @@ pub enum WireSessionEvent {
         session_id: String,
         pane_token: String,
     },
+    /// A chunk of the in-flight turn's assistant message, streamed live.
+    AssistantStreaming {
+        session_id: String,
+        thread_id: i64,
+        message_id: String,
+        index: u32,
+        /// `final` is a Rust keyword, so the field is `is_final` here while the
+        /// wire key stays `final` (the client accumulates until it is `true`).
+        #[serde(rename = "final")]
+        is_final: bool,
+        delta: String,
+    },
 }
 
 impl From<SessionEvent> for WireSessionEvent {
@@ -170,6 +182,21 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id: session_id.0,
                 pane_token,
             },
+            SessionEvent::AssistantStreaming {
+                session_id,
+                thread_id,
+                message_id,
+                index,
+                final_,
+                delta,
+            } => Self::AssistantStreaming {
+                session_id: session_id.0,
+                thread_id: thread_id.0,
+                message_id,
+                index,
+                is_final: final_,
+                delta,
+            },
         }
     }
 }
@@ -212,7 +239,8 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::PermissionRequested { .. }
             | WireSessionEvent::QuestionAsked { .. }
             | WireSessionEvent::PermissionResolved { .. }
-            | WireSessionEvent::SpawnFailed { .. } => {}
+            | WireSessionEvent::SpawnFailed { .. }
+            | WireSessionEvent::AssistantStreaming { .. } => {}
         }
     }
 
@@ -269,6 +297,14 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::SpawnFailed {
             session_id: session_id(),
             pane_token: "delta-sample".to_owned(),
+        },
+        WireSessionEvent::AssistantStreaming {
+            session_id: session_id(),
+            thread_id: 1,
+            message_id: "msg-sample".to_owned(),
+            index: 0,
+            is_final: false,
+            delta: "chunk".to_owned(),
         },
     ];
     for event in &samples {
@@ -468,7 +504,31 @@ mod tests {
                 "question_asked",
                 "permission_resolved",
                 "spawn_failed",
+                "assistant_streaming",
             ],
+        );
+    }
+
+    #[test]
+    fn assistant_streaming_serializes_with_its_chunk_payload() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::AssistantStreaming {
+                session_id: SessionId::from("sess-1"),
+                thread_id: ThreadId(3),
+                message_id: "msg-7".into(),
+                index: 2,
+                final_: true,
+                delta: "hello".into(),
+            })),
+            serde_json::json!({
+                "kind": "assistant_streaming",
+                "session_id": "sess-1",
+                "thread_id": 3,
+                "message_id": "msg-7",
+                "index": 2,
+                "final": true,
+                "delta": "hello",
+            }),
         );
     }
 }

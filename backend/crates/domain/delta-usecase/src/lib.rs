@@ -26,9 +26,9 @@ pub use interactor::{
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    pane_for, DirEntry, DirListing, NewSession, RecentWorkdir, SessionEndHook, SessionEvent,
-    SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, StopHook, TmuxDriver,
-    Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
+    pane_for, DirEntry, DirListing, MessageDisplayHook, NewSession, RecentWorkdir, SessionEndHook,
+    SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, StopHook,
+    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
 };
 pub use send_target::SendTarget;
 pub use session_listing::SessionListing;

@@ -1,0 +1,7 @@
+{
+  "comment": "A background task completes while the user is working in a sub-thread: the harness-injected <task-notification> arrives as a plain role:user line (not a queued_command attachment). It is a programmatic continuation of the in-flight turn, so it and the assistant's reply must stay on the sub-thread, not reset to main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "explore the side topic" }
+  ]
+}
