@@ -13,6 +13,8 @@ use crate::interactor::testing::*;
 
 const SINGLE: &str = r#"{"questions":[{"question":"Which?","header":"Pick","options":[{"label":"A"},{"label":"B"},{"label":"C"}],"multiSelect":false}]}"#;
 const MULTI_SELECT: &str = r#"{"questions":[{"question":"Which?","header":"Pick","options":[{"label":"A"},{"label":"B"},{"label":"C"}],"multiSelect":true}]}"#;
+/// Two questions: Q1 single-select (2 options), Q2 multi-select (3 options).
+const MULTI_QUESTION_MULTI_SELECT: &str = r#"{"questions":[{"question":"Q1?","header":"One","options":[{"label":"A"},{"label":"B"}],"multiSelect":false},{"question":"Q2?","header":"Two","options":[{"label":"X"},{"label":"Y"},{"label":"Z"}],"multiSelect":true}]}"#;
 
 /// Record a pending question on the seeded (open) session and return its
 /// request id.
@@ -66,6 +68,27 @@ async fn multi_select_answer_toggles_each_then_submits() {
     assert_eq!(
         keyed[0].1,
         &["Space", "Down", "Down", "Space", "Right", "Enter"],
+    );
+}
+
+#[tokio::test]
+async fn multi_question_with_a_multi_select_injects_the_full_review_sequence() {
+    let ix = interactor();
+    ix.seed_session().await;
+    let session = SessionId::from("sess-1");
+    let request_id = pending_question_id(&ix, &session, MULTI_QUESTION_MULTI_SELECT).await;
+
+    // Q1 single-select pick option 0 (lone Enter records + advances); Q2
+    // multi-select toggle options 0 and 2 (Space, Down, Down, Space), Right
+    // advances to the review screen; a final Enter submits the review.
+    ix.answer_question(&session, request_id, vec![vec![0], vec![0, 2]])
+        .await
+        .unwrap();
+
+    let keyed = ix.tmux_fake().keyed.lock().unwrap();
+    assert_eq!(
+        keyed[0].1,
+        &["Enter", "Space", "Down", "Down", "Space", "Right", "Enter"],
     );
 }
 

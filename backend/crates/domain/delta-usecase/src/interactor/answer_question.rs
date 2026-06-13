@@ -116,9 +116,5 @@ fn describe_key_error(request_id: i64, err: &QuestionKeyError) -> String {
             "question {request_id}: multi-select sub-question {question} needs at least \
              one option"
         ),
-        QuestionKeyError::MultiSelectInMultiQuestion { question } => format!(
-            "question {request_id}: multi-select sub-question {question} inside a \
-             multi-question call is not supported from the UI; answer in the terminal"
-        ),
     }
 }

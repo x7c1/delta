@@ -7,6 +7,9 @@ function notice(toolInput: string): QuestionNotice {
   return { kind: 'question', requestId: 1, toolInput, dismissed: false };
 }
 
+/** A resolved-promise stub for `onAnswer` in tests that only assert the call. */
+const answerOk = () => Promise.resolve();
+
 const SINGLE = JSON.stringify({
   questions: [
     {
@@ -65,7 +68,7 @@ describe('QuestionCard', () => {
     render(
       <QuestionCard
         notice={notice(SINGLE)}
-        onAnswer={noop}
+        onAnswer={answerOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -80,7 +83,7 @@ describe('QuestionCard', () => {
   });
 
   it('answers a single-select question on option click (no Submit needed)', () => {
-    const onAnswer = vi.fn();
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
     render(
       <QuestionCard
         notice={notice(SINGLE)}
@@ -99,7 +102,7 @@ describe('QuestionCard', () => {
   });
 
   it('toggles multi-select options and submits the chosen set', () => {
-    const onAnswer = vi.fn();
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
     render(
       <QuestionCard
         notice={notice(MULTI_SELECT)}
@@ -123,7 +126,7 @@ describe('QuestionCard', () => {
   });
 
   it('collects one selection per question and submits when all answered', () => {
-    const onAnswer = vi.fn();
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
     render(
       <QuestionCard
         notice={notice(MULTI_QUESTION)}
@@ -151,7 +154,7 @@ describe('QuestionCard', () => {
     render(
       <QuestionCard
         notice={notice(SINGLE)}
-        onAnswer={noop}
+        onAnswer={answerOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -166,7 +169,7 @@ describe('QuestionCard', () => {
     render(
       <QuestionCard
         notice={notice(SINGLE)}
-        onAnswer={noop}
+        onAnswer={answerOk}
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />,
@@ -183,7 +186,7 @@ describe('QuestionCard', () => {
     render(
       <QuestionCard
         notice={notice('not json')}
-        onAnswer={noop}
+        onAnswer={answerOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -196,5 +199,35 @@ describe('QuestionCard', () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByTestId('question-submit')).toBeNull();
+  });
+
+  it('surfaces an error and re-enables the controls when the answer POST fails', async () => {
+    // The POST rejects (a 400/409 or a network failure): the card must not be
+    // left with a dead Submit. It shows an inline error, keeps the terminal
+    // fallback, and re-enables Submit so the user can retry.
+    const onAnswer = vi.fn().mockRejectedValue(new Error('boom'));
+    render(
+      <QuestionCard
+        notice={notice(MULTI_SELECT)}
+        onAnswer={onAnswer}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('question-option-0-0'));
+    const submit = screen.getByTestId('question-submit') as HTMLButtonElement;
+    fireEvent.click(submit);
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+
+    // The inline error appears once the rejected promise settles (findBy* polls
+    // inside act, so the post-reject state update is awaited cleanly).
+    expect(await screen.findByTestId('question-error')).toBeTruthy();
+    expect(screen.getByText('Open terminal')).toBeTruthy();
+
+    // Submit is usable again (not left disabled), so a retry is possible.
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    expect(onAnswer).toHaveBeenCalledTimes(2);
   });
 });

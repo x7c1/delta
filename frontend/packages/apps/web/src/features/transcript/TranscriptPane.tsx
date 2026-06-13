@@ -485,15 +485,18 @@ export function TranscriptPane({
   const questionCard = question && !question.dismissed && activeThread && (
     <QuestionCard
       notice={question}
-      onAnswer={(selections) => {
-        // Best-effort injection: a 409 (already answered / stale) or 400
-        // (malformed) leaves the card's terminal fallback in place, and the
-        // authoritative clear still arrives via the resolution path, so a
-        // failed POST need not surface its own error UI here.
-        void client
-          .answerQuestion(activeThread.session_id, question.requestId, selections)
-          .catch(() => {});
-      }}
+      onAnswer={(selections) =>
+        // Return the POST so the card can await it: a 409 (already answered /
+        // stale), a 400 (malformed), or a network failure rejects, and the card
+        // surfaces an inline error, re-enables its controls for a retry, and
+        // emphasizes the terminal fallback. On success the authoritative clear
+        // still arrives via the resolution path.
+        client.answerQuestion(
+          activeThread.session_id,
+          question.requestId,
+          selections,
+        )
+      }
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissQuestion(activeThread.session_id)}
     />

@@ -81,9 +81,11 @@ export interface QuestionCardProps {
   /**
    * Submit the answer: the chosen 0-based option index(es) per question, in
    * question order. The parent POSTs it to the answer endpoint, which injects
-   * the selection keystrokes into the session's TUI pane.
+   * the selection keystrokes into the session's TUI pane. The returned promise
+   * rejects when the POST fails (a `400`/`409` or a network error); the card
+   * awaits it to surface an inline error and re-enable its controls for a retry.
    */
-  onAnswer: (selections: number[][]) => void;
+  onAnswer: (selections: number[][]) => Promise<void>;
   /** Open the embedded terminal (the fallback if injection misfires). */
   onOpenTerminal: () => void;
   /** Dismiss the card without answering (the TUI prompt stays up). */
@@ -110,6 +112,10 @@ export interface QuestionCardProps {
  * row), not this component. An "Open terminal" link stays as a fallback so a
  * misfired injection never strands the user.
  *
+ * If the answer POST itself fails (a `400`/`409` or a network error), the card
+ * shows an inline error, re-enables its controls so the user can retry, and
+ * emphasizes the terminal fallback — it never leaves a dead Submit behind.
+ *
  * It renders inline at the conversation tail (not in a floating overlay), so the
  * choices sit in the flow right after the assistant's live-streamed preamble.
  * Capped in height with internal scrolling so a large multi-question card never
@@ -132,15 +138,25 @@ export function QuestionCard({
     questions.map(() => new Set<number>()),
   );
   // True once the user has submitted, to disable the controls and avoid a
-  // double-send while the authoritative clear (the resolution path) lands.
+  // double-send while the authoritative clear (the resolution path) lands. A
+  // failed POST flips it back so the user can retry.
   const [submitted, setSubmitted] = useState(false);
+  // Set when the answer POST rejects, so the card shows an inline error and
+  // emphasizes the terminal fallback instead of silently doing nothing.
+  const [failed, setFailed] = useState(false);
 
   const submit = (sets: Set<number>[]) => {
     if (submitted) {
       return;
     }
     setSubmitted(true);
-    onAnswer(sets.map((set) => [...set].sort((a, b) => a - b)));
+    setFailed(false);
+    onAnswer(sets.map((set) => [...set].sort((a, b) => a - b))).catch(() => {
+      // Re-enable the controls and surface the failure so the Submit is never
+      // left dead; the terminal fallback is emphasized below.
+      setSubmitted(false);
+      setFailed(true);
+    });
   };
 
   const toggleMulti = (qi: number, oi: number) => {
@@ -243,6 +259,13 @@ export function QuestionCard({
         </ul>
       )}
 
+      {failed && (
+        <p className="text-red-700" role="alert" data-testid="question-error">
+          Couldn&apos;t submit your answer — answer in the terminal, or try
+          again.
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         {/* A Submit is shown whenever a click alone is not the answer: a
             multi-question call, or any multi-select question. A lone
@@ -258,8 +281,13 @@ export function QuestionCard({
             Submit
           </Button>
         )}
-        {/* The terminal stays available as a fallback if injection misfires. */}
-        <Button size="sm" variant="ghost" onClick={onOpenTerminal}>
+        {/* The terminal stays available as a fallback if injection misfires;
+            a failed POST emphasizes it (solid, not ghost) as the way forward. */}
+        <Button
+          size="sm"
+          variant={failed ? 'primary' : 'ghost'}
+          onClick={onOpenTerminal}
+        >
           Open terminal
         </Button>
         <Button size="sm" variant="ghost" onClick={onDismiss}>
