@@ -225,7 +225,9 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "delta-attribution",
  "delta-bootstrap",
+ "delta-model",
  "delta-sqlite",
  "delta-transcript",
  "delta-usecase",
@@ -235,10 +237,12 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tmux-driver",
  "tokio",
  "tower",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

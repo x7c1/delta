@@ -24,9 +24,15 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
-    // The Playwright end-to-end specs under `e2e/` and `e2e-fake/` use
-    // Playwright's own runner (`pnpm e2e` / `pnpm e2e:fake`); keep them out of
-    // the vitest unit-test run.
-    exclude: ['**/node_modules/**', '**/dist/**', 'e2e/**', 'e2e-fake/**'],
+    // The Playwright end-to-end specs under `e2e/`, `e2e-fake/`, and
+    // `e2e-real/` use Playwright's own runner (`pnpm e2e` / `pnpm e2e:fake` /
+    // `pnpm e2e:real`); keep them out of the vitest unit-test run.
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'e2e/**',
+      'e2e-fake/**',
+      'e2e-real/**',
+    ],
   },
 });
