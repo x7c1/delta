@@ -16,6 +16,9 @@ pub fn router(state: AppState) -> Router {
         // Control plane: Claude Code HTTP hooks.
         .route("/hooks/user-prompt-submit", post(hooks::user_prompt_submit))
         .route("/hooks/stop", post(hooks::stop))
+        // Live assistant text streamed during generation (before the transcript
+        // flush); buffered as a provisional preview and broadcast to the browser.
+        .route("/hooks/message-display", post(hooks::message_display))
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
         // Interactive permission dialog appeared (a human answer is pending).
         .route("/hooks/permission-request", post(hooks::permission_request))

@@ -113,6 +113,15 @@ export function TranscriptPane({
       ? noticeOf(state.notices, activeThread.session_id, 'permission')
       : null,
   );
+  // The focused session's live assistant preview, if a turn is streaming. It is
+  // shown as a provisional bubble at the conversation tail while the turn
+  // generates, then dropped when the turn ends (the persisted message renders
+  // via the normal pipeline). Gated to the active thread below.
+  const streaming = useLiveStore((state) =>
+    activeThread
+      ? state.streamingMessages[activeThread.session_id] ?? null
+      : null,
+  );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   const dismissExternalInput = useLiveStore(
     (state) => state.dismissExternalInput,
@@ -259,7 +268,9 @@ export function TranscriptPane({
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages.length, lastContentLength, pendingCount]);
+    // The live preview grows in place (its own bubble, not a `messages` entry),
+    // so its text length is a content-change signal too — keep following it.
+  }, [messages.length, lastContentLength, pendingCount, streaming?.text.length]);
 
   // The Panel footer (notifications, Composer, queue, chips) sits outside the
   // scroll region and has a variable height: when a notice appears or the
@@ -385,6 +396,17 @@ export function TranscriptPane({
     activeThread !== null &&
     externalInput !== null &&
     externalInput.threadId === activeThread.id;
+
+  // Show the live assistant preview only on the thread it belongs to, while the
+  // turn is still streaming (not yet done) and it has text. Once the turn ends
+  // the store clears it and the persisted message renders instead.
+  const showStreaming =
+    !newSession &&
+    activeThread !== null &&
+    streaming !== null &&
+    !streaming.done &&
+    streaming.threadId === activeThread.id &&
+    streaming.text.length > 0;
 
   // The new-session state has no session id yet; the composer targets a fresh
   // spawn. An existing thread targets that thread (a resume on a closed session).
@@ -679,6 +701,35 @@ export function TranscriptPane({
           </div>
         );
       })}
+
+      {/* The provisional live assistant bubble, appended at the tail while the
+          turn streams. It mirrors MessageItem's assistant styling (left, plain
+          bubble) but carries its own testid so it never inflates message-item
+          counts, and renders the partial text verbatim (whitespace preserved)
+          to avoid partial-Markdown flicker as chunks arrive. A blinking caret
+          marks it as still generating. It is dropped on turn end, when the
+          persisted message takes over. */}
+      {showStreaming && streaming && (
+        <div className="pt-1.5 pb-2">
+          <article
+            className="px-3 text-sm"
+            data-role="assistant"
+            data-testid="streaming-message"
+          >
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+              <div className="whitespace-pre-wrap text-slate-800">
+                {streaming.text}
+                <span
+                  className="ml-0.5 inline-block animate-pulse text-slate-400"
+                  aria-hidden="true"
+                >
+                  ▌
+                </span>
+              </div>
+            </div>
+          </article>
+        </div>
+      )}
     </Panel>
   );
 }

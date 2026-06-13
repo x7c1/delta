@@ -6,6 +6,8 @@
 
 mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
+mod message_display_hook;
+pub use message_display_hook::MessageDisplayHook;
 mod new_session;
 pub use new_session::NewSession;
 mod session_end_hook;

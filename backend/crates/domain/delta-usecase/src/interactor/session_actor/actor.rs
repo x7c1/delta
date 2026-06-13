@@ -152,6 +152,9 @@ where
         SessionInput::Stop { hook, reply } => {
             let _ = reply.send(ctx.on_stop(hook).await);
         }
+        SessionInput::MessageDisplay { hook, reply } => {
+            let _ = reply.send(ctx.on_message_display(hook).await);
+        }
         SessionInput::SessionStart { hook, reply } => {
             let _ = reply.send(ctx.on_session_start(hook).await);
         }

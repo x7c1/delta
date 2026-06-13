@@ -71,6 +71,7 @@ describe('TranscriptPane', () => {
       localSends: {},
       spawns: [],
       notices: {},
+      streamingMessages: {},
     });
     useComposerStore.setState({
       drafts: {},
@@ -116,6 +117,64 @@ describe('TranscriptPane', () => {
     expect(
       screen.queryByRole('navigation', { name: 'Breadcrumb' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders the live assistant bubble for the active thread and drops it on turn end', async () => {
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+
+    // A turn streams into the active thread's session: the provisional bubble
+    // appears at the tail with the accumulated text, distinct from any
+    // persisted message-item.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'assistant_streaming',
+        session_id: SESSION_ID,
+        thread_id: MAIN_THREAD_ID,
+        message_id: 'm1',
+        index: 0,
+        final: false,
+        delta: 'streaming reply…',
+      });
+    });
+    expect(screen.getByTestId('streaming-message')).toHaveTextContent(
+      'streaming reply…',
+    );
+
+    // The turn ends: the preview is dropped (the persisted message renders via
+    // the normal pipeline), so the provisional bubble disappears.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'turn_completed',
+        session_id: SESSION_ID,
+        stop_reason: null,
+      });
+    });
+    expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
+  });
+
+  it('does not render the live bubble for a different thread', async () => {
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+
+    // A preview attributed to another thread of the same session must not show
+    // on the thread the user is viewing.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'assistant_streaming',
+        session_id: SESSION_ID,
+        thread_id: BRANCH_THREAD_ID,
+        message_id: 'm1',
+        index: 0,
+        final: false,
+        delta: 'on a branch',
+      });
+    });
+    expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
   });
 
   it('shows the breadcrumb with "main" as an ancestor while viewing a sub-thread', async () => {

@@ -10,6 +10,7 @@ function reset() {
     activeTurns: {},
     notices: {},
     unread: {},
+    streamingMessages: {},
   });
 }
 
@@ -161,6 +162,15 @@ describe('liveStore turn tracking', () => {
     });
     useLiveStore.getState().noteExternalInput('sess-1', 3, 'typed');
     useLiveStore.getState().markResumeUnavailable('sess-2');
+    useLiveStore.getState().applyEvent({
+      kind: 'assistant_streaming',
+      session_id: 'sess-1',
+      thread_id: 1,
+      message_id: 'm1',
+      index: 0,
+      final: false,
+      delta: 'partial',
+    });
 
     // A reconnect cannot reconcile event-reconstructed turn state (including
     // the permission notice, whose resolution may have been missed — it is
@@ -177,6 +187,9 @@ describe('liveStore turn tracking', () => {
     expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
     expect(noticeOf(notices(), 'sess-1', 'external_input')).not.toBeNull();
     expect(noticeOf(notices(), 'sess-2', 'resume_unavailable')).not.toBeNull();
+    // The live preview cannot be re-seeded (no partial-stream replay), so a
+    // reconnect drops it; the flushed message renders from the refetch.
+    expect(useLiveStore.getState().streamingMessages).toEqual({});
   });
 
   it('seedActiveTurn sets the running flag from a non-idle turn, and only sets', () => {
@@ -202,6 +215,93 @@ describe('liveStore turn tracking', () => {
       .getState()
       .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 });
     expect(useLiveStore.getState().activeTurns).toEqual({});
+  });
+});
+
+describe('liveStore assistant streaming preview', () => {
+  beforeEach(reset);
+
+  function stream(
+    overrides: Partial<{
+      session_id: string;
+      thread_id: number;
+      message_id: string;
+      index: number;
+      final: boolean;
+      delta: string;
+    }> = {},
+  ) {
+    useLiveStore.getState().applyEvent({
+      kind: 'assistant_streaming',
+      session_id: 'sess-1',
+      thread_id: 1,
+      message_id: 'm1',
+      index: 0,
+      final: false,
+      delta: '',
+      ...overrides,
+    });
+  }
+
+  it('accumulates deltas in index order into one per-session preview', () => {
+    stream({ index: 0, delta: 'Hel' });
+    stream({ index: 1, delta: 'lo ' });
+    stream({ index: 2, delta: 'world', final: true });
+
+    const preview = useLiveStore.getState().streamingMessages['sess-1'];
+    expect(preview.text).toBe('Hello world');
+    expect(preview.threadId).toBe(1);
+    expect(preview.messageId).toBe('m1');
+    expect(preview.done).toBe(true);
+  });
+
+  it('reconciles out-of-order and duplicate chunks deterministically', () => {
+    stream({ index: 1, delta: 'B' });
+    stream({ index: 0, delta: 'A' });
+    // A re-delivered index overwrites rather than appends.
+    stream({ index: 1, delta: 'B' });
+    stream({ index: 2, delta: 'C', final: true });
+
+    expect(useLiveStore.getState().streamingMessages['sess-1'].text).toBe('ABC');
+  });
+
+  it('starts a fresh preview when the message_id changes', () => {
+    stream({ message_id: 'm1', index: 0, delta: 'first' });
+    stream({ message_id: 'm2', index: 0, delta: 'second' });
+    expect(useLiveStore.getState().streamingMessages['sess-1'].text).toBe(
+      'second',
+    );
+    expect(useLiveStore.getState().streamingMessages['sess-1'].messageId).toBe(
+      'm2',
+    );
+  });
+
+  it('clears the preview on turn_completed', () => {
+    stream({ index: 0, delta: 'partial' });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().streamingMessages).toEqual({});
+  });
+
+  it('clears the preview on turn_interrupted', () => {
+    stream({ index: 0, delta: 'partial' });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_interrupted',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().streamingMessages).toEqual({});
+  });
+
+  it('clears the preview on session_closed', () => {
+    stream({ index: 0, delta: 'partial' });
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().streamingMessages).toEqual({});
   });
 });
 

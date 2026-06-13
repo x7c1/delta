@@ -1,8 +1,9 @@
 //! Rendering the Claude Code session settings JSON.
 //!
 //! The session needs hooks pointing back at this server so Delta receives
-//! `UserPromptSubmit`, `Stop`, `PreToolUse`, `PermissionRequest`, `SessionStart`,
-//! and `SessionEnd` callbacks. Most are native `http` hooks; `SessionStart` is
+//! `UserPromptSubmit`, `Stop`, `MessageDisplay`, `PreToolUse`,
+//! `PermissionRequest`, `SessionStart`, and `SessionEnd` callbacks. Most are
+//! native `http` hooks; `SessionStart` is
 //! the exception — Claude Code does NOT deliver `SessionStart` to `http` hooks
 //! (verified empirically: every other event arrives over http, `SessionStart`
 //! never does), so it is rendered as a `command` hook that `curl`s the same
@@ -56,6 +57,13 @@ pub fn render_session_settings(port: u16) -> String {
         "hooks": {
             "UserPromptSubmit": [http_hook("user-prompt-submit")],
             "Stop": [http_hook("stop")],
+            // MessageDisplay fires repeatedly while a response is being
+            // generated (before the transcript is flushed), delivering each
+            // visible assistant text chunk. Delta uses it to live-stream the
+            // in-flight reply into the conversation pane. It is delivered to
+            // http hooks like every event except SessionStart, so a plain http
+            // hook is enough; the handler stays passive (empty 200).
+            "MessageDisplay": [http_hook("message-display")],
             "PreToolUse": [{
                 "matcher": "*",
                 "hooks": [
@@ -108,6 +116,10 @@ mod tests {
         assert_eq!(
             parsed["hooks"]["Stop"][0]["hooks"][0]["url"],
             "http://127.0.0.1:9999/hooks/stop"
+        );
+        assert_eq!(
+            parsed["hooks"]["MessageDisplay"][0]["hooks"][0]["url"],
+            "http://127.0.0.1:9999/hooks/message-display"
         );
         assert_eq!(
             parsed["hooks"]["PreToolUse"][0]["hooks"][0]["url"],

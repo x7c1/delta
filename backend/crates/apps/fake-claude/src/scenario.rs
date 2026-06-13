@@ -29,6 +29,7 @@
 //! |---|---|
 //! | `await_prompt` | Block until a prompt is submitted (the launch's positional prompt counts), then fire `UserPromptSubmit` and write the user transcript line. |
 //! | `reply { text, thinking? }` | Write an assistant transcript line (optional `thinking` block before the text block). `{additional_context}` in `text` substitutes the `additionalContext` the most recent `UserPromptSubmit` hook response injected (empty when none). |
+//! | `stream_text { deltas }` | Fire the `MessageDisplay` hook once per entry in `deltas`, mirroring how the real `claude` streams an assistant message's visible text live (before the transcript line lands): the chunks share a fresh `message_id`, carry increasing `index` (0, 1, 2, …), and only the last is `final`. Nothing is written to the transcript — pair it with a following `reply` that persists the full text. |
 //! | `tool_use { name, input? }` | Write an assistant `tool_use` line and fire `PreToolUse` with a fresh `tool_use_id`. |
 //! | `permission_request { on_allow?, on_deny? }` | Fire `PermissionRequest` for the most recent `tool_use` (an interactive dialog appeared) and BLOCK until the hook responds, exactly like the real `claude` awaiting its permission hook. A decision response (`hookSpecificOutput.decision.behavior`) runs the matching `on_allow`/`on_deny` sub-steps (default empty); an empty passthrough response runs neither — the following steps then play the TUI-answered path. |
 //! | `tool_result { is_error? }` | Write the `tool_result` carrier line for the most recent `tool_use`. |
@@ -78,6 +79,11 @@ pub enum Step {
         text: String,
         #[serde(default)]
         thinking: Option<String>,
+    },
+    StreamText {
+        /// One visible text chunk per `MessageDisplay` fire, in order. The last
+        /// chunk is marked `final`.
+        deltas: Vec<String>,
     },
     ToolUse {
         name: String,
@@ -178,6 +184,7 @@ mod tests {
                 "loop": true,
                 "steps": [
                     { "type": "await_prompt" },
+                    { "type": "stream_text", "deltas": ["hi", " there"] },
                     { "type": "reply", "text": "hi", "thinking": "hmm" },
                     { "type": "tool_use", "name": "Bash", "input": { "command": "ls" } },
                     { "type": "permission_request",
@@ -199,10 +206,16 @@ mod tests {
             SessionStartMode::Delayed { delay_ms: 250 }
         );
         assert!(scenario.looped);
-        assert_eq!(scenario.steps.len(), 11);
+        assert_eq!(scenario.steps.len(), 12);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
-            scenario.steps[5],
+            scenario.steps[1],
+            Step::StreamText {
+                deltas: vec!["hi".to_owned(), " there".to_owned()]
+            }
+        );
+        assert_eq!(
+            scenario.steps[6],
             Step::Stop {
                 stop_reason: Some("end_turn".to_owned())
             }

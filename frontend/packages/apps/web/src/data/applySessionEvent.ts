@@ -133,6 +133,13 @@ export function applySessionEvent(
     case 'permission_resolved':
       // Pure UI notice (set/cleared); already handled by the store.
       break;
+    case 'assistant_streaming':
+      // The live preview is held in the store (appended above by
+      // `store.applyEvent`) and read straight from there by the transcript
+      // pane, so there is no query cache to invalidate. The persisted message
+      // arrives later via the normal transcript sync (a `transcript_updated` /
+      // turn-end refetch), which is what supersedes the preview.
+      break;
     case 'spawn_failed':
       // A freshly-spawned session never bound; the server reaped its row (the
       // store flips the tracked spawn to a Retry/Dismiss chip). Drop the
