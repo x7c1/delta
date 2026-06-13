@@ -14,9 +14,9 @@ function visibleText(message: Message): string {
 }
 
 /**
- * Whether the thread's persisted messages already contain an assistant message
- * whose visible text matches the live-streamed text — i.e. the in-flight reply
- * has been flushed to the transcript and now renders via the normal pipeline.
+ * Whether the thread's persisted messages already contain the assistant message
+ * the live preview is streaming — i.e. the in-flight reply has been flushed to
+ * the transcript and now renders via the normal pipeline.
  *
  * This makes the live preview's visibility a function of the current persisted
  * state rather than of event timing. The transcript refetch
@@ -24,40 +24,61 @@ function visibleText(message: Message): string {
  * turn-end event that clears the preview buffer — and a single turn can persist
  * an earlier assistant message while `turn_completed` only fires at the very
  * end — so during that gap both the live bubble and the persisted message would
- * otherwise show the same text twice. Suppressing the bubble the instant a
+ * otherwise show the same text twice. Suppressing the bubble the instant the
  * matching persisted message exists eliminates the duplicate regardless of
  * event/refetch ordering.
  *
- * Matching is conservative to avoid hiding a genuinely in-flight reply:
+ * Matching is precise to avoid hiding a genuinely in-flight reply:
  *
- * - Only assistant-role messages are considered.
  * - Empty `streamedText` never matches (no preview is shown for it anyway).
- * - A persisted message matches when its trimmed visible text EQUALS the
- *   trimmed streamed text (the accumulated deltas equal the persisted text
- *   block), or, for robustness against a late final delta, when the persisted
- *   text `startsWith` the streamed text (the persisted copy is the complete,
- *   authoritative version).
+ * - Only the LAST assistant-role message is compared. The streaming buffer
+ *   always holds the current/latest in-flight message (a new `message_id`
+ *   resets it), so its persisted counterpart, once flushed, is the last
+ *   assistant message. Comparing only the last one avoids matching an EARLIER
+ *   assistant message that merely shares a prefix with the growing stream
+ *   (common openers like "Let me…", "Here's…", or a repeated short reply).
+ * - The primary rule is trimmed EQUALITY (`persisted === streamed`). A partial
+ *   in-flight stream never equals the full persisted text, so it only matches
+ *   once the message is actually persisted.
+ * - `persisted.startsWith(streamed)` is allowed ONLY when the stream is final
+ *   (`streamComplete`). When final, `streamed` is the complete text, so prefix
+ *   matching safely covers a persisted copy with trailing whitespace or extra
+ *   blocks without matching a mid-stream growing prefix.
  *
  * While the reply is still streaming and not yet persisted, no message matches,
  * so the bubble shows normally; the moment the persisted version lands, the
- * bubble hides — no duplicate and no flash gap.
+ * bubble hides — no duplicate and no flash gap. The turn-end clear remains as a
+ * backstop for the rare dropped-final-delta case.
  */
 export function persistedHasStreamedText(
   messages: Message[],
   streamedText: string,
+  streamComplete: boolean,
 ): boolean {
   const streamed = streamedText.trim();
   if (streamed.length === 0) {
     return false;
   }
-  return messages.some((message) => {
-    if (message.role !== 'assistant') {
-      return false;
+  const lastAssistant = lastAssistantMessage(messages);
+  if (lastAssistant === null) {
+    return false;
+  }
+  const persisted = visibleText(lastAssistant).trim();
+  if (persisted.length === 0) {
+    return false;
+  }
+  if (persisted === streamed) {
+    return true;
+  }
+  return streamComplete && persisted.startsWith(streamed);
+}
+
+/** The last assistant-role message in the thread, or `null` if there is none. */
+function lastAssistantMessage(messages: Message[]): Message | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') {
+      return messages[i];
     }
-    const persisted = visibleText(message).trim();
-    if (persisted.length === 0) {
-      return false;
-    }
-    return persisted === streamed || persisted.startsWith(streamed);
-  });
+  }
+  return null;
 }

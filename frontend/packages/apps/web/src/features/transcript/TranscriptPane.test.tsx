@@ -223,6 +223,73 @@ describe('TranscriptPane', () => {
     expect(screen.getAllByText(/change between two states/)).toHaveLength(1);
   });
 
+  it('keeps showing the live bubble when a partial stream shares a prefix with an earlier reply', async () => {
+    // False-positive guard: the previous turn's persisted assistant reply opens
+    // the same way the new reply is starting (a common "Let me…" opener). The
+    // growing partial stream must NOT be suppressed by that earlier message —
+    // only the persisted last-assistant message is the handoff target, and the
+    // new reply is not persisted yet, so the live bubble must still render.
+    const earlierReply = 'Let me check that for you. Answer one.';
+    server.use(
+      http.get('*/api/threads/:id/messages', () => {
+        const body: MessagesResponse = {
+          messages: [
+            {
+              uuid: 'm-user',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'user',
+              linear_parent_uuid: null,
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 0,
+              content_text: 'first question',
+              content: [{ type: 'text', text: 'first question' }],
+              created_at: '2026-01-01T00:00:01Z',
+            },
+            {
+              uuid: 'm-assistant',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'assistant',
+              linear_parent_uuid: 'm-user',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 1,
+              content_text: earlierReply,
+              content: [{ type: 'text', text: earlierReply }],
+              created_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+        };
+        return HttpResponse.json(body);
+      }),
+    );
+
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    await waitFor(() =>
+      expect(screen.getByText(/Answer one\./)).toBeInTheDocument(),
+    );
+
+    // A new reply streams in, so far only "Let me check" — a prefix of the
+    // persisted earlier reply. It is not final and not yet persisted, so the
+    // bubble must show.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'assistant_streaming',
+        session_id: SESSION_ID,
+        thread_id: MAIN_THREAD_ID,
+        message_id: 'm2',
+        index: 0,
+        final: false,
+        delta: 'Let me check',
+      });
+    });
+    expect(screen.getByTestId('streaming-message')).toHaveTextContent(
+      'Let me check',
+    );
+  });
+
   it('does not render the live bubble for a different thread', async () => {
     renderPane(mockThreads, MAIN_THREAD_ID);
     await waitFor(() =>

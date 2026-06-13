@@ -419,7 +419,7 @@ export function TranscriptPane({
     streaming !== null &&
     streaming.threadId === activeThread.id &&
     streaming.text.length > 0 &&
-    !persistedHasStreamedText(messages, streaming.text);
+    !persistedHasStreamedText(messages, streaming.text, streaming.done);
 
   // The new-session state has no session id yet; the composer targets a fresh
   // spawn. An existing thread targets that thread (a resume on a closed session).
