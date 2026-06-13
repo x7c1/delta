@@ -1,0 +1,18 @@
+# Hourly tick for the Delta real-claude canary gate (delta-e2e-real.service).
+#
+# The hourly cadence is deliberately much finer than the 24h debounce inside
+# scripts/e2e-real-auto.sh: almost every tick exits immediately with a
+# one-line "skipped (...)"; the gate, not the timer, decides when quota is
+# spent. Persistent=true catches up on the first tick after the machine was
+# off or asleep.
+
+[Unit]
+Description=Hourly gate check for the Delta real-claude canary suite
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

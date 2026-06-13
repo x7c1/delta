@@ -190,8 +190,9 @@ user's subscription quota** — every canary uses the smallest workable prompt
 response wording, which is non-deterministic), and each canary retries exactly
 once. Run it on demand — after a claude version bump, before relying on a new
 upstream behavior, or when the real loop misbehaves while the fake lane is
-green. It is deliberately **not wired into CI**: GitHub runners have no
-authenticated `claude`, and a contract canary against a live model does not
+green — or let a periodic driver run it for you (see "Automatic canary
+trigger" below). It is deliberately **not wired into CI**: GitHub runners have
+no authenticated `claude`, and a contract canary against a live model does not
 belong in a merge gate.
 
 **When a canary breaks (drift runbook).** A red canary means the upstream
@@ -241,6 +242,90 @@ real-claude loop by hand):
   *main* checkout's root (resolved via `git rev-parse --git-common-dir`): the
   workdir picker hides dot-directories, and a linked git worktree typically
   lives under one, so the picker could never navigate into a worktree path.
+
+### Automatic canary trigger (opt-in)
+
+```bash
+make e2e-real-auto    # gated: runs e2e-real only when it is worth a run
+```
+
+`scripts/e2e-real-auto.sh` is a gating wrapper meant to be invoked by a
+periodic driver. Each invocation runs `make e2e-real` only when **both** hold:
+
+- the installed `claude --version` (respecting `DELTA_CLAUDE_BIN`) differs
+  from the version recorded at the last attempt, **and**
+- at least 24 hours have passed since the last attempt.
+
+Otherwise it exits 0 with a one-line `skipped (reason)`. Claude auto-updates
+frequently — sometimes several times a day — and each suite run costs a
+handful of real subscription turns, so the gate caps automatic spend at one
+run per day, spends nothing on days without an update, and never misses an
+update (a version change inside the debounce window runs on a later tick).
+On a host without `claude` the wrapper exits 0 quietly: it simply is not a
+canary host, so the same timer can be installed everywhere.
+
+**State and logs** live per host (every checkout/worktree shares the host's
+claude and quota, so they share one gate), under
+`${XDG_STATE_HOME:-$HOME/.local/state}/delta/e2e-real/`:
+
+- `last-attempt` — `key=value` lines: the claude `version`, attempt
+  `epoch`/`date`, the `result` (`success` / `failure (exit N)` /
+  `interrupted`), and the `log` path of that run.
+- `logs/` — full output of recent runs (the newest 10 are kept).
+- `lock` — `flock` guard shared with `scripts/e2e-real.sh`, so a periodic
+  tick never overlaps an in-flight suite run, including a manual
+  `make e2e-real` from any checkout (the tick skips and tries again later).
+
+**The debounce is on the attempt, not on success.** A red canary usually
+means real upstream drift; auto-retrying it hourly would burn quota without
+new information. A failure is loud instead: the wrapper exits non-zero (the
+systemd unit shows as failed), prints a `FAILURE:` line with the saved log
+path, records `result=failure` in `last-attempt`, and fires a `notify-send`
+desktop notification when available (best-effort). When that happens, read
+the run log and follow the drift runbook above; the next automatic run
+happens once claude updates again (or run `make e2e-real` manually after the
+fix — manual runs are not gated).
+
+**Periodic driver (systemd user timer).** A ready-made unit pair lives in
+`scripts/systemd/`. It is opt-in: nothing installs it for you, and the
+service file's `DELTA_REPO` must point at your checkout. Install:
+
+```bash
+cp scripts/systemd/delta-e2e-real.{service,timer} ~/.config/systemd/user/
+"$EDITOR" ~/.config/systemd/user/delta-e2e-real.service   # set DELTA_REPO
+systemctl --user daemon-reload
+systemctl --user enable --now delta-e2e-real.timer
+```
+
+The timer ticks hourly (`Persistent=true`, so a machine that was off catches
+up on boot); almost every tick is an immediate skip — the gate, not the
+timer, decides when quota is spent. Inspect it with:
+
+```bash
+systemctl --user list-timers delta-e2e-real.timer   # next/last tick
+journalctl --user -u delta-e2e-real.service -n 50   # gate decisions + failures
+cat ~/.local/state/delta/e2e-real/last-attempt      # last attempt summary
+```
+
+Uninstall:
+
+```bash
+systemctl --user disable --now delta-e2e-real.timer
+rm ~/.config/systemd/user/delta-e2e-real.{service,timer}
+systemctl --user daemon-reload
+```
+
+**Cron alternative** for non-systemd hosts (the login shell `bash -lc` gives
+the run the same PATH as an interactive terminal):
+
+```cron
+0 * * * * bash -lc 'make -C "$HOME/repos/delta" e2e-real-auto' >> "$HOME/.local/state/delta/e2e-real/cron.log" 2>&1
+```
+
+**Testing the gate without spending quota:** point `DELTA_CLAUDE_BIN` at a
+stub that prints a fake version, set `XDG_STATE_HOME` to a temp dir, and set
+`E2E_REAL_CMD` (testing-only override, run via `bash -c`) to a stub command —
+the wrapper then exercises every gate branch without touching the real suite.
 
 ### Run the UI against the real backend
 
