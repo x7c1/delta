@@ -16,7 +16,9 @@ tracing = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 # Mints the session id Delta pins via `claude --session-id` at spawn time.
 uuid = { workspace = true }
+# Parses the stored `AskUserQuestion` tool input (`{"questions":[…]}`) into the
+# shapes the key-sequence generator needs.
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-serde_json = { workspace = true }

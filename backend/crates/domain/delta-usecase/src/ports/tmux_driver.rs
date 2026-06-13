@@ -32,6 +32,17 @@ pub trait TmuxDriver: Send + Sync {
     /// from a session name with [`crate::ports::tmux_driver::pane_for`].
     async fn send_line(&self, pane: &str, text: &str) -> Result<()>;
 
+    /// Send a sequence of named (non-text) keystrokes to `pane`, in order.
+    ///
+    /// Each entry is a tmux `send-keys` key name (`Down`, `Up`, `Space`,
+    /// `Enter`, `Right`, `Tab`, …) sent as a discrete keystroke, not literal
+    /// text — distinct from [`Self::send_line`], which types a string and
+    /// submits it. Used to drive an interactive TUI widget (the
+    /// `AskUserQuestion` prompt) by injecting the navigation/selection keys a
+    /// human would press. `pane` is a fully-qualified tmux target such as
+    /// `<name>:0.0`.
+    async fn send_keys(&self, pane: &str, keys: &[&str]) -> Result<()>;
+
     /// Wipe the pane program's current input without submitting anything.
     ///
     /// Clears the input line (via `C-u`) so any residual content is removed.
@@ -70,6 +81,10 @@ impl TmuxDriver for Box<dyn TmuxDriver> {
 
     async fn send_line(&self, pane: &str, text: &str) -> Result<()> {
         (**self).send_line(pane, text).await
+    }
+
+    async fn send_keys(&self, pane: &str, keys: &[&str]) -> Result<()> {
+        (**self).send_keys(pane, keys).await
     }
 
     async fn clear_input(&self, pane: &str) -> Result<()> {

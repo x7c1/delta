@@ -652,6 +652,13 @@ impl SessionRuntime {
         self.pending_question = Some(pending);
     }
 
+    /// The `AskUserQuestion` currently presenting its options in the TUI, if
+    /// any. Read by the answer path to correlate an incoming answer by
+    /// `request_id` and parse its question shapes for the key generator.
+    pub fn pending_question(&self) -> Option<&PendingQuestion> {
+        self.pending_question.as_ref()
+    }
+
     /// Drop the pending question if `request_id` is the one it tracks. Keyed so
     /// a stale resolution can never wipe a newer question's state — the same
     /// guard [`Self::resolve_pending_permission`] applies.

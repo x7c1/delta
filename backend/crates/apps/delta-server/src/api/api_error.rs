@@ -16,6 +16,11 @@ const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 /// answer-in-the-terminal guidance on this code.
 const PERMISSION_NOT_PENDING_CODE: &str = "permission_not_pending";
 
+/// Stable machine-readable code for an answer to a question that is no longer
+/// pending (already answered, its turn ended, or no live pane). The frontend
+/// switches the card to the answer-in-the-terminal fallback on this code.
+const QUESTION_NOT_PENDING_CODE: &str = "question_not_pending";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -63,6 +68,16 @@ impl IntoResponse for ApiError {
                     Error::PermissionNotPending(_) => {
                         (StatusCode::CONFLICT, Some(PERMISSION_NOT_PENDING_CODE))
                     }
+                    // The question exists (or existed) but cannot be answered
+                    // from the UI anymore: a conflict with current state, with a
+                    // stable code so the frontend keeps the terminal fallback.
+                    Error::QuestionNotPending(_) => {
+                        (StatusCode::CONFLICT, Some(QUESTION_NOT_PENDING_CODE))
+                    }
+                    // The browser's selection could not be turned into a key
+                    // sequence (malformed, or an unsupported sub-case): the
+                    // caller sent a bad answer, so `400`.
+                    Error::InvalidQuestionAnswer(_) => (StatusCode::BAD_REQUEST, None),
                     // A user-selected directory that does not exist or is not a
                     // directory is a client error: the caller named a bad path.
                     Error::InvalidWorkdir(_) => (StatusCode::BAD_REQUEST, None),

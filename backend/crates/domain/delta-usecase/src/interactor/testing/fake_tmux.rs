@@ -19,6 +19,9 @@ pub(crate) struct CreatedSession {
 pub(crate) struct FakeTmux {
     /// The `(pane, text)` pairs `send_line` was called with.
     pub(crate) sent: Mutex<Vec<(String, String)>>,
+    /// The `(pane, keys)` pairs `send_keys` was called with, in order. Each
+    /// entry's `keys` is the ordered list of tmux key names injected.
+    pub(crate) keyed: Mutex<Vec<(String, Vec<String>)>>,
     /// The panes `clear_input` was called with, in order.
     pub(crate) cleared: Mutex<Vec<String>>,
     /// When set, `send_line` fails instead of recording the line, simulating a
@@ -62,6 +65,17 @@ impl TmuxDriver for FakeTmux {
             .lock()
             .unwrap()
             .push((pane.to_owned(), text.to_owned()));
+        Ok(())
+    }
+
+    async fn send_keys(&self, pane: &str, keys: &[&str]) -> Result<()> {
+        if self.fail {
+            return Err(crate::error::Error::Tmux("key injection failed".into()));
+        }
+        self.keyed.lock().unwrap().push((
+            pane.to_owned(),
+            keys.iter().map(|k| (*k).to_owned()).collect(),
+        ));
         Ok(())
     }
 

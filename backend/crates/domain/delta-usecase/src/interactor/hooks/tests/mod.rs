@@ -1,5 +1,6 @@
 //! Claude Code hook handler tests.
 
+mod answering_a_question_injects_keys_into_the_pane;
 mod ask_user_question_drives_a_question_notice;
 mod ask_user_question_never_outlives_its_turn;
 mod first_submit_registers_session;

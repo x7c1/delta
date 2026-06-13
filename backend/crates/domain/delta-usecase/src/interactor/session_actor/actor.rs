@@ -189,6 +189,13 @@ where
         SessionInput::AbandonPermission { request_id } => {
             ctx.abandon_permission_decision(request_id);
         }
+        SessionInput::AnswerQuestion {
+            request_id,
+            selections,
+            reply,
+        } => {
+            let _ = reply.send(ctx.answer_question(request_id, &selections).await);
+        }
         SessionInput::SyncTick { reply } => {
             let _ = reply.send(ctx.sync_tick().await);
         }
