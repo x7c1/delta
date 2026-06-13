@@ -84,15 +84,18 @@ export interface QuestionCardProps {
 }
 
 /**
- * The floating question card for Claude Code's `AskUserQuestion` tool: it
- * renders each question's header and prompt, and its options as a readable
- * list (label in bold, description beneath), so the user can read the choice in
- * Delta. Answering happens in the embedded terminal — there is deliberately NO
+ * The question card for Claude Code's `AskUserQuestion` tool: it renders each
+ * question's header and prompt, and its options as a readable list (label in
+ * bold, description beneath), so the user can read the choice in Delta.
+ * Answering happens in the embedded terminal — there is deliberately NO
  * Allow/Deny and NO decision POST: a CLI hook cannot return the selected
  * option, so the TUI is the only answer path.
  *
- * Capped in height with internal scrolling so a large multi-question card never
- * blankets the whole transcript.
+ * It renders inside the bottom floating card (above the composer), so it carries
+ * no floating-card chrome of its own — only an indigo-accented block that nests
+ * cleanly inside that card, avoiding an ugly card-in-card. Capped in height with
+ * internal scrolling so a large multi-question card never blankets the whole
+ * transcript.
  */
 export function QuestionCard({
   notice,
@@ -103,7 +106,7 @@ export function QuestionCard({
 
   return (
     <div
-      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset flex max-h-[60%] max-w-sm flex-col gap-2 overflow-y-auto rounded border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs shadow-md"
+      className="flex max-h-[40vh] flex-col gap-2 overflow-y-auto rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs"
       data-testid="question-card"
       role="dialog"
       aria-label="Question from Claude Code"

@@ -435,12 +435,18 @@ export function TranscriptPane({
     />
   );
 
-  // The question card floats in the same top-right slot as the permission
-  // notice (the two never co-occur — `claude` shows one interactive prompt at a
-  // time). It is read-only here: the user picks in the terminal, so it carries
-  // no Allow/Deny and posts no decision. Capped height with internal scroll so
-  // a large card never blankets the transcript.
-  const questionOverlay = question && !question.dismissed && activeThread && (
+  // The question card sits at the conversation tail, as the topmost element of
+  // the bottom stack directly above the composer — not in the top-right. The
+  // question belongs where the user is reading and typing, not off in a corner
+  // their gaze has to dart to; this matters all the more because the assistant's
+  // preamble text is unavailable until the user answers, so a top-right card
+  // would read as wholly detached from the conversation. It is read-only here:
+  // the user picks in the terminal, so it carries no Allow/Deny and posts no
+  // decision. Capped height with internal scroll so a large card never blankets
+  // the transcript. The permission notice keeps the top-right slot; the two
+  // never co-occur (`claude` shows one interactive prompt at a time), so moving
+  // the question out of that slot is safe.
+  const questionCard = question && !question.dismissed && activeThread && (
     <QuestionCard
       notice={question}
       onOpenTerminal={() => setTerminalOpen(true)}
@@ -471,6 +477,11 @@ export function TranscriptPane({
   } else if (composer) {
     bottomContent = (
       <div className="space-y-2">
+        {/* The question card leads the stack so it sits at the conversation tail,
+            directly above the input — see questionCard above for why bottom, not
+            top-right. */}
+        {questionCard}
+
         {readOnly && !newSession && (
           <div
             className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
@@ -567,7 +578,6 @@ export function TranscriptPane({
         <>
           {breadcrumbOverlay}
           {permissionOverlay}
-          {questionOverlay}
           {bottomOverlay}
         </>
       }
