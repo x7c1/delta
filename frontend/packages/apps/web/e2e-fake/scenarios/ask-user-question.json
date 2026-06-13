@@ -10,7 +10,11 @@
             "question": "Which framework should we use?",
             "header": "Framework",
             "options": [
-              { "label": "React", "description": "A UI library" },
+              {
+                "label": "React",
+                "description": "A UI library",
+                "preview": "+-------------+\n| <App />     |\n+-------------+"
+              },
               { "label": "Svelte", "description": "A compiler" }
             ],
             "multiSelect": false

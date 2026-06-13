@@ -61,6 +61,24 @@ const MULTI_QUESTION = JSON.stringify({
   ],
 });
 
+// A box-drawing preview exercises the verbatim, monospace rendering: it must
+// survive untouched (no Markdown mangling of `|`/`+`/`-`, newlines preserved).
+const PREVIEW_TEXT = ['+------+', '| Card |', '+------+'].join('\n');
+
+const SINGLE_WITH_PREVIEW = JSON.stringify({
+  questions: [
+    {
+      question: 'Which layout?',
+      header: 'Layout',
+      options: [
+        { label: 'Boxed', description: 'A bordered card', preview: PREVIEW_TEXT },
+        { label: 'Plain', description: 'No border' },
+      ],
+      multiSelect: false,
+    },
+  ],
+});
+
 const noop = () => {};
 
 describe('QuestionCard', () => {
@@ -148,6 +166,44 @@ describe('QuestionCard', () => {
 
     fireEvent.click(submit);
     expect(onAnswer).toHaveBeenCalledWith([[1], [0]]);
+  });
+
+  it('renders an option preview verbatim and shows none for options without one', () => {
+    render(
+      <QuestionCard
+        notice={notice(SINGLE_WITH_PREVIEW)}
+        onAnswer={answerOk}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    // The option WITH a preview renders its block, preserving the exact text
+    // (box-drawing characters and newlines intact, not run through Markdown).
+    const preview = screen.getByTestId('question-option-preview-0-0');
+    expect(preview).toBeTruthy();
+    expect(preview.textContent).toBe(PREVIEW_TEXT);
+
+    // The option WITHOUT a preview renders no preview block (no empty box).
+    expect(screen.queryByTestId('question-option-preview-0-1')).toBeNull();
+  });
+
+  it('still answers on click when an option carries a preview', () => {
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    render(
+      <QuestionCard
+        notice={notice(SINGLE_WITH_PREVIEW)}
+        onAnswer={onAnswer}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    // Selecting the previewed option still works: the click target is the
+    // button, with the preview rendered as a sibling below it.
+    fireEvent.click(screen.getByTestId('question-option-0-0'));
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledWith([[0]]);
   });
 
   it('shows NO Allow/Deny buttons', () => {

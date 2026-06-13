@@ -9,6 +9,13 @@ import type { QuestionNotice as Notice } from '../../store/liveStore';
 interface QuestionOption {
   label: string;
   description?: string;
+  /**
+   * An optional pre-formatted preview (a multi-line mockup, code snippet, or
+   * ASCII/box-drawing art) rendered verbatim so the user can compare options.
+   * Shown in a monospace, whitespace-preserving block — never through the
+   * Markdown renderer, which would mangle box-drawing characters.
+   */
+  preview?: string;
 }
 
 /** One question of an `AskUserQuestion` tool call. */
@@ -62,6 +69,7 @@ export function parseQuestions(toolInput: string): ParsedQuestion[] {
           label: o.label,
           description:
             typeof o.description === 'string' ? o.description : undefined,
+          preview: typeof o.preview === 'string' ? o.preview : undefined,
         },
       ];
     });
@@ -250,6 +258,20 @@ export function QuestionCard({
                           )}
                         </span>
                       </button>
+                      {/* The preview is supplementary and pre-formatted, so it
+                          renders as a sibling BELOW the clickable button (not
+                          nested inside it): a wide, scrollable monospace block
+                          must not intercept the option's click/selection. It is
+                          shown verbatim — never through Markdown — to keep box
+                          drawing, code, and ASCII art exact. */}
+                      {opt.preview && (
+                        <pre
+                          data-testid={`question-option-preview-${qi}-${oi}`}
+                          className="mt-1 overflow-x-auto whitespace-pre rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700"
+                        >
+                          {opt.preview}
+                        </pre>
+                      )}
                     </li>
                   );
                 })}

@@ -46,6 +46,13 @@ test('AskUserQuestion renders an inline interactive card and answering it clears
   await expect(card).toContainText('React');
   await expect(card).toContainText('Svelte');
 
+  // An option carrying a `preview` renders it verbatim in a monospace block;
+  // an option without one shows no preview block.
+  await expect(card.getByTestId('question-option-preview-0-0')).toContainText(
+    '<App />',
+  );
+  await expect(card.getByTestId('question-option-preview-0-1')).toHaveCount(0);
+
   // It is a question, not a gateable permission: no Allow/Deny, and the generic
   // permission notice must never appear for this tool.
   await expect(card.getByRole('button', { name: 'Allow' })).toHaveCount(0);
