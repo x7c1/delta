@@ -66,8 +66,9 @@ describe('persistedHasStreamedText', () => {
   it('does NOT match an EARLIER assistant message sharing a prefix with the partial stream', () => {
     // The false-positive guard: an in-flight stream is a growing prefix and can
     // collide with a prior assistant turn that opens the same way (e.g.
-    // "Let me…"). Only the LAST assistant message is the handoff target, so the
-    // earlier one must not suppress the live bubble.
+    // "Let me…"). `startsWith` is gated on `streamComplete`, so while the stream
+    // is still partial (non-final) the earlier message must not suppress the
+    // live bubble even though the scan now covers all assistant messages.
     const messages = [
       message('user', [{ type: 'text', text: 'first question' }], 'u1'),
       assistantText('Let me check that for you. Done — answer one.', 'a1'),
@@ -79,15 +80,63 @@ describe('persistedHasStreamedText', () => {
     );
   });
 
-  it('suppresses once the LAST assistant message trimmed-equals the partial stream', () => {
+  it('suppresses once an assistant message trimmed-equals the partial stream', () => {
     // Even with a prefix-colliding earlier message present, the moment the new
-    // reply is persisted as the last assistant message and equals the stream,
-    // the bubble is suppressed.
+    // reply is persisted and equals the stream, the bubble is suppressed.
     const reply = 'Let me check that — answer two.';
     const messages = [
       assistantText('Let me check that for you. Answer one.', 'a1'),
       message('user', [{ type: 'text', text: 'second question' }], 'u2'),
       assistantText(reply, 'a2'),
+    ];
+    expect(persistedHasStreamedText(messages, reply, false)).toBe(true);
+  });
+
+  it('matches the text-block message even when a later tool_use message is last (tool turn)', () => {
+    // Regression: Claude splits a single assistant reply into separate
+    // per-content-block transcript lines. In a tool turn the visible text lives
+    // in an EARLIER assistant message (the text-block line) while the LAST
+    // assistant message is a tool_use-only line with no visible text. The scan
+    // must find the text-block line regardless of its position.
+    const reply = 'Here is the answer before calling a tool.';
+    const messages = [
+      message('user', [{ type: 'text', text: 'do a thing' }], 'u'),
+      assistantText(reply, 'a-text'),
+      message(
+        'assistant',
+        [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }],
+        'a-tool',
+      ),
+    ];
+    expect(persistedHasStreamedText(messages, reply, false)).toBe(true);
+    expect(persistedHasStreamedText(messages, reply, true)).toBe(true);
+  });
+
+  it('matches an earlier text-block message when a later assistant message has DIFFERENT text', () => {
+    // After a tool_result, a subsequent assistant message carries different
+    // visible text (e.g. the follow-up after the tool ran). The originally
+    // streamed text still matches its own earlier text-block line.
+    const reply = 'Here is the answer before calling a tool.';
+    const messages = [
+      assistantText(reply, 'a-text'),
+      message(
+        'assistant',
+        [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }],
+        'a-tool',
+      ),
+      message(
+        'user',
+        [
+          {
+            type: 'tool_result',
+            tool_use_id: 't1',
+            content: 'output',
+            is_error: false,
+          },
+        ],
+        'u-result',
+      ),
+      assistantText('A different follow-up after the tool ran.', 'a-followup'),
     ];
     expect(persistedHasStreamedText(messages, reply, false)).toBe(true);
   });

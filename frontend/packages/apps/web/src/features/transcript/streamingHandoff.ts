@@ -31,19 +31,27 @@ function visibleText(message: Message): string {
  * Matching is precise to avoid hiding a genuinely in-flight reply:
  *
  * - Empty `streamedText` never matches (no preview is shown for it anyway).
- * - Only the LAST assistant-role message is compared. The streaming buffer
- *   always holds the current/latest in-flight message (a new `message_id`
- *   resets it), so its persisted counterpart, once flushed, is the last
- *   assistant message. Comparing only the last one avoids matching an EARLIER
- *   assistant message that merely shares a prefix with the growing stream
- *   (common openers like "Let me…", "Here's…", or a repeated short reply).
+ * - ALL assistant-role messages are scanned, not just the last. Claude writes a
+ *   single assistant message as SEPARATE per-content-block transcript lines:
+ *   the `thinking` block, the `text` block, and each `tool_use` block become
+ *   distinct transcript entries (distinct uuid) that merely share one
+ *   `message.id`. In a tool-using or thinking turn the persisted reply's
+ *   visible text therefore lives in an EARLIER assistant message (the
+ *   text-block line), while the LAST assistant message is typically a
+ *   `tool_use`-only line with empty visible text — or a later message after a
+ *   tool_result. Comparing only the last message would miss the text-block line
+ *   and the bubble would never be suppressed, showing the streamed text twice.
+ *   Scanning all assistant messages finds the text-block line wherever it sits.
  * - The primary rule is trimmed EQUALITY (`persisted === streamed`). A partial
  *   in-flight stream never equals the full persisted text, so it only matches
- *   once the message is actually persisted.
+ *   once the message is actually persisted; equality is self-correcting as the
+ *   stream grows, which keeps the all-messages scan from matching an unrelated
+ *   earlier message.
  * - `persisted.startsWith(streamed)` is allowed ONLY when the stream is final
  *   (`streamComplete`). When final, `streamed` is the complete text, so prefix
  *   matching safely covers a persisted copy with trailing whitespace or extra
- *   blocks without matching a mid-stream growing prefix.
+ *   blocks. Gating it on `streamComplete` keeps a mid-stream growing prefix from
+ *   false-matching an earlier assistant message that happens to start the same.
  *
  * While the reply is still streaming and not yet persisted, no message matches,
  * so the bubble shows normally; the moment the persisted version lands, the
@@ -59,26 +67,17 @@ export function persistedHasStreamedText(
   if (streamed.length === 0) {
     return false;
   }
-  const lastAssistant = lastAssistantMessage(messages);
-  if (lastAssistant === null) {
-    return false;
-  }
-  const persisted = visibleText(lastAssistant).trim();
-  if (persisted.length === 0) {
-    return false;
-  }
-  if (persisted === streamed) {
-    return true;
-  }
-  return streamComplete && persisted.startsWith(streamed);
-}
-
-/** The last assistant-role message in the thread, or `null` if there is none. */
-function lastAssistantMessage(messages: Message[]): Message | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'assistant') {
-      return messages[i];
+  return messages.some((message) => {
+    if (message.role !== 'assistant') {
+      return false;
     }
-  }
-  return null;
+    const persisted = visibleText(message).trim();
+    if (persisted.length === 0) {
+      return false;
+    }
+    if (persisted === streamed) {
+      return true;
+    }
+    return streamComplete && persisted.startsWith(streamed);
+  });
 }
