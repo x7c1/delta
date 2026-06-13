@@ -58,6 +58,13 @@ pub fn interrupt_line(uuid: &str) -> TranscriptMessage {
     user_line(uuid, "[Request interrupted by user]")
 }
 
+/// A harness-injected `<task-notification>`: a background-task completion that
+/// current claude delivers as a plain `role: user` line (NOT a legacy
+/// `queued_command` attachment), so it carries no `is_queued_command` flag.
+pub fn task_notification_line(uuid: &str) -> TranscriptMessage {
+    user_line(uuid, "<task-notification>done</task-notification>")
+}
+
 /// An assistant line issuing a tool call (no author text).
 pub fn tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
     TranscriptMessage {

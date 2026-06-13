@@ -120,7 +120,11 @@ pub struct Attributed {
 ///   which Claude delivers as `role: user` but which are part of the
 ///   in-flight turn, not a new human turn. The interrupt marker is also a
 ///   `role: user` line belonging to the aborted turn: it inherits
-///   `carry_thread` and additionally yields [`Effect::TurnInterrupted`].
+///   `carry_thread` and additionally yields [`Effect::TurnInterrupted`]. A
+///   `<task-notification>` (a harness-injected background-task completion,
+///   delivered as a plain `role: user` line) is likewise a programmatic
+///   continuation of the in-flight turn, so it too inherits `carry_thread`
+///   rather than resetting to `main`.
 pub fn attribute_lines(
     session_id: &SessionId,
     main_thread: ThreadId,
@@ -165,11 +169,26 @@ pub fn attribute_lines(
         // the turn the user just aborted, not a new human turn — so it too
         // inherits `carry_thread` and is excluded from `is_human_turn` (it
         // must not run through send correlation nor reset to `main`).
+        //
+        // A `<task-notification>` is a third such `role: user` line: the
+        // harness injects it to report a background task's completion, so it is
+        // a programmatic continuation of the in-flight turn, not a new human
+        // turn. Claude delivers it as a normal `type: "user"` line (NOT a
+        // legacy `queued_command` attachment), so the parser does not flag it
+        // `is_queued_command`. It must likewise be excluded from
+        // `is_human_turn` and inherit `carry_thread`; otherwise, when a
+        // background task completes while the user is working in a sub-thread,
+        // the notification (and the assistant's continuation, and every later
+        // turn) would reset to `main`.
         let trimmed = content_text.as_deref().unwrap_or("").trim();
         let is_interrupt_marker =
             matches!(line.role, Role::User) && claude_format::is_interrupt_marker(trimmed);
-        let is_human_turn =
-            matches!(line.role, Role::User) && !trimmed.is_empty() && !is_interrupt_marker;
+        let is_task_notification =
+            matches!(line.role, Role::User) && claude_format::is_task_notification(trimmed);
+        let is_human_turn = matches!(line.role, Role::User)
+            && !trimmed.is_empty()
+            && !is_interrupt_marker
+            && !is_task_notification;
 
         if is_interrupt_marker {
             effects.push(Effect::TurnInterrupted);
@@ -191,11 +210,16 @@ pub fn attribute_lines(
                     (pending.thread_id, pending.semantic_parent_uuid)
                 }
                 None if line.is_queued_command => {
-                    // A queued command with no matching send is a
-                    // programmatic injection (e.g. a background task
-                    // notification), not stray pane typing, so it must not
-                    // tear the active turn back to `main` — inherit the
-                    // current thread the way a non-human line does.
+                    // A LEGACY `queued_command` attachment with no matching
+                    // send is a programmatic injection, not stray pane typing,
+                    // so it must not tear the active turn back to `main` —
+                    // inherit the current thread the way a non-human line does.
+                    // (Harness-injected `<task-notification>` lines, which
+                    // current claude delivers as plain user lines rather than
+                    // `queued_command` attachments, are handled earlier: they
+                    // are excluded from `is_human_turn` and inherit
+                    // `carry_thread` via the `else` branch, like interrupt
+                    // markers and tool_result lines.)
                     (state.carry_thread, None)
                 }
                 None => {
