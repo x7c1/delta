@@ -21,7 +21,7 @@ const SINGLE = JSON.stringify({
   ],
 });
 
-const MULTI = JSON.stringify({
+const MULTI_SELECT = JSON.stringify({
   questions: [
     {
       question: 'Pick languages',
@@ -32,25 +32,46 @@ const MULTI = JSON.stringify({
       ],
       multiSelect: true,
     },
+  ],
+});
+
+const MULTI_QUESTION = JSON.stringify({
+  questions: [
+    {
+      question: 'Pick a language',
+      header: 'Language',
+      options: [
+        { label: 'Rust', description: 'systems' },
+        { label: 'TypeScript', description: 'web' },
+      ],
+      multiSelect: false,
+    },
     {
       question: 'Pick a database',
       header: 'Database',
-      options: [{ label: 'SQLite', description: 'embedded' }],
+      options: [
+        { label: 'SQLite', description: 'embedded' },
+        { label: 'Postgres', description: 'server' },
+      ],
       multiSelect: false,
     },
   ],
 });
 
-describe('QuestionCard', () => {
-  const noop = () => {};
+const noop = () => {};
 
+describe('QuestionCard', () => {
   it('renders a single question with its header, prompt, and options', () => {
     render(
-      <QuestionCard notice={notice(SINGLE)} onOpenTerminal={noop} onDismiss={noop} />,
+      <QuestionCard
+        notice={notice(SINGLE)}
+        onAnswer={noop}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
     );
 
-    const card = screen.getByTestId('question-card');
-    expect(card).toBeTruthy();
+    expect(screen.getByTestId('question-card')).toBeTruthy();
     expect(screen.getByText('Framework')).toBeTruthy();
     expect(screen.getByText('Which framework should we use?')).toBeTruthy();
     expect(screen.getByText('React')).toBeTruthy();
@@ -58,33 +79,94 @@ describe('QuestionCard', () => {
     expect(screen.getByText('Svelte')).toBeTruthy();
   });
 
-  it('renders multiple questions and the multi-select hint', () => {
+  it('answers a single-select question on option click (no Submit needed)', () => {
+    const onAnswer = vi.fn();
     render(
-      <QuestionCard notice={notice(MULTI)} onOpenTerminal={noop} onDismiss={noop} />,
+      <QuestionCard
+        notice={notice(SINGLE)}
+        onAnswer={onAnswer}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
     );
 
-    expect(screen.getByText('Languages')).toBeTruthy();
-    expect(screen.getByText('Database')).toBeTruthy();
-    expect(screen.getByText('Rust')).toBeTruthy();
-    expect(screen.getByText('SQLite')).toBeTruthy();
-    // The multiSelect question surfaces the "select all" hint.
-    expect(screen.getByText('Select all that apply.')).toBeTruthy();
+    // A lone single-select question has no Submit button — the click is the
+    // answer.
+    expect(screen.queryByTestId('question-submit')).toBeNull();
+    fireEvent.click(screen.getByTestId('question-option-0-1'));
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer).toHaveBeenCalledWith([[1]]);
   });
 
-  it('shows NO Allow/Deny buttons (answering happens in the terminal)', () => {
+  it('toggles multi-select options and submits the chosen set', () => {
+    const onAnswer = vi.fn();
     render(
-      <QuestionCard notice={notice(SINGLE)} onOpenTerminal={noop} onDismiss={noop} />,
+      <QuestionCard
+        notice={notice(MULTI_SELECT)}
+        onAnswer={onAnswer}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    expect(screen.getByText('Select all that apply.')).toBeTruthy();
+    const submit = screen.getByTestId('question-submit');
+    // Submit is disabled until at least one option is toggled.
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByTestId('question-option-0-0'));
+    fireEvent.click(screen.getByTestId('question-option-0-1'));
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(submit);
+    expect(onAnswer).toHaveBeenCalledWith([[0, 1]]);
+  });
+
+  it('collects one selection per question and submits when all answered', () => {
+    const onAnswer = vi.fn();
+    render(
+      <QuestionCard
+        notice={notice(MULTI_QUESTION)}
+        onAnswer={onAnswer}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    const submit = screen.getByTestId('question-submit');
+    // A multi-question call needs every question chosen before Submit enables;
+    // clicking one option does NOT submit immediately.
+    fireEvent.click(screen.getByTestId('question-option-0-1'));
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByTestId('question-option-1-0'));
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(submit);
+    expect(onAnswer).toHaveBeenCalledWith([[1], [0]]);
+  });
+
+  it('shows NO Allow/Deny buttons', () => {
+    render(
+      <QuestionCard
+        notice={notice(SINGLE)}
+        onAnswer={noop}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
     );
     expect(screen.queryByText('Allow')).toBeNull();
     expect(screen.queryByText('Deny')).toBeNull();
   });
 
-  it('fires onOpenTerminal and onDismiss', () => {
+  it('keeps an Open terminal fallback and a Dismiss action', () => {
     const onOpenTerminal = vi.fn();
     const onDismiss = vi.fn();
     render(
       <QuestionCard
         notice={notice(SINGLE)}
+        onAnswer={noop}
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />,
@@ -101,12 +183,18 @@ describe('QuestionCard', () => {
     render(
       <QuestionCard
         notice={notice('not json')}
+        onAnswer={noop}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
     );
-    // The card still renders with its terminal guidance, just no options.
+    // The card still renders with its terminal fallback, just no options.
     expect(screen.getByTestId('question-card')).toBeTruthy();
-    expect(screen.getByText('Pick an option in the terminal.')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Claude is asking a multiple-choice question. Answer it in the terminal.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('question-submit')).toBeNull();
   });
 });

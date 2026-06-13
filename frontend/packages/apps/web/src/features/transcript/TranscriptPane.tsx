@@ -471,20 +471,29 @@ export function TranscriptPane({
     />
   );
 
-  // The question card sits at the conversation tail, as the topmost element of
-  // the bottom stack directly above the composer — not in the top-right. The
-  // question belongs where the user is reading and typing, not off in a corner
-  // their gaze has to dart to; this matters all the more because the assistant's
-  // preamble text is unavailable until the user answers, so a top-right card
-  // would read as wholly detached from the conversation. It is read-only here:
-  // the user picks in the terminal, so it carries no Allow/Deny and posts no
-  // decision. Capped height with internal scroll so a large card never blankets
-  // the transcript. The permission notice keeps the top-right slot; the two
-  // never co-occur (`claude` shows one interactive prompt at a time), so moving
-  // the question out of that slot is safe.
+  // The interactive question card renders INLINE at the conversation tail (in
+  // the scrolling body, after the rendered messages and the live-streamed
+  // bubble), not in the bottom overlay — so the choices "hang off" the
+  // conversation right after the assistant's streamed preamble, where the user
+  // is reading, rather than floating over it. The user answers from here: a
+  // single-select click, a multi-select toggle + Submit, or a per-question
+  // choice across a multi-question call, all POSTed to the answer endpoint,
+  // which injects the selection keystrokes into the session's TUI pane. The
+  // authoritative clear stays the existing resolution path (the `tool_result`
+  // resolving the question's request row), so no extra clear logic is needed.
+  // An "Open terminal" fallback remains in the card for a misfired injection.
   const questionCard = question && !question.dismissed && activeThread && (
     <QuestionCard
       notice={question}
+      onAnswer={(selections) => {
+        // Best-effort injection: a 409 (already answered / stale) or 400
+        // (malformed) leaves the card's terminal fallback in place, and the
+        // authoritative clear still arrives via the resolution path, so a
+        // failed POST need not surface its own error UI here.
+        void client
+          .answerQuestion(activeThread.session_id, question.requestId, selections)
+          .catch(() => {});
+      }}
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissQuestion(activeThread.session_id)}
     />
@@ -513,11 +522,10 @@ export function TranscriptPane({
   } else if (composer) {
     bottomContent = (
       <div className="space-y-2">
-        {/* The question card leads the stack so it sits at the conversation tail,
-            directly above the input — see questionCard above for why bottom, not
-            top-right. */}
-        {questionCard}
-
+        {/* The question card is NOT in this bottom stack: it renders inline at
+            the conversation tail in the scrolling body (see questionCard above
+            and its placement after the streaming bubble), so the choices follow
+            the streamed preamble in the flow instead of floating over it. */}
         {readOnly && !newSession && (
           <div
             className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
@@ -793,6 +801,13 @@ export function TranscriptPane({
           </article>
         </div>
       )}
+
+      {/* The interactive question card, inline at the very tail of the
+          conversation: after the rendered messages and the live-streamed
+          bubble, so the choices appear right after the assistant's preamble.
+          Inset to align with the prose, in its own block so the bottom padding
+          (pb-composer-reserve) keeps it clear of the floating composer. */}
+      {questionCard && <div className="px-3 pt-1.5 pb-2">{questionCard}</div>}
     </Panel>
   );
 }

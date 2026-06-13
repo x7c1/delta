@@ -258,6 +258,14 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    // Answer a pending AskUserQuestion. The mock has no real TUI to inject the
+    // selection keystrokes into, so it just accepts the answer; the question
+    // card clears when the scripted `permission_resolved` event arrives,
+    // mirroring the live flow where the `tool_result` resolves the request row.
+    http.post('*/api/sessions/:id/questions/:requestId/answer', () => {
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     http.post('*/api/sends', async ({ request }) => {
       const payload = (await request.json()) as SendRequest;
       if (typeof payload?.text !== 'string' || payload.text.length === 0) {

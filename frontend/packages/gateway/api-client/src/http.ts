@@ -5,6 +5,7 @@ import type {
   NewSessionResponse,
   PermissionDecision,
   PermissionDecisionRequest,
+  QuestionAnswerRequest,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -39,8 +40,15 @@ export interface ApiClientOptions {
  * effect: the request was already decided, or its hook wait timed out and the
  * interactive TUI prompt owns it now. Callers branch on this to swap the
  * Allow/Deny buttons for the answer-in-the-terminal guidance.
+ *
+ * `question_not_pending` means an `AskUserQuestion` can no longer be answered
+ * from the UI (already answered, its turn ended, or no live pane). Callers
+ * branch on this to keep the answer-in-the-terminal fallback.
  */
-export type ApiErrorCode = 'resume_unavailable' | 'permission_not_pending';
+export type ApiErrorCode =
+  | 'resume_unavailable'
+  | 'permission_not_pending'
+  | 'question_not_pending';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -216,6 +224,33 @@ export class ApiClient {
     const body: PermissionDecisionRequest = { decision };
     return this.requestNoContent(
       `/api/permissions/${requestId}/decision`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  /**
+   * `POST /api/sessions/{id}/questions/{requestId}/answer` — answer a pending
+   * `AskUserQuestion` (204). The server turns the per-question selected option
+   * indices into the exact TUI keystrokes and injects them into the session's
+   * pane; the card then clears when the resulting `tool_result` resolves the
+   * question's request row. A `409` (`question_not_pending`) means the question
+   * can no longer be answered from the UI, and a `400` that the selection was
+   * malformed — both surface as {@link ApiError}, and the card keeps its
+   * answer-in-the-terminal fallback. `selections[q]` lists the chosen 0-based
+   * option indices for question `q`.
+   */
+  answerQuestion(
+    sessionId: SessionId,
+    requestId: number,
+    selections: number[][],
+  ): Promise<void> {
+    const body: QuestionAnswerRequest = { selections };
+    return this.requestNoContent(
+      `/api/sessions/${sessionId}/questions/${requestId}/answer`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
