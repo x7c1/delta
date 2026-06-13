@@ -61,6 +61,19 @@ command -v cargo >/dev/null 2>&1 || die "cargo not found on PATH"
 command -v pnpm >/dev/null 2>&1 || die "pnpm not found on PATH"
 command -v "$CLAUDE_BIN" >/dev/null 2>&1 || die "claude binary not found: $CLAUDE_BIN"
 
+# Per-host overlap guard, shared with scripts/e2e-real-auto.sh: at most one
+# real-claude suite per host at a time, across all checkouts/worktrees (they
+# share the host's claude, quota, and ~/.claude state). The auto wrapper
+# already holds the lock when it invokes this script and signals that with
+# DELTA_E2E_REAL_LOCK_HELD; re-acquiring here would deadlock its own run.
+# Hosts without flock keep the old unguarded manual behavior.
+if [ "${DELTA_E2E_REAL_LOCK_HELD:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
+  LOCK_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/delta/e2e-real/lock"
+  mkdir -p "$(dirname "$LOCK_FILE")"
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || die "another real-claude suite run is in flight (lock: $LOCK_FILE)"
+fi
+
 log "This suite drives the REAL claude CLI: it consumes subscription quota."
 
 # --- Layer 1: Rust contract canaries (no server, no browser). -----------------
