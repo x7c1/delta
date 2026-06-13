@@ -441,11 +441,25 @@ function dropStreamingForSession(
  * hook), `turn_interrupted` (the transcript-detected interrupt) — which can
  * occasionally both arrive, so the drain is idempotent — and `session_closed`
  * (a closed session has no live process, so its turn is over too).
+ *
+ * The streaming preview is deliberately NOT dropped here. At a normal turn
+ * completion the bubble must stay until the persisted assistant message lands
+ * in the transcript refetch, at which point the content-based suppression guard
+ * (`persistedHasStreamedText`) removes it in the SAME render that adds the
+ * persisted copy — a seamless swap with no empty gap. Dropping the buffer on
+ * `turn_completed` (which can outrun the async refetch) is exactly what opened
+ * that gap. The buffer is harmless between turns: it sits invisibly suppressed
+ * and is overwritten by the next turn's first `assistant_streaming` (a new
+ * `message_id` starts fresh). Callers that end a turn WITHOUT a guaranteed
+ * matching persisted message — `turn_interrupted` (a partial may never persist)
+ * and `session_closed` (no live process) — pass {@link dropStreaming} so the
+ * dangling preview is cleared explicitly.
  */
 function endTurnForSession(
   state: LiveState,
   sessionId: SessionId,
   trigger: 'turn_end' | 'session_closed',
+  dropStreaming: boolean,
 ): Partial<LiveState> {
   const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
   if (state.activeTurns[sessionId]) {
@@ -455,7 +469,7 @@ function endTurnForSession(
   }
   return {
     ...next,
-    ...dropStreamingForSession(state, sessionId),
+    ...(dropStreaming ? dropStreamingForSession(state, sessionId) : {}),
     ...clearNoticesOn(state.notices, sessionId, trigger),
   };
 }
@@ -651,8 +665,16 @@ export const useLiveStore = create<LiveState>((set) => ({
           // the server's open-send list (refetched by the router) is the
           // remaining truth for anything still queued — and the turn-scoped
           // notices are swept (see NOTICE_LIFECYCLE). Scoped by session so a
-          // turn in one session never drains another session's chips.
-          const next = endTurnForSession(state, event.session_id, 'turn_end');
+          // turn in one session never drains another session's chips. The
+          // streaming preview is left in place (dropStreaming: false): the
+          // persisted message will suppress the bubble when it lands, a
+          // gap-free swap (see endTurnForSession).
+          const next = endTurnForSession(
+            state,
+            event.session_id,
+            'turn_end',
+            false,
+          );
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'turn_interrupted': {
@@ -660,8 +682,15 @@ export const useLiveStore = create<LiveState>((set) => ({
           // Claude's `Stop` hook does not fire on interrupt, so
           // `turn_completed` never arrives; the backend detects the interrupt
           // from the transcript and emits this hook-independent signal. Drain
-          // exactly as a completed turn would.
-          const next = endTurnForSession(state, event.session_id, 'turn_end');
+          // exactly as a completed turn would, but also drop the streaming
+          // preview (dropStreaming: true): an interrupted partial may have no
+          // matching persisted message, so nothing else would clear it.
+          const next = endTurnForSession(
+            state,
+            event.session_id,
+            'turn_end',
+            true,
+          );
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':
@@ -793,6 +822,7 @@ export const useLiveStore = create<LiveState>((set) => ({
             state,
             event.session_id,
             'session_closed',
+            true,
           );
           return Object.keys(next).length > 0 ? next : state;
         }

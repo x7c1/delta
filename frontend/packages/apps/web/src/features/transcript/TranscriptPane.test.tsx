@@ -119,15 +119,15 @@ describe('TranscriptPane', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders the live assistant bubble for the active thread and drops it on turn end', async () => {
+  it('shows the caret only while streaming, and keeps the bubble after turn end (suppression owns removal)', async () => {
     renderPane(mockThreads, MAIN_THREAD_ID);
     await waitFor(() =>
       expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
     );
 
     // A turn streams into the active thread's session: the provisional bubble
-    // appears at the tail with the accumulated text, distinct from any
-    // persisted message-item.
+    // appears at the tail with the accumulated text, and — while in progress
+    // (not final) — the blinking "generating" caret is shown.
     act(() => {
       useLiveStore.getState().applyEvent({
         kind: 'assistant_streaming',
@@ -139,12 +139,32 @@ describe('TranscriptPane', () => {
         delta: 'streaming reply…',
       });
     });
-    expect(screen.getByTestId('streaming-message')).toHaveTextContent(
-      'streaming reply…',
-    );
+    const bubble = screen.getByTestId('streaming-message');
+    expect(bubble).toHaveTextContent('streaming reply…');
+    expect(bubble).toHaveTextContent('▌');
 
-    // The turn ends: the preview is dropped (the persisted message renders via
-    // the normal pipeline), so the provisional bubble disappears.
+    // The final chunk arrives: the stream is done, so the caret disappears —
+    // a completed bubble awaiting handoff must not show a "generating" caret.
+    // The bubble itself stays (no persisted copy yet).
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'assistant_streaming',
+        session_id: SESSION_ID,
+        thread_id: MAIN_THREAD_ID,
+        message_id: 'm1',
+        index: 1,
+        final: true,
+        delta: ' done',
+      });
+    });
+    expect(screen.getByTestId('streaming-message')).toHaveTextContent(
+      'streaming reply… done',
+    );
+    expect(screen.getByTestId('streaming-message')).not.toHaveTextContent('▌');
+
+    // turn_completed no longer drops the buffer: without a matching persisted
+    // message, the (caret-less) bubble lingers rather than leaving a gap. Its
+    // removal is owned by the suppression guard once the persisted copy lands.
     act(() => {
       useLiveStore.getState().applyEvent({
         kind: 'turn_completed',
@@ -152,7 +172,7 @@ describe('TranscriptPane', () => {
         stop_reason: null,
       });
     });
-    expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
+    expect(screen.getByTestId('streaming-message')).toBeInTheDocument();
   });
 
   it('renders the live streaming bubble as Markdown', async () => {

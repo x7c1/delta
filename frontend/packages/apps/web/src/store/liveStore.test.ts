@@ -276,14 +276,23 @@ describe('liveStore assistant streaming preview', () => {
     );
   });
 
-  it('clears the preview on turn_completed', () => {
+  it('keeps the preview on turn_completed (suppression owns the handoff)', () => {
+    // turn_completed (the Stop hook) can outrun the async transcript refetch
+    // that persists the assistant message. Clearing the buffer here would
+    // remove the bubble before the persisted copy renders, leaving a visible
+    // gap. So the buffer is left in place: the content-based suppression guard
+    // (persistedHasStreamedText) removes it in the same render that adds the
+    // persisted message — a gap-free swap. The next turn's first chunk (a new
+    // message_id) overwrites it, so it does not accumulate.
     stream({ index: 0, delta: 'partial' });
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
       stop_reason: null,
     });
-    expect(useLiveStore.getState().streamingMessages).toEqual({});
+    expect(useLiveStore.getState().streamingMessages['sess-1'].text).toBe(
+      'partial',
+    );
   });
 
   it('clears the preview on turn_interrupted', () => {

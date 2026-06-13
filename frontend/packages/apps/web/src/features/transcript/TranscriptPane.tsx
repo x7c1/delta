@@ -738,12 +738,20 @@ export function TranscriptPane({
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
               <div className="flex items-end">
                 <AssistantMarkdown text={streaming.text} />
-                <span
-                  className="ml-0.5 inline-block animate-pulse text-slate-400"
-                  aria-hidden="true"
-                >
-                  ▌
-                </span>
+                {/* The blinking caret signals "still generating", so it shows
+                    only while the stream is in progress (!done). Once the final
+                    chunk has arrived the bubble lingers (caret-less) until the
+                    persisted message lands and suppression swaps it out, so a
+                    completed reply never shows a misleading "generating" caret
+                    during the handoff. */}
+                {!streaming.done && (
+                  <span
+                    className="ml-0.5 inline-block animate-pulse text-slate-400"
+                    aria-hidden="true"
+                  >
+                    ▌
+                  </span>
+                )}
               </div>
             </div>
           </article>
