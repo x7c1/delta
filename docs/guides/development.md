@@ -210,17 +210,22 @@ The two-layer sync rule:
    contract, and `make check && make e2e && make e2e-fake` to confirm the
    re-enactment still proves the loop.
 
-Known drift already pinned by the suite (fake-claude still re-enacts the old
-shape; kept for transcripts recorded by older claude versions): a prompt typed
-while a turn is in flight is no longer written as a `queued_command`
-attachment line — current claude records a uuid-less
+Drift already pinned by the suite and synced (the queued-prompt format): a
+prompt typed while a turn is in flight is no longer written as a
+`queued_command` attachment line — current claude records a uuid-less
 `{"type":"queue-operation","operation":"enqueue",…}` line at submit time and
-replays the prompt as a plain `type:"user"` line (which fires its own
-`UserPromptSubmit`) when it dequeues. Delta's behavior is unaffected — it
-holds browser-composed sends in its own queue and only types them into an idle
-pane, so claude-side queueing happens only for prompts typed directly into the
-TUI — but the fake's `write_queued_command` step and the parser's
-`queued_command` special case describe the old recording.
+replays the prompt as a plain `type:"user"` line (`promptSource: "queued"`,
+firing its own `UserPromptSubmit`) when it dequeues. Both layers follow the
+new shape: fake-claude re-enacts it with its `enqueue_prompt`/`dequeue_prompt`
+steps, and the parser deliberately skips the uuid-less bookkeeping line while
+the replayed user line flows the normal attribution path (pinned by the
+`queue_operation_dequeue*` corpus cases in `delta-attribution`). The parser's
+`queued_command` special case is kept as **legacy-format compatibility**:
+transcripts recorded by older claude versions are still resumed and viewed,
+so that path must not be cleaned up. Delta's own dispatch is unaffected
+either way — it holds browser-composed sends in its own queue and only types
+them into an idle pane, so claude-side queueing happens only for prompts
+typed directly into the TUI.
 
 Two environment facts the suite handles for you (relevant when running any
 real-claude loop by hand):

@@ -1,0 +1,41 @@
+{
+  "assignments": [
+    {
+      "uuid": "u0",
+      "role": "user",
+      "seq": 0,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a1",
+      "role": "assistant",
+      "seq": 1,
+      "thread_id": 1
+    },
+    {
+      "uuid": "u3",
+      "role": "user",
+      "seq": 3,
+      "thread_id": 2,
+      "semantic_parent_uuid": "a1"
+    },
+    {
+      "uuid": "a4",
+      "role": "assistant",
+      "seq": 4,
+      "thread_id": 2
+    }
+  ],
+  "effects": [
+    {
+      "kind": "send_matched",
+      "send_id": 1,
+      "matched_uuid": "u0"
+    },
+    {
+      "kind": "send_matched",
+      "send_id": 2,
+      "matched_uuid": "u3"
+    }
+  ]
+}

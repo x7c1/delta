@@ -1,5 +1,6 @@
 //! The engine: wire the launch surfaces together and execute the scenario.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -74,6 +75,7 @@ pub fn run() -> Result<(), String> {
         endpoints,
         events,
         pending_prompt: args.prompt,
+        queued_prompts: VecDeque::new(),
         last_tool_use: None,
         tool_use_seq: 0,
         last_additional_context: String::new(),
@@ -141,6 +143,9 @@ struct Engine {
     /// The launch's positional prompt, consumed by the first `await_prompt` —
     /// mirroring how `claude` auto-submits a positional prompt at startup.
     pending_prompt: Option<String>,
+    /// Prompts the scenario enqueued mid-turn (`enqueue_prompt`), awaiting
+    /// their `dequeue_prompt` replay — mirroring claude's prompt queue.
+    queued_prompts: VecDeque<String>,
     last_tool_use: Option<ToolUse>,
     tool_use_seq: usize,
     /// The `additionalContext` the most recent `UserPromptSubmit` hook response
@@ -156,32 +161,7 @@ impl Engine {
         match step {
             Step::AwaitPrompt => {
                 let prompt = self.next_prompt()?;
-                // Hook first, then the transcript line: the real `claude` fires
-                // `UserPromptSubmit` before the user line lands in the JSONL
-                // (the server is built to tolerate — and expects — that order).
-                let body = self.fire(
-                    "UserPromptSubmit",
-                    &self.endpoints.user_prompt_submit,
-                    &UserPromptSubmitPayload {
-                        prompt: prompt.clone(),
-                        session_id: self.session_id.clone(),
-                        transcript_path: self.transcript_path.clone(),
-                        cwd: self.cwd.clone(),
-                    },
-                );
-                // Record any injected `additionalContext`, like the real
-                // `claude` consuming the hook response. Exposed to `reply`
-                // steps via the `{additional_context}` placeholder.
-                self.last_additional_context = body
-                    .as_deref()
-                    .and_then(|b| serde_json::from_str::<Value>(b).ok())
-                    .and_then(|v| {
-                        v.pointer("/hookSpecificOutput/additionalContext")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    })
-                    .unwrap_or_default();
-                self.transcript.user_text(&prompt)
+                self.submit_prompt(&prompt, false)
             }
             Step::Reply { text, thinking } => {
                 // `{additional_context}` substitutes the context the most
@@ -294,7 +274,23 @@ impl Engine {
                 // server the turn was aborted.
                 self.transcript.interrupt_marker()
             }
-            Step::WriteQueuedCommand { text } => self.transcript.queued_command(text),
+            Step::EnqueuePrompt { text } => {
+                // A prompt submitted while the turn is busy: claude records
+                // only the uuid-less `queue-operation` enqueue line now (no
+                // hook fires) and replays the prompt at dequeue.
+                self.queued_prompts.push_back(text.clone());
+                self.transcript.queue_operation_enqueue(text)
+            }
+            Step::DequeuePrompt => {
+                let prompt = self
+                    .queued_prompts
+                    .pop_front()
+                    .ok_or("dequeue_prompt step without a pending enqueue_prompt")?;
+                // The dequeued prompt flows the same path as a TUI-typed one:
+                // its own `UserPromptSubmit`, then a plain user line (stamped
+                // `promptSource: "queued"`).
+                self.submit_prompt(&prompt, true)
+            }
             Step::Delay { ms } => {
                 std::thread::sleep(Duration::from_millis(*ms));
                 Ok(())
@@ -302,6 +298,40 @@ impl Engine {
             Step::Hang => loop {
                 std::thread::park();
             },
+        }
+    }
+
+    /// The submit sequence a fresh prompt and a dequeued replay share: fire
+    /// `UserPromptSubmit` first, then write the user transcript line — the
+    /// real `claude` fires the hook before the line lands in the JSONL (the
+    /// server is built to tolerate — and expects — that order). Records any
+    /// injected `additionalContext` from the hook response, like the real
+    /// `claude` consuming it; exposed to `reply` steps via the
+    /// `{additional_context}` placeholder.
+    fn submit_prompt(&mut self, prompt: &str, dequeued: bool) -> Result<(), String> {
+        let body = self.fire(
+            "UserPromptSubmit",
+            &self.endpoints.user_prompt_submit,
+            &UserPromptSubmitPayload {
+                prompt: prompt.to_owned(),
+                session_id: self.session_id.clone(),
+                transcript_path: self.transcript_path.clone(),
+                cwd: self.cwd.clone(),
+            },
+        );
+        self.last_additional_context = body
+            .as_deref()
+            .and_then(|b| serde_json::from_str::<Value>(b).ok())
+            .and_then(|v| {
+                v.pointer("/hookSpecificOutput/additionalContext")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_default();
+        if dequeued {
+            self.transcript.dequeued_user_text(prompt)
+        } else {
+            self.transcript.user_text(prompt)
         }
     }
 
@@ -322,8 +352,8 @@ impl Engine {
     }
 
     /// Block until Escape arrives. Prompts submitted while a turn is in
-    /// flight are dropped: modelling Claude's queued-command behaviour is the
-    /// explicit `write_queued_command` step's job, not an implicit side
+    /// flight are dropped: modelling claude's prompt queue is the explicit
+    /// `enqueue_prompt`/`dequeue_prompt` steps' job, not an implicit side
     /// effect of waiting.
     fn await_interrupt(&mut self) -> Result<(), String> {
         loop {

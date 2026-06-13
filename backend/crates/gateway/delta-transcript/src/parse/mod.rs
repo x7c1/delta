@@ -20,18 +20,29 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
     }
     let raw: RawLine = serde_json::from_str(trimmed)?;
 
-    // A line without a uuid is not a message we can address; skip it.
+    // A line without a uuid is not a message we can address; skip it. This
+    // deliberately covers `type: "queue-operation"` lines — the uuid-less
+    // bookkeeping records current claude writes when a prompt is submitted
+    // mid-turn. The queued prompt's real message is the plain `type: "user"`
+    // line claude replays at dequeue (which fires its own `UserPromptSubmit`
+    // and flows the normal parse/attribution path), so the bookkeeping line
+    // carries nothing Delta needs to surface.
     let Some(uuid) = raw.uuid else {
         return Ok(None);
     };
 
-    // A `queued_command` attachment is a prompt the user composed while a turn
-    // was in flight. Claude records it ONLY as this attachment line — never as a
-    // normal `type: "user"` line — so without special handling it parses as a
-    // contentless `Role::Other` line: invisible in the transcript and
-    // uncorrelatable to its queued send, which drops the whole turn (prompt and
-    // reply) onto `main`. Surface it as a user message carrying the queued
-    // prompt text so it both displays and flows through send correlation.
+    // LEGACY FORMAT COMPATIBILITY — keep this path. Older claude versions
+    // recorded a prompt composed while a turn was in flight ONLY as a
+    // `queued_command` attachment line — never as a normal `type: "user"`
+    // line — so without special handling it parses as a contentless
+    // `Role::Other` line: invisible in the transcript and uncorrelatable to
+    // its queued send, which drops the whole turn (prompt and reply) onto
+    // `main`. Surface it as a user message carrying the queued prompt text so
+    // it both displays and flows through send correlation. Current claude
+    // writes a `queue-operation` line instead and replays the prompt as a
+    // plain user line (see the queued-prompt drift note in
+    // docs/guides/development.md), but transcripts recorded by older versions
+    // are still resumed and viewed.
     let queued_prompt = raw
         .attachment
         .as_ref()
@@ -117,10 +128,35 @@ mod tests {
     }
 
     #[test]
-    fn queued_command_attachment_parses_as_user_prompt() {
-        // A prompt queued while a turn was in flight: Claude records it only as
-        // this attachment, with no `message` content. It must surface as a user
-        // message carrying the queued prompt so it displays and correlates.
+    fn queue_operation_line_is_deliberately_skipped() {
+        // Current claude's bookkeeping record for a prompt submitted mid-turn:
+        // uuid-less, so it must be skipped (not choked on or misclassified).
+        // The prompt's real message is the plain user line replayed at dequeue.
+        let line = r#"{"type":"queue-operation","operation":"enqueue","content":"Reply with only the word: ok","sessionId":"s1","timestamp":"2026-01-01T00:00:00Z"}"#;
+        assert!(parse_line(line).unwrap().is_none());
+    }
+
+    #[test]
+    fn dequeued_user_line_parses_as_a_plain_user_message() {
+        // The replay current claude writes when a queued prompt dequeues: an
+        // ordinary `type: "user"` line carrying a `promptSource: "queued"`
+        // provenance field, which must not perturb the parse.
+        let line = r#"{"uuid":"u9","parentUuid":"m8","type":"user","promptSource":"queued","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"Reply with only the word: ok"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::User);
+        assert_eq!(
+            msg.flatten_text().as_deref(),
+            Some("Reply with only the word: ok")
+        );
+        assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn legacy_queued_command_attachment_parses_as_user_prompt() {
+        // LEGACY FORMAT: older claude versions recorded a prompt queued while
+        // a turn was in flight only as this attachment, with no `message`
+        // content. It must surface as a user message carrying the queued
+        // prompt so old transcripts still display and correlate.
         let line = r#"{"uuid":"q1","parentUuid":"a0","type":"attachment","timestamp":"2026-01-01T00:00:00Z","attachment":{"type":"queued_command","prompt":"queued while the turn was busy","commandMode":"prompt"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.uuid, MessageUuid::from("q1"));

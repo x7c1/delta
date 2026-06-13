@@ -1,0 +1,8 @@
+{
+  "comment": "Current claude's queued-prompt format, branch-send variant: if a dispatched send ever lands in a just-busy pane, claude enqueues it (uuid-less queue-operation line) and replays it as a plain user line once the turn frees. The replay equals the outstanding branch send's text, so ordinary send correlation attributes the prompt AND its reply to the child thread — nothing is misattributed to main. New-format analogue of the legacy queued_command_branch case.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "start the long task" },
+    { "id": 2, "thread_id": 2, "semantic_parent_uuid": "a1", "text": "branch off that first reply" }
+  ]
+}

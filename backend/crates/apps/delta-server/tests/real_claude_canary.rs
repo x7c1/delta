@@ -33,8 +33,6 @@
 //!   `role: user` line (accepted by `claude_format::is_interrupt_marker`)
 //!   and fires NO `Stop`; a prompt typed while the turn was busy is recorded
 //!   and replayed after the interrupt, firing its own `UserPromptSubmit`.
-//!   NOTE: this canary pins the **current** queued-prompt reality, which has
-//!   drifted from what fake-claude re-enacts — see the test's doc comment.
 //! - [`permission_dialog_fires_the_hook_and_the_allow_decision_is_honored`]:
 //!   `PreToolUse` carries `tool_use_id`; `PermissionRequest` fires for a
 //!   dialog-worthy tool call, carries `tool_name`/`tool_input` and — load
@@ -570,16 +568,17 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
 #[tokio::test]
 #[ignore = "drives the real claude CLI (consumes quota); run via make e2e-real"]
 async fn interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue() {
-    // DRIFT NOTE (claude 2.1.x): a prompt typed while a turn is in flight is
-    // no longer recorded as a `queued_command` attachment line (the shape
-    // `fake-claude` re-enacts and `delta-transcript` special-cases). Instead
-    // claude writes a uuid-less `{"type":"queue-operation","operation":
-    // "enqueue","content":…}` line at submit time, and on dequeue replays the
-    // prompt as a plain `type:"user"` line (promptSource "queued") that fires
-    // its own `UserPromptSubmit` hook — i.e. it flows through the same path as
-    // any TUI-typed prompt. This canary pins that current reality; fake-claude
-    // and the `queued_command` parse path still re-enact the old shape and
-    // need a follow-up sync (kept for transcripts recorded by older versions).
+    // QUEUED-PROMPT FORMAT (claude 2.1.x): a prompt typed while a turn is in
+    // flight is recorded as a uuid-less `{"type":"queue-operation",
+    // "operation":"enqueue","content":…}` line at submit time, and on dequeue
+    // replayed as a plain `type:"user"` line (promptSource "queued") that
+    // fires its own `UserPromptSubmit` hook — i.e. it flows through the same
+    // path as any TUI-typed prompt. This canary pins that reality; fake-claude
+    // re-enacts it (`enqueue_prompt`/`dequeue_prompt` steps). Older claude
+    // versions wrote a `queued_command` attachment line instead, which
+    // `delta-transcript` still parses as legacy-format compatibility for
+    // transcripts recorded back then (see the queued-prompt drift note in
+    // docs/guides/development.md).
     with_one_retry("interrupt_and_queued", || async {
         let capture = Arc::new(Capture {
             events: Mutex::new(Vec::new()),

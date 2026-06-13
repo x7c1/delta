@@ -2,7 +2,10 @@ use delta_model::{MessageUuid, SessionId};
 
 use crate::interactor::testing::*;
 
-/// A branch send issued while a turn is in flight is queued by Claude and
+/// LEGACY FORMAT (older claude versions; see the queued-prompt drift note in
+/// docs/guides/development.md — current claude replays queued prompts as
+/// plain user lines instead, but old transcripts are still resumed/viewed):
+/// a branch send issued while a turn is in flight is queued by Claude and
 /// recorded only as a `queued_command` attachment — never a normal user line,
 /// and with no `UserPromptSubmit` hook of its own. Sync must still correlate
 /// that attachment to its queued send so the prompt AND the reply that follows

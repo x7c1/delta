@@ -1,0 +1,7 @@
+{
+  "comment": "Current claude's queued-prompt format, hand-written from the canary-observed shapes: a prompt typed into the busy pane is recorded as a uuid-less queue-operation enqueue line (skipped by the parser, leaving a seq gap), the interrupt marker frees the turn, and the prompt is replayed as a plain user line (promptSource queued). The replay matches no send, so it is external input landing on main, and its reply follows it there.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "count from 1 to 100" }
+  ]
+}

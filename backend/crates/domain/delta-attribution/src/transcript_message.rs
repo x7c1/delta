@@ -24,9 +24,17 @@ pub struct TranscriptMessage {
     /// unparsable). The reader assigns this; the fold persists it.
     pub seq: i64,
     /// True when this line is a Claude Code `queued_command` attachment: a
-    /// prompt the user composed while a turn was in flight, which Claude records
-    /// *only* as this attachment (never as a normal `type: "user"` line) and
-    /// injects programmatically once the turn yields.
+    /// prompt the user composed while a turn was in flight, which **older**
+    /// claude versions recorded *only* as this attachment (never as a normal
+    /// `type: "user"` line) and injected programmatically once the turn
+    /// yielded.
+    ///
+    /// LEGACY FORMAT COMPATIBILITY — keep this flag and its handling. Current
+    /// claude records a uuid-less `queue-operation` line instead (skipped by
+    /// the parser) and replays the prompt as a plain user line that flows the
+    /// normal attribution path (see the queued-prompt drift note in
+    /// docs/guides/development.md); but transcripts recorded by older
+    /// versions are still resumed and viewed.
     ///
     /// It is surfaced as a [`Role::User`] message so it both displays and feeds
     /// the send-correlation path. The flag matters for the *uncorrelated* case:
