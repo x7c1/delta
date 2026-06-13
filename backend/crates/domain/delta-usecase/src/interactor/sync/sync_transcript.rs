@@ -111,8 +111,12 @@ where
                     {
                         // Keep the queryable runtime mirror in step with the
                         // broadcast, so the sends envelope never reports a
-                        // dialog that already resolved.
+                        // dialog (or question) that already resolved. The same
+                        // `PermissionResolved` event clears either notice in
+                        // the browser; a question's row id and a permission's
+                        // row id are disjoint, so resolving both here is safe.
                         self.state.resolve_pending_permission(request_id);
+                        self.state.resolve_pending_question(request_id);
                         events.push(SessionEvent::PermissionResolved {
                             session_id: session.id.clone(),
                             request_id,

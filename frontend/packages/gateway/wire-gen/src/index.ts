@@ -29,6 +29,7 @@ export type { PermissionDecision } from './generated/PermissionDecision';
 export type { PermissionDecisionRequest } from './generated/PermissionDecisionRequest';
 export type { Turn } from './generated/Turn';
 export type { PendingPermission } from './generated/PendingPermission';
+export type { PendingQuestion } from './generated/PendingQuestion';
 export type { TurnPhase } from './generated/TurnPhase';
 export type { WorkdirEntry } from './generated/WorkdirEntry';
 export type { WorkdirListResponse } from './generated/WorkdirListResponse';

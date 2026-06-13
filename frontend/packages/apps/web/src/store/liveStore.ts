@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
-import type { PendingPermission, SessionEvent, Turn } from '@delta/wire-gen';
+import type {
+  PendingPermission,
+  PendingQuestion,
+  SessionEvent,
+  Turn,
+} from '@delta/wire-gen';
 import type { ConnectionStatus } from '@delta/api-client';
 
 /**
@@ -104,6 +109,29 @@ export interface PermissionNotice {
 }
 
 /**
+ * Claude Code's built-in `AskUserQuestion` tool is presenting a
+ * multiple-choice question for the user to answer in the embedded terminal.
+ * Drives the floating question card over the transcript (the readable question
+ * + options), replacing the confusing generic Allow/Deny notice the tool used
+ * to show. Answering from Delta is out of scope: the user picks in the TUI.
+ *
+ * Set by `question_asked` and re-seeded from the sends envelope's `question`
+ * field after a reconnect (the event is not replayed). Removed on the matching
+ * `permission_resolved` (the correlated tool_result resolved the question's
+ * request row — the user answered), when the turn ends, and when the session
+ * closes. A user dismiss only flags {@link dismissed}, mirroring
+ * {@link PermissionNotice}, so a refetch cannot resurrect the just-closed card.
+ */
+export interface QuestionNotice {
+  kind: 'question';
+  requestId: number;
+  /** The raw `{questions:[…]}` tool input, parsed by the card to render it. */
+  toolInput: string;
+  /** True once the user dismissed the card; the entry stays for de-dup. */
+  dismissed: boolean;
+}
+
+/**
  * Someone typed straight into the session's embedded terminal (rather than
  * sending through the composer); surfaces an inline notice above the
  * composer. Recorded by the router under a focus guard, removed on dismiss,
@@ -146,6 +174,7 @@ export interface SpawnFailureBufferedNotice {
 /** One per-session notice; at most one of each kind exists per session. */
 export type SessionNotice =
   | PermissionNotice
+  | QuestionNotice
   | ExternalInputNotice
   | ResumeUnavailableNotice
   | SpawnFailureBufferedNotice;
@@ -177,6 +206,9 @@ const NOTICE_LIFECYCLE: Record<
   // A pending prompt blocks its turn, so the turn ending (or the session
   // closing — no live process, no dialog) means the question is moot.
   permission: ['turn_end', 'session_closed'],
+  // An AskUserQuestion blocks its turn exactly like a permission prompt, so it
+  // shares the same backstop sweep (a question cannot outlive its turn).
+  question: ['turn_end', 'session_closed'],
   // Same scope as the permission prompt: once the turn it interleaved with is
   // over (or the session is gone), the marker has served its purpose.
   external_input: ['turn_end', 'session_closed'],
@@ -302,15 +334,15 @@ export interface LiveState {
   clearResumeUnavailable: (sessionId: SessionId) => void;
   /**
    * Drop the event-reconstructed turn-scoped state: tracked local sends, the
-   * active-turn flags, and the permission notices. Used on a live-stream
-   * reconnect: the turn-end / `permission_resolved` events that would have
-   * drained these were broadcast while the socket was down and are not
-   * replayed, so they can no longer be reconciled from events. All three
-   * recover from the refetched sends envelope — the open-send list by
-   * refetch, the active-turn flag via {@link seedActiveTurn}, and the
-   * permission notice via {@link seedPermission}. Other notice kinds stay:
-   * they cannot be re-seeded, and each has a non-event escape hatch (a user
-   * dismiss or a lifecycle trigger).
+   * active-turn flags, and the permission/question notices. Used on a
+   * live-stream reconnect: the turn-end / `permission_resolved` events that
+   * would have drained these were broadcast while the socket was down and are
+   * not replayed, so they can no longer be reconciled from events. They all
+   * recover from the refetched sends envelope — the open-send list by refetch,
+   * the active-turn flag via {@link seedActiveTurn}, the permission notice via
+   * {@link seedPermission}, and the question notice via {@link seedQuestion}.
+   * Other notice kinds stay: they cannot be re-seeded, and each has a
+   * non-event escape hatch (a user dismiss or a lifecycle trigger).
    */
   resetTurnEphemera: () => void;
   /**
@@ -336,6 +368,18 @@ export interface LiveState {
     sessionId: SessionId,
     permission: PendingPermission | null,
   ) => void;
+  /**
+   * Seed a session's question notice from the server's queryable pending
+   * question (the `question` field of `GET /api/sessions/{id}/sends`). Mirrors
+   * {@link seedPermission}: set-only (`null` clears nothing), and a report of
+   * the request the card already shows changes nothing, so a refetch can
+   * neither resurrect a card an event just resolved nor un-dismiss one the
+   * user closed.
+   */
+  seedQuestion: (
+    sessionId: SessionId,
+    question: PendingQuestion | null,
+  ) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
   /** Record an external (direct-pane) input notice for a session/thread. */
@@ -346,6 +390,8 @@ export interface LiveState {
   ) => void;
   /** Dismiss the permission notice for a session (kept, flagged dismissed). */
   dismissPermission: (sessionId: SessionId) => void;
+  /** Dismiss the question notice for a session (kept, flagged dismissed). */
+  dismissQuestion: (sessionId: SessionId) => void;
   /** Dismiss the external-input notice for a session. */
   dismissExternalInput: (sessionId: SessionId) => void;
   /**
@@ -484,7 +530,7 @@ export const useLiveStore = create<LiveState>((set) => ({
       const notices: Record<SessionId, SessionNotice[]> = {};
       for (const [sessionId, list] of Object.entries(state.notices)) {
         const remaining = list.filter(
-          (notice) => notice.kind !== 'permission',
+          (notice) => notice.kind !== 'permission' && notice.kind !== 'question',
         );
         if (remaining.length > 0) {
           notices[sessionId] = remaining;
@@ -516,6 +562,25 @@ export const useLiveStore = create<LiveState>((set) => ({
           requestId: permission.request_id,
           toolName: permission.tool_name,
           toolInput: permission.tool_input,
+          dismissed: false,
+        }),
+      };
+    }),
+
+  seedQuestion: (sessionId, question) =>
+    set((state) => {
+      if (question === null) {
+        return state;
+      }
+      const current = noticeOf(state.notices, sessionId, 'question');
+      if (current?.requestId === question.request_id) {
+        return state;
+      }
+      return {
+        notices: withNotice(state.notices, sessionId, {
+          kind: 'question',
+          requestId: question.request_id,
+          toolInput: question.tool_input,
           dismissed: false,
         }),
       };
@@ -554,6 +619,22 @@ export const useLiveStore = create<LiveState>((set) => ({
       }
       // Keep the entry, flagged: removal would let the next sends refetch
       // re-seed the same still-pending request and resurrect the card.
+      return {
+        notices: withNotice(state.notices, sessionId, {
+          ...current,
+          dismissed: true,
+        }),
+      };
+    }),
+
+  dismissQuestion: (sessionId) =>
+    set((state) => {
+      const current = noticeOf(state.notices, sessionId, 'question');
+      if (!current || current.dismissed) {
+        return state;
+      }
+      // Keep the entry, flagged: removal would let the next sends refetch
+      // re-seed the same still-pending question and resurrect the card.
       return {
         notices: withNotice(state.notices, sessionId, {
           ...current,
@@ -612,18 +693,34 @@ export const useLiveStore = create<LiveState>((set) => ({
               dismissed: false,
             }),
           };
+        case 'question_asked':
+          // Claude Code's AskUserQuestion is presenting its options in the
+          // TUI; surface the dedicated question card. Driven off PreToolUse so
+          // the same `permission_resolved` (from the correlated tool_result)
+          // clears it once the user answers.
+          return {
+            notices: withNotice(state.notices, event.session_id, {
+              kind: 'question',
+              requestId: event.request_id,
+              toolInput: event.tool_input,
+              dismissed: false,
+            }),
+          };
         case 'permission_resolved': {
           // The request was answered (a browser decision or the correlated
           // tool_result). Remove the notice only when it is the SAME request
           // that resolved, so a stale resolution never wipes a newer pending
           // prompt for the same session. An auto-approved tool resolves
           // almost immediately, so this clears the brief notice; a genuine
-          // prompt has no resolution until the human answers.
+          // prompt has no resolution until the human answers. The same event
+          // also clears a `question` notice with the matching request id: an
+          // AskUserQuestion's request row resolves the moment its tool_result
+          // (the user's pick) is ingested.
           const next = removeNotices(
             state.notices,
             event.session_id,
             (notice) =>
-              notice.kind === 'permission' &&
+              (notice.kind === 'permission' || notice.kind === 'question') &&
               notice.requestId === event.request_id,
           );
           return Object.keys(next).length > 0 ? next : state;

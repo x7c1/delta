@@ -1,6 +1,7 @@
 use tokio::sync::oneshot;
 
 use crate::error::Result;
+use crate::interactor::hooks::ASK_USER_QUESTION;
 use crate::interactor::permission_decision::PermissionDecision;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingPermission;
@@ -48,6 +49,28 @@ where
         tool_name: &str,
         tool_input_json: &str,
     ) -> Result<PermissionWait> {
+        // Claude Code's `AskUserQuestion` is not a gateable action — a hook
+        // cannot return the chosen option, and the question card is already
+        // driven off `PreToolUse` (see `on_pre_tool_use`). So short-circuit
+        // here to an immediate passthrough: no row, no waiter, no
+        // `pending_permission`, no event. The `decision` receiver's sender is
+        // dropped right away, so the transport's `timeout(...)` resolves at
+        // once with a closed channel → empty passthrough → the TUI prompt
+        // appears instantly (no 50s block, no duplicate Allow/Deny notice).
+        if tool_name == ASK_USER_QUESTION {
+            let (sender, receiver) = oneshot::channel();
+            drop(sender);
+            return Ok(PermissionWait {
+                // No waiter is registered for this id, so the index entry it
+                // seeds and the `abandon_permission_decision` that removes it
+                // are both harmless no-ops (`take_permission_waiter` finds
+                // nothing).
+                request_id: 0,
+                decision: receiver,
+                events: vec![],
+            });
+        }
+
         let request = self
             .store
             .record_permission_request(self.id, tool_name, tool_input_json, None)

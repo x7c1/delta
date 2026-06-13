@@ -1,6 +1,7 @@
 import type {
   Message,
   PendingPermission,
+  PendingQuestion,
   Send,
   Session,
   Thread,
@@ -374,6 +375,13 @@ export interface MockStore {
      * `applyEvent`). Absent means nothing is pending.
      */
     pendingPermission?: PendingPermission;
+    /**
+     * The `AskUserQuestion` currently presenting its options, mirrored from the
+     * scripted `question_asked`/`permission_resolved` events so the sends
+     * envelope reports it the way the real server does (see `applyEvent`).
+     * Absent means no question is pending.
+     */
+    pendingQuestion?: PendingQuestion;
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: Send[];

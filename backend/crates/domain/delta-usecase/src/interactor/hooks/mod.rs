@@ -15,6 +15,15 @@ mod register_session_row;
 #[cfg(test)]
 mod tests;
 
+/// Claude Code's built-in interactive multiple-choice tool.
+///
+/// When the assistant calls this tool, Claude Code presents 2–4 options for the
+/// user to pick in the TUI. Delta special-cases it across both the `PreToolUse`
+/// and `PermissionRequest` hooks (a dedicated question card, not a generic
+/// Allow/Deny notice), so the tool name lives here once and both handlers
+/// reference it — no magic-string drift.
+pub(in crate::interactor) const ASK_USER_QUESTION: &str = "AskUserQuestion";
+
 pub use on_permission_request::PermissionWait;
 
 pub(in crate::interactor::hooks) use match_uuid_for_prompt::match_uuid_for_prompt;

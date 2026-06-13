@@ -1,7 +1,7 @@
 //! Response for `GET /api/sessions/{id}/sends`.
 
 use delta_model::Send;
-use delta_usecase::{PendingPermission, SessionLiveState, TurnState};
+use delta_usecase::{PendingPermission, PendingQuestion, SessionLiveState, TurnState};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -78,16 +78,43 @@ impl From<PendingPermission> for WirePendingPermission {
     }
 }
 
+/// An `AskUserQuestion` tool call currently presenting its options in the TUI,
+/// as reported on the REST surface.
+///
+/// The queryable counterpart of the `question_asked` event (same fields, minus
+/// the session id the URL already names): the event is lost for a client whose
+/// socket was down when it fired, so a reconnecting client rebuilds its
+/// question card from this instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(rename = "PendingQuestion")]
+pub struct WirePendingQuestion {
+    /// The `PreToolUse` row id whose `tool_result` resolves this question.
+    pub request_id: i64,
+    /// The raw `{"questions":[…]}` tool input, serialized as JSON text.
+    pub tool_input: String,
+}
+
+impl From<PendingQuestion> for WirePendingQuestion {
+    fn from(pending: PendingQuestion) -> Self {
+        WirePendingQuestion {
+            request_id: pending.request_id,
+            tool_input: pending.tool_input_json,
+        }
+    }
+}
+
 /// Response for `GET /api/sessions/{id}/sends`: the session's open
 /// (non-terminal) sends — status `queued` or `dispatched` — oldest first, plus
-/// the session's queryable live state (the current turn state and the pending
-/// permission dialog, if one awaits an answer).
+/// the session's queryable live state (the current turn state, the pending
+/// permission dialog, and the pending question, each present only when one
+/// awaits an answer).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "SendsResponse")]
 pub struct WireSendsResponse {
     pub sends: Vec<WireSend>,
     pub turn: WireTurn,
     pub permission: Option<WirePendingPermission>,
+    pub question: Option<WirePendingQuestion>,
 }
 
 impl WireSendsResponse {
@@ -96,6 +123,7 @@ impl WireSendsResponse {
             sends: sends.into_iter().map(WireSend::from).collect(),
             turn: live.turn.into(),
             permission: live.pending_permission.map(WirePendingPermission::from),
+            question: live.pending_question.map(WirePendingQuestion::from),
         }
     }
 }
@@ -126,12 +154,13 @@ mod tests {
     }
 
     #[test]
-    fn sends_response_carries_sends_turn_and_permission() {
+    fn sends_response_carries_sends_turn_permission_and_question() {
         let body = WireSendsResponse::new(
             Vec::new(),
             SessionLiveState {
                 turn: TurnState::Idle,
                 pending_permission: None,
+                pending_question: None,
             },
         );
         assert_eq!(
@@ -140,6 +169,7 @@ mod tests {
                 "sends": [],
                 "turn": { "state": "idle", "send_id": null },
                 "permission": null,
+                "question": null,
             }),
         );
     }
@@ -155,6 +185,7 @@ mod tests {
                     tool_name: "Bash".to_owned(),
                     tool_input_json: "{\"command\":\"rm -rf scratch\"}".to_owned(),
                 }),
+                pending_question: None,
             },
         );
         assert_eq!(
@@ -166,6 +197,34 @@ mod tests {
                     "request_id": 3,
                     "tool_name": "Bash",
                     "tool_input": "{\"command\":\"rm -rf scratch\"}",
+                },
+                "question": null,
+            }),
+        );
+    }
+
+    #[test]
+    fn sends_response_reports_the_pending_question() {
+        let body = WireSendsResponse::new(
+            Vec::new(),
+            SessionLiveState {
+                turn: TurnState::InFlight { send_id: Some(7) },
+                pending_permission: None,
+                pending_question: Some(PendingQuestion {
+                    request_id: 5,
+                    tool_input_json: "{\"questions\":[{\"header\":\"Pick\"}]}".to_owned(),
+                }),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            serde_json::json!({
+                "sends": [],
+                "turn": { "state": "in_flight", "send_id": 7 },
+                "permission": null,
+                "question": {
+                    "request_id": 5,
+                    "tool_input": "{\"questions\":[{\"header\":\"Pick\"}]}",
                 },
             }),
         );

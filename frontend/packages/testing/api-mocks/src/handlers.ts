@@ -2,6 +2,7 @@ import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   MessagesResponse,
   PendingPermission,
+  PendingQuestion,
   NewSessionResponse,
   Send,
   SendRequest,
@@ -231,6 +232,8 @@ export function createMockApi(): MockApi {
         // The pending permission dialog rides along exactly as the real
         // server reports it, so the reconnect re-seed path works in mock mode.
         permission: entry.pendingPermission ?? null,
+        // Likewise the pending AskUserQuestion, so its re-seed path works too.
+        question: entry.pendingQuestion ?? null,
       };
       return HttpResponse.json(body);
     }),
@@ -414,6 +417,16 @@ export function createMockApi(): MockApi {
     }
   };
 
+  const setPendingQuestion = (
+    sessionId: string,
+    pending: PendingQuestion | undefined,
+  ) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (entry) {
+      entry.pendingQuestion = pending;
+    }
+  };
+
   const applyEvent = (event: SessionEvent): void => {
     switch (event.kind) {
       case 'permission_requested':
@@ -425,8 +438,19 @@ export function createMockApi(): MockApi {
           tool_input: event.tool_input,
         });
         break;
+      case 'question_asked':
+        // Mirror the AskUserQuestion into queryable state, as the real server
+        // keeps it for the sends envelope.
+        setPendingQuestion(event.session_id, {
+          request_id: event.request_id,
+          tool_input: event.tool_input,
+        });
+        break;
       case 'permission_resolved':
+        // The same event clears both a permission dialog and a question whose
+        // request id matches (the real server emits it for either row).
         setPendingPermission(event.session_id, undefined);
+        setPendingQuestion(event.session_id, undefined);
         break;
       case 'turn_started': {
         // The named send correlated with its transcript line: terminal.
@@ -444,10 +468,12 @@ export function createMockApi(): MockApi {
         // its turn, mirroring the server's runtime sweep.
         resolveOpenSends(event.session_id, 'matched');
         setPendingPermission(event.session_id, undefined);
+        setPendingQuestion(event.session_id, undefined);
         break;
       case 'turn_interrupted':
         resolveOpenSends(event.session_id, 'cancelled');
         setPendingPermission(event.session_id, undefined);
+        setPendingQuestion(event.session_id, undefined);
         break;
       case 'session_registered': {
         // The spawn bound: the row activates and becomes listable, with a
@@ -473,6 +499,7 @@ export function createMockApi(): MockApi {
             // No live process, no dialog — the server clears its runtime
             // mirror when the close drives the turn back to idle.
             entry.pendingPermission = undefined;
+            entry.pendingQuestion = undefined;
           }
         }
         break;

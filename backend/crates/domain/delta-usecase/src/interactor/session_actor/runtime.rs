@@ -171,13 +171,34 @@ pub struct PendingPermission {
     pub tool_input_json: String,
 }
 
+/// An `AskUserQuestion` tool call currently presenting its options in the TUI,
+/// awaiting the user's pick.
+///
+/// The queryable counterpart of the `QuestionAsked` broadcast, mirroring
+/// [`PendingPermission`]: the event is lost for a client whose socket was down
+/// when it fired, so the sends envelope reports this state and a reconnecting
+/// client rebuilds its question card from a plain refetch. Cleared when the
+/// correlated `tool_result` resolves the request (the user answered in the TUI)
+/// and whenever the turn returns to idle — a question cannot outlive its turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingQuestion {
+    /// The `PreToolUse` row id that recorded this question (its `tool_use_id`
+    /// is what the later `tool_result` resolves it by).
+    pub request_id: i64,
+    /// The raw `{"questions":[…]}` tool input, serialized as JSON text, which
+    /// the browser parses to render the question card.
+    pub tool_input_json: String,
+}
+
 /// One consistent snapshot of the runtime state the sends envelope reports:
-/// the turn phase plus the pending permission dialog, read in a single actor
-/// message so the two can never disagree within one response.
+/// the turn phase plus the pending permission dialog and the pending question,
+/// read in a single actor message so they can never disagree within one
+/// response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionLiveState {
     pub turn: TurnState,
     pub pending_permission: Option<PendingPermission>,
+    pub pending_question: Option<PendingQuestion>,
 }
 
 /// All of one session's runtime state, owned exclusively by its actor.
@@ -210,6 +231,11 @@ pub struct SessionRuntime {
     /// still up, so the question is still genuinely pending. At most one
     /// exists — `claude` shows one dialog at a time.
     pending_permission: Option<PendingPermission>,
+    /// The `AskUserQuestion` tool call currently presenting its options in the
+    /// TUI, if any. Set by the `PreToolUse` hook for that tool and cleared when
+    /// the correlated `tool_result` resolves its request row or the turn ends.
+    /// At most one exists — `claude` shows one question at a time.
+    pending_question: Option<PendingQuestion>,
 }
 
 impl SessionRuntime {
@@ -225,6 +251,7 @@ impl SessionRuntime {
             && self.turn == TurnState::Idle
             && self.permission_waiters.is_empty()
             && self.pending_permission.is_none()
+            && self.pending_question.is_none()
     }
 
     /// Whether a pane is live: bound to the session, or spawned and awaiting
@@ -450,6 +477,7 @@ impl SessionRuntime {
         SessionLiveState {
             turn: self.turn,
             pending_permission: self.pending_permission.clone(),
+            pending_question: self.pending_question.clone(),
         }
     }
 
@@ -458,14 +486,15 @@ impl SessionRuntime {
     /// anomalies). The transition table lives in the `turn` module.
     ///
     /// A transition back to [`TurnState::Idle`] (stop, interrupt, close) also
-    /// drops any pending permission dialog: the dialog blocked that turn, so
-    /// the turn ending — however it ended — means the question is moot. This
-    /// is the same lifecycle the browser notice has.
+    /// drops any pending permission dialog and pending question: both blocked
+    /// that turn, so the turn ending — however it ended — makes them moot. This
+    /// is the same lifecycle the browser notices have.
     pub fn apply_turn(&mut self, input: TurnInput) -> Transition {
         let result = transition(self.turn, input);
         self.turn = result.next;
         if result.next == TurnState::Idle {
             self.pending_permission = None;
+            self.pending_question = None;
         }
         result
     }
@@ -475,6 +504,7 @@ impl SessionRuntime {
     pub fn forget_turn(&mut self) {
         self.turn = TurnState::Idle;
         self.pending_permission = None;
+        self.pending_question = None;
     }
 
     /// Register a oneshot waiter for a permission request the browser may
@@ -513,6 +543,25 @@ impl SessionRuntime {
             .is_some_and(|p| p.request_id == request_id)
         {
             self.pending_permission = None;
+        }
+    }
+
+    /// Record the `AskUserQuestion` now presenting its options in the TUI (a
+    /// new question replaces a stale one — `claude` shows one at a time).
+    pub fn set_pending_question(&mut self, pending: PendingQuestion) {
+        self.pending_question = Some(pending);
+    }
+
+    /// Drop the pending question if `request_id` is the one it tracks. Keyed so
+    /// a stale resolution can never wipe a newer question's state — the same
+    /// guard [`Self::resolve_pending_permission`] applies.
+    pub fn resolve_pending_question(&mut self, request_id: i64) {
+        if self
+            .pending_question
+            .as_ref()
+            .is_some_and(|q| q.request_id == request_id)
+        {
+            self.pending_question = None;
         }
     }
 

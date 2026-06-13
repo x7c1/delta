@@ -243,6 +243,7 @@ where
             SessionLiveState {
                 turn: TurnState::Idle,
                 pending_permission: None,
+                pending_question: None,
             },
         )
         .await

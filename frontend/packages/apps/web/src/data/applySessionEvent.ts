@@ -131,7 +131,10 @@ export function applySessionEvent(
       break;
     case 'permission_requested':
     case 'permission_resolved':
-      // Pure UI notice (set/cleared); already handled by the store.
+    case 'question_asked':
+      // Pure UI notice (set/cleared); already handled by the store. A
+      // `question_asked` (AskUserQuestion) clears via the same
+      // `permission_resolved` the correlated tool_result emits.
       break;
     case 'spawn_failed':
       // A freshly-spawned session never bound; the server reaped its row (the

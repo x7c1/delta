@@ -23,6 +23,7 @@ import {
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
+import { QuestionCard } from './QuestionCard';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import {
@@ -114,6 +115,17 @@ export function TranscriptPane({
       : null,
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
+  // The focused session's pending AskUserQuestion, if any. Emitted by the
+  // `PreToolUse` hook for that built-in tool, so it is a genuine "answer
+  // needed" signal shown directly as a readable question card. It clears on
+  // dismiss, when the correlated tool_result resolves it (the user picked in
+  // the terminal), or when the turn ends.
+  const question = useLiveStore((state) =>
+    activeThread
+      ? noticeOf(state.notices, activeThread.session_id, 'question')
+      : null,
+  );
+  const dismissQuestion = useLiveStore((state) => state.dismissQuestion);
   const dismissExternalInput = useLiveStore(
     (state) => state.dismissExternalInput,
   );
@@ -423,6 +435,19 @@ export function TranscriptPane({
     />
   );
 
+  // The question card floats in the same top-right slot as the permission
+  // notice (the two never co-occur — `claude` shows one interactive prompt at a
+  // time). It is read-only here: the user picks in the terminal, so it carries
+  // no Allow/Deny and posts no decision. Capped height with internal scroll so
+  // a large card never blankets the transcript.
+  const questionOverlay = question && !question.dismissed && activeThread && (
+    <QuestionCard
+      notice={question}
+      onOpenTerminal={() => setTerminalOpen(true)}
+      onDismiss={() => dismissQuestion(activeThread.session_id)}
+    />
+  );
+
   // The bottom layer: the composer plus the notices that must stay next to the
   // input — the closed/external-input banners and, crucially, the pending-send
   // strip, which the user reads to decide whether to hold a send. For a
@@ -542,6 +567,7 @@ export function TranscriptPane({
         <>
           {breadcrumbOverlay}
           {permissionOverlay}
+          {questionOverlay}
           {bottomOverlay}
         </>
       }

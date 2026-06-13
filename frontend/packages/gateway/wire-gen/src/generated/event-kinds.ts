@@ -14,6 +14,7 @@ export const EVENT_KINDS = [
   'turn_interrupted',
   'transcript_updated',
   'permission_requested',
+  'question_asked',
   'permission_resolved',
   'spawn_failed',
 ] as const satisfies readonly SessionEvent['kind'][];
