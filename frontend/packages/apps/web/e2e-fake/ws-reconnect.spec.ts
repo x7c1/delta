@@ -90,7 +90,7 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
   await expectReconnected(page);
   await expect(messages).toHaveCount(4);
   await expect(pending).toHaveCount(0);
-  await expect(page.getByText('running', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('session-running')).toHaveCount(0);
 });
 
 test('a queued send keeps its chip and the running state is re-seeded across a reconnect', async ({
@@ -104,7 +104,7 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
 
   const messages = page.getByTestId('message-item');
   const pending = page.getByTestId('pending-item');
-  const running = page.getByText('running', { exact: true });
+  const running = page.getByTestId('session-running');
   await expect(messages).toHaveCount(2);
   await expect(running).toBeVisible();
   // The first send already matched its transcript line but its turn has not

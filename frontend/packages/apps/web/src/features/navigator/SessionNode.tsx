@@ -2,7 +2,7 @@ import { useState, type CSSProperties, type Ref } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
-import { Badge, Menu, StatusDot, cn } from '@delta/ui-kit';
+import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -19,6 +19,13 @@ export interface SessionNodeProps {
    * session's conversation pane.
    */
   needsPermission?: boolean;
+  /**
+   * Whether this session currently has an in-flight turn. Surfaced as a small
+   * rotating spinner on the row so it is clear *which* session is processing —
+   * a single global indicator could not tell them apart. Coexists with the
+   * permission badge when both apply.
+   */
+  running?: boolean;
   onFocus: () => void;
   onClose: () => void;
   /**
@@ -70,6 +77,7 @@ export function SessionNode({
   item,
   isFocused,
   needsPermission = false,
+  running = false,
   onFocus,
   onClose,
   rowRef,
@@ -160,6 +168,15 @@ export function SessionNode({
               >
                 {cwdTail ? cwdTail.split('/').join(' : ') : label}
               </span>
+              {running && (
+                // Compact: the rotating circle alone reads as "processing". The
+                // Spinner's glyph is aria-hidden, so pair it with a
+                // visually-hidden label for assistive tech.
+                <span className="shrink-0" data-testid="session-running">
+                  <Spinner />
+                  <span className="sr-only">running</span>
+                </span>
+              )}
               {needsPermission && (
                 <span className="shrink-0" data-testid="session-permission-badge">
                   <Badge tone="warning">permission</Badge>
