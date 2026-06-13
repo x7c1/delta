@@ -155,6 +155,74 @@ describe('TranscriptPane', () => {
     expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
   });
 
+  it('hides the live bubble once its text is persisted, even before turn end', async () => {
+    // The handoff bug: the transcript refetch can persist the assistant reply
+    // BEFORE the turn-end event clears the streaming buffer, so for a moment
+    // both the live bubble and the persisted message-item carry the same text.
+    // The content-based guard suppresses the bubble the instant a matching
+    // persisted assistant message exists, regardless of event/refetch ordering.
+    const reply = 'A **delta** is the change between two states.';
+    server.use(
+      http.get('*/api/threads/:id/messages', () => {
+        const body: MessagesResponse = {
+          messages: [
+            {
+              uuid: 'm-user',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'user',
+              linear_parent_uuid: null,
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 0,
+              content_text: 'What is a delta?',
+              content: [{ type: 'text', text: 'What is a delta?' }],
+              created_at: '2026-01-01T00:00:01Z',
+            },
+            {
+              uuid: 'm-assistant',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'assistant',
+              linear_parent_uuid: 'm-user',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 1,
+              content_text: reply,
+              content: [{ type: 'text', text: reply }],
+              created_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+        };
+        return HttpResponse.json(body);
+      }),
+    );
+
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    // The persisted assistant reply renders via the normal pipeline.
+    await waitFor(() =>
+      expect(screen.getByText(/change between two states/)).toBeInTheDocument(),
+    );
+
+    // The streaming buffer still holds the same text (the turn-end event has
+    // not landed yet). With the persisted copy already present, the live bubble
+    // must NOT render — the text appears exactly once.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'assistant_streaming',
+        session_id: SESSION_ID,
+        thread_id: MAIN_THREAD_ID,
+        message_id: 'm1',
+        index: 0,
+        final: true,
+        delta: reply,
+      });
+    });
+    expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
+    // The reply's distinctive text appears exactly once (the persisted item).
+    expect(screen.getAllByText(/change between two states/)).toHaveLength(1);
+  });
+
   it('does not render the live bubble for a different thread', async () => {
     renderPane(mockThreads, MAIN_THREAD_ID);
     await waitFor(() =>

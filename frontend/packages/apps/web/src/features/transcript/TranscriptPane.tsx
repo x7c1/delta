@@ -25,6 +25,7 @@ import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
+import { persistedHasStreamedText } from './streamingHandoff';
 import {
   clearBranchHighlight,
   findAllQuoteRanges,
@@ -399,15 +400,26 @@ export function TranscriptPane({
 
   // Show the live assistant preview on the thread it belongs to whenever a
   // preview exists with text. `done` only means every chunk of the message has
-  // arrived, NOT that the turn ended — the preview stays until the turn ends
-  // (which clears the buffer entirely) and the persisted message renders, so it
-  // is the buffer's presence, not `done`, that gates visibility.
+  // arrived, NOT that the turn ended — the preview stays until the persisted
+  // message renders, so it is the buffer's presence (not `done`) that gates
+  // visibility.
+  //
+  // The final guard makes visibility a function of the current persisted state,
+  // not of event timing: once the thread's persisted messages already contain
+  // an assistant message with the streamed text, the live bubble is suppressed.
+  // The persisted line can land via the transcript refetch BEFORE the turn-end
+  // event clears the preview buffer (and a turn can persist an earlier message
+  // while `turn_completed` only fires at the very end), so without this guard
+  // the same text would briefly show twice — the live bubble and the persisted
+  // copy. The turn-end clear in liveStore stays as cleanup; this guard is what
+  // eliminates the visible duplicate regardless of event/refetch ordering.
   const showStreaming =
     !newSession &&
     activeThread !== null &&
     streaming !== null &&
     streaming.threadId === activeThread.id &&
-    streaming.text.length > 0;
+    streaming.text.length > 0 &&
+    !persistedHasStreamedText(messages, streaming.text);
 
   // The new-session state has no session id yet; the composer targets a fresh
   // spawn. An existing thread targets that thread (a resume on a closed session).

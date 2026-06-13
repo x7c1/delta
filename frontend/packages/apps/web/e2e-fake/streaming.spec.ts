@@ -16,6 +16,11 @@ import { startNewSession } from './support/app';
  * 2. After the turn completes, the provisional bubble is gone and the reply is
  *    present exactly once as a persisted assistant message — no duplicate at
  *    the per-turn handoff.
+ *
+ * The exactly-once assertion guards the handoff-duplicate regression: the
+ * provisional bubble is suppressed the instant the persisted copy of its text
+ * exists (a content-based gate), so the reply text can never appear twice even
+ * if the transcript refetch lands before the turn-end event clears the buffer.
  */
 test('the assistant reply streams live then hands off to the persisted message', async ({
   page,
@@ -34,10 +39,12 @@ test('the assistant reply streams live then hands off to the persisted message',
   const messages = page.getByTestId('message-item');
   await expect(messages).toHaveCount(1);
 
-  // The turn completes: the provisional bubble drops and the persisted reply
-  // renders via the normal pipeline — present exactly once, no duplicate.
-  await expect(streaming).toHaveCount(0, { timeout: 15_000 });
+  // The turn completes: the persisted reply renders via the normal pipeline as
+  // a second message-item. The instant it lands, the content-based gate drops
+  // the provisional bubble — so the reply text is present exactly once, never
+  // duplicated across the live bubble and the persisted copy at the handoff.
   await expect(messages).toHaveCount(2, { timeout: 15_000 });
+  await expect(streaming).toHaveCount(0, { timeout: 15_000 });
   await expect(
     page.getByText('Streaming this reply live.', { exact: true }),
   ).toHaveCount(1);
