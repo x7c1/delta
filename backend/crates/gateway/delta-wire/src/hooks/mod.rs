@@ -19,6 +19,8 @@
 //! them, so both sides of the contract share one definition instead of the
 //! emitter hand-rolling JSON that could drift from what the server parses.
 
+mod message_display_payload;
+pub use message_display_payload::MessageDisplayPayload;
 mod permission_request_payload;
 pub use permission_request_payload::PermissionRequestPayload;
 mod permission_request_response;

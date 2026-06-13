@@ -8,6 +8,10 @@
 //!   `hookSpecificOutput.additionalContext` to inject a locator quote into that
 //!   prompt only.
 //! - `Stop` fires when a response completes.
+//! - `MessageDisplay` fires repeatedly while a response is being generated,
+//!   before the transcript is flushed. Delta buffers each visible text chunk as
+//!   a provisional live preview of the in-flight turn and broadcasts it to the
+//!   browser; the hook is passive (an empty 200) so it never mutates the TUI.
 //! - `PreToolUse` fires for every tool call; Delta only records the request
 //!   (it carries the `tool_use_id` needed to resolve the notice later) and does
 //!   not notify the browser — the TUI decides allow/deny.
@@ -28,12 +32,13 @@ use axum::response::IntoResponse;
 use axum::Json;
 
 use delta_usecase::{
-    PermissionDecision, SessionEndHook, SessionId, SessionStartHook, StopHook,
+    MessageDisplayHook, PermissionDecision, SessionEndHook, SessionId, SessionStartHook, StopHook,
     UserPromptSubmitHook,
 };
 use delta_wire::hooks::{
-    PermissionRequestPayload, PermissionRequestResponse, PreToolUsePayload, SessionEndPayload,
-    SessionStartPayload, StopPayload, UserPromptSubmitPayload, UserPromptSubmitResponse,
+    MessageDisplayPayload, PermissionRequestPayload, PermissionRequestResponse, PreToolUsePayload,
+    SessionEndPayload, SessionStartPayload, StopPayload, UserPromptSubmitPayload,
+    UserPromptSubmitResponse,
 };
 
 use crate::state::AppState;
@@ -84,6 +89,32 @@ pub async fn stop(
     };
 
     match state.interactor().on_stop(hook).await {
+        Ok(events) => {
+            state.broadcast(events);
+            StatusCode::OK.into_response()
+        }
+        Err(err) => internal_error(err).into_response(),
+    }
+}
+
+/// Handle a `MessageDisplay` hook: one chunk of the in-flight turn's assistant
+/// message, streamed live before the transcript is flushed. Delta buffers it as
+/// a provisional preview and broadcasts an `AssistantStreaming` event for the
+/// browser, then answers an empty `200` so the hook stays passive and never
+/// mutates the TUI display.
+pub async fn message_display(
+    State(state): State<AppState>,
+    Json(payload): Json<MessageDisplayPayload>,
+) -> impl IntoResponse {
+    let hook = MessageDisplayHook {
+        session_id: SessionId::from(payload.session_id),
+        message_id: payload.message_id,
+        index: payload.index,
+        final_: payload.r#final,
+        delta: payload.delta,
+    };
+
+    match state.interactor().on_message_display(hook).await {
         Ok(events) => {
             state.broadcast(events);
             StatusCode::OK.into_response()
