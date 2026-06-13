@@ -6,8 +6,8 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use delta_wire::hooks::{
-    PermissionRequestPayload, PreToolUsePayload, SessionStartPayload, StopPayload,
-    UserPromptSubmitPayload,
+    MessageDisplayPayload, PermissionRequestPayload, PreToolUsePayload, SessionStartPayload,
+    StopPayload, UserPromptSubmitPayload,
 };
 use serde_json::{json, Value};
 
@@ -78,6 +78,7 @@ pub fn run() -> Result<(), String> {
         queued_prompts: VecDeque::new(),
         last_tool_use: None,
         tool_use_seq: 0,
+        message_id_seq: 0,
         last_additional_context: String::new(),
     };
 
@@ -148,6 +149,9 @@ struct Engine {
     queued_prompts: VecDeque<String>,
     last_tool_use: Option<ToolUse>,
     tool_use_seq: usize,
+    /// A fresh display-message id per `stream_text` step, mirroring how the real
+    /// `claude` stamps one `message_id` across a streamed message's chunks.
+    message_id_seq: usize,
     /// The `additionalContext` the most recent `UserPromptSubmit` hook response
     /// injected (empty when none): the real `claude` folds it into the model
     /// prompt, so the fake records it and exposes it to `reply` steps via the
@@ -174,6 +178,30 @@ impl Engine {
                 }
                 blocks.push(json!({ "type": "text", "text": text }));
                 self.transcript.assistant_blocks(blocks)
+            }
+            Step::StreamText { deltas } => {
+                // Stream the visible assistant text live via `MessageDisplay`,
+                // before any transcript line lands — exactly the order the real
+                // `claude` delivers it. One `message_id` spans the message; the
+                // chunks carry increasing `index` and only the last is `final`.
+                let message_id = format!("msg_fake_{:04}", self.message_id_seq);
+                self.message_id_seq += 1;
+                let last = deltas.len().saturating_sub(1);
+                for (index, delta) in deltas.iter().enumerate() {
+                    self.fire(
+                        "MessageDisplay",
+                        &self.endpoints.message_display,
+                        &MessageDisplayPayload {
+                            session_id: self.session_id.clone(),
+                            message_id: message_id.clone(),
+                            index: index as u32,
+                            r#final: index == last,
+                            delta: delta.clone(),
+                            turn_id: Some(message_id.clone()),
+                        },
+                    );
+                }
+                Ok(())
             }
             Step::ToolUse { name, input } => {
                 let id = format!("toolu_fake_{:04}", self.tool_use_seq);

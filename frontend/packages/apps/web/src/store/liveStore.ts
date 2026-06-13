@@ -67,6 +67,36 @@ export interface LocalSend {
   createdAt: number;
 }
 
+/**
+ * The provisional live preview of an in-flight turn's assistant message,
+ * accumulated from the `assistant_streaming` events the `MessageDisplay` hook
+ * produces. Shown as a live bubble at the conversation tail while the turn
+ * generates — including an assistant's pre-tool preamble, visible before the
+ * user answers a blocking tool prompt.
+ *
+ * It is NOT a REST resource: the deltas carry no transcript id, so this cannot
+ * be id-joined to the eventually-persisted message. It is reconciled per turn —
+ * cleared on `turn_completed` / `turn_interrupted` / `session_closed` (and on a
+ * reconnect, see {@link LiveState.resetTurnEphemera}), after which the persisted
+ * assistant message renders via the normal transcript pipeline.
+ */
+export interface StreamingMessage {
+  /** The hook's display-message id (not a transcript id). */
+  messageId: string;
+  /** The in-flight turn's thread, so the bubble only shows on its own thread. */
+  threadId: ThreadId;
+  /** The accumulated visible text so far (chunks joined in index order). */
+  text: string;
+  /** True once the final delta has arrived. */
+  done: boolean;
+  /**
+   * The chunks received so far, keyed by `index`. Kept so out-of-order or
+   * duplicate deliveries reconcile deterministically — {@link text} is always
+   * recomputed by joining these in ascending index order.
+   */
+  chunks: Record<number, string>;
+}
+
 /** A new-session spawn tracked from the POST response (real ids). */
 export interface SpawnItem {
   sessionId: SessionId;
@@ -278,6 +308,13 @@ export interface LiveState {
   notices: Record<SessionId, SessionNotice[]>;
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
   unread: Record<ThreadId, number>;
+  /**
+   * The provisional live preview of each session's in-flight assistant message,
+   * keyed by session id. Appended by `assistant_streaming` and cleared on turn
+   * end / close / reconnect (see {@link StreamingMessage}). At most one per
+   * session — `claude` streams one message at a time.
+   */
+  streamingMessages: Record<SessionId, StreamingMessage>;
 
   setConnection: (status: ConnectionStatus) => void;
   /** Record a submit whose `POST /api/sends` is about to fly. */
@@ -378,6 +415,23 @@ function dropLocalSendsForSession(
 }
 
 /**
+ * Drop the streaming preview of one session, returning the changed slice (empty
+ * object when none existed). Used when the turn ends — the persisted assistant
+ * message then renders via the normal pipeline — and on a reconnect.
+ */
+function dropStreamingForSession(
+  state: LiveState,
+  sessionId: SessionId,
+): Partial<LiveState> {
+  if (!state.streamingMessages[sessionId]) {
+    return {};
+  }
+  const streamingMessages = { ...state.streamingMessages };
+  delete streamingMessages[sessionId];
+  return { streamingMessages };
+}
+
+/**
  * Compute the state changes for a turn ending in `sessionId`: drop the tracked
  * local sends for that session (the server's open list is the remaining truth
  * — anything still queued there keeps its chip), clear the running flag, and
@@ -387,11 +441,25 @@ function dropLocalSendsForSession(
  * hook), `turn_interrupted` (the transcript-detected interrupt) — which can
  * occasionally both arrive, so the drain is idempotent — and `session_closed`
  * (a closed session has no live process, so its turn is over too).
+ *
+ * The streaming preview is deliberately NOT dropped here. At a normal turn
+ * completion the bubble must stay until the persisted assistant message lands
+ * in the transcript refetch, at which point the content-based suppression guard
+ * (`persistedHasStreamedText`) removes it in the SAME render that adds the
+ * persisted copy — a seamless swap with no empty gap. Dropping the buffer on
+ * `turn_completed` (which can outrun the async refetch) is exactly what opened
+ * that gap. The buffer is harmless between turns: it sits invisibly suppressed
+ * and is overwritten by the next turn's first `assistant_streaming` (a new
+ * `message_id` starts fresh). Callers that end a turn WITHOUT a guaranteed
+ * matching persisted message — `turn_interrupted` (a partial may never persist)
+ * and `session_closed` (no live process) — pass {@link dropStreaming} so the
+ * dangling preview is cleared explicitly.
  */
 function endTurnForSession(
   state: LiveState,
   sessionId: SessionId,
   trigger: 'turn_end' | 'session_closed',
+  dropStreaming: boolean,
 ): Partial<LiveState> {
   const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
   if (state.activeTurns[sessionId]) {
@@ -399,7 +467,11 @@ function endTurnForSession(
     delete activeTurns[sessionId];
     next.activeTurns = activeTurns;
   }
-  return { ...next, ...clearNoticesOn(state.notices, sessionId, trigger) };
+  return {
+    ...next,
+    ...(dropStreaming ? dropStreamingForSession(state, sessionId) : {}),
+    ...clearNoticesOn(state.notices, sessionId, trigger),
+  };
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
@@ -410,6 +482,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   activeTurns: {},
   notices: {},
   unread: {},
+  streamingMessages: {},
 
   setConnection: (status) => set({ connection: status }),
 
@@ -490,7 +563,10 @@ export const useLiveStore = create<LiveState>((set) => ({
           notices[sessionId] = remaining;
         }
       }
-      return { localSends: {}, activeTurns: {}, notices };
+      // The live previews' turn-end clears may also have been missed during the
+      // outage and cannot be recovered (no re-seed of a partial stream this
+      // PR), so drop them too — the flushed message renders from the refetch.
+      return { localSends: {}, activeTurns: {}, notices, streamingMessages: {} };
     }),
 
   seedActiveTurn: (sessionId, turn) =>
@@ -589,8 +665,16 @@ export const useLiveStore = create<LiveState>((set) => ({
           // the server's open-send list (refetched by the router) is the
           // remaining truth for anything still queued — and the turn-scoped
           // notices are swept (see NOTICE_LIFECYCLE). Scoped by session so a
-          // turn in one session never drains another session's chips.
-          const next = endTurnForSession(state, event.session_id, 'turn_end');
+          // turn in one session never drains another session's chips. The
+          // streaming preview is left in place (dropStreaming: false): the
+          // persisted message will suppress the bubble when it lands, a
+          // gap-free swap (see endTurnForSession).
+          const next = endTurnForSession(
+            state,
+            event.session_id,
+            'turn_end',
+            false,
+          );
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'turn_interrupted': {
@@ -598,8 +682,15 @@ export const useLiveStore = create<LiveState>((set) => ({
           // Claude's `Stop` hook does not fire on interrupt, so
           // `turn_completed` never arrives; the backend detects the interrupt
           // from the transcript and emits this hook-independent signal. Drain
-          // exactly as a completed turn would.
-          const next = endTurnForSession(state, event.session_id, 'turn_end');
+          // exactly as a completed turn would, but also drop the streaming
+          // preview (dropStreaming: true): an interrupted partial may have no
+          // matching persisted message, so nothing else would clear it.
+          const next = endTurnForSession(
+            state,
+            event.session_id,
+            'turn_end',
+            true,
+          );
           return Object.keys(next).length > 0 ? next : state;
         }
         case 'permission_requested':
@@ -663,6 +754,36 @@ export const useLiveStore = create<LiveState>((set) => ({
             ...dropLocalSendsForSession(state, event.session_id),
           };
         }
+        case 'assistant_streaming': {
+          // A chunk of the in-flight turn's assistant message arrived. Append
+          // it to the session's live preview (a new message_id, or the first
+          // chunk after a turn end cleared the buffer, starts fresh). Chunks
+          // are kept by index and the text recomputed by joining them in
+          // ascending order, so out-of-order or duplicate deliveries reconcile
+          // deterministically. Cleared per turn by the turn-end events.
+          const prev = state.streamingMessages[event.session_id];
+          const chunks =
+            prev && prev.messageId === event.message_id
+              ? { ...prev.chunks, [event.index]: event.delta }
+              : { [event.index]: event.delta };
+          const text = Object.keys(chunks)
+            .map(Number)
+            .sort((a, b) => a - b)
+            .map((index) => chunks[index])
+            .join('');
+          return {
+            streamingMessages: {
+              ...state.streamingMessages,
+              [event.session_id]: {
+                messageId: event.message_id,
+                threadId: event.thread_id,
+                text,
+                done: event.final,
+                chunks,
+              },
+            },
+          };
+        }
         case 'external_input':
           // The external-input notice is session-scoped and only meaningful
           // for the focused session, so the router (`applySessionEvent`)
@@ -701,6 +822,7 @@ export const useLiveStore = create<LiveState>((set) => ({
             state,
             event.session_id,
             'session_closed',
+            true,
           );
           return Object.keys(next).length > 0 ? next : state;
         }

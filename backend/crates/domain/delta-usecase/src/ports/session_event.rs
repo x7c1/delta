@@ -113,4 +113,30 @@ pub enum SessionEvent {
         session_id: SessionId,
         pane_token: String,
     },
+    /// A chunk of the in-flight turn's assistant message, delivered live while
+    /// the turn is still generating.
+    ///
+    /// Claude Code's `MessageDisplay` hook fires repeatedly during generation,
+    /// before the transcript JSONL is flushed, so this carries the visible
+    /// assistant text as it appears — a provisional live preview of the
+    /// in-flight turn's reply. The chunks share one `message_id` and arrive at
+    /// increasing `index` (the client accumulates them); only the last has
+    /// `final == true`.
+    ///
+    /// This is NOT persisted: the transcript stays the source of truth. The
+    /// hook's ids do not match any transcript id, so the preview cannot be
+    /// id-joined to the persisted message; instead it is attributed to the
+    /// in-flight turn's thread and dropped per turn — once the turn ends
+    /// ([`Self::TurnCompleted`] / [`Self::TurnInterrupted`]) the persisted
+    /// assistant message, ingested by the normal transcript sync, takes over.
+    AssistantStreaming {
+        session_id: SessionId,
+        thread_id: ThreadId,
+        /// The display message these chunks belong to (the hook's own id; not a
+        /// transcript id).
+        message_id: String,
+        index: u32,
+        final_: bool,
+        delta: String,
+    },
 }

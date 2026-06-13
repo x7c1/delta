@@ -32,6 +32,7 @@ describe('applySessionEvent', () => {
       activeTurns: {},
       notices: {},
       unread: {},
+      streamingMessages: {},
     });
   });
 

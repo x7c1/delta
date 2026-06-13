@@ -20,7 +20,8 @@ use crate::interactor::lifecycle::FreshSpawn;
 use crate::interactor::PermissionDecision;
 use crate::pane_token::PaneToken;
 use crate::ports::{
-    SessionEndHook, SessionEvent, SessionStartHook, StopHook, UserPromptSubmitHook,
+    MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
+    UserPromptSubmitHook,
 };
 use super::runtime::SessionLiveState;
 
@@ -60,6 +61,13 @@ pub(in crate::interactor) enum SessionInput {
     },
     Stop {
         hook: StopHook,
+        reply: Reply<Vec<SessionEvent>>,
+    },
+    /// `MessageDisplay`: one chunk of the in-flight turn's assistant message,
+    /// streamed live. Accumulated into the session's live preview buffer and
+    /// re-broadcast as an `AssistantStreaming` event for the browser.
+    MessageDisplay {
+        hook: MessageDisplayHook,
         reply: Reply<Vec<SessionEvent>>,
     },
     SessionStart {

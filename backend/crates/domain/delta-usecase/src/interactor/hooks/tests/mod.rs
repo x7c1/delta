@@ -1,6 +1,7 @@
 //! Claude Code hook handler tests.
 
 mod first_submit_registers_session;
+mod message_display_streams_and_clears;
 mod on_stop_routes_sync_by_hook_session_id;
 mod pending_permission_is_queryable_live_state;
 mod permission_request_registers_dialog_and_decision_resolves;
