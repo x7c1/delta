@@ -83,6 +83,15 @@ export default {
         // so the panel chrome and the canvas can never disagree).
         'terminal-bg': 'var(--delta-terminal-bg)',
       },
+      keyframes: {
+        // A hard on/off blink for the live-streaming caret. The `steps(1, end)`
+        // timing (see `animation` below) snaps between these two stops with no
+        // tween, so it reads as a text cursor blinking rather than a soft pulse.
+        'caret-blink': { '0%,49%': { opacity: '1' }, '50%,100%': { opacity: '0' } },
+      },
+      animation: {
+        'caret-blink': 'caret-blink 1.1s steps(1, end) infinite',
+      },
       spacing: {
         // Overlay layout tokens (values in src/index.css). The floating-card
         // insets and the scroll-body paddings that reserve space for those

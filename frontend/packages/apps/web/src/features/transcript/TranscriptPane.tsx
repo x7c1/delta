@@ -746,7 +746,7 @@ export function TranscriptPane({
                     during the handoff. */}
                 {!streaming.done && (
                   <span
-                    className="ml-0.5 inline-block animate-pulse text-slate-400"
+                    className="ml-0.5 inline-block animate-caret-blink text-slate-600"
                     aria-hidden="true"
                   >
                     ▌
