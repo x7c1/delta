@@ -4,8 +4,9 @@
 //! whose path the hook payloads report. So the lines written here mirror the
 //! shapes Claude Code writes (and Delta parses): `type: "user"`/`"assistant"`
 //! lines with a `uuid`/`parentUuid` chain and a `message.content` that is a
-//! bare string or an array of typed blocks, plus the `queued_command`
-//! attachment line and the `[Request interrupted by user]` marker.
+//! bare string or an array of typed blocks, plus the uuid-less
+//! `queue-operation` bookkeeping line for a prompt queued mid-turn and the
+//! `[Request interrupted by user]` marker.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -40,10 +41,13 @@ impl TranscriptWriter {
             Err(err) => return Err(format!("read transcript {}: {err}", path.display())),
         };
         let lines: Vec<&str> = existing.lines().filter(|l| !l.trim().is_empty()).collect();
+        // The chain parent is the last line that HAS a uuid: bookkeeping lines
+        // (`queue-operation`) are uuid-less and do not participate in the chain.
         let last_uuid = lines
-            .last()
-            .and_then(|line| serde_json::from_str::<Value>(line).ok())
-            .and_then(|value| value["uuid"].as_str().map(|s| s.to_owned()));
+            .iter()
+            .rev()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .find_map(|value| value["uuid"].as_str().map(|s| s.to_owned()));
         Ok(Self {
             path: path.to_owned(),
             session_id: session_id.to_owned(),
@@ -56,6 +60,17 @@ impl TranscriptWriter {
     pub fn user_text(&mut self, text: &str) -> Result<(), String> {
         let message = json!({ "role": "user", "content": text });
         self.append("user", json!({ "message": message }))
+    }
+
+    /// Append the `type: "user"` line a dequeued prompt is replayed as: a
+    /// plain user line (claude stamps it `promptSource: "queued"`), exactly
+    /// like a TUI-typed prompt apart from that provenance field.
+    pub fn dequeued_user_text(&mut self, text: &str) -> Result<(), String> {
+        let message = json!({ "role": "user", "content": text });
+        self.append(
+            "user",
+            json!({ "message": message, "promptSource": "queued" }),
+        )
     }
 
     /// Append the interrupt marker (a `role: user` line belonging to the
@@ -85,19 +100,23 @@ impl TranscriptWriter {
         self.append("user", json!({ "message": message }))
     }
 
-    /// Append a `queued_command` attachment: a prompt the user composed while
-    /// a turn was in flight, recorded only as this attachment line.
-    pub fn queued_command(&mut self, prompt: &str) -> Result<(), String> {
-        self.append(
-            "attachment",
-            json!({
-                "attachment": {
-                    "type": "queued_command",
-                    "prompt": prompt,
-                    "commandMode": "prompt",
-                },
-            }),
-        )
+    /// Append the bookkeeping line claude writes when a prompt is submitted
+    /// while a turn is in flight: a **uuid-less** `queue-operation` enqueue
+    /// record carrying the queued text. It does not join the uuid chain — the
+    /// prompt's real message is the plain user line written at dequeue.
+    pub fn queue_operation_enqueue(&mut self, content: &str) -> Result<(), String> {
+        let line = json!({
+            "type": "queue-operation",
+            "operation": "enqueue",
+            "content": content,
+            "sessionId": self.session_id,
+            "timestamp": rfc3339_now(),
+        });
+        self.write_line(&line)?;
+        // The line still occupies a transcript row; keep the uuid seed
+        // tracking the file position like every other append.
+        self.next_seq += 1;
+        Ok(())
     }
 
     /// Append one line of `line_type` with the common envelope (uuid chain,
@@ -114,17 +133,21 @@ impl TranscriptWriter {
         if let (Value::Object(target), Value::Object(fields)) = (&mut line, extra) {
             target.extend(fields);
         }
+        self.write_line(&line)?;
 
+        self.last_uuid = Some(uuid);
+        self.next_seq += 1;
+        Ok(())
+    }
+
+    /// Append one raw JSONL line.
+    fn write_line(&self, line: &Value) -> Result<(), String> {
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&self.path)
             .map_err(|e| format!("open transcript {}: {e}", self.path.display()))?;
-        writeln!(file, "{line}").map_err(|e| format!("append transcript line: {e}"))?;
-
-        self.last_uuid = Some(uuid);
-        self.next_seq += 1;
-        Ok(())
+        writeln!(file, "{line}").map_err(|e| format!("append transcript line: {e}"))
     }
 }
 
@@ -222,16 +245,43 @@ mod tests {
     }
 
     #[test]
-    fn queued_command_line_matches_the_attachment_shape() {
+    fn queue_operation_enqueue_line_is_uuid_less_and_off_the_chain() {
         let path = temp_path("queued");
         let _ = std::fs::remove_file(&path);
         let mut writer = TranscriptWriter::open(&path, "sess-3").unwrap();
-        writer.queued_command("later please").unwrap();
+        writer.user_text("first").unwrap();
+        writer.queue_operation_enqueue("later please").unwrap();
+        writer.dequeued_user_text("later please").unwrap();
 
         let lines = read_lines(&path);
-        assert_eq!(lines[0]["type"], "attachment");
-        assert_eq!(lines[0]["attachment"]["type"], "queued_command");
-        assert_eq!(lines[0]["attachment"]["prompt"], "later please");
+        assert_eq!(lines[1]["type"], "queue-operation");
+        assert_eq!(lines[1]["operation"], "enqueue");
+        assert_eq!(lines[1]["content"], "later please");
+        assert!(lines[1].get("uuid").is_none(), "enqueue line is uuid-less");
+        // The dequeued replay is a plain user line chaining past the
+        // bookkeeping line, stamped with its provenance.
+        assert_eq!(lines[2]["type"], "user");
+        assert_eq!(lines[2]["message"]["content"], "later please");
+        assert_eq!(lines[2]["promptSource"], "queued");
+        assert_eq!(lines[2]["parentUuid"], "sess-3-u0");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn reopening_skips_uuid_less_lines_when_recovering_the_chain() {
+        let path = temp_path("reopen-queued");
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut writer = TranscriptWriter::open(&path, "sess-4").unwrap();
+            writer.user_text("first").unwrap();
+            writer.queue_operation_enqueue("queued").unwrap();
+        }
+        let mut writer = TranscriptWriter::open(&path, "sess-4").unwrap();
+        writer.user_text("second").unwrap();
+
+        let lines = read_lines(&path);
+        assert_eq!(lines[2]["uuid"], "sess-4-u2");
+        assert_eq!(lines[2]["parentUuid"], "sess-4-u0");
         let _ = std::fs::remove_file(&path);
     }
 

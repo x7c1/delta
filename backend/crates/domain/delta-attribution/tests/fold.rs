@@ -61,10 +61,11 @@ fn a_branch_send_echo_attributes_user_and_assistant_to_the_child() {
 
 #[test]
 fn a_queued_command_matching_a_send_attributes_prompt_and_reply_to_the_child() {
-    // A branch send issued while a turn is in flight is queued by Claude and
-    // recorded only as a `queued_command` attachment — never a normal user
-    // line. It must still correlate to its send so the prompt AND the reply
-    // land on the child thread, not `main`.
+    // LEGACY FORMAT (older claude versions; see the queued-prompt drift note
+    // in docs/guides/development.md): a branch send issued while a turn was
+    // in flight was queued by Claude and recorded only as a `queued_command`
+    // attachment — never a normal user line. It must still correlate to its
+    // send so the prompt AND the reply land on the child thread, not `main`.
     let outcome = attribute_lines(
         &session(),
         MAIN,
@@ -85,10 +86,12 @@ fn a_queued_command_matching_a_send_attributes_prompt_and_reply_to_the_child() {
 
 #[test]
 fn an_unmatched_queued_command_inherits_the_carry_thread() {
-    // A queued command that matches no send — e.g. a background task
-    // notification injected mid-turn — is a programmatic injection, not stray
-    // pane typing, so it must inherit the active thread rather than reset
-    // attribution to `main`. (Ported from the actor-level sync test
+    // LEGACY FORMAT (older claude versions; see the queued-prompt drift note
+    // in docs/guides/development.md): a queued command that matches no send —
+    // e.g. a background task notification injected mid-turn — is a
+    // programmatic injection, not stray pane typing, so it must inherit the
+    // active thread rather than reset attribution to `main`. (Ported from the
+    // actor-level sync test
     // `unmatched_queued_command_mid_branch_stays_on_branch`.)
     let outcome = attribute_lines(
         &session(),

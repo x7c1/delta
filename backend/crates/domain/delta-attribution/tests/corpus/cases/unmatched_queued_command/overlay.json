@@ -1,7 +1,12 @@
 {
-  "comment": "A queued_command matching no send (a harness-injected task notification) arrives mid-branch: a programmatic injection inherits the active child thread instead of tearing the turn back to main.",
+  "comment": "LEGACY FORMAT (older claude versions; kept because old transcripts are still resumed/viewed \u2014 see the queued-prompt drift note in docs/guides/development.md): a queued_command matching no send (a harness-injected task notification) arrives mid-branch: a programmatic injection inherits the active child thread instead of tearing the turn back to main.",
   "main_thread": 1,
   "sends": [
-    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "work on the branch" }
+    {
+      "id": 1,
+      "thread_id": 2,
+      "semantic_parent_uuid": "a-prior",
+      "text": "work on the branch"
+    }
   ]
 }

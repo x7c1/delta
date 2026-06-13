@@ -34,7 +34,8 @@
 //! | `tool_result { is_error? }` | Write the `tool_result` carrier line for the most recent `tool_use`. |
 //! | `stop { stop_reason? }` | Fire the `Stop` hook: the turn completed. |
 //! | `await_interrupt` | Block until Escape arrives, then write the `[Request interrupted by user]` marker line. No `Stop` fires — exactly like a real interrupt. |
-//! | `write_queued_command { text }` | Write a `queued_command` attachment line (a prompt queued while the turn was busy). |
+//! | `enqueue_prompt { text }` | A prompt submitted while the turn is busy: write the uuid-less `queue-operation` enqueue line carrying the text and remember it for `dequeue_prompt`. No hook fires at enqueue time. |
+//! | `dequeue_prompt` | Replay the oldest enqueued prompt now that the turn has freed: fire its own `UserPromptSubmit`, then write it as a plain user line (`promptSource: "queued"`) — the same path a TUI-typed prompt takes. |
 //! | `delay { ms }` | Sleep. Only for delays the scenario itself is about (e.g. holding a turn open); synchronization belongs to the `await_*` steps. |
 //! | `hang` | Block forever (a launch or turn that never progresses). |
 //!
@@ -98,9 +99,10 @@ pub enum Step {
         stop_reason: Option<String>,
     },
     AwaitInterrupt,
-    WriteQueuedCommand {
+    EnqueuePrompt {
         text: String,
     },
+    DequeuePrompt,
     Delay {
         ms: u64,
     },
@@ -184,7 +186,8 @@ mod tests {
                     { "type": "tool_result", "is_error": true },
                     { "type": "stop", "stop_reason": "end_turn" },
                     { "type": "await_interrupt" },
-                    { "type": "write_queued_command", "text": "queued" },
+                    { "type": "enqueue_prompt", "text": "queued" },
+                    { "type": "dequeue_prompt" },
                     { "type": "delay", "ms": 10 },
                     { "type": "hang" }
                 ]
@@ -196,7 +199,7 @@ mod tests {
             SessionStartMode::Delayed { delay_ms: 250 }
         );
         assert!(scenario.looped);
-        assert_eq!(scenario.steps.len(), 10);
+        assert_eq!(scenario.steps.len(), 11);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
             scenario.steps[5],

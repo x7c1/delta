@@ -35,9 +35,13 @@ pub(crate) fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
 }
 
 /// A `queued_command` attachment line: a prompt the user composed while a turn
-/// was in flight. Claude records it only as this attachment (never as a normal
-/// user line), but Delta surfaces it as a user message that both displays and
-/// flows through send correlation. Mirrors `user_line` apart from the flag.
+/// was in flight, which older claude versions record only as this attachment
+/// (never as a normal user line); Delta surfaces it as a user message that
+/// both displays and flows through send correlation. Mirrors `user_line`
+/// apart from the flag. LEGACY FORMAT — current claude replays queued prompts
+/// as plain user lines instead (see the queued-prompt drift note in
+/// docs/guides/development.md); kept because old transcripts are still
+/// resumed and viewed.
 pub(crate) fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         is_queued_command: true,

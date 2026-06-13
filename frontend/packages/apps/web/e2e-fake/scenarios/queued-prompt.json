@@ -1,0 +1,11 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "working on the long task" },
+    { "type": "enqueue_prompt", "text": "queued while the turn was busy" },
+    { "type": "await_interrupt" },
+    { "type": "dequeue_prompt" },
+    { "type": "reply", "text": "answering the queued prompt" },
+    { "type": "stop" }
+  ]
+}
