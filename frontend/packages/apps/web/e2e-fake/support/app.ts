@@ -14,8 +14,15 @@ import { expect, type Page } from '@playwright/test';
 
 /**
  * Start a new session whose first prompt is `prompt` (its first word selects
- * the fake scenario): enter the new-session flow, choose the current directory
- * in the picker, and send.
+ * the fake scenario): enter the new-session flow, choose a directory in the
+ * picker, and send.
+ *
+ * By default the picker's initial directory (the browse root, `$HOME`) is
+ * chosen — fine for the fake, which ignores its working directory. A real
+ * `claude` raises a first-run trust prompt in a directory it has never been
+ * trusted in, so the real-claude smoke passes an explicit `workdir` (under the
+ * repository, whose trust is already established) and the picker is navigated
+ * there segment by segment.
  *
  * Two entry states exist. On a cold, empty database the app lands directly in
  * the new-session state with the (mandatory) picker already open — clicking
@@ -24,7 +31,11 @@ import { expect, type Page } from '@playwright/test';
  * detected by which signal renders first: an existing session node, or the
  * cold-start new-session placeholder.
  */
-export async function startNewSession(page: Page, prompt: string): Promise<void> {
+export async function startNewSession(
+  page: Page,
+  prompt: string,
+  workdir?: string,
+): Promise<void> {
   const newSessionEmpty = page.getByTestId('new-session-empty');
   await expect(
     page.getByTestId('session-node').first().or(newSessionEmpty),
@@ -34,12 +45,46 @@ export async function startNewSession(page: Page, prompt: string): Promise<void>
   }
 
   await expect(page.getByTestId('workdir-picker')).toBeVisible();
-  await page.getByTestId('workdir-use-current').click();
+  if (workdir !== undefined) {
+    await navigateBrowseTo(page, workdir);
+  } else {
+    await page.getByTestId('workdir-use-current').click();
+  }
   await page.getByTestId('workdir-confirm').click();
   await expect(newSessionEmpty).toBeVisible();
 
   await page.getByRole('textbox').fill(prompt);
   await page.getByRole('button', { name: 'Send' }).click();
+}
+
+/**
+ * Navigate the picker's Browse section from its root (`$HOME`) down to
+ * `absPath`, clicking one directory segment at a time (the picker has no path
+ * input and hides dot-directories, so `absPath` must be under `$HOME` with no
+ * dot-segments). Entering a directory also makes it the picker's candidate,
+ * so the caller only has to confirm afterwards.
+ */
+async function navigateBrowseTo(page: Page, absPath: string): Promise<void> {
+  const home = process.env.HOME;
+  if (!home || !absPath.startsWith(`${home}/`)) {
+    throw new Error(`workdir must live under $HOME (${home}): ${absPath}`);
+  }
+  const browse = page.getByTestId('workdir-browse');
+  let current = home;
+  for (const segment of absPath.slice(home.length + 1).split('/')) {
+    current = `${current}/${segment}`;
+    // Directory rows render their name with a trailing slash ("name/"), which
+    // is part of the button's accessible name.
+    await browse
+      .getByRole('button', { name: `${segment}/`, exact: true })
+      .click();
+    // The entered directory becomes the listing root; waiting for it keeps
+    // the next segment's click off a stale listing.
+    await expect(page.getByTestId('workdir-use-current')).toHaveAttribute(
+      'title',
+      current,
+    );
+  }
 }
 
 /** Send a follow-up message into the focused (already started) session. */

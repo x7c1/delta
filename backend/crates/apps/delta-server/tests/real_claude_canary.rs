@@ -280,6 +280,10 @@ impl Drop for ClaudeSession {
             .args(["-L", &self.socket, "kill-server"])
             .output();
         let _ = std::fs::remove_dir_all(&self.run_dir);
+        // The per-socket config tmux-driver renders for `-f`.
+        let _ = std::fs::remove_file(
+            std::env::temp_dir().join(format!("delta-tmux-{}.conf", self.socket)),
+        );
     }
 }
 
@@ -367,15 +371,28 @@ impl Drop for AttemptCleanup {
 
 /// Best-effort cleanup of the transcript claude wrote under
 /// `~/.claude/projects` for this canary session.
+///
+/// A `claude` that is still shutting down (the tmux kill in
+/// [`ClaudeSession::drop`] is asynchronous from claude's point of view)
+/// flushes its transcript once more on the way out, which can resurrect the
+/// file right after a single removal. Retry briefly until the removal sticks.
 fn remove_real_transcript(capture: &Capture) {
-    if let Some(path) = reported_transcript_path(capture) {
-        let path = PathBuf::from(path);
+    let Some(path) = reported_transcript_path(capture) else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
         let _ = std::fs::remove_file(&path);
-        if let Some(parent) = path.parent() {
-            // Only removes the per-workdir project dir when nothing else is
-            // in it.
-            let _ = std::fs::remove_dir(parent);
+        std::thread::sleep(Duration::from_millis(200));
+        if !path.exists() || Instant::now() >= deadline {
+            break;
         }
+    }
+    if let Some(parent) = path.parent() {
+        // Only removes the per-workdir project dir when nothing else is
+        // in it.
+        let _ = std::fs::remove_dir(parent);
     }
 }
 

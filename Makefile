@@ -92,3 +92,8 @@ e2e:
 .PHONY: e2e-fake
 e2e-fake:
 	scripts/e2e-fake.sh
+
+## e2e-real: run the real-claude canary suite — contract monitoring against the real `claude` CLI (local only; consumes Claude quota; never in CI)
+.PHONY: e2e-real
+e2e-real:
+	scripts/e2e-real.sh
