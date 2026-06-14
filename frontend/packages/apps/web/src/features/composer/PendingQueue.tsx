@@ -16,7 +16,9 @@ export interface PendingQueueProps {
  * - a `queued` send is parked server-side and dispatches when the session goes
  *   idle — labelled so it reads as deliberate waiting, not a failure (queued
  *   sends used to look stuck and provoked duplicate resubmits);
- * - a `dispatched` send and an in-flight submit show a spinner (on its way);
+ * - a `dispatched` send has reached the agent and is waiting on the reply (an
+ *   "awaiting reply" spinner); an in-flight submit (the POST itself) shows a
+ *   "sending" spinner;
  * - a send whose turn is running keeps an in-progress spinner until the
  *   turn-end event lands;
  * - a rejected submit or a reaped spawn renders a distinct error row with
@@ -31,8 +33,8 @@ export function PendingQueue({ entries }: PendingQueueProps) {
     return null;
   }
 
-  // Sends parked server-side until the session is idle.
-  const waiting = entries.filter(
+  // Sends parked server-side (queued) until the session is idle.
+  const queuedCount = entries.filter(
     (entry) => entry.kind === 'server' && entry.send.status === 'queued',
   ).length;
 
@@ -72,8 +74,10 @@ export function PendingQueue({ entries }: PendingQueueProps) {
   return (
     <div className="space-y-1 rounded border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs">
       <div className="flex items-center gap-2 font-medium text-amber-800">
-        <span>Pending sends</span>
-        {waiting > 0 && <Badge tone="warning">{waiting} waiting</Badge>}
+        <span>In progress</span>
+        {queuedCount > 0 && (
+          <Badge tone="warning">{queuedCount} queued</Badge>
+        )}
       </div>
       <ul className="space-y-1">
         {entries.map((entry) => {
@@ -92,7 +96,9 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                 : sendRow(
                     entry.key,
                     entry.send.text,
-                    <Spinner className="shrink-0" label="sending" />,
+                    // Already sent to the agent; what is pending now is its
+                    // reply (the turn), not the act of sending.
+                    <Spinner className="shrink-0" label="awaiting reply" />,
                   );
             case 'local':
               // Accepted and already matched into the transcript; its turn is

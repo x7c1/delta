@@ -93,8 +93,8 @@ describe('PendingQueue server sends', () => {
 
     expect(screen.getAllByTestId('pending-item')).toHaveLength(2);
     expect(screen.getByText('queued — sends when idle')).toBeInTheDocument();
-    expect(screen.getByText('sending')).toBeInTheDocument();
-    expect(screen.getByText('1 waiting')).toBeInTheDocument();
+    expect(screen.getByText('awaiting reply')).toBeInTheDocument();
+    expect(screen.getByText('1 queued')).toBeInTheDocument();
   });
 
   it('shows only the active thread’s sends', () => {
