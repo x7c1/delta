@@ -361,6 +361,24 @@ export interface LiveState {
    * session — `claude` streams one message at a time.
    */
   streamingMessages: Record<SessionId, StreamingMessage>;
+  /**
+   * Per-session credit for a turn-end that arrived before the send it ended was
+   * recorded, keyed by session id. A `turn_completed` / `turn_interrupted`
+   * carries only a session id, and the only drain path for a tracked local send
+   * is such a turn-end event (see {@link LiveState.localSends}). An echo turn
+   * can complete in well under the time the `POST /api/sends` takes to resolve,
+   * so under load the turn-end event can land BEFORE that POST's `onSuccess`
+   * runs {@link LiveState.recordLocalSend}. The turn-end then drains nothing
+   * (the send is not tracked yet), and the late `recordLocalSend` inserts a send
+   * whose turn has already ended — a chip with no remaining drain trigger (it is
+   * also absent from the server's open-send list, so a refetch never re-includes
+   * it), lingering forever. {@link endTurnForSession} grants a credit here when a
+   * turn-end drains no local send yet still has an in-flight submit on the same
+   * session (the racing POST), and {@link recordLocalSend} consumes one to drop
+   * the just-ended send instead of tracking it. A counter, not a flag: two sends
+   * could be in flight at once. Cleared per session as it drains to zero.
+   */
+  endedBeforeRecorded: Record<SessionId, number>;
 
   setConnection: (status: ConnectionStatus) => void;
   /** Record a submit whose `POST /api/sends` is about to fly. */
@@ -555,6 +573,33 @@ function endTurnForSession(
   dropStreaming: boolean,
 ): Partial<LiveState> {
   const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
+  // A turn ended but drained no tracked local send, yet a submit on this
+  // session is still mid-POST: the turn-end raced ahead of that POST's
+  // `onSuccess`. Credit the session so the imminent `recordLocalSend` drops the
+  // already-ended send instead of leaving a chip with no future drain trigger.
+  // Gated on an in-flight submit so a normal already-drained turn-end (or a
+  // direct-pane turn with no browser submit) grants nothing. `session_closed`
+  // is excluded: a closed session accepts no further sends, so no late
+  // `recordLocalSend` can follow. The credit is always consumed and never
+  // leaks: the server runs a turn only for an ACCEPTED send, so a turn-end
+  // implies its POST returned 2xx, whose `onSuccess` is the very
+  // `recordLocalSend` that consumes the credit. A rejected POST has no turn,
+  // so it cannot have raced a turn-end here.
+  if (
+    trigger === 'turn_end' &&
+    next.localSends === undefined &&
+    state.sending.some(
+      (item) =>
+        item.target.kind === 'thread' &&
+        item.target.sessionId === sessionId &&
+        item.status === 'sending',
+    )
+  ) {
+    next.endedBeforeRecorded = {
+      ...state.endedBeforeRecorded,
+      [sessionId]: (state.endedBeforeRecorded[sessionId] ?? 0) + 1,
+    };
+  }
   if (state.activeTurns[sessionId]) {
     const activeTurns = { ...state.activeTurns };
     delete activeTurns[sessionId];
@@ -577,6 +622,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   unread: {},
   unreadSessions: {},
   streamingMessages: {},
+  endedBeforeRecorded: {},
 
   setConnection: (status) => set({ connection: status }),
 
@@ -596,9 +642,25 @@ export const useLiveStore = create<LiveState>((set) => ({
     })),
 
   recordLocalSend: (send) =>
-    set((state) => ({
-      localSends: { ...state.localSends, [send.sendId]: send },
-    })),
+    set((state) => {
+      // The send's turn already ended before this POST `onSuccess` ran (the
+      // turn-end event raced ahead under load and credited the session — see
+      // {@link LiveState.endedBeforeRecorded}). Consume the credit and drop the
+      // send: tracking it now would leave a permanently undrainable chip.
+      const credit = state.endedBeforeRecorded[send.sessionId] ?? 0;
+      if (credit > 0) {
+        const endedBeforeRecorded = { ...state.endedBeforeRecorded };
+        if (credit > 1) {
+          endedBeforeRecorded[send.sessionId] = credit - 1;
+        } else {
+          delete endedBeforeRecorded[send.sessionId];
+        }
+        return { endedBeforeRecorded };
+      }
+      return {
+        localSends: { ...state.localSends, [send.sendId]: send },
+      };
+    }),
 
   trackSpawn: (spawn) =>
     set((state) => {
@@ -660,7 +722,13 @@ export const useLiveStore = create<LiveState>((set) => ({
       // The live previews' turn-end clears may also have been missed during the
       // outage and cannot be recovered (no re-seed of a partial stream this
       // PR), so drop them too — the flushed message renders from the refetch.
-      return { localSends: {}, activeTurns: {}, notices, streamingMessages: {} };
+      return {
+        localSends: {},
+        activeTurns: {},
+        notices,
+        streamingMessages: {},
+        endedBeforeRecorded: {},
+      };
     }),
 
   seedActiveTurn: (sessionId, turn, authoritative) =>
