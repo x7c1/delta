@@ -5,8 +5,8 @@ use rusqlite::{named_params, params, Connection, OptionalExtension, Row};
 use tokio::sync::Mutex;
 
 use delta_model::{
-    Message, MessageUuid, PermissionRequest, PermissionStatus, PromptId, Role, Send, SendStatus,
-    Session, SessionId, SessionStatus, Thread, ThreadId,
+    LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, PromptId, Role, Send,
+    SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow, SessionStore};
 
@@ -132,6 +132,19 @@ fn permission_request_from_row(row: &Row<'_>) -> Result<PermissionRequest> {
     })
 }
 
+/// Map a `launch_option` row, in `LAUNCH_OPTION_COLS` order. Every column maps
+/// directly to its domain field (no fallible status/enum parse), so this mirrors
+/// [`map_session`] and returns the raw `rusqlite::Result`.
+fn launch_option_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchOption> {
+    Ok(LaunchOption {
+        id: row.get(0)?,
+        label: row.get(1)?,
+        name: row.get(2)?,
+        value: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
 fn message_from_row(row: &Row<'_>) -> Result<Message> {
     let content_json: Option<String> = row.get(9)?;
     let content = match content_json {
@@ -188,6 +201,7 @@ const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
 const SEND_COLS: &str =
     "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at";
 const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at";
+const LAUNCH_OPTION_COLS: &str = "id, label, name, value, created_at";
 
 /// Ensure the session's `main` thread exists, returning its id.
 fn ensure_main_thread(conn: &Connection, id: &SessionId, now: &str) -> Result<ThreadId> {
@@ -973,6 +987,61 @@ impl SessionStore for SqliteStore {
             .collect::<std::result::Result<Vec<i64>, _>>()
             .map_err(Error::from)?;
         Ok(ids)
+    }
+
+    async fn list_launch_options(
+        &self,
+    ) -> std::result::Result<Vec<LaunchOption>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Newest first: the most recently registered option is the one a user is
+        // most likely to be looking for in the settings list.
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {LAUNCH_OPTION_COLS} FROM launch_option ORDER BY id DESC"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map([], launch_option_from_row)
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)?);
+        }
+        Ok(out)
+    }
+
+    async fn create_launch_option(
+        &self,
+        label: Option<&str>,
+        name: &str,
+        value: Option<&str>,
+    ) -> std::result::Result<LaunchOption, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        conn.execute(
+            "INSERT INTO launch_option (label, name, value, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![label, name, value, now],
+        )
+        .map_err(Error::from)?;
+        let id = conn.last_insert_rowid();
+        Ok(LaunchOption {
+            id,
+            label: label.map(str::to_owned),
+            name: name.to_owned(),
+            value: value.map(str::to_owned),
+            created_at: now,
+        })
+    }
+
+    async fn delete_launch_option(
+        &self,
+        id: i64,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute("DELETE FROM launch_option WHERE id = ?1", params![id])
+            .map_err(Error::from)?;
+        Ok(())
     }
 }
 

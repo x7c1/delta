@@ -454,4 +454,64 @@ describe('ApiClient', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).code).toBeUndefined();
   });
+
+  it('lists launch options from GET /api/launch-options', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        launch_options: [
+          {
+            id: 1,
+            label: 'plugins',
+            name: '--plugin-dir',
+            value: '/opt/p',
+            created_at: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getLaunchOptions();
+    expect(result.launch_options).toHaveLength(1);
+    expect(result.launch_options[0].name).toBe('--plugin-dir');
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/launch-options',
+      undefined,
+    );
+  });
+
+  it('posts a new launch option and returns the created record', async () => {
+    const created = {
+      id: 7,
+      label: null,
+      name: '--permission-mode',
+      value: 'auto',
+      created_at: '2026-01-02T00:00:00Z',
+    };
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(created, 201));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.createLaunchOption({
+      name: '--permission-mode',
+      value: 'auto',
+    });
+    expect(result).toEqual(created);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/launch-options');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({
+      name: '--permission-mode',
+      value: 'auto',
+    });
+  });
+
+  it('deletes a launch option via DELETE /api/launch-options/{id}', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.deleteLaunchOption(7)).resolves.toBeUndefined();
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/launch-options/7');
+    expect(init.method).toBe('DELETE');
+  });
 });

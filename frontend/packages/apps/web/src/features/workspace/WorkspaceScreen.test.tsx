@@ -324,23 +324,23 @@ describe('WorkspaceScreen multi-session', () => {
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
   });
 
-  it('starts the new-session flow when "New" is clicked from a real session', async () => {
+  it('starts the new-session flow when "New session" is clicked from a real session', async () => {
     // Pin focus to a real session so the test does not depend on cold-load
     // auto-focus (the shared mock store can be mutated by earlier specs).
     useNavStore.setState({ focusedSessionId: SESSION_ID });
     renderScreen();
 
-    const newButton = await screen.findByRole('button', { name: 'New' });
+    const newButton = await screen.findByRole('button', { name: 'New session' });
     fireEvent.click(newButton);
 
     // Focus moves to the sentinel, any prior selection is reset, and the picker
-    // is opened — all three driven by the single "New" click.
+    // is opened — all three driven by the single "New session" click.
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
     expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
   });
 
-  it('re-opens the picker when "New" is clicked while already in new-session', async () => {
+  it('re-opens the picker when "New session" is clicked while already in new-session', async () => {
     // Already in the new-session state with a stale selection and the picker
     // dismissed — the regression case where focus does not change, so a
     // focus-driven auto-open would not re-fire.
@@ -354,11 +354,11 @@ describe('WorkspaceScreen multi-session', () => {
     });
     renderScreen();
 
-    const newButton = await screen.findByRole('button', { name: 'New' });
+    const newButton = await screen.findByRole('button', { name: 'New session' });
     fireEvent.click(newButton);
 
-    // Clicking "New" again (still in new-session) must reset the selection and
-    // re-open the picker.
+    // Clicking "New session" again (still in new-session) must reset the
+    // selection and re-open the picker.
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
     expect(useComposerStore.getState().workdirDialogOpen).toBe(true);

@@ -29,7 +29,8 @@ use serde::Deserialize;
 
 use delta_usecase::{SessionId, ThreadId};
 use delta_wire::rest::{
-    WireCreateSendRequest, WireMessagesResponse, WireNewSessionResponse,
+    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireLaunchOption,
+    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
     WirePermissionDecisionRequest, WireQuestionAnswerRequest, WireQuestionCancelRequest,
     WireRecentWorkdirItem, WireSendResponse, WireSendsResponse, WireSessionListItem,
     WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
@@ -215,6 +216,60 @@ pub(crate) async fn recent_workdir(
             .map(WireRecentWorkdirItem::from)
             .collect(),
     }))
+}
+
+/// `GET /api/launch-options` — the registered custom launch options.
+///
+/// Returns the flat `(label?, name, value?)` records the user has registered as
+/// custom `claude` CLI flags, newest first, for the settings screen to list and
+/// manage. Selecting which to apply when starting a session is a separate
+/// concern handled elsewhere.
+pub(crate) async fn list_launch_options(
+    State(state): State<AppState>,
+) -> Result<Json<WireLaunchOptionsResponse>, ApiError> {
+    let options = state.interactor().list_launch_options().await?;
+    Ok(Json(WireLaunchOptionsResponse {
+        launch_options: options.into_iter().map(WireLaunchOption::from).collect(),
+    }))
+}
+
+/// `POST /api/launch-options` — register a new custom launch option.
+///
+/// `name` (the flag) is required and must be non-blank; `label` and `value` are
+/// optional (a valueless flag carries no `value`). A blank `name` is a `400`.
+/// Returns the created record so the client can render it without a refetch.
+pub(crate) async fn create_launch_option(
+    State(state): State<AppState>,
+    Json(req): Json<WireCreateLaunchOptionRequest>,
+) -> Result<(StatusCode, Json<WireLaunchOption>), ApiError> {
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a launch option must have a non-blank `name` (the flag)".to_owned(),
+        ));
+    }
+    // `label`/`value` are kept verbatim apart from trimming surrounding
+    // whitespace; an all-blank optional is treated as absent rather than a
+    // stored empty string.
+    let label = req.label.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let value = req.value.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let option = state
+        .interactor()
+        .create_launch_option(label, name, value)
+        .await?;
+    Ok((StatusCode::CREATED, Json(WireLaunchOption::from(option))))
+}
+
+/// `DELETE /api/launch-options/{id}` — remove a registered launch option.
+///
+/// Deleting an unknown id is a no-op, so this is idempotent and always replies
+/// `204`.
+pub(crate) async fn delete_launch_option(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    state.interactor().delete_launch_option(id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// `POST /api/sends` — enqueue a send into a session named by the request.

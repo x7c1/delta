@@ -15,6 +15,7 @@ import {
 import { useLiveStore } from '../../store/liveStore';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { NavigatorPane } from '../navigator/NavigatorPane';
+import { SettingsView } from '../settings/SettingsView';
 import { TranscriptPane } from '../transcript/TranscriptPane';
 import { TerminalPane } from '../terminal/TerminalPane';
 import { TerminalFallback } from '../terminal/TerminalFallback';
@@ -305,6 +306,11 @@ export function WorkspaceScreen() {
             {terminal}
           </div>
         ))}
+
+      {/* Settings is a modal overlay layered over the workspace rather than a
+          full-pane mode: it self-gates on `settingsOpen` (renders nothing when
+          closed) and leaves the center conversation pane in place beneath it. */}
+      <SettingsView />
     </div>
   );
 }

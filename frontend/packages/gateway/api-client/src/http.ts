@@ -1,6 +1,9 @@
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
+  CreateLaunchOptionRequest,
   CreateSendRequest,
+  LaunchOption,
+  LaunchOptionsResponse,
   MessagesResponse,
   NewSessionResponse,
   PermissionDecision,
@@ -306,5 +309,38 @@ export class ApiClient {
    */
   getWorkdirRecent(): Promise<WorkdirRecentResponse> {
     return this.request<WorkdirRecentResponse>('/api/workdir/recent');
+  }
+
+  /**
+   * `GET /api/launch-options` — the registered custom launch options (`claude`
+   * CLI flag records), newest first, for the settings screen to manage.
+   */
+  getLaunchOptions(): Promise<LaunchOptionsResponse> {
+    return this.request<LaunchOptionsResponse>('/api/launch-options');
+  }
+
+  /**
+   * `POST /api/launch-options` — register a custom launch option. `name` (the
+   * flag) is required; `label` and `value` are optional. A blank `name` is a
+   * `400`, surfaced as {@link ApiError}. Returns the created record.
+   */
+  createLaunchOption(
+    body: CreateLaunchOptionRequest,
+  ): Promise<LaunchOption> {
+    return this.request<LaunchOption>('/api/launch-options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `DELETE /api/launch-options/{id}` — remove a registered launch option
+   * (204). Deleting an unknown id is a no-op, so this is idempotent.
+   */
+  deleteLaunchOption(id: number): Promise<void> {
+    return this.requestNoContent(`/api/launch-options/${id}`, {
+      method: 'DELETE',
+    });
   }
 }

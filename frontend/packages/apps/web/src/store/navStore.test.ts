@@ -14,6 +14,7 @@ afterEach(() => {
     focusedSessionId: null,
     preNewSessionFocus: null,
     activeThreadId: null,
+    settingsOpen: false,
   });
 });
 
@@ -145,6 +146,30 @@ describe('navStore.cancelNewSession', () => {
 
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useNavStore.getState().preNewSessionFocus).toBe(NEW_SESSION_FOCUS);
+  });
+});
+
+describe('navStore settings overlay', () => {
+  it('opens and closes the settings overlay', () => {
+    expect(useNavStore.getState().settingsOpen).toBe(false);
+    useNavStore.getState().openSettings();
+    expect(useNavStore.getState().settingsOpen).toBe(true);
+    useNavStore.getState().closeSettings();
+    expect(useNavStore.getState().settingsOpen).toBe(false);
+  });
+
+  it('closes the settings overlay when a session is focused', () => {
+    useNavStore.getState().openSettings();
+    useNavStore.getState().setFocusedSession('sess-a');
+    expect(useNavStore.getState().settingsOpen).toBe(false);
+    expect(useNavStore.getState().focusedSessionId).toBe('sess-a');
+  });
+
+  it('closes the settings overlay when a new session starts', () => {
+    useNavStore.getState().openSettings();
+    useNavStore.getState().startNewSession();
+    expect(useNavStore.getState().settingsOpen).toBe(false);
+    expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 });
 

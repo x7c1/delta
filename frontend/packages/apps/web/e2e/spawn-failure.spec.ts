@@ -19,7 +19,7 @@ test('a failed spawn turns the pending chip into a Retry / Dismiss error row', a
 
   // Enter the new-session composer state and choose a directory (mandatory
   // before the first message can be sent), then send the first message.
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
   await page.getByTestId('workdir-use-current').click();
   await page.getByTestId('workdir-confirm').click();
   await expect(page.getByTestId('new-session-empty')).toBeVisible();

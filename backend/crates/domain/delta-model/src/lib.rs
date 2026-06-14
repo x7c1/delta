@@ -16,6 +16,8 @@ pub use content::ContentBlock;
 mod error;
 pub use error::{Error, Result};
 mod newtype;
+mod launch_option;
+pub use launch_option::LaunchOption;
 mod message;
 pub use message::{Message, MessageUuid, PromptId};
 mod send;

@@ -9,6 +9,9 @@ import {
 } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
+  CreateLaunchOptionRequest,
+  LaunchOption,
+  LaunchOptionsResponse,
   MessagesResponse,
   NewSessionResponse,
   SendRequest,
@@ -225,6 +228,59 @@ export function useCloseSessionMutation(
     mutationFn: (sessionId: SessionId) => client.closeSession(sessionId),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
+    },
+  });
+}
+
+/**
+ * The registered launch options (`GET /api/launch-options`) for the settings
+ * screen. Gated by `enabled` so it only fetches while the settings view is
+ * mounted; mutations invalidate this key to refresh the list.
+ */
+export function useLaunchOptionsQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<LaunchOptionsResponse> {
+  return useQuery({
+    queryKey: queryKeys.launchOptions,
+    queryFn: () => client.getLaunchOptions(),
+    enabled,
+  });
+}
+
+/**
+ * Register a launch option (`POST /api/launch-options`); refresh the list on
+ * success so the new row appears.
+ */
+export function useCreateLaunchOptionMutation(
+  client: ApiClient,
+): UseMutationResult<LaunchOption, Error, CreateLaunchOptionRequest> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateLaunchOptionRequest) =>
+      client.createLaunchOption(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.launchOptions,
+      });
+    },
+  });
+}
+
+/**
+ * Delete a launch option (`DELETE /api/launch-options/{id}`); refresh the list
+ * on success so the removed row disappears.
+ */
+export function useDeleteLaunchOptionMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, number> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => client.deleteLaunchOption(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.launchOptions,
+      });
     },
   });
 }

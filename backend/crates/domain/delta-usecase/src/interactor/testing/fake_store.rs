@@ -5,8 +5,8 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use delta_model::{
-    Message, MessageUuid, PermissionRequest, PermissionStatus, Role, Send, SendStatus, Session,
-    SessionId, SessionStatus, Thread, ThreadId,
+    LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, Role, Send,
+    SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
 use crate::error::Result;
@@ -42,6 +42,8 @@ pub(crate) struct FakeStoreInner {
     pub(crate) permissions: Vec<PermissionRequest>,
     pub(crate) next_perm_id: i64,
     pub(crate) transcript_lines_read: HashMap<SessionId, usize>,
+    pub(crate) launch_options: Vec<LaunchOption>,
+    pub(crate) next_launch_option_id: i64,
 }
 
 #[derive(Default)]
@@ -569,5 +571,38 @@ impl SessionStore for FakeStore {
             resolved.push(req.id);
         }
         Ok(resolved)
+    }
+
+    async fn list_launch_options(&self) -> Result<Vec<LaunchOption>> {
+        let g = self.inner.lock().unwrap();
+        // Newest first (descending id), mirroring the SQL store's ordering.
+        let mut out = g.launch_options.clone();
+        out.sort_by_key(|o| std::cmp::Reverse(o.id));
+        Ok(out)
+    }
+
+    async fn create_launch_option(
+        &self,
+        label: Option<&str>,
+        name: &str,
+        value: Option<&str>,
+    ) -> Result<LaunchOption> {
+        let mut g = self.inner.lock().unwrap();
+        g.next_launch_option_id += 1;
+        let option = LaunchOption {
+            id: g.next_launch_option_id,
+            label: label.map(str::to_owned),
+            name: name.to_owned(),
+            value: value.map(str::to_owned),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        g.launch_options.push(option.clone());
+        Ok(option)
+    }
+
+    async fn delete_launch_option(&self, id: i64) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.launch_options.retain(|o| o.id != id);
+        Ok(())
     }
 }

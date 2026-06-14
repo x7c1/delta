@@ -189,7 +189,7 @@ test('starting a new session shows the optimistic send', async ({ page }) => {
   // Enter the new-session composer state. A directory must be chosen before the
   // first message can be sent, so the picker opens automatically — pick the
   // default browsed directory and confirm.
-  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
   await page.getByTestId('workdir-use-current').click();
   await page.getByTestId('workdir-confirm').click();
   await expect(page.getByTestId('new-session-empty')).toBeVisible();

@@ -10,6 +10,10 @@
 
 mod error_body;
 pub use error_body::WireErrorBody;
+mod launch_option_create_request;
+pub use launch_option_create_request::WireCreateLaunchOptionRequest;
+mod launch_options_response;
+pub use launch_options_response::{WireLaunchOption, WireLaunchOptionsResponse};
 mod messages_response;
 pub use messages_response::WireMessagesResponse;
 mod new_session_response;

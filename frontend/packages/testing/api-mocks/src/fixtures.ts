@@ -1,4 +1,5 @@
 import type {
+  LaunchOption,
   Message,
   PendingPermission,
   PendingQuestion,
@@ -389,6 +390,10 @@ export interface MockStore {
   nextSendId: number;
   /** Ordinal of the next mock spawn (see {@link mockSpawnSessionId}). */
   nextSpawnOrdinal: number;
+  /** Registered launch options, newest first (the settings-screen registry). */
+  launchOptions: LaunchOption[];
+  /** Id assigned to the next created launch option. */
+  nextLaunchOptionId: number;
 }
 
 /**
@@ -464,6 +469,25 @@ export function seedData(): MockStore {
     nextThreadId: FIRST_FILLER_THREAD_ID + FILLER_SESSION_COUNT,
     nextSendId: 1,
     nextSpawnOrdinal: 1,
+    // Two seeded options so the settings screen is developable with no backend:
+    // a flag with a value and a valueless flag. Newest first (descending id).
+    launchOptions: [
+      {
+        id: 2,
+        label: null,
+        name: '--permission-mode',
+        value: 'auto',
+        created_at: '2026-01-02T00:00:00Z',
+      },
+      {
+        id: 1,
+        label: 'My plugins',
+        name: '--plugin-dir',
+        value: '/home/dev/plugins',
+        created_at: '2026-01-01T00:00:00Z',
+      },
+    ],
+    nextLaunchOptionId: 3,
   };
 }
 
