@@ -2,8 +2,7 @@
   "steps": [
     { "type": "await_prompt" },
     { "type": "reply", "text": "holding the turn open" },
-    { "type": "delay", "ms": 10000 },
-    { "type": "stop" },
+    { "type": "await_interrupt" },
     { "type": "await_prompt" },
     { "type": "reply", "text": "second turn reply" },
     { "type": "stop" }

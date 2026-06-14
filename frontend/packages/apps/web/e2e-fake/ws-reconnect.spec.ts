@@ -71,12 +71,15 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
 
   // Observe over REST (not the page) that the whole turn ran server-side:
   // both transcript lines landed, the open-send list drained, the turn ended.
+  // The window is generous because the turn runs through the real loop
+  // (keystrokes → tmux → the fake → transcript → tail), whose latency a loaded
+  // CI runner stretches; this waits on settled server truth, never a sleep.
   await expect(async () => {
     expect(await fetchMessageCount(page, session.mainThreadId)).toBeGreaterThanOrEqual(4);
     const sends = await fetchSends(page, session.id);
     expect(sends.sends).toHaveLength(0);
     expect(sends.turn.state).toBe('idle');
-  }).toPass({ timeout: 10_000 });
+  }).toPass({ timeout: 20_000 });
 
   // The page is provably stale: it still shows the pre-outage transcript and
   // a chip for a send whose turn is already over.
@@ -85,11 +88,16 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
 
   // Reconnect: the resync must converge the UI to the observed server truth —
   // the outage turn's two messages appear exactly once, the stale chip
-  // drains, and nothing reads as running.
+  // drains, and nothing reads as running. `expectReconnected` only waits for
+  // the socket to re-open; the convergence here is the resync refetch landing
+  // and rendering, which spans the same reconnect cadence (backoff plus a REST
+  // round trip), so these assertions carry the reconnect-appropriate timeout
+  // rather than the default — the same generosity every other reconnect wait
+  // in this file uses.
   await restoreLiveSocket(page);
   await expectReconnected(page);
-  await expect(messages).toHaveCount(4);
-  await expect(pending).toHaveCount(0);
+  await expect(messages).toHaveCount(4, { timeout: 15_000 });
+  await expect(pending).toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByTestId('session-running')).toHaveCount(0);
 });
 
@@ -98,8 +106,13 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
 }) => {
   await interceptLiveSocket(page);
   await page.goto('/');
-  // Scenario `ws-reconnect-busy`: the first turn replies, then holds open for
-  // a scripted beat before Stop; the second prompt completes normally.
+  // Scenario `ws-reconnect-busy`: the first turn replies, then holds open
+  // until the test interrupts it (Escape via the embedded terminal) — never on
+  // a wall clock. Holding on an explicit signal, not a fixed delay, is what
+  // makes "the session is busy when the follow-up is sent" deterministic: the
+  // follow-up POST below could only race a scripted Stop, dispatching as a
+  // fresh turn instead of parking `queued`, if the hold were timed. After the
+  // interrupt the queued send dispatches and its second turn completes.
   await startNewSession(page, 'ws-reconnect-busy hold the turn open');
 
   const messages = page.getByTestId('message-item');
@@ -113,7 +126,8 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   const session = await latestSession(page);
 
   // Drop the socket mid-turn, then send a follow-up while dark. The session
-  // is busy, so the server parks the send `queued` — confirmed over REST.
+  // is busy (the turn holds until the interrupt far below), so the server
+  // parks the send `queued` — confirmed over REST.
   await dropLiveSocket(page);
   await sendMessage(page, 'queued during the outage');
   await expect(async () => {
@@ -133,10 +147,31 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   ).toBeVisible();
   await expect(running).toBeVisible();
 
-  // The scripted hold ends: the first turn stops, the queued send dispatches,
-  // and its turn completes. The generous timeout covers the scenario's
-  // deliberate 10 s hold.
-  await expect(messages).toHaveCount(4, { timeout: 20_000 });
+  // End the first turn from the embedded terminal (Escape → the fake writes
+  // the interrupt marker, like the real `claude`; no Stop fires). This is the
+  // turn-end the held scenario was waiting for: the marker lands, the queued
+  // send dispatches as an ordinary prompt, and its turn completes. Driving the
+  // end explicitly — rather than waiting out a scripted delay — keeps the whole
+  // spec free of wall-clock races.
+  await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+  const xtermInput = page.locator('.xterm-helper-textarea');
+  await expect(xtermInput).toBeAttached();
+  await expect(page.locator('.xterm-rows')).toContainText('fake-claude session');
+
+  // Land Escape in the fake's stdin; retried until its observable effect (the
+  // queued chip leaving — the send was promoted and dispatched) lands.
+  await expect(async () => {
+    await xtermInput.focus();
+    await xtermInput.press('Escape');
+    await expect(
+      pending.filter({ hasText: 'queued during the outage' }),
+    ).toHaveCount(0, { timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
+
+  // The conversation settles: the first turn's prompt and reply, its interrupt
+  // marker, then the dequeued send's prompt and reply. Nothing is left pending
+  // or running.
+  await expect(messages).toHaveCount(5, { timeout: 20_000 });
   await expect(pending).toHaveCount(0);
   await expect(running).toHaveCount(0);
 });
@@ -164,8 +199,10 @@ test('a pending permission notice survives a reconnect, exactly once', async ({
   await expectReconnected(page);
 
   // The notice survived the reconnect — not cleared by the resync, and not
-  // duplicated by it either.
-  await expect(notice).toHaveCount(1);
+  // duplicated by it either. The count is asserted with the reconnect-
+  // appropriate timeout: `expectReconnected` only waits for the socket, while
+  // the resync refetch that re-seeds the notice lands a beat later.
+  await expect(notice).toHaveCount(1, { timeout: 15_000 });
 
   // The scripted tool_result lands: the notice resolves and the turn
   // completes normally (prompt, tool call, closing reply). The generous
@@ -219,7 +256,9 @@ test('a permission raised entirely during the outage appears after reconnect', a
   // once, regardless of whether an outage-window refetch already showed it.
   await restoreLiveSocket(page);
   await expectReconnected(page);
-  await expect(notice).toHaveCount(1);
+  // The reconnect-appropriate timeout: the notice is seeded by the resync
+  // refetch, which lands a beat after the socket re-opens.
+  await expect(notice).toHaveCount(1, { timeout: 15_000 });
   await expect(notice).toContainText('Permission requested: Bash');
 
   // The scripted tool_result lands: the notice resolves (the live
