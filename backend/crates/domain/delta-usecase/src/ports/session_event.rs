@@ -54,10 +54,10 @@ pub enum SessionEvent {
     ///
     /// Detected from the transcript itself rather than a hook: when the user
     /// interrupts, Claude's `Stop` hook does not fire, so [`Self::TurnCompleted`]
-    /// is never emitted and the optimistic "pending send" chip would stay
+    /// is never emitted and the optimistic "open send" chip would stay
     /// "in progress" forever. The transcript tail instead sees a discrete
     /// `[Request interrupted by user...]` user line and emits this event, which
-    /// clears the stuck pending send hook-independently (same delivery path as
+    /// clears the stuck send hook-independently (same delivery path as
     /// [`Self::PermissionResolved`]).
     TurnInterrupted { session_id: SessionId },
     /// The transcript grew between hooks (continuous tail).
@@ -65,7 +65,7 @@ pub enum SessionEvent {
     /// Emitted by the background poll when new lines were ingested, so the
     /// browser refetches the affected threads. Unlike [`Self::TurnCompleted`]
     /// and [`Self::ExternalInput`], this carries no turn semantics and must not
-    /// mutate the pending-send FIFO or unread badges — it is a pure
+    /// mutate the open-send FIFO or unread badges — it is a pure
     /// "refetch these threads" signal. `thread_ids` are the distinct threads of
     /// the newly-ingested messages.
     TranscriptUpdated {

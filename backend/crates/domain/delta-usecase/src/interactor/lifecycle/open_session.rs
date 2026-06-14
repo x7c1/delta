@@ -71,7 +71,7 @@ where
         // exit code, which is 0 before claude's own resume failure surfaces),
         // leaving the UI stuck on a "waiting" pending row that never clears.
         // Refuse here — before minting a token, writing settings, or spawning
-        // — so no pane is created and no optimistic pending send is enqueued.
+        // — so no pane is created and no optimistic send is enqueued.
         // A session still `spawning` has no transcript path at all (the
         // first hook never bound it), so it is equally unresumable.
         let resumable = match session.transcript_path.as_deref() {

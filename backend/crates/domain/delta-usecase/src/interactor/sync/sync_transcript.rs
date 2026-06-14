@@ -40,7 +40,7 @@ where
     /// - [`SessionEvent::TurnInterrupted`]: when a `[Request interrupted by
     ///   user...]` marker line is ingested, signalling the user aborted the
     ///   in-flight turn. Claude's `Stop` hook does not fire on interrupt, so this
-    ///   is the hook-independent signal that clears the stuck pending send.
+    ///   is the hook-independent signal that clears the stuck send.
     ///
     /// The caller is responsible for broadcasting these events.
     pub(in crate::interactor) async fn sync_transcript(

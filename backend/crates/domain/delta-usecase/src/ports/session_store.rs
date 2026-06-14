@@ -152,7 +152,7 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// A session's open (non-terminal) sends — status `queued` or
     /// `dispatched` — oldest first (ascending `id`).
     ///
-    /// This is the server-side truth behind the browser's pending-send strip:
+    /// This is the server-side truth behind the browser's send strip:
     /// every send accepted for the session that has neither matched a
     /// transcript line nor been cancelled yet.
     async fn open_sends(&self, session_id: &SessionId) -> Result<Vec<Send>>;
