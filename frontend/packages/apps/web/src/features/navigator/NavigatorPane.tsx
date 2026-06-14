@@ -54,6 +54,53 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
 };
 
 /**
+ * Plus glyph marking the "New session" header action so it reads as an
+ * affordance to create something. Decorative — always `aria-hidden`, so the
+ * button's accessible name stays its "New session" label. This file is the
+ * only user.
+ */
+function PlusIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+/**
+ * Gear glyph marking the footer "Settings" entry so it reads as a button.
+ * Decorative — always `aria-hidden`, so the button's accessible name stays its
+ * "Settings" label. This file is the only user.
+ */
+function SettingsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+/**
  * The left pane: a session → thread nested tree, plus a "New" affordance and
  * the live connection status. Each session's open/closed state is shown by its
  * status dot, so no separate count is rendered. Per-session state — a pending
@@ -161,59 +208,58 @@ export function NavigatorPane({
       bodyClassName="scrollbar-none"
       header={
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            {/*
-              data-connection exposes the live connection state structurally so
-              the e2e suites can wait on disconnect/reconnect transitions
-              without depending on the dot's color classes or title wording.
-            */}
-            <span
-              className="inline-flex"
-              data-testid="connection-indicator"
-              data-connection={connection}
-            >
-              <StatusDot
-                tone={CONNECTION_TONE[connection]}
-                title={CONNECTION_TITLE[connection]}
-              />
-            </span>
-            <span className="text-sm font-semibold text-slate-700">
-              Sessions
-            </span>
-          </div>
+          <span className="text-sm font-semibold text-slate-700">Sessions</span>
           <Button
             size="sm"
             variant="secondary"
-            // The "New" button always (re)starts the new-session flow, even when
-            // the app is already in the new-session state. It is not enough to
-            // change focus: the picker's open state lives in the store so it can
-            // be opened without relying on a focus transition. Reset any prior
-            // selection so a fresh "New" starts from a clean directory choice.
+            // The "New session" button always (re)starts the new-session flow,
+            // even when the app is already in the new-session state. It is not
+            // enough to change focus: the picker's open state lives in the store
+            // so it can be opened without relying on a focus transition. Reset
+            // any prior selection so a fresh start uses a clean directory choice.
             onClick={() => {
               startNewSession();
               setNewSessionWorkdir(null);
               openWorkdirDialog();
             }}
           >
-            New
+            <PlusIcon className="h-3.5 w-3.5" />
+            New session
           </Button>
         </div>
       }
       footer={
-        // Settings entry pinned at the lower-left, claude.ai-style: opens the
-        // settings dialog overlaid on top of the workspace.
-        <button
-          type="button"
-          data-testid="settings-entry"
-          aria-pressed={settingsOpen}
-          onClick={openSettings}
-          className={cn(
-            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-600 hover:bg-slate-100',
-            settingsOpen && 'bg-slate-100 font-medium text-slate-900',
-          )}
-        >
-          Settings
-        </button>
+        // The footer is a single row: the live connection status on the left,
+        // and the Settings entry (claude.ai-style, opens the settings dialog
+        // overlaid on the workspace) on the right.
+        <div className="flex items-center justify-between gap-2">
+          {/*
+            data-connection exposes the live connection state structurally so
+            the e2e suites can wait on disconnect/reconnect transitions without
+            depending on the dot's color classes or title wording.
+          */}
+          <span
+            className="inline-flex px-1"
+            data-testid="connection-indicator"
+            data-connection={connection}
+          >
+            <StatusDot
+              tone={CONNECTION_TONE[connection]}
+              title={CONNECTION_TITLE[connection]}
+            />
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="settings-entry"
+            aria-pressed={settingsOpen}
+            onClick={openSettings}
+            className={cn(settingsOpen && 'bg-slate-100 font-medium text-slate-900')}
+          >
+            <SettingsIcon className="h-3.5 w-3.5" />
+            Settings
+          </Button>
+        </div>
       }
     >
       {focusedSessionId === NEW_SESSION_FOCUS && (

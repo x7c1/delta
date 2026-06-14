@@ -41,7 +41,7 @@ export async function startNewSession(
     page.getByTestId('session-node').first().or(newSessionEmpty),
   ).toBeVisible();
   if (!(await newSessionEmpty.isVisible())) {
-    await page.getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('button', { name: 'New session', exact: true }).click();
   }
 
   await expect(page.getByTestId('workdir-picker')).toBeVisible();
