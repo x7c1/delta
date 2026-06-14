@@ -53,6 +53,14 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
   closed: 'Server connection: disconnected',
 };
 
+// Short status word shown beside the dot in the footer, so the indicator reads
+// as the live connection state rather than a static brand label.
+const CONNECTION_LABEL: Record<ConnectionStatus, string> = {
+  connecting: 'Connecting…',
+  open: 'Connected',
+  closed: 'Disconnected',
+};
+
 /**
  * Plus glyph marking the "New session" header action so it reads as an
  * affordance to create something. Decorative — always `aria-hidden`, so the
@@ -208,15 +216,16 @@ export function NavigatorPane({
       bodyClassName="scrollbar-none"
       header={
         // The header holds the primary action: a full-width "New session" CTA,
-        // styled as a filled (secondary) button so it clearly reads as a button
-        // at rest. It always (re)starts the new-session flow even when already in
-        // that state — changing focus is not enough, the picker's open state
-        // lives in the store so it can open without a focus transition; reset any
-        // prior selection for a clean directory choice.
+        // styled as an outlined button (transparent with a thin border, a faint
+        // fill on hover) so it reads clearly as a button while staying lighter
+        // than a solid fill. It always (re)starts the new-session flow even when
+        // already in that state — changing focus is not enough, the picker's open
+        // state lives in the store so it can open without a focus transition;
+        // reset any prior selection for a clean directory choice.
         <Button
-          variant="secondary"
+          variant="ghost"
           size="sm"
-          className="w-full justify-start"
+          className="w-full justify-start border border-slate-300 text-slate-700"
           onClick={() => {
             startNewSession();
             setNewSessionWorkdir(null);
@@ -229,9 +238,9 @@ export function NavigatorPane({
       }
       footer={
         // A quiet utility bar, distinct from the primary action up top: the live
-        // connection status (dot + "Delta" running label) on the left, and an
-        // icon-only Settings entry on the right (claude.ai-style, opens the
-        // settings dialog overlaid on the workspace).
+        // connection status (dot + a status word like "Connected") on the left,
+        // and an icon-only Settings entry on the right (claude.ai-style, opens
+        // the settings dialog overlaid on the workspace).
         <div className="flex items-center justify-between gap-2">
           {/*
             data-connection exposes the live connection state structurally so the
@@ -249,7 +258,9 @@ export function NavigatorPane({
                 title={CONNECTION_TITLE[connection]}
               />
             </span>
-            <span className="text-xs text-slate-500">Delta</span>
+            <span className="text-xs text-slate-500">
+              {CONNECTION_LABEL[connection]}
+            </span>
           </span>
           {/*
             Icon-only Settings button: aria-label carries the accessible name
