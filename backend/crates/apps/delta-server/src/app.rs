@@ -148,7 +148,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        // No pending send queued, so nothing is injected: the handler returns a
+        // No send is queued, so nothing is injected: the handler returns a
         // plain 200 with an empty body rather than a `hookSpecificOutput`.
         assert!(bytes.is_empty(), "no context to inject, so no body");
     }

@@ -4,7 +4,7 @@
 //! they form Delta's control plane:
 //!
 //! - `UserPromptSubmit` fires just before a prompt is processed. Delta matches
-//!   it against the pending-send FIFO to confirm a turn start, and may return a
+//!   it against the open-send FIFO to confirm a turn start, and may return a
 //!   `hookSpecificOutput.additionalContext` to inject a locator quote into that
 //!   prompt only.
 //! - `Stop` fires when a response completes.

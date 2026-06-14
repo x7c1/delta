@@ -148,7 +148,7 @@ pub(crate) async fn list_threads(
 /// Returns the sends still in flight for the session — status `queued`
 /// (held back until the session goes idle) or `dispatched` (typed into the
 /// pane, awaiting transcript correlation) — oldest first. This is the source
-/// of truth for the browser's pending-send strip. An unknown session id is a
+/// of truth for the browser's send strip. An unknown session id is a
 /// `404`, so a reaped spawn is distinguishable from "nothing pending".
 pub(crate) async fn list_sends(
     State(state): State<AppState>,

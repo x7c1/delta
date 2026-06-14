@@ -73,7 +73,7 @@ where
             tracing::warn!(
                 session_id = %self.id,
                 error = %err,
-                "failed to dispatch the held resume first prompt; cancelling its pending send"
+                "failed to dispatch the held resume first prompt; cancelling its open send"
             );
             let _ = self
                 .apply_turn_input(crate::turn::TurnInput::DispatchFailed)

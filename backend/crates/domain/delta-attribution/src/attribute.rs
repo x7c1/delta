@@ -79,7 +79,7 @@ pub enum Effect {
     /// The `[Request interrupted by user...]` marker was ingested: the user
     /// aborted the in-flight turn (Claude's `Stop` hook does not fire on
     /// interrupt). Feed `Interrupt` into the turn machine and notify the
-    /// browser so the stuck pending send clears.
+    /// browser so the stuck send clears.
     TurnInterrupted,
     /// A human user line matched the head outstanding send: mark the send row
     /// matched to this transcript uuid.

@@ -15,7 +15,7 @@ where
     /// `dispatched` — oldest first.
     ///
     /// Backs `GET /api/sessions/{id}/sends`, so the browser can render its
-    /// pending-send strip from server state instead of mirroring the queue
+    /// send strip from server state instead of mirroring the queue
     /// client-side. A stale or unknown session id is reported as a clean
     /// `SessionNotFound` (404) rather than yielding a silently empty list, so
     /// the browser can tell "nothing pending" apart from "no such session"
