@@ -206,56 +206,23 @@ export function NavigatorPane({
       // scrolls via wheel/trackpad. The transcript pane keeps its hover-reveal
       // scrollbar (Panel's default).
       bodyClassName="scrollbar-none"
+      // Trial layout: the three navigator controls are stacked vertically at the
+      // top-left — (dot) Delta status, (icon) New session, (icon) Settings. They
+      // live in the Panel header (outside the scrolling body) so the virtualized
+      // session list's scroll offset is unaffected; headerClassName lets the
+      // header grow past its default single fixed-height row.
+      headerClassName="items-stretch py-2"
       header={
-        // The header is a single left-aligned row holding the "New session"
-        // action (ui-kit ghost Button with an icon+label treatment).
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            // Pull the ghost button left by its own horizontal padding (-ml-1
-            // offsets the sm size's px-2) so the plus chip lines up with the
-            // session cards' content below — card box edge and title column —
-            // instead of floating ~8px further in, which read as odd left
-            // whitespace at rest (the ghost background is invisible until hover).
-            className="-ml-1"
-            // The "New session" button always (re)starts the new-session flow,
-            // even when the app is already in the new-session state. It is not
-            // enough to change focus: the picker's open state lives in the store
-            // so it can be opened without relying on a focus transition. Reset
-            // any prior selection so a fresh start uses a clean directory choice.
-            onClick={() => {
-              startNewSession();
-              setNewSessionWorkdir(null);
-              openWorkdirDialog();
-            }}
-          >
-            {/*
-              The plus sits in a faint circular chip so the create affordance
-              reads a touch more prominently than a bare glyph, while staying
-              understated and on-palette with the app's light slate surfaces.
-            */}
-            <span className="inline-flex items-center justify-center rounded-full bg-slate-200 p-1">
-              <PlusIcon className="h-3 w-3" />
-            </span>
-            New session
-          </Button>
-        </div>
-      }
-      footer={
-        // The footer is a single row: the live connection status (and a small
-        // "Delta" running label) on the left, and the Settings entry
-        // (claude.ai-style, opens the settings dialog overlaid on the
-        // workspace) on the right.
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-col items-start gap-0.5">
           {/*
-            data-connection exposes the live connection state structurally so
-            the e2e suites can wait on disconnect/reconnect transitions without
-            depending on the dot's color classes or title wording.
+            (dot) Delta — the live connection status. data-connection exposes the
+            state structurally so the e2e suites can wait on disconnect/reconnect
+            transitions without depending on the dot's color classes or title
+            wording. Not a button: it is an indicator, not an action.
           */}
-          <span className="inline-flex items-center gap-1.5">
+          <div className="flex items-center gap-2 px-2 py-1">
             <span
-              className="inline-flex px-1"
+              className="inline-flex"
               data-testid="connection-indicator"
               data-connection={connection}
             >
@@ -264,20 +231,48 @@ export function NavigatorPane({
                 title={CONNECTION_TITLE[connection]}
               />
             </span>
+            <span className="text-sm text-slate-600">Delta</span>
+          </div>
+          {/*
+            (icon) New session. Always (re)starts the new-session flow even when
+            already in that state: changing focus is not enough, the picker's
+            open state lives in the store so it can open without a focus
+            transition. Reset any prior selection for a clean directory choice.
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="justify-start"
+            onClick={() => {
+              startNewSession();
+              setNewSessionWorkdir(null);
+              openWorkdirDialog();
+            }}
+          >
             {/*
-              Presentational label next to the status dot, conveying that Delta
-              is the thing whose connection the dot reflects. Muted/small so it
-              sits quietly beside the indicator.
+              The plus sits in a circular chip so the create affordance reads a
+              touch more prominently than a bare glyph, on-palette with the app's
+              light slate surfaces.
             */}
-            <span className="text-xs text-slate-500">Delta</span>
-          </span>
+            <span className="inline-flex items-center justify-center rounded-full bg-slate-200 p-1">
+              <PlusIcon className="h-3 w-3" />
+            </span>
+            New session
+          </Button>
+          {/*
+            (icon) Settings — claude.ai-style entry that opens the settings dialog
+            overlaid on the workspace.
+          */}
           <Button
             variant="ghost"
             size="sm"
             data-testid="settings-entry"
             aria-pressed={settingsOpen}
             onClick={openSettings}
-            className={cn(settingsOpen && 'bg-slate-100 font-medium text-slate-900')}
+            className={cn(
+              'justify-start',
+              settingsOpen && 'bg-slate-100 font-medium text-slate-900',
+            )}
           >
             <SettingsIcon className="h-3.5 w-3.5" />
             Settings
