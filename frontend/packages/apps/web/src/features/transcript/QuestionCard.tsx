@@ -201,7 +201,9 @@ export function QuestionCard({
       role="group"
       aria-label="Question from Claude Code"
     >
-      <p className="font-medium text-indigo-900">Claude is asking a question</p>
+      <p className="text-xs font-medium text-indigo-900">
+        Claude is asking a question
+      </p>
 
       {!answerable ? (
         <p className="text-slate-600">
