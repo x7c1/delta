@@ -108,11 +108,11 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   await page.goto('/');
   // Scenario `ws-reconnect-busy`: the first turn replies, then holds open
   // until the test interrupts it (Escape via the embedded terminal) — never on
-  // a wall clock. Holding on an explicit signal, not a fixed delay, is what
-  // makes "the session is busy when the follow-up is sent" deterministic: the
-  // follow-up POST below could only race a scripted Stop, dispatching as a
-  // fresh turn instead of parking `queued`, if the hold were timed. After the
-  // interrupt the queued send dispatches and its second turn completes.
+  // a wall clock. Holding on an explicit signal, not a fixed delay, keeps the
+  // turn `in_flight` server-side until the test ends it, so once the follow-up
+  // gate below observes `in_flight` the session stays busy through the POST.
+  // After the interrupt the queued send dispatches and its second turn
+  // completes.
   await startNewSession(page, 'ws-reconnect-busy hold the turn open');
 
   const messages = page.getByTestId('message-item');
@@ -125,9 +125,24 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   await expect(pending).toHaveCount(1);
   const session = await latestSession(page);
 
-  // Drop the socket mid-turn, then send a follow-up while dark. The session
-  // is busy (the turn holds until the interrupt far below), so the server
-  // parks the send `queued` — confirmed over REST.
+  // Gate the follow-up POST on the SERVER's own busy signal, not the client
+  // `running` indicator. Whether the server parks a send `queued` vs dispatches
+  // it is decided by its turn FSM at POST time (`queued` iff the turn is
+  // non-idle then). The `running` chip above only proves the turn was
+  // `in_flight` at some *past* sends observation: that flag is set-only and
+  // sticky (`seedActiveTurn` never clears it from a non-authoritative read), so
+  // a later POST trusts a value that could predate the read by hundreds of
+  // milliseconds — a gap a loaded runner stretches. Poll the queryable turn
+  // state until the server itself reports `in_flight`, so "busy at POST time"
+  // is guaranteed by a fresh server read taken moments before the send, never
+  // by a stale client flag.
+  await expect(async () => {
+    expect((await fetchSends(page, session.id)).turn.state).toBe('in_flight');
+  }).toPass({ timeout: 10_000 });
+
+  // Drop the socket mid-turn, then send a follow-up while dark. The session is
+  // busy (just confirmed over REST, and the turn holds until the interrupt far
+  // below), so the server parks the send `queued` — confirmed over REST.
   await dropLiveSocket(page);
   await sendMessage(page, 'queued during the outage');
   await expect(async () => {
