@@ -42,6 +42,22 @@ async function expectReconnected(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Timeout for any assertion whose subject is re-seeded or drained by the
+ * post-reconnect resync — or by a turn's completion — rather than by the live
+ * event that fired during the outage. `expectReconnected` only waits for the
+ * socket to re-open; the resync refetch that rebuilds the pending chip and the
+ * running indicator lands a beat later, and the `turn_completed` broadcast that
+ * drains the optimistic chip / renders the closing reply trails the reply hitting
+ * the transcript. On a 2-vCPU CI runner each of those round trips stretches well
+ * past Playwright's default 5 s, so every such assertion must carry the
+ * reconnect-appropriate budget the rest of this file already uses (the socket
+ * backoff + a REST round trip) — never the default. This is the same generosity
+ * `expectReconnected` and the explicit 15 s/20 s waits above use, named once so
+ * the remaining post-reconnect assertions stop relying on the default.
+ */
+const RECONNECT_SETTLE_MS = 15_000;
+
 test('a turn that completes during a socket outage is resynced on reconnect', async ({
   page,
 }) => {
@@ -96,9 +112,13 @@ test('a turn that completes during a socket outage is resynced on reconnect', as
   // in this file uses.
   await restoreLiveSocket(page);
   await expectReconnected(page);
-  await expect(messages).toHaveCount(4, { timeout: 15_000 });
-  await expect(pending).toHaveCount(0, { timeout: 15_000 });
-  await expect(page.getByTestId('session-running')).toHaveCount(0);
+  await expect(messages).toHaveCount(4, { timeout: RECONNECT_SETTLE_MS });
+  await expect(pending).toHaveCount(0, { timeout: RECONNECT_SETTLE_MS });
+  // Re-seeded from the same resync refetch, which can trail the message render
+  // under load — carry the reconnect budget, not the default.
+  await expect(page.getByTestId('session-running')).toHaveCount(0, {
+    timeout: RECONNECT_SETTLE_MS,
+  });
 });
 
 test('a queued send keeps its chip and the running state is re-seeded across a reconnect', async ({
@@ -159,8 +179,8 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   // state, since the `turn_started` event window is gone.
   await expect(
     pending.filter({ hasText: 'queued during the outage' }),
-  ).toBeVisible();
-  await expect(running).toBeVisible();
+  ).toBeVisible({ timeout: RECONNECT_SETTLE_MS });
+  await expect(running).toBeVisible({ timeout: RECONNECT_SETTLE_MS });
 
   // End the first turn from the embedded terminal (Escape → the fake writes
   // the interrupt marker, like the real `claude`; no Stop fires). This is the
@@ -187,8 +207,11 @@ test('a queued send keeps its chip and the running state is re-seeded across a r
   // marker, then the dequeued send's prompt and reply. Nothing is left pending
   // or running.
   await expect(messages).toHaveCount(5, { timeout: 20_000 });
-  await expect(pending).toHaveCount(0);
-  await expect(running).toHaveCount(0);
+  // The chip and the running flag drain on the dequeued turn's completion
+  // broadcast, which trails its rendered reply under load — give them the same
+  // settle budget rather than the default 5 s.
+  await expect(pending).toHaveCount(0, { timeout: RECONNECT_SETTLE_MS });
+  await expect(running).toHaveCount(0, { timeout: RECONNECT_SETTLE_MS });
 });
 
 test('a pending permission notice survives a reconnect, exactly once', async ({
@@ -224,8 +247,15 @@ test('a pending permission notice survives a reconnect, exactly once', async ({
   // timeout covers the scenario's deliberate hold plus the decision-deadline
   // pass-through.
   await expect(notice).toHaveCount(0, { timeout: 20_000 });
-  await expect(page.getByTestId('message-item')).toHaveCount(3);
-  await expect(page.getByTestId('pending-item')).toHaveCount(0);
+  // The closing reply and the drained chip land on the turn-completion refetch,
+  // a separate round trip from the notice resolution above — carry the settle
+  // budget so a loaded runner's lag does not flake them at the default 5 s.
+  await expect(page.getByTestId('message-item')).toHaveCount(3, {
+    timeout: RECONNECT_SETTLE_MS,
+  });
+  await expect(page.getByTestId('pending-item')).toHaveCount(0, {
+    timeout: RECONNECT_SETTLE_MS,
+  });
 });
 
 test('a permission raised entirely during the outage appears after reconnect', async ({
@@ -282,6 +312,12 @@ test('a permission raised entirely during the outage appears after reconnect', a
   // generous timeout covers the scenario's deliberate 10 s hold plus the
   // decision-deadline pass-through.
   await expect(notice).toHaveCount(0, { timeout: 20_000 });
-  await expect(messages).toHaveCount(5);
-  await expect(page.getByTestId('pending-item')).toHaveCount(0);
+  // The five settled messages land on the turn-completion refetch, a separate
+  // round trip from the notice resolution above; on a loaded runner that refetch
+  // trails it by several seconds, so this count must carry the settle budget
+  // rather than the default 5 s (the observed recurrence: "Received 3").
+  await expect(messages).toHaveCount(5, { timeout: RECONNECT_SETTLE_MS });
+  await expect(page.getByTestId('pending-item')).toHaveCount(0, {
+    timeout: RECONNECT_SETTLE_MS,
+  });
 });

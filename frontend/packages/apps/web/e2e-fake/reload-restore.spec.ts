@@ -10,20 +10,43 @@ import { sendMessage, startNewSession } from './support/app';
  * session with the same turns — both user messages present, in order, with
  * their replies.
  */
+
+/**
+ * Timeout for an assertion that a turn has *settled* — its optimistic pending
+ * chip drained, or its message rendered. A send's chip is an optimistic local
+ * twin that the client keeps up until the turn's `turn_completed` event lands
+ * (see `localSends` in the live store): the send leaving the server's open list
+ * (`matched`) and the assistant reply rendering both happen on the transcript
+ * refetch, which can outrun the separate `Stop`→`turn_completed` broadcast that
+ * actually drops the chip. On a loaded CI runner (2 vCPUs) that broadcast +
+ * re-render lands several seconds after the reply is already on screen, so a
+ * chip-drain assertion gated on the default 5 s timeout flakes while the
+ * message-count assertion beside it passes. This is the same generous,
+ * turn-completion-appropriate budget the rest of the fake suite already uses
+ * for post-completion assertions (e.g. `queued-prompt`), not a tunable sleep.
+ */
+const TURN_SETTLE_MS = 15_000;
+
 test('a reload mid-conversation restores the same threads and messages', async ({
   page,
 }) => {
   await page.goto('/');
   await startNewSession(page, 'reload-restore first message');
 
-  // First turn completes: prompt + reply, pending drained.
+  // First turn completes: prompt + reply, pending drained. The chip drains on
+  // the turn's completion broadcast, which can trail the rendered reply under
+  // load — wait for it with the turn-settle budget, not the default 5 s.
   await expect(page.getByTestId('message-item')).toHaveCount(2);
-  await expect(page.getByTestId('pending-item')).toHaveCount(0);
+  await expect(page.getByTestId('pending-item')).toHaveCount(0, {
+    timeout: TURN_SETTLE_MS,
+  });
 
   // Second turn through the normal open-session send path.
   await sendMessage(page, 'and a second message');
   await expect(page.getByTestId('message-item')).toHaveCount(4);
-  await expect(page.getByTestId('pending-item')).toHaveCount(0);
+  await expect(page.getByTestId('pending-item')).toHaveCount(0, {
+    timeout: TURN_SETTLE_MS,
+  });
 
   await page.reload();
 
