@@ -228,6 +228,52 @@ describe('MessageItem', () => {
     expect(screen.getByText(new RegExp(hiddenLine))).toBeInTheDocument();
   });
 
+  it('folds a task-notification user row into a collapsed card', () => {
+    // A background-task completion arrives as a normal `role: "user"` line
+    // whose text starts with `<task-notification>` (not a meta row). It must
+    // render collapsed on the assistant side — never a right-aligned user
+    // bubble — with the body hidden until the disclosure is toggled.
+    const summaryBadge = 'task notification';
+    const hiddenLine = 'BODY LINE ONLY VISIBLE WHEN EXPANDED';
+    const body = `<task-notification>\nbackground task finished\n${hiddenLine}\n</task-notification>`;
+    render(<MessageItem message={makeMessage('user', body)} />);
+
+    const item = screen.getByTestId('message-item');
+    expect(item).toHaveAttribute('data-task-notification', 'true');
+    // Not a right-aligned user bubble.
+    expect(item).not.toHaveClass('items-end');
+
+    // Collapsed by default: the badge summary shows, but the body is not in the
+    // DOM until toggled.
+    const toggle = screen.getByRole('button');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText(summaryBadge)).toBeInTheDocument();
+    expect(screen.queryByText(new RegExp(hiddenLine))).toBeNull();
+
+    // Toggling reveals the verbatim body.
+    fireEvent.click(toggle);
+    expect(screen.getByText(new RegExp(hiddenLine))).toBeInTheDocument();
+  });
+
+  it('detects a task-notification with leading whitespace, mirroring the backend', () => {
+    // The backend trims leading whitespace before the prefix check; the fold
+    // must match the same shape.
+    render(<MessageItem message={makeMessage('user', '  <task-notification>done')} />);
+    expect(screen.getByTestId('message-item')).toHaveAttribute(
+      'data-task-notification',
+      'true',
+    );
+  });
+
+  it('leaves a normal user turn unfolded (no task-notification card)', () => {
+    // A plain user turn must stay a right-aligned bubble, not be folded.
+    render(<MessageItem message={makeMessage('user', 'just a normal message')} />);
+    const item = screen.getByTestId('message-item');
+    expect(item).not.toHaveAttribute('data-task-notification');
+    expect(item).toHaveClass('items-end');
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
   it('renders no timestamp when created_at is unparseable', () => {
     const message = { ...makeMessage('user', 'hi'), created_at: 'not-a-date' };
     render(<MessageItem message={message} />);

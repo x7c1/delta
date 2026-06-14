@@ -4,6 +4,7 @@ import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { blockSummary, stringifyContent } from './blockSummary';
+import { isTaskNotificationMessage } from './claudeFormat';
 import { messageRendersNothing, type ToolPairing } from './toolPairs';
 
 export interface MessageItemProps {
@@ -85,6 +86,45 @@ export function MessageItem({
             <span className="flex items-center gap-1.5">
               <Badge tone="neutral">meta</Badge>
               <span className="text-slate-500">{firstLine}</span>
+            </span>
+          }
+        >
+          <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
+        </Collapsible>
+        {timestamp && (
+          <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
+            {timestamp}
+          </span>
+        )}
+      </article>
+    );
+  }
+
+  // A task-notification is the background-task completion the harness injects
+  // as a normal `role: "user"` line (not a meta row), so it reaches here as a
+  // genuine user turn — the meta-folding above does not apply. The agent's
+  // reply to it is real content and stays visible; only this injected block is
+  // folded. Render it presentationally like a meta card: a collapsed disclosure
+  // with a one-line badge summary and a plain pre-wrapped body, never a
+  // right-aligned user bubble and never Markdown-rendered. Backend role and
+  // attribution are untouched.
+  if (isTaskNotificationMessage(message)) {
+    const text = message.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+    return (
+      <article
+        className="px-3 text-sm"
+        data-role={message.role}
+        data-task-notification="true"
+        data-testid="message-item"
+      >
+        <Collapsible
+          defaultOpen={false}
+          summary={
+            <span className="flex items-center gap-1.5">
+              <Badge tone="neutral">task notification</Badge>
             </span>
           }
         >
