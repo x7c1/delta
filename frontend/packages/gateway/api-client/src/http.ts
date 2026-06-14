@@ -6,6 +6,7 @@ import type {
   PermissionDecision,
   PermissionDecisionRequest,
   QuestionAnswerRequest,
+  QuestionCancelRequest,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -251,6 +252,28 @@ export class ApiClient {
     const body: QuestionAnswerRequest = { selections };
     return this.requestNoContent(
       `/api/sessions/${sessionId}/questions/${requestId}/answer`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+  }
+
+  /**
+   * `POST /api/sessions/{id}/questions/cancel` — cancel a pending
+   * `AskUserQuestion` (204). The sibling of {@link answerQuestion}: the server
+   * injects a single `Escape` into the session's pane, which cancels the whole
+   * call; the card then clears when the resulting `is_error` `tool_result`
+   * resolves the question's request row. A `409` (`question_not_pending`) means
+   * the question can no longer be cancelled from the UI — surfaced as
+   * {@link ApiError}, and the card keeps its cancel-in-the-terminal fallback.
+   * Cancel carries no selection, so `requestId` rides in the body.
+   */
+  cancelQuestion(sessionId: SessionId, requestId: number): Promise<void> {
+    const body: QuestionCancelRequest = { request_id: requestId };
+    return this.requestNoContent(
+      `/api/sessions/${sessionId}/questions/cancel`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

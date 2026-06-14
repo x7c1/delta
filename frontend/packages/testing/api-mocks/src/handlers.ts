@@ -266,6 +266,14 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    // Cancel a pending AskUserQuestion. The mock has no real TUI to inject the
+    // Escape into, so it just accepts the cancel; the question card clears when
+    // the scripted `permission_resolved` event arrives, mirroring the live flow
+    // where the `is_error` `tool_result` resolves the request row.
+    http.post('*/api/sessions/:id/questions/cancel', () => {
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     http.post('*/api/sends', async ({ request }) => {
       const payload = (await request.json()) as SendRequest;
       if (typeof payload?.text !== 'string' || payload.text.length === 0) {

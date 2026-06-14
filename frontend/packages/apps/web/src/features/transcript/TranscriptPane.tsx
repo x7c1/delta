@@ -497,6 +497,15 @@ export function TranscriptPane({
           selections,
         )
       }
+      onCancel={() =>
+        // Cancel the question in the TUI itself (a single Escape cancels the
+        // whole call). Return the POST so the card can await it: a 409 (already
+        // resolved / stale) or a network failure rejects, and the card surfaces
+        // an inline error, re-enables its controls for a retry, and emphasizes
+        // the terminal fallback. On success the authoritative clear still
+        // arrives via the resolution path (the `is_error` tool_result).
+        client.cancelQuestion(activeThread.session_id, question.requestId)
+      }
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissQuestion(activeThread.session_id)}
     />

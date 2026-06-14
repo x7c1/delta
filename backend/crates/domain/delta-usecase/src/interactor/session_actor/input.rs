@@ -116,6 +116,12 @@ pub(in crate::interactor) enum SessionInput {
         selections: Vec<Vec<usize>>,
         reply: Reply<()>,
     },
+    /// The browser cancelled a pending `AskUserQuestion` of this session: inject
+    /// `Escape` into the TUI pane, which cancels the whole call.
+    CancelQuestion {
+        request_id: i64,
+        reply: Reply<()>,
+    },
 
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous

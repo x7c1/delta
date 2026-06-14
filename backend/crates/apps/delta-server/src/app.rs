@@ -49,6 +49,13 @@ pub fn router(state: AppState) -> Router {
             "/api/sessions/{id}/questions/{request_id}/answer",
             post(api::answer_question),
         )
+        // Cancel a pending AskUserQuestion from the browser (Escape injection
+        // into the session's TUI pane). The request_id rides in the body since
+        // a cancel carries no selection.
+        .route(
+            "/api/sessions/{id}/questions/cancel",
+            post(api::cancel_question),
+        )
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))

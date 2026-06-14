@@ -373,6 +373,21 @@ describe('ApiClient', () => {
     expect(JSON.parse(init.body)).toEqual({ selections: [[0], [2, 1]] });
   });
 
+  it('cancels a pending question, carrying the request id in the body', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(
+      client.cancelQuestion('sess-1', 5),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/sessions/sess-1/questions/cancel');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body)).toEqual({ request_id: 5 });
+  });
+
   it('raises ApiError carrying the status and server error message', async () => {
     const fetchFn = vi
       .fn()
