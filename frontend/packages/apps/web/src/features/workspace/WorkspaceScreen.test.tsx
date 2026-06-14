@@ -88,7 +88,35 @@ describe('WorkspaceScreen multi-session', () => {
       newSessionWorkdir: null,
       workdirDialogOpen: false,
     });
-    useLiveStore.setState({ spawns: [] });
+    useLiveStore.setState({ spawns: [], unreadSessions: {} });
+  });
+
+  it('clears the focused session’s unread flag on load', async () => {
+    // A background session finished its turn while the user was elsewhere, so it
+    // carries an unread dot. The instant that session is the focused one, the
+    // dot is moot — focusing it means the user is now looking at it.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useLiveStore.setState({ unreadSessions: { [SESSION_ID]: true } });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useLiveStore.getState().unreadSessions[SESSION_ID]).toBeUndefined(),
+    );
+  });
+
+  it('leaves a non-focused session’s unread flag intact', async () => {
+    // Only the focused session is cleared; a different session that finished in
+    // the background keeps its dot until the user opens it.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useLiveStore.setState({ unreadSessions: { [SESSION_ID_2]: true } });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useLiveStore.getState().unreadSessions[SESSION_ID]).toBeUndefined(),
+    );
+    expect(useLiveStore.getState().unreadSessions[SESSION_ID_2]).toBe(true);
   });
 
   it('focuses a tracked spawn by its real id once it appears in the list', async () => {

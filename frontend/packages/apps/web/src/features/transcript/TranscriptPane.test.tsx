@@ -1094,6 +1094,144 @@ describe('TranscriptPane', () => {
     );
   });
 
+  describe('dynamic bottom reserve (composer auto-grow follow)', () => {
+    // The body reserves bottom space equal to the bottom overlay's MEASURED
+    // height, so the composer growing pushes the conversation tail up instead of
+    // hiding it. jsdom performs no layout (every `getBoundingClientRect` is 0 and
+    // ResizeObserver never fires on its own), so we drive both explicitly: stub
+    // the overlay's measured height and a controllable ResizeObserver, then fire
+    // it to simulate the composer growing.
+
+    /** The single live observer instance and the element it watches. */
+    let observed: { el: Element; cb: ResizeObserverCallback } | null;
+    let originalRO: typeof ResizeObserver;
+
+    beforeEach(() => {
+      observed = null;
+      originalRO = globalThis.ResizeObserver;
+      class ControllableRO implements ResizeObserver {
+        constructor(private cb: ResizeObserverCallback) {}
+        observe(el: Element): void {
+          observed = { el, cb: this.cb };
+        }
+        unobserve(): void {}
+        disconnect(): void {
+          observed = null;
+        }
+      }
+      globalThis.ResizeObserver =
+        ControllableRO as unknown as typeof ResizeObserver;
+    });
+
+    afterEach(() => {
+      globalThis.ResizeObserver = originalRO;
+    });
+
+    /** The Panel scroll body (the element that carries the reserve padding). */
+    function bodyEl(): HTMLElement {
+      return document.querySelector('.scrollbar-hover') as HTMLElement;
+    }
+
+    it('creates a ResizeObserver for the bottom overlay and drives padding-bottom from its measured height', async () => {
+      renderPane();
+      await waitFor(() =>
+        expect(screen.getByTestId('bottom-overlay')).toBeInTheDocument(),
+      );
+      const overlay = screen.getByTestId('bottom-overlay');
+
+      // The overlay-measuring observer is watching the overlay node itself.
+      await waitFor(() => expect(observed?.el).toBe(overlay));
+
+      // Stub the overlay's measured height, then fire the observer as a real
+      // resize would. The body's padding-bottom = measured height + the overlay
+      // inset gap (12px fallback in jsdom, which computes no custom-property) +
+      // the 64px reading gap that keeps the last turn off the composer.
+      overlay.getBoundingClientRect = () =>
+        ({ height: 120 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+
+      await waitFor(() =>
+        expect(bodyEl().style.paddingBottom).toBe('196px'),
+      );
+    });
+
+    it('grows the reserve when the overlay grows (composer auto-grow), keeping the tail above it', async () => {
+      renderPane();
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(observed?.el).toBe(overlay));
+
+      overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('156px'));
+
+      // The composer grows (more lines typed): the overlay is taller, so the
+      // reserve grows in lockstep — the last turn stays clear of the input.
+      overlay.getBoundingClientRect = () => ({ height: 200 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('276px'));
+    });
+
+    it('re-sticks the body to the bottom when the overlay grows while sticking', async () => {
+      renderPane();
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(observed?.el).toBe(overlay));
+
+      // Make the body look scrollable and pinned at the bottom (sticking). jsdom
+      // reports 0 for layout, so define the scroll geometry by hand.
+      const body = bodyEl();
+      Object.defineProperty(body, 'scrollHeight', {
+        configurable: true,
+        get: () => 1000,
+      });
+      Object.defineProperty(body, 'clientHeight', {
+        configurable: true,
+        get: () => 400,
+      });
+      // Start pinned to the bottom so stickRef stays true.
+      body.scrollTop = 600;
+      fireEvent.scroll(body);
+
+      overlay.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+
+      // The reserve grew (overlay 150 + 12 inset); the measurement re-stuck the
+      // body to the new bottom (scrollTop := scrollHeight) so the tail stays
+      // visible just above the grown composer.
+      await waitFor(() =>
+        expect(body.style.paddingBottom).toBe('226px'),
+      );
+      expect(body.scrollTop).toBe(1000);
+    });
+
+    it('does not move the body when the user has scrolled up (not sticking)', async () => {
+      renderPane();
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(observed?.el).toBe(overlay));
+
+      const body = bodyEl();
+      Object.defineProperty(body, 'scrollHeight', {
+        configurable: true,
+        get: () => 1000,
+      });
+      Object.defineProperty(body, 'clientHeight', {
+        configurable: true,
+        get: () => 400,
+      });
+      // Scrolled well up: far from the bottom, so stickRef goes false.
+      body.scrollTop = 100;
+      fireEvent.scroll(body);
+
+      overlay.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+
+      // Reading scrollback is not yanked to the bottom; only the reserve updates.
+      await waitFor(() =>
+        expect(body.style.paddingBottom).toBe('226px'),
+      );
+      expect(body.scrollTop).toBe(100);
+    });
+  });
+
   it('stays in new-session when a directory has been selected (dismiss does not cancel)', async () => {
     // A previous session is recorded, but a directory is already chosen, so
     // dismissing the picker (e.g. the ✎-reopen-then-close path) must NOT cancel

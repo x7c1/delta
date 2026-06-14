@@ -341,6 +341,20 @@ export interface LiveState {
   /** Unread counts keyed by thread id; cleared when a thread becomes active. */
   unread: Record<ThreadId, number>;
   /**
+   * Sessions whose turn completed while the user was viewing a DIFFERENT
+   * session, so its navigator row carries an unread dot until focused. Set by
+   * {@link markSessionUnread} (called from the router only when the completing
+   * session is not the focused one), cleared by {@link clearSessionUnread} when
+   * the session is focused. A boolean flag, not a count: the dot only signals
+   * "something finished here", it does not tally turns. In-memory only (resets
+   * on reload), mirroring {@link unread} — persistence across reload would need
+   * backend support and is out of scope. The running spinner takes precedence
+   * in the row's rendering (a session running again shows the spinner, not a
+   * stale dot), but the flag itself is left set so the dot reappears the moment
+   * that turn ends off-focus; only focusing the session clears it.
+   */
+  unreadSessions: Record<SessionId, true>;
+  /**
    * The provisional live preview of each session's in-flight assistant message,
    * keyed by session id. Appended by `assistant_streaming` and cleared on turn
    * end / close / reconnect (see {@link StreamingMessage}). At most one per
@@ -419,6 +433,14 @@ export interface LiveState {
   ) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
+  /**
+   * Flag a session unread (its turn completed off-focus). Idempotent: a flag
+   * already set changes nothing. The router gates the focus check, so this only
+   * ever marks a non-focused session.
+   */
+  markSessionUnread: (sessionId: SessionId) => void;
+  /** Clear a session's unread flag (it became the focused session). */
+  clearSessionUnread: (sessionId: SessionId) => void;
   /** Record an external (direct-pane) input notice for a session/thread. */
   noteExternalInput: (
     sessionId: SessionId,
@@ -528,6 +550,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   activeTurns: {},
   notices: {},
   unread: {},
+  unreadSessions: {},
   streamingMessages: {},
 
   setConnection: (status) => set({ connection: status }),
@@ -675,6 +698,25 @@ export const useLiveStore = create<LiveState>((set) => ({
       const next = { ...state.unread };
       delete next[threadId];
       return { unread: next };
+    }),
+
+  markSessionUnread: (sessionId) =>
+    set((state) =>
+      state.unreadSessions[sessionId]
+        ? state
+        : {
+            unreadSessions: { ...state.unreadSessions, [sessionId]: true },
+          },
+    ),
+
+  clearSessionUnread: (sessionId) =>
+    set((state) => {
+      if (!state.unreadSessions[sessionId]) {
+        return state;
+      }
+      const next = { ...state.unreadSessions };
+      delete next[sessionId];
+      return { unreadSessions: next };
     }),
 
   noteExternalInput: (sessionId, threadId, prompt) =>
