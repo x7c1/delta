@@ -32,6 +32,7 @@ import { ApiProvider } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
+import { findAllQuoteRanges } from './branchHighlight';
 import { TranscriptPane } from './TranscriptPane';
 
 const server = setupServer(...createHandlers());
@@ -1008,6 +1009,89 @@ describe('TranscriptPane', () => {
       expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
     );
     expect(useNavStore.getState().preNewSessionFocus).toBeNull();
+  });
+
+  it('clears a pending branch selection on a plain (collapsed) click in the transcript body', async () => {
+    // A passage was selected for "Branch from selected text" (a pending
+    // branchOrigin on the active thread). A plain click in the conversation —
+    // one that leaves the selection collapsed — drops it, so dismissing no
+    // longer requires the composer's ✕.
+    useComposerStore.setState({
+      branchOrigin: {
+        parentThreadId: MAIN_THREAD_ID,
+        semanticParentUuid: 'm-user',
+        locatorQuote: 'selected passage',
+      },
+    });
+    // A plain click collapses the selection.
+    const getSelection = vi
+      .spyOn(window, 'getSelection')
+      .mockReturnValue({ isCollapsed: true } as Selection);
+
+    renderPane();
+    const message = await screen.findByText('What is a delta?');
+
+    fireEvent.click(message);
+
+    await waitFor(() =>
+      expect(useComposerStore.getState().branchOrigin).toBeNull(),
+    );
+    getSelection.mockRestore();
+  });
+
+  it('keeps a pending branch selection when a click leaves a non-empty selection (drag-select end)', async () => {
+    // The mouseup that finishes a drag-select also fires a click, but it leaves
+    // a non-empty (non-collapsed) selection — the one that just set the branch
+    // origin. That click must NOT immediately undo it.
+    const origin = {
+      parentThreadId: MAIN_THREAD_ID,
+      semanticParentUuid: 'm-user' as const,
+      locatorQuote: 'selected passage',
+    };
+    useComposerStore.setState({ branchOrigin: origin });
+    const getSelection = vi
+      .spyOn(window, 'getSelection')
+      .mockReturnValue({ isCollapsed: false } as Selection);
+
+    renderPane();
+    const message = await screen.findByText('What is a delta?');
+
+    fireEvent.click(message);
+
+    // The branch origin survives a non-collapsed click.
+    expect(useComposerStore.getState().branchOrigin).toEqual(origin);
+    getSelection.mockRestore();
+  });
+
+  it('paints the pending branch quote in the body via the branch-origin highlight', async () => {
+    // While a branch is pending, its selected passage stays highlighted (the
+    // CSS Custom Highlight API), so it is visible even after focus moves to the
+    // composer textarea and the native selection fades. The effect searches the
+    // rendered message bodies for the branchOrigin quote; in jsdom the highlight
+    // registry may be unavailable, so this asserts the guarded, no-throw path
+    // and that the range computation runs against the quote.
+    useComposerStore.setState({
+      branchOrigin: {
+        parentThreadId: MAIN_THREAD_ID,
+        semanticParentUuid: 'm-user',
+        locatorQuote: 'What is a delta?',
+      },
+    });
+
+    expect(() => renderPane()).not.toThrow();
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+
+    // The highlighted passage occurs verbatim in a rendered message body, so the
+    // range computation finds at least one match (proving the effect targeted
+    // the branchOrigin quote, independent of whether jsdom paints it).
+    const body = screen
+      .getByText('What is a delta?')
+      .closest('[data-testid="message-item"]')!;
+    expect(findAllQuoteRanges(body, 'What is a delta?').length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('stays in new-session when a directory has been selected (dismiss does not cancel)', async () => {

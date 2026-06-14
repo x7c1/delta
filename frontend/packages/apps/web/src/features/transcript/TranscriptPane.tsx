@@ -77,6 +77,7 @@ export function TranscriptPane({
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
   const cancelNewSession = useNavStore((state) => state.cancelNewSession);
+  const branchOrigin = useComposerStore((state) => state.branchOrigin);
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
@@ -206,6 +207,33 @@ export function TranscriptPane({
   const scrollToChildRef = useRef<ThreadId | null>(null);
   // The child chip to briefly flash after such a scroll, so the eye catches it.
   const [flashChildId, setFlashChildId] = useState<ThreadId | null>(null);
+
+  // A plain click anywhere in the transcript body drops a pending branch
+  // selection (the "Branch from selected text" affordance), so dismissing it no
+  // longer requires hunting for the composer's ✕. The gate is strict: only a
+  // click that leaves the selection COLLAPSED clears. The mouseup that finishes
+  // a drag-select also fires a click, but it leaves a non-empty selection (which
+  // is what just set/updated the branch origin), so it must not immediately undo
+  // it. Attached via the body ref (like the scroll listener) since the shared
+  // Panel body does not take an onClick. `branchOrigin` is read live from the
+  // store so the listener does not need re-binding as it changes.
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) {
+      return;
+    }
+    const onClick = () => {
+      if (!window.getSelection()?.isCollapsed) {
+        return;
+      }
+      if (useComposerStore.getState().branchOrigin !== null) {
+        setBranchOrigin(null);
+        clearBranchHighlight();
+      }
+    };
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [setBranchOrigin]);
 
   // Recompute "is the user near the bottom?" on every scroll so the
   // stick-to-bottom effects know whether to follow new content.
@@ -364,14 +392,28 @@ export function TranscriptPane({
   );
   const highlightTitle = hoveredBranchTitle ?? flashTitle;
 
-  // While a sub-thread chip is hovered (or just flashed after a breadcrumb "go
-  // up"), mark every occurrence of its text in the body so it is clear at a
-  // glance what that branch was about. Re-run when content changes (rendered
-  // text nodes are recreated) so the marks track streaming and refetches; clear
-  // on leave or unmount.
+  // The pending-branch quote to keep highlighted: while a branch is being
+  // composed (a text passage was selected for "Branch from selected text"), its
+  // quote stays marked even after focus leaves for the composer textarea and the
+  // native selection fades — so it is always clear what the pending branch is
+  // anchored to. Scoped to the active thread it was selected from, mirroring the
+  // composer's own gate (branchOrigin.parentThreadId === activeThread.id).
+  const pendingBranchQuote =
+    branchOrigin !== null && branchOrigin.parentThreadId === activeThread?.id
+      ? branchOrigin.locatorQuote
+      : null;
+
+  // Paint the branch-origin highlight over both the hovered/flashed sub-thread
+  // chip's text AND the pending-branch selection: a single highlight carrying
+  // the union of ranges, so a hover mark and a pending-selection mark can show
+  // together. The hovered/flashed chip (or just flashed after a breadcrumb "go
+  // up") marks every occurrence of its title; the pending branch keeps its
+  // selected passage visible independent of focus. Re-run when content changes
+  // (rendered text nodes are recreated) so the marks track streaming and
+  // refetches; clear on leave/unmount or when nothing is to be highlighted.
   useEffect(() => {
     const body = bodyRef.current;
-    if (!body || !highlightTitle) {
+    if (!body || (!highlightTitle && !pendingBranchQuote)) {
       clearBranchHighlight();
       return;
     }
@@ -379,13 +421,18 @@ export function TranscriptPane({
     // siblings of the message article, so scoping to the articles keeps a
     // chip's own title text (and banners, the pending queue, etc.) out of the
     // highlight.
-    const articles = body.querySelectorAll('[data-testid="message-item"]');
-    const ranges = Array.from(articles).flatMap((article) =>
-      findAllQuoteRanges(article, highlightTitle),
+    const articles = Array.from(
+      body.querySelectorAll('[data-testid="message-item"]'),
+    );
+    const quotes = [highlightTitle, pendingBranchQuote].filter(
+      (q): q is string => q !== null,
+    );
+    const ranges = quotes.flatMap((quote) =>
+      articles.flatMap((article) => findAllQuoteRanges(article, quote)),
     );
     setBranchHighlight(ranges);
     return () => clearBranchHighlight();
-  }, [highlightTitle, messages.length, lastContentLength]);
+  }, [highlightTitle, pendingBranchQuote, messages.length, lastContentLength]);
 
   const breadcrumbItems = ancestry.map((thread, index) => ({
     key: thread.id,
