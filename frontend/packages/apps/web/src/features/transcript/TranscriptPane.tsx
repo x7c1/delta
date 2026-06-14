@@ -22,6 +22,7 @@ import {
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { AssistantMarkdown } from './AssistantMarkdown';
+import { isTaskNotificationMessage } from './claudeFormat';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
@@ -687,25 +688,29 @@ export function TranscriptPane({
         // A "tool" message renders as a Collapsible card: an assistant tool call
         // (`tool_use`) or a standalone tool result (`tool_result` — paired
         // results are already dropped as empty-rendering, so any that survive are
-        // orphans Claude delivers as `role: user`). These are tightened and
-        // left-indented so they read as nested steps, distinct from prose. The
-        // check comes before the user/prose split so an orphan tool_result is
-        // treated as a tool card, not a user turn.
+        // orphans Claude delivers as `role: user`). The check comes before the
+        // user/prose split so an orphan tool_result is treated as a tool card,
+        // not a user turn.
         const isToolTurn = message.content.some(
           (block) => block.type === 'tool_use' || block.type === 'tool_result',
         );
-        const topGap = isToolTurn
+        // Both tool rows and the harness-injected task-notification card (a
+        // collapsed `<task-notification>` user turn) render as nested aside
+        // cards: they are tightened and left-indented so they read as nested
+        // steps, distinct from prose.
+        const isNestedCard = isToolTurn || isTaskNotificationMessage(message);
+        const topGap = isNestedCard
           ? 'pt-0.5'
           : message.role === 'user'
             ? 'pt-2'
             : 'pt-1.5';
-        const bottomGap = isToolTurn
+        const bottomGap = isNestedCard
           ? 'pb-0.5'
           : message.role === 'user'
             ? 'pb-1'
             : 'pb-2';
-        // Inset a tool message (left margin) so it reads as a nested step.
-        const indent = isToolTurn ? 'ml-6 mr-0' : '';
+        // Inset a nested card (left margin) so it reads as a nested step.
+        const indent = isNestedCard ? 'ml-6 mr-0' : '';
         return (
           // One block per message: the message and its sub-thread chips. The
           // block owns the vertical rhythm (not the message article), so adjacent

@@ -597,6 +597,70 @@ describe('TranscriptPane', () => {
     );
   });
 
+  it('left-indents the task-notification card like a tool row, but not ordinary user prose', async () => {
+    // The harness-injected task-notification card is a nested aside (like a
+    // tool-execution row), so its block wrapper carries the same `ml-6` left
+    // indent. An ordinary user prose turn must stay at full width (no indent).
+    server.use(
+      http.get('*/api/threads/:id/messages', () => {
+        const body: MessagesResponse = {
+          messages: [
+            {
+              uuid: 'm-user-prose',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'user',
+              linear_parent_uuid: null,
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 0,
+              content_text: 'ordinary prose turn',
+              content: [{ type: 'text', text: 'ordinary prose turn' }],
+              created_at: '2026-01-01T00:00:01Z',
+            },
+            {
+              uuid: 'm-task-notification',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'user',
+              linear_parent_uuid: 'm-user-prose',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 1,
+              content_text: '<task-notification>background job done',
+              content: [
+                { type: 'text', text: '<task-notification>background job done' },
+              ],
+              created_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+        };
+        return HttpResponse.json(body);
+      }),
+    );
+
+    renderPane();
+
+    // The task-notification card renders folded; its message-item article carries
+    // the data-task-notification marker. Its block wrapper (the parent div) owns
+    // the gap/indent decision and must be left-indented like a tool row.
+    const notificationItem = await waitFor(() => {
+      const item = document.querySelector(
+        '[data-task-notification="true"]',
+      );
+      expect(item).not.toBeNull();
+      return item!;
+    });
+    const notificationBlock = notificationItem.parentElement;
+    expect(notificationBlock?.className).toContain('ml-6');
+
+    // The ordinary user prose turn is NOT indented (regression guard).
+    const proseBlock = screen
+      .getByText('ordinary prose turn')
+      .closest('[data-testid="message-item"]')?.parentElement;
+    expect(proseBlock?.className).not.toContain('ml-6');
+  });
+
   it('drops the composer and shows the cannot-resume notice for a resume-unavailable session', async () => {
     // A session whose transcript is gone can never be resumed, so every send or
     // branch would just fail: the input is removed entirely and the session is a
