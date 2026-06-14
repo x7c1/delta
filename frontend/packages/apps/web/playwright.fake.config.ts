@@ -31,7 +31,16 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: 'on-first-retry',
+    // These failures surface only in CI and don't reproduce locally, so a
+    // failing run must leave behind enough evidence to diagnose it after the
+    // fact. With retries: 0 (kept deliberately, so flakes stay visible rather
+    // than being masked by a passing retry), `on-first-retry` would never
+    // capture anything; retain-on-failure captures the trace/video and a
+    // screenshot for exactly the failing run instead. All land under the
+    // suite's output dir (test-results/), which CI uploads on failure.
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
   },
   projects: [
     {
