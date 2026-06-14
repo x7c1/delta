@@ -408,6 +408,40 @@ describe('Composer', () => {
     return { read: () => captured };
   }
 
+  it('wires the auto-grow effect: an inline height and overflow style are applied', () => {
+    // jsdom performs no layout, so `scrollHeight` is 0 and the clamp resolves to
+    // the min height; we cannot assert real growth here (covered by the
+    // autoGrow.test.ts unit test). What we CAN assert is that the effect ran and
+    // drove the textarea's inline geometry — the wiring that makes it auto-grow
+    // in a real browser.
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'one\ntwo\nthree' } });
+    // The effect set an explicit pixel height and toggled the internal scrollbar.
+    expect(textarea.style.height).toMatch(/px$/);
+    // Below the cap (0 scrollHeight in jsdom) the bar stays hidden.
+    expect(textarea.style.overflowY).toBe('hidden');
+    // The manual resize handle is gone (auto-grow replaces it).
+    expect(textarea.className).toContain('resize-none');
+    expect(textarea.className).not.toContain('resize-y');
+  });
+
+  it('resets the textarea height after a submit clears the draft', async () => {
+    renderComposer();
+    const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: 'plain message' } });
+    expect(textarea.value).toBe('plain message');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    // Submit clears the draft; the controlled value empties and the auto-grow
+    // effect re-runs, leaving the textarea reset to its (min) height with the
+    // scrollbar hidden.
+    await waitFor(() => expect(textarea.value).toBe(''));
+    expect(textarea.style.height).toMatch(/px$/);
+    expect(textarea.style.overflowY).toBe('hidden');
+  });
+
   it('includes the selected workdir on a new-session send', async () => {
     useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
     const { read } = renderNewSessionAndCaptureBody();

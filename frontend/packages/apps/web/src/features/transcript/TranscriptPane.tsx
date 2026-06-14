@@ -41,6 +41,47 @@ import {
  */
 const STICK_THRESHOLD_PX = 64;
 
+/**
+ * Fallback gap (px) between the bottom overlay and the resting content when the
+ * `--delta-overlay-inset` token cannot be read (e.g. jsdom, which computes no
+ * styles). Mirrors the token's resting value (0.75rem at the 16px default root)
+ * so the measured reserve still leaves the same gap the floating card uses.
+ */
+const OVERLAY_INSET_FALLBACK_PX = 12;
+
+/**
+ * Comfortable reading gap (px) kept between the last turn and the bottom overlay,
+ * added on top of the measured reserve. The measured reserve (overlay height +
+ * inset) alone parks the last turn flush against the composer, which reads worse
+ * than leaving some air there — so a slice of the breathing room the old fixed
+ * reserve always had is preserved here while the rest of the reserve still tracks
+ * the overlay's real height. Present at every composer size and grows with it.
+ */
+const BODY_BOTTOM_READING_GAP_PX = 64;
+
+/**
+ * The overlay inset in pixels: the gap the floating cards leave from the body
+ * edges (`--delta-overlay-inset`). Read from the live computed style so the
+ * measured bottom reserve (overlay height + this gap) stays in lockstep with the
+ * card's own `bottom-overlay-inset`, even if the token is themed. Falls back to
+ * {@link OVERLAY_INSET_FALLBACK_PX} when the value is unavailable or non-numeric.
+ */
+function overlayInsetPx(el: Element): number {
+  const raw = getComputedStyle(el)
+    .getPropertyValue('--delta-overlay-inset')
+    .trim();
+  if (raw.endsWith('rem')) {
+    const rem = Number.parseFloat(raw);
+    const rootSize = Number.parseFloat(
+      getComputedStyle(document.documentElement).fontSize,
+    );
+    const px = rem * (Number.isFinite(rootSize) ? rootSize : 16);
+    return Number.isFinite(px) ? px : OVERLAY_INSET_FALLBACK_PX;
+  }
+  const px = Number.parseFloat(raw);
+  return Number.isFinite(px) ? px : OVERLAY_INSET_FALLBACK_PX;
+}
+
 export interface TranscriptPaneProps {
   threads: Thread[];
   /** The active thread, or null for the cold-start / new-session state. */
@@ -199,6 +240,16 @@ export function TranscriptPane({
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
   const prevPendingRef = useRef(pendingCount);
+
+  // The bottom overlay (composer + pending strip + bottom notices) floats over
+  // the scrolling body and grows with the composer's content. Reserve bottom
+  // padding equal to its MEASURED height (plus the overlay inset as a gap) so
+  // the last turn always rests just above it and stays readable as it grows —
+  // replacing the old fixed `pb-composer-reserve`, which a grown composer would
+  // cover. `null` until measured: the body falls back to the fixed reserve so a
+  // first paint (or a body without an overlay) never under-reserves.
+  const bottomOverlayRef = useRef<HTMLDivElement | null>(null);
+  const [bottomReserve, setBottomReserve] = useState<number | null>(null);
 
   // When navigating UP to an ancestor via the breadcrumb, this holds the child
   // thread one level down toward where we were. After the ancestor renders, the
@@ -633,13 +684,58 @@ export function TranscriptPane({
   // A floating card near the bottom of the body: inset from the left, right, and
   // bottom edges with a full border, rounded corners, and a shadow so it reads as
   // lifted above (rather than fused to) the transcript. Its opaque background
-  // still occludes the transcript scrolling beneath it. The body reserves a fixed
-  // bottom padding (below) so resting content clears the card.
+  // still occludes the transcript scrolling beneath it. The body reserves bottom
+  // padding equal to this card's MEASURED height (see the effect below) so
+  // resting content clears it however tall the composer grows.
   const bottomOverlay = bottomContent && (
-    <div className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset rounded-md border border-slate-200 bg-white px-3 py-2 shadow-md">
+    <div
+      ref={bottomOverlayRef}
+      data-testid="bottom-overlay"
+      className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset rounded-md border border-slate-200 bg-white px-3 py-2 shadow-md"
+    >
       {bottomContent}
     </div>
   );
+
+  // Track the bottom overlay's actual height and drive the body's bottom padding
+  // from it (height + the overlay inset as a gap), so resting content clears the
+  // composer however tall it grows — the last turn sits just above it rather than
+  // being covered by a fixed reserve. When the overlay grows (the composer
+  // expands as you type, or a banner appears) the body's padding grows and so
+  // does its scrollHeight; re-stick in the same measurement so, while sticking,
+  // the tail stays pinned just above the composer.
+  //
+  // This observes the OVERLAY, never the body, and only ever writes
+  // `bottomReserve` (the body's padding) and the body's `scrollTop` — never the
+  // overlay's own size — so it cannot feed its own observation back into a loop.
+  // The body's ResizeObserver (above) observes the body and only writes
+  // `scrollTop`, so the two stay independent. Re-bind when the overlay's presence
+  // changes (e.g. a resume-unavailable session drops the composer) so the ref
+  // tracks the live node; clear the reserve when there is no overlay so the body
+  // falls back to the fixed token.
+  useLayoutEffect(() => {
+    const overlay = bottomOverlayRef.current;
+    if (!overlay) {
+      // No bottom overlay (e.g. resume-unavailable drops the composer): clear
+      // the measured reserve so the body falls back to the fixed token below.
+      setBottomReserve(null);
+      return;
+    }
+    const apply = () => {
+      const height = overlay.getBoundingClientRect().height;
+      setBottomReserve(
+        height + overlayInsetPx(overlay) + BODY_BOTTOM_READING_GAP_PX,
+      );
+      const body = bodyRef.current;
+      if (body && stickRef.current) {
+        body.scrollTop = body.scrollHeight;
+      }
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [bottomContent]);
 
   // The breadcrumb gets the same floating-card treatment as the composer, pinned
   // at the top-left and hugging its own width (rather than a full-width header
@@ -654,20 +750,23 @@ export function TranscriptPane({
   return (
     <Panel
       bodyRef={bodyRef}
-      // Reserve fixed space for the bottom overlay so the last turn is not hidden
-      // behind the composer at rest. A fixed (not measured) value is deliberate:
-      // it never changes, so the composer growing or a banner appearing cannot
-      // shift the transcript. When the overlay does grow past this, it briefly
-      // covers the last lines — an accepted trade for zero layout shift.
-      // Reserve top space too when the breadcrumb card floats, so the first turn
-      // clears it at rest (mirrors the bottom reserve for the composer). Both
-      // reserves derive from the same overlay-inset token the floating cards
-      // use (see src/index.css), so the paddings and the cards cannot drift.
-      bodyClassName={
-        isOnSubThread
-          ? 'pt-breadcrumb-reserve pb-composer-reserve'
-          : 'pb-composer-reserve'
-      }
+      // Reserve bottom space for the floating composer overlay so the last turn
+      // rests just above it instead of behind it. The reserve is MEASURED from
+      // the overlay's actual height (see the effect above) and applied as the
+      // body's `padding-bottom`, so it tracks the composer as it auto-grows — the
+      // tail stays readable however tall the input gets. Until the first
+      // measurement lands (and whenever there is no overlay) it falls back to the
+      // fixed `--delta-composer-body-reserve` token, so the body never
+      // under-reserves on first paint. The top breadcrumb reserve stays a fixed
+      // class: the breadcrumb card does not grow, so a measured value would buy
+      // nothing.
+      bodyClassName={isOnSubThread ? 'pt-breadcrumb-reserve' : undefined}
+      bodyStyle={{
+        paddingBottom:
+          bottomReserve !== null
+            ? `${bottomReserve}px`
+            : 'var(--delta-composer-body-reserve)',
+      }}
       header={
         newSession ? (
           <span className="text-sm font-semibold text-slate-700">

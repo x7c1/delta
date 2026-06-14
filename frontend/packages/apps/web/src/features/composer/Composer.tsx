@@ -1,4 +1,4 @@
-import { useCallback, type FormEvent } from 'react';
+import { useCallback, useLayoutEffect, useRef, type FormEvent } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SendRequest, Thread } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
@@ -6,6 +6,7 @@ import {
   NEW_SESSION_DRAFT_KEY,
   useComposerStore,
 } from '../../store/composerStore';
+import { COMPOSER_MAX_HEIGHT, autoGrowGeometry } from './autoGrow';
 import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { useSubmitSend } from './useSubmitSend';
@@ -40,6 +41,7 @@ export interface ComposerProps {
  */
 export function Composer({ mode }: ComposerProps) {
   const submitSend = useSubmitSend();
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const isNew = mode.kind === 'new-session';
   const activeThread = mode.kind === 'thread' ? mode.activeThread : null;
@@ -167,6 +169,23 @@ export function Composer({ mode }: ComposerProps) {
     ],
   );
 
+  // Auto-grow the textarea with its content up to a cap, then scroll
+  // internally. Keyed on the controlled `draft` so it grows as you type, shrinks
+  // back when text is deleted, and resets to the min height after a submit
+  // clears the draft. Reset the inline height to `auto` first so `scrollHeight`
+  // reflects the content's natural height (not a previously-applied larger one),
+  // then clamp it and toggle the internal scrollbar past the cap.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = 'auto';
+    const { height, overflow } = autoGrowGeometry(el.scrollHeight);
+    el.style.height = `${height}px`;
+    el.style.overflowY = overflow ? 'auto' : 'hidden';
+  }, [draft]);
+
   const placeholder = isNew
     ? 'Message to start a new session…'
     : branching
@@ -199,11 +218,18 @@ export function Composer({ mode }: ComposerProps) {
       )}
       <div className="flex items-end gap-2">
         <textarea
+          ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(draftKey, event.target.value)}
           placeholder={placeholder}
           rows={2}
-          className="min-h-[2.5rem] flex-1 resize-y rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+          // Auto-grow replaces the manual `resize-y` handle: the height is driven
+          // by the effect above (content height clamped to [min, cap]). The cap
+          // is also set inline as a hard ceiling so the textarea can never exceed
+          // it before the effect runs. `overflow-y` is toggled by the effect, so
+          // it scrolls internally only once the content passes the cap.
+          style={{ maxHeight: `${COMPOSER_MAX_HEIGHT}px` }}
+          className="min-h-[2.5rem] flex-1 resize-none rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               void submit(event);
