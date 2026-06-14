@@ -26,6 +26,16 @@ export interface SessionNodeProps {
    * permission badge when both apply.
    */
   running?: boolean;
+  /**
+   * Whether this session finished a turn while the user was viewing a different
+   * session, leaving something unseen. Surfaced as a small static dot —
+   * deliberately distinct from the animated {@link running} spinner — so a
+   * background completion is discoverable from the list. Running takes
+   * precedence: a session processing again shows the spinner, not a stale dot
+   * (the caller also gates this off the focused row, and focusing a session
+   * clears its unread flag). Cleared by focusing the session.
+   */
+  unread?: boolean;
   onFocus: () => void;
   onClose: () => void;
   /**
@@ -78,6 +88,7 @@ export function SessionNode({
   isFocused,
   needsPermission = false,
   running = false,
+  unread = false,
   onFocus,
   onClose,
   rowRef,
@@ -175,6 +186,24 @@ export function SessionNode({
                 <span className="shrink-0" data-testid="session-running">
                   <Spinner />
                   <span className="sr-only">running</span>
+                </span>
+              )}
+              {unread && !running && (
+                // A static filled dot — deliberately NOT the rotating spinner —
+                // marking a turn that completed while this session was in the
+                // background. Running takes precedence (a session processing
+                // again shows the spinner instead), so a stale dot never sits
+                // next to a live spinner. Cleared when the session is focused.
+                <span
+                  className="shrink-0"
+                  data-testid="session-unread"
+                  title="Finished while you were away"
+                >
+                  <span
+                    className="block h-2 w-2 rounded-full bg-indigo-500"
+                    aria-hidden
+                  />
+                  <span className="sr-only">unread</span>
                 </span>
               )}
               {needsPermission && (

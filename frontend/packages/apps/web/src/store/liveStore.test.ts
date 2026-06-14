@@ -10,6 +10,7 @@ function reset() {
     activeTurns: {},
     notices: {},
     unread: {},
+    unreadSessions: {},
     streamingMessages: {},
   });
 }
@@ -742,6 +743,30 @@ describe('liveStore.applyEvent notices', () => {
     expect(useLiveStore.getState().unread[2]).toBe(2);
     store.clearUnread(2);
     expect(useLiveStore.getState().unread[2]).toBeUndefined();
+  });
+
+  it('marks and clears per-session unread flags', () => {
+    useLiveStore.getState().markSessionUnread('sess-1');
+    expect(useLiveStore.getState().unreadSessions).toEqual({ 'sess-1': true });
+
+    // Idempotent: a flag already set changes nothing (and other sessions stay
+    // independent).
+    useLiveStore.getState().markSessionUnread('sess-1');
+    useLiveStore.getState().markSessionUnread('sess-2');
+    expect(useLiveStore.getState().unreadSessions).toEqual({
+      'sess-1': true,
+      'sess-2': true,
+    });
+
+    useLiveStore.getState().clearSessionUnread('sess-1');
+    expect(useLiveStore.getState().unreadSessions).toEqual({ 'sess-2': true });
+  });
+
+  it('clearSessionUnread on an already-clear session is a no-op', () => {
+    const before = useLiveStore.getState().unreadSessions;
+    useLiveStore.getState().clearSessionUnread('sess-unknown');
+    // The identity-stable map is preserved (no needless re-render).
+    expect(useLiveStore.getState().unreadSessions).toBe(before);
   });
 
   it('ignores session lifecycle events for ephemeral state', () => {
