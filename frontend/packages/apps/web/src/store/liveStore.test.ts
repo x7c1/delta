@@ -193,28 +193,56 @@ describe('liveStore turn tracking', () => {
     expect(useLiveStore.getState().streamingMessages).toEqual({});
   });
 
-  it('seedActiveTurn sets the running flag from a non-idle turn, and only sets', () => {
+  it('seedActiveTurn (stale read) sets from in_flight and only sets', () => {
     // After a reconnect the refetched sends envelope reports the turn state;
-    // a non-idle phase re-seeds the flag the dropped events would have set.
+    // a stale read of a non-idle phase re-seeds the flag the dropped events
+    // would have set.
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1 });
+      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1 }, false);
     expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
 
-    // An idle report never clears: turn-end events own clearing, so a
+    // A stale idle report never clears: turn-end events own clearing, so a
     // momentarily-stale refetch cannot wipe a flag an event just set.
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'idle', send_id: null });
+      .seedActiveTurn('sess-1', { state: 'idle', send_id: null }, false);
     expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
   });
 
-  it('seedActiveTurn ignores awaiting_echo: the turn has not started yet', () => {
+  it('seedActiveTurn (stale read) ignores awaiting_echo: turn not started yet', () => {
     // A dispatched-but-unechoed send is what `send_dispatched` reports live —
     // it never set the running flag, so the refetch must not either.
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 });
+      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 }, false);
+    expect(useLiveStore.getState().activeTurns).toEqual({});
+  });
+
+  it('seedActiveTurn (fresh read) reconciles the flag to the server truth', () => {
+    // A genuinely fresh fetch is authoritative: a fresh in_flight sets the
+    // flag (reconnect healing), and a fresh idle CLEARS it — the server says
+    // there is no running turn. This is what stops a re-focus from leaving the
+    // running spinner stuck on (a stale cached in_flight already set the flag,
+    // and only the fresh idle that follows can clear it).
+    useLiveStore
+      .getState()
+      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1 }, true);
+    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+
+    useLiveStore
+      .getState()
+      .seedActiveTurn('sess-1', { state: 'idle', send_id: null }, true);
+    expect(useLiveStore.getState().activeTurns).toEqual({});
+  });
+
+  it('seedActiveTurn (fresh read) reconciles awaiting_echo to not-running', () => {
+    // awaiting_echo is not in_flight, so a fresh read clears any leftover flag,
+    // consistent with the stale-read mode ignoring it.
+    useLiveStore.setState({ activeTurns: { 'sess-1': true } });
+    useLiveStore
+      .getState()
+      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 }, true);
     expect(useLiveStore.getState().activeTurns).toEqual({});
   });
 });

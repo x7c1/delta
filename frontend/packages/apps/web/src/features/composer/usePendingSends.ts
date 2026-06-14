@@ -60,9 +60,19 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   // response's queryable live state. After a live-stream reconnect the
   // event-reconstructed flag and notice were dropped (the `turn_started` /
   // `permission_requested` that set them may have been missed), and the
-  // resync refetches this query — so both heal here without any event. The
-  // seeds are set-only; clearing stays owned by the turn-end / resolution
-  // events.
+  // resync refetches this query — so both heal here without any event.
+  //
+  // The active-turn seed is authoritative ONLY on a settled fetch, and a
+  // set-only no-op while a refetch is in flight (`fetchStatus !== 'idle'`).
+  // Re-focusing a session serves its stale cached sends envelope first — still
+  // `turn: in_flight` from when it was running — before the refetch lands the
+  // fresh `turn: idle`. Reconciling off that stale read would resurrect a flag
+  // the off-focus `turn_completed` already cleared, leaving the running spinner
+  // stuck on. Gating on a settled fetch makes the stale read a set-only no-op
+  // (healing intact) and lets only the fresh `idle` authoritatively clear it.
+  // A fresh `in_flight` (a genuinely still-running turn after a reconnect) is
+  // authoritative too, so it re-sets the dropped flag. The permission /
+  // question seeds stay plain set-only (they cannot be resurrected this way).
   //
   // `dataUpdatedAt` is a dependency on purpose: when the live state did not
   // change across the reconnect gap (it was `in_flight` before and still is),
@@ -71,11 +81,12 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   // state the reset just dropped would stay lost. The timestamp marks every
   // fresh observation, identical payload or not.
   const sendsUpdatedAt = sendsQuery.dataUpdatedAt;
+  const sendsSettled = sendsQuery.fetchStatus === 'idle';
   useEffect(() => {
     if (sessionId !== null && serverTurn !== undefined) {
-      useLiveStore.getState().seedActiveTurn(sessionId, serverTurn);
+      useLiveStore.getState().seedActiveTurn(sessionId, serverTurn, sendsSettled);
     }
-  }, [sessionId, serverTurn, sendsUpdatedAt]);
+  }, [sessionId, serverTurn, sendsUpdatedAt, sendsSettled]);
   useEffect(() => {
     if (sessionId !== null && serverPermission !== undefined) {
       useLiveStore.getState().seedPermission(sessionId, serverPermission);

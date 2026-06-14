@@ -398,14 +398,39 @@ export interface LiveState {
   resetTurnEphemera: () => void;
   /**
    * Seed a session's active-turn flag from the server's queryable turn state
-   * (the `turn` field of `GET /api/sessions/{id}/sends`). Set-only, and only
-   * for `in_flight` — the phase `turn_started` would have announced (healing
-   * a reconnect that missed it). `awaiting_echo` is a dispatch whose turn has
-   * not started yet, exactly like a live `send_dispatched`, and `idle`
-   * changes nothing — clearing is owned by the turn-end events, so a
-   * momentarily-stale refetch can never wipe a flag an event just set.
+   * (the `turn` field of `GET /api/sessions/{id}/sends`).
+   *
+   * Two modes, picked by `authoritative`:
+   *
+   * - `authoritative: false` (the default — a possibly-stale read): set-only,
+   *   and only for `in_flight` — the phase `turn_started` would have announced.
+   *   This heals a reconnect that missed `turn_started`: it re-sets a dropped
+   *   flag without ever letting a momentarily-stale `idle` refetch wipe a flag
+   *   a live event just set. `awaiting_echo` is a dispatch whose turn has not
+   *   started yet (exactly like a live `send_dispatched`), and `idle` changes
+   *   nothing.
+   * - `authoritative: true` (a genuinely fresh fetch that has settled): the
+   *   server is the source of truth, so reconcile the flag to match —
+   *   `activeTurns[sessionId] = (turn.state === 'in_flight')`. A fresh `idle`
+   *   authoritatively means "no running turn" and CLEARS the flag; a fresh
+   *   `in_flight` keeps/re-sets it (so reconnect healing still works when the
+   *   resync refetch lands `in_flight`). `awaiting_echo` reconciles to
+   *   not-running, consistent with the set-only mode ignoring it.
+   *
+   * The authoritative mode exists to clear a flag the stale-cache read would
+   * otherwise resurrect: after a turn completes off-focus its `turn_completed`
+   * clears `activeTurns`, but re-focusing the session serves the stale cached
+   * `in_flight` envelope before the refetch — without an authoritative clear on
+   * the following fresh `idle`, the set-only re-seed would leave the spinner
+   * stuck on. Callers must therefore pass `authoritative: true` only for a read
+   * known to be fresh (the query settled, not a stale-cache placeholder shown
+   * mid-refetch).
    */
-  seedActiveTurn: (sessionId: SessionId, turn: Turn) => void;
+  seedActiveTurn: (
+    sessionId: SessionId,
+    turn: Turn,
+    authoritative: boolean,
+  ) => void;
   /**
    * Seed a session's permission notice from the server's queryable pending
    * dialog (the `permission` field of `GET /api/sessions/{id}/sends`).
@@ -638,12 +663,29 @@ export const useLiveStore = create<LiveState>((set) => ({
       return { localSends: {}, activeTurns: {}, notices, streamingMessages: {} };
     }),
 
-  seedActiveTurn: (sessionId, turn) =>
+  seedActiveTurn: (sessionId, turn, authoritative) =>
     set((state) => {
-      if (turn.state !== 'in_flight' || state.activeTurns[sessionId]) {
+      const running = turn.state === 'in_flight';
+      if (!authoritative) {
+        // Possibly-stale read: set-only healing. Never clear from here —
+        // turn-end events own clearing, so a stale `idle` cannot wipe a flag
+        // a live event just set.
+        if (!running || state.activeTurns[sessionId]) {
+          return state;
+        }
+        return { activeTurns: { ...state.activeTurns, [sessionId]: true } };
+      }
+      // Fresh read: the server is authoritative, so reconcile to its truth.
+      if (running === !!state.activeTurns[sessionId]) {
         return state;
       }
-      return { activeTurns: { ...state.activeTurns, [sessionId]: true } };
+      const activeTurns = { ...state.activeTurns };
+      if (running) {
+        activeTurns[sessionId] = true;
+      } else {
+        delete activeTurns[sessionId];
+      }
+      return { activeTurns };
     }),
 
   seedPermission: (sessionId, permission) =>
