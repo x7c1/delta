@@ -24,6 +24,7 @@ import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
+import { QuestionCard } from './QuestionCard';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
@@ -125,6 +126,17 @@ export function TranscriptPane({
       : null,
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
+  // The focused session's pending AskUserQuestion, if any. Emitted by the
+  // `PreToolUse` hook for that built-in tool, so it is a genuine "answer
+  // needed" signal shown directly as a readable question card. It clears on
+  // dismiss, when the correlated tool_result resolves it (the user picked in
+  // the terminal), or when the turn ends.
+  const question = useLiveStore((state) =>
+    activeThread
+      ? noticeOf(state.notices, activeThread.session_id, 'question')
+      : null,
+  );
+  const dismissQuestion = useLiveStore((state) => state.dismissQuestion);
   const dismissExternalInput = useLiveStore(
     (state) => state.dismissExternalInput,
   );
@@ -459,6 +471,37 @@ export function TranscriptPane({
     />
   );
 
+  // The interactive question card renders INLINE at the conversation tail (in
+  // the scrolling body, after the rendered messages and the live-streamed
+  // bubble), not in the bottom overlay — so the choices "hang off" the
+  // conversation right after the assistant's streamed preamble, where the user
+  // is reading, rather than floating over it. The user answers from here: a
+  // single-select click, a multi-select toggle + Submit, or a per-question
+  // choice across a multi-question call, all POSTed to the answer endpoint,
+  // which injects the selection keystrokes into the session's TUI pane. The
+  // authoritative clear stays the existing resolution path (the `tool_result`
+  // resolving the question's request row), so no extra clear logic is needed.
+  // An "Open terminal" fallback remains in the card for a misfired injection.
+  const questionCard = question && !question.dismissed && activeThread && (
+    <QuestionCard
+      notice={question}
+      onAnswer={(selections) =>
+        // Return the POST so the card can await it: a 409 (already answered /
+        // stale), a 400 (malformed), or a network failure rejects, and the card
+        // surfaces an inline error, re-enables its controls for a retry, and
+        // emphasizes the terminal fallback. On success the authoritative clear
+        // still arrives via the resolution path.
+        client.answerQuestion(
+          activeThread.session_id,
+          question.requestId,
+          selections,
+        )
+      }
+      onOpenTerminal={() => setTerminalOpen(true)}
+      onDismiss={() => dismissQuestion(activeThread.session_id)}
+    />
+  );
+
   // The bottom layer: the composer plus the notices that must stay next to the
   // input — the closed/external-input banners and, crucially, the pending-send
   // strip, which the user reads to decide whether to hold a send. For a
@@ -482,6 +525,10 @@ export function TranscriptPane({
   } else if (composer) {
     bottomContent = (
       <div className="space-y-2">
+        {/* The question card is NOT in this bottom stack: it renders inline at
+            the conversation tail in the scrolling body (see questionCard above
+            and its placement after the streaming bubble), so the choices follow
+            the streamed preamble in the flow instead of floating over it. */}
         {readOnly && !newSession && (
           <div
             className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
@@ -757,6 +804,13 @@ export function TranscriptPane({
           </article>
         </div>
       )}
+
+      {/* The interactive question card, inline at the very tail of the
+          conversation: after the rendered messages and the live-streamed
+          bubble, so the choices appear right after the assistant's preamble.
+          Inset to align with the prose, in its own block so the bottom padding
+          (pb-composer-reserve) keeps it clear of the floating composer. */}
+      {questionCard && <div className="px-3 pt-1.5 pb-2">{questionCard}</div>}
     </Panel>
   );
 }

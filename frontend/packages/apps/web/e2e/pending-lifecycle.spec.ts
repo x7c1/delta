@@ -3,12 +3,12 @@ import { SESSION_ID } from '@delta/api-mocks';
 import { emitEvent, useManualEventControl } from './support/app';
 
 /**
- * The pending/"running" indicator appears while a turn is in progress and
- * clears once the turn completes.
+ * The per-session running indicator appears on a session's navigator row while
+ * its turn is in progress and clears once the turn completes.
  *
  * Driving the event source manually, this sends a message (creating a queued
  * pending item, send id 1), then feeds `turn_started` — which promotes the item
- * to in-progress and shows the navigator's "running" indicator — then
+ * to in-progress and shows the session row's running indicator — then
  * `turn_completed`, which clears both the item and the indicator.
  */
 test('the running indicator appears then clears as a turn completes', async ({
@@ -22,7 +22,7 @@ test('the running indicator appears then clears as a turn completes', async ({
 
   // Optimistically queued, and not yet running.
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
-  const running = page.getByText('running', { exact: true });
+  const running = page.getByTestId('session-running');
   await expect(running).toHaveCount(0);
 
   // The first mock send is assigned id 1; the turn starts against it.
@@ -61,7 +61,7 @@ test('the running indicator clears when a turn is interrupted', async ({
   await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
-  const running = page.getByText('running', { exact: true });
+  const running = page.getByTestId('session-running');
   await expect(running).toHaveCount(0);
 
   await emitEvent(page, {

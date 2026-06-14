@@ -20,8 +20,8 @@ mod turn;
 
 pub use error::{Error, Result};
 pub use interactor::{
-    BoxedInteractor, Interactor, PendingPermission, PermissionDecision, PermissionWait,
-    SessionLiveState,
+    BoxedInteractor, Interactor, PendingPermission, PendingQuestion, PermissionDecision,
+    PermissionWait, SessionLiveState,
 };
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};

@@ -30,9 +30,9 @@ use serde::Deserialize;
 use delta_usecase::{SessionId, ThreadId};
 use delta_wire::rest::{
     WireCreateSendRequest, WireMessagesResponse, WireNewSessionResponse,
-    WirePermissionDecisionRequest, WireRecentWorkdirItem, WireSendResponse, WireSendsResponse,
-    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WirePermissionDecisionRequest, WireQuestionAnswerRequest, WireRecentWorkdirItem,
+    WireSendResponse, WireSendsResponse, WireSessionListItem, WireSessionsResponse,
+    WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -260,5 +260,38 @@ pub(crate) async fn decide_permission(
         .decide_permission(id, req.decision.into())
         .await?;
     state.broadcast(events);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/sessions/{id}/questions/{request_id}/answer` — answer a pending
+/// `AskUserQuestion` from the browser.
+///
+/// A CLI hook cannot return the user's pick, so the server turns the per-question
+/// selected option indices into the exact TUI keystrokes (the pinned
+/// key-sequence generator) and injects them into the session's live pane. The
+/// TUI then records the answer and the turn proceeds; the eventual `tool_result`
+/// resolves the question's request row through the normal sync, which clears the
+/// card via the same `permission_resolved` path a terminal-answered question
+/// takes — so no event is broadcast here.
+///
+/// Replies `409` when the question is no longer pending (already answered, its
+/// turn ended, or no live pane) and `400` for a malformed selection; the browser
+/// then falls back to the answer-in-the-terminal guidance.
+pub(crate) async fn answer_question(
+    State(state): State<AppState>,
+    Path((id, request_id)): Path<(String, i64)>,
+    Json(req): Json<WireQuestionAnswerRequest>,
+) -> Result<StatusCode, ApiError> {
+    // The wire form uses `u32` indices (non-negative on the wire); widen to the
+    // `usize` the domain generator indexes options with.
+    let selections: Vec<Vec<usize>> = req
+        .selections
+        .into_iter()
+        .map(|group| group.into_iter().map(|index| index as usize).collect())
+        .collect();
+    state
+        .interactor()
+        .answer_question(&SessionId::from(id), request_id, selections)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }

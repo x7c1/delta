@@ -243,6 +243,7 @@ where
             SessionLiveState {
                 turn: TurnState::Idle,
                 pending_permission: None,
+                pending_question: None,
             },
         )
         .await
@@ -389,6 +390,36 @@ where
             self.sessions
                 .post(&id, SessionInput::AbandonPermission { request_id });
         }
+    }
+
+    // ---- Question answers --------------------------------------------------------
+
+    /// Answer a session's pending `AskUserQuestion` by injecting the selection
+    /// keystrokes into its live TUI pane.
+    ///
+    /// Unlike a permission decision (keyed only by request id, so it needs the
+    /// id→session index), a question answer carries the session id in its URL,
+    /// so it routes straight to the owning actor. The actor correlates the
+    /// `request_id` against its pending question, builds the pinned key sequence,
+    /// and injects it via the tmux driver. `selections[q]` holds the chosen
+    /// 0-based option indices for question `q`.
+    ///
+    /// Returns [`Error::QuestionNotPending`] (`409`) when no matching question
+    /// is pending (already answered, stale, or no live pane), and
+    /// [`Error::InvalidQuestionAnswer`] (`400`) for a malformed selection — in
+    /// both cases the browser falls back to the terminal.
+    pub async fn answer_question(
+        &self,
+        session_id: &SessionId,
+        request_id: i64,
+        selections: Vec<Vec<usize>>,
+    ) -> Result<()> {
+        self.request(session_id, |reply| SessionInput::AnswerQuestion {
+            request_id,
+            selections,
+            reply,
+        })
+        .await
     }
 
     // ---- Background ticks --------------------------------------------------------

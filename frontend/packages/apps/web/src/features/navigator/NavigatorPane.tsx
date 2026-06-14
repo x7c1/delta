@@ -54,10 +54,12 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
 };
 
 /**
- * The left pane: a session → thread nested tree, plus a "New" affordance, the
- * permission notice, a running indicator, and the live connection status. Each
- * session's open/closed state is shown by its status dot, so no separate count
- * is rendered. Top-level nodes are sessions; every session that has branched
+ * The left pane: a session → thread nested tree, plus a "New" affordance and
+ * the live connection status. Each session's open/closed state is shown by its
+ * status dot, so no separate count is rendered. Per-session state — a pending
+ * permission request and an in-flight turn (running) — is surfaced on the
+ * owning session's row rather than globally, so it is clear which session it
+ * refers to. Top-level nodes are sessions; every session that has branched
  * shows its thread tree expanded (each row fetches its own — see SessionNode).
  */
 export function NavigatorPane({
@@ -126,9 +128,10 @@ export function NavigatorPane({
   // discoverable. A dismissed notice keeps its badge: the request is still
   // genuinely awaiting an answer.
   const notices = useLiveStore((state) => state.notices);
-  const hasInProgress = useLiveStore(
-    (state) => Object.keys(state.activeTurns).length > 0,
-  );
+  // Per-session in-flight-turn set. Each session's row shows its own running
+  // indicator (see SessionNode), so it is clear *which* session is processing —
+  // a single global footer spinner could not tell them apart.
+  const activeTurns = useLiveStore((state) => state.activeTurns);
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
@@ -190,7 +193,6 @@ export function NavigatorPane({
           </Button>
         </div>
       }
-      footer={hasInProgress ? <Spinner label="running" /> : undefined}
     >
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
@@ -231,6 +233,7 @@ export function NavigatorPane({
               needsPermission={
                 noticeOf(notices, item.session.id, 'permission') !== null
               }
+              running={!!activeTurns[item.session.id]}
               onFocus={() => {
                 setFocusedSession(item.session.id);
                 // The main thread is not listed in the tree, so clicking the

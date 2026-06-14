@@ -82,6 +82,26 @@ pub enum SessionEvent {
         /// next to its Allow/Deny buttons.
         tool_input_json: String,
     },
+    /// Claude Code's built-in `AskUserQuestion` tool is presenting a
+    /// multiple-choice question, so the user must pick an option in the TUI.
+    ///
+    /// Driven off the `PreToolUse` hook (which records the request row carrying
+    /// the `tool_use_id`), so the same `tool_result` → `PermissionResolved`
+    /// path that clears a permission notice also clears this one once the user
+    /// answers. `request_id` is that `PreToolUse` row id; `tool_input_json` is
+    /// the raw `{"questions":[…]}` payload the browser parses to render the
+    /// question card.
+    ///
+    /// Unlike a permission request, this carries no Allow/Deny: a hook cannot
+    /// return the selected answer, so Delta only surfaces the question — the
+    /// answer is given in the TUI. The assistant's preamble text is *not*
+    /// available here: Claude flushes it to the transcript only after the user
+    /// answers.
+    QuestionAsked {
+        session_id: SessionId,
+        request_id: i64,
+        tool_input_json: String,
+    },
     /// A previously-requested tool permission was resolved.
     ///
     /// Emitted when the browser decides via

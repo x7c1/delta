@@ -66,6 +66,15 @@ pub enum WireSessionEvent {
         /// what the tool is about to do next to its Allow/Deny buttons.
         tool_input: String,
     },
+    /// Claude Code's `AskUserQuestion` tool is presenting a multiple-choice
+    /// question; the user picks an option in the TUI.
+    QuestionAsked {
+        session_id: String,
+        request_id: i64,
+        /// The raw `{"questions":[…]}` tool input, serialized as JSON text, so
+        /// the browser can render the question card.
+        tool_input: String,
+    },
     /// A previously-requested tool permission was resolved.
     PermissionResolved {
         session_id: String,
@@ -150,6 +159,15 @@ impl From<SessionEvent> for WireSessionEvent {
                 tool_name,
                 tool_input: tool_input_json,
             },
+            SessionEvent::QuestionAsked {
+                session_id,
+                request_id,
+                tool_input_json,
+            } => Self::QuestionAsked {
+                session_id: session_id.0,
+                request_id,
+                tool_input: tool_input_json,
+            },
             SessionEvent::PermissionResolved {
                 session_id,
                 request_id,
@@ -219,6 +237,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::TurnInterrupted { .. }
             | WireSessionEvent::TranscriptUpdated { .. }
             | WireSessionEvent::PermissionRequested { .. }
+            | WireSessionEvent::QuestionAsked { .. }
             | WireSessionEvent::PermissionResolved { .. }
             | WireSessionEvent::SpawnFailed { .. }
             | WireSessionEvent::AssistantStreaming { .. } => {}
@@ -265,6 +284,11 @@ fn sample_events() -> Vec<WireSessionEvent> {
             request_id: 1,
             tool_name: "Bash".to_owned(),
             tool_input: "{\"command\":\"ls\"}".to_owned(),
+        },
+        WireSessionEvent::QuestionAsked {
+            session_id: session_id(),
+            request_id: 1,
+            tool_input: "{\"questions\":[]}".to_owned(),
         },
         WireSessionEvent::PermissionResolved {
             session_id: session_id(),
@@ -381,6 +405,23 @@ mod tests {
     }
 
     #[test]
+    fn question_asked_serializes_as_a_tagged_event_carrying_raw_tool_input() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::QuestionAsked {
+                session_id: SessionId::from("sess-1"),
+                request_id: 9,
+                tool_input_json: "{\"questions\":[{\"header\":\"Pick\"}]}".to_owned(),
+            })),
+            serde_json::json!({
+                "kind": "question_asked",
+                "session_id": "sess-1",
+                "request_id": 9,
+                "tool_input": "{\"questions\":[{\"header\":\"Pick\"}]}",
+            }),
+        );
+    }
+
+    #[test]
     fn send_dispatched_serializes_with_id_and_send_id() {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::SendDispatched {
@@ -460,6 +501,7 @@ mod tests {
                 "turn_interrupted",
                 "transcript_updated",
                 "permission_requested",
+                "question_asked",
                 "permission_resolved",
                 "spawn_failed",
                 "assistant_streaming",

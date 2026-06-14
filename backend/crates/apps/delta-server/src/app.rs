@@ -43,6 +43,12 @@ pub fn router(state: AppState) -> Router {
             "/api/permissions/{id}/decision",
             post(api::decide_permission),
         )
+        // Answer a pending AskUserQuestion from the browser (keystroke injection
+        // into the session's TUI pane).
+        .route(
+            "/api/sessions/{id}/questions/{request_id}/answer",
+            post(api::answer_question),
+        )
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))

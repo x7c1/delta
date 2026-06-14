@@ -45,6 +45,18 @@ pub enum Error {
     #[error("permission request {0} is not awaiting a decision")]
     PermissionNotPending(i64),
 
+    /// An answer arrived for a question no longer pending: the id is unknown,
+    /// it was already answered, or its turn ended. Surfaced as `409` so the
+    /// browser falls back to the answer-in-the-terminal guidance.
+    #[error("question request {0} is not awaiting an answer")]
+    QuestionNotPending(i64),
+
+    /// The browser's answer to a pending question could not be turned into a
+    /// key sequence: a malformed selection, or a sub-case the generator refuses
+    /// to drive (multi-select within a multi-question call). Surfaced as `400`.
+    #[error("invalid question answer: {0}")]
+    InvalidQuestionAnswer(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),

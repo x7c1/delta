@@ -1,0 +1,31 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    {
+      "type": "tool_use",
+      "name": "AskUserQuestion",
+      "input": {
+        "questions": [
+          {
+            "question": "Which framework should we use?",
+            "header": "Framework",
+            "options": [
+              {
+                "label": "React",
+                "description": "A UI library",
+                "preview": "+-------------+\n| <App />     |\n+-------------+"
+              },
+              { "label": "Svelte", "description": "A compiler" }
+            ],
+            "multiSelect": false
+          }
+        ]
+      }
+    },
+    { "type": "permission_request" },
+    { "type": "delay", "ms": 1500 },
+    { "type": "tool_result" },
+    { "type": "reply", "text": "thanks, using React" },
+    { "type": "stop" }
+  ]
+}

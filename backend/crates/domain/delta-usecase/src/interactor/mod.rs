@@ -8,12 +8,14 @@
 //! interactor. Per-session runtime state lives in the `session_actor` module
 //! (one actor task per session), reached through the `routing` impl.
 
+mod answer_question;
 mod context;
 mod enqueue;
 mod hooks;
 mod lifecycle;
 mod listing;
 mod permission_decision;
+mod question_keys;
 mod routing;
 mod runtime;
 pub(crate) mod session_actor;
@@ -23,7 +25,7 @@ mod workdir;
 
 pub use hooks::PermissionWait;
 pub use permission_decision::PermissionDecision;
-pub use session_actor::runtime::{PendingPermission, SessionLiveState};
+pub use session_actor::runtime::{PendingPermission, PendingQuestion, SessionLiveState};
 
 #[cfg(test)]
 mod testing;

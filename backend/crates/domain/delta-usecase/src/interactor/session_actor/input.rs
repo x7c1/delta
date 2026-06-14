@@ -107,6 +107,16 @@ pub(in crate::interactor) enum SessionInput {
     /// `pending` and the TUI prompt owns the gating). Fire-and-forget.
     AbandonPermission { request_id: i64 },
 
+    // ---- Question answers --------------------------------------------------
+    /// The browser answered a pending `AskUserQuestion` of this session: inject
+    /// the selection keystrokes (built from `selections`) into the TUI pane.
+    AnswerQuestion {
+        request_id: i64,
+        /// The chosen 0-based option index(es) per question, in question order.
+        selections: Vec<Vec<usize>>,
+        reply: Reply<()>,
+    },
+
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous
     /// tail). A no-op for a session with no live pane.

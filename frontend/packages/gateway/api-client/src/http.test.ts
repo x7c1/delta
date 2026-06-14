@@ -358,6 +358,21 @@ describe('ApiClient', () => {
     );
   });
 
+  it('answers a pending question with the per-question selection indices', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(
+      client.answerQuestion('sess-1', 5, [[0], [2, 1]]),
+    ).resolves.toBeUndefined();
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/sessions/sess-1/questions/5/answer');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(init.body)).toEqual({ selections: [[0], [2, 1]] });
+  });
+
   it('raises ApiError carrying the status and server error message', async () => {
     const fetchFn = vi
       .fn()

@@ -16,12 +16,16 @@ mod new_session_response;
 pub use new_session_response::{WireNewSessionResponse, WireSessionLifecycle};
 mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
+mod question_answer_request;
+pub use question_answer_request::WireQuestionAnswerRequest;
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;
 pub use send_response::WireSendResponse;
 mod sends_response;
-pub use sends_response::{WirePendingPermission, WireSendsResponse, WireTurn, WireTurnPhase};
+pub use sends_response::{
+    WirePendingPermission, WirePendingQuestion, WireSendsResponse, WireTurn, WireTurnPhase,
+};
 mod sessions_response;
 pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
 mod threads_response;

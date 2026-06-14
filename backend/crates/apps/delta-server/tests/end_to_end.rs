@@ -53,6 +53,9 @@ struct FakeTmux {
     /// The `command` argv of the most recent `create_session` call, so a test
     /// can assert the first prompt rides on the launch command line.
     last_command: std::sync::Mutex<Vec<String>>,
+    /// The keystroke sequences injected via `send_keys`, in order, so a test
+    /// can assert the exact keys an answered question drove into the pane.
+    keyed: std::sync::Mutex<Vec<Vec<String>>>,
 }
 
 #[async_trait]
@@ -74,6 +77,14 @@ impl TmuxDriver for FakeTmux {
 
     async fn send_line(&self, _pane: &str, _text: &str) -> delta_usecase::Result<()> {
         self.sent.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn send_keys(&self, _pane: &str, keys: &[&str]) -> delta_usecase::Result<()> {
+        self.keyed
+            .lock()
+            .unwrap()
+            .push(keys.iter().map(|k| (*k).to_owned()).collect());
         Ok(())
     }
 
@@ -107,6 +118,10 @@ impl TmuxDriver for SharedTmux {
 
     async fn send_line(&self, pane: &str, text: &str) -> delta_usecase::Result<()> {
         self.0.send_line(pane, text).await
+    }
+
+    async fn send_keys(&self, pane: &str, keys: &[&str]) -> delta_usecase::Result<()> {
+        self.0.send_keys(pane, keys).await
     }
 
     async fn clear_input(&self, pane: &str) -> delta_usecase::Result<()> {

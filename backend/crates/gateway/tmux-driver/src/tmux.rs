@@ -200,6 +200,30 @@ impl TmuxDriver for Tmux {
             .map_err(delta_usecase::Error::from)
     }
 
+    async fn send_keys(
+        &self,
+        pane: &str,
+        keys: &[&str],
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        // Each key is sent as its own discrete `send-keys` invocation with a
+        // small settle in between, so the TUI processes one navigation/toggle
+        // keystroke at a time. Batching them into one `send-keys` call risks the
+        // widget coalescing rapid keys (e.g. a Down+Enter racing the highlight
+        // move), which a deliberate human cadence avoids; the settle restores
+        // that cadence. The keys come from the pinned key-sequence generator, so
+        // they are a fixed vocabulary (`Down`, `Up`, `Space`, `Enter`, …) and
+        // never literal text.
+        for key in keys {
+            let args = key_command(pane, key);
+            let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+            self.run(&borrowed)
+                .await
+                .map_err(delta_usecase::Error::from)?;
+            tokio::time::sleep(KEY_SETTLE).await;
+        }
+        Ok(())
+    }
+
     async fn clear_input(&self, pane: &str) -> std::result::Result<(), delta_usecase::Error> {
         let args = clear_input_commands(pane);
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -308,6 +332,26 @@ fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
 /// `Enter` keystroke. Issued after [`SUBMIT_ENTER_DELAY`] (see [`input_commands`]).
 fn submit_command(pane: &str) -> Vec<String> {
     vec!["send-keys".into(), "-t".into(), pane.into(), "Enter".into()]
+}
+
+/// How long to settle after each injected navigation/selection keystroke, so
+/// the interactive TUI widget processes one key at a time (see [`send_keys`]).
+///
+/// `claude`'s `AskUserQuestion` widget redraws on each keypress; sending the
+/// next key before that redraw can drop a move or coalesce a Down+Enter into a
+/// single misfire. This spacing mimics a human cadence. Kept small so a full
+/// multi-question answer stays well under a second of injection, but non-zero so
+/// the ordering is deterministic.
+///
+/// [`send_keys`]: TmuxDriver::send_keys
+const KEY_SETTLE: std::time::Duration = std::time::Duration::from_millis(120);
+
+/// Build the `tmux send-keys` invocation that sends a single named keystroke
+/// (`Down`, `Up`, `Space`, `Enter`, `Right`, `Tab`, …) to `pane`. The key is a
+/// tmux key name, not literal text (no `-l`), so the TUI receives it as a real
+/// keypress.
+fn key_command(pane: &str, key: &str) -> Vec<String> {
+    vec!["send-keys".into(), "-t".into(), pane.into(), key.into()]
 }
 
 #[cfg(test)]
@@ -442,6 +486,20 @@ mod tests {
         // standalone clear, so the two paths share one source of truth.
         let pane = "delta-1:0.0";
         assert_eq!(input_commands(pane, "hi")[0], clear_input_commands(pane));
+    }
+
+    #[test]
+    fn key_command_sends_a_named_keystroke_not_literal_text() {
+        // A navigation/selection key is sent by tmux key name (no `-l`), so the
+        // TUI receives it as a real keypress rather than typed characters.
+        assert_eq!(
+            key_command("delta-1:0.0", "Down"),
+            vec!["send-keys", "-t", "delta-1:0.0", "Down"],
+        );
+        assert_eq!(
+            key_command("delta-1:0.0", "Enter"),
+            vec!["send-keys", "-t", "delta-1:0.0", "Enter"],
+        );
     }
 
     #[test]
