@@ -32,6 +32,7 @@ describe('applySessionEvent', () => {
       activeTurns: {},
       notices: {},
       unread: {},
+      unreadSessions: {},
       streamingMessages: {},
     });
   });
@@ -113,6 +114,52 @@ describe('applySessionEvent', () => {
     });
     // And the foreign turn must not drain the focused session's tracked send.
     expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
+  });
+
+  it('marks a non-focused session unread when its turn completes', () => {
+    const queryClient = new QueryClient();
+
+    applySessionEvent(
+      { kind: 'turn_completed', session_id: 'other-session', stop_reason: null },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    // A background completion produced something the user has not seen; its
+    // row gets the unread dot.
+    expect(useLiveStore.getState().unreadSessions).toEqual({
+      'other-session': true,
+    });
+  });
+
+  it('does not mark the focused session unread when its turn completes', () => {
+    const queryClient = new QueryClient();
+
+    applySessionEvent(
+      { kind: 'turn_completed', session_id: FOCUSED, stop_reason: null },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    // The user is already viewing this session, so there is nothing unseen.
+    expect(useLiveStore.getState().unreadSessions).toEqual({});
+  });
+
+  it('does not mark unread on a turn interrupt, even for a non-focused session', () => {
+    const queryClient = new QueryClient();
+
+    applySessionEvent(
+      { kind: 'turn_interrupted', session_id: 'other-session' },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    // An interrupt is the user's own Escape/Ctrl-C, not a surprise completion
+    // that needs flagging; only `turn_completed` marks unread.
+    expect(useLiveStore.getState().unreadSessions).toEqual({});
   });
 
   it('badges the focused active thread on external_input', () => {
