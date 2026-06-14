@@ -12,6 +12,22 @@ function reset() {
     unread: {},
     unreadSessions: {},
     streamingMessages: {},
+    endedBeforeRecorded: {},
+  });
+}
+
+/** A thread-targeted submit chip, as `beginSending` records before its POST. */
+function beginThreadSending(overrides: { sessionId?: string; threadId?: number } = {}) {
+  useLiveStore.getState().beginSending({
+    id: `local-${overrides.sessionId ?? 'sess-1'}-${overrides.threadId ?? 1}`,
+    target: {
+      kind: 'thread',
+      sessionId: overrides.sessionId ?? 'sess-1',
+      threadId: overrides.threadId ?? 1,
+    },
+    text: 'hi',
+    status: 'sending',
+    createdAt: 0,
   });
 }
 
@@ -114,6 +130,81 @@ describe('liveStore turn tracking', () => {
       stop_reason: null,
     });
     expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
+  it('does not track a send whose turn ended while its POST was still in flight', () => {
+    // The load race: a fast echo turn completes before `POST /api/sends`
+    // resolves. The submit chip is still in flight (`beginSending`), the
+    // turn-end lands first and drains nothing (the send is not tracked yet),
+    // then `onSuccess` records the send. Recording it would leave a chip with
+    // no remaining drain trigger; instead the credit from the turn-end drops it.
+    beginThreadSending();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({ 'sess-1': 1 });
+
+    // The POST resolves: its chip is removed and the send is recorded.
+    useLiveStore.getState().removeSending('local-sess-1-1');
+    useLiveStore.getState().recordLocalSend(localSend());
+
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+  });
+
+  it('credits each racing send independently when two turns end before recording', () => {
+    beginThreadSending({ threadId: 1 });
+    beginThreadSending({ threadId: 2 });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({ 'sess-1': 2 });
+
+    useLiveStore.getState().recordLocalSend(localSend({ sendId: 1, threadId: 1 }));
+    useLiveStore.getState().recordLocalSend(localSend({ sendId: 2, threadId: 2 }));
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+  });
+
+  it('does not credit a turn-end with no in-flight submit (normal already-drained turn)', () => {
+    // A turn that drains a tracked send (the common case), or an external
+    // direct-pane turn with no browser submit, must not credit the session —
+    // a credit would wrongly swallow the NEXT genuinely-pending send.
+    useLiveStore.getState().recordLocalSend(localSend());
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+
+    // A later, legitimately pending send is tracked normally.
+    useLiveStore.getState().recordLocalSend(localSend({ sendId: 2 }));
+    expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['2']);
+  });
+
+  it('does not cross-credit: a turn ending in another session leaves this send tracked', () => {
+    beginThreadSending({ sessionId: 'sess-1' });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-2',
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+
+    useLiveStore.getState().recordLocalSend(localSend({ sessionId: 'sess-1' }));
+    expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['1']);
   });
 
   it('drains turn state when the session closes', () => {

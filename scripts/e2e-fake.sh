@@ -22,7 +22,10 @@
 # directory; each spec picks its scenario via the first word of the first
 # prompt it sends (see fake-claude's scenario module).
 #
-# Usage: scripts/e2e-fake.sh
+# Usage: scripts/e2e-fake.sh [playwright args...]
+#   Any trailing arguments are forwarded to `playwright test`, so a single
+#   spec or filter can be run against the same real harness, e.g.
+#     scripts/e2e-fake.sh reload-restore.spec.ts
 #   E2E_FAKE_BACKEND_PORT / E2E_FAKE_PORT override the ports.
 #
 # Prerequisites: tmux, the Rust toolchain, pnpm (workspace installed and
@@ -146,7 +149,7 @@ status=0
 (
   cd "$FRONTEND_DIR"
   E2E_FAKE_BACKEND_PORT="$BACKEND_PORT" E2E_FAKE_PORT="$WEB_PORT" \
-    pnpm --filter @delta/web e2e:fake
+    pnpm --filter @delta/web e2e:fake "$@"
 ) || status=$?
 log "Suite finished (exit $status)."
 exit "$status"
