@@ -78,7 +78,7 @@ function PlusIcon({ className }: { className?: string }) {
 }
 
 /**
- * Gear glyph marking the footer "Settings" entry so it reads as a button.
+ * Gear glyph marking the header "Settings" entry so it reads as a button.
  * Decorative — always `aria-hidden`, so the button's accessible name stays its
  * "Settings" label. This file is the only user.
  */
@@ -207,11 +207,14 @@ export function NavigatorPane({
       // scrollbar (Panel's default).
       bodyClassName="scrollbar-none"
       header={
+        // The header is a single row holding the two top-level navigator
+        // actions, styled as the same kind of control (matching ui-kit Button
+        // variant/size and icon+label treatment): "New session" on the left and
+        // the Settings entry on the right.
         <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-slate-700">Sessions</span>
           <Button
+            variant="ghost"
             size="sm"
-            variant="secondary"
             // The "New session" button always (re)starts the new-session flow,
             // even when the app is already in the new-session state. It is not
             // enough to change focus: the picker's open state lives in the store
@@ -226,13 +229,22 @@ export function NavigatorPane({
             <PlusIcon className="h-3.5 w-3.5" />
             New session
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="settings-entry"
+            aria-pressed={settingsOpen}
+            onClick={openSettings}
+            className={cn(settingsOpen && 'bg-slate-100 font-medium text-slate-900')}
+          >
+            <SettingsIcon className="h-3.5 w-3.5" />
+            Settings
+          </Button>
         </div>
       }
       footer={
-        // The footer is a single row: the live connection status on the left,
-        // and the Settings entry (claude.ai-style, opens the settings dialog
-        // overlaid on the workspace) on the right.
-        <div className="flex items-center justify-between gap-2">
+        // The footer holds only the live connection status, left-aligned.
+        <div className="flex items-center gap-2">
           {/*
             data-connection exposes the live connection state structurally so
             the e2e suites can wait on disconnect/reconnect transitions without
@@ -248,17 +260,6 @@ export function NavigatorPane({
               title={CONNECTION_TITLE[connection]}
             />
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            data-testid="settings-entry"
-            aria-pressed={settingsOpen}
-            onClick={openSettings}
-            className={cn(settingsOpen && 'bg-slate-100 font-medium text-slate-900')}
-          >
-            <SettingsIcon className="h-3.5 w-3.5" />
-            Settings
-          </Button>
         </div>
       }
     >
