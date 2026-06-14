@@ -237,16 +237,48 @@ where
     /// in-progress indicator and permission notice after a reconnect). A
     /// session with no actor is idle with nothing pending by definition.
     pub async fn live_state_for(&self, id: &SessionId) -> SessionLiveState {
-        self.query(
-            id,
-            |reply| SessionInput::QueryLiveState { reply },
-            SessionLiveState {
-                turn: TurnState::Idle,
-                pending_permission: None,
-                pending_question: None,
-            },
-        )
-        .await
+        // Resolved inline (rather than through `query`) so each outcome can be
+        // logged: a captured debug log must distinguish a state the live actor
+        // actually returned from the default `Idle` substituted when no actor
+        // is reachable. Without this, an `Idle` in a report is ambiguous —
+        // genuinely idle, or a silent fallback?
+        let default = SessionLiveState {
+            turn: TurnState::Idle,
+            pending_permission: None,
+            pending_question: None,
+        };
+        let (tx, rx) = oneshot::channel();
+        if !self.sessions.post_existing(id, SessionInput::QueryLiveState { reply: tx }) {
+            tracing::debug!(
+                session_id = %id,
+                branch = "no_actor",
+                "live_state_for: no session actor; returning default Idle (a session \
+                 with no actor is idle with nothing pending by definition)"
+            );
+            return default;
+        }
+        match rx.await {
+            Ok(state) => {
+                tracing::debug!(
+                    session_id = %id,
+                    branch = "actor_reply",
+                    turn = ?state.turn,
+                    has_pending_permission = state.pending_permission.is_some(),
+                    has_pending_question = state.pending_question.is_some(),
+                    "live_state_for: state from live actor"
+                );
+                state
+            }
+            Err(_) => {
+                tracing::debug!(
+                    session_id = %id,
+                    branch = "dropped_reply",
+                    "live_state_for: actor existed but dropped its reply (retiring \
+                     mid-query); returning default Idle"
+                );
+                default
+            }
+        }
     }
 
     // ---- Hook deliveries -----------------------------------------------------

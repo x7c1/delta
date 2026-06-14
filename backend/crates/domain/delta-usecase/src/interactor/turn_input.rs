@@ -27,18 +27,28 @@ where
         input: TurnInput,
     ) -> Result<TurnState> {
         let id = self.id;
+        // Capture the source state before the table mutates it so the log line
+        // records the full from -> to edge, not just the destination.
+        let from = self.state.turn();
         let result = self.state.apply_turn(input);
         if result.anomalous {
             tracing::warn!(
                 session_id = %id,
-                ?input,
-                next = ?result.next,
+                from = ?from,
+                trigger = ?input,
+                to = ?result.next,
                 orphaned = ?result.orphaned,
                 "anomalous turn transition: this input should be impossible in the \
                  previous state; converging on the safest outcome"
             );
         } else {
-            tracing::debug!(session_id = %id, ?input, next = ?result.next, "turn transition");
+            tracing::debug!(
+                session_id = %id,
+                from = ?from,
+                trigger = ?input,
+                to = ?result.next,
+                "turn transition"
+            );
         }
 
         match result.orphaned {
