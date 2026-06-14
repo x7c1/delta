@@ -123,6 +123,22 @@ CREATE TABLE IF NOT EXISTS permission_request (
 CREATE INDEX IF NOT EXISTS ix_permission_request_tool_use
   ON permission_request(session_id, tool_use_id);
 
+-- The launch-option registry: custom `claude` CLI flags the user can register
+-- once and later multi-select when starting a session. Each row is one flat
+-- `(label?, name, value?)` record — a generic flag pass-through where `name` is
+-- the flag (e.g. '--plugin-dir', '--permission-mode') and `value` its argument
+-- (e.g. '/path/to/plugins', 'auto'). `value` is nullable for valueless flags;
+-- a repeatable flag is stored as multiple separate rows. `label` is an optional
+-- human-friendly note for the row. This table is session-independent (no
+-- foreign key, never cascaded): the registry outlives any individual session.
+CREATE TABLE IF NOT EXISTS launch_option (
+  id         INTEGER PRIMARY KEY,
+  label      TEXT,
+  name       TEXT NOT NULL,
+  value      TEXT,
+  created_at TEXT NOT NULL
+) STRICT;
+
 -- Full-text index over message content (groundwork: no search UI yet).
 -- External-content fts5 over `message.content_text`, keyed by the message
 -- table's rowid (a STRICT table still has a rowid unless WITHOUT ROWID).

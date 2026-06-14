@@ -995,3 +995,45 @@ async fn message_fts_indexes_inserts_and_updates() {
     assert!(fts_hits(&store, "quick").await.is_empty());
     assert_eq!(fts_hits(&store, "lazy").await.len(), 1);
 }
+
+#[tokio::test]
+async fn launch_options_round_trip_create_list_delete() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // A fresh store has no registered launch options.
+    assert!(store.list_launch_options().await.unwrap().is_empty());
+
+    // A flag with a label and a value persists every field.
+    let plugin = store
+        .create_launch_option(Some("My plugins"), "--plugin-dir", Some("/opt/plugins"))
+        .await
+        .unwrap();
+    assert_eq!(plugin.label.as_deref(), Some("My plugins"));
+    assert_eq!(plugin.name, "--plugin-dir");
+    assert_eq!(plugin.value.as_deref(), Some("/opt/plugins"));
+    assert!(!plugin.created_at.is_empty());
+
+    // A valueless, unlabeled flag stores NULL for both — never a sentinel.
+    let valueless = store
+        .create_launch_option(None, "--dangerously-skip-permissions", None)
+        .await
+        .unwrap();
+    assert_eq!(valueless.label, None);
+    assert_eq!(valueless.value, None);
+    assert_ne!(valueless.id, plugin.id, "ids are distinct");
+
+    // The list is newest-first (descending id), so the second insert leads.
+    let listed = store.list_launch_options().await.unwrap();
+    let ids: Vec<i64> = listed.iter().map(|o| o.id).collect();
+    assert_eq!(ids, vec![valueless.id, plugin.id]);
+
+    // Deleting one leaves the other untouched.
+    store.delete_launch_option(plugin.id).await.unwrap();
+    let remaining = store.list_launch_options().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, valueless.id);
+
+    // Deleting an unknown id is a silent no-op (idempotent), not an error.
+    store.delete_launch_option(9999).await.unwrap();
+    assert_eq!(store.list_launch_options().await.unwrap().len(), 1);
+}

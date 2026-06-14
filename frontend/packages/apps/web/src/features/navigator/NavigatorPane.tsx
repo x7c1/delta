@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { SessionListItem } from '@delta/wire-gen';
-import { Button, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
+import { Button, cn, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
 import {
   useCloseSessionMutation,
   type ConnectionStatus,
@@ -138,6 +138,8 @@ export function NavigatorPane({
   const unreadSessions = useLiveStore((state) => state.unreadSessions);
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
+  const settingsOpen = useNavStore((state) => state.settingsOpen);
+  const openSettings = useNavStore((state) => state.openSettings);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const startNewSession = useNavStore((state) => state.startNewSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -196,6 +198,22 @@ export function NavigatorPane({
             New
           </Button>
         </div>
+      }
+      footer={
+        // Settings entry pinned at the lower-left, claude.ai-style: a full-pane
+        // settings screen the workspace renders in place of the conversation.
+        <button
+          type="button"
+          data-testid="settings-entry"
+          aria-pressed={settingsOpen}
+          onClick={openSettings}
+          className={cn(
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-600 hover:bg-slate-100',
+            settingsOpen && 'bg-slate-100 font-medium text-slate-900',
+          )}
+        >
+          Settings
+        </button>
       }
     >
       {focusedSessionId === NEW_SESSION_FOCUS && (

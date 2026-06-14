@@ -28,4 +28,6 @@ export const queryKeys = {
     ['workdir-list', path ?? 'default'] as const,
   /** Recently-used working directories (`GET /api/workdir/recent`). */
   workdirRecent: ['workdir-recent'] as const,
+  /** The registered launch options (`GET /api/launch-options`). */
+  launchOptions: ['launch-options'] as const,
 };

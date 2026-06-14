@@ -32,6 +32,9 @@ export {
   useWorkdirListQuery,
   useHomeDirQuery,
   useRecentWorkdirsQuery,
+  useLaunchOptionsQuery,
+  useCreateLaunchOptionMutation,
+  useDeleteLaunchOptionMutation,
 } from './query-hooks';
 export {
   appendMessage,

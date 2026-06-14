@@ -37,6 +37,9 @@ export type { WorkdirEntry } from './generated/WorkdirEntry';
 export type { WorkdirListResponse } from './generated/WorkdirListResponse';
 export type { RecentWorkdirItem } from './generated/RecentWorkdirItem';
 export type { WorkdirRecentResponse } from './generated/WorkdirRecentResponse';
+export type { LaunchOption } from './generated/LaunchOption';
+export type { LaunchOptionsResponse } from './generated/LaunchOptionsResponse';
+export type { CreateLaunchOptionRequest } from './generated/CreateLaunchOptionRequest';
 export type { ErrorBody } from './generated/ErrorBody';
 
 export type {

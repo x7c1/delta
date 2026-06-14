@@ -1,5 +1,8 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
+  CreateLaunchOptionRequest,
+  LaunchOption,
+  LaunchOptionsResponse,
   MessagesResponse,
   PendingPermission,
   PendingQuestion,
@@ -405,6 +408,46 @@ export function createMockApi(): MockApi {
         workdirs: recentWorkdirs(),
       };
       return HttpResponse.json(responseBody);
+    }),
+
+    // The launch-option registry for the settings screen: list, create, delete.
+    // Backed by the shared in-memory store so a created option lists and a
+    // deleted one disappears, mirroring the real server's SQLite-backed CRUD.
+    http.get('*/api/launch-options', () => {
+      // Newest first (descending id), as the server returns them.
+      const launch_options = [...store.launchOptions].sort((a, b) => b.id - a.id);
+      const body: LaunchOptionsResponse = { launch_options };
+      return HttpResponse.json(body);
+    }),
+
+    http.post('*/api/launch-options', async ({ request }) => {
+      const payload = (await request.json()) as CreateLaunchOptionRequest;
+      const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+      if (name.length === 0) {
+        // A blank name is a 400, exactly as the real server rejects it.
+        return HttpResponse.json(
+          { error: 'a launch option must have a non-blank `name` (the flag)' },
+          { status: 400 },
+        );
+      }
+      const trimmedLabel = payload.label?.trim();
+      const trimmedValue = payload.value?.trim();
+      const option: LaunchOption = {
+        id: store.nextLaunchOptionId++,
+        label: trimmedLabel ? trimmedLabel : null,
+        name,
+        value: trimmedValue ? trimmedValue : null,
+        created_at: new Date().toISOString(),
+      };
+      store.launchOptions.push(option);
+      return HttpResponse.json(option, { status: 201 });
+    }),
+
+    http.delete('*/api/launch-options/:id', ({ params }) => {
+      const id = Number(params.id);
+      // Deleting an unknown id is a no-op (idempotent), like the real server.
+      store.launchOptions = store.launchOptions.filter((o) => o.id !== id);
+      return new HttpResponse(null, { status: 204 });
     }),
   ];
 

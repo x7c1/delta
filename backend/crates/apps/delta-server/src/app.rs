@@ -59,6 +59,16 @@ pub fn router(state: AppState) -> Router {
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))
+        // Launch-option registry: list, create, and delete the custom `claude`
+        // CLI flags the user can later select when starting a session.
+        .route(
+            "/api/launch-options",
+            get(api::list_launch_options).post(api::create_launch_option),
+        )
+        .route(
+            "/api/launch-options/{id}",
+            axum::routing::delete(api::delete_launch_option),
+        )
         // Browser event stream.
         .route("/ws", get(ws::ws_handler))
         // Terminal bridge to the tmux pane.
@@ -212,6 +222,114 @@ mod tests {
             0,
             "no sessions yet means no recent workdirs"
         );
+    }
+
+    #[tokio::test]
+    async fn launch_options_list_is_empty_on_a_fresh_store() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/launch-options")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body["launch_options"].as_array().unwrap().len(),
+            0,
+            "no options registered yet"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_then_list_and_delete_launch_option() {
+        let state = test_state();
+        let app = router(state);
+
+        // Create one option.
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/launch-options")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"label":"plugins","name":"--plugin-dir","value":"/opt/p"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::CREATED);
+        let bytes = to_bytes(create.into_body(), usize::MAX).await.unwrap();
+        let created: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let id = created["id"].as_i64().unwrap();
+        assert_eq!(created["name"], "--plugin-dir");
+
+        // It now lists.
+        let list = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/launch-options")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["launch_options"].as_array().unwrap().len(), 1);
+
+        // Delete it.
+        let delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/launch-options/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+        // The list is empty again.
+        let list = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/launch-options")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["launch_options"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn create_launch_option_rejects_a_blank_name() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/launch-options")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"name":"   "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

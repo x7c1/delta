@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import {
@@ -117,5 +117,34 @@ describe('NavigatorPane per-session running indicator', () => {
     // visually-hidden label), never as a standalone footer spinner.
     const runningRows = screen.getAllByTestId('session-running');
     expect(runningRows).toHaveLength(1);
+  });
+});
+
+describe('NavigatorPane settings entry', () => {
+  beforeEach(() => {
+    useLiveStore.setState({ connection: 'open', notices: {}, activeTurns: {} });
+    useNavStore.setState({ settingsOpen: false });
+  });
+
+  it('opens the settings screen when the lower-left entry is clicked', () => {
+    renderPane();
+
+    const entry = screen.getByTestId('settings-entry');
+    expect(entry).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(entry);
+
+    expect(useNavStore.getState().settingsOpen).toBe(true);
+  });
+
+  it('marks the entry pressed while the settings screen is open', () => {
+    useNavStore.setState({ settingsOpen: true });
+
+    renderPane();
+
+    expect(screen.getByTestId('settings-entry')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
   });
 });

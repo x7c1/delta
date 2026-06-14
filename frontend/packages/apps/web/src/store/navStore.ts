@@ -55,6 +55,14 @@ export interface NavState {
   preNewSessionFocus: FocusedSession;
   /** Active thread within the focused session (scoped to it). */
   activeThreadId: ThreadId | null;
+  /**
+   * Whether the full-pane settings screen is shown instead of the conversation.
+   * A screen mode, like the new-session sentinel: when set, the workspace
+   * renders the settings view rather than the transcript/composer, and the
+   * navigator highlights its settings entry. Entered from the navigator's
+   * lower-left settings entry and left via the settings view's Close.
+   */
+  settingsOpen: boolean;
   /** Whether the terminal pane is shown (persistent pane on large screens, or
    *  the slide-in overlay on small screens). */
   terminalOpen: boolean;
@@ -80,6 +88,10 @@ export interface NavState {
    */
   cancelNewSession: () => void;
   setActiveThread: (threadId: ThreadId) => void;
+  /** Show the full-pane settings screen. */
+  openSettings: () => void;
+  /** Leave the settings screen, returning to the conversation view. */
+  closeSettings: () => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
   /** Set the terminal pane width, clamped to the allowed range. */
@@ -103,14 +115,21 @@ export const useNavStore = create<NavState>()(
       focusedSessionId: null,
       preNewSessionFocus: null,
       activeThreadId: null,
+      settingsOpen: false,
       terminalOpen: false,
       terminalWidth: DEFAULT_TERMINAL_WIDTH,
 
       setFocusedSession: (sessionId) =>
         set((state) =>
-          state.focusedSessionId === sessionId
+          state.focusedSessionId === sessionId && !state.settingsOpen
             ? state
-            : { focusedSessionId: sessionId, activeThreadId: null },
+            : // Focusing a session always leaves the settings screen — it is a
+              // separate full-pane mode the conversation view replaces.
+              {
+                focusedSessionId: sessionId,
+                activeThreadId: null,
+                settingsOpen: false,
+              },
         ),
       startNewSession: () =>
         set((state) => ({
@@ -120,6 +139,8 @@ export const useNavStore = create<NavState>()(
               : state.focusedSessionId,
           focusedSessionId: NEW_SESSION_FOCUS,
           activeThreadId: null,
+          // Starting a new session leaves the settings screen.
+          settingsOpen: false,
         })),
       cancelNewSession: () =>
         set((state) => {
@@ -137,6 +158,8 @@ export const useNavStore = create<NavState>()(
           };
         }),
       setActiveThread: (threadId) => set({ activeThreadId: threadId }),
+      openSettings: () => set({ settingsOpen: true }),
+      closeSettings: () => set({ settingsOpen: false }),
       setTerminalOpen: (open) => set({ terminalOpen: open }),
       toggleTerminal: () =>
         set((state) => ({ terminalOpen: !state.terminalOpen })),
@@ -149,6 +172,7 @@ export const useNavStore = create<NavState>()(
       partialize: (state) => ({
         focusedSessionId: state.focusedSessionId,
         activeThreadId: state.activeThreadId,
+        settingsOpen: state.settingsOpen,
         terminalOpen: state.terminalOpen,
         terminalWidth: state.terminalWidth,
       }),

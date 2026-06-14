@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 
 use delta_model::{
-    Message, MessageUuid, PermissionRequest, Send, Session, SessionId, Thread, ThreadId,
+    LaunchOption, Message, MessageUuid, PermissionRequest, Send, Session, SessionId, Thread,
+    ThreadId,
 };
 
 use crate::error::Result;
@@ -254,6 +255,21 @@ pub trait SessionStore: std::marker::Send + Sync {
         tool_use_id: &str,
         allowed: bool,
     ) -> Result<Vec<i64>>;
+
+    /// All registered launch options, newest first (descending `id`).
+    async fn list_launch_options(&self) -> Result<Vec<LaunchOption>>;
+
+    /// Register a launch option and return the created row. `label` and `value`
+    /// are optional (a valueless flag carries no `value`); `name` is the flag.
+    async fn create_launch_option(
+        &self,
+        label: Option<&str>,
+        name: &str,
+        value: Option<&str>,
+    ) -> Result<LaunchOption>;
+
+    /// Delete a launch option by id. Deleting an unknown id is a no-op.
+    async fn delete_launch_option(&self, id: i64) -> Result<()>;
 }
 
 #[async_trait]
@@ -444,5 +460,22 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self)
             .resolve_permission_by_tool_use_id(session_id, tool_use_id, allowed)
             .await
+    }
+
+    async fn list_launch_options(&self) -> Result<Vec<LaunchOption>> {
+        (**self).list_launch_options().await
+    }
+
+    async fn create_launch_option(
+        &self,
+        label: Option<&str>,
+        name: &str,
+        value: Option<&str>,
+    ) -> Result<LaunchOption> {
+        (**self).create_launch_option(label, name, value).await
+    }
+
+    async fn delete_launch_option(&self, id: i64) -> Result<()> {
+        (**self).delete_launch_option(id).await
     }
 }
