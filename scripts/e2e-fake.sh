@@ -41,6 +41,20 @@ BACKEND_PORT="${E2E_FAKE_BACKEND_PORT:-7899}"
 WEB_PORT="${E2E_FAKE_PORT:-5198}"
 TMUX_SOCKET="delta-e2e-$$"
 
+# The per-run state (server.log, transcripts) lives in a temp dir deleted on
+# exit, which is useless once CI tears the runner down. Mirror the diagnostic
+# artifacts to a stable, repo-relative path that the CI upload step references
+# (alongside Playwright's own traces/videos/screenshots). The whole dir is
+# wiped at the start of each run so a previous run's logs never masquerade as
+# this one's.
+ARTIFACT_DIR="$FRONTEND_DIR/packages/apps/web/test-results/e2e-fake"
+
+# Elevated, overridable structured log level for the spawned server so the
+# turn-state FSM transitions and live-state resolutions (emitted at debug) are
+# captured in server.log. A caller-provided RUST_LOG wins, so local debugging
+# can narrow or widen it without editing this script.
+SERVER_RUST_LOG="${RUST_LOG:-delta_usecase=debug,info}"
+
 log() { printf '\033[1;36m[e2e-fake]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[e2e-fake]\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -56,17 +70,33 @@ log "Building delta-server and fake-claude ..."
 RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/delta-e2e-fake.XXXXXX")"
 SERVER_PID=""
 
+preserve_artifacts() {
+  # Copy the per-run diagnostics out of the soon-to-be-deleted temp dir into a
+  # stable path CI uploads. Best-effort: a missing source (e.g. the server
+  # never started) must not turn teardown into a failure.
+  mkdir -p "$ARTIFACT_DIR" 2>/dev/null || return 0
+  [ -f "$RUN_DIR/server.log" ] && cp "$RUN_DIR/server.log" "$ARTIFACT_DIR/server.log" 2>/dev/null || true
+  if [ -d "$RUN_DIR/transcripts" ]; then
+    cp -R "$RUN_DIR/transcripts" "$ARTIFACT_DIR/transcripts" 2>/dev/null || true
+  fi
+}
+
 teardown() {
   if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
   fi
+  preserve_artifacts
   # Kill the whole per-run tmux server: every pane this run spawned dies with
   # it, and other sockets (a developer's `delta`, another run) are untouched.
   tmux -L "$TMUX_SOCKET" kill-server 2>/dev/null || true
   rm -rf "$RUN_DIR"
 }
 trap teardown EXIT
+
+# Start each run from a clean artifact dir so stale logs can't be mistaken for
+# this run's evidence.
+rm -rf "$ARTIFACT_DIR"
 
 mkdir -p "$RUN_DIR/workdir" "$RUN_DIR/transcripts"
 
@@ -85,7 +115,8 @@ chmod +x "$WRAPPER"
 # --- Start the backend. -------------------------------------------------------
 log "Starting delta-server on 127.0.0.1:$BACKEND_PORT (tmux socket: $TMUX_SOCKET) ..."
 log "Server log: $RUN_DIR/server.log"
-DELTA_PORT="$BACKEND_PORT" \
+RUST_LOG="$SERVER_RUST_LOG" \
+  DELTA_PORT="$BACKEND_PORT" \
   DELTA_DB_PATH="$RUN_DIR/delta.db" \
   DELTA_SESSION_WORKDIR="$RUN_DIR/workdir" \
   DELTA_TMUX_SOCKET="$TMUX_SOCKET" \

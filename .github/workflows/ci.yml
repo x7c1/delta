@@ -157,3 +157,18 @@ jobs:
 
       - name: E2E (fake mode)
         run: make e2e-fake
+
+      # These failures appear only in CI and don't reproduce locally, so on a
+      # failed run capture every piece of evidence: the Playwright HTML report,
+      # test-results/ (traces, videos, screenshots, and the preserved backend
+      # server.log + fake transcripts under e2e-fake/). if-no-files-found:
+      # ignore keeps a green run from erroring when nothing was produced.
+      - name: Upload e2e-fake diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-fake-diagnostics
+          path: |
+            frontend/packages/apps/web/playwright-report/
+            frontend/packages/apps/web/test-results/
+          if-no-files-found: ignore
