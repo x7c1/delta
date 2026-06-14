@@ -132,6 +132,10 @@ export function NavigatorPane({
   // indicator (see SessionNode), so it is clear *which* session is processing —
   // a single global footer spinner could not tell them apart.
   const activeTurns = useLiveStore((state) => state.activeTurns);
+  // Per-session unread set. A session whose turn finished while the user was
+  // viewing a different one carries a static unread dot on its row (see
+  // SessionNode), distinct from the running spinner, cleared once focused.
+  const unreadSessions = useLiveStore((state) => state.unreadSessions);
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
@@ -234,6 +238,10 @@ export function NavigatorPane({
                 noticeOf(notices, item.session.id, 'permission') !== null
               }
               running={!!activeTurns[item.session.id]}
+              unread={
+                !!unreadSessions[item.session.id] &&
+                focusedSessionId !== item.session.id
+              }
               onFocus={() => {
                 setFocusedSession(item.session.id);
                 // The main thread is not listed in the tree, so clicking the

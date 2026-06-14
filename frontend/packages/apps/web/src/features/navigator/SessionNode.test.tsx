@@ -82,3 +82,29 @@ describe('SessionNode running indicator', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('SessionNode unread indicator', () => {
+  it('renders the unread dot when unread is true and not running', () => {
+    renderNode({ unread: true });
+
+    const unread = screen.getByTestId('session-unread');
+    expect(unread).toBeInTheDocument();
+    // The dot itself is aria-hidden, so an accessible "unread" label is paired
+    // with it for assistive tech.
+    expect(unread).toHaveTextContent('unread');
+  });
+
+  it('does not render the unread dot when unread is false', () => {
+    renderNode({ unread: false });
+
+    expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument();
+  });
+
+  it('hides the unread dot while running (running takes precedence)', () => {
+    renderNode({ unread: true, running: true });
+
+    // A session processing again shows the live spinner, not a stale dot.
+    expect(screen.getByTestId('session-running')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument();
+  });
+});
