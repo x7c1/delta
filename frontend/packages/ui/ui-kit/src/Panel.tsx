@@ -18,14 +18,6 @@ export interface PanelProps {
    */
   overlay?: ReactNode;
   className?: string;
-  /**
-   * Optional classes for the header element. When provided they replace the
-   * header's default layout (`h-10 items-center`, a single fixed-height centered
-   * row) — e.g. pass `items-stretch py-2` to let the header grow and stack its
-   * content vertically. The structural classes (flex, border, horizontal
-   * padding) are always applied.
-   */
-  headerClassName?: string;
   bodyClassName?: string;
   /**
    * Optional inline style for the scrollable body `<div>`, for values a caller
@@ -51,7 +43,6 @@ export function Panel({
   footer,
   overlay,
   className,
-  headerClassName,
   bodyClassName,
   bodyStyle,
   bodyRef,
@@ -62,12 +53,7 @@ export function Panel({
       className={cn('flex h-full min-h-0 flex-col bg-white', className)}
     >
       {header !== undefined && (
-        <header
-          className={cn(
-            'flex shrink-0 border-b border-slate-200 px-3',
-            headerClassName ?? 'h-10 items-center',
-          )}
-        >
+        <header className="flex h-10 shrink-0 items-center border-b border-slate-200 px-3">
           <div className="min-w-0 flex-1">{header}</div>
         </header>
       )}
