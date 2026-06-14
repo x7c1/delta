@@ -222,7 +222,7 @@ export function QuestionCard({
                 {q.options.map((opt, oi) => {
                   const selected = selections[qi]?.has(oi) ?? false;
                   return (
-                    <li key={oi}>
+                    <li key={oi} className="flex items-start gap-2">
                       <button
                         type="button"
                         disabled={submitted}
@@ -233,7 +233,7 @@ export function QuestionCard({
                             ? toggleMulti(qi, oi)
                             : chooseSingle(qi, oi)
                         }
-                        className={`flex w-full items-start gap-2 rounded border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
+                        className={`flex min-w-0 flex-1 items-start gap-2 rounded border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
                           selected
                             ? 'border-indigo-400 bg-indigo-100'
                             : 'border-indigo-100 bg-white hover:border-indigo-300'
@@ -247,7 +247,7 @@ export function QuestionCard({
                             {selected ? '[x]' : '[ ]'}
                           </span>
                         )}
-                        <span>
+                        <span className="min-w-0">
                           <span className="font-semibold text-slate-800">
                             {opt.label}
                           </span>
@@ -258,16 +258,19 @@ export function QuestionCard({
                           )}
                         </span>
                       </button>
-                      {/* The preview is supplementary and pre-formatted, so it
-                          renders as a sibling BELOW the clickable button (not
-                          nested inside it): a wide, scrollable monospace block
-                          must not intercept the option's click/selection. It is
-                          shown verbatim — never through Markdown — to keep box
+                      {/* The preview sits to the RIGHT of the option, side by
+                          side (label/description left, preview right). It is a
+                          sibling — not nested in the button — so a wide,
+                          scrollable monospace block never intercepts the
+                          option's click/selection. Each column takes half the
+                          row (`flex-1` + `min-w-0` so long lines scroll inside
+                          the preview instead of stretching the row). Shown
+                          verbatim — never through Markdown — to keep box
                           drawing, code, and ASCII art exact. */}
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
-                          className="mt-1 overflow-x-auto whitespace-pre rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700"
+                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700"
                         >
                           {opt.preview}
                         </pre>

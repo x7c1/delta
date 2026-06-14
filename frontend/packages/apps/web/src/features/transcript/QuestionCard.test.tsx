@@ -200,7 +200,7 @@ describe('QuestionCard', () => {
     );
 
     // Selecting the previewed option still works: the click target is the
-    // button, with the preview rendered as a sibling below it.
+    // button, with the preview rendered as a sibling beside it (to the right).
     fireEvent.click(screen.getByTestId('question-option-0-0'));
     expect(onAnswer).toHaveBeenCalledTimes(1);
     expect(onAnswer).toHaveBeenCalledWith([[0]]);
