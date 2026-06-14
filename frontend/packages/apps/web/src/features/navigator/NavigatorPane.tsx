@@ -213,6 +213,12 @@ export function NavigatorPane({
           <Button
             variant="ghost"
             size="sm"
+            // Pull the ghost button left by its own horizontal padding (-ml-1
+            // offsets the sm size's px-2) so the plus chip lines up with the
+            // session cards' content below — card box edge and title column —
+            // instead of floating ~8px further in, which read as odd left
+            // whitespace at rest (the ghost background is invisible until hover).
+            className="-ml-1"
             // The "New session" button always (re)starts the new-session flow,
             // even when the app is already in the new-session state. It is not
             // enough to change focus: the picker's open state lives in the store
