@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react';
+import type { CSSProperties, ReactNode, Ref } from 'react';
 import { cn } from './cn';
 
 export interface PanelProps {
@@ -20,6 +20,12 @@ export interface PanelProps {
   className?: string;
   bodyClassName?: string;
   /**
+   * Optional inline style for the scrollable body `<div>`, for values a caller
+   * must compute at runtime rather than express as a static class — e.g. a
+   * measured bottom padding that reserves space for a variable-height overlay.
+   */
+  bodyStyle?: CSSProperties;
+  /**
    * Optional ref to the scrollable body `<div>`, so callers can drive its
    * scroll position (e.g. stick-to-bottom transcripts).
    */
@@ -38,6 +44,7 @@ export function Panel({
   overlay,
   className,
   bodyClassName,
+  bodyStyle,
   bodyRef,
   children,
 }: PanelProps) {
@@ -54,6 +61,7 @@ export function Panel({
         <div
           ref={bodyRef}
           className={cn('h-full overflow-y-auto scrollbar-hover', bodyClassName)}
+          style={bodyStyle}
         >
           {children}
         </div>
