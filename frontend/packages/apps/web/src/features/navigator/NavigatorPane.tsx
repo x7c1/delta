@@ -229,7 +229,7 @@ export function NavigatorPane({
               reads a touch more prominently than a bare glyph, while staying
               understated and on-palette with the app's light slate surfaces.
             */}
-            <span className="inline-flex items-center justify-center rounded-full bg-slate-100 p-1">
+            <span className="inline-flex items-center justify-center rounded-full bg-slate-200 p-1">
               <PlusIcon className="h-3 w-3" />
             </span>
             New session
