@@ -50,6 +50,16 @@ const STICK_THRESHOLD_PX = 64;
 const OVERLAY_INSET_FALLBACK_PX = 12;
 
 /**
+ * Comfortable reading gap (px) kept between the last turn and the bottom overlay,
+ * added on top of the measured reserve. The measured reserve (overlay height +
+ * inset) alone parks the last turn flush against the composer, which reads worse
+ * than leaving some air there — so a slice of the breathing room the old fixed
+ * reserve always had is preserved here while the rest of the reserve still tracks
+ * the overlay's real height. Present at every composer size and grows with it.
+ */
+const BODY_BOTTOM_READING_GAP_PX = 64;
+
+/**
  * The overlay inset in pixels: the gap the floating cards leave from the body
  * edges (`--delta-overlay-inset`). Read from the live computed style so the
  * measured bottom reserve (overlay height + this gap) stays in lockstep with the
@@ -713,7 +723,9 @@ export function TranscriptPane({
     }
     const apply = () => {
       const height = overlay.getBoundingClientRect().height;
-      setBottomReserve(height + overlayInsetPx(overlay));
+      setBottomReserve(
+        height + overlayInsetPx(overlay) + BODY_BOTTOM_READING_GAP_PX,
+      );
       const body = bodyRef.current;
       if (body && stickRef.current) {
         body.scrollTop = body.scrollHeight;

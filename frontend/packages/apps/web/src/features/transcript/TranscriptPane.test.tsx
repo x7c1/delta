@@ -1144,13 +1144,14 @@ describe('TranscriptPane', () => {
 
       // Stub the overlay's measured height, then fire the observer as a real
       // resize would. The body's padding-bottom = measured height + the overlay
-      // inset gap (12px fallback in jsdom, which computes no custom-property).
+      // inset gap (12px fallback in jsdom, which computes no custom-property) +
+      // the 64px reading gap that keeps the last turn off the composer.
       overlay.getBoundingClientRect = () =>
         ({ height: 120 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
 
       await waitFor(() =>
-        expect(bodyEl().style.paddingBottom).toBe('132px'),
+        expect(bodyEl().style.paddingBottom).toBe('196px'),
       );
     });
 
@@ -1161,13 +1162,13 @@ describe('TranscriptPane', () => {
 
       overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
-      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('92px'));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('156px'));
 
       // The composer grows (more lines typed): the overlay is taller, so the
       // reserve grows in lockstep — the last turn stays clear of the input.
       overlay.getBoundingClientRect = () => ({ height: 200 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
-      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('212px'));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('276px'));
     });
 
     it('re-sticks the body to the bottom when the overlay grows while sticking', async () => {
@@ -1197,7 +1198,7 @@ describe('TranscriptPane', () => {
       // body to the new bottom (scrollTop := scrollHeight) so the tail stays
       // visible just above the grown composer.
       await waitFor(() =>
-        expect(body.style.paddingBottom).toBe('162px'),
+        expect(body.style.paddingBottom).toBe('226px'),
       );
       expect(body.scrollTop).toBe(1000);
     });
@@ -1225,7 +1226,7 @@ describe('TranscriptPane', () => {
 
       // Reading scrollback is not yanked to the bottom; only the reserve updates.
       await waitFor(() =>
-        expect(body.style.paddingBottom).toBe('162px'),
+        expect(body.style.paddingBottom).toBe('226px'),
       );
       expect(body.scrollTop).toBe(100);
     });
