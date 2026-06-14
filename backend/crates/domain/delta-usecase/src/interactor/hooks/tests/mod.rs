@@ -2,6 +2,7 @@
 
 mod answering_a_question_injects_keys_into_the_pane;
 mod ask_user_question_drives_a_question_notice;
+mod cancelling_a_question_injects_escape_into_the_pane;
 mod ask_user_question_never_outlives_its_turn;
 mod first_submit_registers_session;
 mod message_display_streams_and_clears;

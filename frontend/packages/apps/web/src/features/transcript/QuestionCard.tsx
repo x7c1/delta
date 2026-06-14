@@ -94,6 +94,15 @@ export interface QuestionCardProps {
    * awaits it to surface an inline error and re-enable its controls for a retry.
    */
   onAnswer: (selections: number[][]) => Promise<void>;
+  /**
+   * Cancel the question in the TUI itself: the parent POSTs to the cancel
+   * endpoint, which injects a single `Escape` into the session's pane (one key
+   * cancels the whole call). The returned promise rejects when the POST fails (a
+   * `409` or a network error); the card awaits it to surface an inline error and
+   * re-enable its controls for a retry. Distinct from {@link onDismiss}, which
+   * only hides the card and leaves the TUI prompt up.
+   */
+  onCancel: () => Promise<void>;
   /** Open the embedded terminal (the fallback if injection misfires). */
   onOpenTerminal: () => void;
   /** Dismiss the card without answering (the TUI prompt stays up). */
@@ -124,6 +133,14 @@ export interface QuestionCardProps {
  * shows an inline error, re-enables its controls so the user can retry, and
  * emphasizes the terminal fallback — it never leaves a dead Submit behind.
  *
+ * A "Cancel" action does the terminal's `Esc`: the parent POSTs to the cancel
+ * endpoint, which injects a single `Escape` into the pane and cancels the whole
+ * question in the TUI (the `is_error` `tool_result` then clears the card through
+ * the same resolution path). It is distinct from "Dismiss", which only hides the
+ * card locally and leaves the TUI prompt open — both are kept because they do
+ * genuinely different things. A failed cancel POST shares the answer's failure
+ * UX (inline error, terminal emphasized, controls re-enabled).
+ *
  * It renders inline at the conversation tail (not in a floating overlay), so the
  * choices sit in the flow right after the assistant's live-streamed preamble.
  * It grows with its content (no height cap or internal scroll) so every option
@@ -132,6 +149,7 @@ export interface QuestionCardProps {
 export function QuestionCard({
   notice,
   onAnswer,
+  onCancel,
   onOpenTerminal,
   onDismiss,
 }: QuestionCardProps) {
@@ -149,21 +167,40 @@ export function QuestionCard({
   // double-send while the authoritative clear (the resolution path) lands. A
   // failed POST flips it back so the user can retry.
   const [submitted, setSubmitted] = useState(false);
-  // Set when the answer POST rejects, so the card shows an inline error and
-  // emphasizes the terminal fallback instead of silently doing nothing.
-  const [failed, setFailed] = useState(false);
+  // Set to the action ('answer' or 'cancel') whose POST rejected, so the card
+  // shows an action-specific inline error and emphasizes the terminal fallback
+  // instead of silently doing nothing; null while nothing has failed.
+  const [failedAction, setFailedAction] = useState<'answer' | 'cancel' | null>(
+    null,
+  );
+  const failed = failedAction !== null;
 
   const submit = (sets: Set<number>[]) => {
     if (submitted) {
       return;
     }
     setSubmitted(true);
-    setFailed(false);
+    setFailedAction(null);
     onAnswer(sets.map((set) => [...set].sort((a, b) => a - b))).catch(() => {
       // Re-enable the controls and surface the failure so the Submit is never
       // left dead; the terminal fallback is emphasized below.
       setSubmitted(false);
-      setFailed(true);
+      setFailedAction('answer');
+    });
+  };
+
+  const cancel = () => {
+    if (submitted) {
+      return;
+    }
+    // Reuse `submitted` to disable the controls while the cancel is in flight,
+    // so an answer and a cancel cannot race. A failure flips it back and shows
+    // the shared inline error, exactly like a failed answer.
+    setSubmitted(true);
+    setFailedAction(null);
+    onCancel().catch(() => {
+      setSubmitted(false);
+      setFailedAction('cancel');
     });
   };
 
@@ -293,8 +330,9 @@ export function QuestionCard({
 
       {failed && (
         <p className="text-red-700" role="alert" data-testid="question-error">
-          Couldn&apos;t submit your answer — answer in the terminal, or try
-          again.
+          {failedAction === 'cancel'
+            ? "Couldn't cancel the question — cancel it in the terminal, or try again."
+            : "Couldn't submit your answer — answer in the terminal, or try again."}
         </p>
       )}
 
@@ -321,6 +359,19 @@ export function QuestionCard({
           onClick={onOpenTerminal}
         >
           Open terminal
+        </Button>
+        {/* Cancel does the terminal's Esc: it cancels the question in the TUI
+            itself (a single Escape cancels the whole call), unlike Dismiss which
+            only hides this card and leaves the TUI prompt open. Disabled while a
+            submit/cancel is in flight so the two cannot race. */}
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={submitted}
+          data-testid="question-cancel"
+          onClick={cancel}
+        >
+          Cancel
         </Button>
         <Button size="sm" variant="ghost" onClick={onDismiss}>
           Dismiss

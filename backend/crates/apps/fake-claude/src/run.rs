@@ -296,11 +296,18 @@ impl Engine {
                 Ok(())
             }
             Step::AwaitInterrupt => {
-                self.await_interrupt()?;
+                self.await_escape()?;
                 // The marker line — and deliberately NO `Stop` hook, exactly
                 // like a real interrupt: the transcript tail is what tells the
                 // server the turn was aborted.
                 self.transcript.interrupt_marker()
+            }
+            Step::AwaitEscape => {
+                // Block until Escape, writing nothing: the cancel's effect (an
+                // `is_error` tool_result) is the scenario's next step. This
+                // models cancelling an AskUserQuestion, where a single Escape
+                // cancels the call and the TUI then writes the error result.
+                self.await_escape()
             }
             Step::EnqueuePrompt { text } => {
                 // A prompt submitted while the turn is busy: claude records
@@ -383,14 +390,18 @@ impl Engine {
     /// flight are dropped: modelling claude's prompt queue is the explicit
     /// `enqueue_prompt`/`dequeue_prompt` steps' job, not an implicit side
     /// effect of waiting.
-    fn await_interrupt(&mut self) -> Result<(), String> {
+    ///
+    /// Shared by the `await_interrupt` (turn interrupt) and `await_escape`
+    /// (AskUserQuestion cancel) steps — both wait for the same Escape byte and
+    /// differ only in what they write afterwards.
+    fn await_escape(&mut self) -> Result<(), String> {
         loop {
             match self.events.recv() {
                 Ok(InputEvent::Interrupt) => return Ok(()),
                 Ok(InputEvent::Prompt(dropped)) => {
                     eprintln!("fake-claude: dropping prompt submitted mid-turn: {dropped}");
                 }
-                Err(_) => return Err("stdin closed while awaiting an interrupt".to_owned()),
+                Err(_) => return Err("stdin closed while awaiting an escape".to_owned()),
             }
         }
     }

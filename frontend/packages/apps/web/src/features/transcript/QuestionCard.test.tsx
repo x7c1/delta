@@ -10,6 +10,9 @@ function notice(toolInput: string): QuestionNotice {
 /** A resolved-promise stub for `onAnswer` in tests that only assert the call. */
 const answerOk = () => Promise.resolve();
 
+/** A resolved-promise stub for `onCancel` in tests that do not exercise it. */
+const cancelOk = () => Promise.resolve();
+
 const SINGLE = JSON.stringify({
   questions: [
     {
@@ -87,6 +90,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(SINGLE)}
         onAnswer={answerOk}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -106,6 +110,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(SINGLE)}
         onAnswer={onAnswer}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -125,6 +130,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(MULTI_SELECT)}
         onAnswer={onAnswer}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -149,6 +155,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(MULTI_QUESTION)}
         onAnswer={onAnswer}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -173,6 +180,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(SINGLE_WITH_PREVIEW)}
         onAnswer={answerOk}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -194,6 +202,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(SINGLE_WITH_PREVIEW)}
         onAnswer={onAnswer}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -211,6 +220,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(SINGLE)}
         onAnswer={answerOk}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -219,13 +229,15 @@ describe('QuestionCard', () => {
     expect(screen.queryByText('Deny')).toBeNull();
   });
 
-  it('keeps an Open terminal fallback and a Dismiss action', () => {
+  it('keeps an Open terminal fallback, a Cancel, and a Dismiss action', () => {
     const onOpenTerminal = vi.fn();
     const onDismiss = vi.fn();
+    const onCancel = vi.fn().mockResolvedValue(undefined);
     render(
       <QuestionCard
         notice={notice(SINGLE)}
         onAnswer={answerOk}
+        onCancel={onCancel}
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />,
@@ -234,8 +246,48 @@ describe('QuestionCard', () => {
     fireEvent.click(screen.getByText('Open terminal'));
     expect(onOpenTerminal).toHaveBeenCalledTimes(1);
 
+    // Cancel and Dismiss are distinct actions: Cancel cancels the question in
+    // the TUI (the Esc POST), Dismiss only hides the card locally.
+    fireEvent.click(screen.getByText('Cancel'));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onDismiss).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByText('Dismiss'));
     expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces an error and re-enables Cancel when the cancel POST fails', async () => {
+    // The cancel POST rejects (a 409 or a network failure): like a failed
+    // answer, the card shows an inline error, keeps the terminal fallback, and
+    // re-enables its controls so the user can retry.
+    const onCancel = vi.fn().mockRejectedValue(new Error('boom'));
+    render(
+      <QuestionCard
+        notice={notice(SINGLE)}
+        onAnswer={answerOk}
+        onCancel={onCancel}
+        onOpenTerminal={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    const cancelBtn = screen.getByTestId('question-cancel') as HTMLButtonElement;
+    fireEvent.click(cancelBtn);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    // Disabled while the cancel POST is in flight.
+    expect(cancelBtn.disabled).toBe(true);
+
+    // The cancel-specific inline error appears once the rejected promise
+    // settles, and the terminal fallback stays available.
+    const error = await screen.findByTestId('question-error');
+    expect(error.textContent).toContain('cancel');
+    expect(screen.getByText('Open terminal')).toBeTruthy();
+
+    // Cancel is usable again (not left disabled), so a retry is possible.
+    expect(cancelBtn.disabled).toBe(false);
+    fireEvent.click(cancelBtn);
+    expect(onCancel).toHaveBeenCalledTimes(2);
   });
 
   it('degrades gracefully when the tool input is unparsable', () => {
@@ -243,6 +295,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice('not json')}
         onAnswer={answerOk}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,
@@ -266,6 +319,7 @@ describe('QuestionCard', () => {
       <QuestionCard
         notice={notice(MULTI_SELECT)}
         onAnswer={onAnswer}
+        onCancel={cancelOk}
         onOpenTerminal={noop}
         onDismiss={noop}
       />,

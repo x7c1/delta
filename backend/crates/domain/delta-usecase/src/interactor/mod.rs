@@ -9,6 +9,7 @@
 //! (one actor task per session), reached through the `routing` impl.
 
 mod answer_question;
+mod cancel_question;
 mod context;
 mod enqueue;
 mod hooks;

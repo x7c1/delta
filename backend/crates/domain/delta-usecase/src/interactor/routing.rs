@@ -422,6 +422,30 @@ where
         .await
     }
 
+    /// Cancel a session's pending `AskUserQuestion` by injecting `Escape` into
+    /// its live TUI pane (a single Escape cancels the whole call).
+    ///
+    /// The sibling of [`answer_question`](Self::answer_question): like an answer,
+    /// it carries the session id in its URL so it routes straight to the owning
+    /// actor, which correlates the `request_id` against its pending question and
+    /// injects the cancel keystroke via the tmux driver.
+    ///
+    /// Returns [`Error::QuestionNotPending`] (`409`) when no matching question is
+    /// pending (already answered/cancelled, stale, or no live pane), in which
+    /// case the browser falls back to the terminal. Unlike an answer there is no
+    /// `400` case — cancel carries no selection to malform.
+    pub async fn cancel_question(
+        &self,
+        session_id: &SessionId,
+        request_id: i64,
+    ) -> Result<()> {
+        self.request(session_id, |reply| SessionInput::CancelQuestion {
+            request_id,
+            reply,
+        })
+        .await
+    }
+
     // ---- Background ticks --------------------------------------------------------
 
     /// Poll the transcript of every currently-open (live-pane) session for

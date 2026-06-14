@@ -38,6 +38,17 @@
 //!   the last question is recorded a "Review your answers" screen appears with
 //!   the default on `1. Submit answers`, so one final `Enter` submits. This
 //!   holds whether the questions are single-select, multi-select, or mixed.
+//!
+//! ### Cancelling (Escape)
+//!
+//! A single `Escape` on any tab cancels the WHOLE `AskUserQuestion` call — one
+//! key, whether the call carries one question or many, and regardless of which
+//! tab the widget currently shows. No second key is needed. Cancelling writes a
+//! `tool_result` with `is_error: true` ("User rejected tool use") for the
+//! call's `tool_use_id`, byte-identical to picking the widget's trailing "Type
+//! something." row. Because that `tool_result` flushes, Delta's existing
+//! `tool_result → resolved` path clears the question card with no extra logic —
+//! the same clear a terminal-answered (or terminal-cancelled) question takes.
 
 /// One keystroke to inject into the TUI, named as the tmux `send-keys` key the
 /// gateway forwards it as.
@@ -45,7 +56,8 @@
 /// The vocabulary is exactly what the pinned `AskUserQuestion` sequences need:
 /// `Down`/`Up` to move the highlight, `Space` to toggle a multi-select option,
 /// `Right` to advance past a multi-select question (to the next tab or the
-/// Submit tab), and `Enter` to record a single-select choice / submit a review.
+/// Submit tab), `Enter` to record a single-select choice / submit a review, and
+/// `Escape` to cancel the whole call (see [`cancel_keys`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Down,
@@ -53,6 +65,7 @@ pub enum Key {
     Space,
     Enter,
     Right,
+    Escape,
 }
 
 impl Key {
@@ -64,8 +77,21 @@ impl Key {
             Key::Space => "Space",
             Key::Enter => "Enter",
             Key::Right => "Right",
+            Key::Escape => "Escape",
         }
     }
+}
+
+/// The keystrokes that cancel a pending `AskUserQuestion` from outside the TUI.
+///
+/// A single `Escape` cancels the whole call (one question or many — see the
+/// module's "Cancelling" notes), so this is unconditionally `[Escape]`: it needs
+/// no question shapes, since the key is the same regardless of how the call is
+/// structured or which tab is showing. The TUI then writes an `is_error`
+/// `tool_result`, whose flush clears the question card through Delta's existing
+/// resolution path.
+pub fn cancel_keys() -> Vec<Key> {
+    vec![Key::Escape]
 }
 
 /// The shape of one question, as the generator needs it: its option count and
@@ -458,6 +484,14 @@ mod tests {
         assert_eq!(Key::Space.tmux_name(), "Space");
         assert_eq!(Key::Enter.tmux_name(), "Enter");
         assert_eq!(Key::Right.tmux_name(), "Right");
+        assert_eq!(Key::Escape.tmux_name(), "Escape");
+    }
+
+    #[test]
+    fn cancel_is_a_single_escape() {
+        // One Escape cancels the whole call — single or multi-question — so the
+        // cancel sequence is unconditionally `[Escape]`, independent of shapes.
+        assert_eq!(cancel_keys(), vec![Key::Escape]);
     }
 
     #[test]

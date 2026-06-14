@@ -196,6 +196,9 @@ where
         } => {
             let _ = reply.send(ctx.answer_question(request_id, &selections).await);
         }
+        SessionInput::CancelQuestion { request_id, reply } => {
+            let _ = reply.send(ctx.cancel_question(request_id).await);
+        }
         SessionInput::SyncTick { reply } => {
             let _ = reply.send(ctx.sync_tick().await);
         }

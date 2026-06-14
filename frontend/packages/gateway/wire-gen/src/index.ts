@@ -28,6 +28,7 @@ export type { SendsResponse } from './generated/SendsResponse';
 export type { PermissionDecision } from './generated/PermissionDecision';
 export type { PermissionDecisionRequest } from './generated/PermissionDecisionRequest';
 export type { QuestionAnswerRequest } from './generated/QuestionAnswerRequest';
+export type { QuestionCancelRequest } from './generated/QuestionCancelRequest';
 export type { Turn } from './generated/Turn';
 export type { PendingPermission } from './generated/PendingPermission';
 export type { PendingQuestion } from './generated/PendingQuestion';

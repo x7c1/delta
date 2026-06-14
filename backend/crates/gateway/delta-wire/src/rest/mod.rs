@@ -18,6 +18,8 @@ mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
 mod question_answer_request;
 pub use question_answer_request::WireQuestionAnswerRequest;
+mod question_cancel_request;
+pub use question_cancel_request::WireQuestionCancelRequest;
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;

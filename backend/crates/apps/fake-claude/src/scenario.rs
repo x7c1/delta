@@ -35,6 +35,7 @@
 //! | `tool_result { is_error? }` | Write the `tool_result` carrier line for the most recent `tool_use`. |
 //! | `stop { stop_reason? }` | Fire the `Stop` hook: the turn completed. |
 //! | `await_interrupt` | Block until Escape arrives, then write the `[Request interrupted by user]` marker line. No `Stop` fires — exactly like a real interrupt. |
+//! | `await_escape` | Block until Escape arrives, writing nothing. Models cancelling an `AskUserQuestion`: a single Escape cancels the call, after which the scenario writes a `tool_result { is_error: true }` for the question — exactly the bytes a real cancel produces. Unlike `await_interrupt` it writes no marker, so the cancel's `tool_result` is the next step. |
 //! | `enqueue_prompt { text }` | A prompt submitted while the turn is busy: write the uuid-less `queue-operation` enqueue line carrying the text and remember it for `dequeue_prompt`. No hook fires at enqueue time. |
 //! | `dequeue_prompt` | Replay the oldest enqueued prompt now that the turn has freed: fire its own `UserPromptSubmit`, then write it as a plain user line (`promptSource: "queued"`) — the same path a TUI-typed prompt takes. |
 //! | `delay { ms }` | Sleep. Only for delays the scenario itself is about (e.g. holding a turn open); synchronization belongs to the `await_*` steps. |
@@ -105,6 +106,7 @@ pub enum Step {
         stop_reason: Option<String>,
     },
     AwaitInterrupt,
+    AwaitEscape,
     EnqueuePrompt {
         text: String,
     },
