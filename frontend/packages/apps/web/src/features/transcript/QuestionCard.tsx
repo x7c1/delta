@@ -234,7 +234,7 @@ export function QuestionCard({
                             : chooseSingle(qi, oi)
                         }
                         className={`flex min-w-0 items-start gap-2 rounded border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
-                          opt.preview ? 'max-w-xs' : 'w-full'
+                          opt.preview ? 'w-80 shrink-0' : 'w-full'
                         } ${
                           selected
                             ? 'border-indigo-400 bg-indigo-100'
@@ -254,7 +254,7 @@ export function QuestionCard({
                             {opt.label}
                           </span>
                           {opt.description && (
-                            <span className="block text-slate-600">
+                            <span className="block text-xs text-slate-600">
                               {opt.description}
                             </span>
                           )}
@@ -264,13 +264,14 @@ export function QuestionCard({
                           side (label/description left, preview right). It is a
                           sibling — not nested in the button — so a wide,
                           scrollable monospace block never intercepts the
-                          option's click/selection. The label column hugs its
-                          content (capped at `max-w-xs`) so the preview stays
-                          close to it rather than half a pane away; the preview
-                          takes the remaining width (`flex-1` + `min-w-0` so long
-                          lines scroll inside the block instead of stretching the
-                          row). Shown verbatim — never through Markdown — to keep
-                          box drawing, code, and ASCII art exact. */}
+                          option's click/selection. The label column is a fixed
+                          width (`w-80` + `shrink-0`) so every preview starts on
+                          the same vertical line instead of jittering with each
+                          label's length; the preview takes the remaining width
+                          (`flex-1` + `min-w-0` so long lines scroll inside the
+                          block instead of stretching the row). Shown verbatim —
+                          never through Markdown — to keep box drawing, code, and
+                          ASCII art exact. */}
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
