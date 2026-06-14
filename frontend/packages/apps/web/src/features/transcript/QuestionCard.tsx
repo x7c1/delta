@@ -126,8 +126,8 @@ export interface QuestionCardProps {
  *
  * It renders inline at the conversation tail (not in a floating overlay), so the
  * choices sit in the flow right after the assistant's live-streamed preamble.
- * Capped in height with internal scrolling so a large multi-question card never
- * blankets the transcript.
+ * It grows with its content (no height cap or internal scroll) so every option
+ * is visible in the conversation pane without scrolling within the card.
  */
 export function QuestionCard({
   notice,
@@ -196,7 +196,7 @@ export function QuestionCard({
 
   return (
     <div
-      className="flex max-h-[40vh] flex-col gap-2 overflow-y-auto rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs"
+      className="flex flex-col gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm"
       data-testid="question-card"
       role="group"
       aria-label="Question from Claude Code"
@@ -233,7 +233,9 @@ export function QuestionCard({
                             ? toggleMulti(qi, oi)
                             : chooseSingle(qi, oi)
                         }
-                        className={`flex min-w-0 flex-1 items-start gap-2 rounded border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
+                        className={`flex min-w-0 items-start gap-2 rounded border px-2 py-1 text-left transition-colors disabled:opacity-60 ${
+                          opt.preview ? 'max-w-xs' : 'w-full'
+                        } ${
                           selected
                             ? 'border-indigo-400 bg-indigo-100'
                             : 'border-indigo-100 bg-white hover:border-indigo-300'
@@ -262,11 +264,13 @@ export function QuestionCard({
                           side (label/description left, preview right). It is a
                           sibling — not nested in the button — so a wide,
                           scrollable monospace block never intercepts the
-                          option's click/selection. Each column takes half the
-                          row (`flex-1` + `min-w-0` so long lines scroll inside
-                          the preview instead of stretching the row). Shown
-                          verbatim — never through Markdown — to keep box
-                          drawing, code, and ASCII art exact. */}
+                          option's click/selection. The label column hugs its
+                          content (capped at `max-w-xs`) so the preview stays
+                          close to it rather than half a pane away; the preview
+                          takes the remaining width (`flex-1` + `min-w-0` so long
+                          lines scroll inside the block instead of stretching the
+                          row). Shown verbatim — never through Markdown — to keep
+                          box drawing, code, and ASCII art exact. */}
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
