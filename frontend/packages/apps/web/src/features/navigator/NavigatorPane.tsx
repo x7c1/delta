@@ -78,7 +78,7 @@ function PlusIcon({ className }: { className?: string }) {
 }
 
 /**
- * Gear glyph marking the header "Settings" entry so it reads as a button.
+ * Gear glyph marking the footer "Settings" entry so it reads as a button.
  * Decorative — always `aria-hidden`, so the button's accessible name stays its
  * "Settings" label. This file is the only user.
  */
@@ -207,11 +207,9 @@ export function NavigatorPane({
       // scrollbar (Panel's default).
       bodyClassName="scrollbar-none"
       header={
-        // The header is a single row holding the two top-level navigator
-        // actions, styled as the same kind of control (matching ui-kit Button
-        // variant/size and icon+label treatment): "New session" on the left and
-        // the Settings entry on the right.
-        <div className="flex items-center justify-between gap-2">
+        // The header is a single left-aligned row holding the "New session"
+        // action (ui-kit ghost Button with an icon+label treatment).
+        <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="sm"
@@ -226,9 +224,47 @@ export function NavigatorPane({
               openWorkdirDialog();
             }}
           >
-            <PlusIcon className="h-3.5 w-3.5" />
+            {/*
+              The plus sits in a faint circular chip so the create affordance
+              reads a touch more prominently than a bare glyph, while staying
+              understated and on-palette with the app's light slate surfaces.
+            */}
+            <span className="inline-flex items-center justify-center rounded-full bg-slate-100 p-1">
+              <PlusIcon className="h-3 w-3" />
+            </span>
             New session
           </Button>
+        </div>
+      }
+      footer={
+        // The footer is a single row: the live connection status (and a small
+        // "Delta" running label) on the left, and the Settings entry
+        // (claude.ai-style, opens the settings dialog overlaid on the
+        // workspace) on the right.
+        <div className="flex items-center justify-between gap-2">
+          {/*
+            data-connection exposes the live connection state structurally so
+            the e2e suites can wait on disconnect/reconnect transitions without
+            depending on the dot's color classes or title wording.
+          */}
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-flex px-1"
+              data-testid="connection-indicator"
+              data-connection={connection}
+            >
+              <StatusDot
+                tone={CONNECTION_TONE[connection]}
+                title={CONNECTION_TITLE[connection]}
+              />
+            </span>
+            {/*
+              Presentational label next to the status dot, conveying that Delta
+              is the thing whose connection the dot reflects. Muted/small so it
+              sits quietly beside the indicator.
+            */}
+            <span className="text-xs text-slate-500">Delta</span>
+          </span>
           <Button
             variant="ghost"
             size="sm"
@@ -240,26 +276,6 @@ export function NavigatorPane({
             <SettingsIcon className="h-3.5 w-3.5" />
             Settings
           </Button>
-        </div>
-      }
-      footer={
-        // The footer holds only the live connection status, left-aligned.
-        <div className="flex items-center gap-2">
-          {/*
-            data-connection exposes the live connection state structurally so
-            the e2e suites can wait on disconnect/reconnect transitions without
-            depending on the dot's color classes or title wording.
-          */}
-          <span
-            className="inline-flex px-1"
-            data-testid="connection-indicator"
-            data-connection={connection}
-          >
-            <StatusDot
-              tone={CONNECTION_TONE[connection]}
-              title={CONNECTION_TITLE[connection]}
-            />
-          </span>
         </div>
       }
     >

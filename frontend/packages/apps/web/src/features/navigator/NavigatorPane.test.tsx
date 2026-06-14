@@ -126,7 +126,7 @@ describe('NavigatorPane settings entry', () => {
     useNavStore.setState({ settingsOpen: false });
   });
 
-  it('opens the settings overlay when the header entry is clicked', () => {
+  it('opens the settings overlay when the footer entry is clicked', () => {
     renderPane();
 
     const entry = screen.getByTestId('settings-entry');
