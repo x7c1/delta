@@ -200,8 +200,8 @@ export function NavigatorPane({
         </div>
       }
       footer={
-        // Settings entry pinned at the lower-left, claude.ai-style: a full-pane
-        // settings screen the workspace renders in place of the conversation.
+        // Settings entry pinned at the lower-left, claude.ai-style: opens the
+        // settings dialog overlaid on top of the workspace.
         <button
           type="button"
           data-testid="settings-entry"

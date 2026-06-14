@@ -60,7 +60,6 @@ export function WorkspaceScreen() {
   const activeThreadId = useNavStore((state) => state.activeThreadId);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
-  const settingsOpen = useNavStore((state) => state.settingsOpen);
   const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
@@ -257,15 +256,6 @@ export function WorkspaceScreen() {
         />
       </div>
 
-      {/* Settings is a full-pane screen mode: it replaces the conversation and
-          terminal to the right of the navigator. Rendered before the
-          conversation branch so it takes precedence over the focused session. */}
-      {settingsOpen ? (
-        <div className="min-w-0 flex-1">
-          <SettingsView />
-        </div>
-      ) : (
-        <>
       {/* Center: transcript, or the cold-start / new-session composer state */}
       <div className="min-w-0 flex-1">
         {isNewSessionFocus ? (
@@ -316,8 +306,11 @@ export function WorkspaceScreen() {
             {terminal}
           </div>
         ))}
-        </>
-      )}
+
+      {/* Settings is a modal overlay layered over the workspace rather than a
+          full-pane mode: it self-gates on `settingsOpen` (renders nothing when
+          closed) and leaves the center conversation pane in place beneath it. */}
+      <SettingsView />
     </div>
   );
 }

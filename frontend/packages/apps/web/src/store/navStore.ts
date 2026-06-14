@@ -56,11 +56,11 @@ export interface NavState {
   /** Active thread within the focused session (scoped to it). */
   activeThreadId: ThreadId | null;
   /**
-   * Whether the full-pane settings screen is shown instead of the conversation.
-   * A screen mode, like the new-session sentinel: when set, the workspace
-   * renders the settings view rather than the transcript/composer, and the
-   * navigator highlights its settings entry. Entered from the navigator's
-   * lower-left settings entry and left via the settings view's Close.
+   * Whether the settings overlay is shown. When set, the settings dialog is
+   * layered on top of the workspace (the center conversation pane stays in
+   * place beneath it) and the navigator highlights its settings entry. Opened
+   * from the navigator's lower-left settings entry and closed via the dialog's
+   * Close button, Esc, or a backdrop click.
    */
   settingsOpen: boolean;
   /** Whether the terminal pane is shown (persistent pane on large screens, or
@@ -88,9 +88,9 @@ export interface NavState {
    */
   cancelNewSession: () => void;
   setActiveThread: (threadId: ThreadId) => void;
-  /** Show the full-pane settings screen. */
+  /** Open the settings overlay. */
   openSettings: () => void;
-  /** Leave the settings screen, returning to the conversation view. */
+  /** Close the settings overlay, returning to the workspace beneath it. */
   closeSettings: () => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
@@ -123,8 +123,8 @@ export const useNavStore = create<NavState>()(
         set((state) =>
           state.focusedSessionId === sessionId && !state.settingsOpen
             ? state
-            : // Focusing a session always leaves the settings screen — it is a
-              // separate full-pane mode the conversation view replaces.
+            : // Focusing a session always closes the settings overlay — picking
+              // a conversation dismisses the modal layered over the workspace.
               {
                 focusedSessionId: sessionId,
                 activeThreadId: null,
@@ -139,7 +139,7 @@ export const useNavStore = create<NavState>()(
               : state.focusedSessionId,
           focusedSessionId: NEW_SESSION_FOCUS,
           activeThreadId: null,
-          // Starting a new session leaves the settings screen.
+          // Starting a new session closes the settings overlay.
           settingsOpen: false,
         })),
       cancelNewSession: () =>

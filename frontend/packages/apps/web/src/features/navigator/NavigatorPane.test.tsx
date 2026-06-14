@@ -126,7 +126,7 @@ describe('NavigatorPane settings entry', () => {
     useNavStore.setState({ settingsOpen: false });
   });
 
-  it('opens the settings screen when the lower-left entry is clicked', () => {
+  it('opens the settings overlay when the lower-left entry is clicked', () => {
     renderPane();
 
     const entry = screen.getByTestId('settings-entry');
@@ -137,7 +137,7 @@ describe('NavigatorPane settings entry', () => {
     expect(useNavStore.getState().settingsOpen).toBe(true);
   });
 
-  it('marks the entry pressed while the settings screen is open', () => {
+  it('marks the entry pressed while the settings overlay is open', () => {
     useNavStore.setState({ settingsOpen: true });
 
     renderPane();

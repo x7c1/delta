@@ -5,26 +5,30 @@ import {
   useLaunchOptionsQuery,
 } from '@delta/api-client';
 import type { LaunchOption } from '@delta/wire-gen';
-import { Button, Panel, Spinner } from '@delta/ui-kit';
+import { Button, Dialog, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 
 /**
- * The full-pane settings screen: manage the registry of custom `claude` CLI
- * launch options (flat `(label?, name, value?)` flag records). Lists the
- * registered options and lets the user add one (label and value optional, name
- * required) and delete one. Selecting which options to apply when starting a
- * session is a separate concern handled elsewhere.
+ * The settings modal: manage the registry of custom `claude` CLI launch
+ * options (flat `(label?, name, value?)` flag records). Lists the registered
+ * options and lets the user add one (label and value optional, name required)
+ * and delete one. Selecting which options to apply when starting a session is a
+ * separate concern handled elsewhere.
  *
- * Reachable from the navigator's lower-left settings entry; left via the header
- * Close button (the conversation view then returns).
+ * Rendered as a {@link Dialog} overlay layered on top of the workspace rather
+ * than replacing the center pane, so the conversation stays in place beneath
+ * it. Opened from the navigator's lower-left settings entry (`openSettings`)
+ * and closed via the dialog's Close button, Esc, or a backdrop click
+ * (`closeSettings`).
  */
 export function SettingsView() {
   const client = useApiClient();
+  const settingsOpen = useNavStore((state) => state.settingsOpen);
   const closeSettings = useNavStore((state) => state.closeSettings);
 
-  // The query only runs while this view is mounted (it owns the settings mode).
-  const launchOptionsQuery = useLaunchOptionsQuery(client, true);
+  // The query only runs while the dialog is open (it owns the settings mode).
+  const launchOptionsQuery = useLaunchOptionsQuery(client, settingsOpen);
   const createLaunchOption = useCreateLaunchOptionMutation(client);
   const deleteLaunchOption = useDeleteLaunchOptionMutation(client);
 
@@ -63,19 +67,21 @@ export function SettingsView() {
   };
 
   return (
-    <Panel
-      header={
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-semibold text-slate-700">
-            Launch options
-          </span>
-          <Button size="sm" variant="ghost" onClick={closeSettings}>
-            Close
-          </Button>
-        </div>
+    <Dialog
+      open={settingsOpen}
+      onClose={closeSettings}
+      title="Launch options"
+      // Wider than the default prompt-sized dialog: this is a settings panel
+      // hosting a list plus an add form, and the option rows (label + monospace
+      // flag/value) need room to read without truncating.
+      className="max-w-2xl"
+      footer={
+        <Button variant="ghost" onClick={closeSettings} data-testid="settings-close">
+          Close
+        </Button>
       }
     >
-      <div className="mx-auto w-full max-w-2xl px-4 py-4">
+      <div className="w-full">
         <p className="mb-4 text-xs text-slate-500">
           Register custom <code>claude</code> CLI flags to apply when starting a
           session. <span className="font-medium">Name</span> is the flag (e.g.{' '}
@@ -178,7 +184,7 @@ export function SettingsView() {
           </ul>
         )}
       </div>
-    </Panel>
+    </Dialog>
   );
 }
 

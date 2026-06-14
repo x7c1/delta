@@ -49,7 +49,23 @@ async function findList() {
 
 describe('SettingsView', () => {
   beforeEach(() => {
+    // The settings UI is a Dialog overlay gated on `settingsOpen`; open it so
+    // the dialog (and its content) renders.
     useNavStore.setState({ settingsOpen: true });
+  });
+
+  it('renders nothing while the settings overlay is closed', () => {
+    useNavStore.setState({ settingsOpen: false });
+    renderSettings();
+    expect(screen.queryByTestId('dialog-backdrop')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('renders the launch options inside the dialog overlay', async () => {
+    renderSettings();
+    await findList();
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByTestId('launch-options-list')).toBeInTheDocument();
   });
 
   it('lists the seeded launch options', async () => {
@@ -110,7 +126,7 @@ describe('SettingsView', () => {
     expect(within(list).getByText('--plugin-dir')).toBeInTheDocument();
   });
 
-  it('closes the settings screen via Close', async () => {
+  it('closes the settings overlay via Close', async () => {
     renderSettings();
     await findList();
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
