@@ -635,6 +635,9 @@ describe('TranscriptPane', () => {
       'aria-expanded',
       'false',
     );
+    // A meta line is a nested aside (like a tool row / task-notification card),
+    // so its block wrapper carries the same `ml-6` left indent.
+    expect(metaItem?.parentElement?.className).toContain('ml-6');
   });
 
   it('left-indents the task-notification card like a tool row, but not ordinary user prose', async () => {

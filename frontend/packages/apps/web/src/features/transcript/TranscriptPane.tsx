@@ -884,11 +884,12 @@ export function TranscriptPane({
         const isToolTurn = message.content.some(
           (block) => block.type === 'tool_use' || block.type === 'tool_result',
         );
-        // Both tool rows and the harness-injected task-notification card (a
-        // collapsed `<task-notification>` user turn) render as nested aside
-        // cards: they are tightened and left-indented so they read as nested
-        // steps, distinct from prose.
-        const isNestedCard = isToolTurn || isTaskNotificationMessage(message);
+        // Tool rows, the harness-injected task-notification card (a collapsed
+        // `<task-notification>` user turn), and meta lines all render as nested
+        // aside cards: they are tightened and left-indented so they read as
+        // nested steps, distinct from prose.
+        const isNestedCard =
+          isToolTurn || isTaskNotificationMessage(message) || message.role === 'meta';
         const topGap = isNestedCard
           ? 'pt-0.5'
           : message.role === 'user'
