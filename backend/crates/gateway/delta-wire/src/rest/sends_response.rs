@@ -32,22 +32,29 @@ pub enum WireTurnPhase {
 pub struct WireTurn {
     pub state: WireTurnPhase,
     pub send_id: Option<i64>,
+    /// The thread the in-flight turn is running on, so a reconnecting client can
+    /// re-seed its per-thread running indicator on the exact thread. `null`
+    /// while idle.
+    pub thread_id: Option<i64>,
 }
 
-impl From<TurnState> for WireTurn {
-    fn from(state: TurnState) -> Self {
+impl WireTurn {
+    fn from_state(state: TurnState, in_progress_thread: Option<i64>) -> Self {
         match state {
             TurnState::Idle => WireTurn {
                 state: WireTurnPhase::Idle,
                 send_id: None,
+                thread_id: None,
             },
             TurnState::AwaitingEcho { send_id } => WireTurn {
                 state: WireTurnPhase::AwaitingEcho,
                 send_id: Some(send_id),
+                thread_id: in_progress_thread,
             },
             TurnState::InFlight { send_id } => WireTurn {
                 state: WireTurnPhase::InFlight,
                 send_id,
+                thread_id: in_progress_thread,
             },
         }
     }
@@ -163,7 +170,7 @@ impl WireSendsResponse {
     pub fn new(sends: Vec<Send>, live: SessionLiveState) -> Self {
         WireSendsResponse {
             sends: sends.into_iter().map(WireSend::from).collect(),
-            turn: live.turn.into(),
+            turn: WireTurn::from_state(live.turn, live.in_progress_thread.map(|id| id.0)),
             permission: live.pending_permission.map(WirePendingPermission::from),
             question: live.pending_question.map(WirePendingQuestion::from),
             running_subagents: live
@@ -184,20 +191,32 @@ mod tests {
     #[test]
     fn turn_state_serializes_with_snake_case_phase_and_optional_send_id() {
         assert_eq!(
-            serde_json::to_value(WireTurn::from(TurnState::Idle)).unwrap(),
-            serde_json::json!({ "state": "idle", "send_id": null }),
+            serde_json::to_value(WireTurn::from_state(TurnState::Idle, Some(3))).unwrap(),
+            serde_json::json!({ "state": "idle", "send_id": null, "thread_id": null }),
         );
         assert_eq!(
-            serde_json::to_value(WireTurn::from(TurnState::AwaitingEcho { send_id: 7 })).unwrap(),
-            serde_json::json!({ "state": "awaiting_echo", "send_id": 7 }),
+            serde_json::to_value(WireTurn::from_state(
+                TurnState::AwaitingEcho { send_id: 7 },
+                Some(3),
+            ))
+            .unwrap(),
+            serde_json::json!({ "state": "awaiting_echo", "send_id": 7, "thread_id": 3 }),
         );
         assert_eq!(
-            serde_json::to_value(WireTurn::from(TurnState::InFlight { send_id: Some(7) })).unwrap(),
-            serde_json::json!({ "state": "in_flight", "send_id": 7 }),
+            serde_json::to_value(WireTurn::from_state(
+                TurnState::InFlight { send_id: Some(7) },
+                Some(3),
+            ))
+            .unwrap(),
+            serde_json::json!({ "state": "in_flight", "send_id": 7, "thread_id": 3 }),
         );
         assert_eq!(
-            serde_json::to_value(WireTurn::from(TurnState::InFlight { send_id: None })).unwrap(),
-            serde_json::json!({ "state": "in_flight", "send_id": null }),
+            serde_json::to_value(WireTurn::from_state(
+                TurnState::InFlight { send_id: None },
+                None,
+            ))
+            .unwrap(),
+            serde_json::json!({ "state": "in_flight", "send_id": null, "thread_id": null }),
         );
     }
 
@@ -207,6 +226,7 @@ mod tests {
             Vec::new(),
             SessionLiveState {
                 turn: TurnState::Idle,
+                in_progress_thread: None,
                 pending_permission: None,
                 pending_question: None,
                 running_subagents: Vec::new(),
@@ -216,7 +236,7 @@ mod tests {
             serde_json::to_value(body).unwrap(),
             serde_json::json!({
                 "sends": [],
-                "turn": { "state": "idle", "send_id": null },
+                "turn": { "state": "idle", "send_id": null, "thread_id": null },
                 "permission": null,
                 "question": null,
                 "running_subagents": [],
@@ -230,6 +250,7 @@ mod tests {
             Vec::new(),
             SessionLiveState {
                 turn: TurnState::InFlight { send_id: Some(7) },
+                in_progress_thread: Some(ThreadId(2)),
                 pending_permission: Some(PendingPermission {
                     request_id: 3,
                     tool_name: "Bash".to_owned(),
@@ -243,7 +264,7 @@ mod tests {
             serde_json::to_value(body).unwrap(),
             serde_json::json!({
                 "sends": [],
-                "turn": { "state": "in_flight", "send_id": 7 },
+                "turn": { "state": "in_flight", "send_id": 7, "thread_id": 2 },
                 "permission": {
                     "request_id": 3,
                     "tool_name": "Bash",
@@ -261,6 +282,7 @@ mod tests {
             Vec::new(),
             SessionLiveState {
                 turn: TurnState::InFlight { send_id: Some(7) },
+                in_progress_thread: Some(ThreadId(3)),
                 pending_permission: None,
                 pending_question: Some(PendingQuestion {
                     request_id: 5,
@@ -274,7 +296,7 @@ mod tests {
             serde_json::to_value(body).unwrap(),
             serde_json::json!({
                 "sends": [],
-                "turn": { "state": "in_flight", "send_id": 7 },
+                "turn": { "state": "in_flight", "send_id": 7, "thread_id": 3 },
                 "permission": null,
                 "question": {
                     "request_id": 5,
@@ -292,6 +314,7 @@ mod tests {
             Vec::new(),
             SessionLiveState {
                 turn: TurnState::InFlight { send_id: Some(7) },
+                in_progress_thread: Some(ThreadId(2)),
                 pending_permission: None,
                 pending_question: None,
                 running_subagents: vec![
@@ -314,7 +337,7 @@ mod tests {
             serde_json::to_value(body).unwrap(),
             serde_json::json!({
                 "sends": [],
-                "turn": { "state": "in_flight", "send_id": 7 },
+                "turn": { "state": "in_flight", "send_id": 7, "thread_id": 2 },
                 "permission": null,
                 "question": null,
                 "running_subagents": [

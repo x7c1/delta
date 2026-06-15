@@ -75,7 +75,8 @@ describe('NavigatorPane per-session running indicator', () => {
     useLiveStore.setState({
       connection: 'open',
       notices: {},
-      activeTurns: {},
+      runningThreads: {},
+      unread: {},
     });
     useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
     useComposerStore.setState({ newSessionWorkdir: null });
@@ -83,7 +84,7 @@ describe('NavigatorPane per-session running indicator', () => {
 
   it('shows the running indicator only on the session with an in-flight turn', () => {
     // Only the first session has an active turn.
-    useLiveStore.setState({ activeTurns: { [SESSION_ID]: true } });
+    useLiveStore.setState({ runningThreads: { [SESSION_ID]: { 1: true } } });
 
     renderPane();
 
@@ -109,7 +110,7 @@ describe('NavigatorPane per-session running indicator', () => {
   it('renders no global footer running indicator', () => {
     // The footer spinner used to appear whenever any turn was in flight; it has
     // been replaced by the per-row indicator above.
-    useLiveStore.setState({ activeTurns: { [SESSION_ID]: true } });
+    useLiveStore.setState({ runningThreads: { [SESSION_ID]: { 1: true } } });
 
     renderPane();
 
@@ -122,7 +123,7 @@ describe('NavigatorPane per-session running indicator', () => {
 
 describe('NavigatorPane settings entry', () => {
   beforeEach(() => {
-    useLiveStore.setState({ connection: 'open', notices: {}, activeTurns: {} });
+    useLiveStore.setState({ connection: 'open', notices: {}, runningThreads: {} });
     useNavStore.setState({ settingsOpen: false });
   });
 

@@ -54,7 +54,7 @@ where
         // is idle — done here, after `sync_transcript` has returned, so
         // dispatching sends no keystrokes from inside the ingestion path.
         let interrupted = events.iter().any(
-            |e| matches!(e, SessionEvent::TurnInterrupted { session_id } if session_id == self.id),
+            |e| matches!(e, SessionEvent::TurnInterrupted { session_id, .. } if session_id == self.id),
         );
         if interrupted {
             if let Some(event) = self.dispatch_queued_send().await? {

@@ -183,14 +183,11 @@ export function NavigatorPane({
   // discoverable. A dismissed notice keeps its badge: the request is still
   // genuinely awaiting an answer.
   const notices = useLiveStore((state) => state.notices);
-  // Per-session in-flight-turn set. Each session's row shows its own running
-  // indicator (see SessionNode), so it is clear *which* session is processing —
-  // a single global footer spinner could not tell them apart.
-  const activeTurns = useLiveStore((state) => state.activeTurns);
-  // Per-session unread set. A session whose turn finished while the user was
-  // viewing a different one carries a static unread dot on its row (see
-  // SessionNode), distinct from the running spinner, cleared once focused.
-  const unreadSessions = useLiveStore((state) => state.unreadSessions);
+  // Running and unread are THREAD-keyed in the store now, so each SessionNode
+  // OR-aggregates them over its own threads (and shows them per thread in its
+  // tree). The collapsed-row spinner/dot is therefore computed inside the node
+  // rather than passed down from here.
+  //
   // Per-session running-subagent set. A subagent runs in its own (untailed)
   // transcript, so its row carries a dedicated badge (see SessionNode) — the
   // only place a running subagent is discoverable from the list. Kept distinct
@@ -331,11 +328,6 @@ export function NavigatorPane({
               isFocused={focusedSessionId === item.session.id}
               needsPermission={
                 noticeOf(notices, item.session.id, 'permission') !== null
-              }
-              running={!!activeTurns[item.session.id]}
-              unread={
-                !!unreadSessions[item.session.id] &&
-                focusedSessionId !== item.session.id
               }
               subagentCount={
                 runningSubagents[item.session.id]?.length ?? 0

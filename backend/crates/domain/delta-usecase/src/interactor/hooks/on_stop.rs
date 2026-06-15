@@ -25,10 +25,20 @@ where
         // registered. The final transcript lines often include the last
         // tool_result, so the `Stop` sync is a key place permission requests
         // resolve.
-        if let Some(session) = self.store.session(&hook.session_id).await? {
+        //
+        // Recover the in-flight turn's thread BEFORE the turn machine runs:
+        // `apply_turn_input(Stop)` can sweep the head dispatched send (the
+        // authoritative thread source), so resolving afterwards would lose it.
+        // Only resolve when the session is registered — a `Stop` for a session
+        // Delta never saw has no thread to resolve (and `main_thread_id` has no
+        // row to read), so its degenerate broadcast carries `None`.
+        let thread_id = if let Some(session) = self.store.session(&hook.session_id).await? {
             let (_messages, resolved_events) = self.sync_transcript(&session).await?;
             events.extend(resolved_events);
-        }
+            Some(self.store.in_progress_turn_thread(&hook.session_id).await?)
+        } else {
+            None
+        };
         // The turn ended: feed `Stop` into the turn machine (back to `Idle`),
         // then release the next queued send — one at a time, the
         // single-outstanding rule — now that the session is idle. Dispatching
@@ -39,6 +49,7 @@ where
         }
         events.push(SessionEvent::TurnCompleted {
             session_id: hook.session_id,
+            thread_id,
             stop_reason: hook.stop_reason,
         });
         Ok(events)

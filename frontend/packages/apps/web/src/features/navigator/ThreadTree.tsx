@@ -4,12 +4,19 @@ import {
   type ThreadNode,
 } from '@delta/model';
 import type { Thread } from '@delta/wire-gen';
-import { Badge, cn } from '@delta/ui-kit';
+import { Badge, Spinner, cn } from '@delta/ui-kit';
 import { useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
 
 export interface ThreadTreeProps {
   threads: Thread[];
+  /**
+   * The session's running threads (the `runningThreads[sessionId]` record), so
+   * each node can show its own running spinner. Passed down rather than read per
+   * node so the whole tree reads one consistent snapshot. `undefined` when no
+   * thread of the session is running.
+   */
+  runningThreads?: Record<ThreadId, true>;
   /**
    * Select a sub-thread. The session card supplies this so a click can do more
    * than set the active thread — for a non-focused session it also focuses the
@@ -30,7 +37,11 @@ export interface ThreadTreeProps {
  * rendered, lifted to depth 0 so they sit directly under the session without a
  * redundant indent level.
  */
-export function ThreadTree({ threads, onSelectThread }: ThreadTreeProps) {
+export function ThreadTree({
+  threads,
+  runningThreads,
+  onSelectThread,
+}: ThreadTreeProps) {
   const roots = buildThreadTree(threads);
   const subThreads = roots.flatMap((root) => root.children);
   return (
@@ -40,6 +51,7 @@ export function ThreadTree({ threads, onSelectThread }: ThreadTreeProps) {
           key={node.thread.id}
           node={node}
           depth={0}
+          runningThreads={runningThreads}
           onSelectThread={onSelectThread}
         />
       ))}
@@ -50,16 +62,19 @@ export function ThreadTree({ threads, onSelectThread }: ThreadTreeProps) {
 function ThreadTreeNode({
   node,
   depth,
+  runningThreads,
   onSelectThread,
 }: {
   node: ThreadNode<Thread>;
   depth: number;
+  runningThreads?: Record<ThreadId, true>;
   onSelectThread: (threadId: ThreadId) => void;
 }) {
   const activeThreadId = useNavStore((state) => state.activeThreadId);
   const unread = useLiveStore((state) => state.unread[node.thread.id] ?? 0);
 
   const isActive = activeThreadId === node.thread.id;
+  const running = runningThreads?.[node.thread.id] ?? false;
 
   return (
     <li>
@@ -80,7 +95,18 @@ function ThreadTreeNode({
           <span className="text-slate-400">⤷ </span>
           {node.thread.title}
         </span>
-        {unread > 0 && !isActive && <Badge tone="count">{unread}</Badge>}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {running && (
+            // Per-thread running spinner: this exact thread has an in-flight
+            // turn. Mirrors the session row's spinner but scoped to the thread,
+            // so a user can see which branch is processing.
+            <span data-testid="thread-running">
+              <Spinner />
+              <span className="sr-only">running</span>
+            </span>
+          )}
+          {unread > 0 && !isActive && <Badge tone="count">{unread}</Badge>}
+        </span>
       </button>
       {node.children.length > 0 && (
         <ul>
@@ -89,6 +115,7 @@ function ThreadTreeNode({
               key={child.thread.id}
               node={child}
               depth={depth + 1}
+              runningThreads={runningThreads}
               onSelectThread={onSelectThread}
             />
           ))}

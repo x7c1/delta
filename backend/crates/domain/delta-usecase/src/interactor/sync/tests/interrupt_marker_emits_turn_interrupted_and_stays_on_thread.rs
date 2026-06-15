@@ -44,13 +44,15 @@ async fn interrupt_marker_emits_turn_interrupted_and_stays_on_thread() {
     ix.transcript_fake().push(interrupt_line("u-int"));
     let (_groups, events) = ix.poll_transcript().await.unwrap();
 
-    // (a) A `TurnInterrupted` is emitted for this session.
+    // (a) A `TurnInterrupted` is emitted for this session, carrying the
+    // interrupted turn's thread (the branch child).
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SessionEvent::TurnInterrupted { session_id } if *session_id == session
+            SessionEvent::TurnInterrupted { session_id, thread_id }
+                if *session_id == session && *thread_id == Some(child)
         )),
-        "ingesting the interrupt marker emits TurnInterrupted, got {events:?}"
+        "ingesting the interrupt marker emits TurnInterrupted on the child thread, got {events:?}"
     );
 
     // (b) The marker message is attributed to the interrupted turn's thread (the

@@ -4,6 +4,7 @@ import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
+import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { pathTail } from '../../utils/pathTail';
@@ -19,23 +20,6 @@ export interface SessionNodeProps {
    * session's conversation pane.
    */
   needsPermission?: boolean;
-  /**
-   * Whether this session currently has an in-flight turn. Surfaced as a small
-   * rotating spinner on the row so it is clear *which* session is processing —
-   * a single global indicator could not tell them apart. Coexists with the
-   * permission badge when both apply.
-   */
-  running?: boolean;
-  /**
-   * Whether this session finished a turn while the user was viewing a different
-   * session, leaving something unseen. Surfaced as a small static dot —
-   * deliberately distinct from the animated {@link running} spinner — so a
-   * background completion is discoverable from the list. Running takes
-   * precedence: a session processing again shows the spinner, not a stale dot
-   * (the caller also gates this off the focused row, and focusing a session
-   * clears its unread flag). Cleared by focusing the session.
-   */
-  unread?: boolean;
   /**
    * How many subagents (the `Agent`/`Task` tool) are currently running in this
    * session's turn. A subagent runs in its own transcript Delta never tails, so
@@ -97,8 +81,6 @@ export function SessionNode({
   item,
   isFocused,
   needsPermission = false,
-  running = false,
-  unread = false,
   subagentCount = 0,
   onFocus,
   onClose,
@@ -109,6 +91,17 @@ export function SessionNode({
   const client = useApiClient();
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
+  // Running and unread are THREAD-keyed in the store. The collapsed session row
+  // OR-aggregates them over the session's threads (main + every sub-thread): the
+  // spinner shows if ANY thread is running, the dot if ANY thread is unread.
+  // This preserves the previous session-level row behaviour while keeping the
+  // thread-keyed state the single source of truth (the tree below shows the
+  // per-thread breakdown). The main thread is included so a turn on main — the
+  // thread reached from this card's header — is not invisible.
+  const sessionRunningThreads = useLiveStore(
+    (state) => state.runningThreads[item.session.id],
+  );
+  const unreadByThread = useLiveStore((state) => state.unread);
   // The kebab menu's dropdown opens below the trigger, but each windowed row is
   // an absolutely-positioned `transform` stacking context, so the dropdown is
   // painted under the next row's card. While the menu is open, lift this row
@@ -130,6 +123,23 @@ export function SessionNode({
   // all. A sub-thread is any thread with a parent.
   const hasSubThreads =
     threads?.some((t) => t.parent_thread_id !== null) ?? false;
+
+  // OR-aggregate running/unread over the session's threads for the collapsed
+  // row. The thread ids are main plus every fetched thread; until the tree
+  // loads, fall back to main alone so a running/unread main thread still shows.
+  const sessionThreadIds: ThreadId[] = threads
+    ? threads.map((t) => t.id)
+    : [item.main_thread_id];
+  const running = sessionThreadIds.some(
+    (id) => sessionRunningThreads?.[id] ?? false,
+  );
+  // The dot is gated off the focused row: while a session is focused the user is
+  // viewing it, and activating its threads clears their unread — but a just-
+  // focused session may still hold unread on sub-threads not yet visited, which
+  // is exactly what the per-thread badges in the tree are for. Mirror the prior
+  // row behaviour (no dot on the focused row) and let the tree carry the detail.
+  const unread =
+    !isFocused && sessionThreadIds.some((id) => (unreadByThread[id] ?? 0) > 0);
 
   // Selecting a sub-thread switches the center pane to it. Focus the owning
   // session first (a focus switch clears the active thread), then set the
@@ -271,7 +281,11 @@ export function SessionNode({
               isFocused ? 'border-indigo-200' : 'border-slate-200',
             )}
           >
-            <ThreadTree threads={threads} onSelectThread={selectThread} />
+            <ThreadTree
+              threads={threads}
+              runningThreads={sessionRunningThreads}
+              onSelectThread={selectThread}
+            />
           </div>
         )}
       </div>

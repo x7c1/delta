@@ -240,7 +240,15 @@ where
             let _ = reply.send(ctx.state.has_live_pane());
         }
         SessionInput::QueryLiveState { reply } => {
-            let _ = reply.send(ctx.state.live_state());
+            let mut live = ctx.state.live_state();
+            // Resolve the in-flight turn's thread so a reconnecting client can
+            // re-seed its per-thread running indicator on the exact thread. Only
+            // meaningful while a turn is in flight; an idle session has no
+            // running thread, so leave it `None`.
+            if !matches!(ctx.state.turn(), crate::turn::TurnState::Idle) {
+                live.in_progress_thread = ctx.store.in_progress_turn_thread(ctx.id).await.ok();
+            }
+            let _ = reply.send(live);
         }
         #[cfg(test)]
         SessionInput::WithRuntime(f) => f(ctx.state),

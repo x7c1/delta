@@ -67,13 +67,20 @@ export function applySessionEvent(
       // ended); refetch the session's open-send list regardless of focus so a
       // background session's pending strip is correct the moment it is viewed.
       invalidateSessionSends(queryClient, event.session_id);
-      // A background session finishing its turn produced something new the user
-      // cannot see, so flag its row unread. Only on `turn_completed` (the Stop
-      // hook — the genuine "it finished" signal); an interrupt is the user's own
-      // Escape/Ctrl-C, not a surprise that needs flagging. Never mark the
-      // focused session — the user is already looking at it.
-      if (event.kind === 'turn_completed' && !isFocused) {
-        store.markSessionUnread(event.session_id);
+      // A turn finishing on a thread the user is not currently viewing produced
+      // something unseen, so bump THAT thread's unread — the navigator shows it
+      // on the thread (and OR-aggregates it onto the collapsed session row).
+      // Only on `turn_completed` (the Stop hook — the genuine "it finished"
+      // signal); an interrupt is the user's own Escape/Ctrl-C, not a surprise
+      // that needs flagging. "Not viewing" means a background session, or the
+      // focused session but a thread other than the active one — so finishing
+      // the very thread on screen never raises a badge.
+      if (
+        event.kind === 'turn_completed' &&
+        event.thread_id !== null &&
+        !(isFocused && activeThreadId === event.thread_id)
+      ) {
+        store.bumpUnread(event.thread_id);
       }
       // Transcript grew on the focused session: refetch the active thread. An
       // interrupt also appends the `[Request interrupted by user]` marker line,
