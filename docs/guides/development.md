@@ -30,6 +30,7 @@ variables, all with local-friendly defaults:
 | `DELTA_PORT` | `7878` | TCP port |
 | `DELTA_DB_PATH` | `delta.db` | SQLite overlay file |
 | `DELTA_SESSION_WORKDIR` | `.tmp/session` | base directory for per-spawn working directories (`<base>/<token>`) |
+| `DELTA_WORKTREE_BASE` | `$HOME/.delta/worktrees` | base directory for per-session git worktrees (`<base>/delta-<session-id>`), deliberately outside any repo tree so the worktree does not inherit a surrounding `CLAUDE.md`/settings |
 | `DELTA_TMUX_SOCKET` | `delta` | dedicated tmux socket (`tmux -L <socket>`) for Delta's sessions, isolated from your default tmux server |
 
 The server owns the `claude` session lifecycle: it boots fine with no tmux
@@ -390,6 +391,12 @@ make dev WORKDIR=~/scratch # or pass your own working directory for claude
 
 Both run as managed background processes, logging to `.tmp/` (a stable
 `delta-server.log` / `delta-frontend.log` symlink points at the latest run).
+`make dev` does not return until both ports are actually listening, so a
+completed command means the UI is openable right away — the frontend's
+install+build finishes binding port 5173 before control returns. If either
+process dies or is not listening within its budget, `make dev` tears the loop
+back down and exits non-zero after printing the tail of the relevant log (the
+budgets are overridable via `DELTA_DEV_SERVER_TIMEOUT` / `DELTA_DEV_FRONTEND_TIMEOUT`).
 
 Then open <http://localhost:5173>. On load the UI fetches the session list and
 shows it (empty on a fresh database); opening the browser does not spawn

@@ -68,6 +68,8 @@ describe('Composer', () => {
       branchOrigin: null,
       newSessionWorkdir: null,
       newSessionLaunchOptionIds: [],
+      newSessionWorktreeEnabled: false,
+      newSessionWorktreeStartPoint: { kind: 'head' },
     });
   });
 
@@ -487,6 +489,77 @@ describe('Composer', () => {
     // A successful new-session send resets the launch-option selection too.
     await waitFor(() => {
       expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
+    });
+  });
+
+  it('includes worktree with the chosen start-point when the toggle is on', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: { kind: 'remote_branch', name: 'develop' },
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start in a worktree' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'start in a worktree',
+        workdir: '/home/dev/projects/delta',
+        worktree: { start_point: { kind: 'remote_branch', name: 'develop' } },
+      });
+    });
+  });
+
+  it('includes the use_remote_branch start-point when "use this branch" is chosen', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: {
+        kind: 'use_remote_branch',
+        name: 'develop',
+      },
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'work on develop directly' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'work on develop directly',
+        workdir: '/home/dev/projects/delta',
+        worktree: {
+          start_point: { kind: 'use_remote_branch', name: 'develop' },
+        },
+      });
+    });
+  });
+
+  it('omits worktree when the toggle is off', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorktreeEnabled: false,
+      // A non-default start-point must NOT leak when the toggle is off.
+      newSessionWorktreeStartPoint: { kind: 'remote_branch', name: 'develop' },
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'no worktree' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'no worktree',
+        workdir: '/home/dev/projects/delta',
+      });
     });
   });
 

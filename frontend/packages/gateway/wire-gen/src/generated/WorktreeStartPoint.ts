@@ -4,8 +4,11 @@
  * Where a new session's worktree branch should start from.
  *
  * Wire twin of the domain [`WorktreeStartPoint`], internally tagged by `kind`
- * (mirroring the `/ws` event union): `{ "kind": "head" }` branches off the
- * repository's current `HEAD`, and `{ "kind": "remote_branch", "name": "..." }`
- * branches off the named remote branch (fetched first).
+ * (mirroring the `/ws` event union): `{ "kind": "head" }` cuts a new branch off
+ * the repository's current `HEAD`, `{ "kind": "remote_branch", "name": "..." }`
+ * cuts a new branch off the named remote branch (fetched first), and
+ * `{ "kind": "use_remote_branch", "name": "..." }` works on the named branch
+ * itself in the worktree (reusing the worktree that already has it checked out,
+ * or creating one that checks it out).
  */
-export type WorktreeStartPoint = { "kind": "head" } | { "kind": "remote_branch", name: string, };
+export type WorktreeStartPoint = { "kind": "head" } | { "kind": "remote_branch", name: string, } | { "kind": "use_remote_branch", name: string, };

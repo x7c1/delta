@@ -358,6 +358,55 @@ describe('ApiClient', () => {
     );
   });
 
+  it('fetches whether a directory is a git repository, encoding the path', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        repo_root: '/home/dev/projects/delta',
+        default_branch: 'main',
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getGitRepoInfo('/home/dev/my repo');
+
+    expect(result.repo_root).toBe('/home/dev/projects/delta');
+    expect(result.default_branch).toBe('main');
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/workdir/git?path=%2Fhome%2Fdev%2Fmy%20repo',
+      undefined,
+    );
+  });
+
+  it('fetches the remote branches of a repository, encoding the path', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        default_branch: 'main',
+        remote_branches: ['main', 'develop', 'release/1.0'],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getGitBranches('/home/dev/my repo');
+
+    expect(result.default_branch).toBe('main');
+    expect(result.remote_branches).toEqual(['main', 'develop', 'release/1.0']);
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/workdir/git/branches?path=%2Fhome%2Fdev%2Fmy%20repo',
+      undefined,
+    );
+  });
+
+  it('surfaces a 400 from the branches endpoint as an ApiError', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: 'not a git repository' }, 400));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.getGitBranches('/home/dev/plain')).rejects.toThrow(
+      ApiError,
+    );
+  });
+
   it('answers a pending question with the per-question selection indices', async () => {
     const fetchFn = vi.fn().mockResolvedValue(noContent());
     const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });

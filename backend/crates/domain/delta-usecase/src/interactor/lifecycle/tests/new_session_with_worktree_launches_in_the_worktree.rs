@@ -3,9 +3,11 @@ use crate::ports::WorktreeStartPoint;
 use crate::{SendTarget, WorktreeSpec};
 
 /// A composer-first send that opts into a worktree, when the selected workdir is
-/// a git repository, creates a per-session worktree at `<base>/delta-<id>` and
-/// launches there — not in the selected directory itself — and that worktree
-/// path is both the tmux launch dir and the stored session cwd.
+/// a git repository, creates a per-session worktree at
+/// `<worktree_base>/delta-<id>` (the neutral base outside any repo tree, *not*
+/// `session_workdir_base`) and launches there — not in the selected directory
+/// itself — and that worktree path is both the tmux launch dir and the stored
+/// session cwd.
 #[tokio::test]
 async fn new_session_with_worktree_launches_in_the_worktree() {
     // The selected directory resolves (FakeWorkspace canonicalizes it) and is a
@@ -33,9 +35,14 @@ async fn new_session_with_worktree_launches_in_the_worktree() {
     .await
     .unwrap();
 
-    // The minted session id is the worktree path/branch suffix.
+    // The minted session id is the worktree path/branch suffix. The worktree
+    // lives under the neutral `worktree_base`, not `session_workdir_base`.
     let session_id = ix.pending_session_ids().await.remove(0);
-    let expected_path = format!("{TEST_WORKDIR_BASE}/delta-{}", session_id.as_str());
+    let expected_path = format!("{TEST_WORKTREE_BASE}/delta-{}", session_id.as_str());
+    assert!(
+        !expected_path.starts_with(&format!("{TEST_WORKDIR_BASE}/")),
+        "the worktree lives under the neutral worktree base, not the session workdir base"
+    );
 
     // A worktree was created off HEAD at the repo root the detection reported,
     // on a `delta-<id>` branch, at the per-session path.

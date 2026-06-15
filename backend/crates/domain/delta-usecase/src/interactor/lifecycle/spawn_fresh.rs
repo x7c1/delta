@@ -4,7 +4,9 @@ use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingSpawn;
 use crate::pane_token::PaneToken;
-use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeStartPoint,
+};
 use crate::send_target::WorktreeSpec;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
@@ -167,32 +169,99 @@ where
 
         // Determine the effective launch directory. With no worktree request,
         // it is the validated workdir (or the default `<base>/<token>`). With a
-        // worktree request, create a per-session worktree under the session base
-        // and launch there instead.
+        // worktree request, launch in a per-session worktree under the neutral
+        // `worktree_base` (outside any repo tree, so the worktree does not
+        // inherit a surrounding `CLAUDE.md`/settings) instead.
         //
-        // The worktree path and its branch are both `delta-<session-id>` (the
-        // Delta-minted conversation id, not the pane token): the session id is
-        // the stable, human-meaningful name a user can later find and clean up.
-        // Creating the worktree here — after workdir validation but *before* the
-        // eager session row — means a git failure leaves no orphan row to roll
-        // back; only the (side-effect-free) token has been minted.
+        // For the new-branch start points (`Head`/`RemoteBranch`) the worktree
+        // path and its branch are both `delta-<session-id>` (the Delta-minted
+        // conversation id, not the pane token): the session id is the stable,
+        // human-meaningful name a user can later find and clean up. For
+        // `UseRemoteBranch` the user works on the named branch *itself*: since
+        // git forbids checking one branch out in two worktrees, the worktree
+        // already holding that branch is reused when one exists (including the
+        // main working tree), and otherwise a `delta-<session-id>` worktree that
+        // checks the branch out is created.
+        //
+        // The git work happens here — after workdir validation but *before* the
+        // eager session row — so a git failure leaves no orphan row to roll
+        // back; only the (side-effect-free) token has been minted. The reuse
+        // case has no new worktree at all, so there is nothing to roll back for
+        // it either.
+        //
+        // `seed_trust` records whether the effective launch directory is a git
+        // repository whose workspace-trust dialog must be pre-accepted before
+        // launching `claude` there (see the seed step below). A worktree is
+        // always a git working tree; a user-selected workdir is checked once
+        // here; the default `<base>/<token>` scratch dir is empty and never
+        // triggers the dialog, so it is never seeded (avoids bloating
+        // `~/.claude.json` for ordinary sessions).
+        let mut seed_trust = false;
         let workdir = match worktree {
             Some(spec) => {
                 let repo_root = worktree_repo_root
                     .expect("worktree_repo_root is Some whenever a worktree was requested");
-                let worktree_path = format!(
-                    "{}/delta-{}",
-                    self.session_workdir_base,
-                    session_id.as_str()
-                );
-                let branch = format!("delta-{}", session_id.as_str());
-                self.git_worktree
-                    .create_worktree(&repo_root, &worktree_path, &branch, spec.start_point)
-                    .await?;
-                worktree_path
+                let default_path = format!("{}/delta-{}", self.worktree_base, session_id.as_str());
+                let effective_path = match spec.start_point {
+                    // New-branch start points: cut `delta-<id>` at `default_path`.
+                    start_point @ (WorktreeStartPoint::Head
+                    | WorktreeStartPoint::RemoteBranch(_)) => {
+                        let branch = format!("delta-{}", session_id.as_str());
+                        self.git_worktree
+                            .create_worktree(&repo_root, &default_path, &branch, start_point)
+                            .await?;
+                        default_path
+                    }
+                    // Use the branch itself: reuse the worktree already holding
+                    // it (incl. the main tree) when one exists, else create one
+                    // that checks it out at `default_path`.
+                    WorktreeStartPoint::UseRemoteBranch(name) => {
+                        match self
+                            .git_worktree
+                            .worktree_path_for_branch(&repo_root, &name)
+                            .await?
+                        {
+                            Some(existing) => existing,
+                            None => {
+                                self.git_worktree
+                                    .add_worktree_checkout(&repo_root, &default_path, &name)
+                                    .await?;
+                                default_path
+                            }
+                        }
+                    }
+                };
+                // A worktree is by definition a git working tree, so its trust
+                // dialog must be pre-accepted; no extra git call needed. Trust
+                // seeding is idempotent, so reusing an already-trusted path
+                // (e.g. the main tree) is fine.
+                seed_trust = true;
+                effective_path
             }
-            None => requested_workdir.unwrap_or_else(|| self.workdir_for(&token)),
+            None => match requested_workdir {
+                // A user-selected workdir may be a real git repo (without a
+                // worktree request). Check once so launching there does not stall
+                // on the trust dialog either.
+                Some(dir) => {
+                    seed_trust = self.git_worktree.repo_root(&dir).await?.is_some();
+                    dir
+                }
+                // The default per-token scratch dir is empty, so `claude` never
+                // shows the trust dialog there; skip the git check on the hot path.
+                None => self.workdir_for(&token),
+            },
         };
+
+        // Pre-accept Claude Code's workspace-trust dialog for git-repo launch
+        // directories. A fresh directory containing files otherwise pops a
+        // blocking interactive dialog at startup, which means the first
+        // `UserPromptSubmit` hook never fires and the spawn is reaped after the
+        // pending deadline. Seed *before* `create_session` so a failure fails the
+        // spawn cleanly with no half-launched pane (mirroring the workdir/worktree
+        // validation ordering above, all of which run before any tmux side effect).
+        if seed_trust {
+            self.git_worktree.ensure_dir_trusted(&workdir).await?;
+        }
 
         // Eagerly create the session row and its `main` thread, then the first
         // prompt's send row bound to those real ids. Hooks cannot arrive before

@@ -8,6 +8,12 @@ use super::{FakeGitWorktree, FakeStore, FakeTmux, FakeTranscript, FakeWorkspace}
 /// The base working directory the test interactor spawns sessions under.
 pub(crate) const TEST_WORKDIR_BASE: &str = "/work";
 
+/// The neutral base directory the test interactor places per-session git
+/// worktrees under. Deliberately distinct from [`TEST_WORKDIR_BASE`] so a test
+/// can assert a worktree lands under `worktree_base` while a default spawn still
+/// lands under `session_workdir_base`.
+pub(crate) const TEST_WORKTREE_BASE: &str = "/worktrees";
+
 /// The settings JSON the test interactor writes for each launch.
 pub(crate) const TEST_SETTINGS_JSON: &str = r#"{"hooks":{}}"#;
 
@@ -34,6 +40,7 @@ pub(crate) fn interactor_with_git(git_worktree: FakeGitWorktree) -> TestInteract
         FakeWorkspace::default(),
         git_worktree,
         TEST_WORKDIR_BASE,
+        TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
     )
@@ -51,6 +58,7 @@ pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
         FakeWorkspace::default(),
         FakeGitWorktree::default(),
         TEST_WORKDIR_BASE,
+        TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
     )
@@ -68,6 +76,7 @@ pub(crate) fn interactor_with_failing_create_session() -> TestInteractor {
         FakeWorkspace::default(),
         FakeGitWorktree::default(),
         TEST_WORKDIR_BASE,
+        TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
     )

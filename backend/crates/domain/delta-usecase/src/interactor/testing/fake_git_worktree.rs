@@ -17,6 +17,14 @@ pub(crate) struct CreatedWorktree {
     pub(crate) start_point: WorktreeStartPoint,
 }
 
+/// A single recorded `add_worktree_checkout` call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CheckedOutWorktree {
+    pub(crate) repo_root: String,
+    pub(crate) worktree_path: String,
+    pub(crate) branch: String,
+}
+
 /// Models git detection and worktree creation for the use-case tests.
 ///
 /// `repo_roots` maps a (resolved) directory to the repository root
@@ -38,6 +46,16 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) fail_create: bool,
     /// The `create_worktree` calls made, in order.
     pub(crate) created: Mutex<Vec<CreatedWorktree>>,
+    /// Scripted results for `worktree_path_for_branch`, keyed by branch name.
+    /// A branch absent from the map resolves to `None` ("not checked out
+    /// anywhere"); a present `(branch, path)` makes the fake report `path` as
+    /// the worktree already holding that branch (driving the reuse path).
+    pub(crate) checked_out_branches: Mutex<Vec<(String, String)>>,
+    /// The `add_worktree_checkout` calls made, in order.
+    pub(crate) checked_out: Mutex<Vec<CheckedOutWorktree>>,
+    /// The dirs passed to `ensure_dir_trusted`, in order, so tests can assert
+    /// whether (and with what path) trust-seeding was invoked.
+    pub(crate) trusted: Mutex<Vec<String>>,
 }
 
 impl FakeGitWorktree {
@@ -47,6 +65,17 @@ impl FakeGitWorktree {
             .lock()
             .unwrap()
             .push((dir.to_owned(), root.to_owned()));
+        self
+    }
+
+    /// Script `worktree_path_for_branch(_, branch)` to report `path` — i.e.
+    /// `branch` is already checked out in the worktree at `path` (driving the
+    /// `UseRemoteBranch` reuse path).
+    pub(crate) fn with_branch_checked_out(self, branch: &str, path: &str) -> Self {
+        self.checked_out_branches
+            .lock()
+            .unwrap()
+            .push((branch.to_owned(), path.to_owned()));
         self
     }
 }
@@ -90,6 +119,42 @@ impl GitWorktree for FakeGitWorktree {
             branch: branch.to_owned(),
             start_point,
         });
+        Ok(())
+    }
+
+    async fn worktree_path_for_branch(
+        &self,
+        _repo_root: &str,
+        branch: &str,
+    ) -> Result<Option<String>> {
+        Ok(self
+            .checked_out_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(name, _)| name == branch)
+            .map(|(_, path)| path.clone()))
+    }
+
+    async fn add_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> Result<()> {
+        if self.fail_create {
+            return Err(crate::error::Error::Git("worktree add failed".into()));
+        }
+        self.checked_out.lock().unwrap().push(CheckedOutWorktree {
+            repo_root: repo_root.to_owned(),
+            worktree_path: worktree_path.to_owned(),
+            branch: branch.to_owned(),
+        });
+        Ok(())
+    }
+
+    async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
+        self.trusted.lock().unwrap().push(dir.to_owned());
         Ok(())
     }
 }

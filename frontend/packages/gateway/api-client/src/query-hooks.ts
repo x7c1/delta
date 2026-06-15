@@ -10,6 +10,8 @@ import {
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   CreateLaunchOptionRequest,
+  GitBranchesResponse,
+  GitRepoResponse,
   LaunchOption,
   LaunchOptionsResponse,
   MessagesResponse,
@@ -180,6 +182,50 @@ export function useRecentWorkdirsQuery(
     queryKey: queryKeys.workdirRecent,
     queryFn: () => client.getWorkdirRecent(),
     enabled,
+  });
+}
+
+/**
+ * Whether the selected directory is a git repository (`GET /api/workdir/git`),
+ * for the new-session picker's worktree option. Cheap (no network), so it runs
+ * as soon as a directory is selected — `enabled` gates it on a non-empty path.
+ *
+ * `retry` is disabled so a non-2xx surfaces immediately: the picker simply
+ * hides the worktree option when this errors or reports `repo_root: null`.
+ */
+export function useGitRepoInfoQuery(
+  client: ApiClient,
+  path: string | null,
+  enabled: boolean,
+): UseQueryResult<GitRepoResponse> {
+  return useQuery({
+    queryKey: queryKeys.gitRepoInfo(path ?? ''),
+    queryFn: () => client.getGitRepoInfo(path as string),
+    enabled: enabled && path !== null,
+    retry: false,
+  });
+}
+
+/**
+ * A repository's remote branches (`GET /api/workdir/git/branches`) for the
+ * worktree start-point picker's "other remote branch" list. This performs a
+ * `git fetch` server-side, so it is fetched lazily: `enabled` should stay
+ * `false` until the user actually opens the remote-branch picker.
+ *
+ * `retry` is disabled so a `400` (the path is not a git repository) surfaces
+ * immediately as an `ApiError` the picker can render inline, rather than after
+ * backoff.
+ */
+export function useGitBranchesQuery(
+  client: ApiClient,
+  path: string | null,
+  enabled: boolean,
+): UseQueryResult<GitBranchesResponse> {
+  return useQuery({
+    queryKey: queryKeys.gitBranches(path ?? ''),
+    queryFn: () => client.getGitBranches(path as string),
+    enabled: enabled && path !== null,
+    retry: false,
   });
 }
 

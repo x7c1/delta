@@ -49,6 +49,15 @@ pub struct Config {
     /// runs in its own `<base>/<token>` subdirectory, so the `cwd ↔ spawn`
     /// mapping is 1:1 and the hook-binding correlation is exact.
     pub session_workdir_base: String,
+    /// Base directory for per-session git worktrees (`<base>/delta-<session-id>`).
+    ///
+    /// Deliberately a *neutral* location outside any repository tree (default
+    /// `$HOME/.delta/worktrees`), not under [`Self::session_workdir_base`]:
+    /// Claude Code walks up from its cwd discovering `CLAUDE.md` and
+    /// `.claude/settings.json`, so a worktree nested inside another repo would
+    /// inherit that repo's `CLAUDE.md` (a blocking external-import prompt) and
+    /// its settings/hooks. Placing worktrees here keeps each one isolated.
+    pub worktree_base: String,
     /// The dedicated tmux socket Delta's sessions live on (`tmux -L <socket>`).
     pub tmux_socket: String,
     /// TCP port the server listens on, used to render the session's hook URLs.
@@ -101,6 +110,7 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
         Box::new(workspace) as Box<dyn delta_usecase::Workspace>,
         Box::new(git_worktree) as Box<dyn delta_usecase::GitWorktree>,
         config.session_workdir_base.clone(),
+        config.worktree_base.clone(),
         config.session_settings_json(),
         config.session_settings_path(),
     )
@@ -115,6 +125,7 @@ mod tests {
         Config {
             database_path: ":memory:".into(),
             session_workdir_base: "/tmp/delta-session".into(),
+            worktree_base: "/tmp/delta-worktrees".into(),
             tmux_socket: DEFAULT_TMUX_SOCKET.into(),
             port: 7878,
             launch: delta_usecase::LaunchConfig::default(),

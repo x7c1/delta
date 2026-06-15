@@ -73,6 +73,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
     let config = Config {
         database_path: temp.path().join("delta.db").to_string_lossy().into_owned(),
         session_workdir_base: temp.path().join("workdirs").to_string_lossy().into_owned(),
+        worktree_base: temp.path().join("worktrees").to_string_lossy().into_owned(),
         tmux_socket: tmux_socket.clone(),
         port,
         launch: LaunchConfig {

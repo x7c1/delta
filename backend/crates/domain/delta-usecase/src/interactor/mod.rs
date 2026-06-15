@@ -64,6 +64,15 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// is free to become a user-selected project path in a later change without
     /// breaking spawn↔session correlation.
     pub(in crate::interactor) session_workdir_base: String,
+    /// Base directory for per-session git worktrees (`<base>/delta-<session-id>`).
+    ///
+    /// Kept separate from [`Self::session_workdir_base`] and pointed at a
+    /// neutral location *outside* any repository tree: Claude Code discovers
+    /// `CLAUDE.md`/settings by walking up from its cwd, so a worktree nested
+    /// under another repo would inherit that repo's config. Used only for
+    /// worktree sessions; default per-token spawns still use
+    /// [`Self::session_workdir_base`].
+    pub(in crate::interactor) worktree_base: String,
     /// The Claude Code settings JSON whose hooks point back at this server (and
     /// which pins the session theme). Rendered by the caller (with the running
     /// port) and held verbatim; written to [`Self::session_settings_path`] and
@@ -134,8 +143,9 @@ where
     G: GitWorktree + 'static,
 {
     /// Construct an Interactor from the five injected ports plus the spawn
-    /// configuration (the base working directory, the rendered settings JSON,
-    /// and the Delta-owned path that JSON is written to for `--settings`).
+    /// configuration (the base working directory, the worktree base directory,
+    /// the rendered settings JSON, and the Delta-owned path that JSON is written
+    /// to for `--settings`).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tmux: T,
@@ -144,6 +154,7 @@ where
         workspace: W,
         git_worktree: G,
         session_workdir_base: impl Into<String>,
+        worktree_base: impl Into<String>,
         session_settings_json: impl Into<String>,
         session_settings_path: impl Into<String>,
     ) -> Self {
@@ -154,6 +165,7 @@ where
             workspace,
             git_worktree,
             session_workdir_base: session_workdir_base.into(),
+            worktree_base: worktree_base.into(),
             session_settings_json: session_settings_json.into(),
             session_settings_path: session_settings_path.into(),
             launch: LaunchConfig::default(),

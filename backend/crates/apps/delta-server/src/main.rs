@@ -50,11 +50,31 @@ fn config_from_env() -> Config {
         database_path: std::env::var("DELTA_DB_PATH").unwrap_or_else(|_| "delta.db".to_owned()),
         session_workdir_base: std::env::var("DELTA_SESSION_WORKDIR")
             .unwrap_or_else(|_| ".tmp/session".to_owned()),
+        worktree_base: std::env::var("DELTA_WORKTREE_BASE")
+            .unwrap_or_else(|_| default_worktree_base()),
         tmux_socket: std::env::var("DELTA_TMUX_SOCKET")
             .unwrap_or_else(|_| delta_bootstrap::DEFAULT_TMUX_SOCKET.to_owned()),
         port: env_port(),
         launch: launch_from_env(),
     }
+}
+
+/// Default base directory for per-session git worktrees: `$HOME/.delta/worktrees`.
+///
+/// Deliberately outside any repository tree so a worktree does not inherit a
+/// surrounding `CLAUDE.md`/settings (which would otherwise trigger Claude Code's
+/// blocking external-import prompt at launch). When `HOME` is unset — only in
+/// degenerate environments — fall back to a temp-dir-based path so the server
+/// still starts; mirrors how the git gateway resolves `~/.claude.json`.
+fn default_worktree_base() -> String {
+    let base = match std::env::var_os("HOME") {
+        Some(home) => std::path::PathBuf::from(home),
+        None => std::env::temp_dir(),
+    };
+    base.join(".delta")
+        .join("worktrees")
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn env_port() -> u16 {

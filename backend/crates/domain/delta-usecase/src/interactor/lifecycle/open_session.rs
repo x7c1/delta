@@ -99,6 +99,15 @@ where
             RESUME_FLAG.to_owned(),
             id.as_str().to_owned(),
         ];
+        // Pre-accept Claude Code's workspace-trust dialog when resuming into a
+        // git repository (a worktree session, or any real-repo cwd): a fresh
+        // pane resuming there would otherwise stall on the interactive trust
+        // dialog. Seed before launching so a failure aborts the resume cleanly
+        // with no pane created. The default `<base>/<token>` scratch dir is not a
+        // git repo, so `repo_root` returns `None` and seeding is skipped.
+        if self.git_worktree.repo_root(&workdir).await?.is_some() {
+            self.git_worktree.ensure_dir_trusted(&workdir).await?;
+        }
         self.tmux
             .create_session(token.as_str(), &workdir, &command)
             .await?;

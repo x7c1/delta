@@ -1,7 +1,10 @@
 //! [`Git`]: the concrete [`GitWorktree`].
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 
 use delta_usecase::{GitWorktree, RemoteBranches, WorktreeStartPoint};
 
@@ -18,17 +21,49 @@ const REMOTE: &str = "origin";
 /// Detects git repositories and creates per-session git worktrees by shelling
 /// out to `git`.
 ///
-/// Stateless: every method takes the repository (or candidate) path explicitly
-/// and invokes `git -C <path> …`, so the gateway is cwd-independent — it never
-/// relies on the process's current directory. This mirrors the tmux driver,
-/// the project's other subprocess gateway.
-#[derive(Debug, Default, Clone)]
-pub struct Git;
+/// The git operations are stateless: every git method takes the repository (or
+/// candidate) path explicitly and invokes `git -C <path> …`, so the gateway is
+/// cwd-independent — it never relies on the process's current directory. This
+/// mirrors the tmux driver, the project's other subprocess gateway.
+///
+/// In addition to git, the gateway owns Claude Code's user-config path
+/// (`config_path`) and a [`Mutex`] that serializes Delta's own read-modify-write
+/// of that file when seeding workspace trust (see [`GitWorktree::ensure_dir_trusted`]).
+#[derive(Debug)]
+pub struct Git {
+    /// Path to Claude Code's user config (`~/.claude.json` by default). Held as a
+    /// field so tests can point it at a temp file instead of the real config.
+    config_path: PathBuf,
+    /// Serializes Delta's own trust-config writes within this single process.
+    trust_lock: Mutex<()>,
+}
+
+impl Default for Git {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Git {
-    /// Create a new git worktree gateway.
+    /// Create a new git worktree gateway, defaulting the trust-config path to
+    /// `$HOME/.claude.json` (falling back to `.claude.json` in the current
+    /// directory if `HOME` is unset, which only happens in degenerate
+    /// environments).
     pub fn new() -> Self {
-        Self
+        let config_path = match std::env::var_os("HOME") {
+            Some(home) => PathBuf::from(home).join(".claude.json"),
+            None => PathBuf::from(".claude.json"),
+        };
+        Self::with_config_path(config_path)
+    }
+
+    /// Create a gateway with an explicit trust-config path. Used by tests to
+    /// target a temp file instead of the real `~/.claude.json`.
+    pub fn with_config_path(config_path: PathBuf) -> Self {
+        Self {
+            config_path,
+            trust_lock: Mutex::new(()),
+        }
     }
 
     /// Run `git -C <repo> <args>`, returning the captured output.
@@ -74,6 +109,25 @@ fn trimmed_stdout(output: &std::process::Output) -> String {
 /// Strip the `origin/` prefix from a remote-tracking ref short name.
 fn strip_origin(name: &str) -> &str {
     name.strip_prefix(ORIGIN_PREFIX).unwrap_or(name)
+}
+
+/// Create the parent directory of `worktree_path` if it is missing.
+///
+/// `git worktree add <path>` requires the *parent* of `<path>` to already exist
+/// (it creates the leaf, not the chain above it). Worktrees live under a neutral
+/// base outside any repo tree (`DELTA_WORKTREE_BASE`, default
+/// `$HOME/.delta/worktrees`), which may not exist on a fresh install, so the
+/// parent is created here, at the point the worktree is made.
+async fn ensure_worktree_parent_dir(worktree_path: &str) -> std::result::Result<(), Error> {
+    if let Some(parent) = std::path::Path::new(worktree_path).parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| Error::WorktreeBaseIo {
+                path: parent.to_string_lossy().into_owned(),
+                source,
+            })?;
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -178,7 +232,18 @@ impl GitWorktree for Git {
                     .map_err(delta_usecase::Error::from)?;
                 format!("{ORIGIN_PREFIX}{name}")
             }
+            // `UseRemoteBranch` works on an existing branch directly and is
+            // routed to `add_worktree_checkout` by the orchestration, never to
+            // `create_worktree` (which always cuts a fresh `delta-<id>` branch).
+            WorktreeStartPoint::UseRemoteBranch(name) => {
+                return Err(delta_usecase::Error::Git(format!(
+                    "create_worktree cannot cut a new branch for UseRemoteBranch({name}); \
+                     this start point must be routed to add_worktree_checkout"
+                )));
+            }
         };
+
+        ensure_worktree_parent_dir(worktree_path).await?;
 
         // `worktree add -b <branch> <path> <start_ref>` creates the worktree on
         // a fresh branch rooted at the start ref. git's stderr is surfaced on
@@ -190,6 +255,114 @@ impl GitWorktree for Git {
         )
         .await
         .map_err(delta_usecase::Error::from)
+    }
+
+    async fn worktree_path_for_branch(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        // `worktree list --porcelain` emits a block per worktree: a
+        // `worktree <abs-path>` line, then (for a normal checkout) a
+        // `branch refs/heads/<name>` line; a detached or bare entry has no
+        // branch line. Pair each path with the immediately following branch
+        // line and return the path whose local branch matches `<branch>`. The
+        // main working tree is listed first, so this covers reusing a branch
+        // that lives in the main tree as well as in a secondary worktree.
+        let output = self
+            .output(repo_root, &["worktree", "list", "--porcelain"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        if !output.status.success() {
+            return Err(command_error("worktree list --porcelain", &output).into());
+        }
+        let listing = trimmed_stdout(&output);
+        let target_ref = format!("refs/heads/{branch}");
+        let mut current_path: Option<&str> = None;
+        for line in listing.lines() {
+            if let Some(path) = line.strip_prefix("worktree ") {
+                current_path = Some(path);
+            } else if let Some(ref_name) = line.strip_prefix("branch ") {
+                if ref_name == target_ref {
+                    return Ok(current_path.map(str::to_owned));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn add_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        // Fetch so the branch reflects the latest remote tip before checkout.
+        // For a real remote branch this succeeds; otherwise git's stderr is
+        // surfaced rather than silently swallowed.
+        self.run(
+            repo_root,
+            "fetch origin <branch>",
+            &["fetch", REMOTE, branch],
+        )
+        .await
+        .map_err(delta_usecase::Error::from)?;
+
+        ensure_worktree_parent_dir(worktree_path)
+            .await
+            .map_err(delta_usecase::Error::from)?;
+
+        // Does a local branch `<branch>` already exist? `show-ref --verify`
+        // exits 0 when `refs/heads/<branch>` resolves, non-zero otherwise — the
+        // expected "no such local branch" signal, not an error to propagate.
+        let local_ref = format!("refs/heads/{branch}");
+        let exists = self
+            .output(repo_root, &["show-ref", "--verify", "--quiet", &local_ref])
+            .await
+            .map_err(delta_usecase::Error::from)?
+            .status
+            .success();
+
+        if exists {
+            // Check the existing local branch out in the new worktree.
+            self.run(
+                repo_root,
+                "worktree add <branch>",
+                &["worktree", "add", worktree_path, branch],
+            )
+            .await
+            .map_err(delta_usecase::Error::from)
+        } else {
+            // No local branch yet: create one tracking `origin/<branch>` and
+            // check it out in the new worktree.
+            let start_ref = format!("{ORIGIN_PREFIX}{branch}");
+            self.run(
+                repo_root,
+                "worktree add --track -b <branch>",
+                &[
+                    "worktree",
+                    "add",
+                    "--track",
+                    "-b",
+                    branch,
+                    worktree_path,
+                    &start_ref,
+                ],
+            )
+            .await
+            .map_err(delta_usecase::Error::from)
+        }
+    }
+
+    async fn ensure_dir_trusted(&self, dir: &str) -> std::result::Result<(), delta_usecase::Error> {
+        // Serialize Delta's own read-modify-write of the shared config across the
+        // whole operation. The lock is process-local (delta-server is a single
+        // process); see `trust` for why the residual delta-vs-claude race is
+        // accepted rather than guarded with file locking.
+        let _guard = self.trust_lock.lock().await;
+        crate::trust::ensure_dir_trusted(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
     }
 }
 
@@ -319,6 +492,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_worktree_creates_the_missing_parent_directory() {
+        // The worktree base (e.g. `$HOME/.delta/worktrees`) may not exist yet on
+        // a fresh install; `git worktree add` would fail if its parent is
+        // absent. The gateway must create the parent chain first.
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo_root = tmp.path().to_str().unwrap().to_owned();
+        let git = Git::new();
+
+        // A worktree path two levels under a base that does not exist yet.
+        let base = tempfile::tempdir().unwrap();
+        let missing_base = base.path().join("does/not/exist/yet");
+        assert!(
+            !missing_base.exists(),
+            "the worktree base does not exist before the call"
+        );
+        let worktree_path = missing_base
+            .join("delta-session-1")
+            .to_string_lossy()
+            .into_owned();
+
+        git.create_worktree(
+            &repo_root,
+            &worktree_path,
+            "delta-session-1",
+            WorktreeStartPoint::Head,
+        )
+        .await
+        .expect("the missing parent is created so the worktree add succeeds");
+
+        assert!(
+            tokio::fs::metadata(&worktree_path).await.unwrap().is_dir(),
+            "the worktree directory exists under the freshly-created base"
+        );
+    }
+
+    #[tokio::test]
     async fn create_worktree_surfaces_git_stderr_on_failure() {
         let tmp = tempfile::tempdir().unwrap();
         init_repo_with_commit(tmp.path()).await;
@@ -424,5 +634,177 @@ mod tests {
             tokio::fs::metadata(&worktree_path).await.unwrap().is_dir(),
             "a remote-branch worktree was created"
         );
+    }
+
+    /// Run `git -C <dir> <args>`, asserting success, returning trimmed stdout.
+    async fn git_ok(dir: &str, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .await
+            .expect("git available");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        trimmed_stdout(&output)
+    }
+
+    /// Canonicalize a path so comparisons survive symlink resolution (macOS
+    /// `/var` → `/private/var`).
+    async fn canonical(path: &str) -> String {
+        tokio::fs::canonicalize(path)
+            .await
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Clone `origin_path` into a fresh temp dir, returning the clone path.
+    async fn clone_into(origin_path: &str, parent: &std::path::Path) -> String {
+        let clone_path = parent.join("clone").to_string_lossy().into_owned();
+        let status = Command::new("git")
+            .args(["clone", "-q", origin_path, &clone_path])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "clone failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        clone_path
+    }
+
+    #[tokio::test]
+    async fn worktree_path_for_branch_finds_a_secondary_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo_root = tmp.path().to_str().unwrap().to_owned();
+        let git = Git::new();
+
+        // Check `feature` out in a secondary worktree.
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir
+            .path()
+            .join("feature-wt")
+            .to_string_lossy()
+            .into_owned();
+        git_ok(&repo_root, &["worktree", "add", "-b", "feature", &wt_path]).await;
+
+        let found = git
+            .worktree_path_for_branch(&repo_root, "feature")
+            .await
+            .unwrap()
+            .expect("feature is checked out in the secondary worktree");
+        assert_eq!(canonical(&found).await, canonical(&wt_path).await);
+    }
+
+    #[tokio::test]
+    async fn worktree_path_for_branch_finds_the_main_working_tree() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo_root = tmp.path().to_str().unwrap().to_owned();
+        let git = Git::new();
+
+        // `main` is checked out in the main working tree (the repo root itself).
+        let found = git
+            .worktree_path_for_branch(&repo_root, "main")
+            .await
+            .unwrap()
+            .expect("main is the main working tree's branch");
+        assert_eq!(canonical(&found).await, canonical(&repo_root).await);
+    }
+
+    #[tokio::test]
+    async fn worktree_path_for_branch_is_none_when_not_checked_out() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo_root = tmp.path().to_str().unwrap().to_owned();
+        // A local branch that exists but is not checked out anywhere.
+        git_ok(&repo_root, &["branch", "idle"]).await;
+        let git = Git::new();
+
+        let found = git
+            .worktree_path_for_branch(&repo_root, "idle")
+            .await
+            .unwrap();
+        assert!(
+            found.is_none(),
+            "an unchecked-out branch has no worktree path"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_worktree_checkout_uses_an_existing_local_branch() {
+        // Origin with `main` and `feature`; the clone fetches both.
+        let origin = tempfile::tempdir().unwrap();
+        init_repo_with_commit(origin.path()).await;
+        let origin_path = origin.path().to_str().unwrap();
+        git_ok(origin_path, &["branch", "feature"]).await;
+
+        let clone_parent = tempfile::tempdir().unwrap();
+        let clone_path = clone_into(origin_path, clone_parent.path()).await;
+        // Create the local branch so the "existing local branch" path is taken.
+        git_ok(&clone_path, &["branch", "feature", "origin/feature"]).await;
+
+        let git = Git::new();
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir
+            .path()
+            .join("feature-wt")
+            .to_string_lossy()
+            .into_owned();
+
+        git.add_worktree_checkout(&clone_path, &wt_path, "feature")
+            .await
+            .unwrap();
+
+        // The worktree checked out `feature` itself (not a `delta-<id>` branch).
+        let head = git_ok(&wt_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
+        assert_eq!(head, "feature");
+    }
+
+    #[tokio::test]
+    async fn add_worktree_checkout_creates_a_tracking_branch_from_origin() {
+        // Origin with a `feature` branch the clone has not checked out locally.
+        let origin = tempfile::tempdir().unwrap();
+        init_repo_with_commit(origin.path()).await;
+        let origin_path = origin.path().to_str().unwrap();
+        git_ok(origin_path, &["branch", "feature"]).await;
+
+        let clone_parent = tempfile::tempdir().unwrap();
+        let clone_path = clone_into(origin_path, clone_parent.path()).await;
+        // No local `feature` branch yet: the tracking-branch path is taken.
+
+        let git = Git::new();
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir
+            .path()
+            .join("feature-wt")
+            .to_string_lossy()
+            .into_owned();
+
+        git.add_worktree_checkout(&clone_path, &wt_path, "feature")
+            .await
+            .unwrap();
+
+        // The worktree is on a local `feature` branch tracking `origin/feature`.
+        let head = git_ok(&wt_path, &["rev-parse", "--abbrev-ref", "HEAD"]).await;
+        assert_eq!(head, "feature");
+        let upstream = git_ok(
+            &wt_path,
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}",
+            ],
+        )
+        .await;
+        assert_eq!(upstream, "origin/feature");
     }
 }

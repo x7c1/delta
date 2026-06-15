@@ -2,6 +2,8 @@ import type { SessionId, ThreadId } from '@delta/model';
 import type {
   CreateLaunchOptionRequest,
   CreateSendRequest,
+  GitBranchesResponse,
+  GitRepoResponse,
   LaunchOption,
   LaunchOptionsResponse,
   MessagesResponse,
@@ -309,6 +311,33 @@ export class ApiClient {
    */
   getWorkdirRecent(): Promise<WorkdirRecentResponse> {
     return this.request<WorkdirRecentResponse>('/api/workdir/recent');
+  }
+
+  /**
+   * `GET /api/workdir/git` — whether a directory is inside a git repository.
+   * `repo_root` is `null` when it is not, and `default_branch` carries the
+   * repository's default branch short name when known. Computed without any
+   * network access, so it is cheap enough to run as soon as a directory is
+   * selected (used to decide whether to offer the worktree option). The picker
+   * builds the query string with the same `encodeURIComponent` style as
+   * {@link getWorkdirList}.
+   */
+  getGitRepoInfo(path: string): Promise<GitRepoResponse> {
+    return this.request<GitRepoResponse>(
+      `/api/workdir/git?path=${encodeURIComponent(path)}`,
+    );
+  }
+
+  /**
+   * `GET /api/workdir/git/branches` — the remote branches of the repository
+   * containing `path`, reflecting a fresh `git fetch` (so it is slow-ish; call
+   * it lazily, only when the user opens the remote-branch picker). A non-git
+   * path is a `400`, surfaced as {@link ApiError}.
+   */
+  getGitBranches(path: string): Promise<GitBranchesResponse> {
+    return this.request<GitBranchesResponse>(
+      `/api/workdir/git/branches?path=${encodeURIComponent(path)}`,
+    );
   }
 
   /**

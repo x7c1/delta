@@ -196,6 +196,29 @@ impl GitWorktree for NoopGitWorktree {
     ) -> delta_usecase::Result<()> {
         Ok(())
     }
+
+    async fn worktree_path_for_branch(
+        &self,
+        _repo_root: &str,
+        _branch: &str,
+    ) -> delta_usecase::Result<Option<String>> {
+        Ok(None)
+    }
+
+    async fn add_worktree_checkout(
+        &self,
+        _repo_root: &str,
+        _worktree_path: &str,
+        _branch: &str,
+    ) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+
+    async fn ensure_dir_trusted(&self, _dir: &str) -> delta_usecase::Result<()> {
+        // The end-to-end flow launches in a non-git scratch dir (`repo_root`
+        // returns `None`), so trust-seeding is never reached; a no-op suffices.
+        Ok(())
+    }
 }
 
 /// Assemble the app with test-wired gateways and return the router plus the
@@ -220,6 +243,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
         Box::new(NoopWorkspace) as Box<dyn delta_usecase::Workspace>,
         Box::new(NoopGitWorktree) as Box<dyn delta_usecase::GitWorktree>,
         "/tmp/delta-e2e-session",
+        "/tmp/delta-e2e-worktrees",
         "{}",
         "/tmp/delta-e2e-settings.json",
     );
