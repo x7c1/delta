@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { connectPty, type PtyConnection } from '@delta/api-client';
 import type { SessionId } from '@delta/model';
-import { Button, Panel } from '@delta/ui-kit';
+import { Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
 import { useNavStore } from '../../store/navStore';
@@ -143,24 +143,20 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   return (
     <Panel
       className="border-l border-slate-200"
-      header={
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-slate-700">Terminal</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setTerminalOpen(false)}
-            aria-label="Close terminal"
-          >
-            ✕
-          </Button>
-        </div>
-      }
       bodyClassName="bg-terminal-bg"
     >
       {/* The per-session xterm elements are appended into this container; the
           note overlays it only while no pane is attachable. */}
       <div ref={containerRef} className="relative h-full w-full">
+        <button
+          type="button"
+          onClick={() => setTerminalOpen(false)}
+          aria-label="Close terminal"
+          title="Close terminal"
+          className="absolute right-2 top-2 z-10 rounded bg-slate-800/60 px-1.5 py-0.5 text-sm leading-none text-slate-300 opacity-60 transition hover:bg-slate-700 hover:text-slate-100 hover:opacity-100 focus-visible:opacity-100"
+        >
+          »
+        </button>
         {unavailableNote && (
           <p className="p-3 text-xs text-slate-300">{unavailableNote}</p>
         )}
