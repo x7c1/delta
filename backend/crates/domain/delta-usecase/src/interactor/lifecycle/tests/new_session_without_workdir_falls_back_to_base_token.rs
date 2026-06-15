@@ -7,7 +7,14 @@ use crate::SendTarget;
 async fn new_session_without_workdir_falls_back_to_base_token() {
     let ix = interactor();
 
-    ix.enqueue_send(SendTarget::NewSession { workdir: None }, "hello", None)
+    ix.enqueue_send(
+        SendTarget::NewSession {
+            workdir: None,
+            launch_option_ids: Vec::new(),
+        },
+        "hello",
+        None,
+    )
         .await
         .unwrap();
 

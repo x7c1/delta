@@ -51,4 +51,13 @@ locator_quote?: string,
  * the default per-spawn directory. The path is validated (it must be an
  * existing directory) before the session launches.
  */
-workdir?: string, };
+workdir?: string, 
+/**
+ * The ids of registered launch options to apply to a fresh session's
+ * `claude` launch, in the order the user selected them. Only meaningful
+ * with `new_session: true`; for a thread send the session is already
+ * running, so this is ignored. When omitted (or empty) a session starts
+ * with no extra launch flags. Each id is resolved to its registered flag
+ * record at spawn and contributes argv entries.
+ */
+launch_option_ids?: Array<number>, };

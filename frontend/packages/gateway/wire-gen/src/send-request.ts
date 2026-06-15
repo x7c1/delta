@@ -34,6 +34,12 @@ export interface SendToNewSession {
    * directory.
    */
   workdir?: string;
+  /**
+   * The ids of registered launch options to apply to the fresh session's
+   * `claude` launch, in selection order. Honored only for a new-session send;
+   * when omitted (or empty) the session starts with no extra launch flags.
+   */
+  launch_option_ids?: number[];
 }
 
 /** Request body for `POST /api/sends` — a discriminated send target. */

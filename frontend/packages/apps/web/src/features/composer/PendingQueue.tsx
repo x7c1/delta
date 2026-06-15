@@ -123,12 +123,13 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                         size="sm"
                         variant="secondary"
                         onClick={() => {
-                          // Re-attempt the identical launch (same text and
-                          // chosen directory), then drop the failed chip so
-                          // only the fresh attempt shows.
+                          // Re-attempt the identical launch (same text, chosen
+                          // directory, and selected launch options), then drop
+                          // the failed chip so only the fresh attempt shows.
                           retrySpawn({
                             text: entry.item.text,
                             workdir: target.workdir,
+                            launchOptionIds: target.launchOptionIds,
                           });
                           removeSending(entry.item.id);
                         }}
@@ -164,6 +165,7 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                       retrySpawn({
                         text: entry.spawn.text,
                         workdir: entry.spawn.workdir,
+                        launchOptionIds: entry.spawn.launchOptionIds,
                       });
                       clearSpawn(entry.spawn.sessionId);
                     }}

@@ -21,6 +21,7 @@ import {
   type PendingSurface,
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
+import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { isTaskNotificationMessage } from './claudeFormat';
 import { MessageItem } from './MessageItem';
@@ -122,6 +123,9 @@ export function TranscriptPane({
   const setBranchOrigin = useComposerStore((state) => state.setBranchOrigin);
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
+  );
+  const setNewSessionLaunchOptionIds = useComposerStore(
+    (state) => state.setNewSessionLaunchOptionIds,
   );
   // The picker's open state lives in the store (not local component state) so
   // the navigator's "New" button can (re)open it without a focus transition.
@@ -348,9 +352,16 @@ export function TranscriptPane({
       }
     } else {
       setNewSessionWorkdir(null);
+      setNewSessionLaunchOptionIds([]);
       closeWorkdirDialog();
     }
-  }, [newSession, setNewSessionWorkdir, openWorkdirDialog, closeWorkdirDialog]);
+  }, [
+    newSession,
+    setNewSessionWorkdir,
+    setNewSessionLaunchOptionIds,
+    openWorkdirDialog,
+    closeWorkdirDialog,
+  ]);
 
   // Keyed on the rendered content changing: jump to the bottom after paint when
   // sticking.
@@ -675,6 +686,7 @@ export function TranscriptPane({
             renders nothing when no directory is selected, so there is no button
             to (re)open the picker from here — that is done via "New". */}
         {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
+        {newSession && <LaunchOptionsPicker />}
         <PendingQueue entries={pendingEntries} />
         {composer}
       </div>

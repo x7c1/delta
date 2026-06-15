@@ -34,6 +34,14 @@ export interface ComposerState {
    */
   newSessionWorkdir: string | null;
   /**
+   * The ids of the registered launch options selected for the next new
+   * session, in selection order. Empty means "apply no extra launch flags"
+   * (the send then omits `launch_option_ids`, preserving today's behavior).
+   * Like `newSessionWorkdir`, it is session-only: cleared on a successful
+   * new-session send and whenever the new-session state is left.
+   */
+  newSessionLaunchOptionIds: number[];
+  /**
    * Whether the new-session working-directory picker modal is open. Lifted from
    * local component state into the store so the "New" button can (re)open it
    * even when the app is already in the new-session state (no focus transition
@@ -45,6 +53,7 @@ export interface ComposerState {
   clearDraft: (threadId: ThreadId) => void;
   setBranchOrigin: (origin: BranchOrigin | null) => void;
   setNewSessionWorkdir: (workdir: string | null) => void;
+  setNewSessionLaunchOptionIds: (ids: number[]) => void;
   openWorkdirDialog: () => void;
   closeWorkdirDialog: () => void;
 }
@@ -53,6 +62,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
   drafts: {},
   branchOrigin: null,
   newSessionWorkdir: null,
+  newSessionLaunchOptionIds: [],
   workdirDialogOpen: false,
 
   setDraft: (threadId, text) =>
@@ -68,6 +78,9 @@ export const useComposerStore = create<ComposerState>((set) => ({
   setBranchOrigin: (origin) => set({ branchOrigin: origin }),
 
   setNewSessionWorkdir: (workdir) => set({ newSessionWorkdir: workdir }),
+
+  setNewSessionLaunchOptionIds: (ids) =>
+    set({ newSessionLaunchOptionIds: ids }),
 
   openWorkdirDialog: () => set({ workdirDialogOpen: true }),
 

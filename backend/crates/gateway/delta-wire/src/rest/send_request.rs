@@ -55,6 +55,15 @@ pub struct WireCreateSendRequest {
     #[serde(default)]
     #[ts(optional)]
     pub workdir: Option<String>,
+    /// The ids of registered launch options to apply to a fresh session's
+    /// `claude` launch, in the order the user selected them. Only meaningful
+    /// with `new_session: true`; for a thread send the session is already
+    /// running, so this is ignored. When omitted (or empty) a session starts
+    /// with no extra launch flags. Each id is resolved to its registered flag
+    /// record at spawn and contributes argv entries.
+    #[serde(default)]
+    #[ts(optional)]
+    pub launch_option_ids: Option<Vec<i64>>,
 }
 
 /// Why a [`WireCreateSendRequest`] could not be resolved to a [`SendTarget`].
@@ -103,6 +112,7 @@ impl WireCreateSendRequest {
                 }
                 SendTarget::NewSession {
                     workdir: self.workdir,
+                    launch_option_ids: self.launch_option_ids.unwrap_or_default(),
                 }
             }
         };
@@ -125,6 +135,7 @@ mod tests {
             text: "hi".into(),
             locator_quote: Some("q".into()),
             workdir: None,
+            launch_option_ids: None,
         };
         let (target, text, quote) = req.into_target().expect("a plain thread send is valid");
         assert!(
@@ -152,6 +163,7 @@ mod tests {
             text: "branch".into(),
             locator_quote: None,
             workdir: None,
+            launch_option_ids: None,
         };
         let (target, _, _) = req.into_target().expect("a branch send is valid");
         match target {
@@ -182,9 +194,16 @@ mod tests {
             text: "kick off".into(),
             locator_quote: None,
             workdir: None,
+            launch_option_ids: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
-        assert!(matches!(target, SendTarget::NewSession { workdir: None }));
+        assert!(matches!(
+            target,
+            SendTarget::NewSession {
+                workdir: None,
+                launch_option_ids,
+            } if launch_option_ids.is_empty()
+        ));
     }
 
     /// A `new_session` send carrying a `workdir` maps that directory onto the
@@ -198,10 +217,11 @@ mod tests {
             text: "in a project".into(),
             locator_quote: None,
             workdir: Some("/projects/app".into()),
+            launch_option_ids: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
-            matches!(target, SendTarget::NewSession { workdir } if workdir.as_deref() == Some("/projects/app")),
+            matches!(target, SendTarget::NewSession { workdir, .. } if workdir.as_deref() == Some("/projects/app")),
             "the workdir rides on the NewSession target"
         );
     }
@@ -218,6 +238,7 @@ mod tests {
             text: "hi".into(),
             locator_quote: None,
             workdir: Some("/ignored".into()),
+            launch_option_ids: None,
         };
         let (target, _, _) = req.into_target().expect("a plain thread send is valid");
         assert!(matches!(
@@ -240,6 +261,7 @@ mod tests {
             text: "no target".into(),
             locator_quote: None,
             workdir: None,
+            launch_option_ids: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Unspecified);
     }
@@ -256,6 +278,7 @@ mod tests {
             text: "both".into(),
             locator_quote: None,
             workdir: None,
+            launch_option_ids: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Conflicting);
     }
@@ -272,6 +295,7 @@ mod tests {
             text: "branch on new".into(),
             locator_quote: None,
             workdir: None,
+            launch_option_ids: None,
         };
         assert_eq!(
             req.into_target().unwrap_err(),
@@ -290,11 +314,37 @@ mod tests {
         assert_eq!(req.semantic_parent_uuid, None);
         assert_eq!(req.locator_quote, None);
         assert_eq!(req.workdir, None);
+        assert_eq!(req.launch_option_ids, None);
 
         let req: WireCreateSendRequest =
             serde_json::from_str(r#"{"new_session":true,"text":"go","workdir":"/p"}"#).unwrap();
         assert_eq!(req.thread_id, None);
         assert!(req.new_session);
         assert_eq!(req.workdir.as_deref(), Some("/p"));
+    }
+
+    /// A `new_session` send carrying `launch_option_ids` maps them onto the
+    /// `NewSession` target in the order given, where they are resolved to argv
+    /// flags before launch.
+    #[test]
+    fn new_session_with_launch_option_ids_carries_them_in_order() {
+        let req = WireCreateSendRequest {
+            thread_id: None,
+            new_session: true,
+            semantic_parent_uuid: None,
+            text: "with options".into(),
+            locator_quote: None,
+            workdir: None,
+            launch_option_ids: Some(vec![3, 1, 2]),
+        };
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        assert!(
+            matches!(
+                target,
+                SendTarget::NewSession { ref launch_option_ids, .. }
+                    if launch_option_ids == &[3, 1, 2]
+            ),
+            "the selected launch-option ids ride on the NewSession target in order"
+        );
     }
 }

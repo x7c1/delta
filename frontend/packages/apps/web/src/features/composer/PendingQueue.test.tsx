@@ -162,6 +162,7 @@ const failedSpawn: SpawnItem = {
   threadId: 42,
   text: 'start a new session',
   workdir: '/work/dir',
+  launchOptionIds: [2, 5],
   status: 'failed',
 };
 
@@ -203,6 +204,8 @@ describe('PendingQueue failed spawn', () => {
     const fresh = useLiveStore.getState().spawns[0];
     expect(fresh.text).toBe('start a new session');
     expect(fresh.workdir).toBe('/work/dir');
+    // The retried launch carries the same selected options, in order.
+    expect(fresh.launchOptionIds).toEqual([2, 5]);
     expect(fresh.sessionId).toBe(mockSpawnSessionId(1));
     // The accepted first send is tracked, so the chip stays through the turn.
     const locals = Object.values(useLiveStore.getState().localSends);

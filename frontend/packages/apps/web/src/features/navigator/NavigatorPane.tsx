@@ -201,6 +201,9 @@ export function NavigatorPane({
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
   );
+  const setNewSessionLaunchOptionIds = useComposerStore(
+    (state) => state.setNewSessionLaunchOptionIds,
+  );
   const openWorkdirDialog = useComposerStore(
     (state) => state.openWorkdirDialog,
   );
@@ -221,7 +224,8 @@ export function NavigatorPane({
         // than a solid fill. It always (re)starts the new-session flow even when
         // already in that state — changing focus is not enough, the picker's open
         // state lives in the store so it can open without a focus transition;
-        // reset any prior selection for a clean directory choice.
+        // reset any prior selection (directory and launch options) for a clean
+        // start.
         <Button
           variant="ghost"
           size="sm"
@@ -229,6 +233,7 @@ export function NavigatorPane({
           onClick={() => {
             startNewSession();
             setNewSessionWorkdir(null);
+            setNewSessionLaunchOptionIds([]);
             openWorkdirDialog();
           }}
         >

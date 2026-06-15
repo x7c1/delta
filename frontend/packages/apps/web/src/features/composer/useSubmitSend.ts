@@ -69,6 +69,7 @@ export function useSubmitSend(): (args: {
             threadId: send.thread_id,
             text: send.text,
             workdir: target.workdir,
+            launchOptionIds: target.launchOptionIds,
           });
         }
         return send;

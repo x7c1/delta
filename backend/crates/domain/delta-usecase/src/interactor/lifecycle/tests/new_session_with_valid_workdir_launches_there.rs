@@ -17,6 +17,7 @@ async fn new_session_with_valid_workdir_launches_there() {
     ix.enqueue_send(
         SendTarget::NewSession {
             workdir: Some("/projects/app".to_owned()),
+            launch_option_ids: Vec::new(),
         },
         "hello",
         None,
