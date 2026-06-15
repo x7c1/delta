@@ -275,7 +275,7 @@ export function NavigatorPane({
           <Button
             variant="ghost"
             size="sm"
-            className={cn('px-1.5', settingsOpen && 'bg-slate-100 text-slate-900')}
+            className={cn('px-1.5 -mr-1', settingsOpen && 'bg-slate-100 text-slate-900')}
             data-testid="settings-entry"
             aria-label="Settings"
             aria-pressed={settingsOpen}
