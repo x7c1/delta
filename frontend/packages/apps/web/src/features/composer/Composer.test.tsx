@@ -514,6 +514,33 @@ describe('Composer', () => {
     });
   });
 
+  it('includes the use_remote_branch start-point when "use this branch" is chosen', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: {
+        kind: 'use_remote_branch',
+        name: 'develop',
+      },
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'work on develop directly' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'work on develop directly',
+        workdir: '/home/dev/projects/delta',
+        worktree: {
+          start_point: { kind: 'use_remote_branch', name: 'develop' },
+        },
+      });
+    });
+  });
+
   it('omits worktree when the toggle is off', async () => {
     useComposerStore.setState({
       newSessionWorkdir: '/home/dev/projects/delta',

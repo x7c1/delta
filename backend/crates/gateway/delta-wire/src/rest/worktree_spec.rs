@@ -8,18 +8,24 @@ use ts_rs::TS;
 /// Where a new session's worktree branch should start from.
 ///
 /// Wire twin of the domain [`WorktreeStartPoint`], internally tagged by `kind`
-/// (mirroring the `/ws` event union): `{ "kind": "head" }` branches off the
-/// repository's current `HEAD`, and `{ "kind": "remote_branch", "name": "..." }`
-/// branches off the named remote branch (fetched first).
+/// (mirroring the `/ws` event union): `{ "kind": "head" }` cuts a new branch off
+/// the repository's current `HEAD`, `{ "kind": "remote_branch", "name": "..." }`
+/// cuts a new branch off the named remote branch (fetched first), and
+/// `{ "kind": "use_remote_branch", "name": "..." }` works on the named branch
+/// itself in the worktree (reusing the worktree that already has it checked out,
+/// or creating one that checks it out).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(rename = "WorktreeStartPoint")]
 pub enum WireWorktreeStartPoint {
-    /// Branch off the repository's current `HEAD`.
+    /// Cut a new branch off the repository's current `HEAD`.
     Head,
-    /// Branch off `origin/<name>`, fetched first. `name` is the remote branch
-    /// short name (no `origin/` prefix).
+    /// Cut a new branch off `origin/<name>`, fetched first. `name` is the remote
+    /// branch short name (no `origin/` prefix).
     RemoteBranch { name: String },
+    /// Work on the branch `<name>` itself in the worktree (no `delta-<id>`
+    /// branch). `name` is the branch short name (no `origin/` prefix).
+    UseRemoteBranch { name: String },
 }
 
 impl From<WireWorktreeStartPoint> for WorktreeStartPoint {
@@ -27,6 +33,9 @@ impl From<WireWorktreeStartPoint> for WorktreeStartPoint {
         match start_point {
             WireWorktreeStartPoint::Head => WorktreeStartPoint::Head,
             WireWorktreeStartPoint::RemoteBranch { name } => WorktreeStartPoint::RemoteBranch(name),
+            WireWorktreeStartPoint::UseRemoteBranch { name } => {
+                WorktreeStartPoint::UseRemoteBranch(name)
+            }
         }
     }
 }
@@ -81,6 +90,24 @@ mod tests {
         assert_eq!(
             WorktreeSpec::from(spec).start_point,
             WorktreeStartPoint::RemoteBranch("main".to_owned())
+        );
+    }
+
+    #[test]
+    fn use_remote_branch_start_point_carries_its_name() {
+        let spec: WireWorktreeSpec = serde_json::from_str(
+            r#"{ "start_point": { "kind": "use_remote_branch", "name": "feature/x" } }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            spec.start_point,
+            WireWorktreeStartPoint::UseRemoteBranch {
+                name: "feature/x".to_owned()
+            }
+        );
+        assert_eq!(
+            WorktreeSpec::from(spec).start_point,
+            WorktreeStartPoint::UseRemoteBranch("feature/x".to_owned())
         );
     }
 }

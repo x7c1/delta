@@ -67,6 +67,45 @@ test('opting into a worktree carries the start-point on the send', async ({
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
 });
 
+test('choosing "use this branch" carries use_remote_branch on the send', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.goto('/');
+
+  await startNewSessionIn(page, '/home/dev/projects/delta');
+
+  const toggle = page.getByTestId('worktree-toggle');
+  await expect(toggle).toBeVisible();
+  await toggle.check();
+
+  // Pick the default-branch preset ("Latest main"); the use-vs-new choice
+  // appears, defaulting to "New branch from it".
+  await page.getByTestId('start-point-default-branch').check();
+  await expect(page.getByTestId('branch-mode-new')).toBeChecked();
+
+  // Switch to "Use this branch".
+  await page.getByTestId('branch-mode-use').check();
+
+  const sendRequest = page.waitForRequest(
+    (request) =>
+      request.url().endsWith('/api/sends') && request.method() === 'POST',
+  );
+
+  await page.getByRole('textbox').fill('work on main directly');
+  await page.getByRole('button', { name: 'Send' }).click();
+
+  const request = await sendRequest;
+  expect(request.postDataJSON()).toMatchObject({
+    new_session: true,
+    text: 'work on main directly',
+    workdir: '/home/dev/projects/delta',
+    worktree: { start_point: { kind: 'use_remote_branch', name: 'main' } },
+  });
+
+  await expect(page.getByTestId('pending-item')).toHaveCount(1);
+});
+
 test('the worktree toggle is absent for a non-git directory', async ({
   page,
 }) => {

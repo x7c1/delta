@@ -157,6 +157,67 @@ describe('WorktreeOptions', () => {
     });
   });
 
+  it('hides the use-vs-new choice for HEAD and shows it for a branch', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: MOCK_GIT_REPO_ROOT,
+      newSessionWorktreeEnabled: true,
+    });
+    renderOptions();
+
+    // HEAD is new-branch-only: no use-vs-new choice.
+    await screen.findByTestId('start-point-head');
+    expect(screen.queryByTestId('branch-mode')).not.toBeInTheDocument();
+
+    // Picking the default-branch preset surfaces the use-vs-new choice,
+    // defaulting to "new branch from it".
+    fireEvent.click(screen.getByTestId('start-point-default-branch'));
+    expect(screen.getByTestId('branch-mode')).toBeInTheDocument();
+    expect(screen.getByTestId('branch-mode-new')).toBeChecked();
+    expect(screen.getByTestId('branch-mode-use')).not.toBeChecked();
+  });
+
+  it('emits use_remote_branch when "use this branch" is chosen', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: MOCK_GIT_REPO_ROOT,
+      newSessionWorktreeEnabled: true,
+    });
+    renderOptions();
+
+    fireEvent.click(await screen.findByTestId('start-point-default-branch'));
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'remote_branch',
+      name: 'main',
+    });
+
+    fireEvent.click(screen.getByTestId('branch-mode-use'));
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'use_remote_branch',
+      name: 'main',
+    });
+  });
+
+  it('preserves the use-this-branch mode when switching the branch', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: MOCK_GIT_REPO_ROOT,
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: { kind: 'use_remote_branch', name: 'main' },
+    });
+    renderOptions();
+
+    // The "use this branch" mode reads as selected for the default-branch pick.
+    await screen.findByTestId('branch-mode-use');
+    expect(screen.getByTestId('branch-mode-use')).toBeChecked();
+
+    // Switching to "other" and picking another branch keeps the use mode.
+    fireEvent.click(screen.getByTestId('start-point-other'));
+    const develop = await screen.findByTestId('remote-branch-develop');
+    fireEvent.click(develop);
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'use_remote_branch',
+      name: 'develop',
+    });
+  });
+
   it('shows an inline error when the branches fetch fails', async () => {
     server.use(
       http.get('*/api/workdir/git/branches', () =>

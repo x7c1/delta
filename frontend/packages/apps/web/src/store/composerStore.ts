@@ -45,10 +45,12 @@ export interface ComposerState {
    */
   newSessionWorktreeEnabled: boolean;
   /**
-   * Where the worktree's branch should be cut from when
-   * `newSessionWorktreeEnabled` is on. Defaults to the repo's current `HEAD`
-   * (the safe, no-fetch choice), or a named remote branch the user picks. Only
-   * read when the toggle is on.
+   * Where the worktree starts from when `newSessionWorktreeEnabled` is on, and
+   * for a branch start-point whether the worktree cuts a fresh branch
+   * (`remote_branch`) or works on the branch itself (`use_remote_branch`). The
+   * use-vs-new mode is encoded directly in the value's `kind`, so no separate
+   * field is needed. Defaults to the repo's current `HEAD` (the safe, no-fetch,
+   * always-new-branch choice). Only read when the toggle is on.
    */
   newSessionWorktreeStartPoint: WorktreeStartPoint;
   /**

@@ -15,19 +15,30 @@ import {
  * directory — or while the check is in flight or errors — nothing renders, so a
  * plain non-git session is unaffected.
  *
- * When present, a toggle opts the new session into starting in a fresh git
- * worktree (a new branch). With the toggle on, a start-point selector chooses
- * where that branch is cut from:
+ * When present, a toggle opts the new session into starting in an isolated git
+ * worktree. With the toggle on, a start-point selector chooses where the
+ * worktree starts from:
  *
- * - **Current HEAD** — `{ kind: "head" }`, the safe default (no fetch).
- * - **Latest `<default_branch>`** — `{ kind: "remote_branch", name }`, shown
- *   only when the repo's default branch is known.
+ * - **Current HEAD** — `{ kind: "head" }`, the safe default (no fetch); always
+ *   a fresh branch (HEAD's branch is checked out in the main tree).
+ * - **Latest `<default_branch>`** — a branch start-point, shown only when the
+ *   repo's default branch is known.
  * - **Other remote branch…** — expands a list fetched lazily from
  *   `GET /api/workdir/git/branches` (which performs a `git fetch`), plus a
  *   free-text entry for a brand-new branch not yet in the fetched list.
  *
+ * For any branch start-point (the default-branch preset or an explicit branch),
+ * a use-vs-new choice picks the worktree's branch mode:
+ *
+ * - **New branch from it** — `{ kind: "remote_branch", name }`, the default
+ *   (safest isolation): cut a fresh per-session branch from it.
+ * - **Use this branch** — `{ kind: "use_remote_branch", name }`: work on the
+ *   branch directly (the backend reuses the worktree that already has it
+ *   checked out, including the main tree, or creates one that checks it out).
+ *
  * The chosen toggle/start-point live in `composerStore`; the composer reads them
- * and attaches `worktree` to the new-session send.
+ * and attaches `worktree` to the new-session send. The start-point value itself
+ * encodes the use-vs-new mode via its `kind`, so no separate mode field needed.
  */
 export function WorktreeOptions() {
   const client = useApiClient();
@@ -67,7 +78,7 @@ export function WorktreeOptions() {
           data-testid="worktree-toggle"
         />
         <span className="font-medium text-slate-700">
-          Start in an isolated git worktree (new branch)
+          Start in an isolated git worktree
         </span>
       </label>
 
@@ -86,8 +97,10 @@ export function WorktreeOptions() {
 /**
  * Discriminates which of the three start-point choices the current
  * {@link WorktreeStartPoint} represents, so the right radio reads as selected.
- * `head` and the default-branch preset are exact matches; any other remote
- * branch (including a free-text entry) falls under "other".
+ * `head` and the default-branch preset are exact matches; any other branch
+ * (including a free-text entry) falls under "other". The use-vs-new *mode*
+ * (`remote_branch` vs `use_remote_branch`) is orthogonal to this and read
+ * separately, so both branch kinds classify the same way.
  */
 type StartPointChoice = 'head' | 'default-branch' | 'other';
 
@@ -102,6 +115,18 @@ function classifyStartPoint(
     return 'default-branch';
   }
   return 'other';
+}
+
+/**
+ * Whether a start-point names a branch (so the use-vs-new choice applies), and
+ * which mode it currently is. `head` is new-branch-only — HEAD's branch is
+ * checked out in the main tree, so it cannot be "used" in another worktree.
+ */
+type BranchMode = 'remote_branch' | 'use_remote_branch';
+
+/** The branch name a non-`head` start-point carries, or `null` for `head`. */
+function branchName(startPoint: WorktreeStartPoint): string | null {
+  return startPoint.kind === 'head' ? null : startPoint.name;
 }
 
 interface WorktreeStartPointSelectorProps {
@@ -122,19 +147,39 @@ function WorktreeStartPointSelector({
   // (fetching) branches query — it stays closed until the user picks "other".
   const [otherOpen, setOtherOpen] = useState(choice === 'other');
 
+  // The current use-vs-new mode for a branch start-point, carried so switching
+  // which branch is selected preserves the user's choice. `head` is always a
+  // new branch, so when it is selected the mode reads as `remote_branch`.
+  const mode: BranchMode =
+    startPoint.kind === 'use_remote_branch'
+      ? 'use_remote_branch'
+      : 'remote_branch';
+
+  // Re-emit the currently-selected branch under `nextMode`. Only meaningful for
+  // a branch start-point (not `head`), so a `null` name is a no-op.
+  const selectMode = (nextMode: BranchMode) => {
+    const name = branchName(startPoint);
+    if (name !== null) {
+      onChange({ kind: nextMode, name });
+    }
+  };
+
   const selectChoice = (next: StartPointChoice) => {
     if (next === 'head') {
+      // HEAD is new-branch-only: its branch is checked out in the main tree, so
+      // it cannot be "used" in another worktree. Reset to the safe default.
       setOtherOpen(false);
       onChange(DEFAULT_WORKTREE_START_POINT);
     } else if (next === 'default-branch' && defaultBranch !== null) {
       setOtherOpen(false);
-      onChange({ kind: 'remote_branch', name: defaultBranch });
+      onChange({ kind: mode, name: defaultBranch });
     } else {
-      // "Other": open the lazy branch picker; keep whatever remote branch is
-      // already chosen (else leave the name blank until one is picked/typed).
+      // "Other": open the lazy branch picker; keep whatever branch is already
+      // chosen (else leave the name blank until one is picked/typed). Preserve
+      // the current use-vs-new mode across the switch.
       setOtherOpen(true);
-      if (startPoint.kind !== 'remote_branch') {
-        onChange({ kind: 'remote_branch', name: '' });
+      if (startPoint.kind === 'head') {
+        onChange({ kind: mode, name: '' });
       }
     }
   };
@@ -206,13 +251,70 @@ function WorktreeStartPointSelector({
       {otherOpen && (
         <RemoteBranchPicker
           workdir={workdir}
-          selectedName={
-            startPoint.kind === 'remote_branch' ? startPoint.name : ''
-          }
-          onSelect={(name) => onChange({ kind: 'remote_branch', name })}
+          selectedName={branchName(startPoint) ?? ''}
+          onSelect={(name) => onChange({ kind: mode, name })}
         />
       )}
+
+      {/* The use-vs-new choice applies to any branch start-point (the
+          default-branch preset or an explicit branch), but never to HEAD. */}
+      {choice !== 'head' && (
+        <BranchModeChoice mode={mode} onChange={selectMode} />
+      )}
     </fieldset>
+  );
+}
+
+interface BranchModeChoiceProps {
+  mode: BranchMode;
+  onChange: (mode: BranchMode) => void;
+}
+
+/**
+ * The "use this branch" vs "new branch from it" choice shown for a branch
+ * start-point. Defaults to "new branch from it" (the safest isolation,
+ * preserving the original behavior). "Use this branch" works on the branch
+ * directly in the worktree — the backend reuses the worktree that already has
+ * it checked out (including the main working tree), or creates one that checks
+ * it out.
+ */
+function BranchModeChoice({ mode, onChange }: BranchModeChoiceProps) {
+  return (
+    <div className="ml-6 space-y-1" data-testid="branch-mode">
+      <label className="flex cursor-pointer items-start gap-2 px-1 py-0.5">
+        <input
+          type="radio"
+          name="worktree-branch-mode"
+          checked={mode === 'remote_branch'}
+          onChange={() => onChange('remote_branch')}
+          data-testid="branch-mode-new"
+          className="mt-0.5"
+        />
+        <span className="flex flex-col">
+          <span className="font-medium text-slate-700">New branch from it</span>
+          <span className="text-slate-500">
+            Cut a fresh per-session branch starting from it.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex cursor-pointer items-start gap-2 px-1 py-0.5">
+        <input
+          type="radio"
+          name="worktree-branch-mode"
+          checked={mode === 'use_remote_branch'}
+          onChange={() => onChange('use_remote_branch')}
+          data-testid="branch-mode-use"
+          className="mt-0.5"
+        />
+        <span className="flex flex-col">
+          <span className="font-medium text-slate-700">Use this branch</span>
+          <span className="text-slate-500">
+            Work on the branch directly in the worktree.
+          </span>
+        </span>
+      </label>
+    </div>
   );
 }
 

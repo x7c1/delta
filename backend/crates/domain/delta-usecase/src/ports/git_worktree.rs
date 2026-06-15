@@ -4,20 +4,34 @@ use async_trait::async_trait;
 
 use crate::error::Result;
 
-/// Where a new worktree's branch should start from.
+/// Where a new session's worktree should start from, and whether it gets its
+/// own `delta-<id>` branch or works on an existing branch directly.
 ///
-/// A fresh session opts into a worktree by naming a start point: branch off the
-/// current checkout (`Head`), or off a named remote branch (`RemoteBranch`,
-/// which is fetched first so the worktree always starts from the latest remote
-/// tip).
+/// A fresh session opts into a worktree by naming a start point:
+/// - `Head` / `RemoteBranch` cut a *new* `delta-<id>` branch — from the current
+///   checkout, or from a named remote branch (fetched first so the worktree
+///   always starts from the latest remote tip).
+/// - `UseRemoteBranch` instead works on the named branch *itself* in the
+///   worktree (no `delta-<id>` branch). Because git forbids checking one branch
+///   out in two worktrees, the orchestration reuses the worktree that already
+///   has that branch checked out (including the main working tree) when one
+///   exists, and otherwise creates a worktree that checks the branch out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorktreeStartPoint {
-    /// Branch off the repository's current `HEAD`. No network access.
+    /// Cut a new `delta-<id>` branch off the repository's current `HEAD`. No
+    /// network access.
     Head,
-    /// Branch off `origin/<name>`, fetched first so it reflects the latest
-    /// remote tip. The carried name is the remote branch's short name (no
-    /// `origin/` prefix), e.g. `main`.
+    /// Cut a new `delta-<id>` branch off `origin/<name>`, fetched first so it
+    /// reflects the latest remote tip. The carried name is the remote branch's
+    /// short name (no `origin/` prefix), e.g. `main`.
     RemoteBranch(String),
+    /// Work on the branch `<name>` itself in the worktree (no `delta-<id>`
+    /// branch). The carried name is the branch's short name (no `origin/`
+    /// prefix). The orchestration reuses an existing worktree that already has
+    /// `<name>` checked out, or creates one that checks it out (creating a
+    /// local tracking branch off `origin/<name>` first when no local branch
+    /// exists yet).
+    UseRemoteBranch(String),
 }
 
 /// Git facts about a candidate working directory, for the detection endpoint.
@@ -105,6 +119,38 @@ pub trait GitWorktree: Send + Sync {
         start_point: WorktreeStartPoint,
     ) -> Result<()>;
 
+    /// The absolute path of the worktree that currently has local branch
+    /// `branch` checked out, or `None` when no worktree has it checked out.
+    ///
+    /// Parses `git -C <repo_root> worktree list --porcelain`, matching the
+    /// `branch refs/heads/<branch>` entry against the *local* branch short
+    /// name. This includes the main working tree, so a branch checked out in
+    /// the main tree is reported (and can be reused) just like one in a
+    /// secondary worktree. Backs the `UseRemoteBranch` reuse path.
+    async fn worktree_path_for_branch(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> Result<Option<String>>;
+
+    /// Create a new worktree at `worktree_path` that checks out the existing
+    /// local branch `branch` itself (NOT a fresh `delta-<id>` branch).
+    ///
+    /// First `git -C <repo_root> fetch origin <branch>` so the branch reflects
+    /// the latest remote tip. Then, if local branch `branch` already exists,
+    /// `git -C <repo_root> worktree add <worktree_path> <branch>`; otherwise
+    /// `git -C <repo_root> worktree add --track -b <branch> <worktree_path>
+    /// origin/<branch>`, creating a local branch tracking the remote one and
+    /// checking it out. The parent of `worktree_path` is created first (the
+    /// worktree base may not exist yet), mirroring [`Self::create_worktree`].
+    /// A `git` failure surfaces its stderr in the error.
+    async fn add_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> Result<()>;
+
     /// Ensure `dir` is marked trusted in Claude Code's user config so the
     /// interactive workspace-trust dialog does not block a programmatic launch in
     /// a fresh directory. Writes `projects.<dir>.hasTrustDialogAccepted = true` to
@@ -141,6 +187,25 @@ impl GitWorktree for Box<dyn GitWorktree> {
     ) -> Result<()> {
         (**self)
             .create_worktree(repo_root, worktree_path, branch, start_point)
+            .await
+    }
+
+    async fn worktree_path_for_branch(
+        &self,
+        repo_root: &str,
+        branch: &str,
+    ) -> Result<Option<String>> {
+        (**self).worktree_path_for_branch(repo_root, branch).await
+    }
+
+    async fn add_worktree_checkout(
+        &self,
+        repo_root: &str,
+        worktree_path: &str,
+        branch: &str,
+    ) -> Result<()> {
+        (**self)
+            .add_worktree_checkout(repo_root, worktree_path, branch)
             .await
     }
 
