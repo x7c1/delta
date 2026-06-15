@@ -153,10 +153,6 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn list_sessions(&self) -> Result<Vec<Session>> {
-        Ok(self.inner.lock().unwrap().sessions.clone())
-    }
-
     async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,

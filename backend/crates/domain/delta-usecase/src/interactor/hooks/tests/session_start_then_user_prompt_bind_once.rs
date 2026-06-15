@@ -52,7 +52,7 @@ async fn session_start_then_user_prompt_bind_once() {
         );
 
         // Exactly one session, one bound pane, one held-first send row.
-        assert_eq!(ix.store().list_sessions().await.unwrap().len(), 1);
+        assert_eq!(ix.list_sessions_page(None, 30).await.unwrap().listings.len(), 1);
         assert!(ix.pane_for_session(&session_id).await.is_some());
         let head = ix
             .store()
@@ -101,7 +101,7 @@ async fn session_start_then_user_prompt_bind_once() {
             "SessionStart is a no-op once UserPromptSubmit already bound"
         );
 
-        assert_eq!(ix.store().list_sessions().await.unwrap().len(), 1);
+        assert_eq!(ix.list_sessions_page(None, 30).await.unwrap().listings.len(), 1);
         assert!(ix.pane_for_session(&session_id).await.is_some());
     }
 }
