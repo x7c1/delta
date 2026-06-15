@@ -162,6 +162,44 @@ kill_port() {
   fi
 }
 
+# Block until 127.0.0.1:$port is accepting connections, returning 0 as soon as it
+# is. This is what makes `dev.sh` return only once the loop is actually reachable
+# — historically it launched the server and dev server in the background and
+# exited immediately, so "I ran make dev but the browser won't open" was common
+# (the frontend's install+build had not finished binding the port yet).
+#
+# Fails fast (returns non-zero) if the launching process dies before the port
+# comes up, or if $timeout seconds elapse — in both cases the caller surfaces the
+# log. Args: $1=port $2=label $3=launcher-pid $4=timeout-secs $5=log-path
+wait_until_listening() {
+  local port="$1" label="$2" pid="$3" timeout="$4" log="$5"
+  local waited=0
+  printf '\033[1;36m[delta]\033[0m Waiting for %s on port %s ' "$label" "$port"
+  while true; do
+    if port_in_use "$port"; then
+      printf ' ready.\n'
+      return 0
+    fi
+    # The launcher (its subshell) exiting means the port will never come up —
+    # cargo build failed, pnpm errored, etc. Stop waiting and let the caller
+    # show the log rather than spin until the timeout.
+    if ! kill -0 "$pid" 2>/dev/null; then
+      printf ' failed.\n'
+      warn "$label exited before listening on port $port. Last 30 lines of $log:"
+      tail -n 30 "$log" >&2 2>/dev/null || true
+      return 1
+    fi
+    if [ "$waited" -ge "$timeout" ]; then
+      printf ' timed out.\n'
+      warn "$label was not listening on port $port after ${timeout}s. Check $log."
+      return 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+    printf '.'
+  done
+}
+
 up() {
   local workdir="${1:-$DEFAULT_WORKDIR}"
 
@@ -204,6 +242,7 @@ up() {
       DELTA_TMUX_SOCKET="$DELTA_TMUX_SOCKET" \
       cargo run -p delta-server >"$SERVER_LOG" 2>&1
   ) &
+  local server_pid=$!
 
   # --- 2. Frontend dev server against the real backend. ---
   ln -sf "$(basename "$FRONTEND_LOG")" "$FRONTEND_LOG_LATEST"
@@ -219,14 +258,30 @@ up() {
     # change (e.g. a fix in `@delta/api-client`) silently does not take effect.
     pnpm --filter @delta/web dev -- --force >>"$FRONTEND_LOG" 2>&1
   ) &
+  local frontend_pid=$!
+
+  # Return only once both servers are actually reachable, so a freshly-returned
+  # `make dev` always means "openable now". The frontend installs and builds the
+  # workspace libraries before it binds its port, so it gets a much longer
+  # budget than the server. Both are overridable for slow machines / cold caches.
+  if ! wait_until_listening "$DELTA_PORT" "delta-server" "$server_pid" \
+        "${DELTA_DEV_SERVER_TIMEOUT:-180}" "$SERVER_LOG"; then
+    down
+    die "delta-server did not come up. See $SERVER_LOG (latest -> $SERVER_LOG_LATEST)."
+  fi
+  if ! wait_until_listening "$FRONTEND_PORT" "frontend dev server" "$frontend_pid" \
+        "${DELTA_DEV_FRONTEND_TIMEOUT:-300}" "$FRONTEND_LOG"; then
+    down
+    die "frontend dev server did not come up. See $FRONTEND_LOG (latest -> $FRONTEND_LOG_LATEST)."
+  fi
 
   cat <<EOF
 
 ────────────────────────────────────────────────────────────────────────────
-Delta is coming up.
+Delta is up.
 
   • delta-server  → http://127.0.0.1:$DELTA_PORT  (owns the claude session)
-  • frontend      → http://localhost:$FRONTEND_PORT  (building libs first; give it a moment)
+  • frontend      → http://localhost:$FRONTEND_PORT  (ready)
 
 The only manual step: open the browser.
 

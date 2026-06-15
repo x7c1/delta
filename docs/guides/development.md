@@ -390,6 +390,12 @@ make dev WORKDIR=~/scratch # or pass your own working directory for claude
 
 Both run as managed background processes, logging to `.tmp/` (a stable
 `delta-server.log` / `delta-frontend.log` symlink points at the latest run).
+`make dev` does not return until both ports are actually listening, so a
+completed command means the UI is openable right away — the frontend's
+install+build finishes binding port 5173 before control returns. If either
+process dies or is not listening within its budget, `make dev` tears the loop
+back down and exits non-zero after printing the tail of the relevant log (the
+budgets are overridable via `DELTA_DEV_SERVER_TIMEOUT` / `DELTA_DEV_FRONTEND_TIMEOUT`).
 
 Then open <http://localhost:5173>. On load the UI fetches the session list and
 shows it (empty on a fresh database); opening the browser does not spawn
