@@ -12,8 +12,9 @@ use crate::ports::new_session::NewSession;
 use crate::session_page::SessionPageCursor;
 
 /// One row of a session-list page: the stored session plus its `last_activity_at`
-/// (`MAX(message.created_at)`, `None` when message-less), fetched inline by the
-/// page query so the usecase needs no per-row follow-up lookup.
+/// (the denormalized `MAX(message.created_at)`, `None` when message-less), read
+/// from the session row by the page query so the usecase needs no per-row
+/// follow-up lookup.
 pub type SessionPageRow = (Session, Option<String>);
 
 /// One recently-used working directory: its absolute `cwd` and the timestamp of
@@ -64,14 +65,13 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// flip an already-active session.
     async fn mark_session_failed(&self, id: &SessionId) -> Result<()>;
 
-    /// All registered sessions, ordered by creation (ascending `created_at`).
-    async fn list_sessions(&self) -> Result<Vec<Session>>;
-
     /// One page of sessions, ordered most-recently-active first, resuming
     /// strictly after `cursor` (or from the top when `None`).
     ///
-    /// The ordering is `recency` DESC, then `created_at` DESC, then `id` ASC,
-    /// where `recency = COALESCE(MAX(message.created_at), session.created_at)`.
+    /// The ordering is `recency` DESC, then `created_at` DESC, then `id` DESC,
+    /// where `recency = COALESCE(session.last_activity_at, session.created_at)`
+    /// — read from the denormalized `last_activity_at` column, not recomputed
+    /// per row, so the ordering is index-backed and the `LIMIT` bounds the work.
     /// Each row carries its raw `last_activity_at` (`None` when message-less) so
     /// the usecase needs no per-row activity lookup. At most `limit` rows are
     /// returned; a full page (`len == limit`) signals more may follow.
@@ -84,9 +84,10 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// Look up a session by id, if it exists.
     async fn session(&self, id: &SessionId) -> Result<Option<Session>>;
 
-    /// The timestamp of a session's most recent message
-    /// (`MAX(message.created_at)`), or `None` when it has no messages yet.
-    /// Stored as ISO-8601 UTC, the same format messages are persisted with.
+    /// The timestamp of a session's most recent message, or `None` when it has
+    /// no timestamped message yet. Read from the denormalized
+    /// `session.last_activity_at` column (the maintained `MAX(message.created_at)`),
+    /// stored as ISO-8601 UTC, the same format messages are persisted with.
     async fn last_activity_at(&self, session_id: &SessionId) -> Result<Option<String>>;
 
     /// The id of a session's trunk (`main`) thread.
@@ -98,10 +99,11 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// Derived from the `session.cwd` column (Delta keeps no separate
     /// working-directory history): one row per distinct `cwd`, ordered by the
     /// most recent activity of any session that used it. The recency key is the
-    /// same one the session list uses — `MAX(message.created_at)` over the
-    /// sessions sharing that `cwd`, falling back to their `created_at` — so a
-    /// directory's place reflects when it was last actually worked in. Each row
-    /// carries that recency timestamp for display.
+    /// same one the session list uses — `COALESCE(last_activity_at, created_at)`
+    /// (the denormalized last-activity column, falling back to `created_at`) —
+    /// maxed across the sessions sharing that `cwd`, so a directory's place
+    /// reflects when it was last actually worked in. Each row carries that
+    /// recency timestamp for display.
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>>;
 
     /// Look up a thread by id.
@@ -292,10 +294,6 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn mark_session_failed(&self, id: &SessionId) -> Result<()> {
         (**self).mark_session_failed(id).await
-    }
-
-    async fn list_sessions(&self) -> Result<Vec<Session>> {
-        (**self).list_sessions().await
     }
 
     async fn list_sessions_page(

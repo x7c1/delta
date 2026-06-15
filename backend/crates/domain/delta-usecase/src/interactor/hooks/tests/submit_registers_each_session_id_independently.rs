@@ -41,14 +41,16 @@ async fn submit_registers_each_session_id_independently() {
         session_id: SessionId::from("sess-2"),
     }));
 
-    // Both sessions now exist.
-    let ids: Vec<String> = ix
-        .store()
-        .list_sessions()
+    // Both sessions now exist (membership, sorted so the assertion does not
+    // depend on the page's recency ordering).
+    let mut ids: Vec<String> = ix
+        .list_sessions_page(None, 30)
         .await
         .unwrap()
+        .listings
         .iter()
-        .map(|s| s.id.as_str().to_owned())
+        .map(|l| l.session.id.as_str().to_owned())
         .collect();
+    ids.sort();
     assert_eq!(ids, vec!["sess-1".to_owned(), "sess-2".to_owned()]);
 }

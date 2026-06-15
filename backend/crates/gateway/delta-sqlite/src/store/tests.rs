@@ -23,31 +23,6 @@ fn new_session_with(id: &str) -> NewSession {
 }
 
 #[tokio::test]
-async fn list_sessions_returns_all_in_deterministic_base_order() {
-    let store = SqliteStore::open_in_memory().unwrap();
-    store
-        .register_session(new_session_with("sess-1"))
-        .await
-        .unwrap();
-    store
-        .register_session(new_session_with("sess-2"))
-        .await
-        .unwrap();
-
-    // The store returns every registered session in a deterministic base order
-    // (`created_at`, then `id` to break equal-timestamp ties). The navigator's
-    // most-recently-active-first ordering is layered on in the usecase, which
-    // also knows each session's last activity.
-    let sessions = store.list_sessions().await.unwrap();
-    let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
-    assert_eq!(ids, vec!["sess-1", "sess-2"]);
-
-    // No sessions yet on a fresh store.
-    let empty = SqliteStore::open_in_memory().unwrap();
-    assert!(empty.list_sessions().await.unwrap().is_empty());
-}
-
-#[tokio::test]
 async fn session_looks_up_by_id() {
     let store = SqliteStore::open_in_memory().unwrap();
     store
@@ -222,6 +197,226 @@ async fn last_activity_at_returns_latest_message_timestamp() {
     assert_eq!(
         store.last_activity_at(&session.id).await.unwrap(),
         Some("2026-01-01T00:05:00Z".to_string()),
+    );
+}
+
+#[tokio::test]
+async fn last_activity_at_is_stored_on_session_and_recomputed_on_reingest() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let make = |uuid: &str, seq: i64, created_at: Option<&str>| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: created_at.map(str::to_owned),
+    };
+
+    // The recency lives on the `session` row as a denormalized column, written
+    // by the upsert — not derived from a per-row scan of `message`. Read it
+    // straight from `session` to prove it is physically stored there.
+    store
+        .upsert_messages(&[
+            make("u-1", 0, Some("2026-01-01T00:00:00Z")),
+            make("u-2", 1, Some("2026-01-01T00:05:00Z")),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(
+        stored_last_activity(&store, &session.id).await.as_deref(),
+        Some("2026-01-01T00:05:00Z"),
+    );
+
+    // A re-ingest that *lowers* the latest message's timestamp must pull the
+    // stored recency back down: it is recomputed as the MAX over the session's
+    // messages, not a monotonic high-water mark.
+    store
+        .upsert_messages(&[make("u-2", 1, Some("2026-01-01T00:02:00Z"))])
+        .await
+        .unwrap();
+    assert_eq!(
+        stored_last_activity(&store, &session.id).await.as_deref(),
+        Some("2026-01-01T00:02:00Z"),
+    );
+
+    // A message with no timestamp contributes nothing: the stored recency stays
+    // NULL (MAX over no value).
+    let fresh = SqliteStore::open_in_memory().unwrap();
+    let (s2, m2) = fresh.register_session(new_session()).await.unwrap();
+    fresh
+        .upsert_messages(&[Message {
+            session_id: s2.id.clone(),
+            thread_id: m2,
+            ..make("u-x", 0, None)
+        }])
+        .await
+        .unwrap();
+    assert_eq!(
+        stored_last_activity(&fresh, &s2.id).await,
+        None,
+        "a timestamp-less message leaves recency NULL",
+    );
+}
+
+/// Read `session.last_activity_at` straight from the row, bypassing the
+/// accessor, so a test can prove the value is physically denormalized onto the
+/// session rather than derived on read.
+async fn stored_last_activity(store: &SqliteStore, id: &SessionId) -> Option<String> {
+    let conn = store.conn.lock().await;
+    conn.query_row(
+        "SELECT last_activity_at FROM session WHERE id = ?1",
+        rusqlite::params![id.as_str()],
+        |r| r.get::<_, Option<String>>(0),
+    )
+    .unwrap()
+}
+
+/// An existing database created before `session.last_activity_at` existed must
+/// gain the column and be backfilled on open, without losing data.
+#[tokio::test]
+async fn opening_a_pre_column_database_migrates_and_backfills() {
+    let dir = std::env::temp_dir().join(format!("delta-migrate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a "legacy" database the way it shipped *before* the column: open it
+    // through the store (which now adds `last_activity_at`), then physically
+    // drop the column so the file looks pre-migration. This keeps every other
+    // table identical to the real old schema rather than hand-rolling a partial
+    // copy. SQLite's `DROP COLUMN` also removes the dependent expression index,
+    // so the file is a faithful pre-`last_activity_at` snapshot.
+    {
+        let legacy = SqliteStore::open(path_str).unwrap();
+        legacy
+            .register_session(NewSession {
+                id: "with-msgs".into(),
+                cwd: "/w".into(),
+                transcript_path: "/tmp/with.jsonl".into(),
+            })
+            .await
+            .unwrap();
+        let (no_msgs, _) = legacy
+            .register_session(NewSession {
+                id: "no-msgs".into(),
+                cwd: "/w".into(),
+                transcript_path: "/tmp/no.jsonl".into(),
+            })
+            .await
+            .unwrap();
+        let main = legacy
+            .main_thread_id(&SessionId::from("with-msgs"))
+            .await
+            .unwrap();
+        let msg = |uuid: &str, at: &str| Message {
+            uuid: MessageUuid::from(uuid),
+            session_id: SessionId::from("with-msgs"),
+            thread_id: main,
+            role: Role::User,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: None,
+            prompt_id: None,
+            seq: 0,
+            content_text: Some("hi".into()),
+            content: vec![ContentBlock::Text { text: "hi".into() }],
+            created_at: Some(at.into()),
+        };
+        legacy
+            .upsert_messages(&[
+                msg("m1", "2026-01-05T00:00:00Z"),
+                msg("m2", "2026-01-09T00:00:00Z"),
+            ])
+            .await
+            .unwrap();
+        let _ = no_msgs;
+        let conn = legacy.conn.lock().await;
+        // Strip the column so the file is a faithful pre-migration snapshot to
+        // re-open. The expression index references the column, so drop it first.
+        conn.execute_batch(
+            "DROP INDEX ix_session_recency; \
+             ALTER TABLE session DROP COLUMN last_activity_at;",
+        )
+        .unwrap();
+    }
+
+    // Opening through the store applies the guarded ALTER + backfill.
+    let store = SqliteStore::open(path_str).unwrap();
+
+    // The message-bearing session is backfilled to its MAX(message.created_at).
+    assert_eq!(
+        store
+            .last_activity_at(&SessionId::from("with-msgs"))
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("2026-01-09T00:00:00Z"),
+    );
+    // The message-less session stays NULL (the navigator orders it on its own
+    // created_at).
+    assert_eq!(
+        store
+            .last_activity_at(&SessionId::from("no-msgs"))
+            .await
+            .unwrap(),
+        None,
+    );
+
+    // Re-opening the now-migrated database is a clean no-op (the column already
+    // exists, so the guarded ALTER does not run again).
+    drop(store);
+    let reopened = SqliteStore::open(path_str).unwrap();
+    assert_eq!(
+        reopened
+            .last_activity_at(&SessionId::from("with-msgs"))
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("2026-01-09T00:00:00Z"),
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The session-list page query is index-backed: its plan must walk
+/// `ix_session_recency` and must NOT fall back to a full sort (temp b-tree).
+/// Guards against a regression that reintroduces the O(total sessions) scan
+/// (e.g. a correlated recency subquery or an ORDER BY the index can't satisfy).
+#[tokio::test]
+async fn list_sessions_page_uses_the_recency_index() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let conn = store.conn.lock().await;
+    let plan: Vec<String> = conn
+        .prepare(
+            "EXPLAIN QUERY PLAN \
+             SELECT id, cwd, transcript_path, title, status, created_at, \
+                    last_activity_at, COALESCE(last_activity_at, created_at) AS recency \
+             FROM session \
+             WHERE NOT (status = 'spawning' AND last_activity_at IS NULL \
+                        AND NOT EXISTS (SELECT 1 FROM message m WHERE m.session_id = session.id)) \
+               AND (1 = 1) \
+             ORDER BY recency DESC, created_at DESC, id DESC \
+             LIMIT 10",
+        )
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(3))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let plan_text = plan.join("\n");
+    assert!(
+        plan_text.contains("ix_session_recency"),
+        "page query should walk ix_session_recency, plan was:\n{plan_text}"
+    );
+    assert!(
+        !plan_text.contains("USE TEMP B-TREE FOR ORDER BY"),
+        "page query should not sort the whole table, plan was:\n{plan_text}"
     );
 }
 
