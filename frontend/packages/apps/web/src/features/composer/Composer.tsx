@@ -67,6 +67,12 @@ export function Composer({ mode }: ComposerProps) {
   const setNewSessionLaunchOptionIds = useComposerStore(
     (state) => state.setNewSessionLaunchOptionIds,
   );
+  const newSessionWorktreeEnabled = useComposerStore(
+    (state) => state.newSessionWorktreeEnabled,
+  );
+  const newSessionWorktreeStartPoint = useComposerStore(
+    (state) => state.newSessionWorktreeStartPoint,
+  );
 
   const sendInFlight = useLiveStore((state) =>
     state.sending.some((item) => item.status === 'sending'),
@@ -113,12 +119,20 @@ export function Composer({ mode }: ComposerProps) {
         // per-spawn directory (today's behavior). Likewise, attach the selected
         // launch options only when at least one is picked, so an unselected
         // session starts with no extra launch flags.
+        // Attach the worktree request only when the opt-in toggle is on AND a
+        // directory is selected: the picker only surfaces the toggle once a
+        // git-repo directory is chosen, so this guard mirrors that and keeps the
+        // backend-rejected "worktree without workdir" state unreachable. Omit it
+        // entirely otherwise (the unchanged non-worktree behavior).
         body = {
           new_session: true,
           text,
           ...(newSessionWorkdir ? { workdir: newSessionWorkdir } : {}),
           ...(newSessionLaunchOptionIds.length > 0
             ? { launch_option_ids: newSessionLaunchOptionIds }
+            : {}),
+          ...(newSessionWorktreeEnabled && newSessionWorkdir
+            ? { worktree: { start_point: newSessionWorktreeStartPoint } }
             : {}),
         };
       } else if (branching) {
@@ -177,6 +191,8 @@ export function Composer({ mode }: ComposerProps) {
       branchOrigin,
       newSessionWorkdir,
       newSessionLaunchOptionIds,
+      newSessionWorktreeEnabled,
+      newSessionWorktreeStartPoint,
       clearDraft,
       submitSend,
       setBranchOrigin,

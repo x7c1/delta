@@ -554,3 +554,55 @@ export function recentWorkdirs(): {
     { path: '/home/dev/scratch', last_used_at: null },
   ];
 }
+
+/**
+ * The mock git repository: `/home/dev/projects/delta` and everything under it
+ * is treated as one repo (root `/home/dev/projects/delta`, default branch
+ * `main`). Every other directory is non-git, so the worktree toggle's show/hide
+ * and the branches endpoint's 400-for-non-git path are both exercisable.
+ */
+export const MOCK_GIT_REPO_ROOT = '/home/dev/projects/delta';
+const MOCK_GIT_DEFAULT_BRANCH = 'main';
+const MOCK_GIT_REMOTE_BRANCHES = ['main', 'develop', 'release/1.0'];
+
+/** Whether `path` is inside the mock git repository. */
+function isInMockGitRepo(path: string): boolean {
+  return path === MOCK_GIT_REPO_ROOT || path.startsWith(`${MOCK_GIT_REPO_ROOT}/`);
+}
+
+/**
+ * The mock `GET /api/workdir/git` answer for `path`: a `repo_root` +
+ * `default_branch` when the path is inside the mock repo, both `null`
+ * otherwise. Mirrors the real endpoint, which never errors (it just reports
+ * "not a git repo" as `repo_root: null`).
+ */
+export function gitRepoInfo(path: string): {
+  repo_root: string | null;
+  default_branch: string | null;
+} {
+  if (isInMockGitRepo(path)) {
+    return {
+      repo_root: MOCK_GIT_REPO_ROOT,
+      default_branch: MOCK_GIT_DEFAULT_BRANCH,
+    };
+  }
+  return { repo_root: null, default_branch: null };
+}
+
+/**
+ * The mock `GET /api/workdir/git/branches` answer for `path`, or `null` when the
+ * path is not a git repository (mapped to a 400 by the handler, matching the
+ * real endpoint that rejects a non-git path).
+ */
+export function gitBranches(path: string): {
+  default_branch: string | null;
+  remote_branches: string[];
+} | null {
+  if (!isInMockGitRepo(path)) {
+    return null;
+  }
+  return {
+    default_branch: MOCK_GIT_DEFAULT_BRANCH,
+    remote_branches: [...MOCK_GIT_REMOTE_BRANCHES],
+  };
+}

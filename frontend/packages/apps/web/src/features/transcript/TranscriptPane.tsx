@@ -21,6 +21,7 @@ import {
   type PendingSurface,
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
+import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { isTaskNotificationMessage } from './claudeFormat';
@@ -685,6 +686,10 @@ export function TranscriptPane({
             renders nothing when no directory is selected, so there is no button
             to (re)open the picker from here — that is done via "New". */}
         {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
+        {/* Below the directory chip: when the selected directory is a git repo,
+            an opt-in to start the session in a fresh worktree (with a
+            start-point choice). Renders nothing for a non-git directory. */}
+        {newSession && <WorktreeOptions />}
         {newSession && <LaunchOptionsPicker />}
         <PendingQueue entries={pendingEntries} />
         {composer}

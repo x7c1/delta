@@ -8,6 +8,7 @@
 // compiler reject any narrowing that drifts from the generated wire shape.
 
 import type { CreateSendRequest } from './generated/CreateSendRequest';
+import type { WorktreeSpec } from './generated/WorktreeSpec';
 
 /**
  * Send target addressing an existing session via one of its threads. A branch
@@ -40,6 +41,13 @@ export interface SendToNewSession {
    * when omitted (or empty) the session starts with no extra launch flags.
    */
   launch_option_ids?: number[];
+  /**
+   * An opt-in request to start the fresh session inside a git worktree of the
+   * selected `workdir`. Only valid when `workdir` is a git repository; when
+   * omitted the session starts directly in the selected directory (the
+   * unchanged behavior).
+   */
+  worktree?: WorktreeSpec;
 }
 
 /** Request body for `POST /api/sends` — a discriminated send target. */

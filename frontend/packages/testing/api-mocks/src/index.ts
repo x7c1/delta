@@ -35,7 +35,10 @@ export {
   FILLER_SESSION_COUNT,
   TOTAL_SEEDED_SESSIONS,
   MOCK_WORKDIR_HOME,
+  MOCK_GIT_REPO_ROOT,
   workdirListing,
   recentWorkdirs,
+  gitRepoInfo,
+  gitBranches,
   type MockStore,
 } from './fixtures';

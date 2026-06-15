@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { HttpHandler } from 'msw';
 import type {
+  GitBranchesResponse,
+  GitRepoResponse,
   SendResponse,
   SendsResponse,
   SessionsResponse,
@@ -8,6 +10,7 @@ import type {
 import { createHandlers, createMockApi } from './handlers';
 import {
   mockSpawnSessionId,
+  MOCK_GIT_REPO_ROOT,
   SESSIONS_PAGE_SIZE,
   SESSION_ID,
   SESSION_ID_2,
@@ -307,5 +310,56 @@ describe('new-session send mock (eager rows)', () => {
       `http://localhost/api/sessions/${failed}/sends`,
     );
     expect(response.status).toBe(404);
+  });
+});
+
+describe('git workdir mocks', () => {
+  it('reports the repo root and default branch for a path in the mock repo', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runGet(
+      handlers,
+      '/api/workdir/git',
+      `http://localhost/api/workdir/git?path=${encodeURIComponent(MOCK_GIT_REPO_ROOT)}`,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as GitRepoResponse;
+    expect(body.repo_root).toBe(MOCK_GIT_REPO_ROOT);
+    expect(body.default_branch).toBe('main');
+  });
+
+  it('reports a null repo root for a non-git path (never errors)', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runGet(
+      handlers,
+      '/api/workdir/git',
+      'http://localhost/api/workdir/git?path=%2Fhome%2Fdev%2Fscratch',
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as GitRepoResponse;
+    expect(body.repo_root).toBeNull();
+    expect(body.default_branch).toBeNull();
+  });
+
+  it('lists remote branches for a repo path', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runGet(
+      handlers,
+      '/api/workdir/git/branches',
+      `http://localhost/api/workdir/git/branches?path=${encodeURIComponent(MOCK_GIT_REPO_ROOT)}`,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as GitBranchesResponse;
+    expect(body.default_branch).toBe('main');
+    expect(body.remote_branches).toEqual(['main', 'develop', 'release/1.0']);
+  });
+
+  it('rejects the branches endpoint for a non-git path with 400', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runGet(
+      handlers,
+      '/api/workdir/git/branches',
+      'http://localhost/api/workdir/git/branches?path=%2Fhome%2Fdev%2Fscratch',
+    );
+    expect(response.status).toBe(400);
   });
 });

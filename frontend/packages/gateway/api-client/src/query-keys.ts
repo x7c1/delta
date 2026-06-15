@@ -28,6 +28,16 @@ export const queryKeys = {
     ['workdir-list', path ?? 'default'] as const,
   /** Recently-used working directories (`GET /api/workdir/recent`). */
   workdirRecent: ['workdir-recent'] as const,
+  /**
+   * Whether a selected directory is a git repository (`GET /api/workdir/git`),
+   * keyed by the queried path so each selection caches independently.
+   */
+  gitRepoInfo: (path: string) => ['git-repo-info', path] as const,
+  /**
+   * A repository's remote branches (`GET /api/workdir/git/branches`), keyed by
+   * the queried path. Fetched lazily (it performs a `git fetch`).
+   */
+  gitBranches: (path: string) => ['git-branches', path] as const,
   /** The registered launch options (`GET /api/launch-options`). */
   launchOptions: ['launch-options'] as const,
 };

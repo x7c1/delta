@@ -17,11 +17,15 @@ import type {
   SendToThread,
   Thread,
   ThreadsResponse,
+  GitBranchesResponse,
+  GitRepoResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
   Turn,
 } from '@delta/wire-gen';
 import {
+  gitBranches,
+  gitRepoInfo,
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
   recentWorkdirs,
@@ -407,6 +411,34 @@ export function createMockApi(): MockApi {
       const responseBody: WorkdirRecentResponse = {
         workdirs: recentWorkdirs(),
       };
+      return HttpResponse.json(responseBody);
+    }),
+
+    // Whether the queried directory is a git repository, for the new-session
+    // worktree option. Like the real endpoint this never errors: a non-git path
+    // reports `repo_root: null`. A path under the mock repo reports its root and
+    // default branch, so the worktree toggle's show/hide is exercisable.
+    http.get('*/api/workdir/git', ({ request }) => {
+      const url = new URL(request.url);
+      const path = url.searchParams.get('path') ?? MOCK_WORKDIR_HOME;
+      const responseBody: GitRepoResponse = gitRepoInfo(path);
+      return HttpResponse.json(responseBody);
+    }),
+
+    // The repository's remote branches (the lazily-fetched start-point list). A
+    // non-git path is a 400, exactly as the real endpoint rejects it, so the
+    // picker's inline-error path is exercisable.
+    http.get('*/api/workdir/git/branches', ({ request }) => {
+      const url = new URL(request.url);
+      const path = url.searchParams.get('path') ?? MOCK_WORKDIR_HOME;
+      const branches = gitBranches(path);
+      if (!branches) {
+        return HttpResponse.json(
+          { error: 'not a git repository' },
+          { status: 400 },
+        );
+      }
+      const responseBody: GitBranchesResponse = branches;
       return HttpResponse.json(responseBody);
     }),
 
