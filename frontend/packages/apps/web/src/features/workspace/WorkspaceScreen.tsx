@@ -309,10 +309,14 @@ export function WorkspaceScreen() {
       {/* Terminal toggle (visible when the terminal is collapsed) */}
       {!terminalOpen && (
         <div className="absolute right-2 top-2 z-10">
-          <Button size="sm" variant="secondary" onClick={toggleTerminal}>
+          <button
+            type="button"
+            onClick={toggleTerminal}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50"
+          >
             <TerminalIcon className="h-3.5 w-3.5" />
             Terminal
-          </Button>
+          </button>
         </div>
       )}
 
