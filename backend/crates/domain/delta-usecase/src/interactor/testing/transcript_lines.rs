@@ -17,6 +17,7 @@ pub(crate) fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
         is_queued_command: false,
+        is_api_error: false,
     }
 }
 
@@ -31,6 +32,18 @@ pub(crate) fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
         is_queued_command: false,
+        is_api_error: false,
+    }
+}
+
+/// A synthetic `isApiErrorMessage` assistant line: Claude writes this when a
+/// turn ends on an API error (a usage/session limit, a rate limit, or any other
+/// API failure) instead of completing normally. It fires no `Stop` hook and
+/// writes no interrupt marker, so the flag is its only turn-end signal.
+pub(crate) fn api_error_line(uuid: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        is_api_error: true,
+        ..assistant_line(uuid, "You've hit your session limit")
     }
 }
 

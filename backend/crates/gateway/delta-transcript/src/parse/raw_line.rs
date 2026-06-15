@@ -24,4 +24,11 @@ pub(super) struct RawLine {
     /// human-authored turns. Drives [`Role::Meta`] classification.
     #[serde(rename = "isMeta")]
     pub is_meta: Option<bool>,
+    /// Set on a synthetic assistant line Claude Code writes when a turn ends on
+    /// an API error (a usage/session limit, a rate limit, or any other API
+    /// failure) instead of completing normally. Such a turn-end fires no `Stop`
+    /// hook and writes no interrupt marker, so this flag is the only signal that
+    /// the turn ended; it drives the transcript-driven turn-end fallback.
+    #[serde(rename = "isApiErrorMessage")]
+    pub is_api_error_message: Option<bool>,
 }

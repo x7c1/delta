@@ -81,6 +81,16 @@ pub enum Effect {
     /// interrupt). Feed `Interrupt` into the turn machine and notify the
     /// browser so the stuck send clears.
     TurnInterrupted,
+    /// A synthetic `isApiErrorMessage` assistant line was ingested: the turn
+    /// ended on an API error (a usage/session limit, a rate limit, or any other
+    /// API failure) rather than completing normally. Like an interrupt, this
+    /// turn-end fires **no** `Stop` hook and writes **no** interrupt marker, so
+    /// without this effect the turn machine would stay in flight forever and
+    /// every later send would defer to `queued` and never dispatch. Feed the
+    /// turn machine back to idle and notify the browser so the stuck send
+    /// clears. Detected from the structural flag, never the error text, so it
+    /// covers every synthetic API-error turn-end and is locale-independent.
+    TurnAborted,
     /// A human user line matched the head outstanding send: mark the send row
     /// matched to this transcript uuid.
     SendMatched {
@@ -121,10 +131,14 @@ pub struct Attributed {
 ///   in-flight turn, not a new human turn. The interrupt marker is also a
 ///   `role: user` line belonging to the aborted turn: it inherits
 ///   `carry_thread` and additionally yields [`Effect::TurnInterrupted`]. A
-///   `<task-notification>` (a harness-injected background-task completion,
-///   delivered as a plain `role: user` line) is likewise a programmatic
-///   continuation of the in-flight turn, so it too inherits `carry_thread`
-///   rather than resetting to `main`.
+///   synthetic `isApiErrorMessage` assistant line (a turn that ended on a
+///   usage/session limit, a rate limit, or any other API error) likewise
+///   inherits `carry_thread` and additionally yields [`Effect::TurnAborted`],
+///   the turn-end signal it carries in place of the absent `Stop` hook /
+///   interrupt marker. A `<task-notification>` (a harness-injected
+///   background-task completion, delivered as a plain `role: user` line) is
+///   likewise a programmatic continuation of the in-flight turn, so it too
+///   inherits `carry_thread` rather than resetting to `main`.
 pub fn attribute_lines(
     session_id: &SessionId,
     main_thread: ThreadId,
@@ -192,6 +206,16 @@ pub fn attribute_lines(
 
         if is_interrupt_marker {
             effects.push(Effect::TurnInterrupted);
+        }
+
+        // A synthetic `isApiErrorMessage` assistant line ends the turn on an API
+        // error without a `Stop` hook or an interrupt marker. Emit a turn-end
+        // effect so the caller feeds the turn machine back to idle; the line is
+        // otherwise ingested and attributed like any assistant line (it inherits
+        // `carry_thread` via the non-human-turn branch below, so this does not
+        // change thread attribution).
+        if line.is_api_error {
+            effects.push(Effect::TurnAborted);
         }
 
         // Compare against the head outstanding send; a match consumes it.

@@ -43,6 +43,24 @@ pub struct TranscriptMessage {
     /// injection (e.g. a background task notification), not external input — it
     /// inherits the active thread instead.
     pub is_queued_command: bool,
+    /// True when Claude Code flagged this line `isApiErrorMessage`: a synthetic
+    /// assistant line it writes when a turn ends on an API error (a
+    /// usage/session limit, a rate limit, or any other API failure) rather than
+    /// completing normally.
+    ///
+    /// Such a turn-end fires **no** `Stop` hook and writes **no** interrupt
+    /// marker, so without this flag the per-session turn state machine would
+    /// stay in flight forever and every later send would defer to `queued` and
+    /// never dispatch. The attribution fold reads this flag to emit a
+    /// transcript-driven turn-end effect ([`Effect::TurnAborted`]), parallel to
+    /// how the interrupt marker yields [`Effect::TurnInterrupted`]. It is keyed
+    /// on the structural flag, never on the human-readable error text, so it
+    /// covers every synthetic API-error turn-end generically and is
+    /// locale-independent.
+    ///
+    /// [`Effect::TurnAborted`]: crate::Effect::TurnAborted
+    /// [`Effect::TurnInterrupted`]: crate::Effect::TurnInterrupted
+    pub is_api_error: bool,
 }
 
 impl TranscriptMessage {

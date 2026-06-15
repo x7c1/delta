@@ -55,6 +55,13 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
     // Read it before `raw.message` is moved out below.
     let is_meta = raw.is_meta == Some(true);
 
+    // `isApiErrorMessage` marks a synthetic assistant line Claude writes when a
+    // turn ends on an API error (usage/session limit, rate limit, any API
+    // failure) instead of completing normally. Such a turn-end fires no `Stop`
+    // hook and writes no interrupt marker, so the fold keys on this flag to feed
+    // the turn machine back to idle. Default `false` when the field is absent.
+    let is_api_error = raw.is_api_error_message == Some(true);
+
     let role = if is_queued_command {
         Role::User
     } else if is_meta {
@@ -89,6 +96,7 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         // 0 since it has no file position.
         seq: 0,
         is_queued_command,
+        is_api_error,
     }))
 }
 
@@ -206,6 +214,29 @@ mod tests {
         let line = r#"{"uuid":"u3","type":"user","message":{"role":"user","content":"hi"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::User);
+    }
+
+    #[test]
+    fn api_error_assistant_line_is_flagged_is_api_error() {
+        // A turn that ends on a usage/session limit (or any API error) is
+        // written as a synthetic assistant line carrying `isApiErrorMessage`.
+        // It fires no `Stop` hook and writes no interrupt marker, so the flag
+        // is the only turn-end signal — it must surface on the parsed line.
+        let line = r#"{"uuid":"e1","type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"message":{"role":"assistant","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your session limit"}]}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Assistant);
+        assert!(msg.is_api_error);
+        assert_eq!(
+            msg.flatten_text().as_deref(),
+            Some("You've hit your session limit")
+        );
+    }
+
+    #[test]
+    fn ordinary_assistant_line_is_not_flagged_api_error() {
+        let line = r#"{"uuid":"a3","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert!(!msg.is_api_error);
     }
 
     #[test]

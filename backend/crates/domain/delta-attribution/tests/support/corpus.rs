@@ -106,6 +106,7 @@ pub struct GoldenAssignment {
 pub enum GoldenEffect {
     SendMatched { send_id: i64, matched_uuid: String },
     TurnInterrupted,
+    TurnAborted,
     ResolvePermission { tool_use_id: String, allowed: bool },
 }
 
@@ -138,6 +139,7 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                     matched_uuid: matched_uuid.as_str().to_owned(),
                 },
                 Effect::TurnInterrupted => GoldenEffect::TurnInterrupted,
+                Effect::TurnAborted => GoldenEffect::TurnAborted,
                 Effect::ResolvePermission {
                     tool_use_id,
                     allowed,
