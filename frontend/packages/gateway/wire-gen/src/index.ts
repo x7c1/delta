@@ -32,6 +32,7 @@ export type { QuestionCancelRequest } from './generated/QuestionCancelRequest';
 export type { Turn } from './generated/Turn';
 export type { PendingPermission } from './generated/PendingPermission';
 export type { PendingQuestion } from './generated/PendingQuestion';
+export type { RunningSubagent } from './generated/RunningSubagent';
 export type { TurnPhase } from './generated/TurnPhase';
 export type { WorkdirEntry } from './generated/WorkdirEntry';
 export type { WorkdirListResponse } from './generated/WorkdirListResponse';

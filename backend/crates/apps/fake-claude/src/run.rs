@@ -6,8 +6,8 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use delta_wire::hooks::{
-    MessageDisplayPayload, PermissionRequestPayload, PreToolUsePayload, SessionStartPayload,
-    StopPayload, UserPromptSubmitPayload,
+    MessageDisplayPayload, PermissionRequestPayload, PostToolUsePayload, PreToolUsePayload,
+    SessionStartPayload, StopPayload, UserPromptSubmitPayload,
 };
 use serde_json::{json, Value};
 
@@ -227,6 +227,25 @@ impl Engine {
                     name: name.clone(),
                     input: input.clone(),
                 });
+                Ok(())
+            }
+            Step::PostToolUse => {
+                // Signal that the most recent tool call completed, mirroring the
+                // real `claude` PostToolUse hook. Used to close a subagent's
+                // running window without writing a `tool_result`.
+                let tool_use = self
+                    .last_tool_use
+                    .as_ref()
+                    .ok_or("post_tool_use step without a preceding tool_use")?;
+                self.fire(
+                    "PostToolUse",
+                    &self.endpoints.post_tool_use,
+                    &PostToolUsePayload {
+                        session_id: self.session_id.clone(),
+                        tool_name: tool_use.name.clone(),
+                        tool_use_id: tool_use.id.clone(),
+                    },
+                );
                 Ok(())
             }
             Step::PermissionRequest { on_allow, on_deny } => {

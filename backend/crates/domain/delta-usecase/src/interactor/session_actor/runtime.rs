@@ -192,15 +192,44 @@ pub struct PendingQuestion {
     pub tool_input_json: String,
 }
 
+/// A subagent (the `Agent`/`Task` tool) currently running inside the session's
+/// main turn.
+///
+/// A subagent runs in its own transcript that Delta never tails, so the main
+/// conversation pane shows nothing while it works. This is the queryable
+/// counterpart of the `subagent_started`/`subagent_finished` broadcasts: those
+/// events are lost for a client whose socket was down when they fired, so the
+/// sends envelope reports the running set and a reconnecting client rebuilds
+/// its indicator from a plain refetch — exactly like [`PendingPermission`] and
+/// [`PendingQuestion`].
+///
+/// The running window is the foreground `PreToolUse(Agent)` → `PostToolUse(Agent)`
+/// hook pair, correlated by `tool_use_id`. Cleared when the turn returns to idle
+/// — a subagent cannot outlive its turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningSubagent {
+    /// The `tool_use_id` of the `Agent`/`Task` call, the key that the matching
+    /// `PostToolUse` clears it by.
+    pub tool_use_id: String,
+    /// The subagent type from the tool input (e.g. `general-purpose`), if the
+    /// call carried one.
+    pub subagent_type: Option<String>,
+    /// The short task description from the tool input, if the call carried one,
+    /// for display next to the indicator.
+    pub description: Option<String>,
+}
+
 /// One consistent snapshot of the runtime state the sends envelope reports:
-/// the turn phase plus the pending permission dialog and the pending question,
-/// read in a single actor message so they can never disagree within one
-/// response.
+/// the turn phase plus the pending permission dialog, the pending question, and
+/// the set of running subagents, read in a single actor message so they can
+/// never disagree within one response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionLiveState {
     pub turn: TurnState,
     pub pending_permission: Option<PendingPermission>,
     pub pending_question: Option<PendingQuestion>,
+    /// The subagents currently running in this session's turn, oldest first.
+    pub running_subagents: Vec<RunningSubagent>,
 }
 
 /// The live, provisional preview of the in-flight turn's assistant message,
@@ -283,6 +312,14 @@ pub struct SessionRuntime {
     /// over), and therefore not part of [`Self::is_empty`] — a turn returning
     /// to idle drops it via [`Self::apply_turn`].
     streaming_message: Option<StreamingMessage>,
+    /// The subagents (`Agent`/`Task` tool calls) currently running in this
+    /// session's turn, keyed by `tool_use_id` and kept in start order. Each is
+    /// added by the `PreToolUse(Agent)` hook and removed by the matching
+    /// `PostToolUse(Agent)`; the whole set is dropped when the turn returns to
+    /// idle, so it is part of [`Self::is_empty`] (a stuck entry would otherwise
+    /// pin the actor alive). Only `Agent`/`Task` flip it — a subagent's nested
+    /// tool calls (e.g. its own `Bash`) reach the same hooks but never match.
+    running_subagents: Vec<RunningSubagent>,
 }
 
 impl SessionRuntime {
@@ -299,6 +336,7 @@ impl SessionRuntime {
             && self.permission_waiters.is_empty()
             && self.pending_permission.is_none()
             && self.pending_question.is_none()
+            && self.running_subagents.is_empty()
     }
 
     /// Whether a pane is live: bound to the session, or spawned and awaiting
@@ -518,13 +556,15 @@ impl SessionRuntime {
         self.turn
     }
 
-    /// Snapshot the queryable live state (turn phase + pending permission)
-    /// in one read, for the sends envelope.
+    /// Snapshot the queryable live state (turn phase + pending permission +
+    /// pending question + running subagents) in one read, for the sends
+    /// envelope.
     pub fn live_state(&self) -> SessionLiveState {
         SessionLiveState {
             turn: self.turn,
             pending_permission: self.pending_permission.clone(),
             pending_question: self.pending_question.clone(),
+            running_subagents: self.running_subagents.clone(),
         }
     }
 
@@ -542,6 +582,12 @@ impl SessionRuntime {
         if result.next == TurnState::Idle {
             self.pending_permission = None;
             self.pending_question = None;
+            // A subagent cannot outlive the turn that spawned it: once the turn
+            // ends (stop, interrupt, close) any still-running entry is moot, so
+            // drop the whole set. This also covers the case where a foreground
+            // `PostToolUse(Agent)` was somehow missed — the turn end clears it
+            // rather than leaving a stuck indicator.
+            self.running_subagents.clear();
             // The provisional live preview belongs to the turn that just ended;
             // the persisted assistant message (ingested by the transcript sync)
             // now renders instead, so drop the preview to avoid a duplicate.
@@ -556,6 +602,7 @@ impl SessionRuntime {
         self.turn = TurnState::Idle;
         self.pending_permission = None;
         self.pending_question = None;
+        self.running_subagents.clear();
         self.streaming_message = None;
     }
 
@@ -672,6 +719,38 @@ impl SessionRuntime {
         }
     }
 
+
+    /// Record a subagent (`Agent`/`Task` tool call) as started, returning
+    /// whether it was newly added.
+    ///
+    /// Keyed by `tool_use_id`: a duplicate `PreToolUse` for an already-tracked
+    /// id is a no-op (returns `false`), so a retried hook delivery cannot list
+    /// the same subagent twice. New entries are appended so the set stays in
+    /// start order for display.
+    pub fn start_subagent(&mut self, subagent: RunningSubagent) -> bool {
+        if self
+            .running_subagents
+            .iter()
+            .any(|s| s.tool_use_id == subagent.tool_use_id)
+        {
+            return false;
+        }
+        self.running_subagents.push(subagent);
+        true
+    }
+
+    /// Drop the running subagent with this `tool_use_id`, returning whether one
+    /// was actually removed.
+    ///
+    /// Keyed so a `PostToolUse` for an unknown id (or one already cleared at
+    /// turn end) is a harmless no-op (returns `false`) rather than emitting a
+    /// spurious "finished" for a subagent that was never tracked.
+    pub fn finish_subagent(&mut self, tool_use_id: &str) -> bool {
+        let before = self.running_subagents.len();
+        self.running_subagents
+            .retain(|s| s.tool_use_id != tool_use_id);
+        self.running_subagents.len() != before
+    }
 
     /// The pending spawn, for the test seams that read launch state back.
     #[cfg(test)]

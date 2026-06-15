@@ -3,6 +3,7 @@ import type {
   Message,
   PendingPermission,
   PendingQuestion,
+  RunningSubagent,
   Send,
   Session,
   Thread,
@@ -383,6 +384,13 @@ export interface MockStore {
      * Absent means no question is pending.
      */
     pendingQuestion?: PendingQuestion;
+    /**
+     * The subagents (`Agent`/`Task` tool) currently running, mirrored from the
+     * scripted `subagent_started`/`subagent_finished` events so the sends
+     * envelope reports the running set the way the real server does (see
+     * `applyEvent`). Absent/empty means none is running.
+     */
+    runningSubagents?: RunningSubagent[];
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: Send[];

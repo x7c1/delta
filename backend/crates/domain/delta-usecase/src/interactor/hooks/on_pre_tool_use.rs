@@ -1,8 +1,22 @@
 use crate::error::Result;
-use crate::interactor::hooks::ASK_USER_QUESTION;
+use crate::interactor::hooks::{is_subagent_tool, ASK_USER_QUESTION};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::session_actor::runtime::PendingQuestion;
+use crate::interactor::session_actor::runtime::{PendingQuestion, RunningSubagent};
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+
+/// Read an optional string field out of a tool-input JSON object.
+///
+/// Returns `None` when the input is not an object, the key is missing, the
+/// value is not a string, or the string is empty — so a malformed or partial
+/// `Agent` input degrades to "no label" rather than failing the hook.
+fn string_field(tool_input_json: &str, key: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(tool_input_json)
+        .ok()?
+        .get(key)?
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+}
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -54,6 +68,33 @@ where
                 request_id: request.id,
                 tool_input_json: tool_input_json.to_owned(),
             }]);
+        }
+
+        if is_subagent_tool(tool_name) {
+            // A subagent (the `Agent`/`Task` tool) is starting. It runs in its
+            // own transcript that Delta never tails, so the conversation pane
+            // would otherwise show nothing while it works — track it as running
+            // and broadcast the start. Keyed by `tool_use_id`, the same id the
+            // matching foreground `PostToolUse(Agent)` carries to clear it. The
+            // runtime mirror lets a client that missed the event rebuild its
+            // indicator from the sends envelope.
+            let subagent_type = string_field(tool_input_json, "subagent_type");
+            let description = string_field(tool_input_json, "description");
+            let newly = self.state.start_subagent(RunningSubagent {
+                tool_use_id: tool_use_id.to_owned(),
+                subagent_type: subagent_type.clone(),
+                description: description.clone(),
+            });
+            // A duplicate `PreToolUse` for an already-tracked id (a retried hook
+            // delivery) must not double-broadcast, so only emit on a new entry.
+            if newly {
+                return Ok(vec![SessionEvent::SubagentStarted {
+                    session_id: self.id.clone(),
+                    tool_use_id: tool_use_id.to_owned(),
+                    subagent_type,
+                    description,
+                }]);
+            }
         }
 
         Ok(vec![])

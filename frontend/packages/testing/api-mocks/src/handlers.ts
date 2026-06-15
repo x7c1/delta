@@ -6,6 +6,7 @@ import type {
   MessagesResponse,
   PendingPermission,
   PendingQuestion,
+  RunningSubagent,
   NewSessionResponse,
   Send,
   SendRequest,
@@ -241,6 +242,8 @@ export function createMockApi(): MockApi {
         permission: entry.pendingPermission ?? null,
         // Likewise the pending AskUserQuestion, so its re-seed path works too.
         question: entry.pendingQuestion ?? null,
+        // Likewise the running subagents, so the reconnect re-seed path works.
+        running_subagents: entry.runningSubagents ?? [],
       };
       return HttpResponse.json(body);
     }),
@@ -518,6 +521,38 @@ export function createMockApi(): MockApi {
     }
   };
 
+  const startSubagent = (
+    sessionId: string,
+    subagent: RunningSubagent,
+  ) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (!entry) {
+      return;
+    }
+    const current = entry.runningSubagents ?? [];
+    if (current.some((s) => s.tool_use_id === subagent.tool_use_id)) {
+      return;
+    }
+    entry.runningSubagents = [...current, subagent];
+  };
+
+  const finishSubagent = (sessionId: string, toolUseId: string) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (!entry?.runningSubagents) {
+      return;
+    }
+    entry.runningSubagents = entry.runningSubagents.filter(
+      (s) => s.tool_use_id !== toolUseId,
+    );
+  };
+
+  const clearSubagents = (sessionId: string) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (entry) {
+      entry.runningSubagents = undefined;
+    }
+  };
+
   const applyEvent = (event: SessionEvent): void => {
     switch (event.kind) {
       case 'permission_requested':
@@ -543,6 +578,18 @@ export function createMockApi(): MockApi {
         setPendingPermission(event.session_id, undefined);
         setPendingQuestion(event.session_id, undefined);
         break;
+      case 'subagent_started':
+        // Mirror the running subagent into queryable state, as the real server
+        // keeps it for the sends envelope (reconnect re-seed).
+        startSubagent(event.session_id, {
+          tool_use_id: event.tool_use_id,
+          subagent_type: event.subagent_type,
+          description: event.description,
+        });
+        break;
+      case 'subagent_finished':
+        finishSubagent(event.session_id, event.tool_use_id);
+        break;
       case 'turn_started': {
         // The named send correlated with its transcript line: terminal.
         const send = store.sends.find((s) => s.id === event.send_id);
@@ -560,11 +607,14 @@ export function createMockApi(): MockApi {
         resolveOpenSends(event.session_id, 'matched');
         setPendingPermission(event.session_id, undefined);
         setPendingQuestion(event.session_id, undefined);
+        // A subagent cannot outlive its turn, mirroring the server's sweep.
+        clearSubagents(event.session_id);
         break;
       case 'turn_interrupted':
         resolveOpenSends(event.session_id, 'cancelled');
         setPendingPermission(event.session_id, undefined);
         setPendingQuestion(event.session_id, undefined);
+        clearSubagents(event.session_id);
         break;
       case 'session_registered': {
         // The spawn bound: the row activates and becomes listable, with a
@@ -591,6 +641,7 @@ export function createMockApi(): MockApi {
             // mirror when the close drives the turn back to idle.
             entry.pendingPermission = undefined;
             entry.pendingQuestion = undefined;
+            entry.runningSubagents = undefined;
           }
         }
         break;

@@ -24,4 +24,4 @@ tool_input: string, } | { "kind": "permission_resolved", session_id: string, req
  * `final` is a Rust keyword, so the field is `is_final` here while the
  * wire key stays `final` (the client accumulates until it is `true`).
  */
-final: boolean, delta: string, };
+final: boolean, delta: string, } | { "kind": "subagent_started", session_id: string, tool_use_id: string, subagent_type: string | null, description: string | null, } | { "kind": "subagent_finished", session_id: string, tool_use_id: string, };

@@ -12,9 +12,14 @@
 //!   before the transcript is flushed. Delta buffers each visible text chunk as
 //!   a provisional live preview of the in-flight turn and broadcasts it to the
 //!   browser; the hook is passive (an empty 200) so it never mutates the TUI.
-//! - `PreToolUse` fires for every tool call; Delta only records the request
-//!   (it carries the `tool_use_id` needed to resolve the notice later) and does
-//!   not notify the browser — the TUI decides allow/deny.
+//! - `PreToolUse` fires for every tool call; Delta records the request (it
+//!   carries the `tool_use_id` needed to resolve the notice later) and does not
+//!   notify the browser — the TUI decides allow/deny. It is also where Delta
+//!   detects a subagent (`Agent`/`Task`) starting, so the browser can show a
+//!   running indicator while it works in its own (untailed) transcript.
+//! - `PostToolUse` fires when a tool call completes; Delta acts on it only to
+//!   close a subagent's running window (matched on the same `tool_use_id`),
+//!   broadcasting `SubagentFinished`.
 //! - `PermissionRequest` fires only when an interactive permission dialog
 //!   actually appears (a human answer is genuinely pending); Delta notifies the
 //!   browser, correlating it to the request recorded at `PreToolUse`.
@@ -36,8 +41,8 @@ use delta_usecase::{
     UserPromptSubmitHook,
 };
 use delta_wire::hooks::{
-    MessageDisplayPayload, PermissionRequestPayload, PermissionRequestResponse, PreToolUsePayload,
-    SessionEndPayload, SessionStartPayload, StopPayload, UserPromptSubmitPayload,
+    MessageDisplayPayload, PermissionRequestPayload, PermissionRequestResponse, PostToolUsePayload,
+    PreToolUsePayload, SessionEndPayload, SessionStartPayload, StopPayload, UserPromptSubmitPayload,
     UserPromptSubmitResponse,
 };
 
@@ -248,6 +253,29 @@ pub async fn pre_tool_use(
             &tool_input_json,
             &payload.tool_use_id,
         )
+        .await
+    {
+        Ok(events) => {
+            state.broadcast(events);
+            StatusCode::OK.into_response()
+        }
+        Err(err) => internal_error(err).into_response(),
+    }
+}
+
+/// Handle a `PostToolUse` hook: a tool call completed. Delta only acts on the
+/// subagent (`Agent`/`Task`) case — it closes that subagent's running window by
+/// `tool_use_id` and broadcasts `SubagentFinished`. Every other tool's
+/// `PostToolUse` is an empty 200 (no runtime state changes).
+pub async fn post_tool_use(
+    State(state): State<AppState>,
+    Json(payload): Json<PostToolUsePayload>,
+) -> impl IntoResponse {
+    let session_id = SessionId::from(payload.session_id);
+
+    match state
+        .interactor()
+        .on_post_tool_use(&session_id, &payload.tool_name, &payload.tool_use_id)
         .await
     {
         Ok(events) => {

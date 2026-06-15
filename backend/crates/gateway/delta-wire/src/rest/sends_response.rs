@@ -1,7 +1,9 @@
 //! Response for `GET /api/sessions/{id}/sends`.
 
 use delta_model::Send;
-use delta_usecase::{PendingPermission, PendingQuestion, SessionLiveState, TurnState};
+use delta_usecase::{
+    PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState, TurnState,
+};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -103,11 +105,39 @@ impl From<PendingQuestion> for WirePendingQuestion {
     }
 }
 
+/// A subagent (the `Agent`/`Task` tool) currently running inside the session's
+/// turn, as reported on the REST surface.
+///
+/// The queryable counterpart of the `subagent_started` event (minus the session
+/// id the URL already names): the start/finish events are lost for a client
+/// whose socket was down when they fired, so a reconnecting client rebuilds its
+/// running-subagent indicator from this list instead.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(rename = "RunningSubagent")]
+pub struct WireRunningSubagent {
+    /// The `tool_use_id` of the `Agent`/`Task` call (its stable key).
+    pub tool_use_id: String,
+    /// The subagent type (e.g. `general-purpose`), if the call carried one.
+    pub subagent_type: Option<String>,
+    /// The short task description, if the call carried one, for display.
+    pub description: Option<String>,
+}
+
+impl From<RunningSubagent> for WireRunningSubagent {
+    fn from(subagent: RunningSubagent) -> Self {
+        WireRunningSubagent {
+            tool_use_id: subagent.tool_use_id,
+            subagent_type: subagent.subagent_type,
+            description: subagent.description,
+        }
+    }
+}
+
 /// Response for `GET /api/sessions/{id}/sends`: the session's open
 /// (non-terminal) sends — status `queued` or `dispatched` — oldest first, plus
 /// the session's queryable live state (the current turn state, the pending
-/// permission dialog, and the pending question, each present only when one
-/// awaits an answer).
+/// permission dialog, the pending question, and the running subagents — each
+/// present/non-empty only while something is in flight).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "SendsResponse")]
 pub struct WireSendsResponse {
@@ -115,6 +145,9 @@ pub struct WireSendsResponse {
     pub turn: WireTurn,
     pub permission: Option<WirePendingPermission>,
     pub question: Option<WirePendingQuestion>,
+    /// The subagents currently running in this session's turn, oldest first.
+    /// Empty when none is running.
+    pub running_subagents: Vec<WireRunningSubagent>,
 }
 
 impl WireSendsResponse {
@@ -124,6 +157,11 @@ impl WireSendsResponse {
             turn: live.turn.into(),
             permission: live.pending_permission.map(WirePendingPermission::from),
             question: live.pending_question.map(WirePendingQuestion::from),
+            running_subagents: live
+                .running_subagents
+                .into_iter()
+                .map(WireRunningSubagent::from)
+                .collect(),
         }
     }
 }
@@ -160,6 +198,7 @@ mod tests {
                 turn: TurnState::Idle,
                 pending_permission: None,
                 pending_question: None,
+                running_subagents: Vec::new(),
             },
         );
         assert_eq!(
@@ -169,6 +208,7 @@ mod tests {
                 "turn": { "state": "idle", "send_id": null },
                 "permission": null,
                 "question": null,
+                "running_subagents": [],
             }),
         );
     }
@@ -185,6 +225,7 @@ mod tests {
                     tool_input_json: "{\"command\":\"rm -rf scratch\"}".to_owned(),
                 }),
                 pending_question: None,
+                running_subagents: Vec::new(),
             },
         );
         assert_eq!(
@@ -198,6 +239,7 @@ mod tests {
                     "tool_input": "{\"command\":\"rm -rf scratch\"}",
                 },
                 "question": null,
+                "running_subagents": [],
             }),
         );
     }
@@ -213,6 +255,7 @@ mod tests {
                     request_id: 5,
                     tool_input_json: "{\"questions\":[{\"header\":\"Pick\"}]}".to_owned(),
                 }),
+                running_subagents: Vec::new(),
             },
         );
         assert_eq!(
@@ -225,6 +268,52 @@ mod tests {
                     "request_id": 5,
                     "tool_input": "{\"questions\":[{\"header\":\"Pick\"}]}",
                 },
+                "running_subagents": [],
+            }),
+        );
+    }
+
+    #[test]
+    fn sends_response_reports_the_running_subagents_oldest_first() {
+        let body = WireSendsResponse::new(
+            Vec::new(),
+            SessionLiveState {
+                turn: TurnState::InFlight { send_id: Some(7) },
+                pending_permission: None,
+                pending_question: None,
+                running_subagents: vec![
+                    RunningSubagent {
+                        tool_use_id: "toolu_01".to_owned(),
+                        subagent_type: Some("general-purpose".to_owned()),
+                        description: Some("Probe the codebase".to_owned()),
+                    },
+                    RunningSubagent {
+                        tool_use_id: "toolu_02".to_owned(),
+                        subagent_type: None,
+                        description: None,
+                    },
+                ],
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(body).unwrap(),
+            serde_json::json!({
+                "sends": [],
+                "turn": { "state": "in_flight", "send_id": 7 },
+                "permission": null,
+                "question": null,
+                "running_subagents": [
+                    {
+                        "tool_use_id": "toolu_01",
+                        "subagent_type": "general-purpose",
+                        "description": "Probe the codebase",
+                    },
+                    {
+                        "tool_use_id": "toolu_02",
+                        "subagent_type": null,
+                        "description": null,
+                    },
+                ],
             }),
         );
     }

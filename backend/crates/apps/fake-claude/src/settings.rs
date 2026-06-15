@@ -17,6 +17,7 @@ pub struct HookEndpoints {
     pub stop: String,
     pub message_display: String,
     pub pre_tool_use: String,
+    pub post_tool_use: String,
     pub permission_request: String,
 }
 
@@ -29,6 +30,7 @@ impl HookEndpoints {
             stop: hook_url(settings, "Stop")?,
             message_display: hook_url(settings, "MessageDisplay")?,
             pre_tool_use: hook_url(settings, "PreToolUse")?,
+            post_tool_use: hook_url(settings, "PostToolUse")?,
             permission_request: hook_url(settings, "PermissionRequest")?,
         })
     }
@@ -78,6 +80,9 @@ mod tests {
                 ],
                 "PreToolUse": [
                     { "matcher": "*", "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/pre-tool-use" } ] }
+                ],
+                "PostToolUse": [
+                    { "matcher": "*", "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/post-tool-use" } ] }
                 ],
                 "PermissionRequest": [
                     { "hooks": [ { "type": "http", "url": "http://127.0.0.1:7878/hooks/permission-request" } ] }

@@ -191,6 +191,11 @@ export function NavigatorPane({
   // viewing a different one carries a static unread dot on its row (see
   // SessionNode), distinct from the running spinner, cleared once focused.
   const unreadSessions = useLiveStore((state) => state.unreadSessions);
+  // Per-session running-subagent set. A subagent runs in its own (untailed)
+  // transcript, so its row carries a dedicated badge (see SessionNode) — the
+  // only place a running subagent is discoverable from the list. Kept distinct
+  // from the turn-activity spinner above.
+  const runningSubagents = useLiveStore((state) => state.runningSubagents);
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const settingsOpen = useNavStore((state) => state.settingsOpen);
@@ -331,6 +336,9 @@ export function NavigatorPane({
               unread={
                 !!unreadSessions[item.session.id] &&
                 focusedSessionId !== item.session.id
+              }
+              subagentCount={
+                runningSubagents[item.session.id]?.length ?? 0
               }
               onFocus={() => {
                 setFocusedSession(item.session.id);
