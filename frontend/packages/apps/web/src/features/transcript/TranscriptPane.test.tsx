@@ -1145,13 +1145,13 @@ describe('TranscriptPane', () => {
       // Stub the overlay's measured height, then fire the observer as a real
       // resize would. The body's padding-bottom = measured height + the overlay
       // inset gap (12px fallback in jsdom, which computes no custom-property) +
-      // the 64px reading gap that keeps the last turn off the composer.
+      // the 96px reading gap that keeps the last turn off the composer.
       overlay.getBoundingClientRect = () =>
         ({ height: 120 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
 
       await waitFor(() =>
-        expect(bodyEl().style.paddingBottom).toBe('196px'),
+        expect(bodyEl().style.paddingBottom).toBe('228px'),
       );
     });
 
@@ -1162,13 +1162,13 @@ describe('TranscriptPane', () => {
 
       overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
-      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('156px'));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('188px'));
 
       // The composer grows (more lines typed): the overlay is taller, so the
       // reserve grows in lockstep — the last turn stays clear of the input.
       overlay.getBoundingClientRect = () => ({ height: 200 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
-      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('276px'));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('308px'));
     });
 
     it('re-sticks the body to the bottom when the overlay grows while sticking', async () => {
@@ -1198,7 +1198,7 @@ describe('TranscriptPane', () => {
       // body to the new bottom (scrollTop := scrollHeight) so the tail stays
       // visible just above the grown composer.
       await waitFor(() =>
-        expect(body.style.paddingBottom).toBe('226px'),
+        expect(body.style.paddingBottom).toBe('258px'),
       );
       expect(body.scrollTop).toBe(1000);
     });
@@ -1226,7 +1226,7 @@ describe('TranscriptPane', () => {
 
       // Reading scrollback is not yanked to the bottom; only the reserve updates.
       await waitFor(() =>
-        expect(body.style.paddingBottom).toBe('226px'),
+        expect(body.style.paddingBottom).toBe('258px'),
       );
       expect(body.scrollTop).toBe(100);
     });
@@ -1245,7 +1245,7 @@ describe('TranscriptPane', () => {
       // Establish a baseline reserve before any branch is pending.
       overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
       act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
-      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('156px'));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('188px'));
 
       // Pin the body to the bottom (sticking) so a re-scroll would be visible.
       const body = bodyEl();
@@ -1275,7 +1275,7 @@ describe('TranscriptPane', () => {
 
       // The grown banner does NOT grow the reserve and does NOT re-stick the
       // body: the banner floats over the transcript tail instead of pushing it.
-      expect(body.style.paddingBottom).toBe('156px');
+      expect(body.style.paddingBottom).toBe('188px');
       expect(body.scrollTop).toBe(600);
     });
   });
