@@ -586,6 +586,7 @@ export function createMockApi(): MockApi {
           tool_use_id: event.tool_use_id,
           subagent_type: event.subagent_type,
           description: event.description,
+          background: event.background,
         });
         break;
       case 'subagent_finished':

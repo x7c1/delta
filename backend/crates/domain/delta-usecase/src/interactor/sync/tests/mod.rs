@@ -9,6 +9,7 @@
 mod support;
 
 mod api_error_line_emits_turn_interrupted_and_stays_on_thread;
+mod background_task_completion_clears_the_running_subagent;
 mod background_task_completion_lands_on_launching_thread;
 mod branch_send_attributes_late_arriving_lines_to_child;
 mod branch_send_attributes_user_and_assistant_to_child;

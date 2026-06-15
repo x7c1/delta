@@ -8,6 +8,7 @@ function subagent(overrides: Partial<SubagentActivity> = {}): SubagentActivity {
     toolUseId: 'toolu_a1',
     subagentType: 'general-purpose',
     description: 'Probe the codebase',
+    background: false,
     ...overrides,
   };
 }

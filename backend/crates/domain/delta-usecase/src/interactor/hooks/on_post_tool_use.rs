@@ -17,18 +17,22 @@ where
     /// `PostToolUse` fires for every tool call (including a subagent's own
     /// nested tools), so it is matched strictly against the subagent tool names
     /// (`{Agent, Task}`) — a nested `Bash` carries its own name and so never
-    /// clears the indicator. When a subagent (`Agent`/`Task`) completes, the
-    /// running entry recorded by the matching `PreToolUse` is removed by
-    /// `tool_use_id` and a [`SessionEvent::SubagentFinished`] is broadcast.
+    /// clears the indicator. When a FOREGROUND subagent (`Agent`/`Task`)
+    /// completes, the running entry recorded by the matching `PreToolUse` is
+    /// removed by `tool_use_id` and a [`SessionEvent::SubagentFinished`] is
+    /// broadcast.
     ///
-    /// This is the FOREGROUND (synchronous) end signal: a foreground
-    /// `Agent`/`Task` call's `PostToolUse` fires when the subagent finishes.
-    /// Background subagents (`run_in_background: true`) complete via a different
-    /// path and are out of scope here.
+    /// This is the FOREGROUND (synchronous) end signal only. A BACKGROUND
+    /// subagent (`run_in_background: true`) gets its `PostToolUse` immediately at
+    /// launch — the call returned, the subagent did not — so this must NOT
+    /// finish it. [`SessionRuntime::finish_foreground_subagent`] skips a
+    /// background entry; it is finished later when its completion
+    /// `<task-notification>` is folded during transcript sync.
     ///
-    /// A `PostToolUse` whose `tool_use_id` is not tracked (an unknown id, or one
-    /// already cleared when the turn ended) is a no-op: nothing is removed and
-    /// nothing is broadcast, so a stray end never produces a spurious event.
+    /// A `PostToolUse` whose `tool_use_id` is not tracked (an unknown id, one
+    /// already cleared when the turn ended, or a still-running background entry)
+    /// is a no-op: nothing is removed and nothing is broadcast, so a stray or
+    /// background end never produces a spurious event.
     pub(in crate::interactor) async fn on_post_tool_use(
         &mut self,
         tool_name: &str,
@@ -38,7 +42,7 @@ where
             return Ok(vec![]);
         }
 
-        if self.state.finish_subagent(tool_use_id) {
+        if self.state.finish_foreground_subagent(tool_use_id) {
             return Ok(vec![SessionEvent::SubagentFinished {
                 session_id: self.id.clone(),
                 tool_use_id: tool_use_id.to_owned(),

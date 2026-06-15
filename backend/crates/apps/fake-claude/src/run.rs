@@ -303,6 +303,18 @@ impl Engine {
                     .ok_or("tool_result step without a preceding tool_use")?;
                 self.transcript.tool_result(&id, *is_error)
             }
+            Step::TaskNotification => {
+                // The harness-injected completion line for a background tool
+                // call: a `<task-notification>` user line correlating back to the
+                // launching `tool_use_id`. The server folds it and finishes the
+                // background subagent's running window.
+                let id = self
+                    .last_tool_use
+                    .as_ref()
+                    .map(|t| t.id.clone())
+                    .ok_or("task_notification step without a preceding tool_use")?;
+                self.transcript.task_notification(&id)
+            }
             Step::Stop { stop_reason } => {
                 self.fire(
                     "Stop",

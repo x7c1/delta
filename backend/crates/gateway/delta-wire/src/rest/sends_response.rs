@@ -125,6 +125,10 @@ pub struct WireRunningSubagent {
     pub subagent_type: Option<String>,
     /// The short task description, if the call carried one, for display.
     pub description: Option<String>,
+    /// Whether the launch carried `run_in_background: true`. A reconnecting
+    /// client carries this so its turn-end sweep keeps a surviving background
+    /// subagent while dropping foreground ones.
+    pub background: bool,
 }
 
 impl From<RunningSubagent> for WireRunningSubagent {
@@ -133,6 +137,7 @@ impl From<RunningSubagent> for WireRunningSubagent {
             tool_use_id: subagent.tool_use_id,
             subagent_type: subagent.subagent_type,
             description: subagent.description,
+            background: subagent.background,
         }
     }
 }
@@ -294,11 +299,13 @@ mod tests {
                         tool_use_id: "toolu_01".to_owned(),
                         subagent_type: Some("general-purpose".to_owned()),
                         description: Some("Probe the codebase".to_owned()),
+                        background: false,
                     },
                     RunningSubagent {
                         tool_use_id: "toolu_02".to_owned(),
                         subagent_type: None,
                         description: None,
+                        background: true,
                     },
                 ],
             },
@@ -315,11 +322,13 @@ mod tests {
                         "tool_use_id": "toolu_01",
                         "subagent_type": "general-purpose",
                         "description": "Probe the codebase",
+                        "background": false,
                     },
                     {
                         "tool_use_id": "toolu_02",
                         "subagent_type": null,
                         "description": null,
+                        "background": true,
                     },
                 ],
             }),

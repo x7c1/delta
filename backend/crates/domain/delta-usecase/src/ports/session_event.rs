@@ -175,10 +175,12 @@ pub enum SessionEvent {
     /// reach the same hook but never match those names, so they do not flip the
     /// indicator. Correlated to its [`Self::SubagentFinished`] by `tool_use_id`.
     ///
-    /// This is the FOREGROUND (synchronous) case: the matching
-    /// `PostToolUse(Agent)` fires when the subagent completes. Background
-    /// subagents (`run_in_background: true`) complete via a different signal and
-    /// are out of scope here.
+    /// The [`Self::SubagentStarted::background`] flag distinguishes the two
+    /// lifecycles. A FOREGROUND (synchronous) subagent finishes when its
+    /// matching `PostToolUse(Agent)` fires. A BACKGROUND subagent
+    /// (`run_in_background: true`) returns immediately at launch — its
+    /// `PostToolUse` does NOT finish it — and finishes only when its completion
+    /// `<task-notification>` is folded during transcript sync.
     SubagentStarted {
         session_id: SessionId,
         /// The `tool_use_id` of the `Agent`/`Task` call (the correlation key).
@@ -187,13 +189,20 @@ pub enum SessionEvent {
         subagent_type: Option<String>,
         /// The short task description, if the call carried one, for display.
         description: Option<String>,
+        /// Whether the launch carried `run_in_background: true`. A background
+        /// subagent outlives the launching turn and is finished by its
+        /// completion notification, not by its immediate `PostToolUse`.
+        background: bool,
     },
     /// A subagent (the `Agent`/`Task` tool) finished running.
     ///
-    /// Detected from the main session's `PostToolUse` hook with `tool_name` in
-    /// `{Agent, Task}`, correlated to its [`Self::SubagentStarted`] by
-    /// `tool_use_id`. A `PostToolUse` for an id that was never tracked (or was
-    /// already cleared at turn end) is a no-op and emits nothing.
+    /// For a FOREGROUND subagent, detected from the main session's `PostToolUse`
+    /// hook with `tool_name` in `{Agent, Task}`. For a BACKGROUND subagent, it
+    /// is emitted when the completion `<task-notification>` is folded during
+    /// transcript sync (`Effect::SubagentCompleted`). Either way it is
+    /// correlated to its [`Self::SubagentStarted`] by `tool_use_id`; a finish
+    /// for an id that was never tracked (or was already cleared at turn end) is
+    /// a no-op and emits nothing.
     SubagentFinished {
         session_id: SessionId,
         tool_use_id: String,

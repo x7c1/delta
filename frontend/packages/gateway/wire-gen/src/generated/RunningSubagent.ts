@@ -21,4 +21,10 @@ subagent_type: string | null,
 /**
  * The short task description, if the call carried one, for display.
  */
-description: string | null, };
+description: string | null, 
+/**
+ * Whether the launch carried `run_in_background: true`. A reconnecting
+ * client carries this so its turn-end sweep keeps a surviving background
+ * subagent while dropping foreground ones.
+ */
+background: boolean, };

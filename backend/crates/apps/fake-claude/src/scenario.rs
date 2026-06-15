@@ -34,6 +34,7 @@
 //! | `post_tool_use` | Fire `PostToolUse` for the most recent `tool_use` (its tool name and `tool_use_id`), mirroring how the real `claude` signals a completed tool call. Used to close a subagent's (`Agent`/`Task`) running window without writing a `tool_result`. |
 //! | `permission_request { on_allow?, on_deny? }` | Fire `PermissionRequest` for the most recent `tool_use` (an interactive dialog appeared) and BLOCK until the hook responds, exactly like the real `claude` awaiting its permission hook. A decision response (`hookSpecificOutput.decision.behavior`) runs the matching `on_allow`/`on_deny` sub-steps (default empty); an empty passthrough response runs neither — the following steps then play the TUI-answered path. |
 //! | `tool_result { is_error? }` | Write the `tool_result` carrier line for the most recent `tool_use`. |
+//! | `task_notification` | Write the harness-injected `<task-notification>` completion line for the most recent `tool_use` (its `tool_use_id`), mirroring how the real `claude` reports a background tool call (`run_in_background: true`) finishing. Pair a `tool_use` (with `run_in_background: true` in its input) → `post_tool_use` (the immediate launch ack) → later `task_notification` to model a background subagent's full lifecycle. |
 //! | `stop { stop_reason? }` | Fire the `Stop` hook: the turn completed. |
 //! | `await_interrupt` | Block until Escape arrives, then write the `[Request interrupted by user]` marker line. No `Stop` fires — exactly like a real interrupt. |
 //! | `await_escape` | Block until Escape arrives, writing nothing. Models cancelling an `AskUserQuestion`: a single Escape cancels the call, after which the scenario writes a `tool_result { is_error: true }` for the question — exactly the bytes a real cancel produces. Unlike `await_interrupt` it writes no marker, so the cancel's `tool_result` is the next step. |
@@ -103,6 +104,7 @@ pub enum Step {
         #[serde(default)]
         is_error: bool,
     },
+    TaskNotification,
     Stop {
         #[serde(default)]
         stop_reason: Option<String>,
@@ -196,6 +198,7 @@ mod tests {
                       "on_allow": [ { "type": "tool_result" } ],
                       "on_deny": [ { "type": "reply", "text": "denied" } ] },
                     { "type": "tool_result", "is_error": true },
+                    { "type": "task_notification" },
                     { "type": "stop", "stop_reason": "end_turn" },
                     { "type": "await_interrupt" },
                     { "type": "enqueue_prompt", "text": "queued" },
@@ -211,7 +214,7 @@ mod tests {
             SessionStartMode::Delayed { delay_ms: 250 }
         );
         assert!(scenario.looped);
-        assert_eq!(scenario.steps.len(), 13);
+        assert_eq!(scenario.steps.len(), 14);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
             scenario.steps[1],
@@ -220,8 +223,9 @@ mod tests {
             }
         );
         assert_eq!(scenario.steps[4], Step::PostToolUse);
+        assert_eq!(scenario.steps[7], Step::TaskNotification);
         assert_eq!(
-            scenario.steps[7],
+            scenario.steps[8],
             Step::Stop {
                 stop_reason: Some("end_turn".to_owned())
             }
