@@ -30,6 +30,7 @@ pub fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
         created_at: Some("2026-01-01T00:00:00Z".into()),
         seq: 0,
         is_queued_command: false,
+        is_api_error: false,
     }
 }
 
@@ -37,6 +38,17 @@ pub fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         role: Role::Assistant,
         ..user_line(uuid, text)
+    }
+}
+
+/// A synthetic `isApiErrorMessage` assistant line: a turn that ended on an API
+/// error (a usage/session limit, a rate limit, or any other API failure)
+/// instead of completing normally. It fires no `Stop` hook and writes no
+/// interrupt marker, so the flag is its only turn-end signal.
+pub fn api_error_line(uuid: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        is_api_error: true,
+        ..assistant_line(uuid, "You've hit your session limit")
     }
 }
 

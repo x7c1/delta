@@ -37,10 +37,14 @@ where
     /// - [`SessionEvent::PermissionResolved`]: when a `tool_result` line is
     ///   ingested, the open permission request correlated by its `tool_use_id`
     ///   is resolved so the browser can clear the "permission requested" notice.
-    /// - [`SessionEvent::TurnInterrupted`]: when a `[Request interrupted by
-    ///   user...]` marker line is ingested, signalling the user aborted the
-    ///   in-flight turn. Claude's `Stop` hook does not fire on interrupt, so this
-    ///   is the hook-independent signal that clears the stuck send.
+    /// - [`SessionEvent::TurnInterrupted`]: emitted in two cases, both of which
+    ///   end a turn without firing Claude's `Stop` hook. (1) A `[Request
+    ///   interrupted by user...]` marker line: the user aborted the in-flight
+    ///   turn. (2) A synthetic `isApiErrorMessage` assistant line: the turn ended
+    ///   on an API error (a usage/session limit, a rate limit, or any other API
+    ///   failure). In either case this is the hook-independent signal that clears
+    ///   the stuck send. They differ only in the turn-machine input fed (an
+    ///   interrupt vs. a genuine stop), not in the browser signal.
     ///
     /// The caller is responsible for broadcasting these events.
     pub(in crate::interactor) async fn sync_transcript(
@@ -131,6 +135,24 @@ where
                     // keystrokes are sent from inside the ingestion path.
                     self.apply_turn_input(crate::turn::TurnInput::Interrupt)
                         .await?;
+                    events.push(SessionEvent::TurnInterrupted {
+                        session_id: session.id.clone(),
+                    });
+                }
+                Effect::TurnAborted => {
+                    // A synthetic `isApiErrorMessage` line ended the turn on an
+                    // API error (usage/session limit, rate limit, ...). The turn
+                    // genuinely ended, so feed `Stop` into the turn machine (back
+                    // to `Idle`) — this is the honest turn-end signal and gives
+                    // the same orphan-send disposition the missing `Stop` hook
+                    // would have. We reuse `TurnInterrupted` as the browser
+                    // signal: like an interrupt, no `Stop` hook fired, so the
+                    // browser must clear the stuck pending chip and drop any
+                    // orphaned streaming preview (which may never get a persisted
+                    // message). The caller releases the queued send after this
+                    // sync returns (it keys on `TurnInterrupted`), so no
+                    // keystrokes are sent from inside the ingestion path.
+                    self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session.id.clone(),
                     });

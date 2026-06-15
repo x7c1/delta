@@ -1,0 +1,7 @@
+{
+  "comment": "A branch turn ends on an API error (a usage/session limit): Claude writes a synthetic `isApiErrorMessage` assistant line instead of completing normally — no Stop hook, no interrupt marker. That line belongs to the aborted branch turn (thread 2, not main) and yields a `turn_aborted` effect; the human prompt typed afterwards is external input that resets attribution to main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "explore the side topic" }
+  ]
+}
