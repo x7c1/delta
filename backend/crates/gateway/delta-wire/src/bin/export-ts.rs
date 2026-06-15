@@ -17,10 +17,11 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use delta_wire::rest::{
-    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireErrorBody, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WirePermissionDecisionRequest,
-    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireSendResponse, WireSendsResponse,
-    WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireErrorBody, WireGitBranchesResponse,
+    WireGitRepoResponse, WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
+    WirePermissionDecisionRequest, WireQuestionAnswerRequest, WireQuestionCancelRequest,
+    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireThreadsResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireSessionEvent};
 use ts_rs::TS;
@@ -47,11 +48,14 @@ fn main() {
     WireCreateSendRequest::export_all(&config).expect("export CreateSendRequest.ts");
     WireSendResponse::export_all(&config).expect("export SendResponse.ts");
     WireSendsResponse::export_all(&config).expect("export SendsResponse.ts");
-    WirePermissionDecisionRequest::export_all(&config).expect("export PermissionDecisionRequest.ts");
+    WirePermissionDecisionRequest::export_all(&config)
+        .expect("export PermissionDecisionRequest.ts");
     WireQuestionAnswerRequest::export_all(&config).expect("export QuestionAnswerRequest.ts");
     WireQuestionCancelRequest::export_all(&config).expect("export QuestionCancelRequest.ts");
     WireWorkdirListResponse::export_all(&config).expect("export WorkdirListResponse.ts");
     WireWorkdirRecentResponse::export_all(&config).expect("export WorkdirRecentResponse.ts");
+    WireGitRepoResponse::export_all(&config).expect("export GitRepoResponse.ts");
+    WireGitBranchesResponse::export_all(&config).expect("export GitBranchesResponse.ts");
     WireLaunchOptionsResponse::export_all(&config).expect("export LaunchOptionsResponse.ts");
     WireCreateLaunchOptionRequest::export_all(&config)
         .expect("export CreateLaunchOptionRequest.ts");

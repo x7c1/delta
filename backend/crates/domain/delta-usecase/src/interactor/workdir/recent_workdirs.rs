@@ -1,15 +1,16 @@
 use crate::error::Result;
-use crate::ports::{RecentWorkdir, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::interactor::InteractorCore;
+use crate::ports::{GitWorktree, RecentWorkdir, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::RECENT_WORKDIRS_LIMIT;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// The recently-used working directories for the picker's "recent" list.
     ///

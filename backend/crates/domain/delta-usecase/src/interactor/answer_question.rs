@@ -17,14 +17,15 @@
 use crate::error::{Error, Result};
 use crate::interactor::question_keys::{answer_keys, parse_question_shapes, QuestionKeyError};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Answer the session's pending `AskUserQuestion` by injecting the keystrokes
     /// for `selections` (the chosen 0-based option indices per question) into the
@@ -70,9 +71,8 @@ where
                 "pending question {request_id} has no parseable options"
             ))
         })?;
-        let keys = answer_keys(&shapes, selections).map_err(|err| {
-            Error::InvalidQuestionAnswer(describe_key_error(request_id, &err))
-        })?;
+        let keys = answer_keys(&shapes, selections)
+            .map_err(|err| Error::InvalidQuestionAnswer(describe_key_error(request_id, &err)))?;
 
         // No live pane means the TUI is gone; treat it like a stale question so
         // the browser falls back to the terminal rather than reporting a server

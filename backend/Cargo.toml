@@ -17,6 +17,7 @@ delta-sqlite = { path = "crates/gateway/delta-sqlite" }
 delta-transcript = { path = "crates/gateway/delta-transcript" }
 tmux-driver = { path = "crates/gateway/tmux-driver" }
 workspace-fs = { path = "crates/gateway/workspace-fs" }
+git-worktree = { path = "crates/gateway/git-worktree" }
 delta-wire = { path = "crates/gateway/delta-wire" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
 delta-server = { path = "crates/apps/delta-server" }

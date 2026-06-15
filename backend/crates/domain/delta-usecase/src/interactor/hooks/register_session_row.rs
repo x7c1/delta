@@ -1,17 +1,18 @@
 use delta_model::{Session, SessionId, ThreadId};
 
 use crate::error::Result;
-use crate::ports::{
-    NewSession, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
-};
 use crate::interactor::InteractorCore;
+use crate::ports::{
+    GitWorktree, NewSession, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
+};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Upsert the session row and emit [`SessionEvent::SessionRegistered`],
     /// returning the session and its `main` thread id.

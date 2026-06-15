@@ -14,7 +14,7 @@
 
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 /// The browser's answer to a pending permission request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,12 +23,13 @@ pub enum PermissionDecision {
     Deny,
 }
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Resolve a pending permission request with the browser's decision.
     ///
@@ -56,7 +57,11 @@ where
         self.state.resolve_pending_permission(request_id);
 
         let allowed = decision == PermissionDecision::Allow;
-        let Some(request) = self.store.decide_permission_request(request_id, allowed).await? else {
+        let Some(request) = self
+            .store
+            .decide_permission_request(request_id, allowed)
+            .await?
+        else {
             // The waiter existed but the row is not `pending` — it was already
             // resolved out from under us (e.g. a tool_result ingested in the
             // same instant). The hook handler still gets the answer; a decided

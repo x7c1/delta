@@ -11,7 +11,7 @@ use crate::Interactor;
 /// `enqueue_send` would open it early and trip the double-open guard on the
 /// explicit `open_session` under test).
 pub(super) async fn closed_session_with_pending_branch() -> (
-    Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace, FakeGitWorktree>,
     SessionId,
     ThreadId,
     ThreadId,
@@ -43,7 +43,7 @@ pub(super) async fn closed_session_with_pending_branch() -> (
 
 /// The thread a given ingested message landed on, by uuid.
 pub(super) fn ingested_thread(
-    ix: &Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    ix: &Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace, FakeGitWorktree>,
     uuid: &str,
 ) -> Option<ThreadId> {
     ix.store()

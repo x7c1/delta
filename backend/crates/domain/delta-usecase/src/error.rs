@@ -61,6 +61,24 @@ pub enum Error {
     #[error("tmux driver error: {0}")]
     Tmux(String),
 
+    /// A worktree was requested for a fresh session, but the selected working
+    /// directory is not inside a git repository. The caller named a directory
+    /// that cannot host a worktree, so this is surfaced as `400`.
+    #[error("not a git repository: {0}")]
+    WorktreeNotAGitRepo(String),
+
+    /// A worktree was requested for a fresh session, but no working directory
+    /// was selected to root it in. A worktree needs a git repository to branch
+    /// off, so this request shape is rejected as `400`.
+    #[error("a worktree requires a selected working directory")]
+    WorktreeRequiresWorkdir,
+
+    /// A git operation (detection or worktree creation) failed. Surfaced as a
+    /// `500`: the request was well-formed, but the underlying `git` invocation
+    /// errored.
+    #[error("git error: {0}")]
+    Git(String),
+
     /// A transcript read/parse failure.
     #[error("transcript error: {0}")]
     Transcript(String),

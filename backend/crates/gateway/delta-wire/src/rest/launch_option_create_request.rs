@@ -37,10 +37,9 @@ mod tests {
         assert_eq!(req.label, None);
         assert_eq!(req.value, None);
 
-        let req: WireCreateLaunchOptionRequest = serde_json::from_str(
-            r#"{"label":"plugins","name":"--plugin-dir","value":"/opt/p"}"#,
-        )
-        .unwrap();
+        let req: WireCreateLaunchOptionRequest =
+            serde_json::from_str(r#"{"label":"plugins","name":"--plugin-dir","value":"/opt/p"}"#)
+                .unwrap();
         assert_eq!(req.label.as_deref(), Some("plugins"));
         assert_eq!(req.value.as_deref(), Some("/opt/p"));
     }

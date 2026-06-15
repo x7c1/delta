@@ -14,6 +14,7 @@ use std::time::Instant;
 use delta_model::{Message, MessageUuid, Send, ThreadId};
 use tokio::sync::oneshot;
 
+use super::runtime::SessionLiveState;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
 use crate::interactor::lifecycle::FreshSpawn;
@@ -23,7 +24,7 @@ use crate::ports::{
     MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
     UserPromptSubmitHook,
 };
-use super::runtime::SessionLiveState;
+use crate::send_target::WorktreeSpec;
 
 /// The reply channel for an input that produces a result.
 pub(in crate::interactor) type Reply<R> = oneshot::Sender<Result<R>>;
@@ -48,6 +49,10 @@ pub(in crate::interactor) enum SessionInput {
         /// The user-selected registered launch options to resolve to argv flags
         /// at spawn, in selection order.
         launch_option_ids: Vec<i64>,
+        /// An opt-in request to start the session inside a git worktree of the
+        /// selected `workdir`. Only meaningful when `workdir` is `Some` and that
+        /// directory is a git repository.
+        worktree: Option<WorktreeSpec>,
         reply: Reply<FreshSpawn>,
     },
     /// Resume the (closed but known) session.
@@ -121,10 +126,7 @@ pub(in crate::interactor) enum SessionInput {
     },
     /// The browser cancelled a pending `AskUserQuestion` of this session: inject
     /// `Escape` into the TUI pane, which cancels the whole call.
-    CancelQuestion {
-        request_id: i64,
-        reply: Reply<()>,
-    },
+    CancelQuestion { request_id: i64, reply: Reply<()> },
 
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous
@@ -144,7 +146,9 @@ pub(in crate::interactor) enum SessionInput {
 
     // ---- Queries (runtime reads) -------------------------------------------
     /// The pane driving the session, if open (the PTY bridge's routing key).
-    QueryPane { reply: oneshot::Sender<Option<String>> },
+    QueryPane {
+        reply: oneshot::Sender<Option<String>>,
+    },
     /// Whether the session is open (has a live, bound pane).
     QueryIsOpen { reply: oneshot::Sender<bool> },
     /// Whether any pane is live for the session (bound, or spawned and

@@ -27,7 +27,7 @@ use delta_model::SessionId;
 use tokio::sync::mpsc;
 
 use crate::interactor::InteractorCore;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::actor;
 use super::input::SessionInput;
@@ -37,23 +37,24 @@ use super::input::SessionInput;
 pub(in crate::interactor) type ActorMap = HashMap<SessionId, mpsc::UnboundedSender<SessionInput>>;
 
 /// Routes per-session inputs to the owning actor, spawning actors lazily.
-pub(in crate::interactor) struct SessionRegistry<T, X, S, W> {
+pub(in crate::interactor) struct SessionRegistry<T, X, S, W, G> {
     /// The shared core handed to each spawned actor. Weak so the actors (which
     /// each hold a strong `Arc`) are what keep the core alive, not the
     /// registry — dropping the interactor closes every mailbox and lets the
     /// actors run down.
-    core: Weak<InteractorCore<T, X, S, W>>,
+    core: Weak<InteractorCore<T, X, S, W, G>>,
     actors: Arc<Mutex<ActorMap>>,
 }
 
-impl<T, X, S, W> SessionRegistry<T, X, S, W>
+impl<T, X, S, W, G> SessionRegistry<T, X, S, W, G>
 where
     T: TmuxDriver + 'static,
     X: Transcript + 'static,
     S: SessionStore + 'static,
     W: Workspace + 'static,
+    G: GitWorktree + 'static,
 {
-    pub(in crate::interactor) fn new(core: &Arc<InteractorCore<T, X, S, W>>) -> Self {
+    pub(in crate::interactor) fn new(core: &Arc<InteractorCore<T, X, S, W, G>>) -> Self {
         Self {
             core: Arc::downgrade(core),
             actors: Arc::new(Mutex::new(HashMap::new())),

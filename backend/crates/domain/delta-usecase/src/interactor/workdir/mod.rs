@@ -1,6 +1,7 @@
 //! Working-directory use cases for the directory picker.
 
 mod browse_workdir;
+mod git_repo;
 mod home_dir;
 mod recent_workdirs;
 

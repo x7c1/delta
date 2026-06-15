@@ -2,14 +2,15 @@ use std::time::Instant;
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Dispatch this session's held first prompt if its resume is ready *and*
     /// has settled, on the background tick.
@@ -45,7 +46,10 @@ where
     /// `Instant::now()`, while tests advance a controlled instant.
     ///
     /// [`RESUME_DISPATCH_SETTLE`]: crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE
-    pub(in crate::interactor) async fn dispatch_ready_resume(&mut self, now: Instant) -> Result<()> {
+    pub(in crate::interactor) async fn dispatch_ready_resume(
+        &mut self,
+        now: Instant,
+    ) -> Result<()> {
         let Some(resuming) = self.state.take_ready_for_dispatch(now) else {
             return Ok(());
         };

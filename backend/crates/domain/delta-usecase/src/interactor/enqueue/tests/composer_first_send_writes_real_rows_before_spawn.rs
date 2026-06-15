@@ -22,6 +22,7 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
             SendTarget::NewSession {
                 workdir: None,
                 launch_option_ids: Vec::new(),
+                worktree: None,
             },
             "first message",
             None,

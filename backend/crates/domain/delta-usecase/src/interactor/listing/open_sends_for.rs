@@ -1,15 +1,16 @@
 use delta_model::{Send, SessionId};
 
 use crate::error::{Error, Result};
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::interactor::InteractorCore;
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// A session's open (non-terminal) sends — status `queued` or
     /// `dispatched` — oldest first.

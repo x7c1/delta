@@ -6,6 +6,8 @@
 
 mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
+mod git_worktree;
+pub use git_worktree::{GitRepoInfo, GitWorktree, RemoteBranches, WorktreeStartPoint};
 mod message_display_hook;
 pub use message_display_hook::MessageDisplayHook;
 mod new_session;

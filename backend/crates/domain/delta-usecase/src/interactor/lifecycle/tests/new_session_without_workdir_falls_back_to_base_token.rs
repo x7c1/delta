@@ -11,12 +11,13 @@ async fn new_session_without_workdir_falls_back_to_base_token() {
         SendTarget::NewSession {
             workdir: None,
             launch_option_ids: Vec::new(),
+            worktree: None,
         },
         "hello",
         None,
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     let created = ix.tmux_fake().created.lock().unwrap().clone();
     assert_eq!(created.len(), 1);

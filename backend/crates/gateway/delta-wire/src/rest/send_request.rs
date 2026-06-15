@@ -5,6 +5,8 @@ use delta_usecase::SendTarget;
 use serde::Deserialize;
 use ts_rs::TS;
 
+use super::worktree_spec::WireWorktreeSpec;
+
 /// Request body for `POST /api/sends`.
 ///
 /// A send either continues an existing session — by naming the `thread_id` it
@@ -64,6 +66,15 @@ pub struct WireCreateSendRequest {
     #[serde(default)]
     #[ts(optional)]
     pub launch_option_ids: Option<Vec<i64>>,
+    /// An opt-in request to start a fresh session inside a git worktree of the
+    /// selected `workdir`. Only meaningful with `new_session: true` and a
+    /// `workdir` that is a git repository; for a thread send (or a new session
+    /// without a workdir) it is rejected/ignored downstream. When omitted, the
+    /// session starts directly in the selected/default directory (the unchanged
+    /// behavior).
+    #[serde(default)]
+    #[ts(optional)]
+    pub worktree: Option<WireWorktreeSpec>,
 }
 
 /// Why a [`WireCreateSendRequest`] could not be resolved to a [`SendTarget`].
@@ -113,6 +124,7 @@ impl WireCreateSendRequest {
                 SendTarget::NewSession {
                     workdir: self.workdir,
                     launch_option_ids: self.launch_option_ids.unwrap_or_default(),
+                    worktree: self.worktree.map(Into::into),
                 }
             }
         };
@@ -136,6 +148,7 @@ mod tests {
             locator_quote: Some("q".into()),
             workdir: None,
             launch_option_ids: None,
+            worktree: None,
         };
         let (target, text, quote) = req.into_target().expect("a plain thread send is valid");
         assert!(
@@ -164,6 +177,7 @@ mod tests {
             locator_quote: None,
             workdir: None,
             launch_option_ids: None,
+            worktree: None,
         };
         let (target, _, _) = req.into_target().expect("a branch send is valid");
         match target {
@@ -195,6 +209,7 @@ mod tests {
             locator_quote: None,
             workdir: None,
             launch_option_ids: None,
+            worktree: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(matches!(
@@ -202,6 +217,7 @@ mod tests {
             SendTarget::NewSession {
                 workdir: None,
                 launch_option_ids,
+                ..
             } if launch_option_ids.is_empty()
         ));
     }
@@ -218,6 +234,7 @@ mod tests {
             locator_quote: None,
             workdir: Some("/projects/app".into()),
             launch_option_ids: None,
+            worktree: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -239,6 +256,7 @@ mod tests {
             locator_quote: None,
             workdir: Some("/ignored".into()),
             launch_option_ids: None,
+            worktree: None,
         };
         let (target, _, _) = req.into_target().expect("a plain thread send is valid");
         assert!(matches!(
@@ -262,6 +280,7 @@ mod tests {
             locator_quote: None,
             workdir: None,
             launch_option_ids: None,
+            worktree: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Unspecified);
     }
@@ -279,6 +298,7 @@ mod tests {
             locator_quote: None,
             workdir: None,
             launch_option_ids: None,
+            worktree: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Conflicting);
     }
@@ -296,6 +316,7 @@ mod tests {
             locator_quote: None,
             workdir: None,
             launch_option_ids: None,
+            worktree: None,
         };
         assert_eq!(
             req.into_target().unwrap_err(),
@@ -336,6 +357,7 @@ mod tests {
             locator_quote: None,
             workdir: None,
             launch_option_ids: Some(vec![3, 1, 2]),
+            worktree: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -346,5 +368,59 @@ mod tests {
             ),
             "the selected launch-option ids ride on the NewSession target in order"
         );
+    }
+
+    /// A `new_session` send carrying a `worktree` maps it onto the `NewSession`
+    /// target, where it gates the worktree-at-launch path.
+    #[test]
+    fn new_session_with_worktree_carries_the_spec() {
+        use delta_usecase::WorktreeStartPoint;
+
+        let req: WireCreateSendRequest = serde_json::from_str(
+            r#"{
+                "new_session": true,
+                "text": "in a worktree",
+                "workdir": "/projects/app",
+                "worktree": { "start_point": { "kind": "remote_branch", "name": "main" } }
+            }"#,
+        )
+        .unwrap();
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        match target {
+            SendTarget::NewSession { worktree, .. } => {
+                let spec = worktree.expect("the worktree spec rides on the target");
+                assert_eq!(
+                    spec.start_point,
+                    WorktreeStartPoint::RemoteBranch("main".to_owned()),
+                );
+            }
+            SendTarget::Thread { .. } => panic!("a new_session send must not be a Thread target"),
+        }
+    }
+
+    /// A `worktree` on a thread send is dropped: an existing thread's session is
+    /// already running, so the request resolves to a plain `Thread` target.
+    #[test]
+    fn worktree_is_ignored_for_a_thread_send() {
+        let req = WireCreateSendRequest {
+            thread_id: Some(5),
+            new_session: false,
+            semantic_parent_uuid: None,
+            text: "hi".into(),
+            locator_quote: None,
+            workdir: None,
+            launch_option_ids: None,
+            worktree: Some(WireWorktreeSpec {
+                start_point: super::super::worktree_spec::WireWorktreeStartPoint::Head,
+            }),
+        };
+        let (target, _, _) = req.into_target().expect("a plain thread send is valid");
+        assert!(matches!(
+            target,
+            SendTarget::Thread {
+                thread_id: ThreadId(5),
+                branch_from: None,
+            }
+        ));
     }
 }

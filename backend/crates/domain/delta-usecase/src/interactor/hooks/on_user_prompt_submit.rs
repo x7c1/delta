@@ -3,18 +3,20 @@ use delta_attribution::claude_format;
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
-    SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
+    GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook,
+    Workspace,
 };
 use crate::turn::TurnInput;
 
 use super::match_uuid_for_prompt;
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `UserPromptSubmit` hook.
     ///

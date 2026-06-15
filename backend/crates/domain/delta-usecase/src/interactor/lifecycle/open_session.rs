@@ -4,16 +4,17 @@ use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{OpenHandle, ResumingSession};
 use crate::pane_token::PaneToken;
-use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::{RESUME_FLAG, SETTINGS_FLAG};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Resume a closed but known session under a fresh tmux session.
     ///

@@ -20,14 +20,15 @@
 use crate::error::{Error, Result};
 use crate::interactor::question_keys::cancel_keys;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Cancel the session's pending `AskUserQuestion` by injecting `Escape` into
     /// the live TUI pane.

@@ -2,14 +2,15 @@ use delta_model::LaunchOption;
 
 use crate::error::Result;
 use crate::interactor::InteractorCore;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// All registered launch options for the settings screen, newest first.
     pub async fn list_launch_options(&self) -> Result<Vec<LaunchOption>> {

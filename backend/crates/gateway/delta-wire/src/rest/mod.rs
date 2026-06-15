@@ -10,6 +10,8 @@
 
 mod error_body;
 pub use error_body::WireErrorBody;
+mod git_response;
+pub use git_response::{WireGitBranchesResponse, WireGitRepoResponse};
 mod launch_option_create_request;
 pub use launch_option_create_request::WireCreateLaunchOptionRequest;
 mod launch_options_response;
@@ -40,3 +42,5 @@ mod workdir_list_response;
 pub use workdir_list_response::{WireWorkdirEntry, WireWorkdirListResponse};
 mod workdir_recent_response;
 pub use workdir_recent_response::{WireRecentWorkdirItem, WireWorkdirRecentResponse};
+mod worktree_spec;
+pub use worktree_spec::{WireWorktreeSpec, WireWorktreeStartPoint};

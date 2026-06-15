@@ -3,14 +3,15 @@ use std::time::Instant;
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::InteractorCore;
-use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Reap this session's launch if it never became ready before its deadline
     /// (the watchdog sweep), covering both a fresh spawn and a resume.
@@ -84,9 +85,7 @@ where
             // which cancels the held first prompt's outstanding send (if any)
             // so its row does not shadow correlation when the session is later
             // resumed again.
-            let _ = self
-                .apply_turn_input(crate::turn::TurnInput::Close)
-                .await;
+            let _ = self.apply_turn_input(crate::turn::TurnInput::Close).await;
             events.push(SessionEvent::SpawnFailed {
                 session_id: self.id.clone(),
                 pane_token: resuming.token.as_str().to_owned(),
@@ -96,12 +95,13 @@ where
     }
 }
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Clean up the eagerly-created session row of a spawn that never bound.
     ///

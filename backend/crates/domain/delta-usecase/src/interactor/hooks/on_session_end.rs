@@ -1,15 +1,16 @@
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
-    SessionEndHook, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
+    GitWorktree, SessionEndHook, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
 };
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `SessionEnd` hook: catch a launch that died before it became
     /// ready, otherwise treat it as a normal end.
@@ -79,9 +80,7 @@ where
             // The session's pane is gone: feed `Close` into the turn machine,
             // which cancels the held first prompt's outstanding send (if any)
             // so its row does not shadow correlation on a later re-resume.
-            let _ = self
-                .apply_turn_input(crate::turn::TurnInput::Close)
-                .await;
+            let _ = self.apply_turn_input(crate::turn::TurnInput::Close).await;
             return Ok(vec![SessionEvent::SpawnFailed {
                 session_id: hook.session_id,
                 pane_token: resuming.token.as_str().to_owned(),

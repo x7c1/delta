@@ -2,6 +2,21 @@
 
 use delta_model::{MessageUuid, ThreadId};
 
+use crate::ports::WorktreeStartPoint;
+
+/// An opt-in request to start a fresh session inside a git worktree.
+///
+/// When a `NewSession` carries a `WorktreeSpec` and a selected working
+/// directory that is a git repository, Delta creates a per-session worktree and
+/// launches the session there instead of in the selected directory itself. The
+/// only knob is where the worktree's branch starts from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeSpec {
+    /// Where the new worktree's branch should start from (current `HEAD` or a
+    /// fetched remote branch).
+    pub start_point: WorktreeStartPoint,
+}
+
 /// The target a send is directed at.
 ///
 /// A send no longer implies "the single session": the caller states whether the
@@ -40,5 +55,11 @@ pub enum SendTarget {
         /// registered `(name, value?)` flag record at spawn and pushed onto the
         /// launch argv. Empty when the user selected none.
         launch_option_ids: Vec<i64>,
+        /// An opt-in request to start the session inside a git worktree of the
+        /// selected `workdir`. When `Some`, the selected directory must be a git
+        /// repository: Delta creates a per-session worktree and launches there
+        /// instead of in the directory itself. When `None`, the session starts
+        /// directly in `workdir` (the unchanged behavior).
+        worktree: Option<WorktreeSpec>,
     },
 }

@@ -1,15 +1,16 @@
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
-    SessionEvent, SessionStartHook, SessionStore, TmuxDriver, Transcript, Workspace,
+    GitWorktree, SessionEvent, SessionStartHook, SessionStore, TmuxDriver, Transcript, Workspace,
 };
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `SessionStart` hook: the session's TUI is ready to accept input.
     ///

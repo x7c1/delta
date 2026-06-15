@@ -1,15 +1,16 @@
 use crate::error::Result;
 use crate::interactor::hooks::ASK_USER_QUESTION;
-use crate::interactor::session_actor::runtime::PendingQuestion;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::interactor::session_actor::runtime::PendingQuestion;
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `PreToolUse` hook: only RECORD the permission request. This hook
     /// fires for every tool call (including auto-approved and long-running ones),

@@ -29,11 +29,12 @@ use serde::Deserialize;
 
 use delta_usecase::{SessionId, ThreadId};
 use delta_wire::rest::{
-    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireLaunchOption,
-    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
-    WirePermissionDecisionRequest, WireQuestionAnswerRequest, WireQuestionCancelRequest,
-    WireRecentWorkdirItem, WireSendResponse, WireSendsResponse, WireSessionListItem,
-    WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
+    WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
+    WireNewSessionResponse, WirePermissionDecisionRequest, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRecentWorkdirItem, WireSendResponse, WireSendsResponse,
+    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -218,6 +219,58 @@ pub(crate) async fn recent_workdir(
     }))
 }
 
+/// Query parameters for the git-detection endpoints: the directory to inspect.
+#[derive(Debug, Deserialize)]
+pub(crate) struct WorkdirGitQuery {
+    /// The absolute path to inspect. Required: unlike the browse endpoints there
+    /// is no sensible default repository to fall back to.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+impl WorkdirGitQuery {
+    /// The required `path`, or a `400` when it is missing or blank.
+    fn require_path(&self) -> Result<&str, ApiError> {
+        match self.path.as_deref() {
+            Some(path) if !path.is_empty() => Ok(path),
+            _ => Err(ApiError::BadRequest(
+                "a `path` query parameter is required".to_owned(),
+            )),
+        }
+    }
+}
+
+/// `GET /api/workdir/git` — detect whether a directory is a git repository.
+///
+/// Returns `{ repo_root, default_branch }`: `repo_root` is the repository root
+/// containing `path` (`null` when it is not inside a git repository), and
+/// `default_branch` is that repository's default branch when known. No fetch, so
+/// this is cheap to call as the picker's selection changes. A missing `path` is
+/// a `400`.
+pub(crate) async fn workdir_git(
+    State(state): State<AppState>,
+    Query(query): Query<WorkdirGitQuery>,
+) -> Result<Json<WireGitRepoResponse>, ApiError> {
+    let path = query.require_path()?;
+    let info = state.interactor().git_repo_info(path).await?;
+    Ok(Json(WireGitRepoResponse::from(info)))
+}
+
+/// `GET /api/workdir/git/branches` — the remote branches of a repository.
+///
+/// Resolves the repository containing `path`, fetches the remote, and returns
+/// `{ default_branch, remote_branches }` so a branch picker can offer a base for
+/// a worktree. A `path` that is not inside a git repository is a `400` (the
+/// `not a git repository` use-case error), and a missing `path` is also a `400`.
+pub(crate) async fn workdir_git_branches(
+    State(state): State<AppState>,
+    Query(query): Query<WorkdirGitQuery>,
+) -> Result<Json<WireGitBranchesResponse>, ApiError> {
+    let path = query.require_path()?;
+    let remote = state.interactor().git_remote_branches(path).await?;
+    Ok(Json(WireGitBranchesResponse::from(remote)))
+}
+
 /// `GET /api/launch-options` — the registered custom launch options.
 ///
 /// Returns the flat `(label?, name, value?)` records the user has registered as
@@ -251,8 +304,16 @@ pub(crate) async fn create_launch_option(
     // `label`/`value` are kept verbatim apart from trimming surrounding
     // whitespace; an all-blank optional is treated as absent rather than a
     // stored empty string.
-    let label = req.label.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let value = req.value.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let label = req
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let value = req
+        .value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let option = state
         .interactor()
         .create_launch_option(label, name, value)

@@ -9,15 +9,16 @@
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{OrphanedSend, TurnInput, TurnState};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Apply one input to the session's turn state machine, executing the
     /// transition's orphan disposition and logging anomalies. Returns the next

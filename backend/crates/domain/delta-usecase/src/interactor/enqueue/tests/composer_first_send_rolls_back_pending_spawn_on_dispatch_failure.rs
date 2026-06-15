@@ -21,6 +21,7 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
             SendTarget::NewSession {
                 workdir: None,
                 launch_option_ids: Vec::new(),
+                worktree: None,
             },
             "first message",
             None,

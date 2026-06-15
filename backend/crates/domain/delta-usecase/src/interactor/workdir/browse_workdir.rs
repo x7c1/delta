@@ -1,15 +1,16 @@
 use crate::error::Result;
-use crate::ports::{DirListing, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::interactor::InteractorCore;
+use crate::ports::{DirListing, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::home_dir;
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Browse the immediate subdirectories of `path` for the directory picker.
     ///

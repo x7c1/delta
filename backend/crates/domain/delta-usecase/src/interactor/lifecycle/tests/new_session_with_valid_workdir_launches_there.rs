@@ -18,6 +18,7 @@ async fn new_session_with_valid_workdir_launches_there() {
         SendTarget::NewSession {
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
+            worktree: None,
         },
         "hello",
         None,

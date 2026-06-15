@@ -1,13 +1,14 @@
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Close an open session: capture its final transcript line, kill its pane,
     /// and drop its binding.
@@ -38,6 +39,12 @@ where
         if let Some(handle) = self.state.remove_open() {
             self.tmux.kill_session(handle.token.as_str()).await?;
         }
+        // Deliberate no-op for git worktrees (MVP): a session that started in a
+        // worktree keeps it on close. `session.cwd` is the worktree path, so a
+        // later resume reattaches to the still-present worktree rather than
+        // recreating it. Removing the worktree (and its branch) on close is
+        // deferred until there is an explicit cleanup story; doing it here would
+        // throw away uncommitted work the moment a session is closed.
         // The pane is gone, so whatever turn was in flight can no longer
         // progress: feed `Close` into the turn machine (an unechoed outstanding
         // send is cancelled; an in-flight one is swept if it never matched).
