@@ -129,9 +129,15 @@ describe('PendingQueue server sends', () => {
       },
     );
 
-    expect(screen.getAllByTestId('pending-item')).toHaveLength(1);
+    const items = screen.getAllByTestId('pending-item');
+    expect(items).toHaveLength(1);
     expect(screen.getByText('still running')).toBeInTheDocument();
-    expect(screen.getByText('in progress')).toBeInTheDocument();
+    // The in-progress indicator now lives in the strip header, not the row:
+    // the running row carries no per-row spinner, so its text never shifts.
+    expect(
+      screen.getByRole('status', { name: 'in progress' }),
+    ).toBeInTheDocument();
+    expect(items[0].querySelector('[role="status"]')).toBeNull();
   });
 
   it('does not double-render a tracked send that is still in the open list', () => {

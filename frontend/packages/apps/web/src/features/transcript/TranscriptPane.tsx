@@ -58,7 +58,7 @@ const OVERLAY_INSET_FALLBACK_PX = 12;
  * reserve always had is preserved here while the rest of the reserve still tracks
  * the overlay's real height. Present at every composer size and grows with it.
  */
-const BODY_BOTTOM_READING_GAP_PX = 64;
+const BODY_BOTTOM_READING_GAP_PX = 192;
 
 /**
  * The overlay inset in pixels: the gap the floating cards leave from the body
@@ -660,24 +660,23 @@ export function TranscriptPane({
 
         {showExternalInput && activeThread && (
           <div
-            className="space-y-1 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+            className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
             data-testid="external-input-notice"
           >
-            <div className="flex items-start gap-2">
-              <Badge tone="info">external input</Badge>
-              <span className="line-clamp-2 text-slate-700">
-                {externalInput.prompt}
-              </span>
-            </div>
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => dismissExternalInput(activeThread.session_id)}
-              >
-                Dismiss
-              </Button>
-            </div>
+            <Badge className="shrink-0" tone="info">
+              external input
+            </Badge>
+            <span className="min-w-0 flex-1 line-clamp-2 break-words text-slate-700">
+              {externalInput.prompt}
+            </span>
+            <Button
+              className="shrink-0"
+              size="sm"
+              variant="ghost"
+              onClick={() => dismissExternalInput(activeThread.session_id)}
+            >
+              Dismiss
+            </Button>
           </div>
         )}
 
@@ -734,6 +733,17 @@ export function TranscriptPane({
       return;
     }
     const apply = () => {
+      // While a branch is being composed, the "Branch from selected text" banner
+      // adds height to this overlay. Folding that into the body's bottom reserve
+      // (and the stick-to-bottom re-scroll) shifts the transcript the instant
+      // text is selected — moving the very selection the user is trying to
+      // adjust, and making it hard to read. So while a branch is pending, hold
+      // the reserve and skip the re-scroll: the banner floats over the transcript
+      // tail instead of pushing it. The reserve recomputes once the branch is
+      // cleared or sent (this effect re-runs and apply() proceeds normally).
+      if (useComposerStore.getState().branchOrigin !== null) {
+        return;
+      }
       const height = overlay.getBoundingClientRect().height;
       setBottomReserve(
         height + overlayInsetPx(overlay) + BODY_BOTTOM_READING_GAP_PX,

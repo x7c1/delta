@@ -38,6 +38,16 @@ export function PendingQueue({ entries }: PendingQueueProps) {
     (entry) => entry.kind === 'server' && entry.send.status === 'queued',
   ).length;
 
+  // Whether any entry is actively in progress (i.e. not a failure row). Drives
+  // the single header spinner: keeping the running indicator in the stable
+  // header avoids shifting each row's text when an icon appears mid-flight.
+  const hasActiveWork = entries.some(
+    (entry) =>
+      entry.kind === 'server' ||
+      entry.kind === 'local' ||
+      (entry.kind === 'sending' && entry.item.status !== 'failed'),
+  );
+
   const failureRow = (
     key: string,
     text: string,
@@ -75,6 +85,9 @@ export function PendingQueue({ entries }: PendingQueueProps) {
     <div className="space-y-1 rounded border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs">
       <div className="flex items-center gap-2 font-medium text-amber-800">
         <span>In progress</span>
+        {hasActiveWork && (
+          <Spinner className="shrink-0" aria-label="in progress" />
+        )}
         {queuedCount > 0 && (
           <Badge tone="warning">{queuedCount} queued</Badge>
         )}
@@ -102,12 +115,10 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                   );
             case 'local':
               // Accepted and already matched into the transcript; its turn is
-              // still running.
-              return sendRow(
-                entry.key,
-                entry.send.text,
-                <Spinner className="shrink-0" label="in progress" />,
-              );
+              // still running. The header spinner already signals progress, so
+              // the row carries no per-row indicator — adding one here shifted
+              // the message text the moment the icon appeared.
+              return sendRow(entry.key, entry.send.text, null);
             case 'sending':
               if (entry.item.status === 'failed') {
                 const target = entry.item.target;

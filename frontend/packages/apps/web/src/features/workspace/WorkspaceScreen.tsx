@@ -22,6 +22,30 @@ import { TerminalFallback } from '../terminal/TerminalFallback';
 import { TerminalResizeHandle } from '../terminal/TerminalResizeHandle';
 
 /**
+ * A terminal-screen glyph for the "Terminal" reopen button so it reads as a
+ * terminal at a glance. Decorative — always `aria-hidden`, so the button's
+ * accessible name stays its "Terminal" label.
+ */
+function TerminalIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="m7 11 2-2-2-2" />
+      <path d="M11 13h4" />
+    </svg>
+  );
+}
+
+/**
  * Pick the session to focus on cold load from the session list: prefer the
  * most-recently-active open session, else the most-recently-active session,
  * else the new-session sentinel when the list is empty. The list is ordered by
@@ -285,9 +309,14 @@ export function WorkspaceScreen() {
       {/* Terminal toggle (visible when the terminal is collapsed) */}
       {!terminalOpen && (
         <div className="absolute right-2 top-2 z-10">
-          <Button size="sm" variant="secondary" onClick={toggleTerminal}>
+          <button
+            type="button"
+            onClick={toggleTerminal}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50"
+          >
+            <TerminalIcon className="h-3.5 w-3.5" />
             Terminal
-          </Button>
+          </button>
         </div>
       )}
 
