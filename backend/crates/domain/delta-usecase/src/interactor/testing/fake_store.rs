@@ -1,6 +1,6 @@
 //! In-memory [`SessionStore`] fake backing the interactor use-case tests.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
@@ -44,6 +44,9 @@ pub(crate) struct FakeStoreInner {
     pub(crate) transcript_lines_read: HashMap<SessionId, usize>,
     pub(crate) launch_options: Vec<LaunchOption>,
     pub(crate) next_launch_option_id: i64,
+    /// Outstanding background-task launches keyed by `(session_id,
+    /// tool_use_id)`, mirroring the SQL `subagent_launch` table.
+    pub(crate) subagent_launches: HashMap<(SessionId, String), ThreadId>,
 }
 
 #[derive(Default)]
@@ -138,6 +141,7 @@ impl SessionStore for FakeStore {
         g.messages.retain(|m| &m.session_id != id);
         g.permissions.retain(|p| &p.session_id != id);
         g.transcript_lines_read.remove(id);
+        g.subagent_launches.retain(|(sid, _), _| sid != id);
         Ok(())
     }
 
@@ -567,6 +571,41 @@ impl SessionStore for FakeStore {
             resolved.push(req.id);
         }
         Ok(resolved)
+    }
+
+    async fn record_subagent_launch(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        thread_id: ThreadId,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.subagent_launches
+            .insert((session_id.clone(), tool_use_id.to_owned()), thread_id);
+        Ok(())
+    }
+
+    async fn clear_subagent_launch(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.subagent_launches
+            .remove(&(session_id.clone(), tool_use_id.to_owned()));
+        Ok(())
+    }
+
+    async fn outstanding_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<BTreeMap<String, ThreadId>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.subagent_launches
+            .iter()
+            .filter(|((sid, _), _)| sid == session_id)
+            .map(|((_, tool_use_id), thread_id)| (tool_use_id.clone(), *thread_id))
+            .collect())
     }
 
     async fn list_launch_options(&self) -> Result<Vec<LaunchOption>> {

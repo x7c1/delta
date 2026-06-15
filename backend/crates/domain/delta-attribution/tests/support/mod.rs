@@ -73,8 +73,45 @@ pub fn interrupt_line(uuid: &str) -> TranscriptMessage {
 /// A harness-injected `<task-notification>`: a background-task completion that
 /// current claude delivers as a plain `role: user` line (NOT a legacy
 /// `queued_command` attachment), so it carries no `is_queued_command` flag.
+/// Carries no `<tool-use-id>`, so it exercises the unknown-launch fallback
+/// (inherit `carry_thread`).
 pub fn task_notification_line(uuid: &str) -> TranscriptMessage {
     user_line(uuid, "<task-notification>done</task-notification>")
+}
+
+/// A `<task-notification>` whose `<tool-use-id>` correlates back to the launch
+/// of a background `Agent`/`Task`/`Bash` with that `tool_use_id`, in the real
+/// harness-injected shape.
+pub fn task_notification_line_for(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
+    user_line(
+        uuid,
+        &format!(
+            "<task-notification>\n\
+             <task-id>a31425032172620ed</task-id>\n\
+             <tool-use-id>{tool_use_id}</tool-use-id>\n\
+             <output-file>/tmp/x.output</output-file>\n\
+             <status>completed</status>\n\
+             <summary>Agent completed</summary>\n\
+             </task-notification>"
+        ),
+    )
+}
+
+/// An assistant line launching a background tool call: a `ToolUse` whose input
+/// carries `run_in_background: true`. The launching `tool_use_id` becomes the
+/// correlation key for the later `<task-notification>`.
+pub fn background_tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: "Agent".into(),
+            input: serde_json::json!({
+                "subagent_type": "general-purpose",
+                "run_in_background": true
+            }),
+        }],
+        ..assistant_line(uuid, "")
+    }
 }
 
 /// An assistant line issuing a tool call (no author text).

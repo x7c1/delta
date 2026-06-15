@@ -27,6 +27,10 @@ pub fn replay(
     let state = AttributionState {
         carry_thread: main_thread,
         outstanding: sends_in_dispatch_order.into(),
+        // A whole-history replay starts with no outstanding background launch:
+        // every launch and its completion fall within the single replayed
+        // batch, so the map is built and drained as the lines fold.
+        launched_threads: std::collections::BTreeMap::new(),
     };
     attribute_lines(session_id, main_thread, state, lines)
 }

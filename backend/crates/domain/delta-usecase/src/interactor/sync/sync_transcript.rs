@@ -93,7 +93,15 @@ where
             .await?
             .as_ref()
             .map(OutstandingSend::from);
-        let state = AttributionState::new(carry_thread, outstanding);
+        // Reseed the outstanding background-task launches: a `run_in_background`
+        // Agent/Task/Bash launched in an earlier sync window, whose completion
+        // notification may land in this one. Without this the notification would
+        // not find its launching thread and fall back to `carry_thread`.
+        let launches = self
+            .store
+            .outstanding_subagent_launches(&session.id)
+            .await?;
+        let state = AttributionState::with_launches(carry_thread, outstanding, launches);
 
         let outcome = attribute_lines(&session.id, main_thread, state, read.messages);
 
@@ -163,6 +171,23 @@ where
                     matched_uuid,
                 } => {
                     self.store.mark_send_matched(send_id, &matched_uuid).await?;
+                }
+                Effect::SubagentLaunched {
+                    tool_use_id,
+                    thread_id,
+                } => {
+                    // Persist the launching thread so a completion notification
+                    // landing in a later sync window can be attributed to it.
+                    self.store
+                        .record_subagent_launch(&session.id, &tool_use_id, thread_id)
+                        .await?;
+                }
+                Effect::SubagentCompleted { tool_use_id } => {
+                    // The notification was folded and matched its launch: the
+                    // correlation is consumed, so clear the persisted row.
+                    self.store
+                        .clear_subagent_launch(&session.id, &tool_use_id)
+                        .await?;
                 }
             }
         }

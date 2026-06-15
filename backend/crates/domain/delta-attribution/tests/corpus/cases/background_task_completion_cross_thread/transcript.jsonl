@@ -1,0 +1,6 @@
+{"uuid":"u0","parentUuid":null,"type":"user","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"work the side topic"}}
+{"uuid":"a1","parentUuid":"u0","type":"assistant","sessionId":"corpus","promptId":"p0","timestamp":"2026-01-01T00:00:01Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_bg","name":"Agent","input":{"subagent_type":"general-purpose","run_in_background":true}}]}}
+{"uuid":"u2","parentUuid":"a1","type":"user","sessionId":"corpus","promptId":"p1","timestamp":"2026-01-01T00:00:02Z","message":{"role":"user","content":"back to the trunk"}}
+{"uuid":"a2","parentUuid":"u2","type":"assistant","sessionId":"corpus","promptId":"p1","timestamp":"2026-01-01T00:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"on the trunk now"}]}}
+{"uuid":"u3","parentUuid":"a2","type":"user","sessionId":"corpus","timestamp":"2026-01-01T00:00:04Z","message":{"role":"user","content":"<task-notification>\n<task-id>a31425032172620ed</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<output-file>/tmp/x.output</output-file>\n<status>completed</status>\n</task-notification>"}}
+{"uuid":"a3","parentUuid":"u3","type":"assistant","sessionId":"corpus","timestamp":"2026-01-01T00:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"the background agent finished"}]}}

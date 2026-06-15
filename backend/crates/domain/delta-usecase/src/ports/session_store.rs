@@ -1,5 +1,7 @@
 //! Persisting and querying Delta's thread overlay.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 
 use delta_model::{
@@ -292,6 +294,36 @@ pub trait SessionStore: std::marker::Send + Sync {
         allowed: bool,
     ) -> Result<Vec<i64>>;
 
+    /// Record (or refresh) the launching thread of a background task, keyed by
+    /// the launching tool_use `id`. A background `Agent`/`Task`/`Bash`
+    /// (`run_in_background: true`) returns immediately and its completion is
+    /// injected later — frequently in a different sync window — as a
+    /// `<task-notification>` carrying this same id. Persisting `(tool_use_id ->
+    /// thread_id)` lets [`Self::outstanding_subagent_launches`] reseed the
+    /// attribution fold so the notification is attributed to the launching
+    /// thread rather than whatever thread is current when it lands. Idempotent:
+    /// re-recording the same id is a no-op refresh.
+    async fn record_subagent_launch(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        thread_id: ThreadId,
+    ) -> Result<()>;
+
+    /// Clear a recorded background-task launch once its `<task-notification>`
+    /// has been folded. Clearing an unknown id is a no-op.
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str)
+        -> Result<()>;
+
+    /// The session's outstanding background-task launches as `(tool_use_id ->
+    /// launching thread)`: every background task still awaiting its
+    /// `<task-notification>`. Seeds the attribution fold at sync start so a
+    /// completion landing in a later window finds its launching thread.
+    async fn outstanding_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<BTreeMap<String, ThreadId>>;
+
     /// All registered launch options, newest first (descending `id`).
     async fn list_launch_options(&self) -> Result<Vec<LaunchOption>>;
 
@@ -492,6 +524,34 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self)
             .resolve_permission_by_tool_use_id(session_id, tool_use_id, allowed)
             .await
+    }
+
+    async fn record_subagent_launch(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        thread_id: ThreadId,
+    ) -> Result<()> {
+        (**self)
+            .record_subagent_launch(session_id, tool_use_id, thread_id)
+            .await
+    }
+
+    async fn clear_subagent_launch(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+    ) -> Result<()> {
+        (**self)
+            .clear_subagent_launch(session_id, tool_use_id)
+            .await
+    }
+
+    async fn outstanding_subagent_launches(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<BTreeMap<String, ThreadId>> {
+        (**self).outstanding_subagent_launches(session_id).await
     }
 
     async fn list_launch_options(&self) -> Result<Vec<LaunchOption>> {
