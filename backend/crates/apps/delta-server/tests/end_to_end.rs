@@ -196,6 +196,12 @@ impl GitWorktree for NoopGitWorktree {
     ) -> delta_usecase::Result<()> {
         Ok(())
     }
+
+    async fn ensure_dir_trusted(&self, _dir: &str) -> delta_usecase::Result<()> {
+        // The end-to-end flow launches in a non-git scratch dir (`repo_root`
+        // returns `None`), so trust-seeding is never reached; a no-op suffices.
+        Ok(())
+    }
 }
 
 /// Assemble the app with test-wired gateways and return the router plus the

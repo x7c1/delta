@@ -18,6 +18,30 @@ pub enum Error {
         status: String,
         stderr: String,
     },
+
+    /// Reading, writing, or renaming Claude Code's user config file failed.
+    /// Carries the config path so the failing file is visible.
+    #[error("trust config I/O failed at {path}: {source}")]
+    TrustIo {
+        path: String,
+        source: std::io::Error,
+    },
+
+    /// The existing user config file is not valid JSON. It is left untouched
+    /// rather than overwritten, so a corrupt or hand-edited file is never
+    /// clobbered. Carries the path and the parse error.
+    #[error("trust config at {path} is not valid JSON: {source}")]
+    TrustParse {
+        path: String,
+        source: serde_json::Error,
+    },
+
+    /// The updated user config could not be serialized back to JSON.
+    #[error("failed to serialize trust config for {path}: {source}")]
+    TrustSerialize {
+        path: String,
+        source: serde_json::Error,
+    },
 }
 
 /// Convenience result alias for this crate.

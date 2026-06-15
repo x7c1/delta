@@ -176,6 +176,14 @@ where
         // Creating the worktree here — after workdir validation but *before* the
         // eager session row — means a git failure leaves no orphan row to roll
         // back; only the (side-effect-free) token has been minted.
+        // `seed_trust` records whether the effective launch directory is a git
+        // repository whose workspace-trust dialog must be pre-accepted before
+        // launching `claude` there (see the seed step below). A worktree is
+        // always a git working tree; a user-selected workdir is checked once
+        // here; the default `<base>/<token>` scratch dir is empty and never
+        // triggers the dialog, so it is never seeded (avoids bloating
+        // `~/.claude.json` for ordinary sessions).
+        let mut seed_trust = false;
         let workdir = match worktree {
             Some(spec) => {
                 let repo_root = worktree_repo_root
@@ -189,10 +197,35 @@ where
                 self.git_worktree
                     .create_worktree(&repo_root, &worktree_path, &branch, spec.start_point)
                     .await?;
+                // A worktree is by definition a git working tree, so its trust
+                // dialog must be pre-accepted; no extra git call needed.
+                seed_trust = true;
                 worktree_path
             }
-            None => requested_workdir.unwrap_or_else(|| self.workdir_for(&token)),
+            None => match requested_workdir {
+                // A user-selected workdir may be a real git repo (without a
+                // worktree request). Check once so launching there does not stall
+                // on the trust dialog either.
+                Some(dir) => {
+                    seed_trust = self.git_worktree.repo_root(&dir).await?.is_some();
+                    dir
+                }
+                // The default per-token scratch dir is empty, so `claude` never
+                // shows the trust dialog there; skip the git check on the hot path.
+                None => self.workdir_for(&token),
+            },
         };
+
+        // Pre-accept Claude Code's workspace-trust dialog for git-repo launch
+        // directories. A fresh directory containing files otherwise pops a
+        // blocking interactive dialog at startup, which means the first
+        // `UserPromptSubmit` hook never fires and the spawn is reaped after the
+        // pending deadline. Seed *before* `create_session` so a failure fails the
+        // spawn cleanly with no half-launched pane (mirroring the workdir/worktree
+        // validation ordering above, all of which run before any tmux side effect).
+        if seed_trust {
+            self.git_worktree.ensure_dir_trusted(&workdir).await?;
+        }
 
         // Eagerly create the session row and its `main` thread, then the first
         // prompt's send row bound to those real ids. Hooks cannot arrive before

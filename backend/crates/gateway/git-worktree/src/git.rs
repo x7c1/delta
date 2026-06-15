@@ -1,7 +1,10 @@
 //! [`Git`]: the concrete [`GitWorktree`].
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use tokio::process::Command;
+use tokio::sync::Mutex;
 
 use delta_usecase::{GitWorktree, RemoteBranches, WorktreeStartPoint};
 
@@ -18,17 +21,49 @@ const REMOTE: &str = "origin";
 /// Detects git repositories and creates per-session git worktrees by shelling
 /// out to `git`.
 ///
-/// Stateless: every method takes the repository (or candidate) path explicitly
-/// and invokes `git -C <path> …`, so the gateway is cwd-independent — it never
-/// relies on the process's current directory. This mirrors the tmux driver,
-/// the project's other subprocess gateway.
-#[derive(Debug, Default, Clone)]
-pub struct Git;
+/// The git operations are stateless: every git method takes the repository (or
+/// candidate) path explicitly and invokes `git -C <path> …`, so the gateway is
+/// cwd-independent — it never relies on the process's current directory. This
+/// mirrors the tmux driver, the project's other subprocess gateway.
+///
+/// In addition to git, the gateway owns Claude Code's user-config path
+/// (`config_path`) and a [`Mutex`] that serializes Delta's own read-modify-write
+/// of that file when seeding workspace trust (see [`GitWorktree::ensure_dir_trusted`]).
+#[derive(Debug)]
+pub struct Git {
+    /// Path to Claude Code's user config (`~/.claude.json` by default). Held as a
+    /// field so tests can point it at a temp file instead of the real config.
+    config_path: PathBuf,
+    /// Serializes Delta's own trust-config writes within this single process.
+    trust_lock: Mutex<()>,
+}
+
+impl Default for Git {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Git {
-    /// Create a new git worktree gateway.
+    /// Create a new git worktree gateway, defaulting the trust-config path to
+    /// `$HOME/.claude.json` (falling back to `.claude.json` in the current
+    /// directory if `HOME` is unset, which only happens in degenerate
+    /// environments).
     pub fn new() -> Self {
-        Self
+        let config_path = match std::env::var_os("HOME") {
+            Some(home) => PathBuf::from(home).join(".claude.json"),
+            None => PathBuf::from(".claude.json"),
+        };
+        Self::with_config_path(config_path)
+    }
+
+    /// Create a gateway with an explicit trust-config path. Used by tests to
+    /// target a temp file instead of the real `~/.claude.json`.
+    pub fn with_config_path(config_path: PathBuf) -> Self {
+        Self {
+            config_path,
+            trust_lock: Mutex::new(()),
+        }
     }
 
     /// Run `git -C <repo> <args>`, returning the captured output.
@@ -190,6 +225,17 @@ impl GitWorktree for Git {
         )
         .await
         .map_err(delta_usecase::Error::from)
+    }
+
+    async fn ensure_dir_trusted(&self, dir: &str) -> std::result::Result<(), delta_usecase::Error> {
+        // Serialize Delta's own read-modify-write of the shared config across the
+        // whole operation. The lock is process-local (delta-server is a single
+        // process); see `trust` for why the residual delta-vs-claude race is
+        // accepted rather than guarded with file locking.
+        let _guard = self.trust_lock.lock().await;
+        crate::trust::ensure_dir_trusted(&self.config_path, dir)
+            .await
+            .map_err(delta_usecase::Error::from)
     }
 }
 

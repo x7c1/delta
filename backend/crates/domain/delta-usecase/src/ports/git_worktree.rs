@@ -104,6 +104,18 @@ pub trait GitWorktree: Send + Sync {
         branch: &str,
         start_point: WorktreeStartPoint,
     ) -> Result<()>;
+
+    /// Ensure `dir` is marked trusted in Claude Code's user config so the
+    /// interactive workspace-trust dialog does not block a programmatic launch in
+    /// a fresh directory. Writes `projects.<dir>.hasTrustDialogAccepted = true` to
+    /// the user's `~/.claude.json`. Idempotent: a no-op if already trusted.
+    ///
+    /// This trust-seeding concern is folded into the `GitWorktree` port (rather
+    /// than its own port) deliberately: a separate port would add another generic
+    /// type parameter to `Interactor`/`SessionContext`, rippling across many
+    /// files. Both this and the git facts above are "what the gateway knows about
+    /// git working directories", so they share one port.
+    async fn ensure_dir_trusted(&self, dir: &str) -> Result<()>;
 }
 
 #[async_trait]
@@ -130,5 +142,9 @@ impl GitWorktree for Box<dyn GitWorktree> {
         (**self)
             .create_worktree(repo_root, worktree_path, branch, start_point)
             .await
+    }
+
+    async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
+        (**self).ensure_dir_trusted(dir).await
     }
 }

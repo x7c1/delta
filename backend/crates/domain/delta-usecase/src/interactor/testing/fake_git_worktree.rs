@@ -38,6 +38,9 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) fail_create: bool,
     /// The `create_worktree` calls made, in order.
     pub(crate) created: Mutex<Vec<CreatedWorktree>>,
+    /// The dirs passed to `ensure_dir_trusted`, in order, so tests can assert
+    /// whether (and with what path) trust-seeding was invoked.
+    pub(crate) trusted: Mutex<Vec<String>>,
 }
 
 impl FakeGitWorktree {
@@ -90,6 +93,11 @@ impl GitWorktree for FakeGitWorktree {
             branch: branch.to_owned(),
             start_point,
         });
+        Ok(())
+    }
+
+    async fn ensure_dir_trusted(&self, dir: &str) -> Result<()> {
+        self.trusted.lock().unwrap().push(dir.to_owned());
         Ok(())
     }
 }
