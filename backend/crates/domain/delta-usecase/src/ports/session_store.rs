@@ -190,6 +190,40 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// Returns `None` when the session has no user message yet.
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>>;
 
+    /// The thread the session's in-progress turn belongs to.
+    ///
+    /// Hooks that fire *inside* a turn but before its user line is ingested
+    /// (`AskUserQuestion`'s `PreToolUse`, the `MessageDisplay` streaming
+    /// preview) need to attribute their output to the turn's thread. They
+    /// cannot read it from [`Self::latest_user_thread`] alone: a mid-turn
+    /// branch send creates a brand-new thread and is dispatched without its
+    /// user line yet in the JSONL (the well-known `UserPromptSubmit` timing
+    /// race — the line is attributed later, at `Stop`), so `latest_user_thread`
+    /// still reports the *prior* turn's thread.
+    ///
+    /// The authoritative source before the line lands is the in-flight send
+    /// itself: the dispatched head carries the `thread_id` it was composed for.
+    /// So resolution prefers, in order:
+    ///
+    /// 1. the [`Self::head_dispatched_send`]'s `thread_id` (the in-flight
+    ///    turn's own thread, correct even before its user line is ingested),
+    /// 2. [`Self::latest_user_thread`] (a turn typed straight into the pane,
+    ///    with no Delta send driving it, once its line is persisted),
+    /// 3. [`Self::main_thread_id`] (no send and no user line yet — a turn at
+    ///    the very start of a session).
+    ///
+    /// Provided as a default method so the composition lives in one place and
+    /// the two hook call sites cannot drift apart.
+    async fn in_progress_turn_thread(&self, session_id: &SessionId) -> Result<ThreadId> {
+        if let Some(send) = self.head_dispatched_send(session_id).await? {
+            return Ok(send.thread_id);
+        }
+        if let Some(thread_id) = self.latest_user_thread(session_id).await? {
+            return Ok(thread_id);
+        }
+        self.main_thread_id(session_id).await
+    }
+
     /// Cancel a send by marking the row `cancelled`.
     ///
     /// The row is kept (rather than deleted) for audit, and because

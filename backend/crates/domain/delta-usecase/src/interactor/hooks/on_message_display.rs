@@ -20,12 +20,14 @@ where
     /// it as an [`SessionEvent::AssistantStreaming`] for the browser. The
     /// transport answers an empty 200; nothing here is persisted.
     ///
-    /// The preview is attributed to the in-flight turn's thread, recovered the
-    /// same way the transcript sync recovers its carry thread: the thread of
-    /// the latest persisted user message, falling back to the session's main
-    /// thread. The hook's `message_id` does not match any transcript id, so the
-    /// preview is reconciled per turn (cleared when the turn ends) rather than
-    /// id-joined to the eventually-persisted message.
+    /// The preview is attributed to the in-progress turn's thread (see
+    /// [`SessionStore::in_progress_turn_thread`]): the in-flight send's thread,
+    /// else the latest persisted user message, else the session's main thread.
+    /// The in-flight-send step keeps a mid-turn branch turn's stream on the new
+    /// branch thread, whose user line is not yet ingested. The hook's
+    /// `message_id` does not match any transcript id, so the preview is
+    /// reconciled per turn (cleared when the turn ends) rather than id-joined to
+    /// the eventually-persisted message.
     ///
     /// An unknown session (no row yet, e.g. a chunk racing ahead of the first
     /// `UserPromptSubmit` bind) is a safe no-op: there is no thread to attribute
@@ -37,12 +39,7 @@ where
         let Some(session) = self.store.session(&hook.session_id).await? else {
             return Ok(Vec::new());
         };
-        let main_thread = self.store.main_thread_id(&session.id).await?;
-        let thread_id = self
-            .store
-            .latest_user_thread(&session.id)
-            .await?
-            .unwrap_or(main_thread);
+        let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
 
         self.state.accumulate_streaming(
             &hook.message_id,
