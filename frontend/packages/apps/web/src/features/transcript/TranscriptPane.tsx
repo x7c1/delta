@@ -660,24 +660,23 @@ export function TranscriptPane({
 
         {showExternalInput && activeThread && (
           <div
-            className="space-y-1 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+            className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
             data-testid="external-input-notice"
           >
-            <div className="flex items-start gap-2">
-              <Badge tone="info">external input</Badge>
-              <span className="line-clamp-2 text-slate-700">
-                {externalInput.prompt}
-              </span>
-            </div>
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => dismissExternalInput(activeThread.session_id)}
-              >
-                Dismiss
-              </Button>
-            </div>
+            <Badge className="shrink-0" tone="info">
+              external input
+            </Badge>
+            <span className="min-w-0 flex-1 line-clamp-2 break-words text-slate-700">
+              {externalInput.prompt}
+            </span>
+            <Button
+              className="shrink-0"
+              size="sm"
+              variant="ghost"
+              onClick={() => dismissExternalInput(activeThread.session_id)}
+            >
+              Dismiss
+            </Button>
           </div>
         )}
 

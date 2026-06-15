@@ -131,7 +131,9 @@ describe('PendingQueue server sends', () => {
 
     expect(screen.getAllByTestId('pending-item')).toHaveLength(1);
     expect(screen.getByText('still running')).toBeInTheDocument();
-    expect(screen.getByText('in progress')).toBeInTheDocument();
+    expect(
+      screen.getByRole('status', { name: 'in progress' }),
+    ).toBeInTheDocument();
   });
 
   it('does not double-render a tracked send that is still in the open list', () => {

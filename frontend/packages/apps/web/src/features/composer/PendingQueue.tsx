@@ -60,12 +60,18 @@ export function PendingQueue({ entries }: PendingQueueProps) {
     </li>
   );
 
-  const sendRow = (key: string, text: string, status: ReactNode) => (
+  const sendRow = (
+    key: string,
+    text: string,
+    status: ReactNode,
+    lead?: ReactNode,
+  ) => (
     <li
       key={key}
       className="flex items-center justify-between gap-2"
       data-testid="pending-item"
     >
+      {lead}
       <span className="min-w-0 flex-1 truncate text-slate-700">{text}</span>
       {status}
     </li>
@@ -102,11 +108,13 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                   );
             case 'local':
               // Accepted and already matched into the transcript; its turn is
-              // still running.
+              // still running. The strip header already reads "In progress", so
+              // this row only needs a leading spinner icon (no redundant label).
               return sendRow(
                 entry.key,
                 entry.send.text,
-                <Spinner className="shrink-0" label="in progress" />,
+                null,
+                <Spinner className="shrink-0" aria-label="in progress" />,
               );
             case 'sending':
               if (entry.item.status === 'failed') {
