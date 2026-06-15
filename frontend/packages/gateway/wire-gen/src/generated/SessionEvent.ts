@@ -16,6 +16,11 @@ export type SessionEvent = { "kind": "session_registered", session_id: string, }
  */
 tool_input: string, } | { "kind": "question_asked", session_id: string, request_id: number, 
 /**
+ * The in-flight turn's thread, so the browser only shows the question
+ * card on the thread it belongs to.
+ */
+thread_id: number, 
+/**
  * The raw `{"questions":[…]}` tool input, serialized as JSON text, so
  * the browser can render the question card.
  */

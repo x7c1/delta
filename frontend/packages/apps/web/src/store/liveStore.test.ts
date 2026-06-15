@@ -911,9 +911,11 @@ describe('liveStore.applyEvent question notices', () => {
   beforeEach(reset);
 
   const QUESTION_INPUT = '{"questions":[{"header":"Pick"}]}';
+  const QUESTION_THREAD = 3;
   const QUESTION_NOTICE = {
     kind: 'question',
     requestId: 5,
+    threadId: QUESTION_THREAD,
     toolInput: QUESTION_INPUT,
     dismissed: false,
   } as const;
@@ -923,6 +925,7 @@ describe('liveStore.applyEvent question notices', () => {
       kind: 'question_asked',
       session_id: sessionId,
       request_id: requestId,
+      thread_id: QUESTION_THREAD,
       tool_input: QUESTION_INPUT,
     });
   }
@@ -989,6 +992,7 @@ describe('liveStore.applyEvent question notices', () => {
   it('seedQuestion re-creates the notice the missed event would have set', () => {
     useLiveStore.getState().seedQuestion('sess-1', {
       request_id: 5,
+      thread_id: QUESTION_THREAD,
       tool_input: QUESTION_INPUT,
     });
     expect(noticeOf(notices(), 'sess-1', 'question')).toEqual(QUESTION_NOTICE);
@@ -1001,6 +1005,7 @@ describe('liveStore.applyEvent question notices', () => {
     // A report of the SAME request must not resurrect the dismissed card.
     useLiveStore.getState().seedQuestion('sess-1', {
       request_id: 5,
+      thread_id: QUESTION_THREAD,
       tool_input: QUESTION_INPUT,
     });
     expect(noticeOf(notices(), 'sess-1', 'question')?.dismissed).toBe(true);
@@ -1012,11 +1017,13 @@ describe('liveStore.applyEvent question notices', () => {
     // A DIFFERENT pending question replaces the entry, un-dismissed.
     useLiveStore.getState().seedQuestion('sess-1', {
       request_id: 9,
+      thread_id: 7,
       tool_input: '{"questions":[]}',
     });
     expect(noticeOf(notices(), 'sess-1', 'question')).toEqual({
       kind: 'question',
       requestId: 9,
+      threadId: 7,
       toolInput: '{"questions":[]}',
       dismissed: false,
     });

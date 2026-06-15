@@ -603,7 +603,14 @@ export function TranscriptPane({
   // authoritative clear stays the existing resolution path (the `tool_result`
   // resolving the question's request row), so no extra clear logic is needed.
   // An "Open terminal" fallback remains in the card for a misfired injection.
-  const questionCard = question && !question.dismissed && activeThread && (
+  // Gate the question card to the thread the question was asked on, mirroring
+  // how `showExternalInput` and `showStreaming` gate by `=== activeThread.id`:
+  // AskUserQuestion belongs to the in-flight turn's thread, so the card must
+  // not show on the session's other threads.
+  const questionCard = question &&
+    !question.dismissed &&
+    activeThread &&
+    question.threadId === activeThread.id && (
     <QuestionCard
       notice={question}
       onAnswer={(selections) =>
