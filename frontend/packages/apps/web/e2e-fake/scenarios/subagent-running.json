@@ -1,0 +1,19 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    {
+      "type": "tool_use",
+      "name": "Agent",
+      "input": {
+        "subagent_type": "general-purpose",
+        "description": "Probe the codebase",
+        "prompt": "Run ls and count entries"
+      }
+    },
+    { "type": "delay", "ms": 3000 },
+    { "type": "post_tool_use" },
+    { "type": "tool_result" },
+    { "type": "reply", "text": "Subagent finished." },
+    { "type": "stop" }
+  ]
+}

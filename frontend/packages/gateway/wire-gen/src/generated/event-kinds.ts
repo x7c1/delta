@@ -18,6 +18,8 @@ export const EVENT_KINDS = [
   'permission_resolved',
   'spawn_failed',
   'assistant_streaming',
+  'subagent_started',
+  'subagent_finished',
 ] as const satisfies readonly SessionEvent['kind'][];
 
 export type SessionEventKind = (typeof EVENT_KINDS)[number];

@@ -159,4 +159,38 @@ pub enum SessionEvent {
         final_: bool,
         delta: String,
     },
+    /// A subagent (the `Agent`/`Task` tool) started running inside the main
+    /// turn.
+    ///
+    /// A subagent runs in its own transcript that Delta never tails, so the
+    /// main conversation pane shows nothing while it works — this event is the
+    /// only live signal that one is running. Detected from the main session's
+    /// `PreToolUse` hook with `tool_name` in `{Agent, Task}` (the historical and
+    /// current names for the same tool); the nested tool calls a subagent makes
+    /// reach the same hook but never match those names, so they do not flip the
+    /// indicator. Correlated to its [`Self::SubagentFinished`] by `tool_use_id`.
+    ///
+    /// This is the FOREGROUND (synchronous) case: the matching
+    /// `PostToolUse(Agent)` fires when the subagent completes. Background
+    /// subagents (`run_in_background: true`) complete via a different signal and
+    /// are out of scope here.
+    SubagentStarted {
+        session_id: SessionId,
+        /// The `tool_use_id` of the `Agent`/`Task` call (the correlation key).
+        tool_use_id: String,
+        /// The subagent type (e.g. `general-purpose`), if the call carried one.
+        subagent_type: Option<String>,
+        /// The short task description, if the call carried one, for display.
+        description: Option<String>,
+    },
+    /// A subagent (the `Agent`/`Task` tool) finished running.
+    ///
+    /// Detected from the main session's `PostToolUse` hook with `tool_name` in
+    /// `{Agent, Task}`, correlated to its [`Self::SubagentStarted`] by
+    /// `tool_use_id`. A `PostToolUse` for an id that was never tracked (or was
+    /// already cleared at turn end) is a no-op and emits nothing.
+    SubagentFinished {
+        session_id: SessionId,
+        tool_use_id: String,
+    },
 }

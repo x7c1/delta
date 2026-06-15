@@ -36,6 +36,16 @@ export interface SessionNodeProps {
    * clears its unread flag). Cleared by focusing the session.
    */
   unread?: boolean;
+  /**
+   * How many subagents (the `Agent`/`Task` tool) are currently running in this
+   * session's turn. A subagent runs in its own transcript Delta never tails, so
+   * the conversation pane shows nothing while it works — a dedicated badge on
+   * the row is the only place a running subagent is discoverable from the list.
+   * Kept distinct from the {@link running} turn-activity spinner: the two can
+   * show together (a subagent runs inside a running turn). `0` shows nothing;
+   * a count is shown only when more than one runs concurrently.
+   */
+  subagentCount?: number;
   onFocus: () => void;
   onClose: () => void;
   /**
@@ -89,6 +99,7 @@ export function SessionNode({
   needsPermission = false,
   running = false,
   unread = false,
+  subagentCount = 0,
   onFocus,
   onClose,
   rowRef,
@@ -204,6 +215,22 @@ export function SessionNode({
                     aria-hidden
                   />
                   <span className="sr-only">unread</span>
+                </span>
+              )}
+              {subagentCount > 0 && (
+                // A subagent runs in its own (untailed) transcript, so this
+                // badge is the only signal one is working. Distinct from the
+                // turn-activity spinner (they can show together); the count is
+                // shown only when more than one runs at once.
+                <span className="shrink-0" data-testid="session-subagent-badge">
+                  <Badge tone="info">
+                    {subagentCount > 1 ? `subagents ${subagentCount}` : 'subagent'}
+                  </Badge>
+                  <span className="sr-only">
+                    {subagentCount > 1
+                      ? `${subagentCount} subagents running`
+                      : 'subagent running'}
+                  </span>
                 </span>
               )}
               {needsPermission && (

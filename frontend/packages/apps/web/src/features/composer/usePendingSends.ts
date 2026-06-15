@@ -55,6 +55,7 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   const serverTurn = sendsQuery.data?.turn;
   const serverPermission = sendsQuery.data?.permission;
   const serverQuestion = sendsQuery.data?.question;
+  const serverRunningSubagents = sendsQuery.data?.running_subagents;
 
   // Re-seed the session's active-turn flag and permission notice from the
   // response's queryable live state. After a live-stream reconnect the
@@ -97,6 +98,13 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
       useLiveStore.getState().seedQuestion(sessionId, serverQuestion);
     }
   }, [sessionId, serverQuestion, sendsUpdatedAt]);
+  useEffect(() => {
+    if (sessionId !== null && serverRunningSubagents !== undefined) {
+      useLiveStore
+        .getState()
+        .seedRunningSubagents(sessionId, serverRunningSubagents);
+    }
+  }, [sessionId, serverRunningSubagents, sendsUpdatedAt]);
 
   return useMemo(() => {
     if (surface === null) {

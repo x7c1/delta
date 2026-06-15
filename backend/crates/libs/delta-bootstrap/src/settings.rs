@@ -1,7 +1,7 @@
 //! Rendering the Claude Code session settings JSON.
 //!
 //! The session needs hooks pointing back at this server so Delta receives
-//! `UserPromptSubmit`, `Stop`, `MessageDisplay`, `PreToolUse`,
+//! `UserPromptSubmit`, `Stop`, `MessageDisplay`, `PreToolUse`, `PostToolUse`,
 //! `PermissionRequest`, `SessionStart`, and `SessionEnd` callbacks. Most are
 //! native `http` hooks; `SessionStart` is
 //! the exception — Claude Code does NOT deliver `SessionStart` to `http` hooks
@@ -70,6 +70,18 @@ pub fn render_session_settings(port: u16) -> String {
                     { "type": "http", "url": url("pre-tool-use"), "timeout": 30 }
                 ]
             }],
+            // PostToolUse fires when a tool call completes. Delta acts on it
+            // only for the subagent (`Agent`/`Task`) case: paired with the
+            // PreToolUse start, it bounds the window a subagent is running so
+            // the browser can show a running indicator while the subagent works
+            // in its own (untailed) transcript. Every other tool's PostToolUse
+            // is an empty 200.
+            "PostToolUse": [{
+                "matcher": "*",
+                "hooks": [
+                    { "type": "http", "url": url("post-tool-use"), "timeout": 30 }
+                ]
+            }],
             // PermissionRequest fires only when an interactive permission dialog
             // actually appears (not for auto/classifier-approved calls), so it is
             // the signal for "a human answer is genuinely pending". PreToolUse
@@ -126,6 +138,11 @@ mod tests {
             "http://127.0.0.1:9999/hooks/pre-tool-use"
         );
         assert_eq!(parsed["hooks"]["PreToolUse"][0]["matcher"], "*");
+        assert_eq!(
+            parsed["hooks"]["PostToolUse"][0]["hooks"][0]["url"],
+            "http://127.0.0.1:9999/hooks/post-tool-use"
+        );
+        assert_eq!(parsed["hooks"]["PostToolUse"][0]["matcher"], "*");
         assert_eq!(
             parsed["hooks"]["PermissionRequest"][0]["hooks"][0]["url"],
             "http://127.0.0.1:9999/hooks/permission-request"

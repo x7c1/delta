@@ -108,3 +108,39 @@ describe('SessionNode unread indicator', () => {
     expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument();
   });
 });
+
+describe('SessionNode subagent badge', () => {
+  it('renders no subagent badge when none is running', () => {
+    renderNode({ subagentCount: 0 });
+
+    expect(
+      screen.queryByTestId('session-subagent-badge'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders a singular subagent badge when one is running', () => {
+    renderNode({ subagentCount: 1 });
+
+    const badge = screen.getByTestId('session-subagent-badge');
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent('subagent');
+    expect(badge).toHaveTextContent('subagent running');
+  });
+
+  it('shows the count when more than one subagent runs concurrently', () => {
+    renderNode({ subagentCount: 3 });
+
+    const badge = screen.getByTestId('session-subagent-badge');
+    expect(badge).toHaveTextContent('subagents 3');
+    expect(badge).toHaveTextContent('3 subagents running');
+  });
+
+  it('shows the subagent badge alongside the running spinner', () => {
+    // A subagent runs inside a running turn, so the two indicators coexist;
+    // the badge is deliberately distinct from the turn-activity spinner.
+    renderNode({ running: true, subagentCount: 1 });
+
+    expect(screen.getByTestId('session-running')).toBeInTheDocument();
+    expect(screen.getByTestId('session-subagent-badge')).toBeInTheDocument();
+  });
+});

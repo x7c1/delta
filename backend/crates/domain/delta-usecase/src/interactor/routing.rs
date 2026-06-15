@@ -264,6 +264,7 @@ where
             turn: TurnState::Idle,
             pending_permission: None,
             pending_question: None,
+            running_subagents: Vec::new(),
         };
         let (tx, rx) = oneshot::channel();
         if !self
@@ -366,6 +367,24 @@ where
         self.request(session_id, |reply| SessionInput::PreToolUse {
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
+            tool_use_id: tool_use_id.to_owned(),
+            reply,
+        })
+        .await
+    }
+
+    /// Handle a `PostToolUse` hook: a tool call completed. Delta only acts on
+    /// the subagent (`Agent`/`Task`) case, closing that subagent's running
+    /// window by `tool_use_id`. Routed through the session's mailbox so the
+    /// clear is ordered after the `PreToolUse` that opened it.
+    pub async fn on_post_tool_use(
+        &self,
+        session_id: &SessionId,
+        tool_name: &str,
+        tool_use_id: &str,
+    ) -> Result<Vec<SessionEvent>> {
+        self.request(session_id, |reply| SessionInput::PostToolUse {
+            tool_name: tool_name.to_owned(),
             tool_use_id: tool_use_id.to_owned(),
             reply,
         })

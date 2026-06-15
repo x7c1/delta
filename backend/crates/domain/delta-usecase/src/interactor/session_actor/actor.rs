@@ -184,6 +184,13 @@ where
                     .await,
             );
         }
+        SessionInput::PostToolUse {
+            tool_name,
+            tool_use_id,
+            reply,
+        } => {
+            let _ = reply.send(ctx.on_post_tool_use(&tool_name, &tool_use_id).await);
+        }
         SessionInput::PermissionRequest {
             tool_name,
             tool_input_json,

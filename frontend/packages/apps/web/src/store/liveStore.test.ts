@@ -12,6 +12,7 @@ function reset() {
     unread: {},
     unreadSessions: {},
     streamingMessages: {},
+    runningSubagents: {},
     endedBeforeRecorded: {},
   });
 }
@@ -1019,5 +1020,182 @@ describe('liveStore.applyEvent question notices', () => {
       toolInput: '{"questions":[]}',
       dismissed: false,
     });
+  });
+});
+
+describe('liveStore running-subagent tracking', () => {
+  beforeEach(reset);
+
+  function subagents(sessionId = 'sess-1') {
+    return useLiveStore.getState().runningSubagents[sessionId];
+  }
+
+  it('adds a running subagent on subagent_started with its display fields', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: 'general-purpose',
+      description: 'Probe the codebase',
+    });
+    expect(subagents()).toEqual([
+      {
+        toolUseId: 'toolu_a1',
+        subagentType: 'general-purpose',
+        description: 'Probe the codebase',
+      },
+    ]);
+  });
+
+  it('removes the subagent on subagent_finished and drops the empty entry', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    });
+    store.applyEvent({
+      kind: 'subagent_finished',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+    });
+    expect(subagents()).toBeUndefined();
+  });
+
+  it('tracks multiple concurrent subagents in start order and clears one at a time', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    });
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a2',
+      subagent_type: null,
+      description: null,
+    });
+    expect(subagents()?.map((s) => s.toolUseId)).toEqual([
+      'toolu_a1',
+      'toolu_a2',
+    ]);
+
+    store.applyEvent({
+      kind: 'subagent_finished',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+    });
+    expect(subagents()?.map((s) => s.toolUseId)).toEqual(['toolu_a2']);
+  });
+
+  it('ignores a duplicate subagent_started for the same tool_use_id', () => {
+    const store = useLiveStore.getState();
+    const started = {
+      kind: 'subagent_started' as const,
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    };
+    store.applyEvent(started);
+    store.applyEvent(started);
+    expect(subagents()).toHaveLength(1);
+  });
+
+  it('ignores a subagent_finished for an untracked tool_use_id', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'subagent_finished',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_never',
+    });
+    expect(subagents()).toBeUndefined();
+  });
+
+  it('clears running subagents when the turn completes', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    });
+    store.applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(subagents()).toBeUndefined();
+  });
+
+  it('clears running subagents when the session closes', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    });
+    store.applyEvent({ kind: 'session_closed', session_id: 'sess-1' });
+    expect(subagents()).toBeUndefined();
+  });
+
+  it('re-seeds the running set authoritatively from the sends envelope', () => {
+    const store = useLiveStore.getState();
+    // A stale local entry the reconnect could not reconcile from events.
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_stale',
+      subagent_type: null,
+      description: null,
+    });
+    // The server reports a different running set: it replaces the local copy.
+    store.seedRunningSubagents('sess-1', [
+      {
+        tool_use_id: 'toolu_fresh',
+        subagent_type: 'general-purpose',
+        description: 'Still running',
+      },
+    ]);
+    expect(subagents()).toEqual([
+      {
+        toolUseId: 'toolu_fresh',
+        subagentType: 'general-purpose',
+        description: 'Still running',
+      },
+    ]);
+  });
+
+  it('seeding an empty list clears the session entry', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    });
+    store.seedRunningSubagents('sess-1', []);
+    expect(subagents()).toBeUndefined();
+  });
+
+  it('resetTurnEphemera drops the event-reconstructed running set', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_a1',
+      subagent_type: null,
+      description: null,
+    });
+    store.resetTurnEphemera();
+    expect(useLiveStore.getState().runningSubagents).toEqual({});
   });
 });

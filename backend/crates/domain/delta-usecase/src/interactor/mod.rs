@@ -27,7 +27,9 @@ mod workdir;
 
 pub use hooks::PermissionWait;
 pub use permission_decision::PermissionDecision;
-pub use session_actor::runtime::{PendingPermission, PendingQuestion, SessionLiveState};
+pub use session_actor::runtime::{
+    PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState,
+};
 
 #[cfg(test)]
 mod testing;

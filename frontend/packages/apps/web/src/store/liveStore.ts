@@ -3,6 +3,7 @@ import type { SessionId, ThreadId } from '@delta/model';
 import type {
   PendingPermission,
   PendingQuestion,
+  RunningSubagent,
   SessionEvent,
   Turn,
 } from '@delta/wire-gen';
@@ -104,6 +105,32 @@ export interface StreamingMessage {
    * recomputed by joining these in ascending index order.
    */
   chunks: Record<number, string>;
+}
+
+/**
+ * A subagent (the `Agent`/`Task` tool) currently running inside a session's
+ * turn. A subagent runs in its own transcript that Delta never tails, so the
+ * conversation pane shows nothing while it works — this is the only live signal
+ * that one is running, surfaced as a badge on the navigator row and an indicator
+ * near the conversation tail.
+ *
+ * Added by `subagent_started`, removed by the matching `subagent_finished`
+ * (correlated by {@link toolUseId}), and swept when the turn ends / the session
+ * closes (a subagent cannot outlive its turn). Re-seeded from the sends
+ * envelope's `running_subagents` after a reconnect, so a missed start/finish
+ * event heals from a plain refetch.
+ *
+ * This is the FOREGROUND (synchronous) case only; background subagents
+ * (`run_in_background: true`) complete via a different signal and are not yet
+ * tracked.
+ */
+export interface SubagentActivity {
+  /** The `Agent`/`Task` call's `tool_use_id` (its stable correlation key). */
+  toolUseId: string;
+  /** The subagent type (e.g. `general-purpose`), or null if none was given. */
+  subagentType: string | null;
+  /** The short task description for display, or null if none was given. */
+  description: string | null;
 }
 
 /** A new-session spawn tracked from the POST response (real ids). */
@@ -368,6 +395,14 @@ export interface LiveState {
    */
   streamingMessages: Record<SessionId, StreamingMessage>;
   /**
+   * The subagents currently running in each session's turn, keyed by session id
+   * and kept in start order. Added by `subagent_started`, removed by the
+   * matching `subagent_finished`, swept on turn end / close, and re-seeded from
+   * the sends envelope after a reconnect (see {@link SubagentActivity}). A
+   * session with none running has no entry (the empty list is dropped).
+   */
+  runningSubagents: Record<SessionId, SubagentActivity[]>;
+  /**
    * Per-session credit for a turn-end that arrived before the send it ended was
    * recorded, keyed by session id. A `turn_completed` / `turn_interrupted`
    * carries only a session id, and the only drain path for a tracked local send
@@ -480,6 +515,20 @@ export interface LiveState {
     sessionId: SessionId,
     question: PendingQuestion | null,
   ) => void;
+  /**
+   * Seed a session's running-subagent set from the server's queryable list
+   * (the `running_subagents` field of `GET /api/sessions/{id}/sends`).
+   *
+   * Unlike the permission/question seeds (which are set-only because a notice
+   * can be user-dismissed), the running set carries no per-entry user state, so
+   * the server list is authoritative: it REPLACES the session's set, healing a
+   * reconnect that missed a `subagent_started` (re-adds it) or a
+   * `subagent_finished` (drops it). An empty list clears the session's entry.
+   */
+  seedRunningSubagents: (
+    sessionId: SessionId,
+    running: RunningSubagent[],
+  ) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
   /**
@@ -549,6 +598,23 @@ function dropStreamingForSession(
 }
 
 /**
+ * Drop the running-subagent set of one session, returning the changed slice
+ * (empty object when none existed). Used when the turn ends — a subagent cannot
+ * outlive the turn that spawned it — and on a reconnect.
+ */
+function dropRunningSubagentsForSession(
+  state: LiveState,
+  sessionId: SessionId,
+): Partial<LiveState> {
+  if (!state.runningSubagents[sessionId]) {
+    return {};
+  }
+  const runningSubagents = { ...state.runningSubagents };
+  delete runningSubagents[sessionId];
+  return { runningSubagents };
+}
+
+/**
  * Compute the state changes for a turn ending in `sessionId`: drop the tracked
  * local sends for that session (the server's open list is the remaining truth
  * — anything still queued there keeps its chip), clear the running flag, and
@@ -614,6 +680,10 @@ function endTurnForSession(
   return {
     ...next,
     ...(dropStreaming ? dropStreamingForSession(state, sessionId) : {}),
+    // A subagent cannot outlive the turn that spawned it, so any still-running
+    // entry is cleared whenever the turn ends (or the session closes). This
+    // also covers a foreground `subagent_finished` that was missed.
+    ...dropRunningSubagentsForSession(state, sessionId),
     ...clearNoticesOn(state.notices, sessionId, trigger),
   };
 }
@@ -628,6 +698,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   unread: {},
   unreadSessions: {},
   streamingMessages: {},
+  runningSubagents: {},
   endedBeforeRecorded: {},
 
   setConnection: (status) => set({ connection: status }),
@@ -733,6 +804,12 @@ export const useLiveStore = create<LiveState>((set) => ({
         activeTurns: {},
         notices,
         streamingMessages: {},
+        // The running-subagent set is re-seeded authoritatively from the sends
+        // envelope's `running_subagents` on the resync refetch (see
+        // {@link seedRunningSubagents}), so drop the event-reconstructed copy —
+        // a `subagent_started`/`subagent_finished` missed during the outage is
+        // not replayed.
+        runningSubagents: {},
         endedBeforeRecorded: {},
       };
     }),
@@ -799,6 +876,29 @@ export const useLiveStore = create<LiveState>((set) => ({
           dismissed: false,
         }),
       };
+    }),
+
+  seedRunningSubagents: (sessionId, running) =>
+    set((state) => {
+      const current = state.runningSubagents[sessionId] ?? [];
+      // Already in sync (same ids, same order): keep the identity-stable state.
+      const same =
+        current.length === running.length &&
+        current.every((s, i) => s.toolUseId === running[i].tool_use_id);
+      if (same) {
+        return state;
+      }
+      const runningSubagents = { ...state.runningSubagents };
+      if (running.length === 0) {
+        delete runningSubagents[sessionId];
+      } else {
+        runningSubagents[sessionId] = running.map((s) => ({
+          toolUseId: s.tool_use_id,
+          subagentType: s.subagent_type,
+          description: s.description,
+        }));
+      }
+      return { runningSubagents };
     }),
 
   bumpUnread: (threadId) =>
@@ -1038,6 +1138,54 @@ export const useLiveStore = create<LiveState>((set) => ({
               },
             },
           };
+        }
+        case 'subagent_started': {
+          // A subagent (the `Agent`/`Task` tool) started in the main turn. It
+          // runs in its own (untailed) transcript, so this is the only live
+          // signal — add it to the session's running set so the navigator badge
+          // and conversation indicator appear. Keyed by `tool_use_id`: a
+          // duplicate start for an id already tracked changes nothing (a retried
+          // event), and new entries append so the set stays in start order.
+          const current = state.runningSubagents[event.session_id] ?? [];
+          if (current.some((s) => s.toolUseId === event.tool_use_id)) {
+            return state;
+          }
+          return {
+            runningSubagents: {
+              ...state.runningSubagents,
+              [event.session_id]: [
+                ...current,
+                {
+                  toolUseId: event.tool_use_id,
+                  subagentType: event.subagent_type,
+                  description: event.description,
+                },
+              ],
+            },
+          };
+        }
+        case 'subagent_finished': {
+          // The subagent completed (foreground `PostToolUse(Agent)`). Drop it
+          // by `tool_use_id`; when it was the session's last running subagent,
+          // drop the now-empty entry so the indicator disappears. A finish for
+          // an id not tracked (already swept at turn end) changes nothing.
+          const current = state.runningSubagents[event.session_id];
+          if (
+            current === undefined ||
+            !current.some((s) => s.toolUseId === event.tool_use_id)
+          ) {
+            return state;
+          }
+          const remaining = current.filter(
+            (s) => s.toolUseId !== event.tool_use_id,
+          );
+          const runningSubagents = { ...state.runningSubagents };
+          if (remaining.length === 0) {
+            delete runningSubagents[event.session_id];
+          } else {
+            runningSubagents[event.session_id] = remaining;
+          }
+          return { runningSubagents };
         }
         case 'external_input':
           // The external-input notice is session-scoped and only meaningful

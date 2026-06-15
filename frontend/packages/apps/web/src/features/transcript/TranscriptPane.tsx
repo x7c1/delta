@@ -28,6 +28,7 @@ import { isTaskNotificationMessage } from './claudeFormat';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
+import { SubagentRunningIndicator } from './SubagentRunningIndicator';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
@@ -171,6 +172,15 @@ export function TranscriptPane({
   const streaming = useLiveStore((state) =>
     activeThread
       ? state.streamingMessages[activeThread.session_id] ?? null
+      : null,
+  );
+  // The focused session's running subagents (the `Agent`/`Task` tool), if any.
+  // A subagent runs in its own transcript Delta never tails, so nothing else
+  // appears at the conversation tail while it works — this drives a small
+  // running indicator near the live bubble so the user knows it is active.
+  const subagents = useLiveStore((state) =>
+    activeThread
+      ? state.runningSubagents[activeThread.session_id] ?? null
       : null,
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
@@ -990,6 +1000,14 @@ export function TranscriptPane({
             </div>
           </article>
         </div>
+      )}
+
+      {/* A running-subagent indicator at the conversation tail: a subagent runs
+          in its own (untailed) transcript, so without this the pane would look
+          idle while it works. Shown only for an active thread (not the
+          new-session screen). */}
+      {!newSession && activeThread !== null && subagents !== null && (
+        <SubagentRunningIndicator subagents={subagents} />
       )}
 
       {/* The interactive question card, inline at the very tail of the

@@ -80,6 +80,21 @@ pub enum WireSessionEvent {
         is_final: bool,
         delta: String,
     },
+    /// A subagent (the `Agent`/`Task` tool) started running inside the main
+    /// turn (its own transcript is never tailed, so this is the only live
+    /// signal). Correlated to its `subagent_finished` by `tool_use_id`.
+    SubagentStarted {
+        session_id: String,
+        tool_use_id: String,
+        subagent_type: Option<String>,
+        description: Option<String>,
+    },
+    /// A subagent (the `Agent`/`Task` tool) finished running, correlated to its
+    /// `subagent_started` by `tool_use_id`.
+    SubagentFinished {
+        session_id: String,
+        tool_use_id: String,
+    },
 }
 
 impl From<SessionEvent> for WireSessionEvent {
@@ -180,6 +195,24 @@ impl From<SessionEvent> for WireSessionEvent {
                 is_final: final_,
                 delta,
             },
+            SessionEvent::SubagentStarted {
+                session_id,
+                tool_use_id,
+                subagent_type,
+                description,
+            } => Self::SubagentStarted {
+                session_id: session_id.0,
+                tool_use_id,
+                subagent_type,
+                description,
+            },
+            SessionEvent::SubagentFinished {
+                session_id,
+                tool_use_id,
+            } => Self::SubagentFinished {
+                session_id: session_id.0,
+                tool_use_id,
+            },
         }
     }
 }
@@ -223,7 +256,9 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::QuestionAsked { .. }
             | WireSessionEvent::PermissionResolved { .. }
             | WireSessionEvent::SpawnFailed { .. }
-            | WireSessionEvent::AssistantStreaming { .. } => {}
+            | WireSessionEvent::AssistantStreaming { .. }
+            | WireSessionEvent::SubagentStarted { .. }
+            | WireSessionEvent::SubagentFinished { .. } => {}
         }
     }
 
@@ -288,6 +323,16 @@ fn sample_events() -> Vec<WireSessionEvent> {
             index: 0,
             is_final: false,
             delta: "chunk".to_owned(),
+        },
+        WireSessionEvent::SubagentStarted {
+            session_id: session_id(),
+            tool_use_id: "toolu-sample".to_owned(),
+            subagent_type: Some("general-purpose".to_owned()),
+            description: Some("Run ls".to_owned()),
+        },
+        WireSessionEvent::SubagentFinished {
+            session_id: session_id(),
+            tool_use_id: "toolu-sample".to_owned(),
         },
     ];
     for event in &samples {
@@ -488,6 +533,8 @@ mod tests {
                 "permission_resolved",
                 "spawn_failed",
                 "assistant_streaming",
+                "subagent_started",
+                "subagent_finished",
             ],
         );
     }
@@ -511,6 +558,59 @@ mod tests {
                 "index": 2,
                 "final": true,
                 "delta": "hello",
+            }),
+        );
+    }
+
+    #[test]
+    fn subagent_started_serializes_with_its_correlation_and_display_fields() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::SubagentStarted {
+                session_id: SessionId::from("sess-1"),
+                tool_use_id: "toolu_01".into(),
+                subagent_type: Some("general-purpose".into()),
+                description: Some("Run ls and count entries".into()),
+            })),
+            serde_json::json!({
+                "kind": "subagent_started",
+                "session_id": "sess-1",
+                "tool_use_id": "toolu_01",
+                "subagent_type": "general-purpose",
+                "description": "Run ls and count entries",
+            }),
+        );
+    }
+
+    #[test]
+    fn subagent_started_keeps_null_display_fields_when_absent() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::SubagentStarted {
+                session_id: SessionId::from("sess-1"),
+                tool_use_id: "toolu_01".into(),
+                subagent_type: None,
+                description: None,
+            })),
+            serde_json::json!({
+                "kind": "subagent_started",
+                "session_id": "sess-1",
+                "tool_use_id": "toolu_01",
+                "subagent_type": null,
+                "description": null,
+            }),
+        );
+    }
+
+    #[test]
+    fn subagent_finished_serializes_with_its_correlation_id() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::SubagentFinished {
+                session_id: SessionId::from("sess-1"),
+                tool_use_id: "toolu_01".into(),
+            })),
+            serde_json::json!({
+                "kind": "subagent_finished",
+                "session_id": "sess-1",
+                "tool_use_id": "toolu_01",
             }),
         );
     }

@@ -27,6 +27,8 @@ mod permission_request_response;
 pub use permission_request_response::{
     PermissionDecisionBody, PermissionHookOutput, PermissionRequestResponse,
 };
+mod post_tool_use_payload;
+pub use post_tool_use_payload::PostToolUsePayload;
 mod pre_tool_use_payload;
 pub use pre_tool_use_payload::PreToolUsePayload;
 mod session_end_payload;

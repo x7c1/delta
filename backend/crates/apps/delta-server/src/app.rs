@@ -20,6 +20,8 @@ pub fn router(state: AppState) -> Router {
         // flush); buffered as a provisional preview and broadcast to the browser.
         .route("/hooks/message-display", post(hooks::message_display))
         .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
+        // A tool call completed; used to close a subagent's running window.
+        .route("/hooks/post-tool-use", post(hooks::post_tool_use))
         // Interactive permission dialog appeared (a human answer is pending).
         .route("/hooks/permission-request", post(hooks::permission_request))
         // A session's TUI became ready (launch-readiness signal): binds a fresh

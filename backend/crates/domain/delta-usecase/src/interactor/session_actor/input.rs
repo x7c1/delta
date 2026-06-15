@@ -96,6 +96,15 @@ pub(in crate::interactor) enum SessionInput {
         tool_use_id: String,
         reply: Reply<Vec<SessionEvent>>,
     },
+    /// `PostToolUse`: a tool call completed. Delta only acts on the
+    /// subagent (`Agent`/`Task`) case — it closes that subagent's running
+    /// window by `tool_use_id`. Routed through the mailbox so the clear is
+    /// ordered with the `PreToolUse` that opened it.
+    PostToolUse {
+        tool_name: String,
+        tool_use_id: String,
+        reply: Reply<Vec<SessionEvent>>,
+    },
     /// `PermissionRequest`: record the row, register a decision waiter, and
     /// hand the transport the receiver it blocks on.
     PermissionRequest {
