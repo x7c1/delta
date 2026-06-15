@@ -264,6 +264,107 @@ fn a_task_notification_mid_branch_inherits_carry_and_does_not_reset_to_main() {
 }
 
 #[test]
+fn a_background_task_completion_is_attributed_to_its_launching_thread() {
+    // A background subagent is launched while the in-flight turn is on the
+    // child thread (carry = CHILD). The launch records `(toolu-bg -> CHILD)`.
+    // The user then moves to and works on `main` (carry resets to MAIN via an
+    // external line). When the `<task-notification>` for `toolu-bg` finally
+    // lands, it — and the assistant continuation it drives — must be attributed
+    // to CHILD (the launching thread), NOT to MAIN (the current thread). Before
+    // the correlation fix the notification blindly inherited `carry_thread` and
+    // landed on MAIN.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(CHILD, None),
+        vec![
+            background_tool_use_line("a-launch", "toolu-bg"),
+            // The user leaves the sub-thread: an external human turn on main.
+            user_line("u-ext", "now working on something else"),
+            assistant_line("a-ext", "sure, on it"),
+            // The background task completes; its notification correlates back.
+            task_notification_line_for("u-note", "toolu-bg"),
+            assistant_line("a-after", "the background agent finished"),
+        ],
+    );
+
+    assert_eq!(message(&outcome, "a-launch").thread_id, CHILD);
+    assert_eq!(message(&outcome, "u-ext").thread_id, MAIN);
+    assert_eq!(message(&outcome, "a-ext").thread_id, MAIN);
+    // The notification lands on the LAUNCHING thread, not the current one.
+    assert_eq!(message(&outcome, "u-note").thread_id, CHILD);
+    // ...and the assistant's continuation of it follows onto that thread.
+    assert_eq!(message(&outcome, "a-after").thread_id, CHILD);
+    assert_eq!(outcome.state.carry_thread, CHILD);
+
+    // The launch is recorded then consumed by its completion.
+    assert_eq!(
+        outcome.effects,
+        vec![
+            Effect::SubagentLaunched {
+                tool_use_id: "toolu-bg".into(),
+                thread_id: CHILD,
+            },
+            Effect::SubagentCompleted {
+                tool_use_id: "toolu-bg".into(),
+            },
+        ]
+    );
+    // The completion drained the correlation from the carried state.
+    assert!(outcome.state.launched_threads.is_empty());
+}
+
+#[test]
+fn a_background_completion_seeded_from_an_earlier_window_lands_on_its_launch() {
+    // The launch fell in an earlier sync window; only the persisted
+    // `(toolu-bg -> CHILD)` map is reseeded (no launch line in this batch).
+    // Carry is MAIN (the user has since moved on). The notification must still
+    // resolve to CHILD via the seeded map, and only `SubagentCompleted` fires.
+    let mut launched = std::collections::BTreeMap::new();
+    launched.insert("toolu-bg".to_owned(), CHILD);
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::with_launches(MAIN, None, launched),
+        vec![task_notification_line_for("u-note", "toolu-bg")],
+    );
+
+    assert_eq!(message(&outcome, "u-note").thread_id, CHILD);
+    assert_eq!(
+        outcome.effects,
+        vec![Effect::SubagentCompleted {
+            tool_use_id: "toolu-bg".into(),
+        }]
+    );
+    assert!(outcome.state.launched_threads.is_empty());
+}
+
+#[test]
+fn an_unknown_background_completion_falls_back_to_inheriting_carry() {
+    // A `<task-notification>` whose `<tool-use-id>` is not in the launch map
+    // (its launch fell in a window no longer seeded) must not regress: it
+    // inherits `carry_thread` exactly as before, emits no completion effect,
+    // and does not reset to `main`.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(CHILD, None),
+        vec![
+            task_notification_line_for("u-note", "toolu-unknown"),
+            assistant_line("a-after", "resuming"),
+        ],
+    );
+
+    assert_eq!(message(&outcome, "u-note").thread_id, CHILD);
+    assert_eq!(message(&outcome, "a-after").thread_id, CHILD);
+    assert_eq!(outcome.state.carry_thread, CHILD);
+    assert!(
+        outcome.effects.is_empty(),
+        "an uncorrelated task-notification emits no completion effect"
+    );
+}
+
+#[test]
 fn an_external_human_line_resets_carry_to_main_without_consuming_the_send() {
     // A human user line matching no outstanding send is external input: it
     // lands on `main` and resets `carry_thread` — but the non-matching

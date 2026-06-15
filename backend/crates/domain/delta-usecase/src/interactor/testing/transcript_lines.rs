@@ -90,3 +90,38 @@ pub(crate) fn tool_result_line(uuid: &str, tool_use_id: &str) -> TranscriptMessa
         ..user_line(uuid, "")
     }
 }
+
+/// An assistant line launching a background tool call: a `ToolUse` whose input
+/// carries `run_in_background: true`. The launching `tool_use_id` becomes the
+/// correlation key for the later `<task-notification>`.
+pub(crate) fn background_tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: "Agent".into(),
+            input: serde_json::json!({
+                "subagent_type": "general-purpose",
+                "run_in_background": true
+            }),
+        }],
+        ..assistant_line(uuid, "")
+    }
+}
+
+/// A harness-injected `<task-notification>` background-task completion, in the
+/// real shape: a plain `role: user` line whose `<tool-use-id>` correlates back
+/// to the launching tool call.
+pub(crate) fn task_notification_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
+    user_line(
+        uuid,
+        &format!(
+            "<task-notification>\n\
+             <task-id>a31425032172620ed</task-id>\n\
+             <tool-use-id>{tool_use_id}</tool-use-id>\n\
+             <output-file>/tmp/x.output</output-file>\n\
+             <status>completed</status>\n\
+             <summary>Agent completed</summary>\n\
+             </task-notification>"
+        ),
+    )
+}

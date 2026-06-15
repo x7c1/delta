@@ -1232,3 +1232,67 @@ async fn launch_options_round_trip_create_list_delete() {
     store.delete_launch_option(9999).await.unwrap();
     assert_eq!(store.list_launch_options().await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn subagent_launches_round_trip_and_clear() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    let child = store
+        .create_thread(&session.id, "side topic", Some(main))
+        .await
+        .unwrap()
+        .id;
+
+    // No launches recorded yet.
+    assert!(store
+        .outstanding_subagent_launches(&session.id)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Record two launches against different threads.
+    store
+        .record_subagent_launch(&session.id, "toolu_a", child)
+        .await
+        .unwrap();
+    store
+        .record_subagent_launch(&session.id, "toolu_b", main)
+        .await
+        .unwrap();
+    let launches = store
+        .outstanding_subagent_launches(&session.id)
+        .await
+        .unwrap();
+    assert_eq!(launches.get("toolu_a"), Some(&child));
+    assert_eq!(launches.get("toolu_b"), Some(&main));
+
+    // Re-recording the same id refreshes the thread rather than erroring.
+    store
+        .record_subagent_launch(&session.id, "toolu_a", main)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .outstanding_subagent_launches(&session.id)
+            .await
+            .unwrap()
+            .get("toolu_a"),
+        Some(&main)
+    );
+
+    // Clearing one leaves the other; clearing an unknown id is a no-op.
+    store
+        .clear_subagent_launch(&session.id, "toolu_a")
+        .await
+        .unwrap();
+    store
+        .clear_subagent_launch(&session.id, "nonexistent")
+        .await
+        .unwrap();
+    let remaining = store
+        .outstanding_subagent_launches(&session.id)
+        .await
+        .unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining.get("toolu_b"), Some(&main));
+}

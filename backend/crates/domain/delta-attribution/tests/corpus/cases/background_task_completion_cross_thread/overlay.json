@@ -1,0 +1,7 @@
+{
+  "comment": "A background subagent (run_in_background: true) is launched while the in-flight turn is on a sub-thread (the first send opens thread 2). The user then moves to main and works there (the second turn matches no send -> external input on main). When the background task completes, its <task-notification> carries the launching tool_use id (toolu_bg) in <tool-use-id>; it must be attributed back to thread 2 (the launching thread), not main, and the assistant's continuation follows onto thread 2.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 2, "semantic_parent_uuid": "a-prior", "text": "work the side topic" }
+  ]
+}

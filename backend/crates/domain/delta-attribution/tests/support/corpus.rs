@@ -58,6 +58,9 @@ impl CorpusCase {
         AttributionState {
             carry_thread: self.main_thread,
             outstanding: self.sends.clone().into(),
+            // Whole-history replay seeds no outstanding launch: every launch and
+            // its completion fall within the replayed lines.
+            launched_threads: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -108,6 +111,8 @@ pub enum GoldenEffect {
     TurnInterrupted,
     TurnAborted,
     ResolvePermission { tool_use_id: String, allowed: bool },
+    SubagentLaunched { tool_use_id: String, thread_id: i64 },
+    SubagentCompleted { tool_use_id: String },
 }
 
 /// Project a fold outcome onto the golden shape.
@@ -146,6 +151,16 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                 } => GoldenEffect::ResolvePermission {
                     tool_use_id: tool_use_id.clone(),
                     allowed: *allowed,
+                },
+                Effect::SubagentLaunched {
+                    tool_use_id,
+                    thread_id,
+                } => GoldenEffect::SubagentLaunched {
+                    tool_use_id: tool_use_id.clone(),
+                    thread_id: thread_id.value(),
+                },
+                Effect::SubagentCompleted { tool_use_id } => GoldenEffect::SubagentCompleted {
+                    tool_use_id: tool_use_id.clone(),
                 },
             })
             .collect(),

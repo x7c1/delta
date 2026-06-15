@@ -7,6 +7,10 @@ repository.workspace = true
 
 [dependencies]
 delta-model = { workspace = true }
+# A background `Agent`/`Task`/`Bash` tool_use carries its `run_in_background`
+# flag inside the `serde_json::Value` tool input (the same type `delta-model`'s
+# `ContentBlock::ToolUse.input` holds), which `claude_format` inspects.
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # The golden-corpus tests feed sanitized raw JSONL fixtures through the real

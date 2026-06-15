@@ -1,7 +1,7 @@
 //! The attribution fold: parsed transcript lines in, attributed messages and
 //! effects out.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use delta_model::{ContentBlock, Message, MessageUuid, Role, Send, SessionId, ThreadId};
 
@@ -54,14 +54,51 @@ pub struct AttributionState {
     /// work: seeding every send of a session in dispatch order folds the full
     /// transcript in one pass, each echo consuming its send in turn.
     pub outstanding: VecDeque<OutstandingSend>,
+    /// The launching thread of each outstanding background task, keyed by the
+    /// launching tool_use `id` (the `toolu_...` value). A background subagent
+    /// or background Bash (`run_in_background: true`) returns immediately and
+    /// its completion is injected later as a `<task-notification>` user line
+    /// carrying that same id in its `<tool-use-id>` element. Looking the id up
+    /// here attributes the notification (and the assistant continuation it
+    /// drives) to the thread that LAUNCHED the task, instead of blindly
+    /// inheriting whatever thread is current when it lands — which is wrong
+    /// whenever the user moved threads while the task ran.
+    ///
+    /// A map (not a single head) because several background tasks — launched
+    /// from different threads, possibly nested — can be outstanding at once,
+    /// and a completion must find its own launch by id. Like `outstanding`,
+    /// this survives across sync windows by being seeded from a persisted
+    /// store at batch start and mutated through effects: a launch is recorded
+    /// ([`Effect::SubagentLaunched`]) when first seen and cleared
+    /// ([`Effect::SubagentCompleted`]) when its notification is folded.
+    /// `BTreeMap` keeps the seed-from-store ↔ fold round-trip deterministic.
+    pub launched_threads: BTreeMap<String, ThreadId>,
 }
 
 impl AttributionState {
     /// Seed a batch: the carry thread plus the at-most-one outstanding send.
+    /// The launch map starts empty; use [`Self::with_launches`] to seed it from
+    /// the persisted background-launch store.
     pub fn new(carry_thread: ThreadId, outstanding: Option<OutstandingSend>) -> Self {
         Self {
             carry_thread,
             outstanding: outstanding.into_iter().collect(),
+            launched_threads: BTreeMap::new(),
+        }
+    }
+
+    /// Seed a batch with the outstanding background-launch map alongside the
+    /// carry thread and outstanding send. The map carries `(tool_use_id ->
+    /// launching thread)` for every background task still awaiting its
+    /// `<task-notification>`.
+    pub fn with_launches(
+        carry_thread: ThreadId,
+        outstanding: Option<OutstandingSend>,
+        launched_threads: BTreeMap<String, ThreadId>,
+    ) -> Self {
+        Self {
+            launched_threads,
+            ..Self::new(carry_thread, outstanding)
         }
     }
 }
@@ -97,6 +134,18 @@ pub enum Effect {
         send_id: i64,
         matched_uuid: MessageUuid,
     },
+    /// A background task (`run_in_background: true` Agent/Task/Bash) was first
+    /// seen launching on an assistant line: persist `(tool_use_id ->
+    /// thread_id)` so its later `<task-notification>` — which may arrive in a
+    /// different sync window — can be attributed back to the launching thread.
+    SubagentLaunched {
+        tool_use_id: String,
+        thread_id: ThreadId,
+    },
+    /// A background task's `<task-notification>` was folded and matched a
+    /// recorded launch: clear the persisted `(tool_use_id -> thread_id)`
+    /// correlation now that it has been consumed.
+    SubagentCompleted { tool_use_id: String },
 }
 
 /// The outcome of folding one batch of transcript lines.
@@ -136,9 +185,20 @@ pub struct Attributed {
 ///   inherits `carry_thread` and additionally yields [`Effect::TurnAborted`],
 ///   the turn-end signal it carries in place of the absent `Stop` hook /
 ///   interrupt marker. A `<task-notification>` (a harness-injected
-///   background-task completion, delivered as a plain `role: user` line) is
-///   likewise a programmatic continuation of the in-flight turn, so it too
-///   inherits `carry_thread` rather than resetting to `main`.
+///   background-task completion, delivered as a plain `role: user` line) is a
+///   programmatic continuation, so it never resets to `main`. It is attributed
+///   to the thread that LAUNCHED the task: its `<tool-use-id>` is looked up in
+///   `launched_threads` (recorded when the background `Agent`/`Task`/`Bash`
+///   tool_use was first seen), so the completion lands on the launching thread
+///   even when the user has moved to a different thread while the task ran.
+///   Only when the id is absent from the map (the launch fell in an earlier,
+///   no-longer-seeded window) does it fall back to inheriting `carry_thread`.
+///
+/// Whenever an assistant line carries a background `Agent`/`Task`/`Bash`
+/// tool_use (`run_in_background: true`), its `id` is recorded against the
+/// current `carry_thread` (the launching thread) and emitted as
+/// [`Effect::SubagentLaunched`] for the caller to persist; the matching
+/// notification later clears it via [`Effect::SubagentCompleted`].
 pub fn attribute_lines(
     session_id: &SessionId,
     main_thread: ThreadId,
@@ -159,16 +219,37 @@ pub fn attribute_lines(
         // `is_error: true` ("User rejected tool use"), so the error flag
         // infers allowed vs denied.
         for block in &line.content {
-            if let ContentBlock::ToolResult {
-                tool_use_id,
-                is_error,
-                ..
-            } = block
-            {
-                effects.push(Effect::ResolvePermission {
-                    tool_use_id: tool_use_id.clone(),
-                    allowed: !is_error,
-                });
+            match block {
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    is_error,
+                    ..
+                } => {
+                    effects.push(Effect::ResolvePermission {
+                        tool_use_id: tool_use_id.clone(),
+                        allowed: !is_error,
+                    });
+                }
+                // A background `Agent`/`Task`/`Bash` (`run_in_background: true`)
+                // returns immediately; its completion is injected later as a
+                // `<task-notification>` carrying this same `id`. Record
+                // `(tool_use_id -> launching thread)` so that notification —
+                // possibly in a later sync window — is attributed to the thread
+                // that launched it rather than whatever thread is current then.
+                // The launching thread is `carry_thread`: a tool_use is part of
+                // the in-flight turn, whose thread `carry_thread` already holds.
+                ContentBlock::ToolUse { id, input, .. }
+                    if claude_format::launches_in_background(input) =>
+                {
+                    state
+                        .launched_threads
+                        .insert(id.clone(), state.carry_thread);
+                    effects.push(Effect::SubagentLaunched {
+                        tool_use_id: id.clone(),
+                        thread_id: state.carry_thread,
+                    });
+                }
+                _ => {}
             }
         }
 
@@ -250,6 +331,34 @@ pub fn attribute_lines(
                     state.carry_thread = main_thread;
                     (main_thread, None)
                 }
+            }
+        } else if is_task_notification {
+            // A background task's completion: attribute it to the thread that
+            // launched the task, not the thread that happens to be current now.
+            // The `<tool-use-id>` correlates back to the recorded launch; a
+            // match consumes it (emitting `SubagentCompleted` so the persisted
+            // correlation is cleared). When the id is unknown — the launch fell
+            // in an earlier window no longer seeded into `launched_threads` —
+            // fall back to inheriting `carry_thread`, the prior no-regression
+            // behaviour.
+            let launching_thread = claude_format::task_notification_tool_use_id(trimmed)
+                .and_then(|tool_use_id| {
+                    state
+                        .launched_threads
+                        .remove(tool_use_id)
+                        .map(|thread| (tool_use_id.to_owned(), thread))
+                });
+            match launching_thread {
+                Some((tool_use_id, thread)) => {
+                    effects.push(Effect::SubagentCompleted { tool_use_id });
+                    // Advance the turn onto the launching thread: the
+                    // assistant's continuation of this notification belongs to
+                    // the task's thread, not the thread that was current when
+                    // the completion happened to land.
+                    state.carry_thread = thread;
+                    (thread, None)
+                }
+                None => (state.carry_thread, None),
             }
         } else {
             (state.carry_thread, None)

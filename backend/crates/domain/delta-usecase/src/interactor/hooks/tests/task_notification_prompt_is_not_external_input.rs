@@ -11,7 +11,9 @@ async fn task_notification_prompt_is_not_external_input() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
 
     let prompt = "<task-notification>\n\
-                  <task-id>abc</task-id>\n\
+                  <task-id>a31425032172620ed</task-id>\n\
+                  <tool-use-id>toolu_01PqcdgEeMZekxvwSqjBviuA</tool-use-id>\n\
+                  <output-file>/tmp/x.output</output-file>\n\
                   <status>completed</status>\n\
                   </task-notification>";
 

@@ -159,6 +159,25 @@ CREATE TABLE IF NOT EXISTS launch_option (
   created_at TEXT NOT NULL
 ) STRICT;
 
+-- Outstanding background-task launches: the launching thread of each
+-- `run_in_background` Agent/Task/Bash, keyed by the launching tool_use id. Such
+-- a call returns immediately and its completion is injected later — frequently
+-- in a different sync window — as a `<task-notification>` user line carrying the
+-- same id. Persisting `(session_id, tool_use_id) -> thread_id` lets the
+-- attribution fold reseed and attribute that notification back to the thread
+-- that launched the task instead of whatever thread is current when it lands. A
+-- row is inserted when the launch is first seen and deleted when its
+-- notification is folded, so the table holds only still-outstanding launches.
+-- This is a brand-new table, so a plain `CREATE TABLE IF NOT EXISTS` brings an
+-- existing database up to date with no `ALTER TABLE` step.
+CREATE TABLE IF NOT EXISTS subagent_launch (
+  session_id  TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
+  tool_use_id TEXT NOT NULL,
+  thread_id   INTEGER NOT NULL REFERENCES thread(id),
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (session_id, tool_use_id)
+) STRICT;
+
 -- Full-text index over message content (groundwork: no search UI yet).
 -- External-content fts5 over `message.content_text`, keyed by the message
 -- table's rowid (a STRICT table still has a rowid unless WITHOUT ROWID).
