@@ -46,14 +46,16 @@ async fn api_error_line_emits_turn_interrupted_and_stays_on_thread() {
     ix.transcript_fake().push(api_error_line("u-api-error"));
     let (_groups, events) = ix.poll_transcript().await.unwrap();
 
-    // (a) A `TurnInterrupted` is emitted for this session (the reused
-    // browser/flush signal for a hook-independent turn-end).
+    // (a) A `TurnInterrupted` is emitted for this session, carrying the
+    // in-flight turn's thread (the branch child) so the running indicator clears
+    // on the exact thread.
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SessionEvent::TurnInterrupted { session_id } if *session_id == session
+            SessionEvent::TurnInterrupted { session_id, thread_id }
+                if *session_id == session && *thread_id == Some(child)
         )),
-        "ingesting the api-error line emits TurnInterrupted, got {events:?}"
+        "ingesting the api-error line emits TurnInterrupted on the child thread, got {events:?}"
     );
 
     // (b) The api-error message is attributed to the in-flight turn's thread (the

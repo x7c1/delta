@@ -232,8 +232,12 @@ export function createMockApi(): MockApi {
       // none outstanding, the session is idle.
       const outstanding = sends.find((send) => send.status === 'dispatched');
       const turn: Turn = outstanding
-        ? { state: 'awaiting_echo', send_id: outstanding.id }
-        : { state: 'idle', send_id: null };
+        ? {
+            state: 'awaiting_echo',
+            send_id: outstanding.id,
+            thread_id: outstanding.thread_id,
+          }
+        : { state: 'idle', send_id: null, thread_id: null };
       const body: SendsResponse = {
         sends,
         turn,

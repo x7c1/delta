@@ -10,4 +10,10 @@ import type { TurnPhase } from "./TurnPhase";
  * after a missed event window can rebuild its in-progress indicator from a
  * plain refetch.
  */
-export type Turn = { state: TurnPhase, send_id: number | null, };
+export type Turn = { state: TurnPhase, send_id: number | null, 
+/**
+ * The thread the in-flight turn is running on, so a reconnecting client can
+ * re-seed its per-thread running indicator on the exact thread. `null`
+ * while idle.
+ */
+thread_id: number | null, };

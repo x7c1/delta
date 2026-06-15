@@ -23,21 +23,33 @@ pub enum WireSessionEvent {
     SessionClosed { session_id: String },
     /// A held (`queued`) send was promoted to `dispatched` and typed.
     SendDispatched { session_id: String, send_id: i64 },
-    /// A queued send was confirmed as a turn start.
+    /// A queued send was confirmed as a turn start. `thread_id` is the thread
+    /// the dispatched send took its turn on, so the running indicator lights on
+    /// the exact thread rather than the whole session.
     TurnStarted {
         session_id: String,
         send_id: i64,
+        thread_id: i64,
         matched_uuid: String,
     },
     /// External input was detected (typed directly into the pane).
     ExternalInput { session_id: String, prompt: String },
-    /// A response completed.
+    /// A response completed. `thread_id` is the thread whose in-flight turn just
+    /// ended, so the running indicator clears (and an unread badge bumps when
+    /// the thread is not focused) on the exact thread. `null` only for a `Stop`
+    /// on a session that was never registered (no thread to resolve).
     TurnCompleted {
         session_id: String,
+        thread_id: Option<i64>,
         stop_reason: Option<String>,
     },
     /// The in-flight turn was interrupted by the user (Escape / Ctrl-C).
-    TurnInterrupted { session_id: String },
+    /// `thread_id` is the interrupted turn's thread, so its running indicator
+    /// clears on the exact thread. `null` only when no thread is resolvable.
+    TurnInterrupted {
+        session_id: String,
+        thread_id: Option<i64>,
+    },
     /// The transcript grew between hooks (continuous tail).
     TranscriptUpdated {
         session_id: String,
@@ -126,10 +138,12 @@ impl From<SessionEvent> for WireSessionEvent {
             SessionEvent::TurnStarted {
                 session_id,
                 send_id,
+                thread_id,
                 matched_uuid,
             } => Self::TurnStarted {
                 session_id: session_id.0,
                 send_id,
+                thread_id: thread_id.0,
                 matched_uuid: matched_uuid.0,
             },
             SessionEvent::ExternalInput { session_id, prompt } => Self::ExternalInput {
@@ -138,13 +152,19 @@ impl From<SessionEvent> for WireSessionEvent {
             },
             SessionEvent::TurnCompleted {
                 session_id,
+                thread_id,
                 stop_reason,
             } => Self::TurnCompleted {
                 session_id: session_id.0,
+                thread_id: thread_id.map(|id| id.0),
                 stop_reason,
             },
-            SessionEvent::TurnInterrupted { session_id } => Self::TurnInterrupted {
+            SessionEvent::TurnInterrupted {
+                session_id,
+                thread_id,
+            } => Self::TurnInterrupted {
                 session_id: session_id.0,
+                thread_id: thread_id.map(|id| id.0),
             },
             SessionEvent::TranscriptUpdated {
                 session_id,
@@ -291,6 +311,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::TurnStarted {
             session_id: session_id(),
             send_id: 1,
+            thread_id: 1,
             matched_uuid: "uuid-sample".to_owned(),
         },
         WireSessionEvent::ExternalInput {
@@ -299,10 +320,12 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::TurnCompleted {
             session_id: session_id(),
+            thread_id: Some(1),
             stop_reason: None,
         },
         WireSessionEvent::TurnInterrupted {
             session_id: session_id(),
+            thread_id: Some(1),
         },
         WireSessionEvent::TranscriptUpdated {
             session_id: session_id(),
@@ -395,8 +418,13 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::TurnInterrupted {
                 session_id: "sess-1".into(),
+                thread_id: Some(4),
             }),
-            serde_json::json!({ "kind": "turn_interrupted", "session_id": "sess-1" }),
+            serde_json::json!({
+                "kind": "turn_interrupted",
+                "session_id": "sess-1",
+                "thread_id": 4,
+            }),
         );
     }
 
@@ -485,23 +513,27 @@ mod tests {
             json(&WireSessionEvent::from(SessionEvent::TurnStarted {
                 session_id: SessionId::from("sess-1"),
                 send_id: 42,
+                thread_id: ThreadId(2),
                 matched_uuid: MessageUuid::from("uuid-1"),
             })),
             serde_json::json!({
                 "kind": "turn_started",
                 "session_id": "sess-1",
                 "send_id": 42,
+                "thread_id": 2,
                 "matched_uuid": "uuid-1",
             }),
         );
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::TurnCompleted {
                 session_id: SessionId::from("sess-1"),
+                thread_id: Some(ThreadId(2)),
                 stop_reason: None,
             })),
             serde_json::json!({
                 "kind": "turn_completed",
                 "session_id": "sess-1",
+                "thread_id": 2,
                 "stop_reason": null,
             }),
         );

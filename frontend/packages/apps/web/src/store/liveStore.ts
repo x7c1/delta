@@ -371,36 +371,39 @@ export interface LiveState {
   /** Tracked new-session spawns, oldest first, keyed by real session id. */
   spawns: SpawnItem[];
   /**
-   * Sessions with a turn in flight, set by `turn_started` and cleared when
-   * the turn completes or is interrupted (or the session closes). Drives the
-   * navigator's "running" indicator. Note `turn_started` only fires when the
-   * user line was ingested in the same `UserPromptSubmit` sync, so absence
-   * here does not prove idleness — same semantics the FIFO's `in_progress`
-   * status had.
+   * Threads with a turn in flight, keyed by session id then thread id, set by
+   * `turn_started` and cleared when the turn completes or is interrupted (or
+   * the session closes). Drives the navigator's THREAD-aware "running"
+   * indicator: a session's collapsed row OR-aggregates over its inner record
+   * (any running thread → spinner), while the expanded thread tree reads each
+   * thread's own flag. Keyed by session first so a `session_closed` (which
+   * carries only a session id) clears the whole session in one drop, with no
+   * separate thread→session map to keep in step. Note `turn_started` only fires
+   * when the user line was ingested in the same `UserPromptSubmit` sync, so
+   * absence here does not prove idleness — same semantics the FIFO's
+   * `in_progress` status had.
    */
-  activeTurns: Record<SessionId, true>;
+  runningThreads: Record<SessionId, Record<ThreadId, true>>;
   /**
    * Per-session notices, at most one per {@link SessionNoticeKind} per
    * session. Read through {@link noticeOf}; lifecycle clearing follows
    * {@link NOTICE_LIFECYCLE}.
    */
   notices: Record<SessionId, SessionNotice[]>;
-  /** Unread counts keyed by thread id; cleared when a thread becomes active. */
-  unread: Record<ThreadId, number>;
   /**
-   * Sessions whose turn completed while the user was viewing a DIFFERENT
-   * session, so its navigator row carries an unread dot until focused. Set by
-   * {@link markSessionUnread} (called from the router only when the completing
-   * session is not the focused one), cleared by {@link clearSessionUnread} when
-   * the session is focused. A boolean flag, not a count: the dot only signals
-   * "something finished here", it does not tally turns. In-memory only (resets
-   * on reload), mirroring {@link unread} — persistence across reload would need
-   * backend support and is out of scope. The running spinner takes precedence
-   * in the row's rendering (a session running again shows the spinner, not a
-   * stale dot), but the flag itself is left set so the dot reappears the moment
-   * that turn ends off-focus; only focusing the session clears it.
+   * Unread counts keyed by thread id; cleared when a thread becomes active.
+   *
+   * The single source of truth for unread, at thread granularity. Bumped on a
+   * `turn_completed` for a thread the user is not currently viewing (a
+   * background session, or a non-active thread of the focused session) and on
+   * external input to the focused thread. The navigator's collapsed session row
+   * OR-aggregates over the session's threads (any unread → dot), and the
+   * expanded thread tree shows each thread's own count — so there is no separate
+   * session-level unread map to drift from this one. In-memory only (resets on
+   * reload): persistence across reload would need backend support and is out of
+   * scope.
    */
-  unreadSessions: Record<SessionId, true>;
+  unread: Record<ThreadId, number>;
   /**
    * The provisional live preview of each session's in-flight assistant message,
    * keyed by session id. Appended by `assistant_streaming` and cleared on turn
@@ -458,20 +461,21 @@ export interface LiveState {
   clearResumeUnavailable: (sessionId: SessionId) => void;
   /**
    * Drop the event-reconstructed turn-scoped state: tracked local sends, the
-   * active-turn flags, and the permission/question notices. Used on a
+   * running-thread flags, and the permission/question notices. Used on a
    * live-stream reconnect: the turn-end / `permission_resolved` events that
    * would have drained these were broadcast while the socket was down and are
    * not replayed, so they can no longer be reconciled from events. They all
    * recover from the refetched sends envelope — the open-send list by refetch,
-   * the active-turn flag via {@link seedActiveTurn}, the permission notice via
+   * the running-thread flag via {@link seedActiveTurn}, the permission notice via
    * {@link seedPermission}, and the question notice via {@link seedQuestion}.
    * Other notice kinds stay: they cannot be re-seeded, and each has a
    * non-event escape hatch (a user dismiss or a lifecycle trigger).
    */
   resetTurnEphemera: () => void;
   /**
-   * Seed a session's active-turn flag from the server's queryable turn state
-   * (the `turn` field of `GET /api/sessions/{id}/sends`).
+   * Seed a session's running-thread flag from the server's queryable turn state
+   * (the `turn` field of `GET /api/sessions/{id}/sends`), which carries the
+   * in-flight turn's `thread_id` so the flag lands on the exact thread.
    *
    * Two modes, picked by `authoritative`:
    *
@@ -483,21 +487,21 @@ export interface LiveState {
    *   started yet (exactly like a live `send_dispatched`), and `idle` changes
    *   nothing.
    * - `authoritative: true` (a genuinely fresh fetch that has settled): the
-   *   server is the source of truth, so reconcile the flag to match —
-   *   `activeTurns[sessionId] = (turn.state === 'in_flight')`. A fresh `idle`
-   *   authoritatively means "no running turn" and CLEARS the flag; a fresh
-   *   `in_flight` keeps/re-sets it (so reconnect healing still works when the
-   *   resync refetch lands `in_flight`). `awaiting_echo` reconciles to
-   *   not-running, consistent with the set-only mode ignoring it.
+   *   server is the source of truth, so reconcile the session's running-thread
+   *   set to match. A fresh `in_flight` keeps/re-sets the flag on `thread_id`
+   *   (so reconnect healing still works when the resync refetch lands
+   *   `in_flight`); a fresh `idle` (or `awaiting_echo`, or an `in_flight` whose
+   *   `thread_id` is absent) authoritatively means "no running thread here" and
+   *   CLEARS the whole session's set.
    *
    * The authoritative mode exists to clear a flag the stale-cache read would
    * otherwise resurrect: after a turn completes off-focus its `turn_completed`
-   * clears `activeTurns`, but re-focusing the session serves the stale cached
-   * `in_flight` envelope before the refetch — without an authoritative clear on
-   * the following fresh `idle`, the set-only re-seed would leave the spinner
-   * stuck on. Callers must therefore pass `authoritative: true` only for a read
-   * known to be fresh (the query settled, not a stale-cache placeholder shown
-   * mid-refetch).
+   * clears the running thread, but re-focusing the session serves the stale
+   * cached `in_flight` envelope before the refetch — without an authoritative
+   * clear on the following fresh `idle`, the set-only re-seed would leave the
+   * spinner stuck on. Callers must therefore pass `authoritative: true` only for
+   * a read known to be fresh (the query settled, not a stale-cache placeholder
+   * shown mid-refetch).
    */
   seedActiveTurn: (
     sessionId: SessionId,
@@ -545,14 +549,6 @@ export interface LiveState {
   ) => void;
   bumpUnread: (threadId: ThreadId) => void;
   clearUnread: (threadId: ThreadId) => void;
-  /**
-   * Flag a session unread (its turn completed off-focus). Idempotent: a flag
-   * already set changes nothing. The router gates the focus check, so this only
-   * ever marks a non-focused session.
-   */
-  markSessionUnread: (sessionId: SessionId) => void;
-  /** Clear a session's unread flag (it became the focused session). */
-  clearSessionUnread: (sessionId: SessionId) => void;
   /** Record an external (direct-pane) input notice for a session/thread. */
   noteExternalInput: (
     sessionId: SessionId,
@@ -665,10 +661,46 @@ function dropForegroundSubagentsForSession(
  * and `session_closed` (no live process) — pass {@link dropStreaming} so the
  * dangling preview is cleared explicitly.
  */
+/**
+ * Clear a running-thread flag. When `threadId` is given (a turn-end on a
+ * specific thread) only that thread is cleared, dropping the session's record
+ * once its last running thread goes; when it is `null` (a `session_closed`,
+ * which ends every thread of the session) the whole session entry is dropped.
+ * Returns the changed slice, or an empty object when nothing matched so the
+ * caller can keep the identity-stable state.
+ */
+function clearRunningThread(
+  state: LiveState,
+  sessionId: SessionId,
+  threadId: ThreadId | null,
+): Partial<LiveState> {
+  const current = state.runningThreads[sessionId];
+  if (current === undefined) {
+    return {};
+  }
+  const runningThreads = { ...state.runningThreads };
+  if (threadId === null) {
+    delete runningThreads[sessionId];
+    return { runningThreads };
+  }
+  if (!current[threadId]) {
+    return {};
+  }
+  const remaining = { ...current };
+  delete remaining[threadId];
+  if (Object.keys(remaining).length === 0) {
+    delete runningThreads[sessionId];
+  } else {
+    runningThreads[sessionId] = remaining;
+  }
+  return { runningThreads };
+}
+
 function endTurnForSession(
   state: LiveState,
   sessionId: SessionId,
   trigger: 'turn_end' | 'session_closed',
+  threadId: ThreadId | null,
   dropStreaming: boolean,
 ): Partial<LiveState> {
   const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
@@ -699,13 +731,9 @@ function endTurnForSession(
       [sessionId]: (state.endedBeforeRecorded[sessionId] ?? 0) + 1,
     };
   }
-  if (state.activeTurns[sessionId]) {
-    const activeTurns = { ...state.activeTurns };
-    delete activeTurns[sessionId];
-    next.activeTurns = activeTurns;
-  }
   return {
     ...next,
+    ...clearRunningThread(state, sessionId, threadId),
     ...(dropStreaming ? dropStreamingForSession(state, sessionId) : {}),
     // A FOREGROUND subagent cannot outlive the turn that spawned it, so any
     // still-running foreground entry is cleared whenever the turn ends (or the
@@ -723,10 +751,9 @@ export const useLiveStore = create<LiveState>((set) => ({
   sending: [],
   localSends: {},
   spawns: [],
-  activeTurns: {},
+  runningThreads: {},
   notices: {},
   unread: {},
-  unreadSessions: {},
   streamingMessages: {},
   runningSubagents: {},
   endedBeforeRecorded: {},
@@ -831,7 +858,7 @@ export const useLiveStore = create<LiveState>((set) => ({
       // PR), so drop them too — the flushed message renders from the refetch.
       return {
         localSends: {},
-        activeTurns: {},
+        runningThreads: {},
         notices,
         streamingMessages: {},
         // The running-subagent set is re-seeded authoritatively from the sends
@@ -846,27 +873,53 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   seedActiveTurn: (sessionId, turn, authoritative) =>
     set((state) => {
-      const running = turn.state === 'in_flight';
+      // A turn is "running" for seeding only when it is in flight AND the
+      // envelope resolved its thread (the `in_progress_turn_thread` result).
+      // An `in_flight` with no thread cannot be placed on a thread, so it is
+      // treated as not-running here.
+      const runningThreadId =
+        turn.state === 'in_flight' && turn.thread_id !== null
+          ? (turn.thread_id as ThreadId)
+          : null;
+      const current = state.runningThreads[sessionId];
       if (!authoritative) {
         // Possibly-stale read: set-only healing. Never clear from here —
         // turn-end events own clearing, so a stale `idle` cannot wipe a flag
         // a live event just set.
-        if (!running || state.activeTurns[sessionId]) {
+        if (runningThreadId === null || current?.[runningThreadId]) {
           return state;
         }
-        return { activeTurns: { ...state.activeTurns, [sessionId]: true } };
+        return {
+          runningThreads: {
+            ...state.runningThreads,
+            [sessionId]: { ...current, [runningThreadId]: true },
+          },
+        };
       }
-      // Fresh read: the server is authoritative, so reconcile to its truth.
-      if (running === !!state.activeTurns[sessionId]) {
+      // Fresh read: the server is authoritative, so reconcile the session's set
+      // to exactly the running thread it reports (or empty when none).
+      if (runningThreadId === null) {
+        if (current === undefined) {
+          return state;
+        }
+        const runningThreads = { ...state.runningThreads };
+        delete runningThreads[sessionId];
+        return { runningThreads };
+      }
+      // Already exactly this one running thread: keep identity-stable state.
+      if (
+        current !== undefined &&
+        Object.keys(current).length === 1 &&
+        current[runningThreadId]
+      ) {
         return state;
       }
-      const activeTurns = { ...state.activeTurns };
-      if (running) {
-        activeTurns[sessionId] = true;
-      } else {
-        delete activeTurns[sessionId];
-      }
-      return { activeTurns };
+      return {
+        runningThreads: {
+          ...state.runningThreads,
+          [sessionId]: { [runningThreadId]: true },
+        },
+      };
     }),
 
   seedPermission: (sessionId, permission) =>
@@ -948,25 +1001,6 @@ export const useLiveStore = create<LiveState>((set) => ({
       return { unread: next };
     }),
 
-  markSessionUnread: (sessionId) =>
-    set((state) =>
-      state.unreadSessions[sessionId]
-        ? state
-        : {
-            unreadSessions: { ...state.unreadSessions, [sessionId]: true },
-          },
-    ),
-
-  clearSessionUnread: (sessionId) =>
-    set((state) => {
-      if (!state.unreadSessions[sessionId]) {
-        return state;
-      }
-      const next = { ...state.unreadSessions };
-      delete next[sessionId];
-      return { unreadSessions: next };
-    }),
-
   noteExternalInput: (sessionId, threadId, prompt) =>
     set((state) => ({
       notices: withNotice(state.notices, sessionId, {
@@ -1022,28 +1056,38 @@ export const useLiveStore = create<LiveState>((set) => ({
   applyEvent: (event) =>
     set((state) => {
       switch (event.kind) {
-        case 'turn_started':
+        case 'turn_started': {
           // The send correlated with its transcript line and the turn is
           // confirmed in flight. The chip itself follows the send (server
-          // list + localSends); here only the per-session running flag moves.
-          return state.activeTurns[event.session_id]
-            ? state
-            : {
-                activeTurns: { ...state.activeTurns, [event.session_id]: true },
-              };
+          // list + localSends); here only the per-thread running flag moves —
+          // set on the exact thread the dispatched send took its turn on, so
+          // the navigator lights the spinner on that thread (and OR-aggregates
+          // it onto the collapsed session row).
+          const current = state.runningThreads[event.session_id];
+          if (current?.[event.thread_id]) {
+            return state;
+          }
+          return {
+            runningThreads: {
+              ...state.runningThreads,
+              [event.session_id]: { ...current, [event.thread_id]: true },
+            },
+          };
+        }
         case 'turn_completed': {
-          // The turn ended: the session's tracked local sends are drained —
-          // the server's open-send list (refetched by the router) is the
-          // remaining truth for anything still queued — and the turn-scoped
-          // notices are swept (see NOTICE_LIFECYCLE). Scoped by session so a
-          // turn in one session never drains another session's chips. The
-          // streaming preview is left in place (dropStreaming: false): the
-          // persisted message will suppress the bubble when it lands, a
-          // gap-free swap (see endTurnForSession).
+          // The turn ended: clear the running flag on the exact thread that ran,
+          // drain the session's tracked local sends — the server's open-send
+          // list (refetched by the router) is the remaining truth for anything
+          // still queued — and sweep the turn-scoped notices (see
+          // NOTICE_LIFECYCLE). Scoped by session so a turn in one session never
+          // drains another session's chips. The streaming preview is left in
+          // place (dropStreaming: false): the persisted message will suppress
+          // the bubble when it lands, a gap-free swap (see endTurnForSession).
           const next = endTurnForSession(
             state,
             event.session_id,
             'turn_end',
+            event.thread_id,
             false,
           );
           return Object.keys(next).length > 0 ? next : state;
@@ -1053,13 +1097,15 @@ export const useLiveStore = create<LiveState>((set) => ({
           // Claude's `Stop` hook does not fire on interrupt, so
           // `turn_completed` never arrives; the backend detects the interrupt
           // from the transcript and emits this hook-independent signal. Drain
-          // exactly as a completed turn would, but also drop the streaming
-          // preview (dropStreaming: true): an interrupted partial may have no
-          // matching persisted message, so nothing else would clear it.
+          // exactly as a completed turn would (clearing the same thread's
+          // running flag), but also drop the streaming preview
+          // (dropStreaming: true): an interrupted partial may have no matching
+          // persisted message, so nothing else would clear it.
           const next = endTurnForSession(
             state,
             event.session_id,
             'turn_end',
+            event.thread_id,
             true,
           );
           return Object.keys(next).length > 0 ? next : state;
@@ -1259,6 +1305,7 @@ export const useLiveStore = create<LiveState>((set) => ({
             state,
             event.session_id,
             'session_closed',
+            null,
             true,
           );
           return Object.keys(next).length > 0 ? next : state;

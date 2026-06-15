@@ -29,10 +29,9 @@ describe('applySessionEvent', () => {
       sending: [],
       localSends: {},
       spawns: [],
-      activeTurns: {},
+      runningThreads: {},
       notices: {},
       unread: {},
-      unreadSessions: {},
       streamingMessages: {},
     });
   });
@@ -45,6 +44,7 @@ describe('applySessionEvent', () => {
       {
         kind: 'turn_started',
         session_id: FOCUSED,
+        thread_id: 5,
         send_id: 1,
         matched_uuid: 'uuid-1',
       },
@@ -80,7 +80,7 @@ describe('applySessionEvent', () => {
       queryKey: ['session-sends', FOCUSED],
     });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('refetches the open sends of a non-focused session on its turn events', () => {
@@ -99,6 +99,7 @@ describe('applySessionEvent', () => {
       {
         kind: 'turn_completed',
         session_id: 'other-session',
+        thread_id: 8,
         stop_reason: null,
       },
       queryClient,
@@ -116,50 +117,69 @@ describe('applySessionEvent', () => {
     expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
   });
 
-  it('marks a non-focused session unread when its turn completes', () => {
+  it('bumps the completing thread of a non-focused session as unread', () => {
     const queryClient = new QueryClient();
 
     applySessionEvent(
-      { kind: 'turn_completed', session_id: 'other-session', stop_reason: null },
+      {
+        kind: 'turn_completed',
+        session_id: 'other-session',
+        thread_id: 8,
+        stop_reason: null,
+      },
       queryClient,
       5,
       FOCUSED,
     );
 
-    // A background completion produced something the user has not seen; its
-    // row gets the unread dot.
-    expect(useLiveStore.getState().unreadSessions).toEqual({
-      'other-session': true,
-    });
+    // A background completion produced something the user has not seen; THAT
+    // thread's unread is bumped (the navigator OR-aggregates it onto the row).
+    expect(useLiveStore.getState().unread).toEqual({ 8: 1 });
   });
 
-  it('does not mark the focused session unread when its turn completes', () => {
+  it('does not bump unread when the completing thread is the one on screen', () => {
     const queryClient = new QueryClient();
 
     applySessionEvent(
-      { kind: 'turn_completed', session_id: FOCUSED, stop_reason: null },
+      { kind: 'turn_completed', session_id: FOCUSED, thread_id: 5, stop_reason: null },
       queryClient,
       5,
       FOCUSED,
     );
 
-    // The user is already viewing this session, so there is nothing unseen.
-    expect(useLiveStore.getState().unreadSessions).toEqual({});
+    // The focused session's active thread (5) is exactly what the user is
+    // viewing, so nothing is unseen.
+    expect(useLiveStore.getState().unread).toEqual({});
   });
 
-  it('does not mark unread on a turn interrupt, even for a non-focused session', () => {
+  it('bumps unread for a non-active thread of the focused session', () => {
+    const queryClient = new QueryClient();
+
+    // The focused session is on thread 5, but a DIFFERENT thread (6) of the
+    // same session completes — the user is not looking at it, so it is unread.
+    applySessionEvent(
+      { kind: 'turn_completed', session_id: FOCUSED, thread_id: 6, stop_reason: null },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    expect(useLiveStore.getState().unread).toEqual({ 6: 1 });
+  });
+
+  it('does not bump unread on a turn interrupt, even for a non-focused session', () => {
     const queryClient = new QueryClient();
 
     applySessionEvent(
-      { kind: 'turn_interrupted', session_id: 'other-session' },
+      { kind: 'turn_interrupted', session_id: 'other-session', thread_id: 8 },
       queryClient,
       5,
       FOCUSED,
     );
 
     // An interrupt is the user's own Escape/Ctrl-C, not a surprise completion
-    // that needs flagging; only `turn_completed` marks unread.
-    expect(useLiveStore.getState().unreadSessions).toEqual({});
+    // that needs flagging; only `turn_completed` bumps unread.
+    expect(useLiveStore.getState().unread).toEqual({});
   });
 
   it('badges the focused active thread on external_input', () => {

@@ -7,10 +7,9 @@ function reset() {
     sending: [],
     localSends: {},
     spawns: [],
-    activeTurns: {},
+    runningThreads: {},
     notices: {},
     unread: {},
-    unreadSessions: {},
     streamingMessages: {},
     runningSubagents: {},
     endedBeforeRecorded: {},
@@ -55,23 +54,26 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
+      thread_id: 1,
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
-    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+    expect(useLiveStore.getState().runningThreads).toEqual({ 'sess-1': { 1: true } });
 
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('clears the running flag on turn_interrupted', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
+      thread_id: 1,
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
@@ -79,8 +81,9 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_interrupted',
       session_id: 'sess-1',
+      thread_id: 1,
     });
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('drains the tracked local send when its turn completes', () => {
@@ -89,6 +92,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().localSends).toEqual({});
@@ -103,6 +107,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_interrupted',
       session_id: 'sess-1',
+      thread_id: 1,
     });
     expect(useLiveStore.getState().localSends).toEqual({});
   });
@@ -116,11 +121,13 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-2',
+      thread_id: 1,
       stop_reason: null,
     });
     useLiveStore.getState().applyEvent({
       kind: 'turn_interrupted',
       session_id: 'sess-2',
+      thread_id: 1,
     });
     expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(1);
 
@@ -128,6 +135,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().localSends).toEqual({});
@@ -144,6 +152,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().endedBeforeRecorded).toEqual({ 'sess-1': 1 });
@@ -162,11 +171,13 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().endedBeforeRecorded).toEqual({ 'sess-1': 2 });
@@ -185,6 +196,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().localSends).toEqual({});
@@ -200,6 +212,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-2',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
@@ -213,6 +226,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
+      thread_id: 1,
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
@@ -222,7 +236,7 @@ describe('liveStore turn tracking', () => {
       session_id: 'sess-1',
     });
     expect(useLiveStore.getState().localSends).toEqual({});
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('resetTurnEphemera drops tracked sends, running flags, and permission notices, nothing else', () => {
@@ -230,6 +244,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
       session_id: 'sess-1',
+      thread_id: 1,
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
@@ -275,7 +290,7 @@ describe('liveStore turn tracking', () => {
     useLiveStore.getState().resetTurnEphemera();
 
     expect(useLiveStore.getState().localSends).toEqual({});
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+    expect(useLiveStore.getState().runningThreads).toEqual({});
     expect(useLiveStore.getState().sending).toHaveLength(1);
     expect(useLiveStore.getState().spawns).toHaveLength(1);
     expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
@@ -292,15 +307,15 @@ describe('liveStore turn tracking', () => {
     // would have set.
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1 }, false);
-    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1, thread_id: 1 }, false);
+    expect(useLiveStore.getState().runningThreads).toEqual({ 'sess-1': { 1: true } });
 
     // A stale idle report never clears: turn-end events own clearing, so a
     // momentarily-stale refetch cannot wipe a flag an event just set.
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'idle', send_id: null }, false);
-    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+      .seedActiveTurn('sess-1', { state: 'idle', send_id: null, thread_id: null }, false);
+    expect(useLiveStore.getState().runningThreads).toEqual({ 'sess-1': { 1: true } });
   });
 
   it('seedActiveTurn (stale read) ignores awaiting_echo: turn not started yet', () => {
@@ -308,8 +323,8 @@ describe('liveStore turn tracking', () => {
     // it never set the running flag, so the refetch must not either.
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 }, false);
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2, thread_id: 1 }, false);
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('seedActiveTurn (fresh read) reconciles the flag to the server truth', () => {
@@ -320,23 +335,23 @@ describe('liveStore turn tracking', () => {
     // and only the fresh idle that follows can clear it).
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1 }, true);
-    expect(useLiveStore.getState().activeTurns).toEqual({ 'sess-1': true });
+      .seedActiveTurn('sess-1', { state: 'in_flight', send_id: 1, thread_id: 1 }, true);
+    expect(useLiveStore.getState().runningThreads).toEqual({ 'sess-1': { 1: true } });
 
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'idle', send_id: null }, true);
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+      .seedActiveTurn('sess-1', { state: 'idle', send_id: null, thread_id: null }, true);
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('seedActiveTurn (fresh read) reconciles awaiting_echo to not-running', () => {
     // awaiting_echo is not in_flight, so a fresh read clears any leftover flag,
     // consistent with the stale-read mode ignoring it.
-    useLiveStore.setState({ activeTurns: { 'sess-1': true } });
+    useLiveStore.setState({ runningThreads: { 'sess-1': { 1: true } } });
     useLiveStore
       .getState()
-      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2 }, true);
-    expect(useLiveStore.getState().activeTurns).toEqual({});
+      .seedActiveTurn('sess-1', { state: 'awaiting_echo', send_id: 2, thread_id: 1 }, true);
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 });
 
@@ -410,6 +425,7 @@ describe('liveStore assistant streaming preview', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().streamingMessages['sess-1'].text).toBe(
@@ -422,6 +438,7 @@ describe('liveStore assistant streaming preview', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_interrupted',
       session_id: 'sess-1',
+      thread_id: 1,
     });
     expect(useLiveStore.getState().streamingMessages).toEqual({});
   });
@@ -585,6 +602,7 @@ describe('liveStore spawn tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(useLiveStore.getState().spawns[0].status).toBe('failed');
@@ -666,6 +684,7 @@ describe('liveStore.applyEvent notices', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     // The turn ended, so the prompt that was blocking the session is resolved.
@@ -791,6 +810,7 @@ describe('liveStore.applyEvent notices', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     // The turn ended, so the external-input notice has served its purpose.
@@ -804,6 +824,7 @@ describe('liveStore.applyEvent notices', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-2',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(noticeOf(notices(), 'sess-1', 'external_input')).toMatchObject({
@@ -842,6 +863,7 @@ describe('liveStore.applyEvent notices', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     useLiveStore.getState().applyEvent({
@@ -867,28 +889,68 @@ describe('liveStore.applyEvent notices', () => {
     expect(useLiveStore.getState().unread[2]).toBeUndefined();
   });
 
-  it('marks and clears per-session unread flags', () => {
-    useLiveStore.getState().markSessionUnread('sess-1');
-    expect(useLiveStore.getState().unreadSessions).toEqual({ 'sess-1': true });
-
-    // Idempotent: a flag already set changes nothing (and other sessions stay
-    // independent).
-    useLiveStore.getState().markSessionUnread('sess-1');
-    useLiveStore.getState().markSessionUnread('sess-2');
-    expect(useLiveStore.getState().unreadSessions).toEqual({
-      'sess-1': true,
-      'sess-2': true,
+  it('tracks running per thread and clears only the completed thread', () => {
+    // Two sub-threads of one session run concurrently.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      thread_id: 2,
+      send_id: 1,
+      matched_uuid: 'u-2',
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      thread_id: 3,
+      send_id: 2,
+      matched_uuid: 'u-3',
+    });
+    expect(useLiveStore.getState().runningThreads).toEqual({
+      'sess-1': { 2: true, 3: true },
     });
 
-    useLiveStore.getState().clearSessionUnread('sess-1');
-    expect(useLiveStore.getState().unreadSessions).toEqual({ 'sess-2': true });
+    // One thread completes: only its flag clears; the other keeps running and
+    // the session entry survives (so the row still OR-aggregates to running).
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 2,
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().runningThreads).toEqual({
+      'sess-1': { 3: true },
+    });
+
+    // The last running thread ends: the now-empty session entry is dropped.
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 3,
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
-  it('clearSessionUnread on an already-clear session is a no-op', () => {
-    const before = useLiveStore.getState().unreadSessions;
-    useLiveStore.getState().clearSessionUnread('sess-unknown');
-    // The identity-stable map is preserved (no needless re-render).
-    expect(useLiveStore.getState().unreadSessions).toBe(before);
+  it('session_closed clears every running thread of the session', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      thread_id: 2,
+      send_id: 1,
+      matched_uuid: 'u-2',
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_started',
+      session_id: 'sess-1',
+      thread_id: 3,
+      send_id: 2,
+      matched_uuid: 'u-3',
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
   it('ignores session lifecycle events for ephemeral state', () => {
@@ -974,6 +1036,7 @@ describe('liveStore.applyEvent question notices', () => {
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(noticeOf(notices(), 'sess-1', 'question')).toBeNull();
@@ -1142,6 +1205,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(subagents()).toBeUndefined();
@@ -1184,6 +1248,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(subagents()?.map((s) => s.toolUseId)).toEqual(['toolu_bg']);
@@ -1203,6 +1268,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'turn_completed',
       session_id: 'sess-1',
+      thread_id: 1,
       stop_reason: null,
     });
     expect(subagents()?.map((s) => s.toolUseId)).toEqual(['toolu_bg']);

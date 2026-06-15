@@ -97,7 +97,7 @@ export function appendSessionSend(
         // running subagents) is server-reported; an optimistic insert learns
         // nothing about it, so keep what the last fetch said (or idle/none/empty
         // before any fetch) and let the follow-up invalidation reconcile.
-        turn: previous?.turn ?? { state: 'idle', send_id: null },
+        turn: previous?.turn ?? { state: 'idle', send_id: null, thread_id: null },
         permission: previous?.permission ?? null,
         question: previous?.question ?? null,
         running_subagents: previous?.running_subagents ?? [],

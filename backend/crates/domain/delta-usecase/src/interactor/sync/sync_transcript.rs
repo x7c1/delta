@@ -137,6 +137,10 @@ where
                     }
                 }
                 Effect::TurnInterrupted => {
+                    // Recover the interrupted turn's thread BEFORE the machine
+                    // runs: `apply_turn_input` can sweep the head dispatched
+                    // send (the authoritative thread source).
+                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
                     // The interrupt ends the turn: feed `Interrupt` into the
                     // turn machine (back to `Idle`). Dispatching any queued
                     // send is left to the caller (which acts on the returned
@@ -146,6 +150,7 @@ where
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session.id.clone(),
+                        thread_id: Some(thread_id),
                     });
                 }
                 Effect::TurnAborted => {
@@ -161,9 +166,11 @@ where
                     // message). The caller releases the queued send after this
                     // sync returns (it keys on `TurnInterrupted`), so no
                     // keystrokes are sent from inside the ingestion path.
+                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
                     self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session.id.clone(),
+                        thread_id: Some(thread_id),
                     });
                 }
                 Effect::SendMatched {

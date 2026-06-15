@@ -15,6 +15,7 @@ import { setupServer } from 'msw/node';
 import {
   SESSION_ID,
   SESSION_ID_2,
+  MAIN_THREAD_ID,
   SESSION_2_MAIN_THREAD_ID,
   SESSION_2_BRANCH_THREAD_ID,
   createHandlers,
@@ -88,35 +89,45 @@ describe('WorkspaceScreen multi-session', () => {
       newSessionWorkdir: null,
       workdirDialogOpen: false,
     });
-    useLiveStore.setState({ spawns: [], unreadSessions: {} });
+    useLiveStore.setState({ spawns: [], unread: {} });
   });
 
-  it('clears the focused session’s unread flag on load', async () => {
-    // A background session finished its turn while the user was elsewhere, so it
-    // carries an unread dot. The instant that session is the focused one, the
-    // dot is moot — focusing it means the user is now looking at it.
-    useNavStore.setState({ focusedSessionId: SESSION_ID });
-    useLiveStore.setState({ unreadSessions: { [SESSION_ID]: true } });
+  it('clears the focused session’s active thread unread on load', async () => {
+    // A background turn finished on the focused session's main thread while the
+    // user was elsewhere, so that thread carries unread. Focusing the session
+    // activates its main thread, which clears that thread's unread (the row's
+    // OR-aggregated dot clears with it).
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      activeThreadId: MAIN_THREAD_ID,
+    });
+    useLiveStore.setState({ unread: { [MAIN_THREAD_ID]: 1 } });
 
     renderScreen();
 
     await waitFor(() =>
-      expect(useLiveStore.getState().unreadSessions[SESSION_ID]).toBeUndefined(),
+      expect(useLiveStore.getState().unread[MAIN_THREAD_ID]).toBeUndefined(),
     );
   });
 
-  it('leaves a non-focused session’s unread flag intact', async () => {
-    // Only the focused session is cleared; a different session that finished in
-    // the background keeps its dot until the user opens it.
-    useNavStore.setState({ focusedSessionId: SESSION_ID });
-    useLiveStore.setState({ unreadSessions: { [SESSION_ID_2]: true } });
+  it('leaves a non-active thread’s unread intact', async () => {
+    // Only the active thread is cleared; a different thread (here a thread of
+    // another session) that finished in the background keeps its unread until
+    // the user activates it.
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      activeThreadId: MAIN_THREAD_ID,
+    });
+    useLiveStore.setState({
+      unread: { [MAIN_THREAD_ID]: 1, [SESSION_2_MAIN_THREAD_ID]: 1 },
+    });
 
     renderScreen();
 
     await waitFor(() =>
-      expect(useLiveStore.getState().unreadSessions[SESSION_ID]).toBeUndefined(),
+      expect(useLiveStore.getState().unread[MAIN_THREAD_ID]).toBeUndefined(),
     );
-    expect(useLiveStore.getState().unreadSessions[SESSION_ID_2]).toBe(true);
+    expect(useLiveStore.getState().unread[SESSION_2_MAIN_THREAD_ID]).toBe(1);
   });
 
   it('focuses a tracked spawn by its real id once it appears in the list', async () => {

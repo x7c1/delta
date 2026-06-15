@@ -35,9 +35,14 @@ pub enum SessionEvent {
     /// turn-lifecycle event.
     SendDispatched { session_id: SessionId, send_id: i64 },
     /// A queued send was confirmed as a turn start.
+    ///
+    /// `thread_id` is the thread the dispatched send was composed for, so the
+    /// browser can light the running indicator on the exact thread (main or a
+    /// branch) that took the turn rather than the session as a whole.
     TurnStarted {
         session_id: SessionId,
         send_id: i64,
+        thread_id: ThreadId,
         matched_uuid: MessageUuid,
     },
     /// External input was detected (typed directly into the pane).
@@ -46,8 +51,17 @@ pub enum SessionEvent {
         prompt: String,
     },
     /// A response completed.
+    ///
+    /// `thread_id` is the thread whose in-flight turn just ended, recovered
+    /// (via `SessionStore::in_progress_turn_thread`) before the turn machine
+    /// clears the in-flight send, so the browser clears the running indicator —
+    /// and bumps the unread badge when the thread is not focused — on the exact
+    /// thread that ran. `None` only for the degenerate case of a `Stop` on a
+    /// session Delta never registered (no thread exists to resolve); a real
+    /// turn always carries its thread.
     TurnCompleted {
         session_id: SessionId,
+        thread_id: Option<ThreadId>,
         stop_reason: Option<String>,
     },
     /// The in-flight turn was interrupted by the user (Escape / Ctrl-C).
@@ -59,7 +73,16 @@ pub enum SessionEvent {
     /// `[Request interrupted by user...]` user line and emits this event, which
     /// clears the stuck send hook-independently (same delivery path as
     /// [`Self::PermissionResolved`]).
-    TurnInterrupted { session_id: SessionId },
+    ///
+    /// `thread_id` is the thread whose in-flight turn was interrupted, recovered
+    /// the same way [`Self::TurnCompleted`] recovers its thread, so the browser
+    /// clears the running indicator on the exact thread that was interrupted.
+    /// `None` only when no thread is resolvable (a degenerate signal for a
+    /// session with no in-flight turn); a real interrupt always carries it.
+    TurnInterrupted {
+        session_id: SessionId,
+        thread_id: Option<ThreadId>,
+    },
     /// The transcript grew between hooks (continuous tail).
     ///
     /// Emitted by the background poll when new lines were ingested, so the

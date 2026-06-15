@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { SESSION_ID } from '@delta/api-mocks';
+import { MAIN_THREAD_ID, SESSION_ID } from '@delta/api-mocks';
 import { emitEvent, useManualEventControl } from './support/app';
 
 /**
@@ -29,6 +29,7 @@ test('the running indicator appears then clears as a turn completes', async ({
   await emitEvent(page, {
     kind: 'turn_started',
     session_id: SESSION_ID,
+    thread_id: MAIN_THREAD_ID,
     send_id: 1,
     matched_uuid: null,
   });
@@ -37,6 +38,7 @@ test('the running indicator appears then clears as a turn completes', async ({
   await emitEvent(page, {
     kind: 'turn_completed',
     session_id: SESSION_ID,
+    thread_id: MAIN_THREAD_ID,
     stop_reason: null,
   });
   await expect(page.getByTestId('pending-item')).toHaveCount(0);
@@ -67,6 +69,7 @@ test('the running indicator clears when a turn is interrupted', async ({
   await emitEvent(page, {
     kind: 'turn_started',
     session_id: SESSION_ID,
+    thread_id: MAIN_THREAD_ID,
     send_id: 1,
     matched_uuid: null,
   });
@@ -76,6 +79,7 @@ test('the running indicator clears when a turn is interrupted', async ({
   await emitEvent(page, {
     kind: 'turn_interrupted',
     session_id: SESSION_ID,
+    thread_id: MAIN_THREAD_ID,
   });
   await expect(page.getByTestId('pending-item')).toHaveCount(0);
   await expect(running).toHaveCount(0);

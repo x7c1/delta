@@ -118,6 +118,10 @@ where
                     events.push(SessionEvent::TurnStarted {
                         session_id: hook.session_id.clone(),
                         send_id: pending.id,
+                        // The dispatched send carries the thread it was composed
+                        // for, so the running indicator lights on that exact
+                        // thread (main or a branch) rather than the session.
+                        thread_id: pending.thread_id,
                         matched_uuid: uuid,
                     });
                 }

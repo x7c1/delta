@@ -46,6 +46,28 @@ describe('ThreadTree', () => {
     expect(onSelectThread).toHaveBeenCalledWith(2);
   });
 
+  it('shows a per-thread running spinner only on running threads', () => {
+    render(
+      <ThreadTree
+        threads={threads}
+        runningThreads={{ 2: true }}
+        onSelectThread={() => {}}
+      />,
+    );
+
+    // The sub-thread (id 2) is running, so its row carries the spinner; with a
+    // single sub-thread rendered, exactly one spinner is present.
+    const spinners = screen.getAllByTestId('thread-running');
+    expect(spinners).toHaveLength(1);
+    expect(spinners[0]).toHaveTextContent('running');
+  });
+
+  it('shows no per-thread spinner when no thread is running', () => {
+    render(<ThreadTree threads={threads} onSelectThread={() => {}} />);
+
+    expect(screen.queryByTestId('thread-running')).not.toBeInTheDocument();
+  });
+
   it('shows an unread badge for inactive threads and hides it for the active one', () => {
     useLiveStore.setState({ unread: { 2: 3 } });
     const { rerender } = render(

@@ -14,13 +14,29 @@ import { createHandlers, SESSION_ID } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import type { SessionListItem } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
+import { useLiveStore } from '../../store/liveStore';
 import { SessionNode } from './SessionNode';
 
 const server = setupServer(...createHandlers());
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  // Running and unread are read from the live store (thread-keyed), OR-aggregated
+  // over the session's threads onto the collapsed row — reset between cases.
+  useLiveStore.setState({ runningThreads: {}, unread: {} });
+});
 afterAll(() => server.close());
+
+/** Flag the session's main thread (id 1) running in the store. */
+function setRunning() {
+  useLiveStore.setState({ runningThreads: { [SESSION_ID]: { 1: true } } });
+}
+
+/** Flag the session's main thread (id 1) unread in the store. */
+function setUnread() {
+  useLiveStore.setState({ unread: { 1: 1 } });
+}
 
 const item: SessionListItem = {
   session: {
@@ -57,8 +73,9 @@ function renderNode(props: Partial<ComponentProps<typeof SessionNode>>) {
 }
 
 describe('SessionNode running indicator', () => {
-  it('renders the running indicator when running is true', () => {
-    renderNode({ running: true });
+  it('renders the running indicator when a thread of the session is running', () => {
+    setRunning();
+    renderNode({});
 
     const running = screen.getByTestId('session-running');
     expect(running).toBeInTheDocument();
@@ -67,14 +84,15 @@ describe('SessionNode running indicator', () => {
     expect(running).toHaveTextContent('running');
   });
 
-  it('does not render the running indicator when running is false', () => {
-    renderNode({ running: false });
+  it('does not render the running indicator when no thread is running', () => {
+    renderNode({});
 
     expect(screen.queryByTestId('session-running')).not.toBeInTheDocument();
   });
 
   it('shows the running indicator and the permission badge together', () => {
-    renderNode({ running: true, needsPermission: true });
+    setRunning();
+    renderNode({ needsPermission: true });
 
     expect(screen.getByTestId('session-running')).toBeInTheDocument();
     expect(
@@ -84,8 +102,9 @@ describe('SessionNode running indicator', () => {
 });
 
 describe('SessionNode unread indicator', () => {
-  it('renders the unread dot when unread is true and not running', () => {
-    renderNode({ unread: true });
+  it('renders the unread dot when a thread is unread and not running', () => {
+    setUnread();
+    renderNode({});
 
     const unread = screen.getByTestId('session-unread');
     expect(unread).toBeInTheDocument();
@@ -94,14 +113,16 @@ describe('SessionNode unread indicator', () => {
     expect(unread).toHaveTextContent('unread');
   });
 
-  it('does not render the unread dot when unread is false', () => {
-    renderNode({ unread: false });
+  it('does not render the unread dot when no thread is unread', () => {
+    renderNode({});
 
     expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument();
   });
 
   it('hides the unread dot while running (running takes precedence)', () => {
-    renderNode({ unread: true, running: true });
+    setUnread();
+    setRunning();
+    renderNode({});
 
     // A session processing again shows the live spinner, not a stale dot.
     expect(screen.getByTestId('session-running')).toBeInTheDocument();
@@ -138,7 +159,8 @@ describe('SessionNode subagent badge', () => {
   it('shows the subagent badge alongside the running spinner', () => {
     // A subagent runs inside a running turn, so the two indicators coexist;
     // the badge is deliberately distinct from the turn-activity spinner.
-    renderNode({ running: true, subagentCount: 1 });
+    setRunning();
+    renderNode({ subagentCount: 1 });
 
     expect(screen.getByTestId('session-running')).toBeInTheDocument();
     expect(screen.getByTestId('session-subagent-badge')).toBeInTheDocument();

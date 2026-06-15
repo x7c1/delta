@@ -1,5 +1,5 @@
 import type { SessionEvent } from '@delta/wire-gen';
-import { SESSION_ID, SESSION_ID_2 } from './fixtures';
+import { MAIN_THREAD_ID, SESSION_ID, SESSION_ID_2 } from './fixtures';
 
 /**
  * A dev/test fake event source. MSW cannot mock WebSockets, so in mock mode the
@@ -36,6 +36,7 @@ export function defaultScript(): SessionEvent[] {
     {
       kind: 'turn_started',
       session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
       send_id: 1,
       matched_uuid: 'uuid-u2',
     },
@@ -46,7 +47,12 @@ export function defaultScript(): SessionEvent[] {
       tool_name: 'Bash',
       tool_input: '{"command":"npm install"}',
     },
-    { kind: 'turn_completed', session_id: SESSION_ID, stop_reason: null },
+    {
+      kind: 'turn_completed',
+      session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
+      stop_reason: null,
+    },
     {
       kind: 'external_input',
       session_id: SESSION_ID,

@@ -88,7 +88,6 @@ export function WorkspaceScreen() {
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
-  const clearSessionUnread = useLiveStore((state) => state.clearSessionUnread);
   const spawns = useLiveStore((state) => state.spawns);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
 
@@ -209,22 +208,16 @@ export function WorkspaceScreen() {
     setActiveThread,
   ]);
 
-  // Clear the unread badge whenever a thread becomes active.
+  // Clear the unread badge whenever a thread becomes active. Unread is
+  // thread-keyed, so activating a thread clears exactly its badge; the
+  // collapsed session row's OR-aggregated dot clears once its last unread
+  // thread is viewed. Focusing a session activates its main thread (see
+  // NavigatorPane), which clears main's unread through this same path.
   useEffect(() => {
     if (activeThreadId !== null) {
       clearUnread(activeThreadId);
     }
   }, [activeThreadId, clearUnread]);
-
-  // Clear the per-session unread dot whenever a real session becomes focused —
-  // the user is now looking at it, so whatever finished in the background is no
-  // longer unseen. Skip the new-session sentinel (no session to clear) and the
-  // null pre-load state.
-  useEffect(() => {
-    if (focusedSessionId !== null && focusedSessionId !== NEW_SESSION_FOCUS) {
-      clearSessionUnread(focusedSessionId);
-    }
-  }, [focusedSessionId, clearSessionUnread]);
 
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;

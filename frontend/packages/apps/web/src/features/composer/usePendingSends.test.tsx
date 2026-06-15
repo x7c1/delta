@@ -53,7 +53,7 @@ function reset() {
     sending: [],
     localSends: {},
     spawns: [],
-    activeTurns: {},
+    runningThreads: {},
   });
 }
 
@@ -65,7 +65,7 @@ const THREAD_SURFACE: PendingSurface = {
 
 const inFlightEnvelope: SendsResponse = {
   sends: [],
-  turn: { state: 'in_flight', send_id: 1 } satisfies Turn,
+  turn: { state: 'in_flight', send_id: 1, thread_id: 1 } satisfies Turn,
   permission: null,
   question: null,
 };
@@ -93,7 +93,7 @@ describe('usePendingSends active-turn seeding', () => {
     // The stale read is a set-only no-op while the refetch is in flight; once
     // the fresh `idle` lands it authoritatively clears the flag.
     await waitFor(() => {
-      expect(useLiveStore.getState().activeTurns).toEqual({});
+      expect(useLiveStore.getState().runningThreads).toEqual({});
     });
   });
 
@@ -111,8 +111,8 @@ describe('usePendingSends active-turn seeding', () => {
     mount(THREAD_SURFACE);
 
     await waitFor(() => {
-      expect(useLiveStore.getState().activeTurns).toEqual({
-        [SESSION_ID]: true,
+      expect(useLiveStore.getState().runningThreads).toEqual({
+        [SESSION_ID]: { 1: true },
       });
     });
   });

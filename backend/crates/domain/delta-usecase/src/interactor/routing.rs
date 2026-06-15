@@ -262,6 +262,7 @@ where
         // genuinely idle, or a silent fallback?
         let default = SessionLiveState {
             turn: TurnState::Idle,
+            in_progress_thread: None,
             pending_permission: None,
             pending_question: None,
             running_subagents: Vec::new(),
