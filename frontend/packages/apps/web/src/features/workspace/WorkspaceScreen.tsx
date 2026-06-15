@@ -306,13 +306,17 @@ export function WorkspaceScreen() {
         )}
       </div>
 
-      {/* Terminal toggle (visible when the terminal is collapsed) */}
+      {/* Terminal toggle (visible when the terminal is collapsed). It mirrors the
+          transcript's breadcrumb card on the opposite corner: same overlay inset
+          (`*-overlay-inset`) and the same `px-3 py-1.5 text-xs rounded-md border
+          bg-white shadow-md` card shape, so the two float at a matching height and
+          size on the left/right of the conversation pane. */}
       {!terminalOpen && (
-        <div className="absolute right-2 top-2 z-10">
+        <div className="absolute right-overlay-inset top-overlay-inset z-10">
           <button
             type="button"
             onClick={toggleTerminal}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50"
           >
             <TerminalIcon className="h-3.5 w-3.5" />
             Terminal
