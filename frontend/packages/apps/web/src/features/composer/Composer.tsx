@@ -61,6 +61,12 @@ export function Composer({ mode }: ComposerProps) {
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
   );
+  const newSessionLaunchOptionIds = useComposerStore(
+    (state) => state.newSessionLaunchOptionIds,
+  );
+  const setNewSessionLaunchOptionIds = useComposerStore(
+    (state) => state.setNewSessionLaunchOptionIds,
+  );
 
   const sendInFlight = useLiveStore((state) =>
     state.sending.some((item) => item.status === 'sending'),
@@ -104,11 +110,16 @@ export function Composer({ mode }: ComposerProps) {
       if (isNew) {
         // Honor the picker's chosen working directory when one is selected;
         // omit `workdir` entirely otherwise so the server uses its default
-        // per-spawn directory (today's behavior).
+        // per-spawn directory (today's behavior). Likewise, attach the selected
+        // launch options only when at least one is picked, so an unselected
+        // session starts with no extra launch flags.
         body = {
           new_session: true,
           text,
           ...(newSessionWorkdir ? { workdir: newSessionWorkdir } : {}),
+          ...(newSessionLaunchOptionIds.length > 0
+            ? { launch_option_ids: newSessionLaunchOptionIds }
+            : {}),
         };
       } else if (branching) {
         body = {
@@ -129,16 +140,21 @@ export function Composer({ mode }: ComposerProps) {
                 sessionId: activeThread.session_id,
                 threadId: activeThread.id,
               }
-            : { kind: 'new-session', workdir: newSessionWorkdir },
+            : {
+                kind: 'new-session',
+                workdir: newSessionWorkdir,
+                launchOptionIds: newSessionLaunchOptionIds,
+              },
           text,
           body,
         });
         if (isNew) {
-          // The spawn was accepted; reset the picker selection so the next new
-          // session starts from the default again. (The accepted spawn itself
+          // The spawn was accepted; reset the picker selections so the next new
+          // session starts from the defaults again. (The accepted spawn itself
           // is tracked by the submission path; the workspace focuses it by its
           // real id once it registers.)
           setNewSessionWorkdir(null);
+          setNewSessionLaunchOptionIds([]);
         }
         if (branching) {
           // The backend created a fresh child thread for this branch send and
@@ -160,10 +176,12 @@ export function Composer({ mode }: ComposerProps) {
       branching,
       branchOrigin,
       newSessionWorkdir,
+      newSessionLaunchOptionIds,
       clearDraft,
       submitSend,
       setBranchOrigin,
       setNewSessionWorkdir,
+      setNewSessionLaunchOptionIds,
       setActiveThread,
       clearResumeUnavailable,
     ],

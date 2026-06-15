@@ -35,5 +35,10 @@ pub enum SendTarget {
         /// when `None`, the session uses its default per-spawn `<base>/<token>`
         /// directory.
         workdir: Option<String>,
+        /// The user-selected subset of registered launch options to apply to
+        /// the spawned `claude`, in selection order. Each id is resolved to its
+        /// registered `(name, value?)` flag record at spawn and pushed onto the
+        /// launch argv. Empty when the user selected none.
+        launch_option_ids: Vec<i64>,
     },
 }

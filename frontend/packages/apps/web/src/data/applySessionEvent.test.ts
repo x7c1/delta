@@ -273,6 +273,7 @@ describe('applySessionEvent', () => {
       threadId: 42,
       text: 'new session',
       workdir: null,
+      launchOptionIds: [],
     });
     queryClient.setQueryData(queryKeys.sessionSends('sess-spawned'), {
       sends: [serverSend({ session_id: 'sess-spawned', thread_id: 42 })],

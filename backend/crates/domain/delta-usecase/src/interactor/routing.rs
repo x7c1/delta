@@ -128,7 +128,10 @@ where
                 })
                 .await
             }
-            SendTarget::NewSession { workdir } => {
+            SendTarget::NewSession {
+                workdir,
+                launch_option_ids,
+            } => {
                 // `locator_quote` is intentionally dropped here, not forwarded
                 // to the spawn: a brand-new session has no earlier passage to
                 // anchor, so there is nothing to locate. The persisted row
@@ -139,6 +142,7 @@ where
                     .request(&id, move |reply| SessionInput::SpawnFresh {
                         first_prompt: Some(text),
                         workdir,
+                        launch_option_ids,
                         reply,
                     })
                     .await?;
@@ -157,6 +161,9 @@ where
             .request(&id, |reply| SessionInput::SpawnFresh {
                 first_prompt: None,
                 workdir: None,
+                // A cold-start session (no first prompt) applies no launch
+                // options; those ride only on a composer-initiated new session.
+                launch_option_ids: Vec::new(),
                 reply,
             })
             .await?;

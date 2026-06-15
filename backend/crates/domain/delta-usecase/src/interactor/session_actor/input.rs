@@ -45,6 +45,9 @@ pub(in crate::interactor) enum SessionInput {
     SpawnFresh {
         first_prompt: Option<String>,
         workdir: Option<String>,
+        /// The user-selected registered launch options to resolve to argv flags
+        /// at spawn, in selection order.
+        launch_option_ids: Vec<i64>,
         reply: Reply<FreshSpawn>,
     },
     /// Resume the (closed but known) session.

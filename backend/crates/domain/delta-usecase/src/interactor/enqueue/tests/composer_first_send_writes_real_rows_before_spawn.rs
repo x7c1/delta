@@ -19,7 +19,10 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
     // thread.
     let (returned, _) = ix
         .enqueue_send(
-            SendTarget::NewSession { workdir: None },
+            SendTarget::NewSession {
+                workdir: None,
+                launch_option_ids: Vec::new(),
+            },
             "first message",
             None,
         )

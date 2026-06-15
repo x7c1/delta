@@ -67,6 +67,7 @@ describe('Composer', () => {
       drafts: {},
       branchOrigin: null,
       newSessionWorkdir: null,
+      newSessionLaunchOptionIds: [],
     });
   });
 
@@ -460,6 +461,52 @@ describe('Composer', () => {
     // A successful new-session send resets the picker selection.
     await waitFor(() => {
       expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+    });
+  });
+
+  it('includes the selected launch options on a new-session send, in order', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      // Selection order (not ascending) so the test pins order preservation.
+      newSessionLaunchOptionIds: [3, 1],
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start with options' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'start with options',
+        workdir: '/home/dev/projects/delta',
+        launch_option_ids: [3, 1],
+      });
+    });
+    // A successful new-session send resets the launch-option selection too.
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
+    });
+  });
+
+  it('omits launch_option_ids when no launch options are selected', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionLaunchOptionIds: [],
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'no options' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'no options',
+        workdir: '/home/dev/projects/delta',
+      });
     });
   });
 });

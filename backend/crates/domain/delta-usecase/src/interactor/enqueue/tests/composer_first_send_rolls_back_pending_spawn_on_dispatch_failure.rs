@@ -18,7 +18,10 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     // fails to launch the tmux session. The error propagates.
     let err = ix
         .enqueue_send(
-            SendTarget::NewSession { workdir: None },
+            SendTarget::NewSession {
+                workdir: None,
+                launch_option_ids: Vec::new(),
+            },
             "first message",
             None,
         )

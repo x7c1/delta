@@ -74,11 +74,19 @@ where
     /// [`Self::open_session`]). When `None`, the spawn falls back to its default
     /// per-token `<base>/<token>` directory.
     ///
+    /// `launch_option_ids` are the registered launch options the user selected
+    /// for this session, in selection order. They are resolved to their
+    /// `(name, value?)` flag records up front (alongside the workdir gate) and
+    /// pushed onto the launch argv after Delta's own flags and before the
+    /// positional prompt. A selected id no longer in the registry is skipped
+    /// with a warning rather than aborting the launch.
+    ///
     /// [`SessionRuntime::bind_pending_spawn`]: crate::interactor::session_actor::runtime::SessionRuntime::bind_pending_spawn
     pub(in crate::interactor) async fn spawn_fresh(
         &mut self,
         first_prompt: Option<String>,
         workdir: Option<String>,
+        launch_option_ids: Vec<i64>,
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
         // Validate a user-selected workdir before minting or launching anything,
@@ -88,6 +96,44 @@ where
         let requested_workdir = match workdir {
             Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
             None => None,
+        };
+
+        // Resolve the user-selected launch options to argv flags before minting
+        // or launching anything, mirroring the workdir gate above: a resolution
+        // failure leaves no side effects. The registry is small, so a single
+        // fetch plus a by-id lookup (preserving the user's selection order) is
+        // cheap. A selected id that is no longer registered (a concurrent
+        // delete after the picker rendered) is skipped with a warning rather
+        // than failing the launch, so a stale UI selection cannot kill a spawn.
+        // Each option contributes its `name` and, when present, its `value`; a
+        // valueless flag contributes only the name.
+        let launch_option_args = if launch_option_ids.is_empty() {
+            Vec::new()
+        } else {
+            let by_id = self
+                .store
+                .list_launch_options()
+                .await?
+                .into_iter()
+                .map(|option| (option.id, option))
+                .collect::<std::collections::HashMap<_, _>>();
+            let mut args = Vec::new();
+            for id in &launch_option_ids {
+                match by_id.get(id) {
+                    Some(option) => {
+                        args.push(option.name.clone());
+                        if let Some(value) = &option.value {
+                            args.push(value.clone());
+                        }
+                    }
+                    None => tracing::warn!(
+                        launch_option_id = id,
+                        session_id = %session_id,
+                        "selected launch option is no longer registered; skipping it"
+                    ),
+                }
+            }
+            args
         };
 
         // The minter is atomic, so token uniqueness needs no coordination here.
@@ -131,6 +177,10 @@ where
             SESSION_ID_FLAG.to_owned(),
             session_id.as_str().to_owned(),
         ];
+        // Apply the user-selected launch options after the Delta-owned
+        // `--settings`/`--session-id` flags and before the trailing positional
+        // prompt, so the prompt stays the last argument `claude` auto-submits.
+        command.extend(launch_option_args);
         // Carry the first prompt on the launch command line as a trailing
         // positional argument. `claude` auto-submits a positional prompt at
         // startup, so the prompt is delivered without any post-launch keystroke

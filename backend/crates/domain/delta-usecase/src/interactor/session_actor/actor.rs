@@ -133,9 +133,13 @@ where
         SessionInput::SpawnFresh {
             first_prompt,
             workdir,
+            launch_option_ids,
             reply,
         } => {
-            let _ = reply.send(ctx.spawn_fresh(first_prompt, workdir).await);
+            let _ = reply.send(
+                ctx.spawn_fresh(first_prompt, workdir, launch_option_ids)
+                    .await,
+            );
         }
         SessionInput::OpenSession { reply } => {
             let _ = reply.send(ctx.open_session().await);

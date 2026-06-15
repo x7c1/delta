@@ -244,6 +244,7 @@ describe('liveStore turn tracking', () => {
       threadId: 42,
       text: 'first message',
       workdir: null,
+      launchOptionIds: [],
     });
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',
@@ -464,6 +465,7 @@ describe('liveStore spawn tracking', () => {
       threadId: 42,
       text: 'start a new session',
       workdir: '/work/dir',
+      launchOptionIds: [],
     });
   }
 

@@ -48,12 +48,16 @@ export interface SendingItem {
   id: string;
   /**
    * Where the submit happened: an existing thread, or the new-session
-   * composer (which retains the chosen `workdir` so a failed launch request
-   * can be retried with the same directory).
+   * composer (which retains the chosen `workdir` and selected launch options
+   * so a failed launch request can be retried with the same configuration).
    */
   target:
     | { kind: 'thread'; sessionId: SessionId; threadId: ThreadId }
-    | { kind: 'new-session'; workdir: string | null };
+    | {
+        kind: 'new-session';
+        workdir: string | null;
+        launchOptionIds: number[];
+      };
   text: string;
   /** sending: POST in flight; failed: POST rejected (dismiss or retry). */
   status: 'sending' | 'failed';
@@ -111,6 +115,8 @@ export interface SpawnItem {
   text: string;
   /** The chosen working directory, retained for the same Retry. */
   workdir: string | null;
+  /** The selected launch-option ids, retained for the same Retry. */
+  launchOptionIds: number[];
   /** spawning: launch in flight; failed: reaped (`spawn_failed` arrived). */
   status: 'spawning' | 'failed';
 }
