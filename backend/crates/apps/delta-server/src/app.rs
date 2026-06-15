@@ -97,6 +97,7 @@ mod tests {
         AppState::build(&Config {
             database_path: ":memory:".into(),
             session_workdir_base: "/tmp/delta-test-session".into(),
+            worktree_base: "/tmp/delta-test-worktrees".into(),
             tmux_socket: "delta-test".into(),
             port: 7878,
             launch: delta_usecase::LaunchConfig {

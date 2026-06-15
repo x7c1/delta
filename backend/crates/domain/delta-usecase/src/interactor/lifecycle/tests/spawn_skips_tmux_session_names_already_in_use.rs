@@ -20,6 +20,7 @@ async fn spawn_skips_tmux_session_names_already_in_use() {
         FakeWorkspace::default(),
         FakeGitWorktree::default(),
         TEST_WORKDIR_BASE,
+        TEST_WORKTREE_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
     );

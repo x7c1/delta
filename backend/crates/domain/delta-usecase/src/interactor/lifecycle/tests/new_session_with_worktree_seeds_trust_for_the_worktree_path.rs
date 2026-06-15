@@ -31,7 +31,7 @@ async fn new_session_with_worktree_seeds_trust_for_the_worktree_path() {
     .unwrap();
 
     let session_id = ix.pending_session_ids().await.remove(0);
-    let expected_path = format!("{TEST_WORKDIR_BASE}/delta-{}", session_id.as_str());
+    let expected_path = format!("{TEST_WORKTREE_BASE}/delta-{}", session_id.as_str());
 
     let trusted = ix.git_worktree_fake().trusted.lock().unwrap().clone();
     assert_eq!(

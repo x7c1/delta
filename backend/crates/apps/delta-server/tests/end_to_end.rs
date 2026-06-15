@@ -226,6 +226,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
         Box::new(NoopWorkspace) as Box<dyn delta_usecase::Workspace>,
         Box::new(NoopGitWorktree) as Box<dyn delta_usecase::GitWorktree>,
         "/tmp/delta-e2e-session",
+        "/tmp/delta-e2e-worktrees",
         "{}",
         "/tmp/delta-e2e-settings.json",
     );

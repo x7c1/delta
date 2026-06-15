@@ -167,8 +167,9 @@ where
 
         // Determine the effective launch directory. With no worktree request,
         // it is the validated workdir (or the default `<base>/<token>`). With a
-        // worktree request, create a per-session worktree under the session base
-        // and launch there instead.
+        // worktree request, create a per-session worktree under the neutral
+        // `worktree_base` (outside any repo tree, so the worktree does not
+        // inherit a surrounding `CLAUDE.md`/settings) and launch there instead.
         //
         // The worktree path and its branch are both `delta-<session-id>` (the
         // Delta-minted conversation id, not the pane token): the session id is
@@ -188,11 +189,8 @@ where
             Some(spec) => {
                 let repo_root = worktree_repo_root
                     .expect("worktree_repo_root is Some whenever a worktree was requested");
-                let worktree_path = format!(
-                    "{}/delta-{}",
-                    self.session_workdir_base,
-                    session_id.as_str()
-                );
+                let worktree_path =
+                    format!("{}/delta-{}", self.worktree_base, session_id.as_str());
                 let branch = format!("delta-{}", session_id.as_str());
                 self.git_worktree
                     .create_worktree(&repo_root, &worktree_path, &branch, spec.start_point)

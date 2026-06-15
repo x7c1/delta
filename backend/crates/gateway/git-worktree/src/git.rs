@@ -215,6 +215,20 @@ impl GitWorktree for Git {
             }
         };
 
+        // `git worktree add <path>` requires the *parent* of `<path>` to already
+        // exist (it creates the leaf, not the chain above it). Worktrees live
+        // under a neutral base outside any repo tree (`DELTA_WORKTREE_BASE`,
+        // default `$HOME/.delta/worktrees`), which may not exist on a fresh
+        // install, so create the parent here, at the point the worktree is made.
+        if let Some(parent) = std::path::Path::new(worktree_path).parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|source| Error::WorktreeBaseIo {
+                    path: parent.to_string_lossy().into_owned(),
+                    source,
+                })?;
+        }
+
         // `worktree add -b <branch> <path> <start_ref>` creates the worktree on
         // a fresh branch rooted at the start ref. git's stderr is surfaced on
         // failure (e.g. the branch already exists, or the path is occupied).
@@ -362,6 +376,43 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(trimmed_stdout(&head), "delta-session-1");
+    }
+
+    #[tokio::test]
+    async fn create_worktree_creates_the_missing_parent_directory() {
+        // The worktree base (e.g. `$HOME/.delta/worktrees`) may not exist yet on
+        // a fresh install; `git worktree add` would fail if its parent is
+        // absent. The gateway must create the parent chain first.
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo_root = tmp.path().to_str().unwrap().to_owned();
+        let git = Git::new();
+
+        // A worktree path two levels under a base that does not exist yet.
+        let base = tempfile::tempdir().unwrap();
+        let missing_base = base.path().join("does/not/exist/yet");
+        assert!(
+            !missing_base.exists(),
+            "the worktree base does not exist before the call"
+        );
+        let worktree_path = missing_base
+            .join("delta-session-1")
+            .to_string_lossy()
+            .into_owned();
+
+        git.create_worktree(
+            &repo_root,
+            &worktree_path,
+            "delta-session-1",
+            WorktreeStartPoint::Head,
+        )
+        .await
+        .expect("the missing parent is created so the worktree add succeeds");
+
+        assert!(
+            tokio::fs::metadata(&worktree_path).await.unwrap().is_dir(),
+            "the worktree directory exists under the freshly-created base"
+        );
     }
 
     #[tokio::test]

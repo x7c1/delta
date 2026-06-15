@@ -19,6 +19,16 @@ pub enum Error {
         stderr: String,
     },
 
+    /// Creating the parent directory for a worktree path failed. `git worktree
+    /// add <path>` requires the parent of `<path>` to already exist; the worktree
+    /// base lives outside any repo tree and may not have been created yet.
+    /// Carries the directory whose creation failed.
+    #[error("failed to create worktree base directory {path}: {source}")]
+    WorktreeBaseIo {
+        path: String,
+        source: std::io::Error,
+    },
+
     /// Reading, writing, or renaming Claude Code's user config file failed.
     /// Carries the config path so the failing file is visible.
     #[error("trust config I/O failed at {path}: {source}")]
