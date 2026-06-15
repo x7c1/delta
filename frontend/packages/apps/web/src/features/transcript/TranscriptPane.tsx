@@ -733,6 +733,17 @@ export function TranscriptPane({
       return;
     }
     const apply = () => {
+      // While a branch is being composed, the "Branch from selected text" banner
+      // adds height to this overlay. Folding that into the body's bottom reserve
+      // (and the stick-to-bottom re-scroll) shifts the transcript the instant
+      // text is selected — moving the very selection the user is trying to
+      // adjust, and making it hard to read. So while a branch is pending, hold
+      // the reserve and skip the re-scroll: the banner floats over the transcript
+      // tail instead of pushing it. The reserve recomputes once the branch is
+      // cleared or sent (this effect re-runs and apply() proceeds normally).
+      if (useComposerStore.getState().branchOrigin !== null) {
+        return;
+      }
       const height = overlay.getBoundingClientRect().height;
       setBottomReserve(
         height + overlayInsetPx(overlay) + BODY_BOTTOM_READING_GAP_PX,

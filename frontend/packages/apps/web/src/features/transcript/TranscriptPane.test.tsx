@@ -1230,6 +1230,54 @@ describe('TranscriptPane', () => {
       );
       expect(body.scrollTop).toBe(100);
     });
+
+    it('holds the reserve and skips the re-scroll while a branch is being composed', async () => {
+      // Selecting text for "Branch from selected text" sets branchOrigin and
+      // makes the overlay taller (the banner renders inside it). Folding that
+      // into the reserve and re-scrolling would shift the transcript the instant
+      // text is selected — moving the very selection the user is adjusting. So
+      // while a branch is pending, the overlay's resize is ignored: the reserve
+      // stays put and the body is not re-stuck to the bottom.
+      renderPane();
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(observed?.el).toBe(overlay));
+
+      // Establish a baseline reserve before any branch is pending.
+      overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('156px'));
+
+      // Pin the body to the bottom (sticking) so a re-scroll would be visible.
+      const body = bodyEl();
+      Object.defineProperty(body, 'scrollHeight', {
+        configurable: true,
+        get: () => 1000,
+      });
+      Object.defineProperty(body, 'clientHeight', {
+        configurable: true,
+        get: () => 400,
+      });
+      body.scrollTop = 600;
+      fireEvent.scroll(body);
+
+      // A branch is now pending: the banner grows the overlay.
+      act(() =>
+        useComposerStore.setState({
+          branchOrigin: {
+            parentThreadId: MAIN_THREAD_ID,
+            semanticParentUuid: 'm-user',
+            locatorQuote: 'What is a delta?',
+          },
+        }),
+      );
+      overlay.getBoundingClientRect = () => ({ height: 200 }) as DOMRect;
+      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+
+      // The grown banner does NOT grow the reserve and does NOT re-stick the
+      // body: the banner floats over the transcript tail instead of pushing it.
+      expect(body.style.paddingBottom).toBe('156px');
+      expect(body.scrollTop).toBe(600);
+    });
   });
 
   it('stays in new-session when a directory has been selected (dismiss does not cancel)', async () => {
