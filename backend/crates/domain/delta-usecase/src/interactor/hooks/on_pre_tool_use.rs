@@ -56,18 +56,15 @@ where
             .await?;
 
         if tool_name == ASK_USER_QUESTION {
-            // Attribute the question to the in-flight turn's thread, recovered
-            // the same way the streaming preview recovers its thread (see
-            // `on_message_display`): the thread of the latest persisted user
-            // message, falling back to the session's main thread. AskUserQuestion
-            // blocks synchronously within the turn, so this latest-user thread IS
-            // the asking thread — the browser shows the card only there.
-            let main_thread = self.store.main_thread_id(self.id).await?;
-            let thread_id = self
-                .store
-                .latest_user_thread(self.id)
-                .await?
-                .unwrap_or(main_thread);
+            // Attribute the question to the in-progress turn's thread, resolved
+            // the same way the streaming preview resolves its thread (see
+            // `on_message_display`): the in-flight send's thread, else the
+            // latest persisted user message, else the session's main thread.
+            // AskUserQuestion blocks synchronously within the turn, so this IS
+            // the asking thread — the browser shows the card only there. The
+            // in-flight-send step is what keeps a mid-turn branch question on
+            // the new branch thread, whose user line is not yet ingested.
+            let thread_id = self.store.in_progress_turn_thread(self.id).await?;
             // Mirror the broadcast into queryable runtime state, so a client
             // that misses the event (socket down) rebuilds the question card
             // from the sends envelope. Cleared on resolution or turn end.
