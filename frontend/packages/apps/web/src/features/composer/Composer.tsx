@@ -249,7 +249,10 @@ export function Composer({ mode }: ComposerProps) {
       ? 'Ask a follow-up on the selected text…'
       : readOnly
         ? 'Send to resume this closed session…'
-        : `Message ${activeThread?.title ?? ''}…`;
+        : // Prefix the thread title with `#` (Slack/Discord style) so it reads as
+          // an addressable target — "Message #main" / "Message #foobar" — rather
+          // than the verb running straight into a bare word.
+          `Message ${activeThread?.title ? `#${activeThread.title}` : ''}…`;
 
   return (
     <form onSubmit={submit} className="space-y-2">
