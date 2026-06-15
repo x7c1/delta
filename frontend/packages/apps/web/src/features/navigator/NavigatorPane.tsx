@@ -211,6 +211,7 @@ export function NavigatorPane({
   return (
     <Panel
       className="border-r border-slate-200"
+      headerClassName="px-2"
       bodyRef={scrollBodyRef}
       // The session list is a side panel; hide its scrollbar entirely (no bar,
       // no reserved column) so it never shows a stray blank strip. It still
@@ -225,12 +226,12 @@ export function NavigatorPane({
         // already in that state — changing focus is not enough, the picker's open
         // state lives in the store so it can open without a focus transition;
         // reset any prior selection (directory and launch options) for a clean
-        // start. The negative horizontal margin pulls the button out of the
-        // header's px-3 inset so it lines up with the body's 8px content column.
+        // start. The header padding is set to `px-2` (via `headerClassName`) so
+        // the full-width button lines up with the body's 8px content column.
         <Button
           variant="ghost"
           size="sm"
-          className="-mx-1 w-full justify-start border border-slate-300 text-slate-700"
+          className="w-full justify-start border border-slate-300 text-slate-700"
           onClick={() => {
             startNewSession();
             setNewSessionWorkdir(null);

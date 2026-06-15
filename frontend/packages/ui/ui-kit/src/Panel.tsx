@@ -18,6 +18,15 @@ export interface PanelProps {
    */
   overlay?: ReactNode;
   className?: string;
+  /**
+   * Optional className for the header element. When provided it supplies the
+   * header's horizontal padding (and any other header-specific classes) in
+   * place of the default `px-3`, so a pane can align its header content with a
+   * differently-inset body (e.g. the navigator's 8px list column). Only one
+   * padding utility is emitted, so the override is deterministic even though
+   * `cn` is a plain join, not tailwind-merge.
+   */
+  headerClassName?: string;
   bodyClassName?: string;
   /**
    * Optional inline style for the scrollable body `<div>`, for values a caller
@@ -43,6 +52,7 @@ export function Panel({
   footer,
   overlay,
   className,
+  headerClassName,
   bodyClassName,
   bodyStyle,
   bodyRef,
@@ -53,7 +63,12 @@ export function Panel({
       className={cn('flex h-full min-h-0 flex-col bg-white', className)}
     >
       {header !== undefined && (
-        <header className="flex h-10 shrink-0 items-center border-b border-slate-200 px-3">
+        <header
+          className={cn(
+            'flex h-10 shrink-0 items-center border-b border-slate-200',
+            headerClassName ?? 'px-3',
+          )}
+        >
           <div className="min-w-0 flex-1">{header}</div>
         </header>
       )}
