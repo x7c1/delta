@@ -35,6 +35,29 @@ export interface ComposerProps {
 }
 
 /**
+ * Paper-plane glyph for the round submit button overlaid on the textarea.
+ * Decorative — always `aria-hidden`, so the button's accessible name stays its
+ * "Send" label. This file is the only user.
+ */
+function SendIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </svg>
+  );
+}
+
+/**
  * The bottom composer: text input bound to a per-thread draft and submit wired
  * to `POST /api/sends` (via the shared submission path, which keeps the
  * pending strip honest). The send target depends on {@link ComposerMode}.
@@ -250,7 +273,12 @@ export function Composer({ mode }: ComposerProps) {
           </Button>
         </div>
       )}
-      <div className="flex items-end gap-2">
+      {/* The textarea spans the full width; the round submit button is overlaid
+          in the bottom-right corner. The textarea reserves right padding (`pr-12`)
+          matching the button's footprint so typed text never slides underneath
+          it. The button sticks to the bottom so it stays anchored as the textarea
+          auto-grows. */}
+      <div className="relative">
         <textarea
           ref={textareaRef}
           value={draft}
@@ -263,16 +291,16 @@ export function Composer({ mode }: ComposerProps) {
           // it before the effect runs. `overflow-y` is toggled by the effect, so
           // it scrolls internally only once the content passes the cap.
           style={{ maxHeight: `${COMPOSER_MAX_HEIGHT}px` }}
-          className="min-h-[2.5rem] flex-1 resize-none rounded border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+          className="min-h-[2.5rem] w-full resize-none rounded border border-slate-300 py-1.5 pl-2 pr-12 text-sm focus:border-indigo-400 focus:outline-none"
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               void submit(event);
             }
           }}
         />
-        <Button
+        <button
           type="submit"
-          variant="primary"
+          aria-label="Send"
           disabled={
             draft.trim().length === 0 ||
             sendInFlight ||
@@ -280,9 +308,12 @@ export function Composer({ mode }: ComposerProps) {
             // mandatory, so Send stays disabled until the picker commits one.
             (isNew && !newSessionWorkdir)
           }
+          className="absolute bottom-4 right-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-400 bg-transparent text-indigo-500 shadow-md transition-all hover:bg-slate-200 hover:text-indigo-600 hover:shadow-lg disabled:cursor-not-allowed disabled:text-slate-400 disabled:shadow-md"
         >
-          Send
-        </Button>
+          {/* The paper-plane's visual weight sits top-right, so nudge the glyph a
+              hair toward the bottom-left to center it within the round button. */}
+          <SendIcon className="h-4 w-4 -translate-x-px translate-y-px" />
+        </button>
       </div>
     </form>
   );

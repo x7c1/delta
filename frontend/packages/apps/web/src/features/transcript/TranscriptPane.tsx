@@ -717,7 +717,7 @@ export function TranscriptPane({
     <div
       ref={bottomOverlayRef}
       data-testid="bottom-overlay"
-      className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset rounded-md border border-slate-200 bg-white px-3 py-2 shadow-md"
+      className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset rounded-md border border-slate-300 bg-white px-3 py-2 shadow-md"
     >
       {bottomContent}
     </div>
@@ -779,7 +779,7 @@ export function TranscriptPane({
   // bar). It floats over the transcript; the body reserves a fixed top padding
   // (below) so the first turn is not hidden behind it at rest.
   const breadcrumbOverlay = isOnSubThread && (
-    <div className="pointer-events-auto absolute left-overlay-inset top-overlay-inset max-w-[calc(100%-2*var(--delta-overlay-inset))] rounded-md border border-slate-200 bg-white px-3 py-1.5 shadow-md">
+    <div className="pointer-events-auto absolute left-overlay-inset top-overlay-inset max-w-[calc(100%-2*var(--delta-overlay-inset))] rounded-md border border-slate-300 bg-white px-3 py-1.5 shadow-md">
       <Breadcrumb items={breadcrumbItems} />
     </div>
   );
