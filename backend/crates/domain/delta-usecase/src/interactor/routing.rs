@@ -20,18 +20,20 @@ use crate::interactor::session_actor::runtime::SessionLiveState;
 use crate::interactor::{Interactor, PermissionDecision};
 use crate::pane_token::PaneToken;
 use crate::ports::{
-    MessageDisplayHook, SessionEndHook, SessionEvent, SessionLifecycle, SessionStartHook,
-    SessionStore, StopHook, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
+    GitWorktree, MessageDisplayHook, SessionEndHook, SessionEvent, SessionLifecycle,
+    SessionStartHook, SessionStore, StopHook, TmuxDriver, Transcript, UserPromptSubmitHook,
+    Workspace,
 };
 use crate::send_target::SendTarget;
 use crate::turn::TurnState;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
     T: TmuxDriver + 'static,
     X: Transcript + 'static,
     S: SessionStore + 'static,
     W: Workspace + 'static,
+    G: GitWorktree + 'static,
 {
     /// Post an input to the session's actor (spawning it on first contact)
     /// and await the result.
@@ -131,6 +133,7 @@ where
             SendTarget::NewSession {
                 workdir,
                 launch_option_ids,
+                worktree,
             } => {
                 // `locator_quote` is intentionally dropped here, not forwarded
                 // to the spawn: a brand-new session has no earlier passage to
@@ -143,6 +146,7 @@ where
                         first_prompt: Some(text),
                         workdir,
                         launch_option_ids,
+                        worktree,
                         reply,
                     })
                     .await?;
@@ -164,6 +168,10 @@ where
                 // A cold-start session (no first prompt) applies no launch
                 // options; those ride only on a composer-initiated new session.
                 launch_option_ids: Vec::new(),
+                // A cold-start session never opts into a worktree (no workdir,
+                // no first prompt); the worktree path rides only on a
+                // composer-initiated new session.
+                worktree: None,
                 reply,
             })
             .await?;
@@ -208,7 +216,10 @@ where
     /// no actor at all.
     pub async fn clear_session_input(&self, id: &SessionId) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        if !self.sessions.post_existing(id, SessionInput::ClearInput { reply: tx }) {
+        if !self
+            .sessions
+            .post_existing(id, SessionInput::ClearInput { reply: tx })
+        {
             return Ok(());
         }
         rx.await.unwrap_or(Ok(()))
@@ -255,7 +266,10 @@ where
             pending_question: None,
         };
         let (tx, rx) = oneshot::channel();
-        if !self.sessions.post_existing(id, SessionInput::QueryLiveState { reply: tx }) {
+        if !self
+            .sessions
+            .post_existing(id, SessionInput::QueryLiveState { reply: tx })
+        {
             tracing::debug!(
                 session_id = %id,
                 branch = "no_actor",
@@ -299,8 +313,11 @@ where
         hook: UserPromptSubmitHook,
     ) -> Result<(Vec<SessionEvent>, Option<String>)> {
         let id = hook.session_id.clone();
-        self.request(&id, move |reply| SessionInput::UserPromptSubmit { hook, reply })
-            .await
+        self.request(&id, move |reply| SessionInput::UserPromptSubmit {
+            hook,
+            reply,
+        })
+        .await
     }
 
     /// Handle a `Stop` hook: ingest the final transcript lines and report the
@@ -313,13 +330,13 @@ where
 
     /// Handle a `MessageDisplay` hook: buffer one chunk of the in-flight turn's
     /// assistant message and return the `AssistantStreaming` event to broadcast.
-    pub async fn on_message_display(
-        &self,
-        hook: MessageDisplayHook,
-    ) -> Result<Vec<SessionEvent>> {
+    pub async fn on_message_display(&self, hook: MessageDisplayHook) -> Result<Vec<SessionEvent>> {
         let id = hook.session_id.clone();
-        self.request(&id, move |reply| SessionInput::MessageDisplay { hook, reply })
-            .await
+        self.request(&id, move |reply| SessionInput::MessageDisplay {
+            hook,
+            reply,
+        })
+        .await
     }
 
     /// Handle a `SessionStart` hook (launch/resume readiness signal).
@@ -473,11 +490,7 @@ where
     /// pending (already answered/cancelled, stale, or no live pane), in which
     /// case the browser falls back to the terminal. Unlike an answer there is no
     /// `400` case — cancel carries no selection to malform.
-    pub async fn cancel_question(
-        &self,
-        session_id: &SessionId,
-        request_id: i64,
-    ) -> Result<()> {
+    pub async fn cancel_question(&self, session_id: &SessionId, request_id: i64) -> Result<()> {
         self.request(session_id, |reply| SessionInput::CancelQuestion {
             request_id,
             reply,
@@ -602,14 +615,15 @@ mod test_seams {
     };
     use crate::interactor::Interactor;
     use crate::pane_token::PaneToken;
-    use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
+    use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-    impl<T, X, S, W> Interactor<T, X, S, W>
+    impl<T, X, S, W, G> Interactor<T, X, S, W, G>
     where
         T: TmuxDriver + 'static,
         X: Transcript + 'static,
         S: SessionStore + 'static,
         W: Workspace + 'static,
+        G: GitWorktree + 'static,
     {
         /// Run a closure against a session's runtime state (spawning its actor
         /// if absent), returning the closure's result.
@@ -756,11 +770,7 @@ mod test_seams {
         /// Mark a resuming session ready at an explicit instant, for
         /// resume-dispatch tests. Returns whether the id was resuming (the
         /// production hook's return).
-        pub(crate) async fn mark_resume_ready_at(
-            &self,
-            id: &SessionId,
-            ready_at: Instant,
-        ) -> bool {
+        pub(crate) async fn mark_resume_ready_at(&self, id: &SessionId, ready_at: Instant) -> bool {
             self.with_runtime(id, move |state| state.mark_resume_ready_at(ready_at))
                 .await
         }

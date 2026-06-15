@@ -4,7 +4,8 @@ use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingSpawn;
 use crate::pane_token::PaneToken;
-use crate::ports::{pane_for, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::send_target::WorktreeSpec;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
 
@@ -18,12 +19,13 @@ pub(in crate::interactor) struct FreshSpawn {
     pub first_send: Option<Send>,
 }
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Spawn this freshly-minted session's pane, optionally dispatching a
     /// first prompt.
@@ -87,6 +89,7 @@ where
         first_prompt: Option<String>,
         workdir: Option<String>,
         launch_option_ids: Vec<i64>,
+        worktree: Option<WorktreeSpec>,
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
         // Validate a user-selected workdir before minting or launching anything,
@@ -95,6 +98,28 @@ where
         // computed after the token is minted, below.
         let requested_workdir = match workdir {
             Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
+            None => None,
+        };
+
+        // Resolve an opt-in worktree request against the validated workdir,
+        // before minting or launching anything so a bad request is rejected with
+        // no side effects. A worktree needs a selected directory that is a git
+        // repository: no workdir is `WorktreeRequiresWorkdir`, and a workdir that
+        // is not a git repo is `WorktreeNotAGitRepo` — both `400`s. On success we
+        // hold the repository root; the actual `git worktree add` (a real side
+        // effect) is deferred to just before the eager row write below, so a git
+        // failure also leaves no orphan. `repo_root` runs no fetch, so this gate
+        // stays lightweight.
+        let worktree_repo_root = match &worktree {
+            Some(_) => {
+                let Some(dir) = requested_workdir.as_deref() else {
+                    return Err(crate::error::Error::WorktreeRequiresWorkdir);
+                };
+                match self.git_worktree.repo_root(dir).await? {
+                    Some(root) => Some(root),
+                    None => return Err(crate::error::Error::WorktreeNotAGitRepo(dir.to_owned())),
+                }
+            }
             None => None,
         };
 
@@ -138,14 +163,45 @@ where
 
         // The minter is atomic, so token uniqueness needs no coordination here.
         let token = self.mint_free_token().await?;
-        let workdir = requested_workdir.unwrap_or_else(|| self.workdir_for(&token));
         let pane = pane_for(token.as_str());
+
+        // Determine the effective launch directory. With no worktree request,
+        // it is the validated workdir (or the default `<base>/<token>`). With a
+        // worktree request, create a per-session worktree under the session base
+        // and launch there instead.
+        //
+        // The worktree path and its branch are both `delta-<session-id>` (the
+        // Delta-minted conversation id, not the pane token): the session id is
+        // the stable, human-meaningful name a user can later find and clean up.
+        // Creating the worktree here — after workdir validation but *before* the
+        // eager session row — means a git failure leaves no orphan row to roll
+        // back; only the (side-effect-free) token has been minted.
+        let workdir = match worktree {
+            Some(spec) => {
+                let repo_root = worktree_repo_root
+                    .expect("worktree_repo_root is Some whenever a worktree was requested");
+                let worktree_path = format!(
+                    "{}/delta-{}",
+                    self.session_workdir_base,
+                    session_id.as_str()
+                );
+                let branch = format!("delta-{}", session_id.as_str());
+                self.git_worktree
+                    .create_worktree(&repo_root, &worktree_path, &branch, spec.start_point)
+                    .await?;
+                worktree_path
+            }
+            None => requested_workdir.unwrap_or_else(|| self.workdir_for(&token)),
+        };
 
         // Eagerly create the session row and its `main` thread, then the first
         // prompt's send row bound to those real ids. Hooks cannot arrive before
         // the launch below (and would queue behind this message anyway), so
         // nothing races this write; if the launch fails the row is deleted
-        // again in the rollback.
+        // again in the rollback. NOTE: the worktree (created above) is
+        // deliberately NOT removed on a later close — see `close_session` for
+        // the no-cleanup-on-close MVP decision; `session.cwd` stored here is the
+        // worktree path, so a resume reattaches to the existing worktree.
         let (_session, main_thread_id) = self
             .store
             .insert_spawning_session(&session_id, &workdir)

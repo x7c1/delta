@@ -1,15 +1,16 @@
 use delta_model::ThreadId;
 
 use crate::error::{Error, Result};
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::interactor::InteractorCore;
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Ensure a thread exists, turning a stale/wrong id into a clean
     /// `ThreadNotFound` instead of an opaque foreign-key error downstream.

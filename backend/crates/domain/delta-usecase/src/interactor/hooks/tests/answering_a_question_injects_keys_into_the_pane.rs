@@ -19,7 +19,13 @@ const MULTI_QUESTION_MULTI_SELECT: &str = r#"{"questions":[{"question":"Q1?","he
 /// Record a pending question on the seeded (open) session and return its
 /// request id.
 async fn pending_question_id(
-    ix: &crate::interactor::Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    ix: &crate::interactor::Interactor<
+        FakeTmux,
+        FakeTranscript,
+        FakeStore,
+        FakeWorkspace,
+        FakeGitWorktree,
+    >,
     session: &SessionId,
     tool_input: &str,
 ) -> i64 {

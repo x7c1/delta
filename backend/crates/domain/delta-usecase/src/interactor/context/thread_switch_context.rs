@@ -1,17 +1,18 @@
 use delta_model::{Send, SessionId};
 
 use crate::error::Result;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::interactor::InteractorCore;
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::{frame_branch_entry_context, frame_locator_context, frame_thread_switch_context};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Compute the `additionalContext` note to inject for this prompt.
     ///

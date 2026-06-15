@@ -14,6 +14,7 @@ async fn new_session_with_invalid_workdir_spawns_nothing() {
             SendTarget::NewSession {
                 workdir: Some("/nope".to_owned()),
                 launch_option_ids: Vec::new(),
+                worktree: None,
             },
             "hello",
             None,

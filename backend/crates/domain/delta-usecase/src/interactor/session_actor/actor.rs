@@ -27,7 +27,7 @@ use delta_model::SessionId;
 use tokio::sync::mpsc;
 
 use crate::interactor::InteractorCore;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::input::SessionInput;
 use super::registry::ActorMap;
@@ -40,16 +40,16 @@ use super::runtime::SessionRuntime;
 ///
 /// Derefs to the core so port access (`self.store`, `self.tmux`, …) and the
 /// core's pure helpers keep their existing call syntax.
-pub(in crate::interactor) struct SessionContext<'a, T, X, S, W> {
-    pub(in crate::interactor) core: &'a InteractorCore<T, X, S, W>,
+pub(in crate::interactor) struct SessionContext<'a, T, X, S, W, G> {
+    pub(in crate::interactor) core: &'a InteractorCore<T, X, S, W, G>,
     /// The session this actor exists for. Hook payloads carry the same id;
     /// the routing layer guarantees they match.
     pub(in crate::interactor) id: &'a SessionId,
     pub(in crate::interactor) state: &'a mut SessionRuntime,
 }
 
-impl<T, X, S, W> std::ops::Deref for SessionContext<'_, T, X, S, W> {
-    type Target = InteractorCore<T, X, S, W>;
+impl<T, X, S, W, G> std::ops::Deref for SessionContext<'_, T, X, S, W, G> {
+    type Target = InteractorCore<T, X, S, W, G>;
 
     fn deref(&self) -> &Self::Target {
         self.core
@@ -58,8 +58,8 @@ impl<T, X, S, W> std::ops::Deref for SessionContext<'_, T, X, S, W> {
 
 /// The actor loop. Spawned by the registry on a session's first contact; runs
 /// until its mailbox closes (the registry dropped) or it retires.
-pub(in crate::interactor) async fn run<T, X, S, W>(
-    core: Arc<InteractorCore<T, X, S, W>>,
+pub(in crate::interactor) async fn run<T, X, S, W, G>(
+    core: Arc<InteractorCore<T, X, S, W, G>>,
     id: SessionId,
     mut mailbox: mpsc::UnboundedReceiver<SessionInput>,
     registry: Weak<Mutex<ActorMap>>,
@@ -68,6 +68,7 @@ pub(in crate::interactor) async fn run<T, X, S, W>(
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     let mut state = SessionRuntime::default();
     let mut carried: Option<SessionInput> = None;
@@ -110,12 +111,13 @@ pub(in crate::interactor) async fn run<T, X, S, W>(
 /// Execute one input against the session, sending the result down its reply
 /// channel. A dropped reply receiver only means the caller went away; the
 /// state change has already happened, so it is not an error here.
-async fn handle<T, X, S, W>(ctx: &mut SessionContext<'_, T, X, S, W>, input: SessionInput)
+async fn handle<T, X, S, W, G>(ctx: &mut SessionContext<'_, T, X, S, W, G>, input: SessionInput)
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     match input {
         SessionInput::EnqueueToThread {
@@ -126,7 +128,12 @@ where
             reply,
         } => {
             let result = ctx
-                .enqueue_to_thread(thread_id, branch_from.as_ref(), &text, locator_quote.as_deref())
+                .enqueue_to_thread(
+                    thread_id,
+                    branch_from.as_ref(),
+                    &text,
+                    locator_quote.as_deref(),
+                )
                 .await;
             let _ = reply.send(result);
         }
@@ -134,10 +141,11 @@ where
             first_prompt,
             workdir,
             launch_option_ids,
+            worktree,
             reply,
         } => {
             let _ = reply.send(
-                ctx.spawn_fresh(first_prompt, workdir, launch_option_ids)
+                ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
                     .await,
             );
         }
@@ -181,7 +189,10 @@ where
             tool_input_json,
             reply,
         } => {
-            let _ = reply.send(ctx.on_permission_request(&tool_name, &tool_input_json).await);
+            let _ = reply.send(
+                ctx.on_permission_request(&tool_name, &tool_input_json)
+                    .await,
+            );
         }
         SessionInput::DecidePermission {
             request_id,

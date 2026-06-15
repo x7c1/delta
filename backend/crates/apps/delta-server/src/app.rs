@@ -59,6 +59,11 @@ pub fn router(state: AppState) -> Router {
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))
+        // Git detection for the worktree-at-start option (read-only): is the
+        // selected directory a git repo, and what remote branches can a worktree
+        // be based on.
+        .route("/api/workdir/git", get(api::workdir_git))
+        .route("/api/workdir/git/branches", get(api::workdir_git_branches))
         // Launch-option registry: list, create, and delete the custom `claude`
         // CLI flags the user can later select when starting a session.
         .route(

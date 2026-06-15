@@ -26,11 +26,12 @@ pub use interactor::{
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    pane_for, DirEntry, DirListing, MessageDisplayHook, NewSession, RecentWorkdir, SessionEndHook,
-    SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, StopHook,
-    TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
+    pane_for, DirEntry, DirListing, GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession,
+    RecentWorkdir, RemoteBranches, SessionEndHook, SessionEvent, SessionLifecycle, SessionPageRow,
+    SessionStartHook, SessionStore, StopHook, TmuxDriver, Transcript, TranscriptMessage,
+    TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeStartPoint,
 };
-pub use send_target::SendTarget;
+pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};
 pub use turn::{transition, OrphanedSend, Transition, TurnInput, TurnState};

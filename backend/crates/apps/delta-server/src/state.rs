@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
-use delta_usecase::{SessionEvent, SessionLifecycle};
 use delta_bootstrap::{AppInteractor, Config};
+use delta_usecase::{SessionEvent, SessionLifecycle};
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;

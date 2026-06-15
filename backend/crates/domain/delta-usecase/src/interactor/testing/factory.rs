@@ -3,7 +3,7 @@
 
 use crate::Interactor;
 
-use super::{FakeStore, FakeTmux, FakeTranscript, FakeWorkspace};
+use super::{FakeGitWorktree, FakeStore, FakeTmux, FakeTranscript, FakeWorkspace};
 
 /// The base working directory the test interactor spawns sessions under.
 pub(crate) const TEST_WORKDIR_BASE: &str = "/work";
@@ -15,12 +15,24 @@ pub(crate) const TEST_SETTINGS_JSON: &str = r#"{"hooks":{}}"#;
 /// `claude --settings`. Outside any spawn workdir, on purpose.
 pub(crate) const TEST_SETTINGS_PATH: &str = "/run/delta/settings.json";
 
-pub(crate) fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+/// The concrete interactor type the use-case tests build over the in-memory
+/// fakes.
+pub(crate) type TestInteractor =
+    Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace, FakeGitWorktree>;
+
+pub(crate) fn interactor() -> TestInteractor {
+    interactor_with_git(FakeGitWorktree::default())
+}
+
+/// Build a test interactor with a specific [`FakeGitWorktree`], for the
+/// worktree spawn-wiring tests; everything else is the default fake.
+pub(crate) fn interactor_with_git(git_worktree: FakeGitWorktree) -> TestInteractor {
     Interactor::new(
         FakeTmux::default(),
         FakeTranscript::default(),
         FakeStore::default(),
         FakeWorkspace::default(),
+        git_worktree,
         TEST_WORKDIR_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -28,8 +40,7 @@ pub(crate) fn interactor() -> Interactor<FakeTmux, FakeTranscript, FakeStore, Fa
 }
 
 /// An interactor whose tmux dispatch always fails.
-pub(crate) fn interactor_with_failing_tmux(
-) -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
     Interactor::new(
         FakeTmux {
             fail: true,
@@ -38,6 +49,7 @@ pub(crate) fn interactor_with_failing_tmux(
         FakeTranscript::default(),
         FakeStore::default(),
         FakeWorkspace::default(),
+        FakeGitWorktree::default(),
         TEST_WORKDIR_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -45,8 +57,7 @@ pub(crate) fn interactor_with_failing_tmux(
 }
 
 /// An interactor whose tmux session launch (`create_session`) always fails.
-pub(crate) fn interactor_with_failing_create_session(
-) -> Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+pub(crate) fn interactor_with_failing_create_session() -> TestInteractor {
     Interactor::new(
         FakeTmux {
             fail_create: true,
@@ -55,6 +66,7 @@ pub(crate) fn interactor_with_failing_create_session(
         FakeTranscript::default(),
         FakeStore::default(),
         FakeWorkspace::default(),
+        FakeGitWorktree::default(),
         TEST_WORKDIR_BASE,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
@@ -62,7 +74,7 @@ pub(crate) fn interactor_with_failing_create_session(
 }
 
 // Helper accessors used only in tests to reach into the fakes the interactor owns.
-impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
+impl TestInteractor {
     /// Register `sess-1` as an open, ready, idle session.
     ///
     /// Fires the first `UserPromptSubmit` (which registers the session) and then
@@ -100,5 +112,9 @@ impl Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace> {
 
     pub(crate) fn workspace_fake(&self) -> &FakeWorkspace {
         self.workspace()
+    }
+
+    pub(crate) fn git_worktree_fake(&self) -> &FakeGitWorktree {
+        self.git_worktree()
     }
 }

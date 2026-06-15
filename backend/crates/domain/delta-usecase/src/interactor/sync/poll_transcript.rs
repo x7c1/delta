@@ -2,14 +2,15 @@ use delta_model::Message;
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// One background-tail tick for this session: poll its transcript for
     /// newly-written lines, if it is open.
@@ -52,9 +53,9 @@ where
         // where it is observed. Release any queued send now that the session
         // is idle — done here, after `sync_transcript` has returned, so
         // dispatching sends no keystrokes from inside the ingestion path.
-        let interrupted = events.iter().any(|e| {
-            matches!(e, SessionEvent::TurnInterrupted { session_id } if session_id == self.id)
-        });
+        let interrupted = events.iter().any(
+            |e| matches!(e, SessionEvent::TurnInterrupted { session_id } if session_id == self.id),
+        );
         if interrupted {
             if let Some(event) = self.dispatch_queued_send().await? {
                 events.push(event);

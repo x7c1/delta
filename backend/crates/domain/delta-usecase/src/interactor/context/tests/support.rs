@@ -9,7 +9,7 @@ use crate::{Interactor, SendTarget};
 /// turn with a `Stop`. Returns the injected `additionalContext` for that send
 /// so a caller can assert on it.
 pub(super) async fn round_trip(
-    ix: &Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace>,
+    ix: &Interactor<FakeTmux, FakeTranscript, FakeStore, FakeWorkspace, FakeGitWorktree>,
     target: SendTarget,
     text: &str,
     quote: Option<&str>,

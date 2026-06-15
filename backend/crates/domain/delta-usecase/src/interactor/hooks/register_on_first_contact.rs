@@ -1,17 +1,19 @@
 use delta_model::Session;
 
 use crate::error::Result;
-use crate::ports::{
-    SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook, Workspace,
-};
 use crate::interactor::InteractorCore;
+use crate::ports::{
+    GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, UserPromptSubmitHook,
+    Workspace,
+};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Register an external session on the first `UserPromptSubmit` for its id.
     ///

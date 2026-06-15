@@ -7,14 +7,15 @@
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::InteractorCore;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Borrow the store (useful for read-only queries from the transport layer).
     pub fn store(&self) -> &S {
@@ -35,14 +36,20 @@ where
     pub(crate) fn workspace(&self) -> &W {
         &self.workspace
     }
+
+    #[cfg(test)]
+    pub(crate) fn git_worktree(&self) -> &G {
+        &self.git_worktree
+    }
 }
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Wipe the residual input of the session's pane, if it is open.
     ///

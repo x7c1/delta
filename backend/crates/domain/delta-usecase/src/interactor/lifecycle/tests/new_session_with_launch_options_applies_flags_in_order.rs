@@ -36,6 +36,7 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
         SendTarget::NewSession {
             workdir: None,
             launch_option_ids: vec![verbose.id, permission_mode.id, 9999],
+            worktree: None,
         },
         "hello",
         None,

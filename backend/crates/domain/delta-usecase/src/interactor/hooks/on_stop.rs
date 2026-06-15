@@ -1,18 +1,24 @@
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    GitWorktree, SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, Workspace,
+};
 use crate::turn::TurnInput;
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `Stop` hook: ingest the final transcript lines and report the
     /// turn as completed.
-    pub(in crate::interactor) async fn on_stop(&mut self, hook: StopHook) -> Result<Vec<SessionEvent>> {
+    pub(in crate::interactor) async fn on_stop(
+        &mut self,
+        hook: StopHook,
+    ) -> Result<Vec<SessionEvent>> {
         let mut events = Vec::new();
         // The hook was routed here by its own session id, so the right
         // session's transcript is synced even when several sessions are

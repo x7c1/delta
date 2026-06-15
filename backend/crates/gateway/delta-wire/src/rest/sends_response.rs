@@ -143,8 +143,7 @@ mod tests {
             serde_json::json!({ "state": "awaiting_echo", "send_id": 7 }),
         );
         assert_eq!(
-            serde_json::to_value(WireTurn::from(TurnState::InFlight { send_id: Some(7) }))
-                .unwrap(),
+            serde_json::to_value(WireTurn::from(TurnState::InFlight { send_id: Some(7) })).unwrap(),
             serde_json::json!({ "state": "in_flight", "send_id": 7 }),
         );
         assert_eq!(

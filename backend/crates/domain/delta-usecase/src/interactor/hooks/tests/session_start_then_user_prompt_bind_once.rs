@@ -15,6 +15,7 @@ async fn session_start_then_user_prompt_bind_once() {
             crate::SendTarget::NewSession {
                 workdir: None,
                 launch_option_ids: Vec::new(),
+                worktree: None,
             },
             "first prompt",
             None,
@@ -69,6 +70,7 @@ async fn session_start_then_user_prompt_bind_once() {
             crate::SendTarget::NewSession {
                 workdir: None,
                 launch_option_ids: Vec::new(),
+                worktree: None,
             },
             "first prompt",
             None,

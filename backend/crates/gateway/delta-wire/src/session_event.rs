@@ -16,22 +16,13 @@ use ts_rs::TS;
 #[ts(rename = "SessionEvent")]
 pub enum WireSessionEvent {
     /// The session was registered (first `UserPromptSubmit`).
-    SessionRegistered {
-        session_id: String,
-    },
+    SessionRegistered { session_id: String },
     /// A known, previously-closed session became live again (resumed).
-    SessionOpened {
-        session_id: String,
-    },
+    SessionOpened { session_id: String },
     /// An open session was closed: its pane was torn down but its data remains.
-    SessionClosed {
-        session_id: String,
-    },
+    SessionClosed { session_id: String },
     /// A held (`queued`) send was promoted to `dispatched` and typed.
-    SendDispatched {
-        session_id: String,
-        send_id: i64,
-    },
+    SendDispatched { session_id: String, send_id: i64 },
     /// A queued send was confirmed as a turn start.
     TurnStarted {
         session_id: String,
@@ -39,19 +30,14 @@ pub enum WireSessionEvent {
         matched_uuid: String,
     },
     /// External input was detected (typed directly into the pane).
-    ExternalInput {
-        session_id: String,
-        prompt: String,
-    },
+    ExternalInput { session_id: String, prompt: String },
     /// A response completed.
     TurnCompleted {
         session_id: String,
         stop_reason: Option<String>,
     },
     /// The in-flight turn was interrupted by the user (Escape / Ctrl-C).
-    TurnInterrupted {
-        session_id: String,
-    },
+    TurnInterrupted { session_id: String },
     /// The transcript grew between hooks (continuous tail).
     TranscriptUpdated {
         session_id: String,
@@ -76,10 +62,7 @@ pub enum WireSessionEvent {
         tool_input: String,
     },
     /// A previously-requested tool permission was resolved.
-    PermissionResolved {
-        session_id: String,
-        request_id: i64,
-    },
+    PermissionResolved { session_id: String, request_id: i64 },
     /// A freshly-spawned session failed to come up before it ever registered.
     SpawnFailed {
         session_id: String,

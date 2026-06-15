@@ -1,13 +1,16 @@
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{MessageDisplayHook, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    GitWorktree, MessageDisplayHook, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace,
+};
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `MessageDisplay` hook: one chunk of the in-flight turn's
     /// assistant message, delivered live before the transcript is flushed.

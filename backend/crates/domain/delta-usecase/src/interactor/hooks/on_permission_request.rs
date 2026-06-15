@@ -5,7 +5,7 @@ use crate::interactor::hooks::ASK_USER_QUESTION;
 use crate::interactor::permission_decision::PermissionDecision;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingPermission;
-use crate::ports::{SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 /// What `on_permission_request` hands the transport: the request row's id, a
 /// receiver the transport awaits (with its own deadline) for the browser's
@@ -18,12 +18,13 @@ pub struct PermissionWait {
     pub events: Vec<SessionEvent>,
 }
 
-impl<T, X, S, W> SessionContext<'_, T, X, S, W>
+impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// Handle a `PermissionRequest` hook: an interactive permission dialog has
     /// actually appeared, so a human answer is genuinely pending. (Unlike

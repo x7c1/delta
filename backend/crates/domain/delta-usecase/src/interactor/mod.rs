@@ -39,22 +39,23 @@ use delta_model::SessionId;
 
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
-use crate::ports::{SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use session_actor::registry::SessionRegistry;
 
 /// Holds the injected capabilities and implements Delta's use cases.
 ///
-/// Generic over the four ports so callers can inject any implementation. This
+/// Generic over the five ports so callers can inject any implementation. This
 /// is the shared core behind [`Interactor`]: the interactor (and any
 /// background task it spawns) holds it through an [`Arc`], so the core itself
 /// carries no registry of those tasks — only the capabilities and the
 /// process-runtime state.
-pub struct InteractorCore<T, X, S, W> {
+pub struct InteractorCore<T, X, S, W, G> {
     pub(in crate::interactor) tmux: T,
     pub(in crate::interactor) transcript: X,
     pub(in crate::interactor) store: S,
     pub(in crate::interactor) workspace: W,
+    pub(in crate::interactor) git_worktree: G,
     /// Base directory for per-spawn working directories.
     ///
     /// Each fresh spawn runs in its own `<base>/<token>` subdirectory. The
@@ -92,10 +93,10 @@ pub struct InteractorCore<T, X, S, W> {
 /// runtime state — the pane binding, launch state, turn machine, permission
 /// waiters, and transcript ingestion — goes through that session's actor
 /// mailbox instead (see the `session_actor` module and the `routing` impl).
-pub struct Interactor<T, X, S, W> {
-    core: Arc<InteractorCore<T, X, S, W>>,
+pub struct Interactor<T, X, S, W, G> {
+    core: Arc<InteractorCore<T, X, S, W, G>>,
     /// session_id → actor mailbox; actors spawn on first contact.
-    pub(in crate::interactor) sessions: SessionRegistry<T, X, S, W>,
+    pub(in crate::interactor) sessions: SessionRegistry<T, X, S, W, G>,
     /// request-row id → owning session, so a permission decision (which only
     /// carries the request id) can be routed to the right actor. Entries are
     /// claimed atomically by `decide_permission`/`abandon_permission_decision`,
@@ -103,37 +104,45 @@ pub struct Interactor<T, X, S, W> {
     pub(in crate::interactor) permission_index: std::sync::Mutex<HashMap<i64, SessionId>>,
 }
 
-impl<T, X, S, W> std::ops::Deref for Interactor<T, X, S, W> {
-    type Target = InteractorCore<T, X, S, W>;
+impl<T, X, S, W, G> std::ops::Deref for Interactor<T, X, S, W, G> {
+    type Target = InteractorCore<T, X, S, W, G>;
 
     fn deref(&self) -> &Self::Target {
         &self.core
     }
 }
 
-/// An [`Interactor`] with its four ports type-erased behind trait objects.
+/// An [`Interactor`] with its five ports type-erased behind trait objects.
 ///
 /// Both the production composition root and integration tests build this exact
 /// type, so the transport layer's shared state stays non-generic regardless of
 /// which gateways are wired in.
-pub type BoxedInteractor =
-    Interactor<Box<dyn TmuxDriver>, Box<dyn Transcript>, Box<dyn SessionStore>, Box<dyn Workspace>>;
+pub type BoxedInteractor = Interactor<
+    Box<dyn TmuxDriver>,
+    Box<dyn Transcript>,
+    Box<dyn SessionStore>,
+    Box<dyn Workspace>,
+    Box<dyn GitWorktree>,
+>;
 
-impl<T, X, S, W> Interactor<T, X, S, W>
+impl<T, X, S, W, G> Interactor<T, X, S, W, G>
 where
     T: TmuxDriver + 'static,
     X: Transcript + 'static,
     S: SessionStore + 'static,
     W: Workspace + 'static,
+    G: GitWorktree + 'static,
 {
-    /// Construct an Interactor from the four injected ports plus the spawn
+    /// Construct an Interactor from the five injected ports plus the spawn
     /// configuration (the base working directory, the rendered settings JSON,
     /// and the Delta-owned path that JSON is written to for `--settings`).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tmux: T,
         transcript: X,
         store: S,
         workspace: W,
+        git_worktree: G,
         session_workdir_base: impl Into<String>,
         session_settings_json: impl Into<String>,
         session_settings_path: impl Into<String>,
@@ -143,6 +152,7 @@ where
             transcript,
             store,
             workspace,
+            git_worktree,
             session_workdir_base: session_workdir_base.into(),
             session_settings_json: session_settings_json.into(),
             session_settings_path: session_settings_path.into(),
@@ -179,12 +189,13 @@ where
     }
 }
 
-impl<T, X, S, W> InteractorCore<T, X, S, W>
+impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
     X: Transcript,
     S: SessionStore,
     W: Workspace,
+    G: GitWorktree,
 {
     /// How long the `PermissionRequest` hook response may block waiting for a
     /// browser decision before falling back to the TUI prompt.

@@ -50,8 +50,7 @@ mod tests {
     #[test]
     fn lifecycle_serializes_snake_case() {
         assert_eq!(
-            serde_json::to_value(WireNewSessionResponse::from(SessionLifecycle::Starting))
-                .unwrap(),
+            serde_json::to_value(WireNewSessionResponse::from(SessionLifecycle::Starting)).unwrap(),
             serde_json::json!({ "status": "starting" }),
         );
         assert_eq!(

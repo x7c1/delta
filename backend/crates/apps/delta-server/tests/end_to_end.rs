@@ -38,7 +38,9 @@ use tower::ServiceExt;
 use delta_server::{router, AppState};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{Interactor, TmuxDriver, Workspace};
+use delta_usecase::{
+    GitWorktree, Interactor, RemoteBranches, TmuxDriver, Workspace, WorktreeStartPoint,
+};
 
 /// A `TmuxDriver` that records the lines it would have sent instead of touching
 /// a real tmux pane, so the test can assert the keystrokes were dispatched. It
@@ -161,6 +163,41 @@ impl Workspace for NoopWorkspace {
     }
 }
 
+/// A no-op `GitWorktree` so the end-to-end flow (which never requests a
+/// worktree) wires without touching `git`.
+struct NoopGitWorktree;
+
+#[async_trait]
+impl GitWorktree for NoopGitWorktree {
+    async fn repo_root(&self, _path: &str) -> delta_usecase::Result<Option<String>> {
+        Ok(None)
+    }
+
+    async fn default_branch(&self, _repo_root: &str) -> delta_usecase::Result<Option<String>> {
+        Ok(None)
+    }
+
+    async fn fetch_remote_branches(
+        &self,
+        _repo_root: &str,
+    ) -> delta_usecase::Result<RemoteBranches> {
+        Ok(RemoteBranches {
+            default_branch: None,
+            branches: Vec::new(),
+        })
+    }
+
+    async fn create_worktree(
+        &self,
+        _repo_root: &str,
+        _worktree_path: &str,
+        _branch: &str,
+        _start_point: WorktreeStartPoint,
+    ) -> delta_usecase::Result<()> {
+        Ok(())
+    }
+}
+
 /// Assemble the app with test-wired gateways and return the router plus the
 /// fake tmux driver (for asserting keystroke dispatch) and the transcript path.
 fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
@@ -181,6 +218,7 @@ fn build_app() -> (Router, Arc<FakeTmux>, std::path::PathBuf, AppState) {
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(NoopWorkspace) as Box<dyn delta_usecase::Workspace>,
+        Box::new(NoopGitWorktree) as Box<dyn delta_usecase::GitWorktree>,
         "/tmp/delta-e2e-session",
         "{}",
         "/tmp/delta-e2e-settings.json",
@@ -254,12 +292,7 @@ async fn drives_session_send_and_turn_correlation_end_to_end() {
     // That first prompt started a turn; complete it with a Stop so the session
     // is idle before the next send. Otherwise the quoted send below would be
     // queued (held back behind the in-flight turn) rather than dispatched.
-    let (status, _) = post_json(
-        &app,
-        "/hooks/stop",
-        json!({ "session_id": session_id }),
-    )
-    .await;
+    let (status, _) = post_json(&app, "/hooks/stop", json!({ "session_id": session_id })).await;
     assert_eq!(status, StatusCode::OK);
 
     // 2. GET /api/sessions lists the registered session, annotated with its open

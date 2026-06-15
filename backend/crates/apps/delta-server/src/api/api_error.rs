@@ -84,8 +84,15 @@ impl IntoResponse for ApiError {
                     // The path exists but the server cannot read it: distinct
                     // from "bad path", so report `403` rather than `400`.
                     Error::WorkdirPermission(_) => (StatusCode::FORBIDDEN, None),
+                    // A worktree was requested for a directory that is not a git
+                    // repo, or with no directory at all: the caller's request
+                    // shape is invalid, so `400`.
+                    Error::WorktreeNotAGitRepo(_) | Error::WorktreeRequiresWorkdir => {
+                        (StatusCode::BAD_REQUEST, None)
+                    }
                     // Everything else is an internal failure.
                     Error::Tmux(_)
+                    | Error::Git(_)
                     | Error::Transcript(_)
                     | Error::Store(_)
                     | Error::Workspace(_)

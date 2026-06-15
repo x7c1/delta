@@ -21,6 +21,7 @@ pub use delta_usecase::LaunchConfig;
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{BoxedInteractor, Interactor};
+use git_worktree::Git;
 use tmux_driver::Tmux;
 use workspace_fs::FsWorkspace;
 
@@ -92,11 +93,13 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
     let transcript = JsonlTranscript::new();
     let tmux = Tmux::new(config.tmux_socket.clone());
     let workspace = FsWorkspace::new();
+    let git_worktree = Git::new();
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
         Box::new(workspace) as Box<dyn delta_usecase::Workspace>,
+        Box::new(git_worktree) as Box<dyn delta_usecase::GitWorktree>,
         config.session_workdir_base.clone(),
         config.session_settings_json(),
         config.session_settings_path(),
