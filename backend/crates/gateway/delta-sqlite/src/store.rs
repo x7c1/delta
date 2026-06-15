@@ -12,7 +12,7 @@ use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow
 
 use crate::content_record::{decode_content, encode_content};
 use crate::error::{Error, Result};
-use crate::schema::SCHEMA_SQL;
+use crate::schema::{ADDITIVE_COLUMNS, BACKFILL_LAST_ACTIVITY_SQL, RECENCY_INDEX_SQL, SCHEMA_SQL};
 use crate::time::now_iso8601;
 
 /// The trunk thread title. The first registered session always has one.
@@ -44,10 +44,55 @@ impl SqliteStore {
         let _mode: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
         conn.pragma_update(None, "foreign_keys", true)?;
         conn.execute_batch(SCHEMA_SQL)?;
+        Self::apply_additive_columns(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
     }
+
+    /// Bring an existing database up to the current column set.
+    ///
+    /// `CREATE TABLE IF NOT EXISTS` never alters a table that already exists, so
+    /// a column added to a shipped table is invisible to a database created
+    /// before it. Each [`ADDITIVE_COLUMNS`] entry is applied as a guarded
+    /// `ALTER TABLE ... ADD COLUMN` only when the column is genuinely absent
+    /// (SQLite has no `ADD COLUMN IF NOT EXISTS`), so this is a no-op on a fresh
+    /// database that already declared the column in `SCHEMA_SQL`. Adding
+    /// `session.last_activity_at` is followed by a one-time backfill so existing
+    /// sessions get a correct recency value instead of a stale NULL.
+    fn apply_additive_columns(conn: &Connection) -> Result<()> {
+        for col in ADDITIVE_COLUMNS {
+            if !column_exists(conn, col.table, col.column)? {
+                conn.execute_batch(col.add_column_sql)?;
+                if col.table == "session" && col.column == "last_activity_at" {
+                    conn.execute_batch(BACKFILL_LAST_ACTIVITY_SQL)?;
+                }
+            }
+        }
+        // Created here rather than in `SCHEMA_SQL` because it references
+        // `last_activity_at`, which an existing database only gains from the
+        // guarded `ALTER TABLE` above. Idempotent (`IF NOT EXISTS`), so a fresh
+        // database — where the column came from `SCHEMA_SQL` — creates it once
+        // and a re-open is a no-op.
+        conn.execute_batch(RECENCY_INDEX_SQL)?;
+        Ok(())
+    }
+}
+
+/// Whether `table` already has a column named `column`, via `PRAGMA table_info`.
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+    // `table` is a hard-coded schema identifier (never user input), so the
+    // pragma-call form is safe; bound parameters are not accepted inside a
+    // `PRAGMA table_info(...)` call.
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The raw `session` columns of one row, in `SESSION_COLS` order, before the
@@ -83,10 +128,10 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
     })
 }
 
-/// Map a session-list page row: the session columns followed by the inline
-/// `last_activity_at` (`MAX(message.created_at)`, `NULL` when message-less).
-/// The query also selects the coalesced `recency` for its `WHERE`/`ORDER BY`,
-/// but that is derivable from `last_activity_at`/`created_at` and not returned.
+/// Map a session-list page row: the session columns followed by the stored
+/// `last_activity_at` (`NULL` when the session has no timestamped message). The
+/// query's `WHERE`/`ORDER BY` key is the coalesced `recency`, but that is
+/// derivable from `last_activity_at`/`created_at` and not returned.
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
     let last_activity_at: Option<String> = row.get(6)?;
@@ -316,25 +361,6 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
-    async fn list_sessions(&self) -> std::result::Result<Vec<Session>, delta_usecase::Error> {
-        let conn = self.conn.lock().await;
-        // Fetch in a deterministic `created_at` order; the navigator's final
-        // most-recently-active-first ordering is applied in the usecase, which
-        // already has each session's `last_activity_at` to key on.
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT {SESSION_COLS} FROM session ORDER BY created_at, id"
-            ))
-            .map_err(Error::from)?;
-        let rows = stmt.query_map([], map_session).map_err(Error::from)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let parts = row.map_err(Error::from)?;
-            out.push(session_from_parts(parts)?);
-        }
-        Ok(out)
-    }
-
     async fn list_sessions_page(
         &self,
         cursor: Option<SessionPageCursor>,
@@ -351,26 +377,30 @@ impl SessionStore for SqliteStore {
         // a spawning session ever held data.
         //
         // `recency` is the row's last activity, falling back to its own
-        // `created_at` when message-less. The ordering is `recency` DESC, then
-        // `created_at` DESC, then `id` DESC. The final tiebreaker is descending
-        // because Delta-minted session ids are time-ordered UUID v7: when two
-        // sessions tie on both timestamps (they have second resolution, so a
-        // burst of activity ties easily), the *newest* session must still sort
-        // first — most-recently-active first all the way down. The cursor
-        // predicate is the expanded OR form (equivalent to a row-value tuple
-        // comparison) so each key's role stays explicit. When there is no
-        // cursor, `:cursor_null = 1` short-circuits the predicate to select
-        // from the top. ISO-8601 UTC timestamps compare correctly as text, so
-        // no datetime casting is needed.
+        // `created_at` when message-less — read straight from the denormalized
+        // `last_activity_at` column, NOT recomputed per row. The ordering is
+        // `recency` DESC, then `created_at` DESC, then `id` DESC, satisfied by
+        // `ix_session_last_activity (last_activity_at, created_at, id)` so LIMIT
+        // bounds the scan instead of sorting every session. The final
+        // tiebreaker is descending because Delta-minted session ids are
+        // time-ordered UUID v7: when two sessions tie on both timestamps (they
+        // have second resolution, so a burst of activity ties easily), the
+        // *newest* session must still sort first — most-recently-active first
+        // all the way down. The cursor predicate is the expanded OR form
+        // (equivalent to a row-value tuple comparison) so each key's role stays
+        // explicit. When there is no cursor, `:cursor_null = 1` short-circuits
+        // the predicate to select from the top. ISO-8601 UTC timestamps compare
+        // correctly as text, so no datetime casting is needed. The message-less
+        // `spawning` exclusion uses `last_activity_at IS NULL` as a cheap
+        // necessary condition (a spawning session that ingested nothing has no
+        // activity), then confirms with the message guard.
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {SESSION_COLS}, \
-                 (SELECT MAX(m.created_at) FROM message m WHERE m.session_id = session.id) \
-                   AS last_activity_at, \
-                 COALESCE((SELECT MAX(m.created_at) FROM message m WHERE m.session_id = session.id), \
-                          created_at) AS recency \
+                 last_activity_at, \
+                 COALESCE(last_activity_at, created_at) AS recency \
                  FROM session \
-                 WHERE NOT (status = 'spawning' \
+                 WHERE NOT (status = 'spawning' AND last_activity_at IS NULL \
                             AND NOT EXISTS (SELECT 1 FROM message m WHERE m.session_id = session.id)) \
                    AND (:cursor_null = 1 \
                     OR recency < :r \
@@ -438,16 +468,15 @@ impl SessionStore for SqliteStore {
         let conn = self.conn.lock().await;
         // One row per distinct `cwd`, ordered by the most recent activity of any
         // session that ran in it. Per-session recency is
-        // `COALESCE(MAX(message.created_at), session.created_at)` — the same key
-        // the session list uses — and a cwd's recency is the max of that across
-        // its sessions. ISO-8601 UTC text compares correctly as time, so no
-        // datetime casting is needed.
+        // `COALESCE(last_activity_at, created_at)` — the same denormalized key
+        // the session list uses, read straight from the column rather than
+        // recomputed with a correlated `MAX(message.created_at)` subquery — and
+        // a cwd's recency is the max of that across its sessions. ISO-8601 UTC
+        // text compares correctly as time, so no datetime casting is needed.
         let mut stmt = conn
             .prepare(
                 "SELECT s.cwd, \
-                        MAX(COALESCE( \
-                          (SELECT MAX(m.created_at) FROM message m WHERE m.session_id = s.id), \
-                          s.created_at)) AS recency \
+                        MAX(COALESCE(s.last_activity_at, s.created_at)) AS recency \
                  FROM session s \
                  GROUP BY s.cwd \
                  ORDER BY recency DESC, s.cwd ASC \
@@ -746,6 +775,17 @@ impl SessionStore for SqliteStore {
     ) -> std::result::Result<(), delta_usecase::Error> {
         let mut conn = self.conn.lock().await;
         let tx = conn.transaction().map_err(Error::from)?;
+        // Sessions whose messages this batch touched: their denormalized
+        // `last_activity_at` is recomputed once after the inserts (below).
+        // Collected as the distinct session ids in the batch, in first-seen
+        // order, so the recompute runs once per session regardless of how many
+        // of its messages are in the batch.
+        let mut touched: Vec<&SessionId> = Vec::new();
+        for m in messages {
+            if !touched.iter().any(|id| **id == m.session_id) {
+                touched.push(&m.session_id);
+            }
+        }
         for m in messages {
             let content_json = encode_content(&m.content);
             tx.execute(
@@ -795,6 +835,23 @@ impl SessionStore for SqliteStore {
             )
             .map_err(Error::from)?;
         }
+        // Refresh the denormalized recency for every session this batch touched,
+        // recomputing `MAX(message.created_at)` once per session (a single-session
+        // lookup backed by `ix_message_session_created`). Recomputing — rather
+        // than taking the batch max — keeps the column correct even when a
+        // re-ingest rewrites a message's `created_at`, and yields NULL for a
+        // session whose only messages have no timestamp. The whole thing is in
+        // the same transaction as the inserts, so the column can never lag the
+        // rows it summarizes.
+        for session_id in touched {
+            tx.execute(
+                "UPDATE session SET last_activity_at = \
+                   (SELECT MAX(created_at) FROM message WHERE session_id = ?1) \
+                 WHERE id = ?1",
+                params![session_id.as_str()],
+            )
+            .map_err(Error::from)?;
+        }
         tx.commit().map_err(Error::from)?;
         Ok(())
     }
@@ -804,10 +861,12 @@ impl SessionStore for SqliteStore {
         session_id: &SessionId,
     ) -> std::result::Result<Option<String>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        // MAX over an empty set yields SQL NULL, mapped to `None`.
+        // Read the denormalized column directly: it is the maintained
+        // `MAX(message.created_at)` (NULL when the session has no timestamped
+        // message), kept current by `upsert_messages`.
         let latest: Option<String> = conn
             .query_row(
-                "SELECT MAX(created_at) FROM message WHERE session_id = ?1",
+                "SELECT last_activity_at FROM session WHERE id = ?1",
                 params![session_id.as_str()],
                 |r| r.get(0),
             )

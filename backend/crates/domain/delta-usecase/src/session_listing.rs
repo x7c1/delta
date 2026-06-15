@@ -4,10 +4,11 @@ use delta_model::{Session, ThreadId};
 
 /// A stored session plus the runtime facts the browser needs to render it.
 ///
-/// `list_sessions` returns these so the navigator can show every conversation
-/// Delta knows — whether or not it currently has a live pane — and route into
-/// each one. Open/closed is process-runtime state from the registry, not a
-/// persisted column, so it is computed per call rather than read off `session`.
+/// `list_sessions_page` returns these so the navigator can show every
+/// conversation Delta knows — whether or not it currently has a live pane — and
+/// route into each one. Open/closed is process-runtime state from the registry,
+/// not a persisted column, so it is computed per call rather than read off
+/// `session`.
 #[derive(Debug, Clone)]
 pub struct SessionListing {
     /// The persisted session record.
@@ -18,8 +19,8 @@ pub struct SessionListing {
     /// The id of the session's trunk (`main`) thread, for drilling in.
     pub main_thread_id: ThreadId,
     /// The timestamp of the session's most recent message (ISO-8601 UTC), or
-    /// `None` when the session has no messages yet. Derived per call from
-    /// `MAX(message.created_at)`, so it reflects the latest activity even though
-    /// it is not a persisted column on `session`.
+    /// `None` when the session has no messages yet. Read from the denormalized
+    /// `session.last_activity_at` column (maintained on every message upsert),
+    /// so the session list orders by it without recomputing recency per row.
     pub last_activity_at: Option<String>,
 }

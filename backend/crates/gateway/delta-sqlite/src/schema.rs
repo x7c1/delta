@@ -1,9 +1,17 @@
 //! The database schema, created in its final form on open.
 //!
-//! There is NO migration machinery: the schema below is what a database looks
-//! like, period. Development databases are recreated with `make reset`, so a
-//! schema change here never needs a guarded `ALTER TABLE` — change the
-//! `CREATE` statements and reset.
+//! The schema below is what a *fresh* database looks like: a single batch of
+//! `CREATE ... IF NOT EXISTS` statements. Development databases are recreated
+//! with `make reset`, so most schema changes need nothing more than editing the
+//! `CREATE` statements here and resetting.
+//!
+//! Additive column changes that must survive an *existing* database (so a user
+//! is not forced to reset and lose their irreplaceable thread overlay) are
+//! handled by the idempotent, guarded `ALTER TABLE` steps in
+//! [`crate::store::SqliteStore::init`] (see [`ADDITIVE_COLUMNS`]). A fresh
+//! database already has those columns from the `CREATE` statements, so the
+//! guarded step is a no-op there; an old database gains the column and is
+//! backfilled in the same open.
 //!
 //! Every table is `STRICT` (values must match the declared column types) and
 //! value domains are pinned with `CHECK` constraints, so a typo'd status or a
@@ -25,14 +33,25 @@ pub const SCHEMA_SQL: &str = r#"
 -- its deadline (a failed session with zero ingested messages is deleted at
 -- reap time instead). `transcript_path` is NULL while 'spawning': the path is
 -- owned by Claude Code and only learned from the first hook.
+--
+-- `last_activity_at` is a denormalized copy of the session's most recent
+-- message timestamp (`MAX(message.created_at)`), maintained on every message
+-- upsert. It is NULL while the session has no timestamped message. The session
+-- list orders by it directly so the ordering is index-backed
+-- (`ix_session_last_activity`) and a LIMIT truly bounds the work, instead of
+-- recomputing recency for every session with a correlated subquery and sorting
+-- the whole table. The navigator's recency key is
+-- `COALESCE(last_activity_at, created_at)`, so a message-less session still
+-- sorts on its own `created_at`.
 CREATE TABLE IF NOT EXISTS session (
-  id              TEXT PRIMARY KEY,
-  cwd             TEXT NOT NULL,
-  transcript_path TEXT,
-  title           TEXT,
-  status          TEXT NOT NULL
-                    CHECK (status IN ('spawning','active','ended','failed')),
-  created_at      TEXT NOT NULL
+  id               TEXT PRIMARY KEY,
+  cwd              TEXT NOT NULL,
+  transcript_path  TEXT,
+  title            TEXT,
+  status           TEXT NOT NULL
+                     CHECK (status IN ('spawning','active','ended','failed')),
+  created_at       TEXT NOT NULL,
+  last_activity_at TEXT
 ) STRICT;
 
 -- The transcript-ingestion cursor, split out of `session`: how many lines of
@@ -77,8 +96,9 @@ CREATE TABLE IF NOT EXISTS message (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS ix_message_session_seq ON message(session_id, seq);
--- Speeds up the per-session MAX(created_at) the session-list page query runs to
--- derive each row's recency (last activity) inline.
+-- Backs the per-session `MAX(created_at)` used to (re)compute a session's
+-- denormalized `last_activity_at` on message upsert and to backfill it for an
+-- existing database. Both are single-session lookups, so the index bounds them.
 CREATE INDEX IF NOT EXISTS ix_message_session_created ON message(session_id, created_at);
 CREATE INDEX IF NOT EXISTS ix_message_thread ON message(thread_id);
 CREATE INDEX IF NOT EXISTS ix_message_semantic_parent ON message(semantic_parent_uuid);
@@ -164,3 +184,54 @@ CREATE TRIGGER IF NOT EXISTS message_fts_after_update AFTER UPDATE ON message BE
   INSERT INTO message_fts(rowid, content_text) VALUES (new.rowid, new.content_text);
 END;
 "#;
+
+/// Index backing the session-list page ordering.
+///
+/// Created after `last_activity_at` exists (see
+/// [`crate::store::SqliteStore::apply_additive_columns`]) rather than in
+/// [`SCHEMA_SQL`], because it references that column. It is an **expression**
+/// index on `COALESCE(last_activity_at, created_at)` — the navigator's recency
+/// key — so the page query's `ORDER BY COALESCE(last_activity_at, created_at)
+/// DESC, created_at DESC, id DESC` is satisfied by walking the index in order
+/// and stopping after LIMIT rows, instead of recomputing recency for every
+/// session and sorting the whole table in a temp b-tree. A plain
+/// `(last_activity_at, created_at, id)` index would NOT match, because the sort
+/// key is the COALESCE expression, not the bare column.
+pub const RECENCY_INDEX_SQL: &str = "\
+    CREATE INDEX IF NOT EXISTS ix_session_recency \
+      ON session(COALESCE(last_activity_at, created_at) DESC, created_at DESC, id DESC)";
+
+/// Columns added to an existing table after the table first shipped, applied on
+/// open as guarded `ALTER TABLE ... ADD COLUMN` steps.
+///
+/// SQLite has no `ADD COLUMN IF NOT EXISTS`, so each step is gated on the column
+/// being absent (checked via `PRAGMA table_info`). A fresh database already has
+/// the column from [`SCHEMA_SQL`], making the step a no-op; an existing database
+/// gains it. `ADD COLUMN` can only add a nullable column without a non-constant
+/// default, which is exactly what `last_activity_at` is — the backfill
+/// ([`BACKFILL_LAST_ACTIVITY_SQL`]) populates it for rows that predate it.
+pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[AdditiveColumn {
+    table: "session",
+    column: "last_activity_at",
+    add_column_sql: "ALTER TABLE session ADD COLUMN last_activity_at TEXT",
+}];
+
+/// One additive column and the `ALTER TABLE` that introduces it.
+pub struct AdditiveColumn {
+    /// The table the column belongs to.
+    pub table: &'static str,
+    /// The column name, used to detect whether it already exists.
+    pub column: &'static str,
+    /// The `ALTER TABLE ... ADD COLUMN` applied when the column is absent.
+    pub add_column_sql: &'static str,
+}
+
+/// Backfill `session.last_activity_at` from each session's most recent message
+/// timestamp, falling back to NULL when the session has no timestamped message
+/// (the navigator then orders that session on its own `created_at`). Idempotent:
+/// it overwrites with the same computed value, so running it on an
+/// already-current database changes nothing. Run once after the column is added
+/// for an existing database; a fresh database has no rows yet, so it is inert.
+pub const BACKFILL_LAST_ACTIVITY_SQL: &str = "\
+    UPDATE session SET last_activity_at = \
+      (SELECT MAX(m.created_at) FROM message m WHERE m.session_id = session.id)";

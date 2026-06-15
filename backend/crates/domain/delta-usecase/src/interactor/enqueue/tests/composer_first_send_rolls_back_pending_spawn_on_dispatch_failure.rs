@@ -39,8 +39,12 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     );
     // The eager session row (and its send, by cascade) was rolled back too: the
     // caller got the error synchronously, so nothing must linger in the store.
+    // Checked against the fake store's raw rows so the still-`spawning` eager
+    // row would be caught too (the session-list page deliberately hides
+    // message-less spawning sessions, so it could not distinguish a lingering
+    // one from a deleted one).
     assert!(
-        ix.store().list_sessions().await.unwrap().is_empty(),
+        ix.store().inner.lock().unwrap().sessions.is_empty(),
         "the failed spawn left no session row behind"
     );
     let (events, _) = ix

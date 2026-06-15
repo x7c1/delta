@@ -2,20 +2,20 @@ use delta_model::SessionId;
 
 use crate::interactor::testing::*;
 
-/// `list_sessions` lists every registered session, each annotated with its
-/// live (open) state and `main` thread id; `threads_for` scopes the thread
-/// tree to a single session by id. With no messages, both sessions share the
-/// same recency fallback (`created_at`), so the `id` tiebreaker decides their
-/// order; recency ordering proper is covered by
-/// [`list_sessions_orders_by_most_recent_activity`].
+/// `list_sessions_page` lists every registered session, each annotated with its
+/// live (open) state and `main` thread id; `threads_for` scopes the thread tree
+/// to a single session by id. With no messages, both sessions share the same
+/// recency fallback (`created_at`), so the `id` tiebreaker decides their order;
+/// recency ordering proper is covered by
+/// [`list_sessions_page_reproduces_recency_order_across_pages`].
 ///
-/// [`list_sessions_orders_by_most_recent_activity`]: super::list_sessions_orders_by_most_recent_activity
+/// [`list_sessions_page_reproduces_recency_order_across_pages`]: super::list_sessions_page_reproduces_recency_order_across_pages
 #[tokio::test]
-async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() {
+async fn list_sessions_page_annotates_each_with_open_state_and_threads_route_by_id() {
     let ix = interactor();
 
-    // No session yet: the list is empty.
-    assert!(ix.list_sessions().await.unwrap().is_empty());
+    // No session yet: the page is empty.
+    assert!(ix.list_sessions_page(None, 30).await.unwrap().listings.is_empty());
 
     // Register two sessions in order. Their hooks arrive in a cwd with no
     // matching pending spawn, so they register as external, closed data sessions
@@ -27,7 +27,7 @@ async fn list_sessions_annotates_each_with_open_state_and_threads_route_by_id() 
         .await
         .unwrap();
 
-    let listings = ix.list_sessions().await.unwrap();
+    let listings = ix.list_sessions_page(None, 30).await.unwrap().listings;
     let ids: Vec<_> = listings
         .iter()
         .map(|l| l.session.id.as_str().to_owned())
