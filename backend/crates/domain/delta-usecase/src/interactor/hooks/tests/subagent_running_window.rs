@@ -15,12 +15,26 @@ use crate::ports::{SessionEvent, StopHook};
 const AGENT_INPUT: &str =
     r#"{"subagent_type":"general-purpose","description":"Run ls and count entries","prompt":"…"}"#;
 
+/// An `Agent` launched with `run_in_background: true`: its `PostToolUse` fires
+/// at launch (the call returned, not the subagent), and its completion arrives
+/// later as a `<task-notification>`.
+const BACKGROUND_AGENT_INPUT: &str = r#"{"subagent_type":"general-purpose","description":"Long crawl","prompt":"…","run_in_background":true}"#;
+
 fn running_tool_use_ids(state: &crate::SessionLiveState) -> Vec<String> {
     state
         .running_subagents
         .iter()
         .map(|s| s.tool_use_id.clone())
         .collect()
+}
+
+fn is_background(state: &crate::SessionLiveState, tool_use_id: &str) -> bool {
+    state
+        .running_subagents
+        .iter()
+        .find(|s| s.tool_use_id == tool_use_id)
+        .map(|s| s.background)
+        .unwrap_or_else(|| panic!("no running subagent {tool_use_id}"))
 }
 
 #[tokio::test]
@@ -41,6 +55,7 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
             tool_use_id: "toolu_a1".to_owned(),
             subagent_type: Some("general-purpose".to_owned()),
             description: Some("Run ls and count entries".to_owned()),
+            background: false,
         }],
         "starting an Agent broadcasts SubagentStarted carrying its labels"
     );
@@ -251,5 +266,128 @@ async fn the_turn_ending_clears_a_still_running_subagent() {
             .running_subagents
             .is_empty(),
         "a running subagent never outlives its turn"
+    );
+}
+
+#[tokio::test]
+async fn a_background_launch_starts_a_background_running_entry() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    let events = ix
+        .on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        events,
+        vec![SessionEvent::SubagentStarted {
+            session_id: session.clone(),
+            tool_use_id: "toolu_bg".to_owned(),
+            subagent_type: Some("general-purpose".to_owned()),
+            description: Some("Long crawl".to_owned()),
+            background: true,
+        }],
+        "a `run_in_background` launch broadcasts SubagentStarted with background:true"
+    );
+
+    let state = ix.live_state_for(&session).await;
+    assert_eq!(running_tool_use_ids(&state), vec!["toolu_bg".to_owned()]);
+    assert!(
+        is_background(&state, "toolu_bg"),
+        "the running entry is marked background"
+    );
+}
+
+#[tokio::test]
+async fn the_immediate_post_tool_use_does_not_finish_a_background_subagent() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+
+    // A background launch's `PostToolUse` fires immediately (the call returned,
+    // the subagent did not), so it must NOT finish the running entry.
+    let events = ix
+        .on_post_tool_use(&session, "Agent", "toolu_bg")
+        .await
+        .unwrap();
+
+    assert!(
+        events.is_empty(),
+        "the immediate PostToolUse for a background subagent broadcasts nothing"
+    );
+    assert_eq!(
+        running_tool_use_ids(&ix.live_state_for(&session).await),
+        vec!["toolu_bg".to_owned()],
+        "the background subagent is still running after its immediate PostToolUse"
+    );
+}
+
+#[tokio::test]
+async fn a_background_subagent_survives_the_turn_ending() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+    // Its immediate PostToolUse (a no-op for the indicator).
+    ix.on_post_tool_use(&session, "Agent", "toolu_bg")
+        .await
+        .unwrap();
+
+    // The launching turn ends. A background subagent outlives the turn that
+    // launched it, so the turn-end sweep must keep it.
+    ix.on_stop(StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    let state = ix.live_state_for(&session).await;
+    assert_eq!(
+        running_tool_use_ids(&state),
+        vec!["toolu_bg".to_owned()],
+        "the background subagent survives the turn ending"
+    );
+    assert!(is_background(&state, "toolu_bg"));
+}
+
+#[tokio::test]
+async fn a_foreground_and_a_background_subagent_diverge_at_turn_end() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_fg")
+        .await
+        .unwrap();
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+    assert_eq!(
+        running_tool_use_ids(&ix.live_state_for(&session).await),
+        vec!["toolu_fg".to_owned(), "toolu_bg".to_owned()],
+    );
+
+    // The turn ends: the foreground entry is swept, the background one survives.
+    ix.on_stop(StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        running_tool_use_ids(&ix.live_state_for(&session).await),
+        vec!["toolu_bg".to_owned()],
+        "only the foreground subagent is swept at turn end"
     );
 }

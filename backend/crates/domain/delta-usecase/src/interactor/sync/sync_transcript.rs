@@ -188,6 +188,21 @@ where
                     self.store
                         .clear_subagent_launch(&session.id, &tool_use_id)
                         .await?;
+                    // This is the BACKGROUND subagent's end signal. A background
+                    // `Agent`/`Task` was started by `PreToolUse` and survived its
+                    // immediate `PostToolUse` and the turn-end sweep; its
+                    // completion `<task-notification>` is what finishes it. Drop
+                    // the running entry and broadcast `SubagentFinished` so the
+                    // navigator badge / conversation indicator clears. The finish
+                    // is id-keyed and kind-agnostic, so a background `Bash`
+                    // (which also yields `SubagentCompleted` but never STARTED an
+                    // indicator) is a harmless no-op here.
+                    if self.state.finish_subagent(&tool_use_id) {
+                        events.push(SessionEvent::SubagentFinished {
+                            session_id: session.id.clone(),
+                            tool_use_id,
+                        });
+                    }
                 }
             }
         }

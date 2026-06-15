@@ -115,14 +115,16 @@ export interface StreamingMessage {
  * near the conversation tail.
  *
  * Added by `subagent_started`, removed by the matching `subagent_finished`
- * (correlated by {@link toolUseId}), and swept when the turn ends / the session
- * closes (a subagent cannot outlive its turn). Re-seeded from the sends
- * envelope's `running_subagents` after a reconnect, so a missed start/finish
- * event heals from a plain refetch.
+ * (correlated by {@link toolUseId}), and re-seeded from the sends envelope's
+ * `running_subagents` after a reconnect, so a missed start/finish event heals
+ * from a plain refetch.
  *
- * This is the FOREGROUND (synchronous) case only; background subagents
- * (`run_in_background: true`) complete via a different signal and are not yet
- * tracked.
+ * The {@link background} flag drives the turn-end sweep. A FOREGROUND subagent
+ * is swept when the turn ends / the session closes (it cannot outlive its
+ * turn). A BACKGROUND subagent (`run_in_background: true`) outlives the
+ * launching turn — the immediate `subagent_finished` of the launch never
+ * arrives, and its real completion (a `subagent_finished` driven by the
+ * completion notification) lands much later — so the turn-end sweep KEEPS it.
  */
 export interface SubagentActivity {
   /** The `Agent`/`Task` call's `tool_use_id` (its stable correlation key). */
@@ -131,6 +133,11 @@ export interface SubagentActivity {
   subagentType: string | null;
   /** The short task description for display, or null if none was given. */
   description: string | null;
+  /**
+   * Whether the launch carried `run_in_background: true`. A background subagent
+   * survives the turn-end sweep; a foreground one is dropped at turn end.
+   */
+  background: boolean;
 }
 
 /** A new-session spawn tracked from the POST response (real ids). */
@@ -605,19 +612,32 @@ function dropStreamingForSession(
 }
 
 /**
- * Drop the running-subagent set of one session, returning the changed slice
- * (empty object when none existed). Used when the turn ends — a subagent cannot
- * outlive the turn that spawned it — and on a reconnect.
+ * Drop the FOREGROUND running subagents of one session at turn end, KEEPING any
+ * background entries, and return the changed slice (empty object when nothing
+ * changed). A foreground subagent cannot outlive the turn that spawned it, so
+ * it is swept; a background subagent (`run_in_background: true`) deliberately
+ * outlives the launching turn and is removed only by its completion
+ * `subagent_finished`, so it is kept.
  */
-function dropRunningSubagentsForSession(
+function dropForegroundSubagentsForSession(
   state: LiveState,
   sessionId: SessionId,
 ): Partial<LiveState> {
-  if (!state.runningSubagents[sessionId]) {
+  const current = state.runningSubagents[sessionId];
+  if (!current) {
+    return {};
+  }
+  const survivors = current.filter((s) => s.background);
+  if (survivors.length === current.length) {
+    // All entries are background: nothing to sweep, keep identity-stable state.
     return {};
   }
   const runningSubagents = { ...state.runningSubagents };
-  delete runningSubagents[sessionId];
+  if (survivors.length === 0) {
+    delete runningSubagents[sessionId];
+  } else {
+    runningSubagents[sessionId] = survivors;
+  }
   return { runningSubagents };
 }
 
@@ -687,10 +707,13 @@ function endTurnForSession(
   return {
     ...next,
     ...(dropStreaming ? dropStreamingForSession(state, sessionId) : {}),
-    // A subagent cannot outlive the turn that spawned it, so any still-running
-    // entry is cleared whenever the turn ends (or the session closes). This
-    // also covers a foreground `subagent_finished` that was missed.
-    ...dropRunningSubagentsForSession(state, sessionId),
+    // A FOREGROUND subagent cannot outlive the turn that spawned it, so any
+    // still-running foreground entry is cleared whenever the turn ends (or the
+    // session closes); this also covers a foreground `subagent_finished` that
+    // was missed. A BACKGROUND subagent (`run_in_background: true`) outlives the
+    // launching turn and is KEPT — it is finished only by its completion
+    // `subagent_finished`.
+    ...dropForegroundSubagentsForSession(state, sessionId),
     ...clearNoticesOn(state.notices, sessionId, trigger),
   };
 }
@@ -904,6 +927,7 @@ export const useLiveStore = create<LiveState>((set) => ({
           toolUseId: s.tool_use_id,
           subagentType: s.subagent_type,
           description: s.description,
+          background: s.background,
         }));
       }
       return { runningSubagents };
@@ -1168,6 +1192,7 @@ export const useLiveStore = create<LiveState>((set) => ({
                   toolUseId: event.tool_use_id,
                   subagentType: event.subagent_type,
                   description: event.description,
+                  background: event.background,
                 },
               ],
             },

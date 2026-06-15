@@ -100,6 +100,21 @@ impl TranscriptWriter {
         self.append("user", json!({ "message": message }))
     }
 
+    /// Append the harness-injected `<task-notification>` line claude writes when
+    /// a background tool call (`run_in_background: true`) completes: a plain
+    /// `role: user` line whose `<tool-use-id>` correlates back to the launching
+    /// tool call. It belongs to the in-flight turn (a programmatic continuation,
+    /// not a new human turn), exactly like a `tool_result`.
+    pub fn task_notification(&mut self, tool_use_id: &str) -> Result<(), String> {
+        let body = format!(
+            "<task-notification>\n\
+             <tool-use-id>{tool_use_id}</tool-use-id>\n\
+             <status>completed</status>\n\
+             </task-notification>"
+        );
+        self.user_text(&body)
+    }
+
     /// Append the bookkeeping line claude writes when a prompt is submitted
     /// while a turn is in flight: a **uuid-less** `queue-operation` enqueue
     /// record carrying the queued text. It does not join the uuid chain — the

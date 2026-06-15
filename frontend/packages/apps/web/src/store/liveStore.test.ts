@@ -1044,12 +1044,14 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: 'general-purpose',
       description: 'Probe the codebase',
+      background: false,
     });
     expect(subagents()).toEqual([
       {
         toolUseId: 'toolu_a1',
         subagentType: 'general-purpose',
         description: 'Probe the codebase',
+        background: false,
       },
     ]);
   });
@@ -1062,6 +1064,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     });
     store.applyEvent({
       kind: 'subagent_finished',
@@ -1079,6 +1082,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     });
     store.applyEvent({
       kind: 'subagent_started',
@@ -1086,6 +1090,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a2',
       subagent_type: null,
       description: null,
+      background: false,
     });
     expect(subagents()?.map((s) => s.toolUseId)).toEqual([
       'toolu_a1',
@@ -1108,6 +1113,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     };
     store.applyEvent(started);
     store.applyEvent(started);
@@ -1131,6 +1137,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     });
     store.applyEvent({
       kind: 'turn_completed',
@@ -1148,8 +1155,64 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     });
     store.applyEvent({ kind: 'session_closed', session_id: 'sess-1' });
+    expect(subagents()).toBeUndefined();
+  });
+
+  it('keeps a background subagent while sweeping a foreground one at turn end', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_fg',
+      subagent_type: null,
+      description: null,
+      background: false,
+    });
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_bg',
+      subagent_type: null,
+      description: null,
+      background: true,
+    });
+    // The launching turn ends: the foreground entry is swept, the background
+    // one survives (it outlives the turn that launched it).
+    store.applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(subagents()?.map((s) => s.toolUseId)).toEqual(['toolu_bg']);
+  });
+
+  it('clears a surviving background subagent on its completion subagent_finished', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_bg',
+      subagent_type: null,
+      description: null,
+      background: true,
+    });
+    // The launching turn ends; the background subagent keeps running.
+    store.applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      stop_reason: null,
+    });
+    expect(subagents()?.map((s) => s.toolUseId)).toEqual(['toolu_bg']);
+    // Its completion notification (folded server-side) arrives as a
+    // subagent_finished, clearing it.
+    store.applyEvent({
+      kind: 'subagent_finished',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_bg',
+    });
     expect(subagents()).toBeUndefined();
   });
 
@@ -1162,13 +1225,17 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_stale',
       subagent_type: null,
       description: null,
+      background: false,
     });
     // The server reports a different running set: it replaces the local copy.
+    // A surviving background subagent is restored with its flag, so the
+    // reconnecting client's later turn-end sweep keeps it.
     store.seedRunningSubagents('sess-1', [
       {
         tool_use_id: 'toolu_fresh',
         subagent_type: 'general-purpose',
         description: 'Still running',
+        background: true,
       },
     ]);
     expect(subagents()).toEqual([
@@ -1176,6 +1243,7 @@ describe('liveStore running-subagent tracking', () => {
         toolUseId: 'toolu_fresh',
         subagentType: 'general-purpose',
         description: 'Still running',
+        background: true,
       },
     ]);
   });
@@ -1188,6 +1256,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     });
     store.seedRunningSubagents('sess-1', []);
     expect(subagents()).toBeUndefined();
@@ -1201,6 +1270,7 @@ describe('liveStore running-subagent tracking', () => {
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
+      background: false,
     });
     store.resetTurnEphemera();
     expect(useLiveStore.getState().runningSubagents).toEqual({});

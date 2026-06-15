@@ -91,6 +91,10 @@ pub enum WireSessionEvent {
         tool_use_id: String,
         subagent_type: Option<String>,
         description: Option<String>,
+        /// Whether the launch carried `run_in_background: true`. A background
+        /// subagent outlives the launching turn (the client must not sweep it at
+        /// turn end) and is finished by its completion notification.
+        background: bool,
     },
     /// A subagent (the `Agent`/`Task` tool) finished running, correlated to its
     /// `subagent_started` by `tool_use_id`.
@@ -205,11 +209,13 @@ impl From<SessionEvent> for WireSessionEvent {
                 tool_use_id,
                 subagent_type,
                 description,
+                background,
             } => Self::SubagentStarted {
                 session_id: session_id.0,
                 tool_use_id,
                 subagent_type,
                 description,
+                background,
             },
             SessionEvent::SubagentFinished {
                 session_id,
@@ -335,6 +341,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             tool_use_id: "toolu-sample".to_owned(),
             subagent_type: Some("general-purpose".to_owned()),
             description: Some("Run ls".to_owned()),
+            background: false,
         },
         WireSessionEvent::SubagentFinished {
             session_id: session_id(),
@@ -578,6 +585,7 @@ mod tests {
                 tool_use_id: "toolu_01".into(),
                 subagent_type: Some("general-purpose".into()),
                 description: Some("Run ls and count entries".into()),
+                background: false,
             })),
             serde_json::json!({
                 "kind": "subagent_started",
@@ -585,6 +593,28 @@ mod tests {
                 "tool_use_id": "toolu_01",
                 "subagent_type": "general-purpose",
                 "description": "Run ls and count entries",
+                "background": false,
+            }),
+        );
+    }
+
+    #[test]
+    fn subagent_started_carries_the_background_flag_when_launched_in_background() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::SubagentStarted {
+                session_id: SessionId::from("sess-1"),
+                tool_use_id: "toolu_01".into(),
+                subagent_type: Some("general-purpose".into()),
+                description: Some("Long crawl".into()),
+                background: true,
+            })),
+            serde_json::json!({
+                "kind": "subagent_started",
+                "session_id": "sess-1",
+                "tool_use_id": "toolu_01",
+                "subagent_type": "general-purpose",
+                "description": "Long crawl",
+                "background": true,
             }),
         );
     }
@@ -597,6 +627,7 @@ mod tests {
                 tool_use_id: "toolu_01".into(),
                 subagent_type: None,
                 description: None,
+                background: false,
             })),
             serde_json::json!({
                 "kind": "subagent_started",
@@ -604,6 +635,7 @@ mod tests {
                 "tool_use_id": "toolu_01",
                 "subagent_type": null,
                 "description": null,
+                "background": false,
             }),
         );
     }

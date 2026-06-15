@@ -1,3 +1,5 @@
+use delta_attribution::claude_format;
+
 use crate::error::Result;
 use crate::interactor::hooks::{is_subagent_tool, ASK_USER_QUESTION};
 use crate::interactor::session_actor::actor::SessionContext;
@@ -85,16 +87,29 @@ where
             // A subagent (the `Agent`/`Task` tool) is starting. It runs in its
             // own transcript that Delta never tails, so the conversation pane
             // would otherwise show nothing while it works — track it as running
-            // and broadcast the start. Keyed by `tool_use_id`, the same id the
-            // matching foreground `PostToolUse(Agent)` carries to clear it. The
+            // and broadcast the start. Keyed by `tool_use_id`.
+            //
+            // A FOREGROUND subagent is cleared by the matching `PostToolUse`
+            // (which fires when it completes) and swept at turn end. A BACKGROUND
+            // subagent (`run_in_background: true`) returns immediately — its
+            // `PostToolUse` fires at launch, not completion — so it must survive
+            // both the immediate `PostToolUse` and the turn-end sweep, finishing
+            // only when its completion `<task-notification>` is folded. The
+            // `background` flag, read from the same top-level `run_in_background`
+            // key the attribution fold keys on, drives that distinction. The
             // runtime mirror lets a client that missed the event rebuild its
             // indicator from the sends envelope.
             let subagent_type = string_field(tool_input_json, "subagent_type");
             let description = string_field(tool_input_json, "description");
+            let background = serde_json::from_str::<serde_json::Value>(tool_input_json)
+                .as_ref()
+                .map(claude_format::launches_in_background)
+                .unwrap_or(false);
             let newly = self.state.start_subagent(RunningSubagent {
                 tool_use_id: tool_use_id.to_owned(),
                 subagent_type: subagent_type.clone(),
                 description: description.clone(),
+                background,
             });
             // A duplicate `PreToolUse` for an already-tracked id (a retried hook
             // delivery) must not double-broadcast, so only emit on a new entry.
@@ -104,6 +119,7 @@ where
                     tool_use_id: tool_use_id.to_owned(),
                     subagent_type,
                     description,
+                    background,
                 }]);
             }
         }

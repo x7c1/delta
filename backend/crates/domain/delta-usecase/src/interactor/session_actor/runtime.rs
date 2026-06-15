@@ -206,13 +206,24 @@ pub struct PendingQuestion {
 /// its indicator from a plain refetch — exactly like [`PendingPermission`] and
 /// [`PendingQuestion`].
 ///
-/// The running window is the foreground `PreToolUse(Agent)` → `PostToolUse(Agent)`
-/// hook pair, correlated by `tool_use_id`. Cleared when the turn returns to idle
-/// — a subagent cannot outlive its turn.
+/// A foreground subagent's running window is the synchronous
+/// `PreToolUse(Agent)` → `PostToolUse(Agent)` hook pair, correlated by
+/// `tool_use_id`, cleared when the turn returns to idle — a foreground subagent
+/// cannot outlive its turn.
+///
+/// A background subagent (`run_in_background: true`) outlives the launching
+/// turn: its `PostToolUse` fires immediately at launch (the call returned, not
+/// the subagent), and its real completion arrives much later as a
+/// `<task-notification>` transcript line. So a background entry is NOT finished
+/// by the immediate `PostToolUse` and is NOT swept at turn end; it is finished
+/// only when the completion notification is folded (see
+/// `Effect::SubagentCompleted`). The [`Self::background`] flag drives both
+/// distinctions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningSubagent {
-    /// The `tool_use_id` of the `Agent`/`Task` call, the key that the matching
-    /// `PostToolUse` clears it by.
+    /// The `tool_use_id` of the `Agent`/`Task` call, the key that finishes it —
+    /// the matching `PostToolUse` for a foreground entry, or the completion
+    /// `<task-notification>` carrying this same id for a background entry.
     pub tool_use_id: String,
     /// The subagent type from the tool input (e.g. `general-purpose`), if the
     /// call carried one.
@@ -220,6 +231,10 @@ pub struct RunningSubagent {
     /// The short task description from the tool input, if the call carried one,
     /// for display next to the indicator.
     pub description: Option<String>,
+    /// Whether the launch carried `run_in_background: true`. A background
+    /// subagent survives the immediate `PostToolUse` and the turn-end sweep; a
+    /// foreground one is finished on its `PostToolUse` and swept at turn end.
+    pub background: bool,
 }
 
 /// One consistent snapshot of the runtime state the sends envelope reports:
@@ -317,11 +332,15 @@ pub struct SessionRuntime {
     streaming_message: Option<StreamingMessage>,
     /// The subagents (`Agent`/`Task` tool calls) currently running in this
     /// session's turn, keyed by `tool_use_id` and kept in start order. Each is
-    /// added by the `PreToolUse(Agent)` hook and removed by the matching
-    /// `PostToolUse(Agent)`; the whole set is dropped when the turn returns to
-    /// idle, so it is part of [`Self::is_empty`] (a stuck entry would otherwise
-    /// pin the actor alive). Only `Agent`/`Task` flip it — a subagent's nested
-    /// tool calls (e.g. its own `Bash`) reach the same hooks but never match.
+    /// added by the `PreToolUse(Agent)` hook. A FOREGROUND entry is removed by
+    /// the matching `PostToolUse(Agent)` and the whole foreground set is swept
+    /// when the turn returns to idle. A BACKGROUND entry
+    /// (`run_in_background: true`) survives both — its immediate `PostToolUse`
+    /// is a no-op and the turn-end sweep skips it — and is removed only when its
+    /// completion `<task-notification>` is folded (`Effect::SubagentCompleted`).
+    /// The set is part of [`Self::is_empty`] (a stuck entry would otherwise pin
+    /// the actor alive). Only `Agent`/`Task` flip it — a subagent's nested tool
+    /// calls (e.g. its own `Bash`) reach the same hooks but never match.
     running_subagents: Vec<RunningSubagent>,
 }
 
@@ -585,12 +604,16 @@ impl SessionRuntime {
         if result.next == TurnState::Idle {
             self.pending_permission = None;
             self.pending_question = None;
-            // A subagent cannot outlive the turn that spawned it: once the turn
-            // ends (stop, interrupt, close) any still-running entry is moot, so
-            // drop the whole set. This also covers the case where a foreground
-            // `PostToolUse(Agent)` was somehow missed — the turn end clears it
-            // rather than leaving a stuck indicator.
-            self.running_subagents.clear();
+            // A FOREGROUND subagent cannot outlive the turn that spawned it:
+            // once the turn ends (stop, interrupt, close) any still-running
+            // foreground entry is moot, so drop it. This also covers the case
+            // where a foreground `PostToolUse(Agent)` was somehow missed — the
+            // turn end clears it rather than leaving a stuck indicator. A
+            // BACKGROUND subagent (`run_in_background: true`) deliberately
+            // outlives the launching turn: it keeps running after the turn
+            // returns to idle, so it is kept here and removed only when its
+            // completion `<task-notification>` is folded.
+            self.running_subagents.retain(|s| s.background);
             // The provisional live preview belongs to the turn that just ended;
             // the persisted assistant message (ingested by the transcript sync)
             // now renders instead, so drop the preview to avoid a duplicate.
@@ -601,6 +624,11 @@ impl SessionRuntime {
 
     /// Drop the turn state without any orphan handling. Used when the session
     /// row itself is being deleted (its sends go with it by cascade).
+    ///
+    /// Unlike [`Self::apply_turn`], this clears the WHOLE running set including
+    /// background subagents: the session is being deleted, so no later
+    /// completion notification can arrive to finish a background entry — keeping
+    /// one would pin a doomed actor alive forever.
     pub fn forget_turn(&mut self) {
         self.turn = TurnState::Idle;
         self.pending_permission = None;
@@ -742,12 +770,35 @@ impl SessionRuntime {
         true
     }
 
-    /// Drop the running subagent with this `tool_use_id`, returning whether one
-    /// was actually removed.
+    /// Drop the FOREGROUND running subagent with this `tool_use_id`, returning
+    /// whether one was actually removed.
     ///
-    /// Keyed so a `PostToolUse` for an unknown id (or one already cleared at
-    /// turn end) is a harmless no-op (returns `false`) rather than emitting a
-    /// spurious "finished" for a subagent that was never tracked.
+    /// This is the `PostToolUse(Agent)` path. It only removes a foreground
+    /// entry: a background subagent's `PostToolUse` fires immediately at launch
+    /// (the call returned, not the subagent), so it must NOT finish it — the
+    /// completion `<task-notification>` does, via [`Self::finish_subagent`].
+    ///
+    /// Keyed so a `PostToolUse` for an unknown id, one already cleared at turn
+    /// end, or a background id (still running) is a harmless no-op (returns
+    /// `false`) rather than emitting a spurious "finished".
+    pub fn finish_foreground_subagent(&mut self, tool_use_id: &str) -> bool {
+        let before = self.running_subagents.len();
+        self.running_subagents
+            .retain(|s| s.tool_use_id != tool_use_id || s.background);
+        self.running_subagents.len() != before
+    }
+
+    /// Drop the running subagent with this `tool_use_id` regardless of kind,
+    /// returning whether one was actually removed.
+    ///
+    /// This is the background-completion path: when a completion
+    /// `<task-notification>` is folded (`Effect::SubagentCompleted`), the
+    /// background entry it correlates to by `tool_use_id` is removed here.
+    ///
+    /// Keyed and kind-agnostic so it tolerates an unknown id: a background
+    /// `Bash` (`run_in_background: true`) also produces `SubagentCompleted`, but
+    /// Delta never STARTS an indicator for `Bash`, so its id is untracked and
+    /// this is a harmless no-op (returns `false`).
     pub fn finish_subagent(&mut self, tool_use_id: &str) -> bool {
         let before = self.running_subagents.len();
         self.running_subagents
