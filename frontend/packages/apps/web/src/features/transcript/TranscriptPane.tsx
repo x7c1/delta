@@ -58,7 +58,7 @@ const OVERLAY_INSET_FALLBACK_PX = 12;
  * reserve always had is preserved here while the rest of the reserve still tracks
  * the overlay's real height. Present at every composer size and grows with it.
  */
-const BODY_BOTTOM_READING_GAP_PX = 128;
+const BODY_BOTTOM_READING_GAP_PX = 192;
 
 /**
  * The overlay inset in pixels: the gap the floating cards leave from the body
