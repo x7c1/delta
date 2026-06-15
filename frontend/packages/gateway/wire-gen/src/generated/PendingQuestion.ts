@@ -15,6 +15,11 @@ export type PendingQuestion = {
  */
 request_id: number, 
 /**
+ * The in-flight turn's thread, so a reconnecting client shows the question
+ * card only on the thread it belongs to.
+ */
+thread_id: number, 
+/**
  * The raw `{"questions":[…]}` tool input, serialized as JSON text.
  */
 tool_input: string, };

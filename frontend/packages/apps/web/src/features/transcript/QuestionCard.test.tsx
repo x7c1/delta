@@ -4,7 +4,7 @@ import type { QuestionNotice } from '../../store/liveStore';
 import { QuestionCard } from './QuestionCard';
 
 function notice(toolInput: string): QuestionNotice {
-  return { kind: 'question', requestId: 1, toolInput, dismissed: false };
+  return { kind: 'question', requestId: 1, threadId: 1, toolInput, dismissed: false };
 }
 
 /** A resolved-promise stub for `onAnswer` in tests that only assert the call. */

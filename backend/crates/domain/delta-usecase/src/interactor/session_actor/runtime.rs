@@ -187,6 +187,9 @@ pub struct PendingQuestion {
     /// The `PreToolUse` row id that recorded this question (its `tool_use_id`
     /// is what the later `tool_result` resolves it by).
     pub request_id: i64,
+    /// The in-flight turn's thread, so the browser only shows the question card
+    /// on the thread it belongs to.
+    pub thread_id: ThreadId,
     /// The raw `{"questions":[…]}` tool input, serialized as JSON text, which
     /// the browser parses to render the question card.
     pub tool_input_json: String,

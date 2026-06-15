@@ -97,9 +97,14 @@ pub enum SessionEvent {
     /// answer is given in the TUI. The assistant's preamble text is *not*
     /// available here: Claude flushes it to the transcript only after the user
     /// answers.
+    ///
+    /// `thread_id` is the in-flight turn's thread, so the browser only shows
+    /// the question card on the thread it belongs to — recovered the same way
+    /// the streaming preview ([`Self::AssistantStreaming`]) recovers its thread.
     QuestionAsked {
         session_id: SessionId,
         request_id: i64,
+        thread_id: ThreadId,
         tool_input_json: String,
     },
     /// A previously-requested tool permission was resolved.

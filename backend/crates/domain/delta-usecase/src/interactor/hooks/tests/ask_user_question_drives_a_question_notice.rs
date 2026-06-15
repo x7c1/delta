@@ -20,14 +20,19 @@ async fn pre_tool_use_for_ask_user_question_emits_question_asked_and_records_it(
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
+    // AskUserQuestion blocks synchronously within the turn, so the question is
+    // attributed to the in-flight turn's thread — here the seed prompt's main
+    // thread (the latest-user-thread, falling back to main).
+    let main_thread = ix.store().main_thread_id(&session).await.unwrap();
 
     let events = ix
         .on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1")
         .await
         .unwrap();
 
-    // The `QuestionAsked` event carries the PreToolUse row id and the raw
-    // questions JSON, so the browser can render the card.
+    // The `QuestionAsked` event carries the PreToolUse row id, the in-flight
+    // turn's thread, and the raw questions JSON, so the browser can render the
+    // card on the thread it belongs to.
     let request_id = {
         let g = ix.store().inner.lock().unwrap();
         g.permissions
@@ -39,22 +44,26 @@ async fn pre_tool_use_for_ask_user_question_emits_question_asked_and_records_it(
     match events.as_slice() {
         [SessionEvent::QuestionAsked {
             request_id: id,
+            thread_id,
             tool_input_json,
             ..
         }] => {
             assert_eq!(*id, request_id);
+            assert_eq!(*thread_id, main_thread);
             assert_eq!(tool_input_json, QUESTION_INPUT);
         }
         other => panic!("expected a single QuestionAsked, got {other:?}"),
     }
 
-    // It is also queryable as live state (re-seedable across a reconnect).
+    // It is also queryable as live state (re-seedable across a reconnect),
+    // carrying the same thread attribution.
     let pending = ix
         .live_state_for(&session)
         .await
         .pending_question
         .expect("the question is queryable while it awaits an answer");
     assert_eq!(pending.request_id, request_id);
+    assert_eq!(pending.thread_id, main_thread);
     assert_eq!(pending.tool_input_json, QUESTION_INPUT);
 }
 

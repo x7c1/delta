@@ -92,6 +92,9 @@ impl From<PendingPermission> for WirePendingPermission {
 pub struct WirePendingQuestion {
     /// The `PreToolUse` row id whose `tool_result` resolves this question.
     pub request_id: i64,
+    /// The in-flight turn's thread, so a reconnecting client shows the question
+    /// card only on the thread it belongs to.
+    pub thread_id: i64,
     /// The raw `{"questions":[…]}` tool input, serialized as JSON text.
     pub tool_input: String,
 }
@@ -100,6 +103,7 @@ impl From<PendingQuestion> for WirePendingQuestion {
     fn from(pending: PendingQuestion) -> Self {
         WirePendingQuestion {
             request_id: pending.request_id,
+            thread_id: pending.thread_id.0,
             tool_input: pending.tool_input_json,
         }
     }
@@ -169,6 +173,8 @@ impl WireSendsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use delta_model::ThreadId;
 
     #[test]
     fn turn_state_serializes_with_snake_case_phase_and_optional_send_id() {
@@ -253,6 +259,7 @@ mod tests {
                 pending_permission: None,
                 pending_question: Some(PendingQuestion {
                     request_id: 5,
+                    thread_id: ThreadId(3),
                     tool_input_json: "{\"questions\":[{\"header\":\"Pick\"}]}".to_owned(),
                 }),
                 running_subagents: Vec::new(),
@@ -266,6 +273,7 @@ mod tests {
                 "permission": null,
                 "question": {
                     "request_id": 5,
+                    "thread_id": 3,
                     "tool_input": "{\"questions\":[{\"header\":\"Pick\"}]}",
                 },
                 "running_subagents": [],

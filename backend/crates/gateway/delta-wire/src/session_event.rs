@@ -57,6 +57,9 @@ pub enum WireSessionEvent {
     QuestionAsked {
         session_id: String,
         request_id: i64,
+        /// The in-flight turn's thread, so the browser only shows the question
+        /// card on the thread it belongs to.
+        thread_id: i64,
         /// The raw `{"questions":[…]}` tool input, serialized as JSON text, so
         /// the browser can render the question card.
         tool_input: String,
@@ -160,10 +163,12 @@ impl From<SessionEvent> for WireSessionEvent {
             SessionEvent::QuestionAsked {
                 session_id,
                 request_id,
+                thread_id,
                 tool_input_json,
             } => Self::QuestionAsked {
                 session_id: session_id.0,
                 request_id,
+                thread_id: thread_id.0,
                 tool_input: tool_input_json,
             },
             SessionEvent::PermissionResolved {
@@ -306,6 +311,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::QuestionAsked {
             session_id: session_id(),
             request_id: 1,
+            thread_id: 1,
             tool_input: "{\"questions\":[]}".to_owned(),
         },
         WireSessionEvent::PermissionResolved {
@@ -438,12 +444,14 @@ mod tests {
             json(&WireSessionEvent::from(SessionEvent::QuestionAsked {
                 session_id: SessionId::from("sess-1"),
                 request_id: 9,
+                thread_id: ThreadId(3),
                 tool_input_json: "{\"questions\":[{\"header\":\"Pick\"}]}".to_owned(),
             })),
             serde_json::json!({
                 "kind": "question_asked",
                 "session_id": "sess-1",
                 "request_id": 9,
+                "thread_id": 3,
                 "tool_input": "{\"questions\":[{\"header\":\"Pick\"}]}",
             }),
         );

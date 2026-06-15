@@ -603,7 +603,14 @@ export function TranscriptPane({
   // authoritative clear stays the existing resolution path (the `tool_result`
   // resolving the question's request row), so no extra clear logic is needed.
   // An "Open terminal" fallback remains in the card for a misfired injection.
-  const questionCard = question && !question.dismissed && activeThread && (
+  // Gate the question card to the thread the question was asked on, mirroring
+  // how `showExternalInput` and `showStreaming` gate by `=== activeThread.id`:
+  // AskUserQuestion belongs to the in-flight turn's thread, so the card must
+  // not show on the session's other threads.
+  const questionCard = question &&
+    !question.dismissed &&
+    activeThread &&
+    question.threadId === activeThread.id && (
     <QuestionCard
       notice={question}
       onAnswer={(selections) =>
@@ -877,11 +884,12 @@ export function TranscriptPane({
         const isToolTurn = message.content.some(
           (block) => block.type === 'tool_use' || block.type === 'tool_result',
         );
-        // Both tool rows and the harness-injected task-notification card (a
-        // collapsed `<task-notification>` user turn) render as nested aside
-        // cards: they are tightened and left-indented so they read as nested
-        // steps, distinct from prose.
-        const isNestedCard = isToolTurn || isTaskNotificationMessage(message);
+        // Tool rows, the harness-injected task-notification card (a collapsed
+        // `<task-notification>` user turn), and meta lines all render as nested
+        // aside cards: they are tightened and left-indented so they read as
+        // nested steps, distinct from prose.
+        const isNestedCard =
+          isToolTurn || isTaskNotificationMessage(message) || message.role === 'meta';
         const topGap = isNestedCard
           ? 'pt-0.5'
           : message.role === 'user'

@@ -569,6 +569,7 @@ export function createMockApi(): MockApi {
         // keeps it for the sends envelope.
         setPendingQuestion(event.session_id, {
           request_id: event.request_id,
+          thread_id: event.thread_id,
           tool_input: event.tool_input,
         });
         break;

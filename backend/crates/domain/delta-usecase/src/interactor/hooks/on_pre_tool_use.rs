@@ -56,16 +56,30 @@ where
             .await?;
 
         if tool_name == ASK_USER_QUESTION {
+            // Attribute the question to the in-flight turn's thread, recovered
+            // the same way the streaming preview recovers its thread (see
+            // `on_message_display`): the thread of the latest persisted user
+            // message, falling back to the session's main thread. AskUserQuestion
+            // blocks synchronously within the turn, so this latest-user thread IS
+            // the asking thread — the browser shows the card only there.
+            let main_thread = self.store.main_thread_id(self.id).await?;
+            let thread_id = self
+                .store
+                .latest_user_thread(self.id)
+                .await?
+                .unwrap_or(main_thread);
             // Mirror the broadcast into queryable runtime state, so a client
             // that misses the event (socket down) rebuilds the question card
             // from the sends envelope. Cleared on resolution or turn end.
             self.state.set_pending_question(PendingQuestion {
                 request_id: request.id,
+                thread_id,
                 tool_input_json: tool_input_json.to_owned(),
             });
             return Ok(vec![SessionEvent::QuestionAsked {
                 session_id: self.id.clone(),
                 request_id: request.id,
+                thread_id,
                 tool_input_json: tool_input_json.to_owned(),
             }]);
         }

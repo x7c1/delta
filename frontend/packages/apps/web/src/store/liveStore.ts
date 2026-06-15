@@ -188,6 +188,13 @@ export interface PermissionNotice {
 export interface QuestionNotice {
   kind: 'question';
   requestId: number;
+  /**
+   * The in-flight turn's thread the question was asked on, mirroring
+   * {@link ExternalInputNotice.threadId}: the transcript pane gates the
+   * question card to this thread so it shows only where the question belongs,
+   * not on every thread of the session.
+   */
+  threadId: ThreadId;
   /** The raw `{questions:[…]}` tool input, parsed by the card to render it. */
   toolInput: string;
   /** True once the user dismissed the card; the entry stays for de-dup. */
@@ -872,6 +879,7 @@ export const useLiveStore = create<LiveState>((set) => ({
         notices: withNotice(state.notices, sessionId, {
           kind: 'question',
           requestId: question.request_id,
+          threadId: question.thread_id,
           toolInput: question.tool_input,
           dismissed: false,
         }),
@@ -1051,6 +1059,7 @@ export const useLiveStore = create<LiveState>((set) => ({
             notices: withNotice(state.notices, event.session_id, {
               kind: 'question',
               requestId: event.request_id,
+              threadId: event.thread_id,
               toolInput: event.tool_input,
               dismissed: false,
             }),

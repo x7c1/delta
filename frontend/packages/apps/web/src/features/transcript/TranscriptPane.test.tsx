@@ -443,6 +443,45 @@ describe('TranscriptPane', () => {
     expect(screen.queryByTestId('streaming-message')).not.toBeInTheDocument();
   });
 
+  it('shows the question card only on the thread the question was asked on', async () => {
+    // The question is asked on the main thread; viewing main, the card shows.
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'question_asked',
+        session_id: SESSION_ID,
+        request_id: 5,
+        thread_id: MAIN_THREAD_ID,
+        tool_input: '{"questions":[{"header":"Pick"}]}',
+      });
+    });
+    expect(await screen.findByTestId('question-card')).toBeInTheDocument();
+  });
+
+  it('does not render the question card for a different thread', async () => {
+    renderPane(mockThreads, MAIN_THREAD_ID);
+    await waitFor(() =>
+      expect(screen.getByText('What is a delta?')).toBeInTheDocument(),
+    );
+
+    // A question attributed to another thread of the same session must not
+    // show on the thread the user is viewing — only on its own thread.
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'question_asked',
+        session_id: SESSION_ID,
+        request_id: 5,
+        thread_id: BRANCH_THREAD_ID,
+        tool_input: '{"questions":[{"header":"Pick"}]}',
+      });
+    });
+    expect(screen.queryByTestId('question-card')).not.toBeInTheDocument();
+  });
+
   it('shows the breadcrumb with "main" as an ancestor while viewing a sub-thread', async () => {
     // Drilled into a sub-thread (ancestry = [main › delta etymology]), so the
     // breadcrumb appears with "main" as a clickable leading crumb.
@@ -596,6 +635,9 @@ describe('TranscriptPane', () => {
       'aria-expanded',
       'false',
     );
+    // A meta line is a nested aside (like a tool row / task-notification card),
+    // so its block wrapper carries the same `ml-6` left indent.
+    expect(metaItem?.parentElement?.className).toContain('ml-6');
   });
 
   it('left-indents the task-notification card like a tool row, but not ordinary user prose', async () => {
