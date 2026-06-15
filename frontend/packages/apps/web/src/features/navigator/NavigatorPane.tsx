@@ -225,11 +225,12 @@ export function NavigatorPane({
         // already in that state — changing focus is not enough, the picker's open
         // state lives in the store so it can open without a focus transition;
         // reset any prior selection (directory and launch options) for a clean
-        // start.
+        // start. The negative horizontal margin pulls the button out of the
+        // header's px-3 inset so it lines up with the body's 8px content column.
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start border border-slate-300 text-slate-700"
+          className="-mx-1 w-full justify-start border border-slate-300 text-slate-700"
           onClick={() => {
             startNewSession();
             setNewSessionWorkdir(null);
