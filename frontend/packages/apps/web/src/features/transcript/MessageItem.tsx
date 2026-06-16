@@ -83,9 +83,9 @@ export function MessageItem({
         <Collapsible
           defaultOpen={false}
           summary={
-            <span className="flex items-center gap-1.5">
-              <Badge tone="neutral">meta</Badge>
-              <span className="text-slate-500">{firstLine}</span>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <Badge tone="neutral" className="shrink-0">meta</Badge>
+              <span className="truncate text-slate-500">{firstLine}</span>
             </span>
           }
         >

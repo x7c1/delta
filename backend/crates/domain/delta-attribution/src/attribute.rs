@@ -1,9 +1,9 @@
 //! The attribution fold: parsed transcript lines in, attributed messages and
 //! effects out.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
-use delta_model::{ContentBlock, Message, MessageUuid, Role, Send, SessionId, ThreadId};
+use delta_model::{ContentBlock, Message, MessageUuid, PromptId, Role, Send, SessionId, ThreadId};
 
 use crate::claude_format;
 use crate::transcript_message::TranscriptMessage;
@@ -73,6 +73,28 @@ pub struct AttributionState {
     /// ([`Effect::SubagentCompleted`]) when its notification is folded.
     /// `BTreeMap` keeps the seed-from-store ↔ fold round-trip deterministic.
     pub launched_threads: BTreeMap<String, ThreadId>,
+    /// The `promptId`s of the slash/local-command groups seen in this fold. A
+    /// local command (e.g. `/review-pr`) is recorded as several `type: "user"`
+    /// lines sharing one `promptId`: a leading `<local-command-caveat>` (the
+    /// only one Claude flags `isMeta`), the bare command-name line, then the
+    /// command's `<local-command-stdout>`/`<local-command-stderr>` output.
+    /// Recording the caveat's `promptId` here lets the later same-`promptId`
+    /// lines be recognized as command machinery (folded to [`Role::Meta`]) and
+    /// the command-name line, when it equals an outstanding send, be resolved as
+    /// a degenerate completed turn — a local command fires no `UserPromptSubmit`
+    /// echo and no `Stop`, so without this its dispatched send would wedge the
+    /// turn machine in `AwaitingEcho` forever.
+    ///
+    /// Threaded through the fold state (like `launched_threads`) so a batch cut
+    /// between the caveat and its trailing lines still groups them. It is NOT
+    /// seeded from a persisted store: Claude writes a local-command group as one
+    /// atomic transcript append (the lines share a timestamp), so the whole
+    /// group always lands in a single tail batch in production; whole-history
+    /// replay sees the caveat before its members within the one pass. A
+    /// `HashSet` is fine: it is only ever membership-tested (never iterated for
+    /// output), and its `PartialEq` is order-independent, so the threaded-state
+    /// equality the batch-split replay property pins still holds.
+    pub local_command_prompts: HashSet<PromptId>,
 }
 
 impl AttributionState {
@@ -84,6 +106,7 @@ impl AttributionState {
             carry_thread,
             outstanding: outstanding.into_iter().collect(),
             launched_threads: BTreeMap::new(),
+            local_command_prompts: HashSet::new(),
         }
     }
 
@@ -128,6 +151,18 @@ pub enum Effect {
     /// clears. Detected from the structural flag, never the error text, so it
     /// covers every synthetic API-error turn-end and is locale-independent.
     TurnAborted,
+    /// A dispatched send was consumed by a slash/local command (e.g. the user
+    /// ran `/review-pr`), not by a model turn. A local command is handled
+    /// entirely client-side: it fires **no** `UserPromptSubmit` echo and **no**
+    /// `Stop` hook, yet Delta dispatched it as a send and moved the turn machine
+    /// to `AwaitingEcho`. Without a turn-end signal that send stays outstanding
+    /// forever — wedging the single-outstanding rule so no later send dispatches.
+    /// This effect is emitted alongside the [`Effect::SendMatched`] that
+    /// consumes the send (the command-name line equals the send text inside a
+    /// recognized local-command `promptId` group): feed the turn machine back to
+    /// idle and notify the browser so the stuck send clears, exactly like
+    /// [`Effect::TurnAborted`] does for an API-error turn-end.
+    LocalCommandTurnEnded,
     /// A human user line matched the head outstanding send: mark the send row
     /// matched to this transcript uuid.
     SendMatched {
@@ -210,6 +245,41 @@ pub fn attribute_lines(
 
     for line in lines {
         let content_text = Message::flatten_text(&line.content);
+        let trimmed_content = content_text.as_deref().unwrap_or("").trim();
+
+        // Slash/local-command grouping. A local command (e.g. `/review-pr`) is
+        // recorded as several `type: "user"` lines sharing one `promptId`: a
+        // leading `<local-command-caveat>` Claude flags `isMeta` (already
+        // `Role::Meta`), the bare command-name line, then the command's
+        // `<local-command-stdout>`/`<local-command-stderr>` output (folded to
+        // `Role::Meta` by the parser's content check). Record the caveat's
+        // `promptId` so the OTHER members are recognized as command machinery.
+        if matches!(line.role, Role::Meta)
+            && claude_format::is_local_command_caveat(trimmed_content)
+        {
+            if let Some(prompt_id) = line.prompt_id.clone() {
+                state.local_command_prompts.insert(prompt_id);
+            }
+        }
+
+        // A `type: "user"` line sharing a recognized local-command `promptId`
+        // (the bare command-name line — the output lines already arrive as
+        // `Role::Meta`) is command machinery, not a human turn. Fold it to
+        // `Role::Meta` so it renders collapsed instead of as a user bubble, and
+        // — crucially — exclude it from `is_human_turn` so it does not run
+        // through external-input handling on `main`.
+        let in_local_command_group = line
+            .prompt_id
+            .as_ref()
+            .is_some_and(|id| state.local_command_prompts.contains(id));
+        let role = if in_local_command_group && matches!(line.role, Role::User) {
+            Role::Meta
+        } else {
+            line.role
+        };
+        let is_local_command_name_line = in_local_command_group
+            && matches!(line.role, Role::User)
+            && !trimmed_content.is_empty();
 
         // Correlate any tool_result blocks on this line with the open
         // permission requests they settle. Resolving on actual completion
@@ -275,12 +345,15 @@ pub fn attribute_lines(
         // background task completes while the user is working in a sub-thread,
         // the notification (and the assistant's continuation, and every later
         // turn) would reset to `main`.
-        let trimmed = content_text.as_deref().unwrap_or("").trim();
+        // Classify against the reclassified `role`: a local-command member that
+        // was folded to `Role::Meta` above is no longer a human turn (the
+        // command-name line is handled by its own branch below).
+        let trimmed = trimmed_content;
         let is_interrupt_marker =
-            matches!(line.role, Role::User) && claude_format::is_interrupt_marker(trimmed);
+            matches!(role, Role::User) && claude_format::is_interrupt_marker(trimmed);
         let is_task_notification =
-            matches!(line.role, Role::User) && claude_format::is_task_notification(trimmed);
-        let is_human_turn = matches!(line.role, Role::User)
+            matches!(role, Role::User) && claude_format::is_task_notification(trimmed);
+        let is_human_turn = matches!(role, Role::User)
             && !trimmed.is_empty()
             && !is_interrupt_marker
             && !is_task_notification;
@@ -300,7 +373,32 @@ pub fn attribute_lines(
         }
 
         // Compare against the head outstanding send; a match consumes it.
-        let (thread_id, semantic_parent_uuid) = if is_human_turn {
+        let (thread_id, semantic_parent_uuid) = if is_local_command_name_line {
+            // The bare command-name line of a local-command group (e.g.
+            // `/review-pr`). Delta dispatched it as a send and the turn machine
+            // is `AwaitingEcho`, but a local command fires no `UserPromptSubmit`
+            // echo and no `Stop` — so left alone the send wedges the queue
+            // forever. When this line's text equals the head outstanding send,
+            // treat it as a degenerate completed turn: consume the send
+            // (`SendMatched`) and end the turn (`LocalCommandTurnEnded`, which the
+            // caller feeds into the turn machine as a `Stop`). The line is
+            // command machinery, so it inherits `carry_thread` and never resets
+            // to `main`. (If it does NOT match an outstanding send — e.g. a
+            // local command typed straight into the pane, never dispatched by
+            // Delta — there is nothing to resolve; it simply folds as `Meta`.)
+            let head_matches = state
+                .outstanding
+                .front()
+                .is_some_and(|send| send.text.trim() == trimmed);
+            if let Some(pending) = head_matches.then(|| state.outstanding.pop_front()).flatten() {
+                effects.push(Effect::SendMatched {
+                    send_id: pending.id,
+                    matched_uuid: line.uuid.clone(),
+                });
+                effects.push(Effect::LocalCommandTurnEnded);
+            }
+            (state.carry_thread, None)
+        } else if is_human_turn {
             let head_matches = state
                 .outstanding
                 .front()
@@ -368,7 +466,9 @@ pub fn attribute_lines(
             uuid: line.uuid,
             session_id: session_id.clone(),
             thread_id,
-            role: line.role,
+            // The reclassified role: a local-command command-name line folds to
+            // `Role::Meta` so it renders collapsed, not as a user bubble.
+            role,
             linear_parent_uuid: line.linear_parent_uuid,
             semantic_parent_uuid,
             prompt_id: line.prompt_id,

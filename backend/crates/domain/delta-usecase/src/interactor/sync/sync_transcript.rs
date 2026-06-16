@@ -173,6 +173,30 @@ where
                         thread_id: Some(thread_id),
                     });
                 }
+                Effect::LocalCommandTurnEnded => {
+                    // A dispatched send was consumed by a slash/local command
+                    // (e.g. `/review-pr`), not by a model turn. A local command
+                    // is handled entirely client-side: it fires no
+                    // `UserPromptSubmit` echo and no `Stop` hook, so without this
+                    // the turn machine stays in `AwaitingEcho` forever and every
+                    // later send defers to `queued` and never dispatches. The
+                    // `SendMatched` effect emitted alongside this one already
+                    // consumed the send (it left `dispatched`), so feeding `Stop`
+                    // here returns the machine to `Idle` cleanly: its defensive
+                    // requeue/sweep is a no-op against the now-matched row. Reuse
+                    // `TurnInterrupted` as the browser signal — like an interrupt
+                    // or an API-error abort, no `Stop` hook fired, so the browser
+                    // must clear the stuck pending chip. The caller releases any
+                    // queued send after this sync returns (it keys on
+                    // `TurnInterrupted`), so no keystrokes are sent from inside
+                    // the ingestion path.
+                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
+                    self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
+                    events.push(SessionEvent::TurnInterrupted {
+                        session_id: session.id.clone(),
+                        thread_id: Some(thread_id),
+                    });
+                }
                 Effect::SendMatched {
                     send_id,
                     matched_uuid,

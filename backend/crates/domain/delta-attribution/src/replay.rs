@@ -31,6 +31,9 @@ pub fn replay(
         // every launch and its completion fall within the single replayed
         // batch, so the map is built and drained as the lines fold.
         launched_threads: std::collections::BTreeMap::new(),
+        // Likewise empty: a whole-history replay sees each local-command group's
+        // caveat before its trailing lines within the single replayed batch.
+        local_command_prompts: std::collections::HashSet::new(),
     };
     attribute_lines(session_id, main_thread, state, lines)
 }

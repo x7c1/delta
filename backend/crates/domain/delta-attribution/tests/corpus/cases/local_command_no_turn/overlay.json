@@ -1,0 +1,7 @@
+{
+  "comment": "A slash/local command (`/review-pr`) run as the session's first prompt. Delta dispatched it as send 1, so the turn machine is AwaitingEcho{1}. Claude handles a local command entirely client-side: it records a 3-line group sharing one promptId (`pcmd`) — a `<local-command-caveat>` it flags isMeta, the bare command-name line `/review-pr`, and the command's `<local-command-stdout>` — but fires NO UserPromptSubmit echo and NO Stop. Attribution must fold the command-name and stdout lines to `meta` (not render them as user bubbles), consume send 1 against the command-name line (`send_matched`), and end the degenerate turn (`local_command_turn_ended`) so the send is freed and the machine returns to idle. The real prompt typed afterwards (different promptId) is an ordinary user turn on main.",
+  "main_thread": 1,
+  "sends": [
+    { "id": 1, "thread_id": 1, "text": "/review-pr" }
+  ]
+}

@@ -12,6 +12,20 @@ use delta_usecase::TranscriptMessage;
 use raw_content::RawContent;
 use raw_line::RawLine;
 
+/// Markers Claude Code writes at the start of a slash/local command's captured
+/// output, recorded as a `type: "user"` line WITHOUT `isMeta`. These structural
+/// prefixes let the parser fold the output to [`Role::Meta`] (like the group's
+/// caveat) rather than rendering it as a human user turn.
+const LOCAL_COMMAND_OUTPUT_MARKERS: [&str; 2] =
+    ["<local-command-stdout>", "<local-command-stderr>"];
+
+/// Whether a user line's leading text is a local command's captured output.
+fn is_local_command_output_marker(text: &str) -> bool {
+    LOCAL_COMMAND_OUTPUT_MARKERS
+        .iter()
+        .any(|marker| text.starts_with(marker))
+}
+
 /// Parse one JSONL line. Returns `Ok(None)` for blank lines.
 pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::Error> {
     let trimmed = line.trim();
@@ -55,6 +69,25 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
     // Read it before `raw.message` is moved out below.
     let is_meta = raw.is_meta == Some(true);
 
+    // A slash/local command (e.g. `/review-pr`) records its captured output as
+    // a `type: "user"` line WITHOUT `isMeta` — only the leading caveat line of
+    // the group is flagged. So content-detect the `<local-command-stdout>` /
+    // `<local-command-stderr>` markers and fold that output to `Role::Meta` too,
+    // matching the caveat, instead of rendering it as a human user turn. (The
+    // bare command-name line of the same group carries no marker; it is folded
+    // by the attribution layer, which groups it by the caveat's `promptId`.)
+    // Detected here, at line-classification time, so the fold is robust even in
+    // a sync window that did not include the caveat line.
+    let is_local_command_output = raw
+        .message
+        .as_ref()
+        .and_then(|m| m.content.as_ref())
+        .and_then(|c| match c {
+            RawContent::Text(text) => Some(text.as_str()),
+            RawContent::Blocks(_) => None,
+        })
+        .is_some_and(|text| is_local_command_output_marker(text.trim_start()));
+
     // `isApiErrorMessage` marks a synthetic assistant line Claude writes when a
     // turn ends on an API error (usage/session limit, rate limit, any API
     // failure) instead of completing normally. Such a turn-end fires no `Stop`
@@ -64,7 +97,7 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
 
     let role = if is_queued_command {
         Role::User
-    } else if is_meta {
+    } else if is_meta || is_local_command_output {
         Role::Meta
     } else {
         raw.line_type
@@ -212,6 +245,46 @@ mod tests {
     #[test]
     fn ordinary_user_line_without_meta_is_user_role() {
         let line = r#"{"uuid":"u3","type":"user","message":{"role":"user","content":"hi"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::User);
+    }
+
+    #[test]
+    fn local_command_stdout_line_is_meta_even_without_is_meta_flag() {
+        // A slash/local command (e.g. `/review-pr`) records its captured output
+        // as a `type: "user"` line WITHOUT `isMeta`. It is command machinery, so
+        // it must fold as `Role::Meta`, not render as a human user turn.
+        let line = r#"{"uuid":"o1","type":"user","promptId":"p1","message":{"role":"user","content":"<local-command-stdout>\nPENDING review created.\n</local-command-stdout>"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Meta);
+        assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn local_command_stderr_line_is_meta_even_without_is_meta_flag() {
+        let line = r#"{"uuid":"o2","type":"user","promptId":"p1","message":{"role":"user","content":"<local-command-stderr>boom</local-command-stderr>"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Meta);
+    }
+
+    #[test]
+    fn bare_command_name_line_stays_user_at_parse_time() {
+        // The command-name member of a local-command group (e.g. `/review-pr`)
+        // carries no structural marker, so the single-line parser cannot tell it
+        // from a human prompt. It is folded by the attribution layer instead,
+        // which groups it by the caveat's shared `promptId`. Pinning it as
+        // `Role::User` here guards against a future content-sniff that would
+        // misclassify a human prompt literally beginning with a slash.
+        let line = r#"{"uuid":"c1","type":"user","promptId":"p1","message":{"role":"user","content":"/review-pr"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::User);
+    }
+
+    #[test]
+    fn user_line_merely_mentioning_local_command_markup_stays_user() {
+        // A human prompt that contains the marker text mid-line (not as the
+        // leading token) is a genuine turn and must not be folded.
+        let line = r#"{"uuid":"u4","type":"user","message":{"role":"user","content":"why did <local-command-stdout> appear?"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::User);
     }
