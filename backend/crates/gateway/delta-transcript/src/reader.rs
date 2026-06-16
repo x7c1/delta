@@ -19,6 +19,18 @@ use crate::parse::parse_line;
 /// the file's true position and the caller's line cursor reads each line exactly
 /// once. Unparsable non-blank lines are skipped (with a warning) rather than
 /// aborting the whole read, so one malformed line cannot stall ingestion.
+///
+/// Only newline-terminated lines are consumed. The transcript is appended
+/// incrementally with unbuffered `writeln!`, which emits the JSON body and its
+/// terminating `\n` as separate write syscalls, so a read that races a
+/// mid-append line can observe a partial final line (truncated JSON, or
+/// complete JSON without its `\n` yet). Counting that partial line into
+/// `total_lines` would advance the caller's persistent cursor past it; once the
+/// line is completed it would sit before the cursor and never be re-read,
+/// permanently dropping it. So a trailing remainder with no `\n` is treated as
+/// a line still being written and is deliberately deferred to the next read:
+/// iteration and `total_lines` cover only the prefix up to and including the
+/// last `\n`, which contains only fully-written lines.
 #[derive(Debug, Default, Clone)]
 pub struct JsonlTranscript;
 
@@ -47,9 +59,20 @@ impl Transcript for JsonlTranscript {
             Err(e) => return Err(Error::from(e).into()),
         };
 
+        // Consume only newline-terminated lines: a trailing remainder without a
+        // `\n` is a line still being appended, so defer it to the next read
+        // instead of counting it (see the type doc for why). Slicing up to and
+        // including the last `\n` yields the terminated prefix (an empty slice
+        // when no newline has been written yet), whose `lines()` never yields a
+        // partial line.
+        let terminated = match contents.rfind('\n') {
+            Some(last) => &contents[..=last],
+            None => "",
+        };
+
         let mut messages = Vec::new();
         let mut total_lines = 0;
-        for (idx, line) in contents.lines().enumerate() {
+        for (idx, line) in terminated.lines().enumerate() {
             total_lines = idx + 1;
             if idx < from_line {
                 continue;
@@ -183,6 +206,79 @@ mod tests {
         assert_eq!(out.total_lines, 3, "the no-uuid line still counts");
         assert_eq!(out.messages[0].seq, 0);
         assert_eq!(out.messages[1].seq, 2, "assistant sits after the skipped line");
+    }
+
+    /// A line still mid-append (no trailing `\n` yet, possibly truncated JSON)
+    /// must not be consumed: it is neither returned as a message nor counted
+    /// toward `total_lines`, so the caller's persistent line cursor never
+    /// advances past content that is not all there yet.
+    #[tokio::test]
+    async fn unterminated_final_line_is_deferred() {
+        let mut file = tempfile_jsonl();
+        writeln!(
+            file,
+            r#"{{"uuid":"u1","type":"user","message":{{"content":"a","role":"user"}}}}"#
+        )
+        .unwrap();
+        // A second line written WITHOUT a terminating newline — exactly what a
+        // reader racing the appender can observe mid-write.
+        write!(
+            file,
+            r#"{{"uuid":"u2","type":"user","message":{{"content":"b","role":"user"}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let t = JsonlTranscript::new();
+        let out = t.read_from(&path, 0).await.unwrap();
+        assert_eq!(out.messages.len(), 1, "only the terminated line is consumed");
+        assert_eq!(
+            out.total_lines, 1,
+            "the unterminated final line does not count"
+        );
+        assert_eq!(out.messages[0].seq, 0);
+        assert_eq!(out.messages[0].flatten_text().as_deref(), Some("a"));
+    }
+
+    /// Once the deferred line gains its trailing newline, reading again from the
+    /// previous `total_lines` returns it exactly once with its true `seq` — no
+    /// permanent loss and no double-read.
+    #[tokio::test]
+    async fn deferred_line_is_read_once_after_completion() {
+        let mut file = tempfile_jsonl();
+        writeln!(
+            file,
+            r#"{{"uuid":"u1","type":"user","message":{{"content":"a","role":"user"}}}}"#
+        )
+        .unwrap();
+        write!(
+            file,
+            r#"{{"uuid":"u2","type":"user","message":{{"content":"b","role":"user"}}}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let t = JsonlTranscript::new();
+        let first = t.read_from(&path, 0).await.unwrap();
+        assert_eq!(first.messages.len(), 1);
+        assert_eq!(first.total_lines, 1);
+
+        // The appender completes the line with its terminating newline.
+        writeln!(file).unwrap();
+        file.flush().unwrap();
+
+        // Resume from the cursor the first read advanced to.
+        let next = t.read_from(&path, first.total_lines).await.unwrap();
+        assert_eq!(
+            next.messages.len(),
+            1,
+            "the completed line is read exactly once"
+        );
+        assert_eq!(next.total_lines, 2);
+        assert_eq!(next.messages[0].seq, 1, "at its true file position");
+        assert_eq!(next.messages[0].flatten_text().as_deref(), Some("b"));
     }
 
     /// A minimal temp-file helper avoiding an extra dependency.
