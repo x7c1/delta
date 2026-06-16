@@ -206,6 +206,15 @@ pub enum SessionEvent {
     /// `<task-notification>` is folded during transcript sync.
     SubagentStarted {
         session_id: SessionId,
+        /// The thread that launched the subagent, resolved (via
+        /// `SessionStore::in_progress_turn_thread`) the same way `TurnStarted`
+        /// resolves its thread. A BACKGROUND subagent outlives its launching
+        /// turn, so the browser needs the thread to keep that thread's running
+        /// indicator lit (and its unread badge suppressed) until the subagent
+        /// finishes — not just for the duration of the turn. The matching
+        /// [`Self::SubagentFinished`] carries no thread; the browser maps the
+        /// `tool_use_id` back to this entry's thread.
+        thread_id: ThreadId,
         /// The `tool_use_id` of the `Agent`/`Task` call (the correlation key).
         tool_use_id: String,
         /// The subagent type (e.g. `general-purpose`), if the call carried one.

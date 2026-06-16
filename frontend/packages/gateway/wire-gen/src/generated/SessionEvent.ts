@@ -29,7 +29,15 @@ tool_input: string, } | { "kind": "permission_resolved", session_id: string, req
  * `final` is a Rust keyword, so the field is `is_final` here while the
  * wire key stays `final` (the client accumulates until it is `true`).
  */
-final: boolean, delta: string, } | { "kind": "subagent_started", session_id: string, tool_use_id: string, subagent_type: string | null, description: string | null, 
+final: boolean, delta: string, } | { "kind": "subagent_started", session_id: string, 
+/**
+ * The thread that launched the subagent, so the client keeps that
+ * thread's running indicator lit — and its unread badge suppressed —
+ * until the subagent finishes, which for a background subagent outlives
+ * the launching turn. `subagent_finished` carries no thread; the client
+ * maps its `tool_use_id` back to this entry's thread.
+ */
+thread_id: number, tool_use_id: string, subagent_type: string | null, description: string | null, 
 /**
  * Whether the launch carried `run_in_background: true`. A background
  * subagent outlives the launching turn (the client must not sweep it at

@@ -68,6 +68,53 @@ describe('ThreadTree', () => {
     expect(screen.queryByTestId('thread-running')).not.toBeInTheDocument();
   });
 
+  it('shows the per-thread spinner when only a launched subagent is running', () => {
+    // The sub-thread (id 2) has no in-flight turn but launched a background
+    // subagent that is still running, so the thread reads as running.
+    render(
+      <ThreadTree
+        threads={threads}
+        runningSubagents={[
+          {
+            threadId: 2,
+            toolUseId: 'toolu_bg',
+            subagentType: null,
+            description: null,
+            background: true,
+          },
+        ]}
+        onSelectThread={() => {}}
+      />,
+    );
+
+    const spinners = screen.getAllByTestId('thread-running');
+    expect(spinners).toHaveLength(1);
+  });
+
+  it('suppresses the per-thread unread badge while a launched subagent runs', () => {
+    // The thread's turn completed (unread 3) but its background subagent is
+    // still working: the badge is held back until the subagent finishes.
+    useLiveStore.setState({ unread: { 2: 3 } });
+    render(
+      <ThreadTree
+        threads={threads}
+        runningSubagents={[
+          {
+            threadId: 2,
+            toolUseId: 'toolu_bg',
+            subagentType: null,
+            description: null,
+            background: true,
+          },
+        ]}
+        onSelectThread={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('thread-running')).toBeInTheDocument();
+    expect(screen.queryByText('3')).not.toBeInTheDocument();
+  });
+
   it('shows an unread badge for inactive threads and hides it for the active one', () => {
     useLiveStore.setState({ unread: { 2: 3 } });
     const { rerender } = render(

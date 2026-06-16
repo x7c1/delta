@@ -126,6 +126,11 @@ impl From<PendingQuestion> for WirePendingQuestion {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "RunningSubagent")]
 pub struct WireRunningSubagent {
+    /// The thread that launched the subagent, so a reconnecting client can keep
+    /// that thread's running indicator lit — and its unread badge suppressed —
+    /// until the subagent finishes, which for a background subagent outlives the
+    /// launching turn.
+    pub thread_id: i64,
     /// The `tool_use_id` of the `Agent`/`Task` call (its stable key).
     pub tool_use_id: String,
     /// The subagent type (e.g. `general-purpose`), if the call carried one.
@@ -141,6 +146,7 @@ pub struct WireRunningSubagent {
 impl From<RunningSubagent> for WireRunningSubagent {
     fn from(subagent: RunningSubagent) -> Self {
         WireRunningSubagent {
+            thread_id: subagent.thread_id.0,
             tool_use_id: subagent.tool_use_id,
             subagent_type: subagent.subagent_type,
             description: subagent.description,
@@ -319,12 +325,14 @@ mod tests {
                 pending_question: None,
                 running_subagents: vec![
                     RunningSubagent {
+                        thread_id: ThreadId(2),
                         tool_use_id: "toolu_01".to_owned(),
                         subagent_type: Some("general-purpose".to_owned()),
                         description: Some("Probe the codebase".to_owned()),
                         background: false,
                     },
                     RunningSubagent {
+                        thread_id: ThreadId(4),
                         tool_use_id: "toolu_02".to_owned(),
                         subagent_type: None,
                         description: None,
@@ -342,12 +350,14 @@ mod tests {
                 "question": null,
                 "running_subagents": [
                     {
+                        "thread_id": 2,
                         "tool_use_id": "toolu_01",
                         "subagent_type": "general-purpose",
                         "description": "Probe the codebase",
                         "background": false,
                     },
                     {
+                        "thread_id": 4,
                         "tool_use_id": "toolu_02",
                         "subagent_type": null,
                         "description": null,

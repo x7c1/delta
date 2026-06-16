@@ -11,6 +11,13 @@
  */
 export type RunningSubagent = { 
 /**
+ * The thread that launched the subagent, so a reconnecting client can keep
+ * that thread's running indicator lit — and its unread badge suppressed —
+ * until the subagent finishes, which for a background subagent outlives the
+ * launching turn.
+ */
+thread_id: number, 
+/**
  * The `tool_use_id` of the `Agent`/`Task` call (its stable key).
  */
 tool_use_id: string, 

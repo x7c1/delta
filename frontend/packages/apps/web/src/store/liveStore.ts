@@ -127,6 +127,15 @@ export interface StreamingMessage {
  * completion notification) lands much later — so the turn-end sweep KEEPS it.
  */
 export interface SubagentActivity {
+  /**
+   * The thread that launched the subagent. A subagent — a BACKGROUND one in
+   * particular — keeps its launching thread "running" until it finishes, even
+   * past the end of the launching turn, so the navigator can keep that thread's
+   * spinner lit and suppress its unread badge until the subagent is done (see
+   * {@link threadHasRunningSubagent}). `subagent_finished` carries no thread;
+   * this entry is what maps the finishing `tool_use_id` back to its thread.
+   */
+  threadId: ThreadId;
   /** The `Agent`/`Task` call's `tool_use_id` (its stable correlation key). */
   toolUseId: string;
   /** The subagent type (e.g. `general-purpose`), or null if none was given. */
@@ -138,6 +147,26 @@ export interface SubagentActivity {
    * survives the turn-end sweep; a foreground one is dropped at turn end.
    */
   background: boolean;
+}
+
+/**
+ * Whether a thread is "running" in the navigator sense: it has either an
+ * in-flight turn or a still-running subagent it launched. A BACKGROUND subagent
+ * outlives its launching turn, so a thread that launched one is NOT idle while
+ * it runs — folding the subagent into "running" keeps that thread's spinner lit
+ * and, crucially, suppresses its `unread && !running` "done" badge until the
+ * subagent finishes. Both inputs are the per-session slices
+ * (`runningThreads[sessionId]` and `runningSubagents[sessionId]`).
+ */
+export function threadIsRunning(
+  runningThreads: Record<ThreadId, true> | undefined,
+  runningSubagents: SubagentActivity[] | undefined,
+  threadId: ThreadId,
+): boolean {
+  if (runningThreads?.[threadId]) {
+    return true;
+  }
+  return (runningSubagents ?? []).some((s) => s.threadId === threadId);
 }
 
 /** A new-session spawn tracked from the POST response (real ids). */
@@ -977,6 +1006,7 @@ export const useLiveStore = create<LiveState>((set) => ({
         delete runningSubagents[sessionId];
       } else {
         runningSubagents[sessionId] = running.map((s) => ({
+          threadId: s.thread_id as ThreadId,
           toolUseId: s.tool_use_id,
           subagentType: s.subagent_type,
           description: s.description,
@@ -1235,6 +1265,7 @@ export const useLiveStore = create<LiveState>((set) => ({
               [event.session_id]: [
                 ...current,
                 {
+                  threadId: event.thread_id as ThreadId,
                   toolUseId: event.tool_use_id,
                   subagentType: event.subagent_type,
                   description: event.description,
