@@ -32,7 +32,7 @@ export function Collapsible({
         <span className="text-slate-400" aria-hidden>
           {open ? '▾' : '▸'}
         </span>
-        <span className="truncate">{summary}</span>
+        <span className="min-w-0 flex-1 truncate">{summary}</span>
       </button>
       {open && (
         <div className="border-t border-slate-200 px-2 py-1.5 text-xs">

@@ -220,7 +220,11 @@ describe('MessageItem', () => {
     // body is not in the DOM until toggled.
     const toggle = screen.getByRole('button');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.getByText(summaryLine)).toBeInTheDocument();
+    const summaryNode = screen.getByText(summaryLine);
+    expect(summaryNode).toBeInTheDocument();
+    // The first-line text truncates so a long meta line cannot overflow the
+    // collapsed card; it shrinks within the flex button instead of clipping.
+    expect(summaryNode).toHaveClass('truncate');
     expect(screen.queryByText(new RegExp(hiddenLine))).toBeNull();
 
     // Toggling reveals the verbatim body.
