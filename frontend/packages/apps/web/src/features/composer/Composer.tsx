@@ -294,7 +294,14 @@ export function Composer({ mode }: ComposerProps) {
           // it before the effect runs. `overflow-y` is toggled by the effect, so
           // it scrolls internally only once the content passes the cap.
           style={{ maxHeight: `${COMPOSER_MAX_HEIGHT}px` }}
-          className="min-h-[2.5rem] w-full resize-none rounded border border-slate-300 py-1.5 pl-2 pr-12 text-sm focus:border-indigo-400 focus:outline-none"
+          // The textarea is borderless and transparent: the enclosing composer
+          // card (see TranscriptPane's bottom layer) supplies the visual
+          // boundary, so a border here would double up with it. Its own left
+          // padding is kept small (`pl-0.5`) because the card already pads
+          // `px-3`: together they give the text a 14px left inset that matches
+          // its 14px top inset (card `py-2` + the textarea's `py-1.5`), rather
+          // than the lopsided 20px the card-default `pl-2` would stack up to.
+          className="min-h-[2.5rem] w-full resize-none bg-transparent py-1.5 pl-0.5 pr-12 text-sm focus:outline-none"
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               void submit(event);
@@ -311,7 +318,14 @@ export function Composer({ mode }: ComposerProps) {
             // mandatory, so Send stays disabled until the picker commits one.
             (isNew && !newSessionWorkdir)
           }
-          className="absolute bottom-4 right-2.5 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-400 bg-transparent text-indigo-500 shadow-md transition-all hover:bg-slate-200 hover:text-indigo-600 hover:shadow-lg disabled:cursor-not-allowed disabled:text-slate-400 disabled:shadow-md"
+          // Anchored to the card's bottom-right corner with an equal visual gap
+          // to the card's right and bottom borders. The enclosing composer card
+          // pads `px-3` (12px) but only `py-2` (8px), so the button sits `right-0`
+          // (12px right gap = the card's horizontal padding) and `bottom-1` (4px
+          // above the textarea + the card's 8px bottom padding = a matching 12px
+          // bottom gap). Staying pinned to the bottom keeps it in the corner as
+          // the textarea auto-grows.
+          className="absolute bottom-1 right-0 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-400 bg-transparent text-indigo-500 shadow-md transition-all hover:bg-slate-200 hover:text-indigo-600 hover:shadow-lg disabled:cursor-not-allowed disabled:text-slate-400 disabled:shadow-md"
         >
           {/* The paper-plane's visual weight sits top-right, so nudge the glyph a
               hair toward the bottom-left to center it within the round button. */}

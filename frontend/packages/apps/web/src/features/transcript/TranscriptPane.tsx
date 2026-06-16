@@ -63,6 +63,16 @@ const OVERLAY_INSET_FALLBACK_PX = 12;
 const BODY_BOTTOM_READING_GAP_PX = 192;
 
 /**
+ * Shared chrome for the floating cards that hover over the transcript (the
+ * breadcrumb, the bottom notices card, and the composer card): a full border,
+ * rounded corners, an opaque white fill that occludes the transcript beneath,
+ * and a shadow so the card reads as lifted above the conversation rather than
+ * fused to it. Per-card padding is applied at each use site.
+ */
+const FLOATING_CARD_CLASS =
+  'rounded-md border border-slate-300 bg-white shadow-md';
+
+/**
  * The overlay inset in pixels: the gap the floating cards leave from the body
  * edges (`--delta-overlay-inset`). Read from the live computed style so the
  * measured bottom reserve (overlay height + this gap) stays in lockstep with the
@@ -660,71 +670,101 @@ export function TranscriptPane({
       </div>
     );
   } else if (composer) {
+    // Whether the upper (notices) card has anything to show. Each of these
+    // conditions matches exactly one child it gates — `readOnly` the closed
+    // notice, `showExternalInput` the external-input notice, and a non-empty
+    // `pendingEntries` the pending strip (`PendingQueue` itself renders null when
+    // empty) — so the card is omitted entirely rather than rendering an empty
+    // box when none of them are present.
+    const hasNotices =
+      (readOnly && !newSession) ||
+      (showExternalInput && activeThread !== null) ||
+      pendingEntries.length > 0;
     bottomContent = (
-      <div className="space-y-2">
-        {/* The question card is NOT in this bottom stack: it renders inline at
-            the conversation tail in the scrolling body (see questionCard above
-            and its placement after the streaming bubble), so the choices follow
-            the streamed preamble in the flow instead of floating over it. */}
-        {readOnly && !newSession && (
+      <>
+        {/* Upper card: status notices + the pending-send strip, kept visually
+            separate from the composer so the (now borderless) textarea has a
+            clean boundary of its own. The question card is NOT in this stack: it
+            renders inline at the conversation tail in the scrolling body (see
+            questionCard above), so the choices follow the streamed preamble in
+            the flow instead of floating over it. */}
+        {hasNotices && (
           <div
-            className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
-            data-testid="readonly-notice"
+            className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
+            data-testid="bottom-notices"
           >
-            <Badge tone="neutral">closed</Badge>
-            <span>This session is closed. Sending a message resumes it.</span>
+            {readOnly && !newSession && (
+              <div
+                className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
+                data-testid="readonly-notice"
+              >
+                <Badge tone="neutral">closed</Badge>
+                <span>
+                  This session is closed. Sending a message resumes it.
+                </span>
+              </div>
+            )}
+
+            {showExternalInput && activeThread && (
+              <div
+                className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+                data-testid="external-input-notice"
+              >
+                <Badge className="shrink-0" tone="info">
+                  external input
+                </Badge>
+                <span className="min-w-0 flex-1 line-clamp-2 break-words text-slate-700">
+                  {externalInput.prompt}
+                </span>
+                <Button
+                  className="shrink-0"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => dismissExternalInput(activeThread.session_id)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            )}
+
+            <PendingQueue entries={pendingEntries} />
           </div>
         )}
 
-        {showExternalInput && activeThread && (
-          <div
-            className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
-            data-testid="external-input-notice"
-          >
-            <Badge className="shrink-0" tone="info">
-              external input
-            </Badge>
-            <span className="min-w-0 flex-1 line-clamp-2 break-words text-slate-700">
-              {externalInput.prompt}
-            </span>
-            <Button
-              className="shrink-0"
-              size="sm"
-              variant="ghost"
-              onClick={() => dismissExternalInput(activeThread.session_id)}
-            >
-              Dismiss
-            </Button>
-          </div>
-        )}
-
-        {/* A directory is chosen: show it as a chip with a ✎ to change it (the
-            ✎ reopens the picker without resetting the selection). The chip
-            renders nothing when no directory is selected, so there is no button
-            to (re)open the picker from here — that is done via "New". */}
-        {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
-        {/* Below the directory chip: when the selected directory is a git repo,
-            an opt-in to start the session in a fresh worktree (with a
-            start-point choice). Renders nothing for a non-git directory. */}
-        {newSession && <WorktreeOptions />}
-        {newSession && <LaunchOptionsPicker />}
-        <PendingQueue entries={pendingEntries} />
-        {composer}
-      </div>
+        {/* Composer card: the new-session launch pickers (which parameterize the
+            spawn) sit directly above the input they configure. */}
+        <div
+          className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
+          data-testid="composer-card"
+        >
+          {/* A directory is chosen: show it as a chip with a ✎ to change it (the
+              ✎ reopens the picker without resetting the selection). The chip
+              renders nothing when no directory is selected, so there is no button
+              to (re)open the picker from here — that is done via "New". */}
+          {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
+          {/* Below the directory chip: when the selected directory is a git repo,
+              an opt-in to start the session in a fresh worktree (with a
+              start-point choice). Renders nothing for a non-git directory. */}
+          {newSession && <WorktreeOptions />}
+          {newSession && <LaunchOptionsPicker />}
+          {composer}
+        </div>
+      </>
     );
   }
 
-  // A floating card near the bottom of the body: inset from the left, right, and
-  // bottom edges with a full border, rounded corners, and a shadow so it reads as
-  // lifted above (rather than fused to) the transcript. Its opaque background
-  // still occludes the transcript scrolling beneath it. The body reserves bottom
-  // padding equal to this card's MEASURED height (see the effect below) so
-  // resting content clears it however tall the composer grows.
+  // The bottom layer floats over the body as a stack of cards inset from the
+  // left, right, and bottom edges. This wrapper is transparent and only
+  // positions and MEASURES the stack (the body reserves bottom padding equal to
+  // its measured height — see the effect below — so resting content clears it
+  // however tall the composer grows); its children carry the actual floating-card
+  // chrome ({@link FLOATING_CARD_CLASS}). For a resume-impossible session the
+  // single "cannot resume" notice floats on its own with no composer beneath it.
   const bottomOverlay = bottomContent && (
     <div
       ref={bottomOverlayRef}
       data-testid="bottom-overlay"
-      className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset rounded-md border border-slate-300 bg-white px-3 py-2 shadow-md"
+      className="pointer-events-auto absolute inset-x-overlay-inset bottom-overlay-inset flex flex-col gap-2"
     >
       {bottomContent}
     </div>
@@ -786,7 +826,9 @@ export function TranscriptPane({
   // bar). It floats over the transcript; the body reserves a fixed top padding
   // (below) so the first turn is not hidden behind it at rest.
   const breadcrumbOverlay = isOnSubThread && (
-    <div className="pointer-events-auto absolute left-overlay-inset top-overlay-inset max-w-[calc(100%-2*var(--delta-overlay-inset))] rounded-md border border-slate-300 bg-white px-3 py-1.5 shadow-md">
+    <div
+      className={`pointer-events-auto absolute left-overlay-inset top-overlay-inset max-w-[calc(100%-2*var(--delta-overlay-inset))] px-3 py-1.5 ${FLOATING_CARD_CLASS}`}
+    >
       <Breadcrumb items={breadcrumbItems} />
     </div>
   );
