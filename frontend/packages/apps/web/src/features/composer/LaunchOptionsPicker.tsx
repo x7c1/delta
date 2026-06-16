@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useLaunchOptionsQuery } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
@@ -13,6 +14,14 @@ import { useComposerStore } from '../../store/composerStore';
  * inline panel rather than a blocking dialog. It renders nothing until the
  * registry has at least one option, so a user who never registered any sees no
  * extra chrome.
+ *
+ * The initial selection is seeded from the options marked `default_enabled`,
+ * once, the first time the registry loads for a fresh new-session compose state
+ * (tracked by `composerStore.newSessionLaunchOptionsSeeded`). The seed only ever
+ * supplies the initial value: an in-place uncheck — even unchecking every
+ * option — is preserved, never re-seeded. The failed-spawn Retry path restores
+ * its own preserved selection directly (it does not flow through this store
+ * field), so it is unaffected.
  */
 export function LaunchOptionsPicker() {
   const client = useApiClient();
@@ -21,8 +30,24 @@ export function LaunchOptionsPicker() {
   const setSelected = useComposerStore(
     (state) => state.setNewSessionLaunchOptionIds,
   );
+  const seedSelected = useComposerStore(
+    (state) => state.seedNewSessionLaunchOptionIds,
+  );
 
   const options = query.data?.launch_options ?? [];
+
+  // Seed the initial selection from the `default_enabled` options the first time
+  // the registry loads. `seedNewSessionLaunchOptionIds` is a no-op once the
+  // selection has been seeded or the user has touched it, so this never clobbers
+  // an explicit choice; it runs again only after a reset (re)enters new-session
+  // compose. Effect (not render) so it does not set store state during render.
+  useEffect(() => {
+    if (options.length === 0) {
+      return;
+    }
+    seedSelected(options.filter((o) => o.default_enabled).map((o) => o.id));
+  }, [options, seedSelected]);
+
   if (options.length === 0) {
     return null;
   }

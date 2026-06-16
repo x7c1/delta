@@ -1198,24 +1198,38 @@ async fn launch_options_round_trip_create_list_delete() {
     // A fresh store has no registered launch options.
     assert!(store.list_launch_options().await.unwrap().is_empty());
 
-    // A flag with a label and a value persists every field.
+    // A flag with a label and a value persists every field, including the
+    // pre-checked `default_enabled` flag.
     let plugin = store
-        .create_launch_option(Some("My plugins"), "--plugin-dir", Some("/opt/plugins"))
+        .create_launch_option(Some("My plugins"), "--plugin-dir", Some("/opt/plugins"), true)
         .await
         .unwrap();
     assert_eq!(plugin.label.as_deref(), Some("My plugins"));
     assert_eq!(plugin.name, "--plugin-dir");
     assert_eq!(plugin.value.as_deref(), Some("/opt/plugins"));
+    assert!(plugin.default_enabled);
     assert!(!plugin.created_at.is_empty());
 
-    // A valueless, unlabeled flag stores NULL for both — never a sentinel.
+    // A valueless, unlabeled flag stores NULL for both — never a sentinel — and
+    // `default_enabled` defaults to off.
     let valueless = store
-        .create_launch_option(None, "--dangerously-skip-permissions", None)
+        .create_launch_option(None, "--dangerously-skip-permissions", None, false)
         .await
         .unwrap();
     assert_eq!(valueless.label, None);
     assert_eq!(valueless.value, None);
+    assert!(!valueless.default_enabled);
     assert_ne!(valueless.id, plugin.id, "ids are distinct");
+
+    // The persisted `default_enabled` round-trips through `list`.
+    let listed_plugin = store
+        .list_launch_options()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|o| o.id == plugin.id)
+        .unwrap();
+    assert!(listed_plugin.default_enabled);
 
     // The list is newest-first (descending id), so the second insert leads.
     let listed = store.list_launch_options().await.unwrap();
@@ -1231,6 +1245,45 @@ async fn launch_options_round_trip_create_list_delete() {
     // Deleting an unknown id is a silent no-op (idempotent), not an error.
     store.delete_launch_option(9999).await.unwrap();
     assert_eq!(store.list_launch_options().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn set_launch_option_default_enabled_toggles_in_place() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let option = store
+        .create_launch_option(None, "--plugin-dir", Some("/opt/plugins"), false)
+        .await
+        .unwrap();
+    assert!(!option.default_enabled);
+
+    // Toggling on returns the updated row, preserving id and created_at.
+    let updated = store
+        .set_launch_option_default_enabled(option.id, true)
+        .await
+        .unwrap()
+        .expect("an existing option");
+    assert_eq!(updated.id, option.id);
+    assert_eq!(updated.created_at, option.created_at);
+    assert!(updated.default_enabled);
+
+    // The change persists.
+    let listed = store.list_launch_options().await.unwrap();
+    assert!(listed[0].default_enabled);
+
+    // Toggling back off works too.
+    let updated = store
+        .set_launch_option_default_enabled(option.id, false)
+        .await
+        .unwrap()
+        .expect("an existing option");
+    assert!(!updated.default_enabled);
+
+    // Toggling an unknown id returns None rather than erroring.
+    assert!(store
+        .set_launch_option_default_enabled(9999, true)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]

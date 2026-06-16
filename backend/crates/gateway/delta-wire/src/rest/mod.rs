@@ -14,6 +14,8 @@ mod git_response;
 pub use git_response::{WireGitBranchesResponse, WireGitRepoResponse};
 mod launch_option_create_request;
 pub use launch_option_create_request::WireCreateLaunchOptionRequest;
+mod launch_option_update_request;
+pub use launch_option_update_request::WireUpdateLaunchOptionRequest;
 mod launch_options_response;
 pub use launch_options_response::{WireLaunchOption, WireLaunchOptionsResponse};
 mod messages_response;

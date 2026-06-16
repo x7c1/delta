@@ -19,13 +19,30 @@ where
 
     /// Register a new launch option. `label` and `value` are optional (a
     /// valueless flag carries no `value`); `name` is the flag itself.
+    /// `default_enabled` marks it to start pre-checked in the session-start
+    /// picker.
     pub async fn create_launch_option(
         &self,
         label: Option<&str>,
         name: &str,
         value: Option<&str>,
+        default_enabled: bool,
     ) -> Result<LaunchOption> {
-        self.store.create_launch_option(label, name, value).await
+        self.store
+            .create_launch_option(label, name, value, default_enabled)
+            .await
+    }
+
+    /// Set a launch option's `default_enabled` flag, returning the updated row,
+    /// or `None` if no option has that id.
+    pub async fn set_launch_option_default_enabled(
+        &self,
+        id: i64,
+        default_enabled: bool,
+    ) -> Result<Option<LaunchOption>> {
+        self.store
+            .set_launch_option_default_enabled(id, default_enabled)
+            .await
     }
 
     /// Delete a launch option by id. Deleting an unknown id is a no-op.

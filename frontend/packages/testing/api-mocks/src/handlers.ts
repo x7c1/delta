@@ -3,6 +3,7 @@ import type {
   CreateLaunchOptionRequest,
   LaunchOption,
   LaunchOptionsResponse,
+  UpdateLaunchOptionRequest,
   MessagesResponse,
   PendingPermission,
   PendingQuestion,
@@ -476,10 +477,26 @@ export function createMockApi(): MockApi {
         label: trimmedLabel ? trimmedLabel : null,
         name,
         value: trimmedValue ? trimmedValue : null,
+        default_enabled: payload.default_enabled === true,
         created_at: new Date().toISOString(),
       };
       store.launchOptions.push(option);
       return HttpResponse.json(option, { status: 201 });
+    }),
+
+    http.patch('*/api/launch-options/:id', async ({ params, request }) => {
+      const id = Number(params.id);
+      const payload = (await request.json()) as UpdateLaunchOptionRequest;
+      const option = store.launchOptions.find((o) => o.id === id);
+      if (!option) {
+        // An unknown id is a 404, exactly as the real server reports it.
+        return HttpResponse.json(
+          { error: `no launch option with id ${id}` },
+          { status: 404 },
+        );
+      }
+      option.default_enabled = payload.default_enabled === true;
+      return HttpResponse.json(option);
     }),
 
     http.delete('*/api/launch-options/:id', ({ params }) => {

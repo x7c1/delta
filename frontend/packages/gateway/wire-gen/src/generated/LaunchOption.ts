@@ -4,5 +4,6 @@
  * One registered launch option: a flat `(label?, name, value?)` record for a
  * custom `claude` CLI flag. `name` is the flag (e.g. `--plugin-dir`), `value`
  * its argument (`null` for a valueless flag), and `label` an optional note.
+ * `default_enabled` marks it to start pre-checked in the session-start picker.
  */
-export type LaunchOption = { id: number, label: string | null, name: string, value: string | null, created_at: string, };
+export type LaunchOption = { id: number, label: string | null, name: string, value: string | null, default_enabled: boolean, created_at: string, };

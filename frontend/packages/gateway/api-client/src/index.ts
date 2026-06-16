@@ -36,6 +36,7 @@ export {
   useGitBranchesQuery,
   useLaunchOptionsQuery,
   useCreateLaunchOptionMutation,
+  useUpdateLaunchOptionMutation,
   useDeleteLaunchOptionMutation,
 } from './query-hooks';
 export {

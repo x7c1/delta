@@ -23,6 +23,10 @@ pub struct WireCreateLaunchOptionRequest {
     #[serde(default)]
     #[ts(optional)]
     pub value: Option<String>,
+    /// Whether the option starts pre-checked in the session-start picker.
+    /// Defaults to `false` (off) when omitted.
+    #[serde(default)]
+    pub default_enabled: bool,
 }
 
 #[cfg(test)]
@@ -36,11 +40,14 @@ mod tests {
         assert_eq!(req.name, "--dangerously-skip-permissions");
         assert_eq!(req.label, None);
         assert_eq!(req.value, None);
+        assert!(!req.default_enabled);
 
-        let req: WireCreateLaunchOptionRequest =
-            serde_json::from_str(r#"{"label":"plugins","name":"--plugin-dir","value":"/opt/p"}"#)
-                .unwrap();
+        let req: WireCreateLaunchOptionRequest = serde_json::from_str(
+            r#"{"label":"plugins","name":"--plugin-dir","value":"/opt/p","default_enabled":true}"#,
+        )
+        .unwrap();
         assert_eq!(req.label.as_deref(), Some("plugins"));
         assert_eq!(req.value.as_deref(), Some("/opt/p"));
+        assert!(req.default_enabled);
     }
 }

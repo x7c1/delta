@@ -33,8 +33,8 @@ use delta_wire::rest::{
     WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
     WireNewSessionResponse, WirePermissionDecisionRequest, WireQuestionAnswerRequest,
     WireQuestionCancelRequest, WireRecentWorkdirItem, WireSendResponse, WireSendsResponse,
-    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -316,9 +316,33 @@ pub(crate) async fn create_launch_option(
         .filter(|s| !s.is_empty());
     let option = state
         .interactor()
-        .create_launch_option(label, name, value)
+        .create_launch_option(label, name, value, req.default_enabled)
         .await?;
     Ok((StatusCode::CREATED, Json(WireLaunchOption::from(option))))
+}
+
+/// `PATCH /api/launch-options/{id}` — set a launch option's `default_enabled`
+/// flag in place.
+///
+/// Updating in place preserves the option's id and `created_at` (a
+/// delete+recreate would churn both); `name`, `value`, and `label` are immutable
+/// through this endpoint. Returns the updated record so the client can render it
+/// without a refetch, or `404` when no option has that id.
+pub(crate) async fn update_launch_option(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<WireUpdateLaunchOptionRequest>,
+) -> Result<Json<WireLaunchOption>, ApiError> {
+    let option = state
+        .interactor()
+        .set_launch_option_default_enabled(id, req.default_enabled)
+        .await?;
+    match option {
+        Some(option) => Ok(Json(WireLaunchOption::from(option))),
+        None => Err(ApiError::NotFound(format!(
+            "no launch option with id {id}"
+        ))),
+    }
 }
 
 /// `DELETE /api/launch-options/{id}` — remove a registered launch option.

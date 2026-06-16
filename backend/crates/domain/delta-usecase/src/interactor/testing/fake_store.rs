@@ -621,6 +621,7 @@ impl SessionStore for FakeStore {
         label: Option<&str>,
         name: &str,
         value: Option<&str>,
+        default_enabled: bool,
     ) -> Result<LaunchOption> {
         let mut g = self.inner.lock().unwrap();
         g.next_launch_option_id += 1;
@@ -629,10 +630,26 @@ impl SessionStore for FakeStore {
             label: label.map(str::to_owned),
             name: name.to_owned(),
             value: value.map(str::to_owned),
+            default_enabled,
             created_at: "2026-01-01T00:00:00Z".into(),
         };
         g.launch_options.push(option.clone());
         Ok(option)
+    }
+
+    async fn set_launch_option_default_enabled(
+        &self,
+        id: i64,
+        default_enabled: bool,
+    ) -> Result<Option<LaunchOption>> {
+        let mut g = self.inner.lock().unwrap();
+        match g.launch_options.iter_mut().find(|o| o.id == id) {
+            Some(option) => {
+                option.default_enabled = default_enabled;
+                Ok(Some(option.clone()))
+            }
+            None => Ok(None),
+        }
     }
 
     async fn delete_launch_option(&self, id: i64) -> Result<()> {

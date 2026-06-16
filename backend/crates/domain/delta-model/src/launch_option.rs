@@ -18,6 +18,10 @@ pub struct LaunchOption {
     pub name: String,
     /// The flag's argument, e.g. `/path/to/plugins`; `None` for a valueless flag.
     pub value: Option<String>,
+    /// Whether this option starts pre-checked in the session-start picker. The
+    /// user can still uncheck it in place for an individual session; this only
+    /// seeds the initial selection.
+    pub default_enabled: bool,
     /// ISO-8601 timestamp.
     pub created_at: String,
 }

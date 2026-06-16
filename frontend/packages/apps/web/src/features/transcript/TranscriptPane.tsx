@@ -136,8 +136,8 @@ export function TranscriptPane({
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
   );
-  const setNewSessionLaunchOptionIds = useComposerStore(
-    (state) => state.setNewSessionLaunchOptionIds,
+  const resetNewSessionLaunchOptions = useComposerStore(
+    (state) => state.resetNewSessionLaunchOptions,
   );
   // The picker's open state lives in the store (not local component state) so
   // the navigator's "New" button can (re)open it without a focus transition.
@@ -386,13 +386,13 @@ export function TranscriptPane({
       }
     } else {
       setNewSessionWorkdir(null);
-      setNewSessionLaunchOptionIds([]);
+      resetNewSessionLaunchOptions();
       closeWorkdirDialog();
     }
   }, [
     newSession,
     setNewSessionWorkdir,
-    setNewSessionLaunchOptionIds,
+    resetNewSessionLaunchOptions,
     openWorkdirDialog,
     closeWorkdirDialog,
   ]);

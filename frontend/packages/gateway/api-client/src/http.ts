@@ -17,6 +17,7 @@ import type {
   SendsResponse,
   SessionsResponse,
   ThreadsResponse,
+  UpdateLaunchOptionRequest,
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
@@ -358,6 +359,22 @@ export class ApiClient {
   ): Promise<LaunchOption> {
     return this.request<LaunchOption>('/api/launch-options', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `PATCH /api/launch-options/{id}` — set a launch option's `default_enabled`
+   * flag in place (id and `created_at` are preserved). An unknown id is a `404`,
+   * surfaced as {@link ApiError}. Returns the updated record.
+   */
+  updateLaunchOption(
+    id: number,
+    body: UpdateLaunchOptionRequest,
+  ): Promise<LaunchOption> {
+    return this.request<LaunchOption>(`/api/launch-options/${id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });

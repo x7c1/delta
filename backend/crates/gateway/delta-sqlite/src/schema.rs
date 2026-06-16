@@ -151,12 +151,17 @@ CREATE INDEX IF NOT EXISTS ix_permission_request_tool_use
 -- a repeatable flag is stored as multiple separate rows. `label` is an optional
 -- human-friendly note for the row. This table is session-independent (no
 -- foreign key, never cascaded): the registry outlives any individual session.
+-- `default_enabled` (0/1) marks an option to start pre-checked in the
+-- session-start picker. It is additive (see `ADDITIVE_COLUMNS`): an existing
+-- database gains it via a guarded `ALTER TABLE ... ADD COLUMN ... DEFAULT 0`,
+-- so every pre-existing row defaults to off with no backfill.
 CREATE TABLE IF NOT EXISTS launch_option (
-  id         INTEGER PRIMARY KEY,
-  label      TEXT,
-  name       TEXT NOT NULL,
-  value      TEXT,
-  created_at TEXT NOT NULL
+  id              INTEGER PRIMARY KEY,
+  label           TEXT,
+  name            TEXT NOT NULL,
+  value           TEXT,
+  default_enabled INTEGER NOT NULL DEFAULT 0 CHECK (default_enabled IN (0, 1)),
+  created_at      TEXT NOT NULL
 ) STRICT;
 
 -- Outstanding background-task launches: the launching thread of each
@@ -226,14 +231,24 @@ pub const RECENCY_INDEX_SQL: &str = "\
 /// SQLite has no `ADD COLUMN IF NOT EXISTS`, so each step is gated on the column
 /// being absent (checked via `PRAGMA table_info`). A fresh database already has
 /// the column from [`SCHEMA_SQL`], making the step a no-op; an existing database
-/// gains it. `ADD COLUMN` can only add a nullable column without a non-constant
-/// default, which is exactly what `last_activity_at` is — the backfill
-/// ([`BACKFILL_LAST_ACTIVITY_SQL`]) populates it for rows that predate it.
-pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[AdditiveColumn {
-    table: "session",
-    column: "last_activity_at",
-    add_column_sql: "ALTER TABLE session ADD COLUMN last_activity_at TEXT",
-}];
+/// gains it. `ADD COLUMN` can add either a nullable column without a default
+/// (`last_activity_at`, backfilled by [`BACKFILL_LAST_ACTIVITY_SQL`] for rows
+/// that predate it) or a `NOT NULL` column with a *constant* default
+/// (`launch_option.default_enabled DEFAULT 0`, which needs no backfill — every
+/// pre-existing row simply takes the constant 0 = off).
+pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
+    AdditiveColumn {
+        table: "session",
+        column: "last_activity_at",
+        add_column_sql: "ALTER TABLE session ADD COLUMN last_activity_at TEXT",
+    },
+    AdditiveColumn {
+        table: "launch_option",
+        column: "default_enabled",
+        add_column_sql:
+            "ALTER TABLE launch_option ADD COLUMN default_enabled INTEGER NOT NULL DEFAULT 0",
+    },
+];
 
 /// One additive column and the `ALTER TABLE` that introduces it.
 pub struct AdditiveColumn {

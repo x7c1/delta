@@ -87,8 +87,8 @@ export function Composer({ mode }: ComposerProps) {
   const newSessionLaunchOptionIds = useComposerStore(
     (state) => state.newSessionLaunchOptionIds,
   );
-  const setNewSessionLaunchOptionIds = useComposerStore(
-    (state) => state.setNewSessionLaunchOptionIds,
+  const resetNewSessionLaunchOptions = useComposerStore(
+    (state) => state.resetNewSessionLaunchOptions,
   );
   const newSessionWorktreeEnabled = useComposerStore(
     (state) => state.newSessionWorktreeEnabled,
@@ -191,7 +191,7 @@ export function Composer({ mode }: ComposerProps) {
           // is tracked by the submission path; the workspace focuses it by its
           // real id once it registers.)
           setNewSessionWorkdir(null);
-          setNewSessionLaunchOptionIds([]);
+          resetNewSessionLaunchOptions();
         }
         if (branching) {
           // The backend created a fresh child thread for this branch send and
@@ -220,7 +220,7 @@ export function Composer({ mode }: ComposerProps) {
       submitSend,
       setBranchOrigin,
       setNewSessionWorkdir,
-      setNewSessionLaunchOptionIds,
+      resetNewSessionLaunchOptions,
       setActiveThread,
       clearResumeUnavailable,
     ],
