@@ -62,6 +62,19 @@ export interface ComposerState {
    */
   newSessionLaunchOptionIds: number[];
   /**
+   * Whether `newSessionLaunchOptionIds` has been seeded from the registry's
+   * `default_enabled` options yet for the current new-session compose state.
+   *
+   * The picker seeds the initial selection from the options marked
+   * `default_enabled` exactly once, the first time the registry loads. This flag
+   * distinguishes "not seeded yet" (seed from defaults) from "user has since
+   * unchecked everything" (an empty `newSessionLaunchOptionIds` that must be
+   * left alone) — both look like an empty id array otherwise. It is reset to
+   * `false` together with `newSessionLaunchOptionIds` whenever the new-session
+   * compose state is (re)entered or cleared, so the next fresh compose reseeds.
+   */
+  newSessionLaunchOptionsSeeded: boolean;
+  /**
    * Whether the new-session working-directory picker modal is open. Lifted from
    * local component state into the store so the "New" button can (re)open it
    * even when the app is already in the new-session state (no focus transition
@@ -75,7 +88,24 @@ export interface ComposerState {
   setNewSessionWorkdir: (workdir: string | null) => void;
   setNewSessionWorktreeEnabled: (enabled: boolean) => void;
   setNewSessionWorktreeStartPoint: (startPoint: WorktreeStartPoint) => void;
+  /**
+   * Set the selected launch-option ids from a user interaction in the picker.
+   * Marks the selection as seeded, so the picker will not later overwrite an
+   * explicit choice (including unchecking everything) with the defaults.
+   */
   setNewSessionLaunchOptionIds: (ids: number[]) => void;
+  /**
+   * Seed the initial selection from the registry's `default_enabled` options.
+   * A no-op once the selection has already been seeded (or the user has touched
+   * it), so it only ever supplies the initial value. Marks the selection seeded.
+   */
+  seedNewSessionLaunchOptionIds: (ids: number[]) => void;
+  /**
+   * Clear the launch-option selection and the seeded flag, so the next
+   * new-session compose reseeds from the defaults. Used wherever the
+   * new-session compose state is (re)entered or left.
+   */
+  resetNewSessionLaunchOptions: () => void;
   openWorkdirDialog: () => void;
   closeWorkdirDialog: () => void;
 }
@@ -94,6 +124,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
   newSessionWorktreeEnabled: false,
   newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
   newSessionLaunchOptionIds: [],
+  newSessionLaunchOptionsSeeded: false,
   workdirDialogOpen: false,
 
   setDraft: (threadId, text) =>
@@ -134,7 +165,17 @@ export const useComposerStore = create<ComposerState>((set) => ({
     set({ newSessionWorktreeStartPoint: startPoint }),
 
   setNewSessionLaunchOptionIds: (ids) =>
-    set({ newSessionLaunchOptionIds: ids }),
+    set({ newSessionLaunchOptionIds: ids, newSessionLaunchOptionsSeeded: true }),
+
+  seedNewSessionLaunchOptionIds: (ids) =>
+    set((state) =>
+      state.newSessionLaunchOptionsSeeded
+        ? state
+        : { newSessionLaunchOptionIds: ids, newSessionLaunchOptionsSeeded: true },
+    ),
+
+  resetNewSessionLaunchOptions: () =>
+    set({ newSessionLaunchOptionIds: [], newSessionLaunchOptionsSeeded: false }),
 
   openWorkdirDialog: () => set({ workdirDialogOpen: true }),
 

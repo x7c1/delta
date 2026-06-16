@@ -21,6 +21,7 @@ import type {
   SendsResponse,
   SessionsResponse,
   ThreadsResponse,
+  UpdateLaunchOptionRequest,
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
@@ -305,6 +306,30 @@ export function useCreateLaunchOptionMutation(
   return useMutation({
     mutationFn: (body: CreateLaunchOptionRequest) =>
       client.createLaunchOption(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.launchOptions,
+      });
+    },
+  });
+}
+
+/**
+ * Set a launch option's `default_enabled` flag (`PATCH
+ * /api/launch-options/{id}`); refresh the list on success so the toggled state
+ * is reflected.
+ */
+export function useUpdateLaunchOptionMutation(
+  client: ApiClient,
+): UseMutationResult<
+  LaunchOption,
+  Error,
+  { id: number; body: UpdateLaunchOptionRequest }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: UpdateLaunchOptionRequest }) =>
+      client.updateLaunchOption(id, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.launchOptions,

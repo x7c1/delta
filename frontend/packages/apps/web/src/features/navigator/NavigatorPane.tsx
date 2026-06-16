@@ -199,8 +199,8 @@ export function NavigatorPane({
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
   );
-  const setNewSessionLaunchOptionIds = useComposerStore(
-    (state) => state.setNewSessionLaunchOptionIds,
+  const resetNewSessionLaunchOptions = useComposerStore(
+    (state) => state.resetNewSessionLaunchOptions,
   );
   const openWorkdirDialog = useComposerStore(
     (state) => state.openWorkdirDialog,
@@ -233,7 +233,7 @@ export function NavigatorPane({
           onClick={() => {
             startNewSession();
             setNewSessionWorkdir(null);
-            setNewSessionLaunchOptionIds([]);
+            resetNewSessionLaunchOptions();
             openWorkdirDialog();
           }}
         >

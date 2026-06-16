@@ -21,4 +21,9 @@ name: string,
 /**
  * The flag's argument, e.g. `/path/to/plugins`. Omitted for a valueless flag.
  */
-value?: string, };
+value?: string, 
+/**
+ * Whether the option starts pre-checked in the session-start picker.
+ * Defaults to `false` (off) when omitted.
+ */
+default_enabled: boolean, };

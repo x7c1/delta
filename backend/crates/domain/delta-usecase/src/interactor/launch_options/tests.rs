@@ -64,11 +64,11 @@ async fn create_then_list_returns_registered_options_newest_first() {
     let ix = interactor();
 
     let first = ix
-        .create_launch_option(Some("plugins"), "--plugin-dir", Some("/opt/p"))
+        .create_launch_option(Some("plugins"), "--plugin-dir", Some("/opt/p"), true)
         .await
         .unwrap();
     let second = ix
-        .create_launch_option(None, "--permission-mode", Some("auto"))
+        .create_launch_option(None, "--permission-mode", Some("auto"), false)
         .await
         .unwrap();
 
@@ -80,6 +80,36 @@ async fn create_then_list_returns_registered_options_newest_first() {
     assert_eq!(plugins.label.as_deref(), Some("plugins"));
     assert_eq!(plugins.name, "--plugin-dir");
     assert_eq!(plugins.value.as_deref(), Some("/opt/p"));
+    assert!(plugins.default_enabled);
+}
+
+/// Setting `default_enabled` toggles it in place and returns the updated row;
+/// an unknown id returns `None`.
+#[tokio::test]
+async fn set_default_enabled_toggles_in_place() {
+    let ix = interactor();
+    let option = ix
+        .create_launch_option(None, "--plugin-dir", Some("/opt/p"), false)
+        .await
+        .unwrap();
+    assert!(!option.default_enabled);
+
+    let updated = ix
+        .set_launch_option_default_enabled(option.id, true)
+        .await
+        .unwrap()
+        .expect("an existing option");
+    assert_eq!(updated.id, option.id);
+    assert!(updated.default_enabled);
+
+    let listed = ix.list_launch_options().await.unwrap();
+    assert!(listed.iter().find(|o| o.id == option.id).unwrap().default_enabled);
+
+    assert!(ix
+        .set_launch_option_default_enabled(9999, true)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 /// A valueless, unlabeled flag round-trips with `None` for both optionals.
@@ -87,12 +117,13 @@ async fn create_then_list_returns_registered_options_newest_first() {
 async fn create_valueless_flag_keeps_label_and_value_none() {
     let ix = interactor();
     let option = ix
-        .create_launch_option(None, "--dangerously-skip-permissions", None)
+        .create_launch_option(None, "--dangerously-skip-permissions", None, false)
         .await
         .unwrap();
     assert_eq!(option.label, None);
     assert_eq!(option.value, None);
     assert_eq!(option.name, "--dangerously-skip-permissions");
+    assert!(!option.default_enabled);
 }
 
 /// Delete removes only the named option; deleting an unknown id is a no-op.
@@ -100,11 +131,11 @@ async fn create_valueless_flag_keeps_label_and_value_none() {
 async fn delete_removes_only_the_named_option() {
     let ix = interactor();
     let keep = ix
-        .create_launch_option(None, "--model", Some("opus"))
+        .create_launch_option(None, "--model", Some("opus"), false)
         .await
         .unwrap();
     let drop = ix
-        .create_launch_option(None, "--model", Some("sonnet"))
+        .create_launch_option(None, "--model", Some("sonnet"), false)
         .await
         .unwrap();
 

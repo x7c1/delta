@@ -14,17 +14,17 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
     // Register three options; the picker would normally surface these.
     let permission_mode = ix
         .store()
-        .create_launch_option(None, "--permission-mode", Some("auto"))
+        .create_launch_option(None, "--permission-mode", Some("auto"), false)
         .await
         .unwrap();
     let _plugin_dir = ix
         .store()
-        .create_launch_option(None, "--plugin-dir", Some("/plugins"))
+        .create_launch_option(None, "--plugin-dir", Some("/plugins"), false)
         .await
         .unwrap();
     let verbose = ix
         .store()
-        .create_launch_option(None, "--verbose", None)
+        .create_launch_option(None, "--verbose", None, false)
         .await
         .unwrap();
 

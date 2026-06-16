@@ -66,15 +66,17 @@ pub fn router(state: AppState) -> Router {
         // be based on.
         .route("/api/workdir/git", get(api::workdir_git))
         .route("/api/workdir/git/branches", get(api::workdir_git_branches))
-        // Launch-option registry: list, create, and delete the custom `claude`
-        // CLI flags the user can later select when starting a session.
+        // Launch-option registry: list, create, update (toggle the
+        // `default_enabled` flag), and delete the custom `claude` CLI flags the
+        // user can later select when starting a session.
         .route(
             "/api/launch-options",
             get(api::list_launch_options).post(api::create_launch_option),
         )
         .route(
             "/api/launch-options/{id}",
-            axum::routing::delete(api::delete_launch_option),
+            axum::routing::patch(api::update_launch_option)
+                .delete(api::delete_launch_option),
         )
         // Browser event stream.
         .route("/ws", get(ws::ws_handler))

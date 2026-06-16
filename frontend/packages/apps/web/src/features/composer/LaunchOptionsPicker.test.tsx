@@ -39,7 +39,11 @@ function renderPicker() {
 
 describe('LaunchOptionsPicker', () => {
   beforeEach(() => {
-    useComposerStore.setState({ newSessionLaunchOptionIds: [] });
+    // A fresh, not-yet-seeded new-session compose state.
+    useComposerStore.setState({
+      newSessionLaunchOptionIds: [],
+      newSessionLaunchOptionsSeeded: false,
+    });
   });
 
   it('renders nothing when the registry is empty', async () => {
@@ -57,7 +61,26 @@ describe('LaunchOptionsPicker', () => {
     });
   });
 
+  it('seeds the initial selection from the default_enabled options', async () => {
+    renderPicker();
+    // The fixture marks `--plugin-dir` (id 1) `default_enabled`, so it is
+    // pre-checked once the registry loads; `--permission-mode` (id 2) is not.
+    const pluginDir = await screen.findByTestId('launch-option-1');
+    const permissionMode = screen.getByTestId('launch-option-2');
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([1]);
+    });
+    expect(pluginDir).toBeChecked();
+    expect(permissionMode).not.toBeChecked();
+  });
+
   it('records selections in click order and drops them on deselect', async () => {
+    // Start from an already-seeded, empty selection so click order is the only
+    // thing under test (no default seeding interferes).
+    useComposerStore.setState({
+      newSessionLaunchOptionIds: [],
+      newSessionLaunchOptionsSeeded: true,
+    });
     renderPicker();
     // The two seeded options (`--permission-mode auto` = id 2,
     // `--plugin-dir` = id 1) appear once the query resolves.
@@ -80,5 +103,28 @@ describe('LaunchOptionsPicker', () => {
         1,
       ]);
     });
+  });
+
+  it('does not re-seed after the user unchecks a default-enabled option', async () => {
+    renderPicker();
+    const pluginDir = await screen.findByTestId('launch-option-1');
+    // Seeded on (id 1 is default_enabled).
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([1]);
+    });
+
+    // The user unchecks it: the selection is now empty but seeded, so it must
+    // stay empty rather than re-seeding back to the defaults.
+    fireEvent.click(pluginDir);
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
+    });
+    // Give any stray seed effect a chance to (incorrectly) fire.
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionsSeeded).toBe(
+        true,
+      );
+    });
+    expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
   });
 });

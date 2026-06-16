@@ -3,6 +3,7 @@ import {
   useCreateLaunchOptionMutation,
   useDeleteLaunchOptionMutation,
   useLaunchOptionsQuery,
+  useUpdateLaunchOptionMutation,
 } from '@delta/api-client';
 import type { LaunchOption } from '@delta/wire-gen';
 import { Button, Dialog, Spinner } from '@delta/ui-kit';
@@ -30,11 +31,13 @@ export function SettingsView() {
   // The query only runs while the dialog is open (it owns the settings mode).
   const launchOptionsQuery = useLaunchOptionsQuery(client, settingsOpen);
   const createLaunchOption = useCreateLaunchOptionMutation(client);
+  const updateLaunchOption = useUpdateLaunchOptionMutation(client);
   const deleteLaunchOption = useDeleteLaunchOptionMutation(client);
 
   const [label, setLabel] = useState('');
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
+  const [defaultEnabled, setDefaultEnabled] = useState(false);
 
   const options = launchOptionsQuery.data?.launch_options ?? [];
   // `name` is the only required field; trim so an all-whitespace entry cannot
@@ -55,12 +58,14 @@ export function SettingsView() {
         label: trimmedLabel.length > 0 ? trimmedLabel : undefined,
         name: name.trim(),
         value: trimmedValue.length > 0 ? trimmedValue : undefined,
+        default_enabled: defaultEnabled,
       },
       {
         onSuccess: () => {
           setLabel('');
           setName('');
           setValue('');
+          setDefaultEnabled(false);
         },
       },
     );
@@ -136,6 +141,15 @@ export function SettingsView() {
               className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-indigo-400 focus:outline-none"
             />
           </div>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <input
+              type="checkbox"
+              checked={defaultEnabled}
+              onChange={(event) => setDefaultEnabled(event.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            Enabled by default (pre-checked when starting a session)
+          </label>
           {createLaunchOption.isError && (
             <p className="text-xs text-red-600" role="alert">
               Could not add the launch option. Please try again.
@@ -174,6 +188,16 @@ export function SettingsView() {
               <LaunchOptionRow
                 key={option.id}
                 option={option}
+                onToggleDefault={(next) =>
+                  updateLaunchOption.mutate({
+                    id: option.id,
+                    body: { default_enabled: next },
+                  })
+                }
+                toggling={
+                  updateLaunchOption.isPending &&
+                  updateLaunchOption.variables?.id === option.id
+                }
                 onDelete={() => deleteLaunchOption.mutate(option.id)}
                 deleting={
                   deleteLaunchOption.isPending &&
@@ -190,11 +214,19 @@ export function SettingsView() {
 
 interface LaunchOptionRowProps {
   option: LaunchOption;
+  onToggleDefault: (next: boolean) => void;
+  toggling: boolean;
   onDelete: () => void;
   deleting: boolean;
 }
 
-function LaunchOptionRow({ option, onDelete, deleting }: LaunchOptionRowProps) {
+function LaunchOptionRow({
+  option,
+  onToggleDefault,
+  toggling,
+  onDelete,
+  deleting,
+}: LaunchOptionRowProps) {
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
       <div className="min-w-0">
@@ -210,15 +242,28 @@ function LaunchOptionRow({ option, onDelete, deleting }: LaunchOptionRowProps) {
           )}
         </div>
       </div>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onDelete}
-        disabled={deleting}
-        aria-label={`Delete launch option ${option.name}`}
-      >
-        Delete
-      </Button>
+      <div className="flex shrink-0 items-center gap-3">
+        <label className="flex items-center gap-1.5 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={option.default_enabled}
+            onChange={(event) => onToggleDefault(event.target.checked)}
+            disabled={toggling}
+            aria-label={`Enable launch option ${option.name} by default`}
+            className="h-3.5 w-3.5"
+          />
+          Default
+        </label>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onDelete}
+          disabled={deleting}
+          aria-label={`Delete launch option ${option.name}`}
+        >
+          Delete
+        </Button>
+      </div>
     </li>
   );
 }

@@ -188,7 +188,9 @@ fn launch_option_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchOption> {
         label: row.get(1)?,
         name: row.get(2)?,
         value: row.get(3)?,
-        created_at: row.get(4)?,
+        // SQLite stores the bool as INTEGER 0/1; `rusqlite` maps it back to `bool`.
+        default_enabled: row.get(4)?,
+        created_at: row.get(5)?,
     })
 }
 
@@ -248,7 +250,7 @@ const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
 const SEND_COLS: &str =
     "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at";
 const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at";
-const LAUNCH_OPTION_COLS: &str = "id, label, name, value, created_at";
+const LAUNCH_OPTION_COLS: &str = "id, label, name, value, default_enabled, created_at";
 
 /// Ensure the session's `main` thread exists, returning its id.
 fn ensure_main_thread(conn: &Connection, id: &SessionId, now: &str) -> Result<ThreadId> {
@@ -1134,13 +1136,14 @@ impl SessionStore for SqliteStore {
         label: Option<&str>,
         name: &str,
         value: Option<&str>,
+        default_enabled: bool,
     ) -> std::result::Result<LaunchOption, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         conn.execute(
-            "INSERT INTO launch_option (label, name, value, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![label, name, value, now],
+            "INSERT INTO launch_option (label, name, value, default_enabled, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![label, name, value, default_enabled, now],
         )
         .map_err(Error::from)?;
         let id = conn.last_insert_rowid();
@@ -1149,8 +1152,35 @@ impl SessionStore for SqliteStore {
             label: label.map(str::to_owned),
             name: name.to_owned(),
             value: value.map(str::to_owned),
+            default_enabled,
             created_at: now,
         })
+    }
+
+    async fn set_launch_option_default_enabled(
+        &self,
+        id: i64,
+        default_enabled: bool,
+    ) -> std::result::Result<Option<LaunchOption>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE launch_option SET default_enabled = ?2 WHERE id = ?1",
+                params![id, default_enabled],
+            )
+            .map_err(Error::from)?;
+        if affected == 0 {
+            return Ok(None);
+        }
+        let option = conn
+            .query_row(
+                &format!("SELECT {LAUNCH_OPTION_COLS} FROM launch_option WHERE id = ?1"),
+                params![id],
+                launch_option_from_row,
+            )
+            .optional()
+            .map_err(Error::from)?;
+        Ok(option)
     }
 
     async fn delete_launch_option(

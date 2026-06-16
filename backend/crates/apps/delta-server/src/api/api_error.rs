@@ -32,6 +32,9 @@ pub(crate) enum ApiError {
     UseCase(delta_usecase::Error),
     /// A malformed request rejected before any use case runs (`400`).
     BadRequest(String),
+    /// A request targeting a resource that does not exist (`404`), where the
+    /// use case reports absence as `None` rather than an [`delta_usecase::Error`].
+    NotFound(String),
 }
 
 impl From<delta_usecase::Error> for ApiError {
@@ -45,6 +48,7 @@ impl IntoResponse for ApiError {
         use delta_usecase::Error;
         let (status, message, code) = match self {
             ApiError::BadRequest(message) => (StatusCode::BAD_REQUEST, message, None),
+            ApiError::NotFound(message) => (StatusCode::NOT_FOUND, message, None),
             ApiError::UseCase(err) => {
                 let (status, code) = match &err {
                     // No session yet means nothing to act on for the caller.

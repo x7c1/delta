@@ -485,6 +485,7 @@ export function seedData(): MockStore {
         label: null,
         name: '--permission-mode',
         value: 'auto',
+        default_enabled: false,
         created_at: '2026-01-02T00:00:00Z',
       },
       {
@@ -492,6 +493,7 @@ export function seedData(): MockStore {
         label: 'My plugins',
         name: '--plugin-dir',
         value: '/home/dev/plugins',
+        default_enabled: true,
         created_at: '2026-01-01T00:00:00Z',
       },
     ],

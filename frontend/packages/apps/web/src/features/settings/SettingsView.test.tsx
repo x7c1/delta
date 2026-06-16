@@ -111,6 +111,30 @@ describe('SettingsView', () => {
     expect(addButton).toBeEnabled();
   });
 
+  it('toggles a launch option default_enabled flag and persists it', async () => {
+    renderSettings();
+    const list = await findList();
+    // `--permission-mode` (id 2) starts off; `--plugin-dir` (id 1) starts on.
+    const permissionModeToggle = within(list).getByRole('checkbox', {
+      name: 'Enable launch option --permission-mode by default',
+    });
+    const pluginDirToggle = within(list).getByRole('checkbox', {
+      name: 'Enable launch option --plugin-dir by default',
+    });
+    expect(permissionModeToggle).not.toBeChecked();
+    expect(pluginDirToggle).toBeChecked();
+
+    // Toggling it on round-trips through the mock store (the list refetches).
+    fireEvent.click(permissionModeToggle);
+    await waitFor(() =>
+      expect(
+        within(list).getByRole('checkbox', {
+          name: 'Enable launch option --permission-mode by default',
+        }),
+      ).toBeChecked(),
+    );
+  });
+
   it('deletes a launch option', async () => {
     renderSettings();
     const list = await findList();
