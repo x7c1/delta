@@ -1,6 +1,7 @@
 use delta_model::Send;
 
 use crate::error::Result;
+use crate::interactor::launch_options::expand_leading_tilde;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingSpawn;
 use crate::pane_token::PaneToken;
@@ -144,13 +145,21 @@ where
                 .into_iter()
                 .map(|option| (option.id, option))
                 .collect::<std::collections::HashMap<_, _>>();
+            // Read HOME once for tilde expansion (see the push below).
+            let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
             let mut args = Vec::new();
             for id in &launch_option_ids {
                 match by_id.get(id) {
                     Some(option) => {
                         args.push(option.name.clone());
                         if let Some(value) = &option.value {
-                            args.push(value.clone());
+                            // Expand a leading `~` ourselves: this command line
+                            // is forwarded to `claude` as an argv tail with no
+                            // shell, so the shell's tilde expansion never runs.
+                            // Left as-is, a `~/...` value would reach `claude`
+                            // literally and be resolved against the (worktree)
+                            // cwd, yielding a bogus `<cwd>/~/...` path.
+                            args.push(expand_leading_tilde(value, home.as_deref()));
                         }
                     }
                     None => tracing::warn!(
