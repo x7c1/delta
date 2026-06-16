@@ -1,0 +1,44 @@
+{
+  "assignments": [
+    {
+      "uuid": "caveat",
+      "role": "meta",
+      "seq": 0,
+      "thread_id": 1
+    },
+    {
+      "uuid": "cmdname",
+      "role": "meta",
+      "seq": 1,
+      "thread_id": 1
+    },
+    {
+      "uuid": "stdout",
+      "role": "meta",
+      "seq": 2,
+      "thread_id": 1
+    },
+    {
+      "uuid": "u1",
+      "role": "user",
+      "seq": 3,
+      "thread_id": 1
+    },
+    {
+      "uuid": "a1",
+      "role": "assistant",
+      "seq": 4,
+      "thread_id": 1
+    }
+  ],
+  "effects": [
+    {
+      "kind": "send_matched",
+      "send_id": 1,
+      "matched_uuid": "cmdname"
+    },
+    {
+      "kind": "local_command_turn_ended"
+    }
+  ]
+}

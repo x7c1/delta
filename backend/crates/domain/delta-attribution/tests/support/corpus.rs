@@ -61,6 +61,9 @@ impl CorpusCase {
             // Whole-history replay seeds no outstanding launch: every launch and
             // its completion fall within the replayed lines.
             launched_threads: std::collections::BTreeMap::new(),
+            // Likewise no local-command group is carried in: each group's caveat
+            // precedes its trailing lines within the replayed batch.
+            local_command_prompts: std::collections::HashSet::new(),
         }
     }
 }
@@ -110,6 +113,7 @@ pub enum GoldenEffect {
     SendMatched { send_id: i64, matched_uuid: String },
     TurnInterrupted,
     TurnAborted,
+    LocalCommandTurnEnded,
     ResolvePermission { tool_use_id: String, allowed: bool },
     SubagentLaunched { tool_use_id: String, thread_id: i64 },
     SubagentCompleted { tool_use_id: String },
@@ -145,6 +149,7 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                 },
                 Effect::TurnInterrupted => GoldenEffect::TurnInterrupted,
                 Effect::TurnAborted => GoldenEffect::TurnAborted,
+                Effect::LocalCommandTurnEnded => GoldenEffect::LocalCommandTurnEnded,
                 Effect::ResolvePermission {
                     tool_use_id,
                     allowed,
