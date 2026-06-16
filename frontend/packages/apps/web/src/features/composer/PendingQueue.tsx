@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
+import { useCancelSendMutation } from '@delta/api-client';
+import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
 import { useNewSessionSend } from './useNewSessionSend';
 import type { PendingEntry } from './usePendingSends';
@@ -25,9 +27,11 @@ export interface PendingQueueProps {
  *   Dismiss (and Retry for a new-session launch) so it is recoverable.
  */
 export function PendingQueue({ entries }: PendingQueueProps) {
+  const client = useApiClient();
   const removeSending = useLiveStore((state) => state.removeSending);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
   const retrySpawn = useNewSessionSend();
+  const cancelSend = useCancelSendMutation(client);
 
   if (entries.length === 0) {
     return null;
@@ -101,10 +105,28 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                     entry.key,
                     entry.send.text,
                     // Parked on purpose: the server holds it until the
-                    // session's current turn ends, then dispatches it.
-                    <Badge className="shrink-0" tone="neutral">
-                      queued — sends when idle
-                    </Badge>,
+                    // session's current turn ends, then dispatches it — and
+                    // until then the user can abandon it. Cancelling flips the
+                    // row to `cancelled` server-side, and the refetch the
+                    // mutation triggers drops it from this list. A `409`
+                    // (already dispatched) is benign: the same refetch
+                    // reconciles the strip.
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Badge tone="neutral">queued — sends when idle</Badge>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={cancelSend.isPending}
+                        onClick={() =>
+                          cancelSend.mutate({
+                            sendId: entry.send.id,
+                            sessionId: entry.send.session_id,
+                          })
+                        }
+                      >
+                        Cancel
+                      </Button>
+                    </div>,
                   )
                 : sendRow(
                     entry.key,

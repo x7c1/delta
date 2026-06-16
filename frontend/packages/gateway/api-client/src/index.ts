@@ -28,6 +28,7 @@ export {
   useOpenSessionMutation,
   useCloseSessionMutation,
   useCreateSendMutation,
+  useCancelSendMutation,
   useThreadMessagesQuery,
   useWorkdirListQuery,
   useHomeDirQuery,

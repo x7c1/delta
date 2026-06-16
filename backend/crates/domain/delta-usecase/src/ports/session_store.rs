@@ -150,6 +150,13 @@ pub trait SessionStore: std::marker::Send + Sync {
         locator_quote: Option<&str>,
     ) -> Result<Send>;
 
+    /// A single send by id, if it exists.
+    ///
+    /// Used to resolve the owning session of a cancel request (which carries
+    /// only the send id in its URL) so the cancel can route through that
+    /// session's actor, ordered against the dispatch path.
+    async fn send(&self, id: i64) -> Result<Option<Send>>;
+
     /// The oldest still-`queued` send for a session (FIFO), if any. This is
     /// the next held-back send to dispatch when the session becomes idle.
     async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
@@ -234,6 +241,19 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// `dispatched` row whose keystrokes were never delivered (e.g. a failed
     /// tmux dispatch).
     async fn cancel_send(&self, id: i64) -> Result<()>;
+
+    /// Cancel a send **only while it is still `queued`**, returning whether a
+    /// row actually transitioned.
+    ///
+    /// The guarded sibling of [`Self::cancel_send`]: a user-initiated cancel may
+    /// only abandon a send that has not yet been typed into the pane, so the
+    /// `WHERE status = 'queued'` clause makes the transition a no-op (returning
+    /// `false`) the moment the send has been dispatched, matched, or already
+    /// cancelled — losing a race with the idle dispatch path rather than
+    /// clobbering an in-flight send. A cancelled (terminal) row drops out of
+    /// [`Self::open_sends`] and is skipped by [`Self::next_queued_send`], so it
+    /// is never dispatched on idle.
+    async fn cancel_queued_send(&self, id: i64) -> Result<bool>;
 
     /// Upsert a batch of messages (content cache + overlay columns).
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()>;
@@ -454,6 +474,10 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
+    async fn send(&self, id: i64) -> Result<Option<Send>> {
+        (**self).send(id).await
+    }
+
     async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         (**self).next_queued_send(session_id).await
     }
@@ -484,6 +508,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn cancel_send(&self, id: i64) -> Result<()> {
         (**self).cancel_send(id).await
+    }
+
+    async fn cancel_queued_send(&self, id: i64) -> Result<bool> {
+        (**self).cancel_queued_send(id).await
     }
 
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()> {

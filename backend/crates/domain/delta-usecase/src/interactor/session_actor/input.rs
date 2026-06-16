@@ -137,6 +137,12 @@ pub(in crate::interactor) enum SessionInput {
     /// `Escape` into the TUI pane, which cancels the whole call.
     CancelQuestion { request_id: i64, reply: Reply<()> },
 
+    // ---- Send cancellation -------------------------------------------------
+    /// The browser cancelled a still-`queued` send of this session before it was
+    /// dispatched: transition the row to `cancelled` so the idle dispatch path
+    /// skips it. A no-op conflict if the send already left `queued`.
+    CancelSend { send_id: i64, reply: Reply<()> },
+
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous
     /// tail). A no-op for a session with no live pane.

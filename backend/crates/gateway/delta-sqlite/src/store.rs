@@ -646,6 +646,19 @@ impl SessionStore for SqliteStore {
         })
     }
 
+    async fn send(&self, id: i64) -> std::result::Result<Option<Send>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let row = conn
+            .query_row(
+                &format!("SELECT {SEND_COLS} FROM send WHERE id = ?1"),
+                params![id],
+                |r| Ok(send_from_row(r)),
+            )
+            .optional()
+            .map_err(Error::from)?;
+        row.transpose().map_err(Into::into)
+    }
+
     async fn next_queued_send(
         &self,
         session_id: &SessionId,
@@ -771,6 +784,17 @@ impl SessionStore for SqliteStore {
         )
         .map_err(Error::from)?;
         Ok(())
+    }
+
+    async fn cancel_queued_send(&self, id: i64) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE send SET status = 'cancelled' WHERE id = ?1 AND status = 'queued'",
+                params![id],
+            )
+            .map_err(Error::from)?;
+        Ok(affected > 0)
     }
 
     async fn upsert_messages(

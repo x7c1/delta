@@ -356,6 +356,30 @@ export function useDeleteLaunchOptionMutation(
   });
 }
 
+/**
+ * Cancel a still-queued send (`POST /api/sends/{id}/cancel`); refresh the
+ * session's open-send list so the cancelled chip disappears.
+ *
+ * The mutation carries the owning `sessionId` alongside the `sendId` so the
+ * exact open-send query can be invalidated. A `409` (`send_not_cancellable`)
+ * still invalidates: the send already left the queue, so the refetch reconciles
+ * the strip either way.
+ */
+export function useCancelSendMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, { sendId: number; sessionId: SessionId }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sendId }: { sendId: number; sessionId: SessionId }) =>
+      client.cancelSend(sendId),
+    onSettled: (_data, _error, { sessionId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionSends(sessionId),
+      });
+    },
+  });
+}
+
 export function useCreateSendMutation(
   client: ApiClient,
 ): UseMutationResult<SendResponse, Error, SendRequest> {

@@ -368,6 +368,11 @@ impl SessionStore for FakeStore {
         Ok(send)
     }
 
+    async fn send(&self, id: i64) -> Result<Option<Send>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.sends.iter().find(|s| s.id == id).cloned())
+    }
+
     async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         let g = self.inner.lock().unwrap();
         Ok(g.sends
@@ -445,6 +450,20 @@ impl SessionStore for FakeStore {
             s.status = SendStatus::Cancelled;
         }
         Ok(())
+    }
+
+    async fn cancel_queued_send(&self, id: i64) -> Result<bool> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Queued)
+        {
+            s.status = SendStatus::Cancelled;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn upsert_messages(&self, messages: &[Message]) -> Result<()> {

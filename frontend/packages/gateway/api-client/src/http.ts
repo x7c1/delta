@@ -51,11 +51,17 @@ export interface ApiClientOptions {
  * `question_not_pending` means an `AskUserQuestion` can no longer be answered
  * from the UI (already answered, its turn ended, or no live pane). Callers
  * branch on this to keep the answer-in-the-terminal fallback.
+ *
+ * `send_not_cancellable` means a queued send can no longer be cancelled (it has
+ * already been dispatched into the pane, matched a transcript line, or was
+ * already cancelled, or never existed). Callers treat it as benign and let the
+ * pending strip reconcile from the next refetch.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
   | 'permission_not_pending'
-  | 'question_not_pending';
+  | 'question_not_pending'
+  | 'send_not_cancellable';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -214,6 +220,20 @@ export class ApiClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(wireBody),
+    });
+  }
+
+  /**
+   * `POST /api/sends/{id}/cancel` — cancel a still-queued send (204) before it
+   * is dispatched into the pane. The row flips to `cancelled`, so it is skipped
+   * by the idle dispatch path and drops out of the open-send list. A `409`
+   * (`send_not_cancellable`) means the send has already left the `queued` state
+   * (dispatched, matched, already cancelled, or unknown) — surfaced as
+   * {@link ApiError}; the caller lets the pending strip reconcile from a refetch.
+   */
+  cancelSend(sendId: number): Promise<void> {
+    return this.requestNoContent(`/api/sends/${sendId}/cancel`, {
+      method: 'POST',
     });
   }
 
