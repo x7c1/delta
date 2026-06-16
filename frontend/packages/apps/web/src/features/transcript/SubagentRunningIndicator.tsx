@@ -31,7 +31,13 @@ export function SubagentRunningIndicator({
     return null;
   }
   return (
-    <div className="px-3 pt-1.5 pb-2" data-testid="subagent-running-indicator">
+    // Left-indented (`ml-6`) to line up with the tool-call cards in the
+    // transcript: the running subagent is itself a tool (`Agent`/`Task`) in
+    // flight, so it reads as a nested step rather than top-level prose.
+    <div
+      className="ml-6 mr-0 px-3 pt-1.5 pb-2"
+      data-testid="subagent-running-indicator"
+    >
       <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
         <div className="flex items-center gap-2">
           <Spinner />
