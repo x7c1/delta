@@ -100,6 +100,12 @@ pub enum WireSessionEvent {
     /// signal). Correlated to its `subagent_finished` by `tool_use_id`.
     SubagentStarted {
         session_id: String,
+        /// The thread that launched the subagent, so the client keeps that
+        /// thread's running indicator lit — and its unread badge suppressed —
+        /// until the subagent finishes, which for a background subagent outlives
+        /// the launching turn. `subagent_finished` carries no thread; the client
+        /// maps its `tool_use_id` back to this entry's thread.
+        thread_id: i64,
         tool_use_id: String,
         subagent_type: Option<String>,
         description: Option<String>,
@@ -226,12 +232,14 @@ impl From<SessionEvent> for WireSessionEvent {
             },
             SessionEvent::SubagentStarted {
                 session_id,
+                thread_id,
                 tool_use_id,
                 subagent_type,
                 description,
                 background,
             } => Self::SubagentStarted {
                 session_id: session_id.0,
+                thread_id: thread_id.0,
                 tool_use_id,
                 subagent_type,
                 description,
@@ -361,6 +369,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::SubagentStarted {
             session_id: session_id(),
+            thread_id: 1,
             tool_use_id: "toolu-sample".to_owned(),
             subagent_type: Some("general-purpose".to_owned()),
             description: Some("Run ls".to_owned()),
@@ -614,6 +623,7 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::SubagentStarted {
                 session_id: SessionId::from("sess-1"),
+                thread_id: ThreadId(2),
                 tool_use_id: "toolu_01".into(),
                 subagent_type: Some("general-purpose".into()),
                 description: Some("Run ls and count entries".into()),
@@ -622,6 +632,7 @@ mod tests {
             serde_json::json!({
                 "kind": "subagent_started",
                 "session_id": "sess-1",
+                "thread_id": 2,
                 "tool_use_id": "toolu_01",
                 "subagent_type": "general-purpose",
                 "description": "Run ls and count entries",
@@ -635,6 +646,7 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::SubagentStarted {
                 session_id: SessionId::from("sess-1"),
+                thread_id: ThreadId(2),
                 tool_use_id: "toolu_01".into(),
                 subagent_type: Some("general-purpose".into()),
                 description: Some("Long crawl".into()),
@@ -643,6 +655,7 @@ mod tests {
             serde_json::json!({
                 "kind": "subagent_started",
                 "session_id": "sess-1",
+                "thread_id": 2,
                 "tool_use_id": "toolu_01",
                 "subagent_type": "general-purpose",
                 "description": "Long crawl",
@@ -656,6 +669,7 @@ mod tests {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::SubagentStarted {
                 session_id: SessionId::from("sess-1"),
+                thread_id: ThreadId(2),
                 tool_use_id: "toolu_01".into(),
                 subagent_type: None,
                 description: None,
@@ -664,6 +678,7 @@ mod tests {
             serde_json::json!({
                 "kind": "subagent_started",
                 "session_id": "sess-1",
+                "thread_id": 2,
                 "tool_use_id": "toolu_01",
                 "subagent_type": null,
                 "description": null,

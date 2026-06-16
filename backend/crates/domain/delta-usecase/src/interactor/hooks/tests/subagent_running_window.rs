@@ -42,6 +42,7 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
 
     let events = ix
         .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
@@ -52,12 +53,13 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
         events,
         vec![SessionEvent::SubagentStarted {
             session_id: session.clone(),
+            thread_id: main,
             tool_use_id: "toolu_a1".to_owned(),
             subagent_type: Some("general-purpose".to_owned()),
             description: Some("Run ls and count entries".to_owned()),
             background: false,
         }],
-        "starting an Agent broadcasts SubagentStarted carrying its labels"
+        "starting an Agent broadcasts SubagentStarted carrying its launching thread and labels"
     );
 
     let state = ix.live_state_for(&session).await;
@@ -274,6 +276,7 @@ async fn a_background_launch_starts_a_background_running_entry() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
 
     let events = ix
         .on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
@@ -284,6 +287,7 @@ async fn a_background_launch_starts_a_background_running_entry() {
         events,
         vec![SessionEvent::SubagentStarted {
             session_id: session.clone(),
+            thread_id: main,
             tool_use_id: "toolu_bg".to_owned(),
             subagent_type: Some("general-purpose".to_owned()),
             description: Some("Long crawl".to_owned()),

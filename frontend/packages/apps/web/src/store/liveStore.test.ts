@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { noticeOf, useLiveStore, type LocalSend } from './liveStore';
+import {
+  noticeOf,
+  threadIsRunning,
+  useLiveStore,
+  type LocalSend,
+} from './liveStore';
 
 function reset() {
   useLiveStore.setState({
@@ -1104,6 +1109,7 @@ describe('liveStore running-subagent tracking', () => {
     useLiveStore.getState().applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: 'general-purpose',
       description: 'Probe the codebase',
@@ -1111,6 +1117,7 @@ describe('liveStore running-subagent tracking', () => {
     });
     expect(subagents()).toEqual([
       {
+        threadId: 7,
         toolUseId: 'toolu_a1',
         subagentType: 'general-purpose',
         description: 'Probe the codebase',
@@ -1119,11 +1126,54 @@ describe('liveStore running-subagent tracking', () => {
     ]);
   });
 
+  it('records the launching thread and folds it into thread-running, suppressing unread until the subagent finishes', () => {
+    const store = useLiveStore.getState();
+    // A turn on thread 7 completed off-focus, bumping its unread, while the
+    // background subagent it launched keeps running.
+    store.applyEvent({
+      kind: 'subagent_started',
+      session_id: 'sess-1',
+      thread_id: 7,
+      tool_use_id: 'toolu_bg',
+      subagent_type: null,
+      description: null,
+      background: true,
+    });
+    store.applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 7,
+      stop_reason: null,
+    });
+    store.bumpUnread(7);
+
+    // The thread reads as running purely from its still-running subagent, even
+    // though its turn already ended (so the navigator shows the spinner, not the
+    // "done while you were away" dot).
+    const running = useLiveStore.getState().runningSubagents['sess-1'];
+    expect(running?.[0]?.threadId).toBe(7);
+    expect(threadIsRunning(undefined, running, 7 as number)).toBe(true);
+    expect(threadIsRunning(undefined, running, 8 as number)).toBe(false);
+
+    // Once the subagent finishes, the thread is idle again and its unread
+    // surfaces (the dot appears).
+    store.applyEvent({
+      kind: 'subagent_finished',
+      session_id: 'sess-1',
+      tool_use_id: 'toolu_bg',
+    });
+    expect(
+      threadIsRunning(undefined, useLiveStore.getState().runningSubagents['sess-1'], 7 as number),
+    ).toBe(false);
+    expect(useLiveStore.getState().unread[7]).toBe(1);
+  });
+
   it('removes the subagent on subagent_finished and drops the empty entry', () => {
     const store = useLiveStore.getState();
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
@@ -1142,6 +1192,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
@@ -1150,6 +1201,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a2',
       subagent_type: null,
       description: null,
@@ -1173,6 +1225,7 @@ describe('liveStore running-subagent tracking', () => {
     const started = {
       kind: 'subagent_started' as const,
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
@@ -1197,6 +1250,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
@@ -1216,6 +1270,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
@@ -1230,6 +1285,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_fg',
       subagent_type: null,
       description: null,
@@ -1238,6 +1294,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_bg',
       subagent_type: null,
       description: null,
@@ -1259,6 +1316,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_bg',
       subagent_type: null,
       description: null,
@@ -1288,6 +1346,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_stale',
       subagent_type: null,
       description: null,
@@ -1298,6 +1357,7 @@ describe('liveStore running-subagent tracking', () => {
     // reconnecting client's later turn-end sweep keeps it.
     store.seedRunningSubagents('sess-1', [
       {
+        thread_id: 4,
         tool_use_id: 'toolu_fresh',
         subagent_type: 'general-purpose',
         description: 'Still running',
@@ -1306,6 +1366,7 @@ describe('liveStore running-subagent tracking', () => {
     ]);
     expect(subagents()).toEqual([
       {
+        threadId: 4,
         toolUseId: 'toolu_fresh',
         subagentType: 'general-purpose',
         description: 'Still running',
@@ -1319,6 +1380,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,
@@ -1333,6 +1395,7 @@ describe('liveStore running-subagent tracking', () => {
     store.applyEvent({
       kind: 'subagent_started',
       session_id: 'sess-1',
+      thread_id: 7,
       tool_use_id: 'toolu_a1',
       subagent_type: null,
       description: null,

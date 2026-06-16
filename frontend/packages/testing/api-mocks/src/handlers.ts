@@ -587,6 +587,7 @@ export function createMockApi(): MockApi {
         // Mirror the running subagent into queryable state, as the real server
         // keeps it for the sends envelope (reconnect re-seed).
         startSubagent(event.session_id, {
+          thread_id: event.thread_id,
           tool_use_id: event.tool_use_id,
           subagent_type: event.subagent_type,
           description: event.description,

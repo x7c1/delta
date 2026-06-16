@@ -105,7 +105,14 @@ where
                 .as_ref()
                 .map(claude_format::launches_in_background)
                 .unwrap_or(false);
+            // Resolve the launching thread from the same authoritative in-flight
+            // source `turn_started` and `on_stop` use, so the browser can keep
+            // that thread's running indicator lit (and its unread badge
+            // suppressed) until the subagent finishes — for a background
+            // subagent, past the end of the launching turn.
+            let thread_id = self.store.in_progress_turn_thread(self.id).await?;
             let newly = self.state.start_subagent(RunningSubagent {
+                thread_id,
                 tool_use_id: tool_use_id.to_owned(),
                 subagent_type: subagent_type.clone(),
                 description: description.clone(),
@@ -116,6 +123,7 @@ where
             if newly {
                 return Ok(vec![SessionEvent::SubagentStarted {
                     session_id: self.id.clone(),
+                    thread_id,
                     tool_use_id: tool_use_id.to_owned(),
                     subagent_type,
                     description,

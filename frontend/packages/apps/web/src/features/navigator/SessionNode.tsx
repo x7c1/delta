@@ -4,7 +4,7 @@ import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
-import { useLiveStore } from '../../store/liveStore';
+import { threadIsRunning, useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { pathTail } from '../../utils/pathTail';
@@ -101,6 +101,15 @@ export function SessionNode({
   const sessionRunningThreads = useLiveStore(
     (state) => state.runningThreads[item.session.id],
   );
+  // The session's running subagents fold into per-thread "running" too: a
+  // subagent (a BACKGROUND one in particular) keeps its launching thread
+  // running until it finishes, even past the launching turn's end. Including it
+  // here lights the row spinner and suppresses the `unread && !running` dot
+  // while any subagent runs on a thread of this session, so a thread reads as
+  // "still working" — not "done while you were away" — until the subagent ends.
+  const sessionRunningSubagents = useLiveStore(
+    (state) => state.runningSubagents[item.session.id],
+  );
   const unreadByThread = useLiveStore((state) => state.unread);
   // The kebab menu's dropdown opens below the trigger, but each windowed row is
   // an absolutely-positioned `transform` stacking context, so the dropdown is
@@ -130,8 +139,8 @@ export function SessionNode({
   const sessionThreadIds: ThreadId[] = threads
     ? threads.map((t) => t.id)
     : [item.main_thread_id];
-  const running = sessionThreadIds.some(
-    (id) => sessionRunningThreads?.[id] ?? false,
+  const running = sessionThreadIds.some((id) =>
+    threadIsRunning(sessionRunningThreads, sessionRunningSubagents, id),
   );
   // The dot is gated off the focused row: while a session is focused the user is
   // viewing it, and activating its threads clears their unread — but a just-
@@ -284,6 +293,7 @@ export function SessionNode({
             <ThreadTree
               threads={threads}
               runningThreads={sessionRunningThreads}
+              runningSubagents={sessionRunningSubagents}
               onSelectThread={selectThread}
             />
           </div>

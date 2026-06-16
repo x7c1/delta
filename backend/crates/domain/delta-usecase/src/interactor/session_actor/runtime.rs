@@ -221,6 +221,13 @@ pub struct PendingQuestion {
 /// distinctions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningSubagent {
+    /// The thread that launched the subagent, resolved (via
+    /// `SessionStore::in_progress_turn_thread`) the same way the in-flight
+    /// turn's thread is. A reconnecting client carries this so it can keep the
+    /// launching thread's running indicator lit — and its unread badge
+    /// suppressed — until the subagent finishes, which for a BACKGROUND
+    /// subagent outlives the launching turn.
+    pub thread_id: ThreadId,
     /// The `tool_use_id` of the `Agent`/`Task` call, the key that finishes it —
     /// the matching `PostToolUse` for a foreground entry, or the completion
     /// `<task-notification>` carrying this same id for a background entry.

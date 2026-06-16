@@ -6,7 +6,11 @@ import {
 import type { Thread } from '@delta/wire-gen';
 import { Badge, Spinner, cn } from '@delta/ui-kit';
 import { useNavStore } from '../../store/navStore';
-import { useLiveStore } from '../../store/liveStore';
+import {
+  threadIsRunning,
+  useLiveStore,
+  type SubagentActivity,
+} from '../../store/liveStore';
 
 export interface ThreadTreeProps {
   threads: Thread[];
@@ -17,6 +21,15 @@ export interface ThreadTreeProps {
    * thread of the session is running.
    */
   runningThreads?: Record<ThreadId, true>;
+  /**
+   * The session's running subagents (the `runningSubagents[sessionId]` list).
+   * A thread that launched a still-running subagent — a BACKGROUND one in
+   * particular, which outlives its launching turn — reads as "running": its
+   * spinner stays lit and its per-thread unread badge is suppressed until the
+   * subagent finishes. Passed down (not read per node) so the whole tree reads
+   * one consistent snapshot. `undefined` when none is running.
+   */
+  runningSubagents?: SubagentActivity[];
   /**
    * Select a sub-thread. The session card supplies this so a click can do more
    * than set the active thread — for a non-focused session it also focuses the
@@ -40,6 +53,7 @@ export interface ThreadTreeProps {
 export function ThreadTree({
   threads,
   runningThreads,
+  runningSubagents,
   onSelectThread,
 }: ThreadTreeProps) {
   const roots = buildThreadTree(threads);
@@ -52,6 +66,7 @@ export function ThreadTree({
           node={node}
           depth={0}
           runningThreads={runningThreads}
+          runningSubagents={runningSubagents}
           onSelectThread={onSelectThread}
         />
       ))}
@@ -63,18 +78,28 @@ function ThreadTreeNode({
   node,
   depth,
   runningThreads,
+  runningSubagents,
   onSelectThread,
 }: {
   node: ThreadNode<Thread>;
   depth: number;
   runningThreads?: Record<ThreadId, true>;
+  runningSubagents?: SubagentActivity[];
   onSelectThread: (threadId: ThreadId) => void;
 }) {
   const activeThreadId = useNavStore((state) => state.activeThreadId);
   const unread = useLiveStore((state) => state.unread[node.thread.id] ?? 0);
 
   const isActive = activeThreadId === node.thread.id;
-  const running = runningThreads?.[node.thread.id] ?? false;
+  // A thread is running when it has an in-flight turn OR a still-running
+  // subagent it launched (the latter outlives the turn for a background
+  // subagent), so the spinner and the unread suppression below both account for
+  // a working subagent.
+  const running = threadIsRunning(
+    runningThreads,
+    runningSubagents,
+    node.thread.id,
+  );
 
   return (
     <li>
@@ -105,7 +130,14 @@ function ThreadTreeNode({
               <span className="sr-only">running</span>
             </span>
           )}
-          {unread > 0 && !isActive && <Badge tone="count">{unread}</Badge>}
+          {/* Suppress the unread badge while this thread is running (mirrors the
+              session row's `unread && !running`): a thread whose launched
+              subagent is still working reads as running, not "done while you
+              were away" — the badge surfaces once the subagent finishes and the
+              spinner clears. */}
+          {unread > 0 && !isActive && !running && (
+            <Badge tone="count">{unread}</Badge>
+          )}
         </span>
       </button>
       {node.children.length > 0 && (
@@ -116,6 +148,7 @@ function ThreadTreeNode({
               node={child}
               depth={depth + 1}
               runningThreads={runningThreads}
+              runningSubagents={runningSubagents}
               onSelectThread={onSelectThread}
             />
           ))}

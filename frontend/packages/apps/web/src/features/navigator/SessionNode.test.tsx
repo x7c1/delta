@@ -24,7 +24,7 @@ afterEach(() => {
   server.resetHandlers();
   // Running and unread are read from the live store (thread-keyed), OR-aggregated
   // over the session's threads onto the collapsed row — reset between cases.
-  useLiveStore.setState({ runningThreads: {}, unread: {} });
+  useLiveStore.setState({ runningThreads: {}, unread: {}, runningSubagents: {} });
 });
 afterAll(() => server.close());
 
@@ -36,6 +36,23 @@ function setRunning() {
 /** Flag the session's main thread (id 1) unread in the store. */
 function setUnread() {
   useLiveStore.setState({ unread: { 1: 1 } });
+}
+
+/** Record a background subagent running on the session's main thread (id 1). */
+function setRunningSubagent() {
+  useLiveStore.setState({
+    runningSubagents: {
+      [SESSION_ID]: [
+        {
+          threadId: 1,
+          toolUseId: 'toolu_bg',
+          subagentType: null,
+          description: null,
+          background: true,
+        },
+      ],
+    },
+  });
 }
 
 const item: SessionListItem = {
@@ -99,6 +116,15 @@ describe('SessionNode running indicator', () => {
       screen.getByTestId('session-permission-badge'),
     ).toBeInTheDocument();
   });
+
+  it('shows the running indicator when only a subagent is running (turn idle)', () => {
+    // The launching turn has ended but its background subagent keeps working;
+    // the thread still reads as running so the row shows the spinner.
+    setRunningSubagent();
+    renderNode({});
+
+    expect(screen.getByTestId('session-running')).toBeInTheDocument();
+  });
 });
 
 describe('SessionNode unread indicator', () => {
@@ -125,6 +151,18 @@ describe('SessionNode unread indicator', () => {
     renderNode({});
 
     // A session processing again shows the live spinner, not a stale dot.
+    expect(screen.getByTestId('session-running')).toBeInTheDocument();
+    expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument();
+  });
+
+  it('suppresses the unread dot while a launched subagent is still running', () => {
+    // The turn completed (unread bumped) but its background subagent is still
+    // working: the thread reads as running, so the row shows the spinner and not
+    // the "done while you were away" dot until the subagent finishes.
+    setUnread();
+    setRunningSubagent();
+    renderNode({});
+
     expect(screen.getByTestId('session-running')).toBeInTheDocument();
     expect(screen.queryByTestId('session-unread')).not.toBeInTheDocument();
   });
