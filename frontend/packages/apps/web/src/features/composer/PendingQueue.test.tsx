@@ -10,6 +10,7 @@ import {
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
 import { createHandlers, mockSpawnSessionId, SESSION_ID } from '@delta/api-mocks';
 import { ApiClient, queryKeys } from '@delta/api-client';
 import type { Send } from '@delta/wire-gen';
@@ -95,6 +96,50 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByText('queued — sends when idle')).toBeInTheDocument();
     expect(screen.getByText('awaiting reply')).toBeInTheDocument();
     expect(screen.getByText('1 queued')).toBeInTheDocument();
+  });
+
+  it('cancels a queued send, removing it from the strip', async () => {
+    // Override the open-send + cancel routes for this test so the flow is
+    // self-contained: the first sends fetch carries the queued row, Cancel hits
+    // the send-scoped cancel route, and the refetch the mutation triggers then
+    // returns an empty list (the row was cancelled server-side).
+    let cancelled = false;
+    const cancelUrls: string[] = [];
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: cancelled
+            ? []
+            : [serverSend({ id: 42, text: 'parked', status: 'queued' })],
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/cancel', ({ request, params }) => {
+        cancelUrls.push(new URL(request.url).pathname);
+        if (params.id === '42') {
+          cancelled = true;
+          return new HttpResponse(null, { status: 204 });
+        }
+        return HttpResponse.json(
+          { error: 'not cancellable', code: 'send_not_cancellable' },
+          { status: 409 },
+        );
+      }),
+    );
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('parked');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('parked')).not.toBeInTheDocument();
+    });
+    expect(cancelUrls).toEqual(['/api/sends/42/cancel']);
+    expect(screen.queryAllByTestId('pending-item')).toHaveLength(0);
   });
 
   it('shows only the active thread’s sends', () => {

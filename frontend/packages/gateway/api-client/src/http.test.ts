@@ -437,6 +437,32 @@ describe('ApiClient', () => {
     expect(JSON.parse(init.body)).toEqual({ request_id: 5 });
   });
 
+  it('cancels a queued send, posting to the send-scoped cancel route', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.cancelSend(7)).resolves.toBeUndefined();
+
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/sends/7/cancel');
+    expect(init.method).toBe('POST');
+  });
+
+  it('surfaces send_not_cancellable as an ApiError code', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: 'send 7 is not cancellable', code: 'send_not_cancellable' },
+        409,
+      ),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.cancelSend(7)).rejects.toMatchObject({
+      status: 409,
+      code: 'send_not_cancellable',
+    } satisfies Partial<ApiError>);
+  });
+
   it('raises ApiError carrying the status and server error message', async () => {
     const fetchFn = vi
       .fn()

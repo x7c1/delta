@@ -987,6 +987,61 @@ async fn queued_send_is_held_then_promoted_to_dispatched() {
 }
 
 #[tokio::test]
+async fn cancel_queued_send_only_cancels_while_queued() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    // A queued send cancels: the guarded transition reports it moved, the row is
+    // terminal (`cancelled`), and it drops out of both the queue and the
+    // open-send list so the idle dispatch path never reaches it.
+    let queued = store
+        .enqueue_queued_send(&session.id, main, None, "held", None)
+        .await
+        .unwrap();
+    assert!(
+        store.cancel_queued_send(queued.id).await.unwrap(),
+        "a queued send transitions to cancelled"
+    );
+    assert_eq!(
+        store.send(queued.id).await.unwrap().unwrap().status,
+        SendStatus::Cancelled,
+    );
+    assert!(
+        store.next_queued_send(&session.id).await.unwrap().is_none(),
+        "a cancelled send is skipped by the idle dispatch path"
+    );
+    assert!(
+        store.open_sends(&session.id).await.unwrap().is_empty(),
+        "a cancelled send drops out of the open-send list"
+    );
+    // A second cancel is now a no-op: the row already left `queued`.
+    assert!(
+        !store.cancel_queued_send(queued.id).await.unwrap(),
+        "re-cancelling an already-cancelled send reports no transition"
+    );
+
+    // A dispatched send is not cancellable through the guarded path: the row
+    // stays dispatched and the transition reports no change.
+    let dispatched = store
+        .enqueue_send(&session.id, main, None, "typed", None)
+        .await
+        .unwrap();
+    assert_eq!(dispatched.status, SendStatus::Dispatched);
+    assert!(
+        !store.cancel_queued_send(dispatched.id).await.unwrap(),
+        "a dispatched send is not cancellable while dispatched"
+    );
+    assert_eq!(
+        store.send(dispatched.id).await.unwrap().unwrap().status,
+        SendStatus::Dispatched,
+        "the dispatched row is left untouched"
+    );
+
+    // An unknown id reports no transition rather than erroring.
+    assert!(!store.cancel_queued_send(9999).await.unwrap());
+}
+
+#[tokio::test]
 async fn open_sends_lists_non_terminal_sends_oldest_first_per_session() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

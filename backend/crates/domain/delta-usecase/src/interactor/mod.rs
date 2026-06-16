@@ -10,6 +10,7 @@
 
 mod answer_question;
 mod cancel_question;
+mod cancel_send;
 mod context;
 mod enqueue;
 mod hooks;

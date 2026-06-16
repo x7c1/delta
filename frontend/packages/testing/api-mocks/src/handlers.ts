@@ -289,6 +289,23 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    // Cancel a still-queued send. Mirrors the server's guarded transition: only
+    // a `queued` row cancels (it drops out of the open-send list on the next
+    // `GET .../sends`); anything else is a `409` with the stable
+    // `send_not_cancellable` code.
+    http.post('*/api/sends/:id/cancel', ({ params }) => {
+      const id = Number(params.id);
+      const send = store.sends.find((s) => s.id === id);
+      if (!send || send.status !== 'queued') {
+        return HttpResponse.json(
+          { error: `send ${id} is not cancellable`, code: 'send_not_cancellable' },
+          { status: 409 },
+        );
+      }
+      send.status = 'cancelled';
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     http.post('*/api/sends', async ({ request }) => {
       const payload = (await request.json()) as SendRequest;
       if (typeof payload?.text !== 'string' || payload.text.length === 0) {

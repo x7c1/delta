@@ -518,6 +518,33 @@ where
         .await
     }
 
+    // ---- Send cancellation -------------------------------------------------
+
+    /// Cancel a still-`queued` send before it is dispatched into the pane.
+    ///
+    /// The cancel request carries only the send id (in its URL), so the owning
+    /// session is derived from the send row here — mirroring how
+    /// [`enqueue_send`](Self::enqueue_send) derives the session from a thread —
+    /// and the cancel then executes on that session's actor, ordered against its
+    /// dispatch path.
+    ///
+    /// Returns [`Error::SendNotCancellable`] (`409`) when the send no longer
+    /// exists, or when it has already left the `queued` state (dispatched into
+    /// the pane, matched a transcript line, or already cancelled). Only `queued`
+    /// sends — held back and not yet typed — are cancellable; the browser drops
+    /// its cancel control and reconciles from the next refetch on this error.
+    pub async fn cancel_send(&self, send_id: i64) -> Result<()> {
+        let Some(send) = self.store.send(send_id).await? else {
+            return Err(Error::SendNotCancellable(send_id));
+        };
+        let session_id = send.session_id;
+        self.request(&session_id, move |reply| SessionInput::CancelSend {
+            send_id,
+            reply,
+        })
+        .await
+    }
+
     // ---- Background ticks --------------------------------------------------------
 
     /// Poll the transcript of every currently-open (live-pane) session for

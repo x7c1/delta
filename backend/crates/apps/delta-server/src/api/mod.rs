@@ -381,6 +381,26 @@ pub(crate) async fn create_send(
     Ok((StatusCode::CREATED, Json(WireSendResponse::from(send))))
 }
 
+/// `POST /api/sends/{id}/cancel` — cancel a still-queued send (204).
+///
+/// A send composed while the assistant's turn is in flight is held in the
+/// `queued` state and only dispatched once the session goes idle. This abandons
+/// such a send before that dispatch: the row flips to `cancelled`, so it is
+/// skipped by the idle dispatch path and drops out of the open-send list (the
+/// browser refetches that list to clear the chip — no event is broadcast).
+///
+/// Replies `409` with code `send_not_cancellable` when the send no longer
+/// exists or has already left `queued` (dispatched into the pane, matched, or
+/// already cancelled); only `queued` sends are cancellable. The browser drops
+/// its cancel control and reconciles from the refetch on this code.
+pub(crate) async fn cancel_send(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    state.interactor().cancel_send(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `POST /api/permissions/{id}/decision` — answer a pending tool-permission
 /// request from the browser.
 ///

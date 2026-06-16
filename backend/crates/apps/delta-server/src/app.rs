@@ -40,6 +40,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/sends", get(api::list_sends))
         .route("/api/threads/{id}/messages", get(api::thread_messages))
         .route("/api/sends", post(api::create_send))
+        // Cancel a still-queued send before it is dispatched into the pane.
+        .route("/api/sends/{id}/cancel", post(api::cancel_send))
         // Answer a pending tool-permission request from the browser.
         .route(
             "/api/permissions/{id}/decision",
