@@ -188,10 +188,23 @@ export function TranscriptPane({
   // A subagent runs in its own transcript Delta never tails, so nothing else
   // appears at the conversation tail while it works — this drives a small
   // running indicator near the live bubble so the user knows it is active.
-  const subagents = useLiveStore((state) =>
+  const sessionSubagents = useLiveStore((state) =>
     activeThread
       ? state.runningSubagents[activeThread.session_id] ?? null
       : null,
+  );
+  // Scope the indicator to the subagents launched from the thread in view: a
+  // subagent belongs to the thread that started it (`threadId`), so a different
+  // thread of the same session must not show its activity. Memoized so the
+  // filtered array keeps a stable identity across unrelated store updates (the
+  // selector above returns the session's stored array by reference).
+  const subagents = useMemo(
+    () =>
+      activeThread
+        ? sessionSubagents?.filter((s) => s.threadId === activeThread.id) ??
+          null
+        : null,
+    [sessionSubagents, activeThread],
   );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   // The focused session's pending AskUserQuestion, if any. Emitted by the
@@ -846,7 +859,14 @@ export function TranscriptPane({
       // under-reserves on first paint. The top breadcrumb reserve stays a fixed
       // class: the breadcrumb card does not grow, so a measured value would buy
       // nothing.
-      bodyClassName={isOnSubThread ? 'pt-breadcrumb-reserve' : undefined}
+      // `scrollbar-none` hides the body's scrollbar entirely (it still scrolls
+      // via wheel/trackpad): the conversation reads as a clean page, and the
+      // floating composer/breadcrumb cards already sit over the right edge where
+      // a bar would otherwise run. `scrollbar-none` is declared after Panel's
+      // default `scrollbar-hover`, so it wins when both are present.
+      bodyClassName={
+        isOnSubThread ? 'scrollbar-none pt-breadcrumb-reserve' : 'scrollbar-none'
+      }
       bodyStyle={{
         paddingBottom:
           bottomReserve !== null

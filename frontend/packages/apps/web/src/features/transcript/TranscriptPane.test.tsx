@@ -73,6 +73,7 @@ describe('TranscriptPane', () => {
       spawns: [],
       notices: {},
       streamingMessages: {},
+      runningSubagents: {},
     });
     useComposerStore.setState({
       drafts: {},
@@ -775,6 +776,57 @@ describe('TranscriptPane', () => {
       screen.queryByTestId('external-input-notice'),
     ).not.toBeInTheDocument();
     expect(useLiveStore.getState().notices).toEqual({});
+  });
+
+  it('shows the running-subagent indicator for the active thread, indented to align with tool calls', async () => {
+    useLiveStore.setState({
+      runningSubagents: {
+        [SESSION_ID]: [
+          {
+            threadId: MAIN_THREAD_ID,
+            toolUseId: 'toolu_sub_1',
+            subagentType: 'general-purpose',
+            description: 'Explore the codebase',
+            background: false,
+          },
+        ],
+      },
+    });
+
+    renderPane(mockThreads, MAIN_THREAD_ID);
+
+    const indicator = await screen.findByTestId('subagent-running-indicator');
+    expect(indicator).toHaveTextContent('Explore the codebase');
+    // Indented (ml-6) so it lines up with the tool-call cards rather than the
+    // top-level prose — the running subagent is itself a tool in flight.
+    expect(indicator).toHaveClass('ml-6');
+  });
+
+  it('hides the running-subagent indicator on a thread other than the one that launched it', async () => {
+    useLiveStore.setState({
+      runningSubagents: {
+        [SESSION_ID]: [
+          {
+            threadId: MAIN_THREAD_ID,
+            toolUseId: 'toolu_sub_1',
+            subagentType: 'general-purpose',
+            description: 'Explore the codebase',
+            background: false,
+          },
+        ],
+      },
+    });
+
+    // View the sub-thread: the subagent belongs to main, so its activity must
+    // not bleed into a different thread of the same session.
+    renderPane(mockThreads, BRANCH_THREAD_ID);
+
+    // The breadcrumb confirms the sub-thread pane has rendered before asserting
+    // the indicator's absence (so the check is not trivially passing pre-mount).
+    await screen.findByRole('navigation', { name: 'Breadcrumb' });
+    expect(
+      screen.queryByTestId('subagent-running-indicator'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows the permission notice with Allow/Deny and the input summary', async () => {

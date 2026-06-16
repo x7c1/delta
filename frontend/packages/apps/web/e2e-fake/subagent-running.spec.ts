@@ -1,5 +1,17 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { startNewSession, sendMessage } from './support/app';
+
+/**
+ * The running spinner on THIS test's session row. Scoped to the focused row
+ * (`aria-current="true"`): the fake-mode suite shares one delta-server, so
+ * earlier specs can leave other sessions running, and a bare `session-running`
+ * would match more than one row. Only the session started here is focused.
+ */
+function focusedRowRunning(page: Page) {
+  return page
+    .locator('[data-testid="session-node"][aria-current="true"]')
+    .getByTestId('session-running');
+}
 
 /**
  * A running subagent (the `Agent`/`Task` tool) is surfaced while it works and
@@ -15,10 +27,11 @@ import { startNewSession, sendMessage } from './support/app';
  * appears in the conversation pane while it works. The spec asserts:
  *
  * 1. While the subagent runs, the conversation pane shows the running indicator
- *    with the subagent's description, and the navigator row shows the subagent
- *    badge.
- * 2. Once the subagent finishes (`PostToolUse`), both the indicator and the
- *    badge are gone.
+ *    with the subagent's description, and the navigator row shows the running
+ *    spinner (a running subagent folds into the row's running state, so the
+ *    spinner alone signals "still working" — there is no separate badge).
+ * 2. Once the subagent finishes (`PostToolUse`) and the turn ends, both the
+ *    indicator and the spinner are gone.
  */
 test('a running subagent is shown while it works and cleared when it finishes', async ({
   page,
@@ -34,13 +47,13 @@ test('a running subagent is shown while it works and cleared when it finishes', 
   });
   await expect(indicator).toContainText('Probe the codebase');
 
-  // The navigator row also carries a dedicated subagent badge.
-  await expect(page.getByTestId('session-subagent-badge')).toBeVisible();
+  // The navigator row shows the running spinner while the subagent works.
+  await expect(focusedRowRunning(page)).toBeVisible();
 
-  // Once the subagent completes (PostToolUse), the indicator and the badge are
-  // both gone.
+  // Once the subagent completes (PostToolUse) and the turn ends, the indicator
+  // and the running spinner are both gone.
   await expect(indicator).toHaveCount(0, { timeout: 15_000 });
-  await expect(page.getByTestId('session-subagent-badge')).toHaveCount(0);
+  await expect(focusedRowRunning(page)).toHaveCount(0);
 });
 
 /**
@@ -55,9 +68,10 @@ test('a running subagent is shown while it works and cleared when it finishes', 
  * writes the `<task-notification>` completion line, which the server folds to
  * finish the subagent.
  *
- * The spec asserts the indicator/badge appear at launch, SURVIVE the turn end
- * (the distinguishing behaviour from the foreground case), and clear only after
- * the completion notification.
+ * The spec asserts the indicator and the running spinner appear at launch,
+ * SURVIVE the turn end (the distinguishing behaviour from the foreground case —
+ * the background subagent keeps the row running past its launching turn), and
+ * clear only after the completion notification.
  */
 test('a background subagent survives the launching turn and clears on its completion notification', async ({
   page,
@@ -66,25 +80,26 @@ test('a background subagent survives the launching turn and clears on its comple
   await startNewSession(page, 'subagent-running-background please run a background subagent');
 
   // While the background subagent runs, the conversation pane shows the running
-  // indicator and the navigator row shows the badge.
+  // indicator and the navigator row shows the running spinner.
   const indicator = page.getByTestId('subagent-running-indicator');
   await expect(indicator).toContainText('Subagent running', { timeout: 15_000 });
   await expect(indicator).toContainText('Probe the codebase in the background');
-  await expect(page.getByTestId('session-subagent-badge')).toBeVisible();
+  await expect(focusedRowRunning(page)).toBeVisible();
 
   // The launching turn has ended (the fake replied and stopped after the
-  // immediate PostToolUse), yet the background subagent's indicator and badge
-  // SURVIVE — the distinguishing behaviour from a foreground subagent.
+  // immediate PostToolUse), yet the background subagent's indicator and the
+  // running spinner SURVIVE — the distinguishing behaviour from a foreground
+  // subagent (the running subagent keeps the row running past its turn).
   await expect(page.getByText('Launched the background subagent.')).toBeVisible({
     timeout: 15_000,
   });
   await expect(indicator).toBeVisible();
-  await expect(page.getByTestId('session-subagent-badge')).toBeVisible();
+  await expect(focusedRowRunning(page)).toBeVisible();
 
   // A follow-up prompt drives the turn in which the fake writes the completion
   // `<task-notification>`; folding it finishes the background subagent, so the
-  // indicator and badge finally clear.
+  // indicator and the running spinner finally clear.
   await sendMessage(page, 'any news?');
   await expect(indicator).toHaveCount(0, { timeout: 15_000 });
-  await expect(page.getByTestId('session-subagent-badge')).toHaveCount(0);
+  await expect(focusedRowRunning(page)).toHaveCount(0);
 });

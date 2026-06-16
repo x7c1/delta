@@ -186,14 +186,10 @@ export function NavigatorPane({
   // Running and unread are THREAD-keyed in the store now, so each SessionNode
   // OR-aggregates them over its own threads (and shows them per thread in its
   // tree). The collapsed-row spinner/dot is therefore computed inside the node
-  // rather than passed down from here.
-  //
-  // Per-session running-subagent set. A subagent runs in its own (untailed)
-  // transcript, so its row carries a dedicated badge (see SessionNode) — the
-  // only place a running subagent is discoverable from the list. Kept distinct
-  // from the turn-activity spinner above.
-  const runningSubagents = useLiveStore((state) => state.runningSubagents);
-
+  // rather than passed down from here. A running subagent (foreground or
+  // background) is folded into that per-thread "running" — see SessionNode —
+  // so the row's spinner already covers it; the navigator shows no separate
+  // subagent count.
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const settingsOpen = useNavStore((state) => state.settingsOpen);
   const openSettings = useNavStore((state) => state.openSettings);
@@ -328,9 +324,6 @@ export function NavigatorPane({
               isFocused={focusedSessionId === item.session.id}
               needsPermission={
                 noticeOf(notices, item.session.id, 'permission') !== null
-              }
-              subagentCount={
-                runningSubagents[item.session.id]?.length ?? 0
               }
               onFocus={() => {
                 setFocusedSession(item.session.id);

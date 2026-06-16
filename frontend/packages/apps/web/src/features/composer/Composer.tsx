@@ -277,9 +277,10 @@ export function Composer({ mode }: ComposerProps) {
         </div>
       )}
       {/* The textarea spans the full width; the round submit button is overlaid
-          in the bottom-right corner. The textarea reserves right padding (`pr-12`)
-          matching the button's footprint so typed text never slides underneath
-          it. The button sticks to the bottom so it stays anchored as the textarea
+          in the bottom-right corner. The textarea reserves right padding (`pr-10`)
+          so typed text never slides under the button — just past its 32px (`w-8`)
+          footprint, leaving a small gap rather than a wide empty margin. The
+          button sticks to the bottom so it stays anchored as the textarea
           auto-grows. */}
       <div className="relative">
         <textarea
@@ -301,7 +302,7 @@ export function Composer({ mode }: ComposerProps) {
           // `px-3`: together they give the text a 14px left inset that matches
           // its 14px top inset (card `py-2` + the textarea's `py-1.5`), rather
           // than the lopsided 20px the card-default `pl-2` would stack up to.
-          className="min-h-[2.5rem] w-full resize-none bg-transparent py-1.5 pl-0.5 pr-12 text-sm focus:outline-none"
+          className="min-h-[2.5rem] w-full resize-none bg-transparent py-1.5 pl-0.5 pr-10 text-sm focus:outline-none"
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               void submit(event);

@@ -74,6 +74,30 @@ export function defaultScript(): SessionEvent[] {
       tool_name: 'Bash',
       tool_input: '{"command":"rm -rf node_modules"}',
     },
+    // Two subagents left running at the tail of the script — with no
+    // turn_completed after them, which would sweep them — so the running
+    // indicator stays visible in mock mode for development: the navigator row
+    // badge and the conversation-pane indicator. One foreground, and one
+    // background (`run_in_background: true`), the case whose indicator must
+    // persist past its launching turn.
+    {
+      kind: 'subagent_started',
+      session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
+      tool_use_id: 'toolu-mock-subagent-fg',
+      subagent_type: 'general-purpose',
+      description: 'Explore the codebase',
+      background: false,
+    },
+    {
+      kind: 'subagent_started',
+      session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
+      tool_use_id: 'toolu-mock-subagent-bg',
+      subagent_type: 'general-purpose',
+      description: 'Background build & test',
+      background: true,
+    },
   ];
 }
 
