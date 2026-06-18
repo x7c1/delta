@@ -1,6 +1,6 @@
 //! The wire form of [`SessionEvent`].
 
-use delta_usecase::SessionEvent;
+use delta_usecase::{RateLimitWindow, SessionEvent, StatusSnapshot};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -11,7 +11,12 @@ use ts_rs::TS;
 /// concerns the domain type must not know about: the `kind` tag, the
 /// snake_case variant names, and the TypeScript export. Ids are plain
 /// `String`/`i64` here because that is exactly what crosses the wire.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+///
+/// Only `PartialEq` (not `Eq`) is derived: [`WireSessionEvent::StatusUpdated`]
+/// carries a [`WireStatusSnapshot`] with `f64` fields, and `f64` does not
+/// implement `Eq`. Nothing keys these events by hash, so `PartialEq` (which
+/// backs `assert_eq!`) is all the equality they need.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(rename = "SessionEvent")]
 pub enum WireSessionEvent {
@@ -120,6 +125,66 @@ pub enum WireSessionEvent {
         session_id: String,
         tool_use_id: String,
     },
+    /// The latest Claude Code status-line snapshot for a session: selected
+    /// model, context-window usage, rate limits, and cost. A "latest value"
+    /// keyed by `session_id` (each snapshot supersedes the last), not an append.
+    StatusUpdated {
+        session_id: String,
+        snapshot: WireStatusSnapshot,
+    },
+}
+
+/// The wire form of a Claude Code status-line snapshot. Every field is optional
+/// (a session before its first API response reports `null`s and omits the rate
+/// limits); see `delta_usecase::StatusSnapshot` for the semantics.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
+#[ts(rename = "StatusSnapshot")]
+pub struct WireStatusSnapshot {
+    pub model_id: Option<String>,
+    pub model_display_name: Option<String>,
+    pub context_used_percentage: Option<f64>,
+    pub context_window_size: Option<u64>,
+    pub context_current_usage: Option<u64>,
+    pub total_input_tokens: Option<u64>,
+    pub five_hour: Option<WireRateLimitWindow>,
+    pub seven_day: Option<WireRateLimitWindow>,
+    pub total_cost_usd: Option<f64>,
+    pub current_dir: Option<String>,
+}
+
+/// The wire form of one rate-limit window.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
+#[ts(rename = "RateLimitWindow")]
+pub struct WireRateLimitWindow {
+    pub used_percentage: Option<f64>,
+    /// Unix epoch seconds at which the window resets.
+    pub resets_at: Option<i64>,
+}
+
+impl From<RateLimitWindow> for WireRateLimitWindow {
+    fn from(window: RateLimitWindow) -> Self {
+        Self {
+            used_percentage: window.used_percentage,
+            resets_at: window.resets_at,
+        }
+    }
+}
+
+impl From<StatusSnapshot> for WireStatusSnapshot {
+    fn from(snapshot: StatusSnapshot) -> Self {
+        Self {
+            model_id: snapshot.model_id,
+            model_display_name: snapshot.model_display_name,
+            context_used_percentage: snapshot.context_used_percentage,
+            context_window_size: snapshot.context_window_size,
+            context_current_usage: snapshot.context_current_usage,
+            total_input_tokens: snapshot.total_input_tokens,
+            five_hour: snapshot.five_hour.map(WireRateLimitWindow::from),
+            seven_day: snapshot.seven_day.map(WireRateLimitWindow::from),
+            total_cost_usd: snapshot.total_cost_usd,
+            current_dir: snapshot.current_dir,
+        }
+    }
 }
 
 impl From<SessionEvent> for WireSessionEvent {
@@ -252,6 +317,13 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id: session_id.0,
                 tool_use_id,
             },
+            SessionEvent::StatusUpdated {
+                session_id,
+                snapshot,
+            } => Self::StatusUpdated {
+                session_id: session_id.0,
+                snapshot: WireStatusSnapshot::from(snapshot),
+            },
         }
     }
 }
@@ -297,7 +369,8 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::SpawnFailed { .. }
             | WireSessionEvent::AssistantStreaming { .. }
             | WireSessionEvent::SubagentStarted { .. }
-            | WireSessionEvent::SubagentFinished { .. } => {}
+            | WireSessionEvent::SubagentFinished { .. }
+            | WireSessionEvent::StatusUpdated { .. } => {}
         }
     }
 
@@ -378,6 +451,10 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::SubagentFinished {
             session_id: session_id(),
             tool_use_id: "toolu-sample".to_owned(),
+        },
+        WireSessionEvent::StatusUpdated {
+            session_id: session_id(),
+            snapshot: WireStatusSnapshot::default(),
         },
     ];
     for event in &samples {
@@ -591,6 +668,7 @@ mod tests {
                 "assistant_streaming",
                 "subagent_started",
                 "subagent_finished",
+                "status_updated",
             ],
         );
     }
@@ -683,6 +761,80 @@ mod tests {
                 "subagent_type": null,
                 "description": null,
                 "background": false,
+            }),
+        );
+    }
+
+    #[test]
+    fn status_updated_serializes_its_snapshot_with_nested_rate_limits() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::StatusUpdated {
+                session_id: SessionId::from("sess-1"),
+                snapshot: StatusSnapshot {
+                    model_id: Some("claude-opus-4".to_owned()),
+                    model_display_name: Some("Opus 4".to_owned()),
+                    context_used_percentage: Some(42.5),
+                    context_window_size: Some(200_000),
+                    context_current_usage: Some(85_000),
+                    total_input_tokens: Some(90_000),
+                    five_hour: Some(RateLimitWindow {
+                        used_percentage: Some(12.0),
+                        resets_at: Some(1_700_000_000),
+                    }),
+                    seven_day: Some(RateLimitWindow {
+                        used_percentage: Some(3.5),
+                        resets_at: Some(1_700_500_000),
+                    }),
+                    total_cost_usd: Some(0.1234),
+                    current_dir: Some("/work".to_owned()),
+                },
+            })),
+            serde_json::json!({
+                "kind": "status_updated",
+                "session_id": "sess-1",
+                "snapshot": {
+                    "model_id": "claude-opus-4",
+                    "model_display_name": "Opus 4",
+                    "context_used_percentage": 42.5,
+                    "context_window_size": 200_000,
+                    "context_current_usage": 85_000,
+                    "total_input_tokens": 90_000,
+                    "five_hour": { "used_percentage": 12.0, "resets_at": 1_700_000_000 },
+                    "seven_day": { "used_percentage": 3.5, "resets_at": 1_700_500_000 },
+                    "total_cost_usd": 0.1234,
+                    "current_dir": "/work",
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn status_updated_pre_api_snapshot_carries_nulls_and_absent_rate_limits() {
+        // Before the first API response, rate limits and context usage are not
+        // yet known; the snapshot still serializes with explicit nulls.
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::StatusUpdated {
+                session_id: SessionId::from("sess-1"),
+                snapshot: StatusSnapshot {
+                    model_display_name: Some("Opus 4".to_owned()),
+                    ..StatusSnapshot::default()
+                },
+            })),
+            serde_json::json!({
+                "kind": "status_updated",
+                "session_id": "sess-1",
+                "snapshot": {
+                    "model_id": null,
+                    "model_display_name": "Opus 4",
+                    "context_used_percentage": null,
+                    "context_window_size": null,
+                    "context_current_usage": null,
+                    "total_input_tokens": null,
+                    "five_hour": null,
+                    "seven_day": null,
+                    "total_cost_usd": null,
+                    "current_dir": null,
+                },
             }),
         );
     }

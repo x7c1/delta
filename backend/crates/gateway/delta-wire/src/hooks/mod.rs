@@ -35,6 +35,11 @@ mod session_end_payload;
 pub use session_end_payload::SessionEndPayload;
 mod session_start_payload;
 pub use session_start_payload::SessionStartPayload;
+mod status_line_payload;
+pub use status_line_payload::{
+    StatusLineContextWindow, StatusLineCost, StatusLineModel, StatusLinePayload,
+    StatusLineRateLimitWindow, StatusLineRateLimits, StatusLineWorkspace,
+};
 mod stop_payload;
 pub use stop_payload::StopPayload;
 mod user_prompt_submit_payload;
