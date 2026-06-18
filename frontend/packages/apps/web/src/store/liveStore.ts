@@ -3,8 +3,10 @@ import type { SessionId, ThreadId } from '@delta/model';
 import type {
   PendingPermission,
   PendingQuestion,
+  RateLimitWindow,
   RunningSubagent,
   SessionEvent,
+  StatusSnapshot,
   Turn,
 } from '@delta/wire-gen';
 import type { ConnectionStatus } from '@delta/api-client';
@@ -387,6 +389,21 @@ function clearNoticesOn(
   );
 }
 
+/**
+ * The most recent account-wide rate-limit snapshot, taken from the latest
+ * `status_updated` event of any session. Rate limits are account-wide (the same
+ * across every session), so a single global value is kept and replaced on each
+ * event rather than stored per session. Either window can be absent (a
+ * non-Pro/Max account, or before the first API response of the day), in which
+ * case that window is `null` and its footer row is hidden.
+ */
+export interface RateLimits {
+  /** The rolling 5-hour window, or `null` when the account reports none. */
+  fiveHour: RateLimitWindow | null;
+  /** The rolling 7-day window, or `null` when the account reports none. */
+  sevenDay: RateLimitWindow | null;
+}
+
 export interface LiveState {
   connection: ConnectionStatus;
   /** Submits not yet accepted (or rejected) by the server, oldest first. */
@@ -466,6 +483,23 @@ export interface LiveState {
    * could be in flight at once. Cleared per session as it drains to zero.
    */
   endedBeforeRecorded: Record<SessionId, number>;
+  /**
+   * The latest Claude Code status-line context-usage percentage per session,
+   * keyed by session id. Replace-latest, not append: the status line fires
+   * frequently, so only the most recent snapshot of each session is kept. Drives
+   * the composer's top-edge context bar for the focused session. A session with
+   * no snapshot yet (or a `null` percentage right after `/compact`) has no entry,
+   * so the bar is hidden rather than shown at 0%.
+   */
+  contextUsage: Record<SessionId, number>;
+  /**
+   * The latest account-wide rate-limit snapshot, or `null` before any
+   * `status_updated` event arrives. A single global value (not per session):
+   * rate limits are account-wide, so every session's status line reports the
+   * same windows and the most recent one wins. Drives the navigator footer's
+   * 5h/7d meter rows; an absent window hides its row.
+   */
+  rateLimits: RateLimits | null;
 
   setConnection: (status: ConnectionStatus) => void;
   /** Record a submit whose `POST /api/sends` is about to fly. */
@@ -786,6 +820,8 @@ export const useLiveStore = create<LiveState>((set) => ({
   streamingMessages: {},
   runningSubagents: {},
   endedBeforeRecorded: {},
+  contextUsage: {},
+  rateLimits: null,
 
   setConnection: (status) => set({ connection: status }),
 
@@ -1340,6 +1376,41 @@ export const useLiveStore = create<LiveState>((set) => ({
             true,
           );
           return Object.keys(next).length > 0 ? next : state;
+        }
+        case 'status_updated': {
+          // A Claude Code status-line snapshot arrived. These fire frequently,
+          // so both pieces are stored replace-latest (never appended): the
+          // session's context-usage percentage replaces that session's previous
+          // value, and the account-wide rate limits replace the single global
+          // snapshot (every session reports the same windows, so the most recent
+          // event wins regardless of which session it came from).
+          const snapshot: StatusSnapshot = event.snapshot;
+          const next: Partial<LiveState> = {};
+
+          // Context usage is per session. A `null` percentage (e.g. right after
+          // `/compact`, before the next API response) drops the session's entry
+          // so the bar is hidden rather than pinned at the old value or 0%.
+          const pct = snapshot.context_used_percentage;
+          if (pct === null) {
+            if (state.contextUsage[event.session_id] !== undefined) {
+              const contextUsage = { ...state.contextUsage };
+              delete contextUsage[event.session_id];
+              next.contextUsage = contextUsage;
+            }
+          } else if (state.contextUsage[event.session_id] !== pct) {
+            next.contextUsage = {
+              ...state.contextUsage,
+              [event.session_id]: pct,
+            };
+          }
+
+          // Rate limits are account-wide: replace the single global snapshot.
+          next.rateLimits = {
+            fiveHour: snapshot.five_hour,
+            sevenDay: snapshot.seven_day,
+          };
+
+          return next;
         }
         default:
           return state;

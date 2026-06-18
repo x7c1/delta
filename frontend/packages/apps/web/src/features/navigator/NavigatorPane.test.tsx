@@ -121,9 +121,131 @@ describe('NavigatorPane per-session running indicator', () => {
   });
 });
 
+describe('NavigatorPane rate-limit meters', () => {
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      rateLimits: null,
+    });
+    useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
+  });
+
+  it('renders both meter rows with percentages and reset labels', () => {
+    // Add a 30s cushion on top of each whole-minute offset so the few ms that
+    // elapse between this `Date.now()` and the component's own render-time read
+    // cannot cross a minute boundary and flip the displayed countdown.
+    const now = Date.now() / 1000;
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: {
+          used_percentage: 37,
+          resets_at: now + 2 * 3600 + 13 * 60 + 30,
+        },
+        sevenDay: {
+          used_percentage: 8,
+          resets_at: now + 5 * 86400 + 4 * 3600 + 30,
+        },
+      },
+    });
+
+    renderPane();
+
+    const fiveHour = screen.getByTestId('rate-limit-5h');
+    expect(within(fiveHour).getByRole('meter')).toHaveAttribute(
+      'aria-valuenow',
+      '37',
+    );
+    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('37%');
+    expect(screen.getByTestId('rate-limit-5h-reset')).toHaveTextContent(
+      '↻02h13m',
+    );
+
+    const sevenDay = screen.getByTestId('rate-limit-7d');
+    expect(within(sevenDay).getByRole('meter')).toHaveAttribute(
+      'aria-valuenow',
+      '8',
+    );
+    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('8%');
+    expect(screen.getByTestId('rate-limit-7d-reset')).toHaveTextContent(
+      '↻5d04h',
+    );
+  });
+
+  it('renders neither row (no empty bars) when the snapshot has no rate limits', () => {
+    useLiveStore.setState({
+      rateLimits: { fiveHour: null, sevenDay: null },
+    });
+
+    renderPane();
+
+    expect(screen.queryByTestId('rate-limits')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rate-limit-5h')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rate-limit-7d')).not.toBeInTheDocument();
+  });
+
+  it('renders only the 5h row when the 7d window is absent', () => {
+    const now = Date.now() / 1000;
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: { used_percentage: 50, resets_at: now + 3600 },
+        sevenDay: null,
+      },
+    });
+
+    renderPane();
+
+    expect(screen.getByTestId('rate-limit-5h')).toBeInTheDocument();
+    expect(screen.queryByTestId('rate-limit-7d')).not.toBeInTheDocument();
+  });
+
+  it('renders only the 7d row when the 5h window is absent', () => {
+    const now = Date.now() / 1000;
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: null,
+        sevenDay: { used_percentage: 12, resets_at: now + 86400 },
+      },
+    });
+
+    renderPane();
+
+    expect(screen.queryByTestId('rate-limit-5h')).not.toBeInTheDocument();
+    expect(screen.getByTestId('rate-limit-7d')).toBeInTheDocument();
+  });
+
+  it('shows 0% and no reset glyph for a present window with null fields', () => {
+    // A present window can still carry null values (no usage reported yet, no
+    // reset timestamp): the row renders at 0% and omits the ↻ countdown rather
+    // than showing a misleading reset.
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: { used_percentage: null, resets_at: null },
+        sevenDay: null,
+      },
+    });
+
+    renderPane();
+
+    const fiveHour = screen.getByTestId('rate-limit-5h');
+    expect(within(fiveHour).getByRole('meter')).toHaveAttribute(
+      'aria-valuenow',
+      '0',
+    );
+    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('0%');
+    expect(screen.queryByTestId('rate-limit-5h-reset')).not.toBeInTheDocument();
+  });
+});
+
 describe('NavigatorPane settings entry', () => {
   beforeEach(() => {
-    useLiveStore.setState({ connection: 'open', notices: {}, runningThreads: {} });
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      rateLimits: null,
+    });
     useNavStore.setState({ settingsOpen: false });
   });
 
