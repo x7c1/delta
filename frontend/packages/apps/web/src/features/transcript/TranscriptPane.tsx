@@ -280,6 +280,17 @@ export function TranscriptPane({
     () => messages.filter((m) => !messageRendersNothing(m, pairing)),
     [messages, pairing],
   );
+  // The uuid of the latest assistant message: only it shows the richer two-line
+  // meta (model + cwd/branch, the "current working location"); older assistant
+  // messages show only `time · info`.
+  const latestAssistantUuid = useMemo(() => {
+    for (let i = renderedMessages.length - 1; i >= 0; i -= 1) {
+      if (renderedMessages[i].role === 'assistant') {
+        return renderedMessages[i].uuid;
+      }
+    }
+    return null;
+  }, [renderedMessages]);
 
   // Stick-to-bottom: auto-scroll the transcript when new content arrives, but
   // only while the user is already near the bottom (so reading scrollback is
@@ -1034,6 +1045,7 @@ export function TranscriptPane({
             <MessageItem
               message={message}
               pairing={pairing}
+              isLatest={message.uuid === latestAssistantUuid}
               // Branch-from-quote works on closed sessions too: the branch send
               // resumes the session before creating the child thread, so an old
               // conversation can be picked up from a selected passage.

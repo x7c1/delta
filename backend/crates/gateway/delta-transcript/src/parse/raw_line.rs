@@ -13,10 +13,22 @@ pub(super) struct RawLine {
     pub parent_uuid: Option<String>,
     #[serde(rename = "type")]
     pub line_type: Option<String>,
+    /// Discriminates a `type: "system"` line; `turn_duration` is the one Delta
+    /// reads (it carries the turn's latency).
+    pub subtype: Option<String>,
     #[serde(rename = "promptId")]
     pub prompt_id: Option<String>,
     pub timestamp: Option<String>,
     pub message: Option<RawMessage>,
+    /// Top-level working directory at this turn. Effectively fixed per session.
+    pub cwd: Option<String>,
+    /// Top-level git branch at this turn. Can change mid-session.
+    #[serde(rename = "gitBranch")]
+    pub git_branch: Option<String>,
+    /// Present on a `system`/`turn_duration` line: the turn's latency in
+    /// milliseconds. An `f64` because the wire value is a JSON number.
+    #[serde(rename = "durationMs")]
+    pub duration_ms: Option<f64>,
     /// Present on `type: "attachment"` lines; carries a queued command's prompt.
     pub attachment: Option<RawAttachment>,
     /// Set on harness-injected lines (skill bodies, system reminders,

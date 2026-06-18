@@ -7,7 +7,10 @@ use ts_rs::TS;
 use crate::message::WireMessage;
 
 /// Response for `GET /api/threads/{id}/messages`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+///
+/// Holds `Vec<WireMessage>`, which carries an `f64` (`response_time_ms`), so
+/// this derives only `PartialEq` — a float cannot implement `Eq`.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(rename = "MessagesResponse")]
 pub struct WireMessagesResponse {
     pub messages: Vec<WireMessage>,

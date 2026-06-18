@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ContentBlock, Message, MessageRole } from '@delta/wire-gen';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { MessageItem } from './MessageItem';
@@ -25,6 +25,10 @@ function makeMessageWithContent(
     content_text: text,
     content,
     created_at: '2026-01-01T00:00:00Z',
+    model: null,
+    git_branch: null,
+    cwd: null,
+    response_time_ms: null,
   };
 }
 
@@ -282,5 +286,109 @@ describe('MessageItem', () => {
     const message = { ...makeMessage('user', 'hi'), created_at: 'not-a-date' };
     render(<MessageItem message={message} />);
     expect(screen.queryByText(/\d{4}-\d{2}-\d{2}/)).toBeNull();
+  });
+
+  function assistantWithMeta(): Message {
+    return {
+      ...makeMessage('assistant', 'an answer'),
+      model: 'claude-opus-4-8',
+      cwd: '/home/dev/repo',
+      git_branch: 'feature/meta',
+      response_time_ms: 9400,
+    };
+  }
+
+  it('renders the latest assistant message with the two-line meta', () => {
+    render(<MessageItem message={assistantWithMeta()} isLatest />);
+
+    // Line 1 surfaces the model, the response time, and the timestamp.
+    expect(screen.getByTestId('meta-model')).toHaveTextContent('claude-opus-4-8');
+    expect(screen.getByTestId('meta-response-time')).toHaveTextContent('9.4s');
+    const expected = formatLocalDateTime('2026-01-01T00:00:00Z', true) as string;
+    expect(screen.getByText(expected)).toBeInTheDocument();
+
+    // Line 2 surfaces the working location: cwd and the branch (with its glyph).
+    expect(screen.getByTestId('meta-location')).toBeInTheDocument();
+    expect(screen.getByTestId('meta-cwd')).toHaveTextContent('/home/dev/repo');
+    expect(screen.getByTestId('meta-branch')).toHaveTextContent('feature/meta');
+  });
+
+  it('renders an older assistant message with only time and the info icon', () => {
+    render(<MessageItem message={assistantWithMeta()} isLatest={false} />);
+
+    // No model and no cwd/branch line for an older message…
+    expect(screen.queryByTestId('meta-model')).toBeNull();
+    expect(screen.queryByTestId('meta-location')).toBeNull();
+    // …just the timestamp and the info icon.
+    const expected = formatLocalDateTime('2026-01-01T00:00:00Z', true) as string;
+    expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getByTestId('message-meta-info')).toBeInTheDocument();
+  });
+
+  it('degrades the latest two-line meta when cwd and branch are absent', () => {
+    // A latest assistant message that carries only model + response time (no
+    // cwd/branch) must still render line 1, and must NOT render an empty
+    // second location line.
+    const message: Message = {
+      ...assistantWithMeta(),
+      cwd: null,
+      git_branch: null,
+    };
+    render(<MessageItem message={message} isLatest />);
+
+    expect(screen.getByTestId('meta-model')).toHaveTextContent('claude-opus-4-8');
+    expect(screen.getByTestId('meta-response-time')).toHaveTextContent('9.4s');
+    // No location line at all when both cwd and branch are missing.
+    expect(screen.queryByTestId('meta-location')).toBeNull();
+    expect(screen.queryByTestId('meta-cwd')).toBeNull();
+    expect(screen.queryByTestId('meta-branch')).toBeNull();
+  });
+
+  it('renders the latest location line when only the branch is present', () => {
+    // Partial location: a branch but no cwd. The line renders with just the
+    // branch, no leading separator dangling from the absent cwd.
+    const message: Message = {
+      ...assistantWithMeta(),
+      cwd: null,
+      git_branch: 'feature/only-branch',
+    };
+    render(<MessageItem message={message} isLatest />);
+
+    expect(screen.getByTestId('meta-location')).toBeInTheDocument();
+    expect(screen.queryByTestId('meta-cwd')).toBeNull();
+    expect(screen.getByTestId('meta-branch')).toHaveTextContent('feature/only-branch');
+  });
+
+  it('shows em dashes in the popover for the message metadata that is absent', () => {
+    // A message missing every metadata field still renders the popover with each
+    // labelled row present, falling back to an em dash rather than crashing or
+    // omitting the row.
+    render(<MessageItem message={makeMessage('assistant', 'an answer')} isLatest={false} />);
+
+    const popover = screen.getByTestId('message-meta-popover');
+    expect(within(popover).getByTestId('popover-model')).toHaveTextContent('—');
+    expect(within(popover).getByTestId('popover-time')).toHaveTextContent('—');
+    expect(within(popover).getByTestId('popover-cwd')).toHaveTextContent('—');
+    expect(within(popover).getByTestId('popover-branch')).toHaveTextContent('—');
+  });
+
+  it('info-icon popover lists model, response time, cwd and branch — no token/cache figures', () => {
+    render(<MessageItem message={assistantWithMeta()} isLatest={false} />);
+
+    const popover = screen.getByTestId('message-meta-popover');
+    expect(popover).toHaveTextContent('model');
+    expect(popover).toHaveTextContent('claude-opus-4-8');
+    expect(popover).toHaveTextContent('response time');
+    expect(popover).toHaveTextContent('9.4s');
+    expect(popover).toHaveTextContent('cwd');
+    expect(popover).toHaveTextContent('/home/dev/repo');
+    expect(popover).toHaveTextContent('branch');
+    expect(popover).toHaveTextContent('feature/meta');
+
+    // The popover is intentionally limited to those four facts: no token counts
+    // or cache ratios leak into it.
+    expect(popover.textContent).not.toMatch(/token/i);
+    expect(popover.textContent).not.toMatch(/cache/i);
+    expect(popover.textContent).not.toMatch(/cost/i);
   });
 });

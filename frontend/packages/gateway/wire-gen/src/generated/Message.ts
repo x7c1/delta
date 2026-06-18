@@ -10,6 +10,9 @@ import type { MessageRole } from "./MessageRole";
  * twin carries the serialization concerns the domain type must not know
  * about: the field names on the wire and the TypeScript export. Ids are plain
  * `String`/`i64` here because that is exactly what crosses the wire.
+ *
+ * `response_time_ms` is an `f64`, so this type derives only `PartialEq` — a
+ * float cannot implement `Eq`/`Hash`.
  */
 export type Message = { uuid: string, session_id: string, thread_id: number, role: MessageRole, linear_parent_uuid: string | null, semantic_parent_uuid: string | null, prompt_id: string | null, 
 /**
@@ -29,4 +32,22 @@ content: Array<ContentBlock>,
  * domain stores `None` for a missing timestamp, but the wire keeps the
  * pre-existing empty-string contract so the browser shape is unchanged.
  */
-created_at: string, };
+created_at: string, 
+/**
+ * The model that produced this message (historical, per message), or `null`
+ * when the line carried none. Distinct from the current model selection.
+ */
+model: string | null, 
+/**
+ * The git branch active at this turn, or `null` when absent.
+ */
+git_branch: string | null, 
+/**
+ * The working directory at this turn, or `null` when absent.
+ */
+cwd: string | null, 
+/**
+ * The turn's response time in milliseconds, or `null` when no duration was
+ * recorded for the turn.
+ */
+response_time_ms: number | null, };

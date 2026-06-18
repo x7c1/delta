@@ -3,5 +3,8 @@ import type { Message } from "./Message";
 
 /**
  * Response for `GET /api/threads/{id}/messages`.
+ *
+ * Holds `Vec<WireMessage>`, which carries an `f64` (`response_time_ms`), so
+ * this derives only `PartialEq` — a float cannot implement `Eq`.
  */
 export type MessagesResponse = { messages: Array<Message>, };

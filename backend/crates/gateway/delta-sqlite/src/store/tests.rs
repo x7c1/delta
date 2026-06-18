@@ -143,6 +143,10 @@ async fn message_upsert_and_thread_view() {
             text: "hello".into(),
         }],
         created_at: Some("2026-01-01T00:00:00Z".into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -166,6 +170,63 @@ async fn message_upsert_and_thread_view() {
 }
 
 #[tokio::test]
+async fn message_metadata_round_trips_through_upsert_and_read() {
+    // The per-message metadata columns (model, git_branch, cwd, response_time_ms)
+    // must survive the INSERT and read back into the right domain fields. This
+    // guards the column ordering in `MESSAGE_COLS`, the INSERT/ON CONFLICT bind
+    // list, and `message_from_row` against an off-by-one that would silently
+    // swap or drop a field. A re-upsert of the same uuid with different metadata
+    // must refresh it (it is transcript-derived cache, not overlay).
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let msg = Message {
+        uuid: MessageUuid::from("a-1"),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::Assistant,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("answer".into()),
+        content: vec![ContentBlock::Text {
+            text: "answer".into(),
+        }],
+        created_at: Some("2026-01-01T00:00:00Z".into()),
+        model: Some("claude-opus-4-8".into()),
+        git_branch: Some("feature/meta".into()),
+        cwd: Some("/home/dev/repo".into()),
+        response_time_ms: Some(9400.5),
+    };
+    store
+        .upsert_messages(std::slice::from_ref(&msg))
+        .await
+        .unwrap();
+
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].model.as_deref(), Some("claude-opus-4-8"));
+    assert_eq!(view[0].git_branch.as_deref(), Some("feature/meta"));
+    assert_eq!(view[0].cwd.as_deref(), Some("/home/dev/repo"));
+    assert_eq!(view[0].response_time_ms, Some(9400.5));
+
+    // A re-ingest with changed metadata refreshes the cached columns.
+    let mut updated = msg.clone();
+    updated.model = Some("claude-sonnet-4-8".into());
+    updated.git_branch = None;
+    updated.response_time_ms = Some(1200.0);
+    store.upsert_messages(&[updated]).await.unwrap();
+
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].model.as_deref(), Some("claude-sonnet-4-8"));
+    assert_eq!(view[0].git_branch, None, "a metadata value can be cleared");
+    assert_eq!(view[0].cwd.as_deref(), Some("/home/dev/repo"));
+    assert_eq!(view[0].response_time_ms, Some(1200.0));
+}
+
+#[tokio::test]
 async fn last_activity_at_returns_latest_message_timestamp() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
@@ -185,6 +246,10 @@ async fn last_activity_at_returns_latest_message_timestamp() {
         content_text: Some("hi".into()),
         content: vec![ContentBlock::Text { text: "hi".into() }],
         created_at: Some(created_at.into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
     store
         .upsert_messages(&[
@@ -217,6 +282,10 @@ async fn last_activity_at_is_stored_on_session_and_recomputed_on_reingest() {
         content_text: Some("hi".into()),
         content: vec![ContentBlock::Text { text: "hi".into() }],
         created_at: created_at.map(str::to_owned),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
 
     // The recency lives on the `session` row as a denormalized column, written
@@ -327,6 +396,10 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
             content_text: Some("hi".into()),
             content: vec![ContentBlock::Text { text: "hi".into() }],
             created_at: Some(at.into()),
+            model: None,
+            git_branch: None,
+            cwd: None,
+            response_time_ms: None,
         };
         legacy
             .upsert_messages(&[
@@ -380,6 +453,102 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
             .as_deref(),
         Some("2026-01-09T00:00:00Z"),
     );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A database created before the per-message metadata columns
+/// (`model`/`git_branch`/`cwd`/`response_time_ms`) must gain them on open and
+/// load its pre-existing rows with those fields as NULL — never crashing on the
+/// now-wider `message_from_row` and never losing the row's other data.
+#[tokio::test]
+async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
+    let dir = std::env::temp_dir().join(format!("delta-migrate-meta-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    let (session_id, main) = {
+        // Build the database, insert a message carrying metadata, then physically
+        // drop the four metadata columns so the file is a faithful pre-metadata
+        // snapshot. Dropping after the insert proves the row predates the columns.
+        let legacy = SqliteStore::open(path_str).unwrap();
+        let (session, main) = legacy.register_session(new_session()).await.unwrap();
+        legacy
+            .upsert_messages(&[Message {
+                uuid: MessageUuid::from("a-1"),
+                session_id: session.id.clone(),
+                thread_id: main,
+                role: Role::Assistant,
+                linear_parent_uuid: None,
+                semantic_parent_uuid: None,
+                prompt_id: None,
+                seq: 0,
+                content_text: Some("answer".into()),
+                content: vec![ContentBlock::Text {
+                    text: "answer".into(),
+                }],
+                created_at: Some("2026-01-01T00:00:00Z".into()),
+                model: Some("will-be-stripped".into()),
+                git_branch: Some("will-be-stripped".into()),
+                cwd: Some("will-be-stripped".into()),
+                response_time_ms: Some(9400.0),
+            }])
+            .await
+            .unwrap();
+        let conn = legacy.conn.lock().await;
+        // The FTS update trigger fires on a message UPDATE; DROP COLUMN does not
+        // rewrite rows, so the columns can be removed without touching it.
+        conn.execute_batch(
+            "ALTER TABLE message DROP COLUMN model; \
+             ALTER TABLE message DROP COLUMN git_branch; \
+             ALTER TABLE message DROP COLUMN cwd; \
+             ALTER TABLE message DROP COLUMN response_time_ms;",
+        )
+        .unwrap();
+        (session.id, main)
+    };
+
+    // Re-opening applies the guarded ALTERs; the old row loads with NULL metadata
+    // (the read path does not crash on the now-present-again columns) and keeps
+    // its other fields intact.
+    let store = SqliteStore::open(path_str).unwrap();
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].uuid, MessageUuid::from("a-1"));
+    assert_eq!(view[0].content_text.as_deref(), Some("answer"));
+    assert_eq!(view[0].model, None, "a pre-migration row has no model");
+    assert_eq!(view[0].git_branch, None);
+    assert_eq!(view[0].cwd, None);
+    assert_eq!(view[0].response_time_ms, None);
+
+    // A fresh upsert of the same uuid now fills the metadata, proving the
+    // migrated columns are writable.
+    store
+        .upsert_messages(&[Message {
+            uuid: MessageUuid::from("a-1"),
+            session_id: session_id.clone(),
+            thread_id: main,
+            role: Role::Assistant,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: None,
+            prompt_id: None,
+            seq: 0,
+            content_text: Some("answer".into()),
+            content: vec![ContentBlock::Text {
+                text: "answer".into(),
+            }],
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+            model: Some("claude-opus-4-8".into()),
+            git_branch: None,
+            cwd: None,
+            response_time_ms: Some(1234.0),
+        }])
+        .await
+        .unwrap();
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view[0].model.as_deref(), Some("claude-opus-4-8"));
+    assert_eq!(view[0].response_time_ms, Some(1234.0));
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -457,6 +626,10 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
         content_text: Some("hi".into()),
         content: vec![ContentBlock::Text { text: "hi".into() }],
         created_at: Some(created_at.into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
 
     // `/projects/a` had its latest activity at 00:10; `/projects/b`'s most
@@ -539,6 +712,10 @@ async fn upsert_preserves_thread_overlay_on_reingest() {
             text: "hello".into(),
         }],
         created_at: Some("2026-01-01T00:00:00Z".into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -622,6 +799,10 @@ async fn upsert_keeps_missing_created_at_null() {
             text: "hello".into(),
         }],
         created_at: None,
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
     store.upsert_messages(&[msg]).await.unwrap();
 
@@ -672,6 +853,10 @@ async fn branch_thread_derives_root_from_send_then_message() {
                 text: "branch reply".into(),
             }],
             created_at: Some("2026-01-01T00:00:00Z".into()),
+            model: None,
+            git_branch: None,
+            cwd: None,
+            response_time_ms: None,
         }])
         .await
         .unwrap();
@@ -697,6 +882,10 @@ async fn session_active_at(store: &SqliteStore, id: &str, activity_at: &str) -> 
             content_text: Some("hi".into()),
             content: vec![ContentBlock::Text { text: "hi".into() }],
             created_at: Some(activity_at.into()),
+            model: None,
+            git_branch: None,
+            cwd: None,
+            response_time_ms: None,
         }])
         .await
         .unwrap();
@@ -1161,6 +1350,10 @@ async fn delete_session_cascades_to_children() {
                 text: "hello".into(),
             }],
             created_at: Some("2026-01-01T00:00:00Z".into()),
+            model: None,
+            git_branch: None,
+            cwd: None,
+            response_time_ms: None,
         }])
         .await
         .unwrap();
@@ -1227,6 +1420,10 @@ async fn message_fts_indexes_inserts_and_updates() {
             text: "the quick brown fox".into(),
         }],
         created_at: Some("2026-01-01T00:00:00Z".into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
