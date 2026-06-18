@@ -1400,3 +1400,62 @@ describe('TranscriptPane', () => {
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 });
+
+describe('TranscriptPane composer context bar', () => {
+  beforeEach(() => {
+    useNavStore.setState({
+      activeThreadId: MAIN_THREAD_ID,
+      focusedSessionId: SESSION_ID,
+      preNewSessionFocus: null,
+    });
+    useLiveStore.setState({
+      sending: [],
+      localSends: {},
+      spawns: [],
+      notices: {},
+      streamingMessages: {},
+      runningSubagents: {},
+      contextUsage: {},
+      rateLimits: null,
+    });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+      workdirDialogOpen: false,
+    });
+  });
+
+  it('fills the context bar proportional to the focused session used_percentage', async () => {
+    // Seed a second, unfocused session too: the bar must read the FOCUSED
+    // session's key (62), not just whatever entry is present, so an off-by-key
+    // selector bug would surface here rather than passing on a single entry.
+    useLiveStore.setState({
+      contextUsage: { [SESSION_ID]: 62, 'other-session': 9 },
+    });
+
+    renderPane();
+
+    const card = await screen.findByTestId('composer-card');
+    const fill = within(card).getByTestId('composer-context-fill');
+    expect(fill).toHaveStyle({ width: '62%' });
+    expect(fill).toHaveAttribute('aria-valuenow', '62');
+    expect(within(card).getByTestId('composer-context-bar')).toHaveTextContent(
+      '62%',
+    );
+  });
+
+  it('omits the fill when the focused session has no context usage', async () => {
+    // No `contextUsage` entry for the focused session (e.g. no snapshot yet, or
+    // null right after /compact).
+    renderPane();
+
+    const card = await screen.findByTestId('composer-card');
+    expect(
+      within(card).queryByTestId('composer-context-fill'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByTestId('composer-context-bar'),
+    ).not.toBeInTheDocument();
+  });
+});

@@ -206,6 +206,15 @@ export function TranscriptPane({
         : null,
     [sessionSubagents, activeThread],
   );
+  // The focused session's latest context-window usage (a `status_updated`
+  // snapshot's `used_percentage`, replace-latest in the store). Drives the
+  // ambient fill along the composer card's top edge — right where the user is
+  // about to send. `undefined` when no snapshot has arrived yet (or after a
+  // `/compact` cleared it), in which case the fill is omitted rather than shown
+  // at 0%. Forwarded straight through; never recomputed here.
+  const contextUsage = useLiveStore((state) =>
+    activeThread ? state.contextUsage[activeThread.session_id] : undefined,
+  );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   // The focused session's pending AskUserQuestion, if any. Emitted by the
   // `PreToolUse` hook for that built-in tool, so it is a genuine "answer
@@ -745,11 +754,40 @@ export function TranscriptPane({
         )}
 
         {/* Composer card: the new-session launch pickers (which parameterize the
-            spawn) sit directly above the input they configure. */}
+            spawn) sit directly above the input they configure. The focused
+            session's context-window usage rides the card's TOP EDGE as a thin
+            ambient fill (the border doubles as the track), filled from the left
+            to `used_percentage`%, with the numeric `NN%` small at the edge —
+            right where the user is about to send. Omitted entirely when no
+            snapshot is available (or after `/compact`), rather than shown at 0%. */}
         <div
-          className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
+          className={`relative ${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
           data-testid="composer-card"
         >
+          {contextUsage !== undefined && (
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0"
+              data-testid="composer-context-bar"
+            >
+              {/* The card's top border is the track; this fill runs along it from
+                  the left to the usage percentage. A real DOM bar, not text. */}
+              <div
+                className="h-0.5 rounded-t-md bg-indigo-400/80"
+                style={{ width: `${Math.min(100, Math.max(0, contextUsage))}%` }}
+                data-testid="composer-context-fill"
+                role="meter"
+                aria-label="Context window usage"
+                aria-valuenow={Math.round(
+                  Math.min(100, Math.max(0, contextUsage)),
+                )}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              />
+              <span className="absolute right-1.5 top-0.5 text-[10px] leading-none tabular-nums text-slate-400">
+                {Math.round(contextUsage)}%
+              </span>
+            </div>
+          )}
           {/* A directory is chosen: show it as a chip with a ✎ to change it (the
               ✎ reopens the picker without resetting the selection). The chip
               renders nothing when no directory is selected, so there is no button
