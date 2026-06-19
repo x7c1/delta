@@ -37,6 +37,11 @@ pub(crate) struct FakeGitWorktree {
     /// Directories that "are" git repositories, mapping each to the root
     /// `repo_root` returns. Anything absent resolves to `None` (not a git repo).
     pub(crate) repo_roots: Mutex<Vec<(String, String)>>,
+    /// Branch names `current_branch` should return for a given directory. A
+    /// directory absent from the map resolves to `None` (no branch at launch:
+    /// not a git repo, or detached HEAD). A present entry mirrors the real
+    /// gateway's branch-name short form.
+    pub(crate) current_branches: Mutex<Vec<(String, String)>>,
     /// The default branch `default_branch`/`fetch_remote_branches` report.
     pub(crate) default_branch: Mutex<Option<String>>,
     /// The remote branches `fetch_remote_branches` reports.
@@ -68,6 +73,15 @@ impl FakeGitWorktree {
         self
     }
 
+    /// Script `current_branch(dir)` to report `branch`.
+    pub(crate) fn with_current_branch(self, dir: &str, branch: &str) -> Self {
+        self.current_branches
+            .lock()
+            .unwrap()
+            .push((dir.to_owned(), branch.to_owned()));
+        self
+    }
+
     /// Script `worktree_path_for_branch(_, branch)` to report `path` — i.e.
     /// `branch` is already checked out in the worktree at `path` (driving the
     /// `UseRemoteBranch` reuse path).
@@ -90,6 +104,16 @@ impl GitWorktree for FakeGitWorktree {
             .iter()
             .find(|(dir, _)| dir == path)
             .map(|(_, root)| root.clone()))
+    }
+
+    async fn current_branch(&self, path: &str) -> Result<Option<String>> {
+        Ok(self
+            .current_branches
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(dir, _)| dir == path)
+            .map(|(_, branch)| branch.clone()))
     }
 
     async fn default_branch(&self, _repo_root: &str) -> Result<Option<String>> {

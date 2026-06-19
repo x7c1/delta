@@ -63,6 +63,8 @@ const item: SessionListItem = {
     title: null,
     status: 'active',
     created_at: '2026-01-01T00:00:00Z',
+    branch_at_launch: 'main',
+    repo_root: '/home/dev/project',
   },
   open: true,
   main_thread_id: 1,

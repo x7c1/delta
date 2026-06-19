@@ -11,6 +11,8 @@ fn new_session() -> NewSession {
         id: "sess-1".into(),
         cwd: "/work".into(),
         transcript_path: "/tmp/t.jsonl".into(),
+        branch_at_launch: None,
+        repo_root: None,
     }
 }
 
@@ -19,6 +21,8 @@ fn new_session_with(id: &str) -> NewSession {
         id: id.into(),
         cwd: "/work".into(),
         transcript_path: format!("/tmp/{id}.jsonl"),
+        branch_at_launch: None,
+        repo_root: None,
     }
 }
 
@@ -369,6 +373,8 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
                 id: "with-msgs".into(),
                 cwd: "/w".into(),
                 transcript_path: "/tmp/with.jsonl".into(),
+                branch_at_launch: None,
+                repo_root: None,
             })
             .await
             .unwrap();
@@ -377,6 +383,8 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
                 id: "no-msgs".into(),
                 cwd: "/w".into(),
                 transcript_path: "/tmp/no.jsonl".into(),
+                branch_at_launch: None,
+                repo_root: None,
             })
             .await
             .unwrap();
@@ -597,6 +605,8 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
         id: id.into(),
         cwd: cwd.into(),
         transcript_path: format!("/tmp/{id}.jsonl"),
+        branch_at_launch: None,
+        repo_root: None,
     };
 
     // Three sessions across two distinct cwds. `/projects/b` is used by two
@@ -672,6 +682,8 @@ async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
             id: "sess-1".into(),
             cwd: "/fresh".into(),
             transcript_path: "/tmp/s.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
         })
         .await
         .unwrap();
@@ -982,7 +994,7 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&spawning, "/work")
+        .insert_spawning_session(&spawning, "/work", None, None)
         .await
         .unwrap();
 
@@ -998,6 +1010,8 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
             id: spawning.clone(),
             cwd: "/work".into(),
             transcript_path: "/tmp/spawn.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
         })
         .await
         .unwrap();
@@ -1294,7 +1308,10 @@ async fn spawning_session_inserts_then_activates_on_register() {
 
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
-    let (session, main) = store.insert_spawning_session(&id, "/work").await.unwrap();
+    let (session, main) = store
+        .insert_spawning_session(&id, "/work", None, None)
+        .await
+        .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
     assert_eq!(session.transcript_path, None);
     assert_eq!(store.main_thread_id(&id).await.unwrap(), main);
@@ -1306,6 +1323,8 @@ async fn spawning_session_inserts_then_activates_on_register() {
             id: id.clone(),
             cwd: "/work/real".into(),
             transcript_path: "/tmp/spawn.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
         })
         .await
         .unwrap();
@@ -1320,6 +1339,8 @@ async fn spawning_session_inserts_then_activates_on_register() {
             id: id.clone(),
             cwd: "/elsewhere".into(),
             transcript_path: "/tmp/other.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
         })
         .await
         .unwrap();
@@ -1379,7 +1400,10 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
 
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
-    store.insert_spawning_session(&id, "/work").await.unwrap();
+    store
+        .insert_spawning_session(&id, "/work", None, None)
+        .await
+        .unwrap();
     store.mark_session_failed(&id).await.unwrap();
     let failed = store.session(&id).await.unwrap().unwrap();
     assert_eq!(failed.status, SessionStatus::Failed);

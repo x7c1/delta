@@ -14,6 +14,8 @@ async fn recent_workdirs_lists_distinct_session_cwds() {
             id: SessionId::from("s-1"),
             cwd: "/projects/a".into(),
             transcript_path: "/tmp/a.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
         })
         .await
         .unwrap();
@@ -22,6 +24,8 @@ async fn recent_workdirs_lists_distinct_session_cwds() {
             id: SessionId::from("s-2"),
             cwd: "/projects/b".into(),
             transcript_path: "/tmp/b.jsonl".into(),
+            branch_at_launch: None,
+            repo_root: None,
         })
         .await
         .unwrap();

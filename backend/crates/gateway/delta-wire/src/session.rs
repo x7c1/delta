@@ -50,6 +50,16 @@ pub struct WireSession {
     pub status: WireSessionStatus,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// Spawn-time snapshot of the local git branch checked out in `cwd`.
+    /// `null` when the launch directory was not inside a git repository, when
+    /// HEAD was detached, or for sessions that predate this field. Never
+    /// updated on resume or a later `git checkout`; the per-message
+    /// `git_branch` is a separate per-turn snapshot.
+    pub branch_at_launch: Option<String>,
+    /// Spawn-time snapshot of the repository root containing `cwd`. `null`
+    /// when the launch directory was not inside a git repository, or for
+    /// sessions that predate this field.
+    pub repo_root: Option<String>,
 }
 
 impl From<Session> for WireSession {
@@ -61,6 +71,8 @@ impl From<Session> for WireSession {
             title: session.title,
             status: session.status.into(),
             created_at: session.created_at,
+            branch_at_launch: session.branch_at_launch,
+            repo_root: session.repo_root,
         }
     }
 }
@@ -80,6 +92,8 @@ mod tests {
             title: None,
             status: SessionStatus::Active,
             created_at: "2026-01-01T00:00:00Z".into(),
+            branch_at_launch: Some("main".into()),
+            repo_root: Some("/work/delta".into()),
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -90,6 +104,8 @@ mod tests {
                 "title": null,
                 "status": "active",
                 "created_at": "2026-01-01T00:00:00Z",
+                "branch_at_launch": "main",
+                "repo_root": "/work/delta",
             }),
         );
     }

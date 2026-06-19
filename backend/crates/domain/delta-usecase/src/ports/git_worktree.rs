@@ -86,6 +86,16 @@ pub trait GitWorktree: Send + Sync {
     /// root has any trailing newline trimmed. Lightweight: no fetch.
     async fn repo_root(&self, path: &str) -> Result<Option<String>>;
 
+    /// The local branch name currently checked out under `path`, or `None`
+    /// when `path` is not inside a git repository OR when HEAD is detached.
+    ///
+    /// Runs `git -C <path> rev-parse --abbrev-ref HEAD`: a non-zero exit (not a
+    /// git repo) and an output of the literal `HEAD` (detached) are both the
+    /// `None` signal, not errors to propagate. The returned name has any
+    /// trailing newline trimmed. Lightweight: no fetch. Mirrors the
+    /// `Option`-returning shape of [`Self::repo_root`].
+    async fn current_branch(&self, path: &str) -> Result<Option<String>>;
+
     /// The repository's default branch short name (e.g. `main`), or `None` when
     /// it is unset.
     ///
@@ -168,6 +178,10 @@ pub trait GitWorktree: Send + Sync {
 impl GitWorktree for Box<dyn GitWorktree> {
     async fn repo_root(&self, path: &str) -> Result<Option<String>> {
         (**self).repo_root(path).await
+    }
+
+    async fn current_branch(&self, path: &str) -> Result<Option<String>> {
+        (**self).current_branch(path).await
     }
 
     async fn default_branch(&self, repo_root: &str) -> Result<Option<String>> {

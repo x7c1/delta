@@ -41,6 +41,14 @@ where
                 id: session_id.clone(),
                 cwd: cwd.to_owned(),
                 transcript_path: transcript_path.to_owned(),
+                // The hook-driven activate path knows nothing of Delta's
+                // launch context: the spawn-time snapshot is recorded once by
+                // `insert_spawning_session` and is left untouched here. For
+                // an externally-started `claude` (the fresh-insert side of
+                // `register_session`) Delta likewise has no launch git
+                // context, so both stay `None`.
+                branch_at_launch: None,
+                repo_root: None,
             })
             .await?;
         events.push(SessionEvent::SessionRegistered {

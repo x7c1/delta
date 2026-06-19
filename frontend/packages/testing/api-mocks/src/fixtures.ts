@@ -68,29 +68,35 @@ export const TOTAL_SEEDED_SESSIONS = 3 + FILLER_SESSION_COUNT;
 
 export const mockSession: Session = {
   id: SESSION_ID,
-  cwd: '/work/delta',
+  cwd: '/home/dev/projects/delta',
   transcript_path: '/tmp/transcript.jsonl',
   title: null,
   status: 'active',
   created_at: '2026-01-01T00:00:00Z',
+  branch_at_launch: 'main',
+  repo_root: '/home/dev/projects/delta',
 };
 
 export const mockSession2: Session = {
   id: SESSION_ID_2,
-  cwd: '/work/scratch',
+  cwd: '/home/dev/projects/scratch',
   transcript_path: '/tmp/transcript-2.jsonl',
   title: 'scratch notes',
   status: 'ended',
   created_at: '2026-01-02T00:00:00Z',
+  branch_at_launch: 'feat/scratch-ideas',
+  repo_root: '/home/dev/projects/scratch',
 };
 
 export const mockSession3: Session = {
   id: SESSION_ID_3,
-  cwd: '/work/old-experiment',
+  cwd: '/home/dev/projects/old-experiment',
   transcript_path: '/tmp/transcript-3-gone.jsonl',
   title: 'resume-unavailable demo',
   status: 'ended',
   created_at: '2025-12-31T00:00:00Z',
+  branch_at_launch: 'main',
+  repo_root: '/home/dev/projects/old-experiment',
 };
 
 export const mockThreads: Thread[] = [
@@ -473,6 +479,11 @@ function buildFillerSessions(): MockStore['sessions'] {
         title: `archived session ${ordinal}`,
         status: 'ended' as const,
         created_at: createdAt,
+        // Older filler sessions predate the spawn-time git snapshot; leaving
+        // them null exercises the navigator's fallback (cwd basename for the
+        // repo line, session label for the branch line).
+        branch_at_launch: null,
+        repo_root: null,
       },
       open: false,
       mainThreadId: threadId,

@@ -249,6 +249,8 @@ describe('WorkspaceScreen multi-session', () => {
                 title: null,
                 status: 'active',
                 created_at: '2026-01-02T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
               },
               open: false,
               main_thread_id: SESSION_2_MAIN_THREAD_ID,
@@ -262,6 +264,8 @@ describe('WorkspaceScreen multi-session', () => {
                 title: null,
                 status: 'active',
                 created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
               },
               open: false,
               main_thread_id: 1,
@@ -391,11 +395,13 @@ describe('WorkspaceScreen multi-session', () => {
     );
   });
 
-  it("shows the working-directory tail in a session's row", async () => {
-    // The row leads with the session's cwd tail (its last two segments) on the
-    // first line so a session is identifiable by where it runs; the full path
-    // stays available on hover via `title`. The second line carries the session
-    // id and the last-activity time as visible, right-aligned row text.
+  it('identifies a session by its launch-time branch and repo basename', async () => {
+    // The row's two-line header identifies a session by its launch context:
+    // line 1 carries the *launch-time* local git branch (captured once on
+    // spawn, never updated on resume), and line 2 left carries the basename of
+    // the launch-time repository root with the time on the right. Both spans
+    // are hover-titled with their full value; the per-span tooltips replace
+    // the old card-wide cwd hover.
     const lastActivityAt = '2026-01-01T00:00:02Z';
     server.use(
       http.get('*/api/sessions', () =>
@@ -409,6 +415,8 @@ describe('WorkspaceScreen multi-session', () => {
                 title: null,
                 status: 'active',
                 created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: 'feat/example',
+                repo_root: '/home/dev/projects/delta',
               },
               open: true,
               main_thread_id: 1,
@@ -422,21 +430,63 @@ describe('WorkspaceScreen multi-session', () => {
 
     renderScreen();
 
-    // The visible directory tail leads the first line, rendered with ' : '
-    // separators in place of slashes; its tooltip still carries the full
-    // slash path (no longer the time).
-    const tail = await screen.findByText('projects : delta');
-    expect(tail.getAttribute('title')).toBe('/home/dev/projects/delta');
+    // Line 1: the launch-time branch, with the full branch name on hover.
+    const branch = await screen.findByTestId('session-branch');
+    expect(branch).toHaveTextContent('feat/example');
+    expect(branch.getAttribute('title')).toBe('feat/example');
 
-    // The session id and the last-activity time are visible row text on the
-    // second line now. Derive the expected time the same way the component does
-    // so the assertion is timezone-agnostic.
+    // Line 2 left: the repo basename, with the full repo_root path on hover.
+    const repo = screen.getByTestId('session-repo');
+    expect(repo).toHaveTextContent('delta');
+    expect(repo.getAttribute('title')).toBe('/home/dev/projects/delta');
+
+    // The last-activity time is still visible on line 2 (right-aligned).
+    // Derive it the same way the component does so the assertion is
+    // timezone-agnostic.
     const formattedTime = formatLocalDateTime(lastActivityAt);
     expect(formattedTime).not.toBeNull();
     expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
-    // The id is rendered as its first 8 chars, with the full value in its title.
-    const idEl = screen.getByText(SESSION_ID.slice(0, 8));
-    expect(idEl).toBeInTheDocument();
-    expect(idEl.getAttribute('title')).toBe(SESSION_ID);
+  });
+
+  it("falls back to the cwd basename when a session has no launch repo_root", async () => {
+    // A session launched outside any git repo (or one that predates the
+    // spawn-time snapshot — older databases store NULL on both) still
+    // identifies its working directory: line 2 falls back to the cwd's
+    // basename, hover-titled with the full cwd path.
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/home/dev/scratch',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
+              },
+              open: true,
+              main_thread_id: 1,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+
+    renderScreen();
+
+    // Line 2: the cwd basename, with the full cwd path on hover.
+    const repo = await screen.findByTestId('session-repo');
+    expect(repo).toHaveTextContent('scratch');
+    expect(repo.getAttribute('title')).toBe('/home/dev/scratch');
+
+    // Line 1 falls back to the session label when no branch was recorded.
+    const branch = screen.getByTestId('session-branch');
+    expect(branch).toHaveTextContent(`session ${SESSION_ID.slice(0, 8)}`);
   });
 });
