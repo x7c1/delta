@@ -330,7 +330,15 @@ fn status_snapshot_from(payload: StatusLinePayload) -> StatusSnapshot {
         model_display_name: model.display_name,
         context_used_percentage: context.used_percentage,
         context_window_size: context.context_window_size,
-        context_current_usage: context.current_usage,
+        // "Tokens currently occupying the context window" = the input-side of
+        // Claude Code's `current_usage` breakdown (prompt + cache read + cache
+        // write). `None` before the first API response, when `current_usage` is
+        // absent.
+        context_current_usage: context.current_usage.map(|usage| {
+            usage.input_tokens.unwrap_or(0)
+                + usage.cache_creation_input_tokens.unwrap_or(0)
+                + usage.cache_read_input_tokens.unwrap_or(0)
+        }),
         total_input_tokens: context.total_input_tokens,
         five_hour: rate_limits.five_hour.map(rate_limit_window_from),
         seven_day: rate_limits.seven_day.map(rate_limit_window_from),

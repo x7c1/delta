@@ -62,10 +62,26 @@ pub struct StatusLineContextWindow {
     pub used_percentage: Option<f64>,
     #[serde(default)]
     pub context_window_size: Option<u64>,
+    /// Per-bucket token breakdown of the current context occupancy. Claude Code
+    /// sends this as an object (not a scalar); `null` before the first API
+    /// response.
     #[serde(default)]
-    pub current_usage: Option<u64>,
+    pub current_usage: Option<StatusLineCurrentUsage>,
     #[serde(default)]
     pub total_input_tokens: Option<u64>,
+}
+
+/// The per-bucket token breakdown inside `context_window.current_usage`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct StatusLineCurrentUsage {
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_creation_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub cache_read_input_tokens: Option<u64>,
 }
 
 /// Rate-limit windows. Absent entirely before the first API response and on

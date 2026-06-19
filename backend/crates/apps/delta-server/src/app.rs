@@ -582,7 +582,12 @@ mod tests {
             "context_window": {
                 "used_percentage": 42.5,
                 "context_window_size": 200000,
-                "current_usage": 85000,
+                "current_usage": {
+                    "input_tokens": 5000,
+                    "output_tokens": 200,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 80000
+                },
                 "total_input_tokens": 90000
             },
             "rate_limits": {
@@ -616,6 +621,9 @@ mod tests {
             } => {
                 assert_eq!(session_id.0, "sess-status");
                 assert_eq!(snapshot.context_used_percentage, Some(42.5));
+                // `current_usage` arrives as an object; the snapshot sums its
+                // input-side buckets (5000 + 0 + 80000) into the occupancy.
+                assert_eq!(snapshot.context_current_usage, Some(85000));
                 let five_hour = snapshot.five_hour.expect("5h window present");
                 assert_eq!(five_hour.used_percentage, Some(12.0));
                 assert_eq!(five_hour.resets_at, Some(1700000000));
