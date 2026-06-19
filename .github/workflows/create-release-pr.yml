@@ -1,0 +1,38 @@
+name: Create Release PR
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  create-release-pr:
+    runs-on: ubuntu-latest
+    # Skip when the push that triggered us is the merge of a release PR
+    # itself — otherwise we'd loop, opening a new release PR for the very
+    # release that just landed.
+    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # cargo-edit gives us `cargo set-version`, which is the safest way
+      # to bump the workspace version: it understands [workspace.package]
+      # boundaries so sed-style rewrites can't corrupt the file.
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+
+      - name: Create or update release PR
+        run: .github/scripts/create-release-pr.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
