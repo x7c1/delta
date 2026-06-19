@@ -1,0 +1,42 @@
+name: Validate Release PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  validate-title:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      # Cheap pre-filter: a PR whose title does not start with "Release v"
+      # is not a release PR, so the validator has nothing to enforce on
+      # it. Exit 0 so the required check passes for every non-release PR
+      # without needing to gate it on labels.
+      - name: Skip when not a release PR
+        id: gate
+        run: |
+          title="${{ github.event.pull_request.title }}"
+          if [[ ! "$title" =~ ^Release\ v ]]; then
+            echo "Not a release PR (title='${title}'); skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout code
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release PR title
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          .github/scripts/validate-release-pr-title.sh "$PR_TITLE" "$last_tag"

@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Only consider main runs that finished green: a red CI must never
+    # tag a release.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # cargo metadata reads the manifest, so the toolchain has to be
+      # available even when the version turns out to be unchanged.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Check if version changed
+        id: version-check
+        run: ./scripts/check-version-change.sh
+
+      - name: Generate changelog
+        if: steps.version-check.outputs.changed == 'true'
+        id: changelog
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.version-check.outputs.version }}
+        run: |
+          repo_url=$(gh repo view --json url --jq '.url')
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          changelog=$(.github/scripts/generate-changelog.sh "$last_tag" "$repo_url")
+          # Append a compare link against the previous tag. The release
+          # PR description carries the same link but pointing at the
+          # release branch; update-release-pr-links.sh rewrites that
+          # one to the tag after the release lands.
+          compare=""
+          if [ -n "$last_tag" ]; then
+            compare=$(printf '## Changelog\n\n- [%s...v%s](%s/compare/%s...v%s)' \
+              "$last_tag" "$NEW_VERSION" \
+              "$repo_url" "$last_tag" "$NEW_VERSION")
+          fi
+          {
+            echo 'body<<CHANGELOG_EOF'
+            printf '%s\n' "$changelog"
+            printf '%s\n' "$compare"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        if: steps.version-check.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version-check.outputs.version }}
+          name: Release v${{ steps.version-check.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+
+      - name: Rewrite release PR links to point at the tag
+        if: steps.version-check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/update-release-pr-links.sh "${{ steps.version-check.outputs.version }}"
