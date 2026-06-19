@@ -1,7 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { SessionListItem } from '@delta/wire-gen';
-import { Button, cn, Panel, Spinner, StatusDot, type DotTone } from '@delta/ui-kit';
+import type { RateLimitWindow, SessionListItem } from '@delta/wire-gen';
+import {
+  Button,
+  cn,
+  Meter,
+  Panel,
+  Spinner,
+  StatusDot,
+  type DotTone,
+} from '@delta/ui-kit';
 import {
   useCloseSessionMutation,
   type ConnectionStatus,
@@ -11,6 +19,7 @@ import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
+import { formatResetCountdown } from './rateLimitReset';
 
 /**
  * Estimated height of a collapsed session card, in pixels. Only a seed for the
@@ -109,6 +118,56 @@ function SettingsIcon({ className }: { className?: string }) {
 }
 
 /**
+ * One account-wide rate-limit row in the footer: a window label (`5h` / `7d`),
+ * a {@link Meter} bar, the percentage, and a compact relative reset countdown.
+ * The 5h and 7d rows carry distinct static accent colours purely so they can be
+ * told apart — the colour does NOT change with the value (no threshold). The
+ * caller hides the row entirely when its window is absent, so this only renders
+ * a present window; a `null` percentage within a present window reads as 0%.
+ */
+function RateLimitRow({
+  label,
+  window: rateWindow,
+  fillClassName,
+  testId,
+}: {
+  label: string;
+  window: RateLimitWindow;
+  fillClassName: string;
+  testId: string;
+}) {
+  const percentage = rateWindow.used_percentage ?? 0;
+  const reset =
+    rateWindow.resets_at !== null
+      ? formatResetCountdown(rateWindow.resets_at)
+      : null;
+  return (
+    <div
+      className="flex items-center gap-1.5 text-xs text-slate-500"
+      data-testid={testId}
+    >
+      <span className="w-5 shrink-0 tabular-nums text-slate-400">{label}</span>
+      <Meter
+        value={percentage}
+        fillClassName={fillClassName}
+        title={`${label} rate limit: ${Math.round(percentage)}% used`}
+      />
+      <span className="shrink-0 tabular-nums" data-testid={`${testId}-pct`}>
+        {Math.round(percentage)}%
+      </span>
+      {reset !== null && (
+        <span
+          className="shrink-0 tabular-nums text-slate-400"
+          data-testid={`${testId}-reset`}
+        >
+          {`↻ ${reset}`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
  * The left pane: a session → thread nested tree, plus a "New" affordance and
  * the live connection status. Each session's open/closed state is shown by its
  * status dot, so no separate count is rendered. Per-session state — a pending
@@ -177,6 +236,11 @@ export function NavigatorPane({
   ]);
 
   const connection = useLiveStore((state) => state.connection);
+  // Account-wide rate limits (the latest `status_updated` snapshot, identical
+  // across sessions). The footer is the natural home for this app-global state.
+  // Each window's row is hidden when the window is absent — a non-Pro/Max
+  // account, or before the first API response — rather than shown zeroed.
+  const rateLimits = useLiveStore((state) => state.rateLimits);
   // Per-session notices. A pending permission request drives a badge on its
   // session's row (the notice card itself lives in the focused session's
   // conversation pane), so a request on a non-focused session is still
@@ -242,47 +306,77 @@ export function NavigatorPane({
         </Button>
       }
       footer={
-        // A quiet utility bar, distinct from the primary action up top: the live
-        // connection status (dot + a status word like "Connected") on the left,
-        // and an icon-only Settings entry on the right (claude.ai-style, opens
-        // the settings dialog overlaid on the workspace).
-        <div className="flex items-center justify-between gap-2">
-          {/*
-            data-connection exposes the live connection state structurally so the
-            e2e suites can wait on disconnect/reconnect transitions without
-            depending on the dot's color classes or title wording.
-          */}
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-flex px-1"
-              data-testid="connection-indicator"
-              data-connection={connection}
+        // A quiet utility bar, distinct from the primary action up top. The
+        // account-wide rate-limit meters (5h / 7d) stack ABOVE the connection
+        // row — the footer is the natural home for app-global state — and each is
+        // omitted when its window is absent. Below them: the live connection
+        // status (dot + a status word like "Connected") on the left, and an
+        // icon-only Settings entry on the right (claude.ai-style, opens the
+        // settings dialog overlaid on the workspace).
+        <div className="flex flex-col gap-1.5">
+          {(rateLimits?.fiveHour || rateLimits?.sevenDay) && (
+            <div className="flex flex-col gap-1 pt-1.5" data-testid="rate-limits">
+              {rateLimits.fiveHour && (
+                <RateLimitRow
+                  label="5h"
+                  window={rateLimits.fiveHour}
+                  // Distinct static accent — only to tell the two rows apart.
+                  fillClassName="bg-indigo-400"
+                  testId="rate-limit-5h"
+                />
+              )}
+              {rateLimits.sevenDay && (
+                <RateLimitRow
+                  label="7d"
+                  window={rateLimits.sevenDay}
+                  // Distinct static accent — only to tell the two rows apart.
+                  fillClassName="bg-sky-400"
+                  testId="rate-limit-7d"
+                />
+              )}
+            </div>
+          )}
+          <div className="flex items-center justify-between gap-2">
+            {/*
+              data-connection exposes the live connection state structurally so
+              the e2e suites can wait on disconnect/reconnect transitions without
+              depending on the dot's color classes or title wording.
+            */}
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-flex px-1"
+                data-testid="connection-indicator"
+                data-connection={connection}
+              >
+                <StatusDot
+                  tone={CONNECTION_TONE[connection]}
+                  title={CONNECTION_TITLE[connection]}
+                />
+              </span>
+              <span className="text-xs text-slate-500">
+                {CONNECTION_LABEL[connection]}
+              </span>
+            </span>
+            {/*
+              Icon-only Settings button: aria-label carries the accessible name
+              since the gear glyph has no text, while data-testid and aria-pressed
+              keep the existing wiring and the e2e/unit hooks stable.
+            */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                'px-1.5 -mr-2.5',
+                settingsOpen && 'bg-slate-100 text-slate-900',
+              )}
+              data-testid="settings-entry"
+              aria-label="Settings"
+              aria-pressed={settingsOpen}
+              onClick={openSettings}
             >
-              <StatusDot
-                tone={CONNECTION_TONE[connection]}
-                title={CONNECTION_TITLE[connection]}
-              />
-            </span>
-            <span className="text-xs text-slate-500">
-              {CONNECTION_LABEL[connection]}
-            </span>
-          </span>
-          {/*
-            Icon-only Settings button: aria-label carries the accessible name
-            since the gear glyph has no text, while data-testid and aria-pressed
-            keep the existing wiring and the e2e/unit hooks stable.
-          */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={cn('px-1.5 -mr-2.5', settingsOpen && 'bg-slate-100 text-slate-900')}
-            data-testid="settings-entry"
-            aria-label="Settings"
-            aria-pressed={settingsOpen}
-            onClick={openSettings}
-          >
-            <SettingsIcon className="h-4 w-4" />
-          </Button>
+              <SettingsIcon className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       }
     >

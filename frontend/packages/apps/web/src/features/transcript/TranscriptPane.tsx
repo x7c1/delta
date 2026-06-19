@@ -206,6 +206,15 @@ export function TranscriptPane({
         : null,
     [sessionSubagents, activeThread],
   );
+  // The focused session's latest context-window usage (a `status_updated`
+  // snapshot's `used_percentage`, replace-latest in the store). Drives the
+  // ambient fill along the composer card's top edge — right where the user is
+  // about to send. `undefined` when no snapshot has arrived yet (or after a
+  // `/compact` cleared it), in which case the fill is omitted rather than shown
+  // at 0%. Forwarded straight through; never recomputed here.
+  const contextUsage = useLiveStore((state) =>
+    activeThread ? state.contextUsage[activeThread.session_id] : undefined,
+  );
   const dismissPermission = useLiveStore((state) => state.dismissPermission);
   // The focused session's pending AskUserQuestion, if any. Emitted by the
   // `PreToolUse` hook for that built-in tool, so it is a genuine "answer
@@ -745,22 +754,74 @@ export function TranscriptPane({
         )}
 
         {/* Composer card: the new-session launch pickers (which parameterize the
-            spawn) sit directly above the input they configure. */}
+            spawn) sit directly above the input they configure. The focused
+            session's context-window usage rides the card's TOP EDGE as a thin
+            ambient fill (the border doubles as the track), filled from the left
+            to `used_percentage`%, with the numeric `NN%` small at the edge —
+            right where the user is about to send. Omitted entirely when no
+            snapshot is available (or after `/compact`), rather than shown at 0%. */}
         <div
-          className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
+          className={`relative ${FLOATING_CARD_CLASS} px-3 py-2`}
           data-testid="composer-card"
         >
-          {/* A directory is chosen: show it as a chip with a ✎ to change it (the
-              ✎ reopens the picker without resetting the selection). The chip
-              renders nothing when no directory is selected, so there is no button
-              to (re)open the picker from here — that is done via "New". */}
-          {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
-          {/* Below the directory chip: when the selected directory is a git repo,
-              an opt-in to start the session in a fresh worktree (with a
-              start-point choice). Renders nothing for a non-git directory. */}
-          {newSession && <WorktreeOptions />}
-          {newSession && <LaunchOptionsPicker />}
-          {composer}
+          {contextUsage !== undefined && (
+            <div
+              className="pointer-events-none absolute inset-x-0 top-0"
+              data-testid="composer-context-bar"
+            >
+              {/* The card's top border is the track; this fill runs along it from
+                  the RIGHT edge leftward to the usage percentage, so the bar's
+                  growing tip stays next to the `%` readout. A real DOM bar. */}
+              <div
+                className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-indigo-400/80"
+                style={{ width: `${Math.min(100, Math.max(0, contextUsage))}%` }}
+                data-testid="composer-context-fill"
+                role="meter"
+                aria-label="Context window usage"
+                aria-valuenow={Math.round(
+                  Math.min(100, Math.max(0, contextUsage)),
+                )}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              />
+              <span className="group/ctx pointer-events-auto absolute right-0.5 top-0.5 z-10">
+                <span
+                  className="cursor-help px-1 py-1 text-xs leading-none tabular-nums text-slate-400"
+                  data-testid="composer-context-label"
+                  tabIndex={0}
+                  aria-label="Context window usage"
+                >
+                  {Math.round(contextUsage)}%
+                </span>
+                {/* Opens upward (the bar sits at the very top of the composer)
+                    so it never covers the textarea below. */}
+                <span
+                  role="note"
+                  data-testid="composer-context-popover"
+                  className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
+                >
+                  Context window usage
+                </span>
+              </span>
+            </div>
+          )}
+          {/* Flow content sits in its own `space-y-2` wrapper so the absolute
+              context bar above is not counted as a spacing sibling (which would
+              push the composer down by a row gap). */}
+          <div className="space-y-2">
+            {/* A directory is chosen: show it as a chip with a ✎ to change it
+                (the ✎ reopens the picker without resetting the selection). The
+                chip renders nothing when no directory is selected, so there is
+                no button to (re)open the picker from here — that is done via
+                "New". */}
+            {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
+            {/* Below the directory chip: when the selected directory is a git
+                repo, an opt-in to start the session in a fresh worktree (with a
+                start-point choice). Renders nothing for a non-git directory. */}
+            {newSession && <WorktreeOptions />}
+            {newSession && <LaunchOptionsPicker />}
+            {composer}
+          </div>
         </div>
       </>
     );

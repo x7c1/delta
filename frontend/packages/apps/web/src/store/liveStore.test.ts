@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { StatusSnapshot } from '@delta/wire-gen';
 import {
   noticeOf,
   threadIsRunning,
   useLiveStore,
   type LocalSend,
 } from './liveStore';
+import { loadPersistedStatus } from './statusPersistence';
 
 function reset() {
   useLiveStore.setState({
@@ -18,7 +20,28 @@ function reset() {
     streamingMessages: {},
     runningSubagents: {},
     endedBeforeRecorded: {},
+    contextUsage: {},
+    rateLimits: null,
   });
+}
+
+/** A status-line snapshot, with sensible defaults overridable per field. */
+function statusSnapshot(
+  overrides: Partial<StatusSnapshot> = {},
+): StatusSnapshot {
+  return {
+    model_id: null,
+    model_display_name: null,
+    context_used_percentage: null,
+    context_window_size: null,
+    context_current_usage: null,
+    total_input_tokens: null,
+    five_hour: null,
+    seven_day: null,
+    total_cost_usd: null,
+    current_dir: null,
+    ...overrides,
+  };
 }
 
 /** A thread-targeted submit chip, as `beginSending` records before its POST. */
@@ -1403,5 +1426,118 @@ describe('liveStore running-subagent tracking', () => {
     });
     store.resetTurnEphemera();
     expect(useLiveStore.getState().runningSubagents).toEqual({});
+  });
+});
+
+describe('liveStore status_updated', () => {
+  beforeEach(reset);
+
+  it('keeps only the latest per-session context usage (replace, not append)', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ context_used_percentage: 40 }),
+    });
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ context_used_percentage: 55 }),
+    });
+    // Only the most recent snapshot is retained for the session.
+    expect(useLiveStore.getState().contextUsage).toEqual({ 'sess-1': 55 });
+  });
+
+  it('keeps context usage keyed per session (one session does not clobber another)', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ context_used_percentage: 40 }),
+    });
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-2',
+      snapshot: statusSnapshot({ context_used_percentage: 70 }),
+    });
+    // Each session retains its own latest value; the second event does not
+    // overwrite the first (context is per session, unlike the global rate limit).
+    expect(useLiveStore.getState().contextUsage).toEqual({
+      'sess-1': 40,
+      'sess-2': 70,
+    });
+  });
+
+  it('keeps a single global rate-limit snapshot across sessions', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({
+        five_hour: { used_percentage: 10, resets_at: 100 },
+        seven_day: { used_percentage: 2, resets_at: 200 },
+      }),
+    });
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-2',
+      snapshot: statusSnapshot({
+        five_hour: { used_percentage: 30, resets_at: 300 },
+        seven_day: { used_percentage: 9, resets_at: 400 },
+      }),
+    });
+    // The latest event (from a different session) replaces the global snapshot.
+    expect(useLiveStore.getState().rateLimits).toEqual({
+      fiveHour: { used_percentage: 30, resets_at: 300 },
+      sevenDay: { used_percentage: 9, resets_at: 400 },
+    });
+  });
+
+  it('drops a session context entry when the percentage goes null (e.g. /compact)', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ context_used_percentage: 40 }),
+    });
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ context_used_percentage: null }),
+    });
+    expect(useLiveStore.getState().contextUsage).toEqual({});
+  });
+});
+
+describe('liveStore status persistence', () => {
+  beforeEach(() => {
+    reset();
+    localStorage.clear();
+  });
+
+  it('persists the latest status snapshot on status_updated so a reload can restore it', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({
+        context_used_percentage: 62,
+        // Reset times in the far future so the freshness pruning keeps them
+        // (resets_at is epoch seconds; load compares against now/1000).
+        five_hour: { used_percentage: 30, resets_at: Date.now() / 1000 + 3600 },
+        seven_day: {
+          used_percentage: 9,
+          resets_at: Date.now() / 1000 + 5 * 86400,
+        },
+      }),
+    });
+
+    // What a fresh page load would read back at init (the store seeds
+    // contextUsage / rateLimits from this on startup).
+    const restored = loadPersistedStatus(Date.now());
+    expect(restored.contextUsage).toEqual({ 'sess-1': 62 });
+    expect(restored.rateLimits).toEqual({
+      fiveHour: { used_percentage: 30, resets_at: expect.any(Number) },
+      sevenDay: { used_percentage: 9, resets_at: expect.any(Number) },
+    });
   });
 });
