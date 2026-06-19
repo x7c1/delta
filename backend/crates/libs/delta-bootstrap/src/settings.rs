@@ -27,22 +27,30 @@ pub fn render_session_settings(port: u16) -> String {
             ]
         })
     };
+    // The shared `curl` invocation for every entry that forwards its stdin JSON
+    // to the server (the `SessionStart` command hook and the `statusLine`
+    // command both use it). `-o /dev/null` discards the server's response so it
+    // is never fed back to Claude — for a hook that means no hook output, for
+    // `statusLine` an empty terminal status line; `-m 5` bounds the call if the
+    // server is somehow unreachable; the `content-type` header lets the
+    // server's JSON extractor parse the body; `--data-binary @-` forwards
+    // stdin verbatim.
+    let curl_post = |path: &str| {
+        format!(
+            "curl -sS -m 5 -o /dev/null -X POST {} \
+             -H 'content-type: application/json' --data-binary @-",
+            url(path)
+        )
+    };
     // `SessionStart` is delivered only to `command` hooks (Claude Code does not
     // POST it to `http` hooks), so this one forwards the hook's stdin JSON to the
-    // same server endpoint with `curl`. `-o /dev/null` discards the server's
-    // response so it is never fed back to Claude as hook output; `-m 5` bounds
-    // startup if the server is somehow unreachable; the `content-type` header
-    // lets the server's JSON extractor parse the body.
+    // same server endpoint with `curl`.
     let command_post_hook = |path: &str| {
         json!({
             "hooks": [
                 {
                     "type": "command",
-                    "command": format!(
-                        "curl -sS -m 5 -o /dev/null -X POST {} \
-                         -H 'content-type: application/json' --data-binary @-",
-                        url(path)
-                    )
+                    "command": curl_post(path)
                 }
             ]
         })
@@ -54,6 +62,20 @@ pub fn render_session_settings(port: u16) -> String {
         // theme the user has set globally. Passed via `--settings`, so this only
         // applies to Delta's sessions and never touches the user's own config.
         "theme": "dark",
+        // Claude Code pipes a JSON snapshot of session state (selected model,
+        // context-window usage, rate limits, cost, workspace) to this command's
+        // stdin on every status-line refresh. None of that is in the transcript
+        // JSONL, so this is how the server learns it: the command `curl`s the
+        // stdin payload to the server, which rebroadcasts it to the browser.
+        // Claude renders the command's STDOUT as the status-line text in the
+        // (delta-embedded) terminal; delta shows this data in the web UI
+        // instead, so the shared `curl_post`'s `-o /dev/null` makes the command
+        // emit nothing — both discarding the server's response and leaving the
+        // terminal status line empty.
+        "statusLine": {
+            "type": "command",
+            "command": curl_post("status-line")
+        },
         "hooks": {
             "UserPromptSubmit": [http_hook("user-prompt-submit")],
             "Stop": [http_hook("stop")],
@@ -166,5 +188,23 @@ mod tests {
             parsed["hooks"]["SessionEnd"][0]["hooks"][0]["url"],
             "http://127.0.0.1:9999/hooks/session-end"
         );
+    }
+
+    #[test]
+    fn emits_a_status_line_command_targeting_the_same_port() {
+        let rendered = render_session_settings(9999);
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+        // `statusLine` is a top-level `command` entry (not a hook): Claude Code
+        // pipes the status JSON to its stdin and renders its stdout as the
+        // status line. It must target `/hooks/status-line` on the same port as
+        // the hooks, forward stdin (`--data-binary @-`), and emit nothing to
+        // stdout (`-o /dev/null`) so the embedded terminal's status line stays
+        // empty.
+        assert_eq!(parsed["statusLine"]["type"], "command");
+        let command = parsed["statusLine"]["command"].as_str().unwrap();
+        assert!(command.contains("http://127.0.0.1:9999/hooks/status-line"));
+        assert!(command.contains("--data-binary @-"));
+        assert!(command.contains("-o /dev/null"));
     }
 }

@@ -20,6 +20,7 @@ export const EVENT_KINDS = [
   'assistant_streaming',
   'subagent_started',
   'subagent_finished',
+  'status_updated',
 ] as const satisfies readonly SessionEvent['kind'][];
 
 export type SessionEventKind = (typeof EVENT_KINDS)[number];

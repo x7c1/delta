@@ -9,7 +9,13 @@ use delta_model::{MessageUuid, SessionId, ThreadId};
 /// (`WireSessionEvent` in the `delta-wire` crate), which mirrors these
 /// variants and owns the `kind`-tagged shape plus the generated TypeScript
 /// bindings.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Only `PartialEq` (not `Eq`) is derived: [`Self::StatusUpdated`] carries a
+/// [`StatusSnapshot`] with `f64` fields (percentages, cost), and `f64` does not
+/// implement `Eq`. No code keys events by hash or stores them in a set, so
+/// `PartialEq` is all the equality the events ever need (it backs `assert_eq!`
+/// in tests).
+#[derive(Debug, Clone, PartialEq)]
 pub enum SessionEvent {
     /// The session was registered (first `UserPromptSubmit`).
     ///
@@ -239,4 +245,59 @@ pub enum SessionEvent {
         session_id: SessionId,
         tool_use_id: String,
     },
+    /// The latest Claude Code status-line snapshot for a session.
+    ///
+    /// Sourced from the `statusLine` command Delta injects into the session
+    /// settings, which Claude Code invokes on every status-line refresh (the
+    /// command `curl`s the JSON back to the server). None of this data is in the
+    /// transcript JSONL, so this event is the only way the browser learns the
+    /// session's selected model, context-window usage, rate limits, and cost.
+    ///
+    /// Because the status line refreshes frequently, this is a "latest value"
+    /// keyed by `session_id`, not an append: each snapshot supersedes the last.
+    /// It carries no turn or thread semantics and mutates no server state.
+    StatusUpdated {
+        session_id: SessionId,
+        snapshot: StatusSnapshot,
+    },
+}
+
+/// A snapshot of Claude Code session state from the `statusLine` command.
+///
+/// Mirrors the fields Delta extracts from the raw `statusLine` JSON
+/// (`delta_wire::hooks::StatusLinePayload`). Every field is optional: before a
+/// session's first API response Claude Code reports `current_usage` /
+/// `used_percentage` as `null` and omits `rate_limits` entirely (also omitted
+/// on accounts without a Pro/Max subscription).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StatusSnapshot {
+    /// The selected model's stable id (e.g. `claude-opus-4-...`).
+    pub model_id: Option<String>,
+    /// The selected model's human-readable name (e.g. `Opus 4.8`).
+    pub model_display_name: Option<String>,
+    /// Percentage of the context window in use, as precomputed by Claude Code.
+    pub context_used_percentage: Option<f64>,
+    /// The context window's total size in tokens.
+    pub context_window_size: Option<u64>,
+    /// Tokens currently occupying the context window.
+    pub context_current_usage: Option<u64>,
+    /// Total input tokens sent this session.
+    pub total_input_tokens: Option<u64>,
+    /// The 5-hour rate-limit window.
+    pub five_hour: Option<RateLimitWindow>,
+    /// The 7-day rate-limit window.
+    pub seven_day: Option<RateLimitWindow>,
+    /// Total session cost in USD.
+    pub total_cost_usd: Option<f64>,
+    /// The session's working directory.
+    pub current_dir: Option<String>,
+}
+
+/// One rate-limit window from a [`StatusSnapshot`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RateLimitWindow {
+    /// Percentage of the window consumed.
+    pub used_percentage: Option<f64>,
+    /// Unix epoch seconds at which the window resets.
+    pub resets_at: Option<i64>,
 }

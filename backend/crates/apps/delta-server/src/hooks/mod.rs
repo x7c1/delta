@@ -37,13 +37,13 @@ use axum::response::IntoResponse;
 use axum::Json;
 
 use delta_usecase::{
-    MessageDisplayHook, PermissionDecision, SessionEndHook, SessionId, SessionStartHook, StopHook,
-    UserPromptSubmitHook,
+    MessageDisplayHook, PermissionDecision, RateLimitWindow, SessionEndHook, SessionEvent,
+    SessionId, SessionStartHook, StatusSnapshot, StopHook, UserPromptSubmitHook,
 };
 use delta_wire::hooks::{
     MessageDisplayPayload, PermissionRequestPayload, PermissionRequestResponse, PostToolUsePayload,
-    PreToolUsePayload, SessionEndPayload, SessionStartPayload, StopPayload, UserPromptSubmitPayload,
-    UserPromptSubmitResponse,
+    PreToolUsePayload, SessionEndPayload, SessionStartPayload, StatusLinePayload,
+    StatusLineRateLimitWindow, StopPayload, UserPromptSubmitPayload, UserPromptSubmitResponse,
 };
 
 use crate::state::AppState;
@@ -283,5 +283,73 @@ pub async fn post_tool_use(
             StatusCode::OK.into_response()
         }
         Err(err) => internal_error(err).into_response(),
+    }
+}
+
+/// Handle a `statusLine` callback: the latest snapshot of session state Claude
+/// Code pipes to its configured status-line command on every refresh (model,
+/// context-window usage, rate limits, cost). Delta injects that command into
+/// the session settings to `curl` the JSON here (see `delta-bootstrap`'s
+/// `render_session_settings`); none of this data is in the transcript JSONL.
+///
+/// This is a "latest value" snapshot keyed by `session_id`, not an append: it
+/// mutates no server state, so the handler skips the per-session actor and
+/// broadcasts a `StatusUpdated` directly. A payload without a `session_id` (it
+/// is optional in the upstream schema) carries nothing to key on, so it is
+/// dropped with an empty 200.
+pub async fn status_line(
+    State(state): State<AppState>,
+    Json(payload): Json<StatusLinePayload>,
+) -> impl IntoResponse {
+    let Some(session_id) = payload.session_id.clone() else {
+        tracing::debug!("statusLine payload without a session_id; dropping");
+        return StatusCode::OK;
+    };
+
+    let snapshot = status_snapshot_from(payload);
+    state.broadcast([SessionEvent::StatusUpdated {
+        session_id: SessionId::from(session_id),
+        snapshot,
+    }]);
+    StatusCode::OK
+}
+
+/// Project the raw `statusLine` payload onto the domain [`StatusSnapshot`],
+/// flattening Claude Code's nested shape and forwarding `used_percentage`
+/// verbatim (it is precomputed against the correct window size — Delta never
+/// recomputes it from token counts).
+fn status_snapshot_from(payload: StatusLinePayload) -> StatusSnapshot {
+    // Each nested section is optional; treat an absent one as its empty
+    // default so every leaf field collapses to `None` uniformly.
+    let model = payload.model.unwrap_or_default();
+    let context = payload.context_window.unwrap_or_default();
+    let rate_limits = payload.rate_limits.unwrap_or_default();
+
+    StatusSnapshot {
+        model_id: model.id,
+        model_display_name: model.display_name,
+        context_used_percentage: context.used_percentage,
+        context_window_size: context.context_window_size,
+        // "Tokens currently occupying the context window" = the input-side of
+        // Claude Code's `current_usage` breakdown (prompt + cache read + cache
+        // write). `None` before the first API response, when `current_usage` is
+        // absent.
+        context_current_usage: context.current_usage.map(|usage| {
+            usage.input_tokens.unwrap_or(0)
+                + usage.cache_creation_input_tokens.unwrap_or(0)
+                + usage.cache_read_input_tokens.unwrap_or(0)
+        }),
+        total_input_tokens: context.total_input_tokens,
+        five_hour: rate_limits.five_hour.map(rate_limit_window_from),
+        seven_day: rate_limits.seven_day.map(rate_limit_window_from),
+        total_cost_usd: payload.cost.and_then(|cost| cost.total_cost_usd),
+        current_dir: payload.workspace.and_then(|workspace| workspace.current_dir),
+    }
+}
+
+fn rate_limit_window_from(window: StatusLineRateLimitWindow) -> RateLimitWindow {
+    RateLimitWindow {
+        used_percentage: window.used_percentage,
+        resets_at: window.resets_at,
     }
 }
