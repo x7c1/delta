@@ -1,15 +1,19 @@
 import { create } from 'zustand';
+import {
+  loadPersistedStatus,
+  savePersistedStatus,
+} from './statusPersistence';
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   PendingPermission,
   PendingQuestion,
-  RateLimitWindow,
   RunningSubagent,
   SessionEvent,
   StatusSnapshot,
   Turn,
 } from '@delta/wire-gen';
 import type { ConnectionStatus } from '@delta/api-client';
+import type { RateLimits } from './statusTypes';
 
 /**
  * Ephemeral, session-only live UI state that is NOT a REST resource. REST
@@ -387,21 +391,6 @@ function clearNoticesOn(
   return removeNotices(notices, sessionId, (notice) =>
     NOTICE_LIFECYCLE[notice.kind].includes(trigger),
   );
-}
-
-/**
- * The most recent account-wide rate-limit snapshot, taken from the latest
- * `status_updated` event of any session. Rate limits are account-wide (the same
- * across every session), so a single global value is kept and replaced on each
- * event rather than stored per session. Either window can be absent (a
- * non-Pro/Max account, or before the first API response of the day), in which
- * case that window is `null` and its footer row is hidden.
- */
-export interface RateLimits {
-  /** The rolling 5-hour window, or `null` when the account reports none. */
-  fiveHour: RateLimitWindow | null;
-  /** The rolling 7-day window, or `null` when the account reports none. */
-  sevenDay: RateLimitWindow | null;
 }
 
 export interface LiveState {
@@ -809,6 +798,11 @@ function endTurnForSession(
   };
 }
 
+// Seed the status slices from the last persisted snapshot (freshness-guarded),
+// so a reload restores the context bar / rate-limit footer instead of going
+// blank until the next statusLine event.
+const restoredStatus = loadPersistedStatus(Date.now());
+
 export const useLiveStore = create<LiveState>((set) => ({
   connection: 'connecting',
   sending: [],
@@ -820,8 +814,8 @@ export const useLiveStore = create<LiveState>((set) => ({
   streamingMessages: {},
   runningSubagents: {},
   endedBeforeRecorded: {},
-  contextUsage: {},
-  rateLimits: null,
+  contextUsage: restoredStatus.contextUsage,
+  rateLimits: restoredStatus.rateLimits,
 
   setConnection: (status) => set({ connection: status }),
 
@@ -1409,6 +1403,14 @@ export const useLiveStore = create<LiveState>((set) => ({
             fiveHour: snapshot.five_hour,
             sevenDay: snapshot.seven_day,
           };
+
+          // Persist the latest snapshot so a reload can restore it (freshness-
+          // guarded in statusPersistence) instead of going blank.
+          savePersistedStatus(
+            next.contextUsage ?? state.contextUsage,
+            next.rateLimits,
+            Date.now(),
+          );
 
           return next;
         }

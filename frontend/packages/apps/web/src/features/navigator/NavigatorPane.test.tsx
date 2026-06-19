@@ -159,7 +159,7 @@ describe('NavigatorPane rate-limit meters', () => {
     );
     expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('37%');
     expect(screen.getByTestId('rate-limit-5h-reset')).toHaveTextContent(
-      '↻02h13m',
+      '↻ 02h13m',
     );
 
     const sevenDay = screen.getByTestId('rate-limit-7d');
@@ -169,7 +169,7 @@ describe('NavigatorPane rate-limit meters', () => {
     );
     expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('8%');
     expect(screen.getByTestId('rate-limit-7d-reset')).toHaveTextContent(
-      '↻5d04h',
+      '↻ 5d04h',
     );
   });
 

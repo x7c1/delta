@@ -6,6 +6,7 @@ import {
   useLiveStore,
   type LocalSend,
 } from './liveStore';
+import { loadPersistedStatus } from './statusPersistence';
 
 function reset() {
   useLiveStore.setState({
@@ -1505,5 +1506,38 @@ describe('liveStore status_updated', () => {
       snapshot: statusSnapshot({ context_used_percentage: null }),
     });
     expect(useLiveStore.getState().contextUsage).toEqual({});
+  });
+});
+
+describe('liveStore status persistence', () => {
+  beforeEach(() => {
+    reset();
+    localStorage.clear();
+  });
+
+  it('persists the latest status snapshot on status_updated so a reload can restore it', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({
+        context_used_percentage: 62,
+        // Reset times in the far future so the freshness pruning keeps them
+        // (resets_at is epoch seconds; load compares against now/1000).
+        five_hour: { used_percentage: 30, resets_at: Date.now() / 1000 + 3600 },
+        seven_day: {
+          used_percentage: 9,
+          resets_at: Date.now() / 1000 + 5 * 86400,
+        },
+      }),
+    });
+
+    // What a fresh page load would read back at init (the store seeds
+    // contextUsage / rateLimits from this on startup).
+    const restored = loadPersistedStatus(Date.now());
+    expect(restored.contextUsage).toEqual({ 'sess-1': 62 });
+    expect(restored.rateLimits).toEqual({
+      fiveHour: { used_percentage: 30, resets_at: expect.any(Number) },
+      sevenDay: { used_percentage: 9, resets_at: expect.any(Number) },
+    });
   });
 });

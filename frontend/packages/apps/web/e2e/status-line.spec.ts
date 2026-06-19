@@ -43,21 +43,32 @@ test('the footer meters and composer context bar reflect a status snapshot', asy
   await expect(page.getByTestId('composer-context-bar')).toHaveCount(0);
 
   const now = Math.floor(Date.now() / 1000);
+  // The countdown floors to its smallest shown unit (minutes for the 5h
+  // window, hours for the 7d), and a few seconds elapse between capturing
+  // `now` here and the footer rendering. Seat each target in the MIDDLE of its
+  // floor bucket (+30s for the 5h minute, +30m for the 7d hour) so drift cannot
+  // tip it across a boundary and make the exact-text assertion flaky.
   await emitEvent(page, {
     kind: 'status_updated',
     session_id: SESSION_ID,
     snapshot: snapshot({
       context_used_percentage: 47,
-      five_hour: { used_percentage: 35, resets_at: now + 2 * 3600 + 13 * 60 },
-      seven_day: { used_percentage: 8, resets_at: now + 5 * 86400 + 4 * 3600 },
+      five_hour: {
+        used_percentage: 35,
+        resets_at: now + 2 * 3600 + 13 * 60 + 30,
+      },
+      seven_day: {
+        used_percentage: 8,
+        resets_at: now + 5 * 86400 + 4 * 3600 + 30 * 60,
+      },
     }),
   });
 
   // Footer: both rate-limit meters render with their percentages and resets.
   await expect(page.getByTestId('rate-limit-5h-pct')).toHaveText('35%');
-  await expect(page.getByTestId('rate-limit-5h-reset')).toHaveText('↻02h13m');
+  await expect(page.getByTestId('rate-limit-5h-reset')).toHaveText('↻ 02h13m');
   await expect(page.getByTestId('rate-limit-7d-pct')).toHaveText('8%');
-  await expect(page.getByTestId('rate-limit-7d-reset')).toHaveText('↻5d04h');
+  await expect(page.getByTestId('rate-limit-7d-reset')).toHaveText('↻ 5d04h');
 
   // Composer: the top-edge context bar fills to the focused session's usage.
   const fill = page.getByTestId('composer-context-fill');

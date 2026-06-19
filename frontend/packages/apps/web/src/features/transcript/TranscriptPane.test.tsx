@@ -1440,9 +1440,35 @@ describe('TranscriptPane composer context bar', () => {
     const fill = within(card).getByTestId('composer-context-fill');
     expect(fill).toHaveStyle({ width: '62%' });
     expect(fill).toHaveAttribute('aria-valuenow', '62');
+    // The fill is right-anchored along the card's top edge (it grows leftward
+    // from the right so its tip stays next to the `%` readout).
+    expect(fill.className).toContain('right-0');
+    expect(fill.className).toContain('rounded-tr-md');
     expect(within(card).getByTestId('composer-context-bar')).toHaveTextContent(
       '62%',
     );
+  });
+
+  it('exposes a focusable label with an always-present help popover', async () => {
+    useLiveStore.setState({ contextUsage: { [SESSION_ID]: 62 } });
+
+    renderPane();
+
+    const card = await screen.findByTestId('composer-card');
+    // The `%` readout is a focusable, help-cursored span (it reveals the
+    // popover on hover/focus rather than via a native `title` tooltip).
+    const label = within(card).getByTestId('composer-context-label');
+    expect(label).toHaveTextContent('62%');
+    expect(label).toHaveAttribute('tabindex', '0');
+    expect(label.className).toContain('cursor-help');
+    // The old native title tooltip is gone.
+    expect(label).not.toHaveAttribute('title');
+
+    // The custom popover is always in the DOM (CSS-toggled on hover/focus), so
+    // it is structurally assertable without simulating a hover.
+    const popover = within(card).getByTestId('composer-context-popover');
+    expect(popover).toHaveAttribute('role', 'note');
+    expect(popover).toHaveTextContent('Context window usage');
   });
 
   it('omits the fill when the focused session has no context usage', async () => {
@@ -1456,6 +1482,14 @@ describe('TranscriptPane composer context bar', () => {
     ).not.toBeInTheDocument();
     expect(
       within(card).queryByTestId('composer-context-bar'),
+    ).not.toBeInTheDocument();
+    // With no usage the whole bar is omitted, so neither the label nor its
+    // popover is in the DOM.
+    expect(
+      within(card).queryByTestId('composer-context-label'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(card).queryByTestId('composer-context-popover'),
     ).not.toBeInTheDocument();
   });
 });

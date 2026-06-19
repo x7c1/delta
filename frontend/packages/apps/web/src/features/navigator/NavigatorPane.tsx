@@ -160,7 +160,7 @@ function RateLimitRow({
           className="shrink-0 tabular-nums text-slate-400"
           data-testid={`${testId}-reset`}
         >
-          ↻{reset}
+          {`↻ ${reset}`}
         </span>
       )}
     </div>
@@ -315,7 +315,7 @@ export function NavigatorPane({
         // settings dialog overlaid on the workspace).
         <div className="flex flex-col gap-1.5">
           {(rateLimits?.fiveHour || rateLimits?.sevenDay) && (
-            <div className="flex flex-col gap-1" data-testid="rate-limits">
+            <div className="flex flex-col gap-1 pt-1.5" data-testid="rate-limits">
               {rateLimits.fiveHour && (
                 <RateLimitRow
                   label="5h"
