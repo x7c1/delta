@@ -12,12 +12,26 @@ channel into side branches.
 
 ## Status
 
-Pre-1.0 and under active development. The core works end to end: multi-session
-management (spawn / view / resume), the thread-navigation layer (branch and
-return within a session), and a conversation viewer whose session list and
-sub-thread trees are cursor-paginated and DOM-virtualized so they stay
-responsive as history grows. An embedded terminal handles permission prompts.
-Features are still being shaped as the product takes form.
+v0.1.0 is the first tagged release and is alpha quality. Delta adopts
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html) from this version
+onward, but while it stays on `0.x` **no compatibility is guaranteed**: the
+SQLite schema, the browser↔server wire contract, and the supported Claude CLI
+version range may all change in any `0.x` bump. Supported platform is **Linux
+only** for now.
+
+## Install
+
+Delta is distributed as source only — there are no prebuilt binaries yet.
+
+```
+git clone https://github.com/x7c1/delta.git
+cd delta
+make dev
+```
+
+`make dev` runs the local development loop (backend + frontend). See
+[docs/guides/development.md](docs/guides/development.md) for prerequisites
+(tmux, claude, cargo, pnpm) and the rest of the workflow.
 
 ## Architecture
 
