@@ -6,6 +6,7 @@ import { AssistantMarkdown } from './AssistantMarkdown';
 import { blockSummary, stringifyContent } from './blockSummary';
 import { isTaskNotificationMessage } from './claudeFormat';
 import { MessageMeta } from './MessageMeta';
+import { MessageTimestamp } from './MessageTimestamp';
 import { messageRendersNothing, type ToolPairing } from './toolPairs';
 
 export interface MessageItemProps {
@@ -100,9 +101,10 @@ export function MessageItem({
           <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
         </Collapsible>
         {timestamp && (
-          <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
-            {timestamp}
-          </span>
+          <MessageTimestamp
+            timestamp={timestamp}
+            className="mt-1 block text-right"
+          />
         )}
       </article>
     );
@@ -139,9 +141,10 @@ export function MessageItem({
           <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
         </Collapsible>
         {timestamp && (
-          <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
-            {timestamp}
-          </span>
+          <MessageTimestamp
+            timestamp={timestamp}
+            className="mt-1 block text-right"
+          />
         )}
       </article>
     );
@@ -285,9 +288,7 @@ export function MessageItem({
           {blocks}
         </div>
         {timestamp && (
-          <span className="mt-1 text-xs tabular-nums text-slate-400">
-            {timestamp}
-          </span>
+          <MessageTimestamp timestamp={timestamp} className="mt-1" />
         )}
       </article>
     );
