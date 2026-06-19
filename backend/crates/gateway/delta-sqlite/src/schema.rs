@@ -44,14 +44,22 @@ pub const SCHEMA_SQL: &str = r#"
 -- `COALESCE(last_activity_at, created_at)`, so a message-less session still
 -- sorts on its own `created_at`.
 CREATE TABLE IF NOT EXISTS session (
-  id               TEXT PRIMARY KEY,
-  cwd              TEXT NOT NULL,
-  transcript_path  TEXT,
-  title            TEXT,
-  status           TEXT NOT NULL
-                     CHECK (status IN ('spawning','active','ended','failed')),
-  created_at       TEXT NOT NULL,
-  last_activity_at TEXT
+  id                TEXT PRIMARY KEY,
+  cwd               TEXT NOT NULL,
+  transcript_path   TEXT,
+  title             TEXT,
+  status            TEXT NOT NULL
+                      CHECK (status IN ('spawning','active','ended','failed')),
+  created_at        TEXT NOT NULL,
+  last_activity_at  TEXT,
+  -- Spawn-time snapshot of the local git branch checked out in `cwd` and the
+  -- repository root that contained it. Both are NULL when the launch directory
+  -- was not inside a git repo (or HEAD was detached). Both are additive and
+  -- arrived after the table first shipped (see `ADDITIVE_COLUMNS`), so an
+  -- existing database gains them as NULL on every pre-existing row with no
+  -- backfill — the navigator's frontend falls back to the cwd basename then.
+  branch_at_launch  TEXT,
+  repo_root         TEXT
 ) STRICT;
 
 -- The transcript-ingestion cursor, split out of `session`: how many lines of
@@ -279,6 +287,22 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "message",
         column: "response_time_ms",
         add_column_sql: "ALTER TABLE message ADD COLUMN response_time_ms REAL",
+    },
+    // Spawn-time git snapshot, added to `session` after it first shipped. Both
+    // are nullable with no default: an existing database gains them as NULL on
+    // every pre-existing row, so a session launched before this change stays
+    // unidentified by branch/repo and the navigator falls back to the cwd
+    // basename. No backfill — we cannot recover what `git rev-parse` would have
+    // reported at the historical spawn moment.
+    AdditiveColumn {
+        table: "session",
+        column: "branch_at_launch",
+        add_column_sql: "ALTER TABLE session ADD COLUMN branch_at_launch TEXT",
+    },
+    AdditiveColumn {
+        table: "session",
+        column: "repo_root",
+        add_column_sql: "ALTER TABLE session ADD COLUMN repo_root TEXT",
     },
 ];
 

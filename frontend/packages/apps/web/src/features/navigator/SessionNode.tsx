@@ -7,7 +7,6 @@ import { useApiClient } from '../../data/apiContext';
 import { threadIsRunning, useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
-import { pathTail } from '../../utils/pathTail';
 import { ThreadTree } from './ThreadTree';
 
 export interface SessionNodeProps {
@@ -50,12 +49,26 @@ function sessionLabel(item: SessionListItem): string {
 }
 
 /**
+ * The basename (last path segment) of `path`, or `''` when there is no usable
+ * basename (an empty string or `/`). Trailing slashes are stripped first so
+ * `/a/b/` resolves to `b`, mirroring `basename` in POSIX shells.
+ */
+function basename(path: string): string {
+  const trimmed = path.replace(/\/+$/, '');
+  const slash = trimmed.lastIndexOf('/');
+  return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+}
+
+/**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
- * indicator plus the working-directory tail, which is the primary identifier
- * (left-truncated, full path on hover; falls back to the session label when
- * there is no directory); line 2 shows the session id and the last-activity
- * time, right-aligned) plus the kebab actions menu in a fixed-width slot at the
+ * indicator plus the session's *launch-time* local git branch (the primary
+ * identifier, right-truncated with the full name on hover; falls back to the
+ * session label when the launch directory was not in a git repo); line 2 shows
+ * the basename of the launch-time repository root on the left
+ * (RTL-truncated with the full path on hover; falls back to the cwd's basename,
+ * then omitted entirely when even that yields no name) and the last-activity
+ * time on the right) plus the kebab actions menu in a fixed-width slot at the
  * right end, enabled only when the session is open. The focused card is lifted
  * with an indigo border, tint, and ring.
  *
@@ -113,8 +126,20 @@ export function SessionNode({
   const threads = threadsQuery.data?.threads;
 
   const lastActivity = formatLocalDateTime(item.last_activity_at);
-  const cwdTail = pathTail(item.session.cwd);
   const label = sessionLabel(item);
+  // Line 1: the local branch checked out in the launch directory at spawn time,
+  // captured once by the backend on `insert_spawning_session`. Falls back to
+  // the session label for sessions launched outside a git repo (or that
+  // predate the snapshot — older databases store NULL).
+  const branchAtLaunch = item.session.branch_at_launch;
+  // Line 2 left: the basename of the repository root captured at spawn time,
+  // falling back to the cwd basename so a session launched outside a repo
+  // still identifies its working directory. `repoFull` carries the full path
+  // for the hover tooltip; an empty `repoName` means no usable basename and
+  // the line-2 left span is omitted entirely.
+  const repoRoot = item.session.repo_root;
+  const repoFull = repoRoot ?? item.session.cwd;
+  const repoName = basename(repoFull);
   // Show the sub-thread list only once the session has branched. The main
   // thread itself is never listed (it is reached by clicking this card's
   // header — see NavigatorPane); a session with no sub-threads shows no tree at
@@ -189,14 +214,23 @@ export function SessionNode({
                 tone={item.open ? 'green' : 'slate'}
                 title={item.open ? 'Open' : 'Closed'}
               />
+              {/* Line 1: the *launch-time* local git branch, captured once on
+                  spawn and never updated on resume or a later `git checkout`.
+                  Distinct from the per-message `git_branch` carried on each
+                  transcript line (a per-turn snapshot). Right-truncates: a
+                  branch like `feat/some-very-long-name` should keep the
+                  meaningful prefix and clip the tail (`feat/some-very…`), not
+                  the other way around. Falls back to the session label when no
+                  launch branch was recorded. */}
               <span
                 className={cn(
-                  'min-w-0 truncate text-left [direction:rtl]',
+                  'min-w-0 truncate text-left',
                   isFocused && 'font-medium text-indigo-800',
                 )}
-                title={item.session.cwd}
+                title={branchAtLaunch ?? label}
+                data-testid="session-branch"
               >
-                {cwdTail ? cwdTail.split('/').join(' : ') : label}
+                {branchAtLaunch ?? label}
               </span>
               {running && (
                 // Compact: the rotating circle alone reads as "processing". The
@@ -231,15 +265,25 @@ export function SessionNode({
                 </span>
               )}
             </span>
-            {/* Secondary line: session id + last-activity time, right-aligned. The id is
-                a long UUID, so only its first 8 chars are shown, with the full value
-                in its title. */}
-            <span className="flex items-baseline justify-end gap-2 text-xs text-slate-400">
-              <span className="font-mono" title={item.session.id}>
-                {item.session.id.slice(0, 8)}
-              </span>
+            {/* Line 2: the launch-time repo basename on the left (RTL-truncated
+                so a long worktree path keeps its meaningful tail, e.g.
+                `…/projects/delta`) and the last-activity time on the right.
+                The repo span is omitted entirely when neither `repo_root`
+                nor `cwd` yields a usable basename. */}
+            <span className="flex items-baseline gap-2 text-xs text-slate-400">
+              {repoName && (
+                <span
+                  className="min-w-0 flex-1 truncate text-left [direction:rtl]"
+                  title={repoFull}
+                  data-testid="session-repo"
+                >
+                  {repoName}
+                </span>
+              )}
               {lastActivity && (
-                <span className="shrink-0 tabular-nums">{lastActivity}</span>
+                <span className="ml-auto shrink-0 tabular-nums">
+                  {lastActivity}
+                </span>
               )}
             </span>
           </button>

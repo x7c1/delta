@@ -20,4 +20,18 @@ transcript_path: string, title: string | null, status: SessionStatus,
 /**
  * ISO-8601 timestamp.
  */
-created_at: string, };
+created_at: string, 
+/**
+ * Spawn-time snapshot of the local git branch checked out in `cwd`.
+ * `null` when the launch directory was not inside a git repository, when
+ * HEAD was detached, or for sessions that predate this field. Never
+ * updated on resume or a later `git checkout`; the per-message
+ * `git_branch` is a separate per-turn snapshot.
+ */
+branch_at_launch: string | null, 
+/**
+ * Spawn-time snapshot of the repository root containing `cwd`. `null`
+ * when the launch directory was not inside a git repository, or for
+ * sessions that predate this field.
+ */
+repo_root: string | null, };

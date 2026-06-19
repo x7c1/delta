@@ -91,10 +91,11 @@ test('a visible non-focused session shows its sub-thread tree expanded without a
   // ("scratch notes") is on page 1 and visible but NOT focused. Every visible
   // row fetches its own thread tree and renders it expanded by default, so the
   // non-focused session's sub-thread ("scratch ideas") is on screen with no
-  // interaction. The row is matched by its working-directory row ("work : scratch").
+  // interaction. The row is matched by its launch-time branch identifier,
+  // visible as the line-1 text on the card.
   const scratchRow = page
     .getByTestId('session-node')
-    .filter({ hasText: 'work : scratch' });
+    .filter({ hasText: 'feat/scratch-ideas' });
   await expect(scratchRow).toBeVisible();
   const subThread = page.getByRole('button', { name: /scratch ideas/ });
   await expect(subThread).toBeVisible();
@@ -121,7 +122,7 @@ test('focusing a closed session shows its transcript read-only', async ({
   // kebab menu shares the label, so target the row by test id.
   await page
     .getByTestId('session-node')
-    .filter({ hasText: 'work : scratch' })
+    .filter({ hasText: 'feat/scratch-ideas' })
     .click();
 
   // Its transcript renders, but with a read-only notice (closed session).
@@ -139,7 +140,7 @@ test('a closed session resumes after a Send via the pending queue', async ({
 
   await page
     .getByTestId('session-node')
-    .filter({ hasText: 'work : scratch' })
+    .filter({ hasText: 'feat/scratch-ideas' })
     .click();
   await expect(page.getByTestId('readonly-notice')).toBeVisible();
 

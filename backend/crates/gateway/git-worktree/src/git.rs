@@ -150,6 +150,31 @@ impl GitWorktree for Git {
         }
     }
 
+    async fn current_branch(
+        &self,
+        path: &str,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        // `rev-parse --abbrev-ref HEAD` prints the branch short name when HEAD
+        // resolves to a local branch, and the literal `HEAD` when HEAD is
+        // detached. A non-zero exit (path is not inside a git repo) is the
+        // expected `None` signal, not an error to propagate; the detached-HEAD
+        // case is also reported as `None` because there is no branch name to
+        // record at launch time.
+        let output = self
+            .output(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let name = trimmed_stdout(&output);
+        if name == "HEAD" {
+            Ok(None)
+        } else {
+            Ok(Some(name))
+        }
+    }
+
     async fn default_branch(
         &self,
         repo_root: &str,
@@ -421,6 +446,61 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn current_branch_reports_the_local_branch_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let git = Git::new();
+
+        let branch = git
+            .current_branch(tmp.path().to_str().unwrap())
+            .await
+            .unwrap()
+            .expect("a fresh repo on its initial branch reports a branch");
+        assert_eq!(branch, "main");
+    }
+
+    #[tokio::test]
+    async fn current_branch_is_none_outside_a_git_repo() {
+        // A bare temp directory with no git repo above it.
+        let tmp = tempfile::tempdir().unwrap();
+        let git = Git::new();
+
+        let branch = git
+            .current_branch(tmp.path().to_str().unwrap())
+            .await
+            .unwrap();
+        assert!(branch.is_none(), "a non-git directory has no branch");
+    }
+
+    #[tokio::test]
+    async fn current_branch_is_none_when_head_is_detached() {
+        // A detached HEAD has no branch name to record at launch time;
+        // `rev-parse --abbrev-ref HEAD` returns the literal `HEAD`, which the
+        // gateway translates to `None`.
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo = tmp.path().to_str().unwrap();
+        // Detach HEAD onto the initial commit so HEAD no longer points at a
+        // branch ref.
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["checkout", "--detach", "HEAD"])
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "detach failed: {}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        let git = Git::new();
+
+        let branch = git.current_branch(repo).await.unwrap();
+        assert!(branch.is_none(), "a detached HEAD reports no branch");
     }
 
     #[tokio::test]

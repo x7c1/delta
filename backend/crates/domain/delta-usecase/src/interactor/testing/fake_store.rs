@@ -84,6 +84,13 @@ impl SessionStore for FakeStore {
             title: None,
             status: SessionStatus::Active,
             created_at: "2026-01-01T00:00:00Z".into(),
+            // `register_session` is the external-claude / hook-activation
+            // path: it never sees Delta's launch context, so the snapshot
+            // stays unknown here. Delta-launched sessions record it via
+            // `insert_spawning_session` instead, and that row already exists
+            // when this activate path runs.
+            branch_at_launch: new.branch_at_launch,
+            repo_root: new.repo_root,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -103,6 +110,8 @@ impl SessionStore for FakeStore {
         &self,
         id: &SessionId,
         cwd: &str,
+        branch_at_launch: Option<&str>,
+        repo_root: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -116,6 +125,8 @@ impl SessionStore for FakeStore {
             title: None,
             status: SessionStatus::Spawning,
             created_at: "2026-01-01T00:00:00Z".into(),
+            branch_at_launch: branch_at_launch.map(str::to_owned),
+            repo_root: repo_root.map(str::to_owned),
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;

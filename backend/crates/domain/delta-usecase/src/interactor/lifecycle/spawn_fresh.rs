@@ -206,6 +206,14 @@ where
         // triggers the dialog, so it is never seeded (avoids bloating
         // `~/.claude.json` for ordinary sessions).
         let mut seed_trust = false;
+        // `launch_repo_root` is the repository root containing the effective
+        // launch directory at spawn time — the worktree's repo for a worktree
+        // spawn, the user-selected workdir's repo for a plain spawn, `None`
+        // for the default `<base>/<token>` scratch dir (always non-git). It
+        // feeds the navigator's "repo name" line via `insert_spawning_session`
+        // below, and is reused as the trust-seeding signal so we never call
+        // `repo_root` twice on the same path.
+        let mut launch_repo_root: Option<String> = None;
         let workdir = match worktree {
             Some(spec) => {
                 let repo_root = worktree_repo_root
@@ -243,16 +251,22 @@ where
                 // A worktree is by definition a git working tree, so its trust
                 // dialog must be pre-accepted; no extra git call needed. Trust
                 // seeding is idempotent, so reusing an already-trusted path
-                // (e.g. the main tree) is fine.
+                // (e.g. the main tree) is fine. The worktree's repository root
+                // is the same `repo_root` checked here, so it doubles as the
+                // navigator's "repo name" source — no extra `git rev-parse`.
                 seed_trust = true;
+                launch_repo_root = Some(repo_root);
                 effective_path
             }
             None => match requested_workdir {
                 // A user-selected workdir may be a real git repo (without a
-                // worktree request). Check once so launching there does not stall
-                // on the trust dialog either.
+                // worktree request). Look up `repo_root` once, both to gate
+                // trust-seeding (idem) and to feed the navigator's "repo name"
+                // line — `None` here is "launched outside a repo", and the
+                // frontend then falls back to the cwd basename.
                 Some(dir) => {
-                    seed_trust = self.git_worktree.repo_root(&dir).await?.is_some();
+                    launch_repo_root = self.git_worktree.repo_root(&dir).await?;
+                    seed_trust = launch_repo_root.is_some();
                     dir
                 }
                 // The default per-token scratch dir is empty, so `claude` never
@@ -260,6 +274,14 @@ where
                 None => self.workdir_for(&token),
             },
         };
+
+        // Snapshot the launch-time local branch. This is the navigator card's
+        // line-1 identifier — the branch the conversation was started on, never
+        // mutated on resume or a later `git checkout` inside the worktree (the
+        // per-message `git_branch` on `Message` carries the per-turn snapshot
+        // separately). `None` when the launch dir is not a git repo or HEAD is
+        // detached; the frontend then falls back to the session label.
+        let branch_at_launch = self.git_worktree.current_branch(&workdir).await?;
 
         // Pre-accept Claude Code's workspace-trust dialog for git-repo launch
         // directories. A fresh directory containing files otherwise pops a
@@ -282,7 +304,12 @@ where
         // worktree path, so a resume reattaches to the existing worktree.
         let (_session, main_thread_id) = self
             .store
-            .insert_spawning_session(&session_id, &workdir)
+            .insert_spawning_session(
+                &session_id,
+                &workdir,
+                branch_at_launch.as_deref(),
+                launch_repo_root.as_deref(),
+            )
             .await?;
         let first_send = match first_prompt.as_deref() {
             Some(text) => Some(

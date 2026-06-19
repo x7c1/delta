@@ -22,4 +22,18 @@ pub struct Session {
     pub status: SessionStatus,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// Local branch checked out in [`Self::cwd`] at the moment this session
+    /// was spawned (`git rev-parse --abbrev-ref HEAD`). `None` when the launch
+    /// directory was not inside a git repository, when HEAD was detached, or
+    /// for sessions that predate this field. This is a **spawn-time snapshot**:
+    /// it is never mutated on resume or after a later `git checkout` inside
+    /// the worktree. The per-message `git_branch` on [`crate::Message`] is a
+    /// separate per-turn snapshot and is unaffected.
+    pub branch_at_launch: Option<String>,
+    /// Repository root that contained [`Self::cwd`] at spawn time
+    /// (`git rev-parse --show-toplevel`). `None` when the launch directory was
+    /// not inside a git repository, or for sessions that predate this field.
+    /// Like [`Self::branch_at_launch`], this is a spawn-time snapshot — never
+    /// updated later.
+    pub repo_root: Option<String>,
 }

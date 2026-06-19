@@ -173,6 +173,10 @@ impl GitWorktree for NoopGitWorktree {
         Ok(None)
     }
 
+    async fn current_branch(&self, _path: &str) -> delta_usecase::Result<Option<String>> {
+        Ok(None)
+    }
+
     async fn default_branch(&self, _repo_root: &str) -> delta_usecase::Result<Option<String>> {
         Ok(None)
     }

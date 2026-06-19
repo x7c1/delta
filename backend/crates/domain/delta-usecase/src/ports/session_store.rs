@@ -51,10 +51,19 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// Claude Code and only learned from the first hook, which activates the
     /// row via [`Self::register_session`]). The id is freshly minted, so an
     /// existing row with the same id is an error, not an upsert.
+    ///
+    /// `branch_at_launch` and `repo_root` are the spawn-time git snapshot of
+    /// `cwd` — the local branch checked out and the repository root containing
+    /// it. Both are `None` when the launch directory is not inside a git
+    /// repository (or HEAD is detached). They are persisted once here and
+    /// never updated later: see [`Session::branch_at_launch`] /
+    /// [`Session::repo_root`] for the spawn-snapshot semantics.
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
         cwd: &str,
+        branch_at_launch: Option<&str>,
+        repo_root: Option<&str>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
@@ -381,8 +390,12 @@ impl SessionStore for Box<dyn SessionStore> {
         &self,
         id: &SessionId,
         cwd: &str,
+        branch_at_launch: Option<&str>,
+        repo_root: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
-        (**self).insert_spawning_session(id, cwd).await
+        (**self)
+            .insert_spawning_session(id, cwd, branch_at_launch, repo_root)
+            .await
     }
 
     async fn delete_session(&self, id: &SessionId) -> Result<()> {
