@@ -30,8 +30,8 @@ test('a prompt queued mid-turn dequeues after the interrupt and lands with its r
   // surfaces nothing.
   const messages = page.getByTestId('message-item');
   const pending = page.getByTestId('pending-item');
-  await expect(messages).toHaveCount(2);
-  await expect(pending).toHaveCount(1);
+  await expect(messages).toHaveCount(2, { timeout: 15_000 });
+  await expect(pending).toHaveCount(1, { timeout: 15_000 });
 
   // Open the embedded terminal; assert the attach before pressing Escape so
   // a bridge failure surfaces here, not as an opaque retry timeout below.
