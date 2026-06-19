@@ -184,7 +184,10 @@ pub enum Effect {
 }
 
 /// The outcome of folding one batch of transcript lines.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Holds `Vec<Message>`, which carries an `f64` (`response_time_ms`), so this
+/// derives only `PartialEq` — a float cannot implement `Eq`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Attributed {
     /// The lines as attributed [`Message`]s, in input order.
     pub messages: Vec<Message>,
@@ -478,6 +481,11 @@ pub fn attribute_lines(
             content_text,
             content: line.content,
             created_at: line.created_at,
+            // Transcript-derived per-message metadata, carried straight through.
+            model: line.model,
+            git_branch: line.git_branch,
+            cwd: line.cwd,
+            response_time_ms: line.response_time_ms,
         });
     }
 

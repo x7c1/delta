@@ -7,7 +7,10 @@ use delta_model::{ContentBlock, Message, MessageUuid, PromptId, Role};
 /// The transcript gateway produces these from the raw JSONL; the attribution
 /// fold turns them into [`Message`] values by attaching the active
 /// `thread_id` and any known semantic parent.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `response_time_ms` is an `f64`, so this type derives only `PartialEq` — a
+/// float cannot implement `Eq`/`Hash`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TranscriptMessage {
     pub uuid: MessageUuid,
     pub role: Role,
@@ -61,6 +64,17 @@ pub struct TranscriptMessage {
     /// [`Effect::TurnAborted`]: crate::Effect::TurnAborted
     /// [`Effect::TurnInterrupted`]: crate::Effect::TurnInterrupted
     pub is_api_error: bool,
+    /// The model that produced this line (the transcript's `message.model`), or
+    /// `None` for non-assistant lines and shapes carrying no model.
+    pub model: Option<String>,
+    /// The git branch active at this line (top-level `gitBranch`), or `None`.
+    pub git_branch: Option<String>,
+    /// The working directory at this line (top-level `cwd`), or `None`.
+    pub cwd: Option<String>,
+    /// The turn's response time in milliseconds, back-filled by the reader from
+    /// the turn's `system`/`turn_duration` line, or `None` when none was
+    /// recorded for the turn.
+    pub response_time_ms: Option<f64>,
 }
 
 impl TranscriptMessage {

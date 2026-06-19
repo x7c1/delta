@@ -31,6 +31,10 @@ pub fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
         seq: 0,
         is_queued_command: false,
         is_api_error: false,
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
     }
 }
 

@@ -6,7 +6,7 @@ use tokio::fs;
 use delta_usecase::{Transcript, TranscriptRead};
 
 use crate::error::Error;
-use crate::parse::parse_line;
+use crate::parse::{correlate_turn_durations, parse_line_outcome, ParsedLine};
 
 /// Reads Claude Code JSONL transcripts from the filesystem.
 ///
@@ -70,25 +70,42 @@ impl Transcript for JsonlTranscript {
             None => "",
         };
 
-        let mut messages = Vec::new();
+        // Parse every line in range into an outcome first, keeping `turn_duration`
+        // outcomes interleaved in file order, so a turn's latency can be
+        // correlated onto the turn's assistant message (it is written right after
+        // it). Message outcomes already carry their absolute line index as `seq`.
+        let mut outcomes = Vec::new();
         let mut total_lines = 0;
         for (idx, line) in terminated.lines().enumerate() {
             total_lines = idx + 1;
             if idx < from_line {
                 continue;
             }
-            match parse_line(line) {
-                Ok(Some(mut msg)) => {
+            match parse_line_outcome(line) {
+                Ok(ParsedLine::Message(mut msg)) => {
                     // The message's absolute line index is its persisted `seq`.
                     msg.seq = idx as i64;
-                    messages.push(msg);
+                    outcomes.push(ParsedLine::Message(msg));
                 }
-                Ok(None) => {}
+                Ok(other @ ParsedLine::TurnDuration { .. }) => outcomes.push(other),
+                Ok(ParsedLine::Skip) => {}
                 Err(err) => {
                     tracing::warn!(error = %err, "skipping unparsable transcript line");
                 }
             }
         }
+
+        // Stamp each turn's response time onto its assistant message, then drop
+        // the now-consumed `turn_duration` outcomes — they are not messages.
+        correlate_turn_durations(&mut outcomes);
+        let messages = outcomes
+            .into_iter()
+            .filter_map(|outcome| match outcome {
+                ParsedLine::Message(msg) => Some(*msg),
+                ParsedLine::TurnDuration { .. } | ParsedLine::Skip => None,
+            })
+            .collect();
+
         Ok(TranscriptRead {
             messages,
             total_lines,
@@ -279,6 +296,43 @@ mod tests {
         assert_eq!(next.total_lines, 2);
         assert_eq!(next.messages[0].seq, 1, "at its true file position");
         assert_eq!(next.messages[0].flatten_text().as_deref(), Some("b"));
+    }
+
+    /// A turn's `turn_duration` system line back-fills `response_time_ms` onto
+    /// the turn's assistant message through the full reader path, while leaving
+    /// the system line itself out of the produced messages and keeping `seq`
+    /// aligned to true file position.
+    #[tokio::test]
+    async fn turn_duration_back_fills_the_assistant_response_time() {
+        let mut file = tempfile_jsonl();
+        writeln!(
+            file,
+            r#"{{"uuid":"u1","type":"user","message":{{"content":"q","role":"user"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"uuid":"a1","type":"assistant","message":{{"role":"assistant","model":"claude-opus-4-8","content":[{{"type":"text","text":"r"}}]}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":4221}}"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let out = JsonlTranscript::new().read_from(&path, 0).await.unwrap();
+        // The user and assistant lines parse; the turn_duration line yields no
+        // message but still counts toward total_lines.
+        assert_eq!(out.messages.len(), 2);
+        assert_eq!(out.total_lines, 3);
+        let assistant = &out.messages[1];
+        assert_eq!(assistant.seq, 1);
+        assert_eq!(assistant.model.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(assistant.response_time_ms, Some(4221.0));
+        assert_eq!(out.messages[0].response_time_ms, None);
     }
 
     /// A minimal temp-file helper avoiding an extra dependency.

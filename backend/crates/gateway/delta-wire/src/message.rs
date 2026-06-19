@@ -42,7 +42,10 @@ impl From<Role> for WireRole {
 /// twin carries the serialization concerns the domain type must not know
 /// about: the field names on the wire and the TypeScript export. Ids are plain
 /// `String`/`i64` here because that is exactly what crosses the wire.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+///
+/// `response_time_ms` is an `f64`, so this type derives only `PartialEq` — a
+/// float cannot implement `Eq`/`Hash`.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(rename = "Message")]
 pub struct WireMessage {
     pub uuid: String,
@@ -62,6 +65,16 @@ pub struct WireMessage {
     /// domain stores `None` for a missing timestamp, but the wire keeps the
     /// pre-existing empty-string contract so the browser shape is unchanged.
     pub created_at: String,
+    /// The model that produced this message (historical, per message), or `null`
+    /// when the line carried none. Distinct from the current model selection.
+    pub model: Option<String>,
+    /// The git branch active at this turn, or `null` when absent.
+    pub git_branch: Option<String>,
+    /// The working directory at this turn, or `null` when absent.
+    pub cwd: Option<String>,
+    /// The turn's response time in milliseconds, or `null` when no duration was
+    /// recorded for the turn.
+    pub response_time_ms: Option<f64>,
 }
 
 impl From<Message> for WireMessage {
@@ -82,6 +95,10 @@ impl From<Message> for WireMessage {
                 .map(WireContentBlock::from)
                 .collect(),
             created_at: message.created_at.unwrap_or_default(),
+            model: message.model,
+            git_branch: message.git_branch,
+            cwd: message.cwd,
+            response_time_ms: message.response_time_ms,
         }
     }
 }
@@ -108,6 +125,10 @@ mod tests {
                 text: "hello".into(),
             }],
             created_at: Some("2026-01-01T00:00:00Z".into()),
+            model: Some("claude-opus-4-8".into()),
+            git_branch: Some("main".into()),
+            cwd: Some("/repo".into()),
+            response_time_ms: Some(1234.0),
         };
         assert_eq!(
             serde_json::to_value(WireMessage::from(message)).unwrap(),
@@ -123,6 +144,10 @@ mod tests {
                 "content_text": "hello",
                 "content": [{ "type": "text", "text": "hello" }],
                 "created_at": "2026-01-01T00:00:00Z",
+                "model": "claude-opus-4-8",
+                "git_branch": "main",
+                "cwd": "/repo",
+                "response_time_ms": 1234.0,
             }),
         );
     }

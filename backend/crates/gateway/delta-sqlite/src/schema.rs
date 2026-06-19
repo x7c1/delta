@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS message (
   content_text         TEXT,
   content_json         TEXT,
   created_at           TEXT,
+  -- Transcript-derived per-message metadata (all nullable: older lines and
+  -- non-assistant shapes carry none). `response_time_ms` is REAL because the
+  -- turn duration is a JSON number. These are cache rebuildable from the JSONL
+  -- transcript, like the rest of the message body.
+  model                TEXT,
+  git_branch           TEXT,
+  cwd                  TEXT,
+  response_time_ms     REAL,
   PRIMARY KEY (session_id, uuid)
 ) STRICT;
 
@@ -247,6 +255,30 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         column: "default_enabled",
         add_column_sql:
             "ALTER TABLE launch_option ADD COLUMN default_enabled INTEGER NOT NULL DEFAULT 0",
+    },
+    // Per-message transcript metadata, added to `message` after it first
+    // shipped. All nullable with no default, so an existing database gains them
+    // as NULL on every pre-existing row (and re-ingest of newer lines fills them
+    // — they are transcript-derived cache, not irreplaceable overlay).
+    AdditiveColumn {
+        table: "message",
+        column: "model",
+        add_column_sql: "ALTER TABLE message ADD COLUMN model TEXT",
+    },
+    AdditiveColumn {
+        table: "message",
+        column: "git_branch",
+        add_column_sql: "ALTER TABLE message ADD COLUMN git_branch TEXT",
+    },
+    AdditiveColumn {
+        table: "message",
+        column: "cwd",
+        add_column_sql: "ALTER TABLE message ADD COLUMN cwd TEXT",
+    },
+    AdditiveColumn {
+        table: "message",
+        column: "response_time_ms",
+        add_column_sql: "ALTER TABLE message ADD COLUMN response_time_ms REAL",
     },
 ];
 

@@ -25,7 +25,10 @@ string_newtype! {
 /// - `semantic_parent_uuid` is the `to:` reply edge. It is only set on user
 ///   branch messages and is usually `None`. A thread is a subtree of this
 ///   `to:` graph.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `response_time_ms` is an `f64`, so this type derives only `PartialEq` — a
+/// float cannot implement `Eq`/`Hash`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub uuid: MessageUuid,
     pub session_id: SessionId,
@@ -43,6 +46,22 @@ pub struct Message {
     pub content: Vec<ContentBlock>,
     /// ISO-8601 timestamp, or `None` when the transcript line carried none.
     pub created_at: Option<String>,
+    /// The model that produced this message (the transcript's `message.model`),
+    /// or `None` for non-assistant lines and shapes that carry no model. This is
+    /// the historical, per-message model — distinct from the user's *current*
+    /// model selection reported by the status line.
+    pub model: Option<String>,
+    /// The git branch active at this turn (the transcript's top-level
+    /// `gitBranch`), or `None` when absent. Unlike `cwd`, this can change
+    /// mid-session (e.g. a `git checkout` between turns).
+    pub git_branch: Option<String>,
+    /// The working directory at this turn (the transcript's top-level `cwd`), or
+    /// `None` when absent. Effectively fixed for a session's lifetime.
+    pub cwd: Option<String>,
+    /// The turn's response time in milliseconds, correlated from the turn's
+    /// `system`/`turn_duration` line, or `None` when no duration was recorded
+    /// for the turn. An `f64`, so this type cannot derive `Eq`/`Hash`.
+    pub response_time_ms: Option<f64>,
 }
 
 impl Message {

@@ -12,6 +12,24 @@ use delta_usecase::TranscriptMessage;
 use raw_content::RawContent;
 use raw_line::RawLine;
 
+/// What a single transcript line parses into.
+///
+/// Most lines yield a [`TranscriptMessage`]; a `system`/`turn_duration` line
+/// yields no message but carries the turn's latency, which the reader correlates
+/// back onto that turn's assistant message (see [`correlate_turn_durations`]).
+/// A blank/no-uuid/duration-less line yields [`ParsedLine::Skip`].
+#[derive(Debug)]
+pub(crate) enum ParsedLine {
+    /// A real message line. Boxed because a [`TranscriptMessage`] is far larger
+    /// than the other variants, which would otherwise bloat every `ParsedLine`.
+    Message(Box<TranscriptMessage>),
+    /// A `system`/`turn_duration` line: the turn's response time, to be
+    /// correlated onto the turn's assistant message.
+    TurnDuration { duration_ms: f64 },
+    /// A line that produces nothing (blank, no uuid, or no usable payload).
+    Skip,
+}
+
 /// Markers Claude Code writes at the start of a slash/local command's captured
 /// output, recorded as a `type: "user"` line WITHOUT `isMeta`. These structural
 /// prefixes let the parser fold the output to [`Role::Meta`] (like the group's
@@ -26,13 +44,39 @@ fn is_local_command_output_marker(text: &str) -> bool {
         .any(|marker| text.starts_with(marker))
 }
 
-/// Parse one JSONL line. Returns `Ok(None)` for blank lines.
+/// Parse one JSONL line into a message, ignoring non-message outcomes.
+///
+/// Thin wrapper over [`parse_line_outcome`] kept for callers (and tests) that
+/// only care about message lines: a `turn_duration` system line — which carries
+/// no message — collapses to `Ok(None)` here, exactly like a blank or no-uuid
+/// line. The reader uses [`parse_line_outcome`] directly so it can correlate a
+/// turn's duration onto its assistant message.
 pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::Error> {
+    Ok(match parse_line_outcome(line)? {
+        ParsedLine::Message(msg) => Some(*msg),
+        ParsedLine::TurnDuration { .. } | ParsedLine::Skip => None,
+    })
+}
+
+/// Parse one JSONL line into a [`ParsedLine`].
+pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::Error> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
-        return Ok(None);
+        return Ok(ParsedLine::Skip);
     }
     let raw: RawLine = serde_json::from_str(trimmed)?;
+
+    // A `system`/`turn_duration` line carries the turn's latency but no message.
+    // Surface it as its own outcome so the reader can correlate the duration
+    // onto the turn's assistant message (it itself never becomes a message).
+    if raw.line_type.as_deref() == Some("system")
+        && raw.subtype.as_deref() == Some("turn_duration")
+    {
+        return Ok(match raw.duration_ms {
+            Some(duration_ms) => ParsedLine::TurnDuration { duration_ms },
+            None => ParsedLine::Skip,
+        });
+    }
 
     // A line without a uuid is not a message we can address; skip it. This
     // deliberately covers `type: "queue-operation"` lines — the uuid-less
@@ -42,7 +86,7 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
     // and flows the normal parse/attribution path), so the bookkeeping line
     // carries nothing Delta needs to surface.
     let Some(uuid) = raw.uuid else {
-        return Ok(None);
+        return Ok(ParsedLine::Skip);
     };
 
     // LEGACY FORMAT COMPATIBILITY — keep this path. Older claude versions
@@ -106,6 +150,11 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
             .unwrap_or(Role::Other)
     };
 
+    // The model that produced this line lives on the embedded message
+    // (`message.model`), present on assistant lines only. Take it before the
+    // message is moved out for content below.
+    let model = raw.message.as_ref().and_then(|m| m.model.clone());
+
     let content = if let Some(prompt) = queued_prompt {
         vec![ContentBlock::Text { text: prompt }]
     } else {
@@ -118,7 +167,7 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         }
     };
 
-    Ok(Some(TranscriptMessage {
+    Ok(ParsedLine::Message(Box::new(TranscriptMessage {
         uuid: MessageUuid::from(uuid),
         role,
         linear_parent_uuid: raw.parent_uuid.map(MessageUuid::from),
@@ -130,7 +179,41 @@ pub fn parse_line(line: &str) -> Result<Option<TranscriptMessage>, serde_json::E
         seq: 0,
         is_queued_command,
         is_api_error,
-    }))
+        model,
+        git_branch: raw.git_branch,
+        cwd: raw.cwd,
+        // The duration arrives on a separate `turn_duration` line; the reader
+        // correlates it onto this message afterwards (see the reader).
+        response_time_ms: None,
+    })))
+}
+
+/// Correlate each turn's `turn_duration` onto its assistant message.
+///
+/// A `system`/`turn_duration` line carries the turn's latency but no message; it
+/// is written right after the turn's final assistant line (the chain is
+/// `assistant → stop_hook_summary → turn_duration`). So a duration is attributed
+/// to the **most recent assistant message** that precedes it in file order. The
+/// `outcomes` slice is the per-line parse results in file order; this back-fills
+/// `response_time_ms` on the matching assistant message in place.
+///
+/// Lives here (not in the reader) so it is unit-testable over a fixture of raw
+/// lines, and so the file-position/seq bookkeeping in the reader stays simple.
+pub(crate) fn correlate_turn_durations(outcomes: &mut [ParsedLine]) {
+    for idx in 0..outcomes.len() {
+        let ParsedLine::TurnDuration { duration_ms } = outcomes[idx] else {
+            continue;
+        };
+        // Walk back to the nearest preceding assistant message and stamp it.
+        for prior in outcomes[..idx].iter_mut().rev() {
+            if let ParsedLine::Message(msg) = prior {
+                if msg.role == Role::Assistant {
+                    msg.response_time_ms = Some(duration_ms);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -336,5 +419,157 @@ mod tests {
     fn line_without_uuid_is_skipped() {
         let line = r#"{"type":"user","message":{"content":"hi"}}"#;
         assert!(parse_line(line).unwrap().is_none());
+    }
+
+    #[test]
+    fn assistant_line_extracts_model_cwd_and_git_branch() {
+        // The model lives on the embedded message; cwd/gitBranch are top-level.
+        let line = r#"{"uuid":"a1","type":"assistant","cwd":"/repo","gitBranch":"feature/x","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"hi"}]}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.model.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(msg.cwd.as_deref(), Some("/repo"));
+        assert_eq!(msg.git_branch.as_deref(), Some("feature/x"));
+        // The duration arrives on a separate line; it is not set here.
+        assert_eq!(msg.response_time_ms, None);
+    }
+
+    #[test]
+    fn user_line_has_no_model_and_metadata_is_optional() {
+        // A user line carries no model; absent cwd/gitBranch stay None.
+        let line = r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"hi"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.model, None);
+        assert_eq!(msg.cwd, None);
+        assert_eq!(msg.git_branch, None);
+    }
+
+    #[test]
+    fn turn_duration_system_line_yields_no_message() {
+        // The `turn_duration` system line carries the turn's latency but is not
+        // itself a message: `parse_line` (message-only) drops it, while the
+        // outcome form surfaces the duration for correlation.
+        let line = r#"{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":4221,"timestamp":"2026-01-01T00:00:00Z"}"#;
+        assert!(parse_line(line).unwrap().is_none());
+        match parse_line_outcome(line).unwrap() {
+            ParsedLine::TurnDuration { duration_ms } => assert_eq!(duration_ms, 4221.0),
+            other => panic!("expected TurnDuration, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn turn_duration_is_correlated_onto_its_turn_assistant_message() {
+        // A realistic turn tail: the user prompt, the turn's assistant reply, a
+        // `stop_hook_summary` system line, then the `turn_duration` line whose
+        // latency must attach to that assistant message — not the user line and
+        // not the system lines. Mirrors claude's real
+        // `assistant → stop_hook_summary → turn_duration` ordering.
+        let lines = [
+            r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"q"}}"#,
+            r#"{"uuid":"a1","type":"assistant","message":{"role":"assistant","model":"claude-opus-4-8","content":[{"type":"text","text":"answer"}]}}"#,
+            r#"{"uuid":"s1","type":"system","subtype":"stop_hook_summary","message":{"role":"system","content":"x"}}"#,
+            r#"{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":10167}"#,
+        ];
+        let mut outcomes: Vec<ParsedLine> =
+            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        correlate_turn_durations(&mut outcomes);
+
+        let messages: Vec<&TranscriptMessage> = outcomes
+            .iter()
+            .filter_map(|o| match o {
+                ParsedLine::Message(m) => Some(m.as_ref()),
+                _ => None,
+            })
+            .collect();
+        let user = messages.iter().find(|m| m.uuid == MessageUuid::from("u1")).unwrap();
+        let assistant = messages.iter().find(|m| m.uuid == MessageUuid::from("a1")).unwrap();
+        assert_eq!(
+            assistant.response_time_ms,
+            Some(10167.0),
+            "duration attaches to the turn's assistant message"
+        );
+        assert_eq!(
+            user.response_time_ms, None,
+            "the user line is not the turn's assistant message"
+        );
+    }
+
+    #[test]
+    fn each_turns_duration_attaches_to_its_own_turns_assistant() {
+        // Two complete turns in one window: each `turn_duration` must stamp the
+        // assistant of its OWN turn (the nearest preceding assistant), never
+        // bleed onto the other turn's reply.
+        let lines = [
+            r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"q1"}}"#,
+            r#"{"uuid":"a1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"r1"}]}}"#,
+            r#"{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":1000}"#,
+            r#"{"uuid":"u2","type":"user","message":{"role":"user","content":"q2"}}"#,
+            r#"{"uuid":"a2","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"r2"}]}}"#,
+            r#"{"uuid":"d2","type":"system","subtype":"turn_duration","durationMs":2000}"#,
+        ];
+        let mut outcomes: Vec<ParsedLine> =
+            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        correlate_turn_durations(&mut outcomes);
+
+        let by_uuid = |uuid: &str| {
+            outcomes
+                .iter()
+                .find_map(|o| match o {
+                    ParsedLine::Message(m) if m.uuid == MessageUuid::from(uuid) => Some(m.as_ref()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(by_uuid("a1").response_time_ms, Some(1000.0));
+        assert_eq!(by_uuid("a2").response_time_ms, Some(2000.0));
+    }
+
+    #[test]
+    fn turn_duration_with_no_preceding_assistant_is_a_silent_no_op() {
+        // A `turn_duration` whose turn has no assistant message in the window
+        // (e.g. the assistant line is below the read cursor, or the turn ended
+        // before any assistant line) must not panic walking past the start and
+        // must not mis-attach to a user/system line. It simply drops.
+        let lines = [
+            r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"q"}}"#,
+            r#"{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":4221}"#,
+        ];
+        let mut outcomes: Vec<ParsedLine> =
+            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        correlate_turn_durations(&mut outcomes);
+
+        let user = outcomes
+            .iter()
+            .find_map(|o| match o {
+                ParsedLine::Message(m) => Some(m.as_ref()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            user.response_time_ms, None,
+            "no assistant precedes the duration, so it attaches to nothing"
+        );
+    }
+
+    #[test]
+    fn an_assistant_turn_without_a_duration_line_keeps_response_time_none() {
+        // An interrupted/in-progress turn whose `turn_duration` line has not been
+        // written yet leaves the assistant's `response_time_ms` as None — the
+        // correlation only stamps a message when a duration actually exists.
+        let lines = [
+            r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"q"}}"#,
+            r#"{"uuid":"a1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"r"}]}}"#,
+        ];
+        let mut outcomes: Vec<ParsedLine> =
+            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        correlate_turn_durations(&mut outcomes);
+
+        let assistant = outcomes
+            .iter()
+            .find_map(|o| match o {
+                ParsedLine::Message(m) if m.role == Role::Assistant => Some(m.as_ref()),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(assistant.response_time_ms, None);
     }
 }

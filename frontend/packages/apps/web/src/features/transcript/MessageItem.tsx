@@ -5,6 +5,8 @@ import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { blockSummary, stringifyContent } from './blockSummary';
 import { isTaskNotificationMessage } from './claudeFormat';
+import { MessageMeta } from './MessageMeta';
+import { MessageTimestamp } from './MessageTimestamp';
 import { messageRendersNothing, type ToolPairing } from './toolPairs';
 
 export interface MessageItemProps {
@@ -17,6 +19,12 @@ export interface MessageItemProps {
    * shown elsewhere is suppressed here (it is rendered inline with that call).
    */
   pairing?: ToolPairing;
+  /**
+   * Whether this is the latest assistant message in the thread. Only the latest
+   * assistant message renders the richer two-line meta (model + cwd/branch);
+   * older ones render a single `time · info` line. Defaults to false.
+   */
+  isLatest?: boolean;
 }
 
 /**
@@ -38,6 +46,7 @@ export function MessageItem({
   message,
   onSelectQuote,
   pairing,
+  isLatest = false,
 }: MessageItemProps) {
   const handleMouseUp = useCallback(() => {
     if (!onSelectQuote) {
@@ -92,9 +101,10 @@ export function MessageItem({
           <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
         </Collapsible>
         {timestamp && (
-          <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
-            {timestamp}
-          </span>
+          <MessageTimestamp
+            timestamp={timestamp}
+            className="mt-1 block text-right"
+          />
         )}
       </article>
     );
@@ -131,9 +141,10 @@ export function MessageItem({
           <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
         </Collapsible>
         {timestamp && (
-          <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
-            {timestamp}
-          </span>
+          <MessageTimestamp
+            timestamp={timestamp}
+            className="mt-1 block text-right"
+          />
         )}
       </article>
     );
@@ -277,9 +288,7 @@ export function MessageItem({
           {blocks}
         </div>
         {timestamp && (
-          <span className="mt-1 text-xs tabular-nums text-slate-400">
-            {timestamp}
-          </span>
+          <MessageTimestamp timestamp={timestamp} className="mt-1" />
         )}
       </article>
     );
@@ -305,11 +314,7 @@ export function MessageItem({
       ) : (
         blocks
       )}
-      {timestamp && (
-        <span className="mt-1 block text-right text-xs tabular-nums text-slate-400">
-          {timestamp}
-        </span>
-      )}
+      <MessageMeta message={message} timestamp={timestamp} isLatest={isLatest} />
     </article>
   );
 }

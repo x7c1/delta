@@ -212,6 +212,10 @@ fn message_from_row(row: &Row<'_>) -> Result<Message> {
         content_text: row.get(8)?,
         content,
         created_at: row.get(10)?,
+        model: row.get(11)?,
+        git_branch: row.get(12)?,
+        cwd: row.get(13)?,
+        response_time_ms: row.get(14)?,
     })
 }
 
@@ -249,7 +253,7 @@ const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
      ) AS root_message_uuid, created_at";
 const SEND_COLS: &str =
     "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at";
-const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at";
+const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at, model, git_branch, cwd, response_time_ms";
 const LAUNCH_OPTION_COLS: &str = "id, label, name, value, default_enabled, created_at";
 
 /// Ensure the session's `main` thread exists, returning its id.
@@ -837,7 +841,7 @@ impl SessionStore for SqliteStore {
                     // `created_at` may be NULL: a transcript line without a
                     // timestamp is stored as such, never as a sentinel.
                     "INSERT INTO message ({MESSAGE_COLS}) VALUES
-                     (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                     (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                      ON CONFLICT(session_id, uuid) DO UPDATE SET
                        role = excluded.role,
                        linear_parent_uuid = excluded.linear_parent_uuid,
@@ -845,7 +849,11 @@ impl SessionStore for SqliteStore {
                        seq = excluded.seq,
                        content_text = excluded.content_text,
                        content_json = excluded.content_json,
-                       created_at = excluded.created_at"
+                       created_at = excluded.created_at,
+                       model = excluded.model,
+                       git_branch = excluded.git_branch,
+                       cwd = excluded.cwd,
+                       response_time_ms = excluded.response_time_ms"
                 ),
                 params![
                     m.uuid.as_str(),
@@ -859,6 +867,10 @@ impl SessionStore for SqliteStore {
                     m.content_text,
                     content_json,
                     m.created_at,
+                    m.model,
+                    m.git_branch,
+                    m.cwd,
+                    m.response_time_ms,
                 ],
             )
             .map_err(Error::from)?;
