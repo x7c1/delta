@@ -125,6 +125,12 @@ function SettingsIcon({ className }: { className?: string }) {
  * track and grows leftward (see the `className` passed at the call site). The
  * caller hides the row entirely when its window is absent, so this only renders
  * a present window; a `null` percentage within a present window reads as 0%.
+ *
+ * The row uses a monospace family on purpose so EVERY character — digits, `%`,
+ * the `↻` reset glyph, the letters in `5d04h` / `02h13m`, and any spaces — sits
+ * in a fixed-width cell, which is what keeps the two rows' columns aligned.
+ * Tabular-figures (`tabular-nums`) alone equalises digit glyphs only, leaving
+ * symbols and letters at proportional widths — so it is not sufficient here.
  */
 function RateLimitRow({
   label,
@@ -146,23 +152,23 @@ function RateLimitRow({
       : null;
   return (
     <div
-      className="flex items-center gap-1.5 text-xs text-slate-500"
+      className="flex items-center gap-1.5 font-mono text-xs text-slate-500"
       data-testid={testId}
     >
-      <span className="w-5 shrink-0 tabular-nums text-slate-400">{label}</span>
+      <span className="w-5 shrink-0 text-slate-400">{label}</span>
       <Meter
         value={percentage}
         fillClassName={fillClassName}
         className={meterClassName}
         title={`${label} rate limit: ${Math.round(percentage)}% used`}
       />
-      <span className="shrink-0 tabular-nums" data-testid={`${testId}-pct`}>
+      <span className="shrink-0" data-testid={`${testId}-pct`}>
         {/* Zero-pad to 3 digits so the percentage column lines up across rows. */}
         {Math.round(percentage).toString().padStart(3, '0')}%
       </span>
       {reset !== null && (
         <span
-          className="shrink-0 tabular-nums text-slate-400"
+          className="shrink-0 text-slate-400"
           data-testid={`${testId}-reset`}
         >
           {`↻ ${reset}`}
@@ -326,7 +332,7 @@ export function NavigatorPane({
                   label="5h"
                   window={rateLimits.fiveHour}
                   // Shared neutral accent — the rows are told apart by the label.
-                  fillClassName="bg-slate-600"
+                  fillClassName="bg-slate-500"
                   // `flex justify-end` on the Meter's outer track pushes its
                   // inner fill div to the right edge, so the bar grows leftward
                   // from the reset side without modifying the Meter primitive.
@@ -339,7 +345,7 @@ export function NavigatorPane({
                   label="7d"
                   window={rateLimits.sevenDay}
                   // Shared neutral accent — the rows are told apart by the label.
-                  fillClassName="bg-slate-600"
+                  fillClassName="bg-slate-500"
                   // `flex justify-end` on the Meter's outer track pushes its
                   // inner fill div to the right edge, so the bar grows leftward
                   // from the reset side without modifying the Meter primitive.
