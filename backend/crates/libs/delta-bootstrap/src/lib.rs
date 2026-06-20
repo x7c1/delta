@@ -13,6 +13,12 @@ mod settings;
 pub use error::{Error, Result};
 pub use settings::render_session_settings;
 
+// Re-export the underlying store error so callers (the `delta-server` binary)
+// can pattern-match on its variants — notably `SchemaMismatch`, which it
+// surfaces with a clean message at startup — without taking a direct
+// dependency on `delta-sqlite`.
+pub use delta_sqlite::Error as StoreError;
+
 // Re-exported so a binary that only configures the server (a test harness,
 // the `delta-server` main) can name the launch settings without depending on
 // the use-case crate directly.

@@ -1625,3 +1625,154 @@ async fn subagent_launches_round_trip_and_clear() {
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining.get("toolu_b"), Some(&main));
 }
+
+// SCHEMA_VERSION startup gate. The four cases below are the contract from the
+// compatibility policy doc (subdomain 1): a fresh DB stamps current; a pre-gate
+// v0.1.0 DB is silently rescued; any other non-matching version is refused with
+// an error naming `make reset`; a current DB opens normally.
+
+/// Read the on-disk `PRAGMA user_version` from a freshly-opened connection,
+/// so the gate's effect on a file can be observed independently of the store
+/// (which holds its own connection behind an async mutex).
+fn read_user_version(path: &str) -> u32 {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn schema_gate_stamps_a_fresh_database_with_the_current_version() {
+    let dir = std::env::temp_dir().join(format!("delta-schema-fresh-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("fresh.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Sanity: the file does not exist yet, so the open is genuinely creating
+    // it. `user_version` defaults to 0 on a brand-new SQLite file.
+    assert!(!path.exists());
+
+    let store = SqliteStore::open(path_str).unwrap();
+    // The store works as usual (the schema steps ran).
+    store.register_session(new_session()).await.unwrap();
+    drop(store);
+
+    // The gate stamped the file current, so a re-open takes the match path.
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+    let reopened = SqliteStore::open(path_str).unwrap();
+    let again = reopened
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap();
+    assert!(again.is_some(), "the stamped DB re-opens normally");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn schema_gate_rescues_a_pre_gate_v0_1_0_database() {
+    let dir =
+        std::env::temp_dir().join(format!("delta-schema-rescue-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a "shipped-as-v0.1.0" DB: open it through the store, write some
+    // overlay state, then reset `user_version` to 0 so the file looks exactly
+    // like one created before the gate landed. The `session` table is present,
+    // which is the marker the rescue branch keys off.
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch("PRAGMA user_version = 0").unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 0);
+
+    // Re-opening must NOT error — the rescue branch silently bumps the marker
+    // and continues. The pre-existing overlay row is still there afterwards.
+    let store = SqliteStore::open(path_str).unwrap();
+    assert!(store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .is_some());
+    drop(store);
+
+    // The file is now stamped current, so a second re-open is the match path.
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn schema_gate_refuses_a_non_matching_version() {
+    let dir =
+        std::env::temp_dir().join(format!("delta-schema-mismatch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("future.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a DB then force `user_version` to a value that is neither 0 nor
+    // the current SCHEMA_VERSION. This stands in for both "future binary
+    // wrote it" and "stale overlay against newer binary" — the gate makes no
+    // distinction; it refuses both.
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        let foreign = crate::SCHEMA_VERSION + 1;
+        conn.execute_batch(&format!("PRAGMA user_version = {foreign}"))
+            .unwrap();
+    }
+
+    let err = match SqliteStore::open(path_str) {
+        Ok(_) => panic!("expected mismatched version to be refused"),
+        Err(err) => err,
+    };
+    match &err {
+        crate::Error::SchemaMismatch { found, expected } => {
+            assert_eq!(*expected, crate::SCHEMA_VERSION);
+            assert_eq!(*found, crate::SCHEMA_VERSION + 1);
+        }
+        other => panic!("expected SchemaMismatch, got {other:?}"),
+    }
+    // The error's `Display` is what reaches the user — it must name
+    // `make reset` so the remediation is obvious without consulting docs.
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("make reset"),
+        "error message must name `make reset`: {rendered}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn schema_gate_opens_a_current_database_unchanged() {
+    let dir =
+        std::env::temp_dir().join(format!("delta-schema-match-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("current.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // First open stamps the file current; a second open is the match branch.
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+    }
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    let store = SqliteStore::open(path_str).unwrap();
+    let session = store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .expect("the registered session survives a re-open");
+    assert_eq!(session.id.as_str(), "sess-1");
+
+    // The version did not change (idempotent on the match path).
+    drop(store);
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
