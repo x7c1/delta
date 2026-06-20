@@ -3,8 +3,10 @@ import type { Message, Thread } from '@delta/wire-gen';
 import {
   LANE_LABEL_PREFIX_LEN,
   MAIN_LANE_LABEL,
+  NO_PREVIEW_LANE_LABEL,
   buildTimelineLanes,
-  laneLabelFromUuid,
+  laneLabelFromText,
+  messagePreviewText,
 } from './timelineLanes';
 
 function thread(
@@ -29,7 +31,16 @@ function thread(
   };
 }
 
-function message(threadId: number, seq: number, uuid?: string): Message {
+function message(
+  threadId: number,
+  seq: number,
+  uuid?: string,
+  {
+    createdAt = '2026-01-01T00:00:00Z',
+    contentText = null as string | null,
+    content = [] as Message['content'],
+  } = {},
+): Message {
   return {
     uuid: uuid ?? `m-${threadId}-${seq}`,
     session_id: 'session-1',
@@ -39,9 +50,9 @@ function message(threadId: number, seq: number, uuid?: string): Message {
     semantic_parent_uuid: null,
     prompt_id: null,
     seq,
-    content_text: null,
-    content: [],
-    created_at: '2026-01-01T00:00:00Z',
+    content_text: contentText,
+    content,
+    created_at: createdAt,
     model: null,
     git_branch: null,
     cwd: null,
@@ -49,15 +60,46 @@ function message(threadId: number, seq: number, uuid?: string): Message {
   };
 }
 
-describe('laneLabelFromUuid', () => {
+describe('laneLabelFromText', () => {
   it(`returns at most ${LANE_LABEL_PREFIX_LEN} leading chars`, () => {
-    const uuid = 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6';
-    expect(laneLabelFromUuid(uuid)).toBe(uuid.slice(0, LANE_LABEL_PREFIX_LEN));
-    expect(laneLabelFromUuid(uuid).length).toBe(LANE_LABEL_PREFIX_LEN);
+    const long = 'a'.repeat(50);
+    expect(laneLabelFromText(long)).toBe(long.slice(0, LANE_LABEL_PREFIX_LEN));
+    expect(laneLabelFromText(long).length).toBe(LANE_LABEL_PREFIX_LEN);
   });
 
-  it('returns the uuid unchanged when shorter than the prefix length', () => {
-    expect(laneLabelFromUuid('short')).toBe('short');
+  it('returns the text unchanged when shorter than the prefix length', () => {
+    expect(laneLabelFromText('short')).toBe('short');
+  });
+});
+
+describe('messagePreviewText', () => {
+  it('prefers content_text when present', () => {
+    const m = message(1, 0, 'm1', { contentText: 'hello world' });
+    expect(messagePreviewText(m)).toBe('hello world');
+  });
+
+  it('falls back to joining `text` content blocks when content_text is null', () => {
+    const m = message(1, 0, 'm1', {
+      contentText: null,
+      content: [
+        { type: 'text', text: 'first ' },
+        { type: 'thinking', thinking: 'private' },
+        { type: 'text', text: 'second' },
+      ],
+    });
+    expect(messagePreviewText(m)).toBe('first second');
+  });
+
+  it('collapses newlines and runs of whitespace into single spaces', () => {
+    const m = message(1, 0, 'm1', {
+      contentText: '  line one\n\n  line  two\t\tend  ',
+    });
+    expect(messagePreviewText(m)).toBe('line one line two end');
+  });
+
+  it('returns empty string when there is no visible text', () => {
+    const m = message(1, 0, 'm1', { contentText: null, content: [] });
+    expect(messagePreviewText(m)).toBe('');
   });
 });
 
@@ -75,8 +117,9 @@ describe('buildTimelineLanes', () => {
     expect(lanes.map((l) => l.threadId)).toEqual([1, 2]);
   });
 
-  it(`labels the main thread "${MAIN_LANE_LABEL}" and subthreads by the root uuid prefix`, () => {
-    const rootUuid = 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6';
+  it(`labels the main thread "${MAIN_LANE_LABEL}" and subthreads by the root message body prefix`, () => {
+    const rootUuid = 'root-uuid-1';
+    const rootBody = 'Plan the next migration step in detail';
     const threads = [
       thread(1),
       thread(2, {
@@ -85,20 +128,41 @@ describe('buildTimelineLanes', () => {
         createdAt: '2026-01-01T00:05:00Z',
       }),
     ];
-    const lanes = buildTimelineLanes(threads, new Map());
+    // The root message lives in the parent thread's message list — that is
+    // exactly the cross-lane lookup the builder has to perform.
+    const messagesByThread = new Map([
+      [1, [message(1, 0, rootUuid, { contentText: rootBody })]],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
     expect(lanes[0]).toMatchObject({
       label: MAIN_LANE_LABEL,
       tooltip: MAIN_LANE_LABEL,
       isMain: true,
     });
     expect(lanes[1]).toMatchObject({
-      label: rootUuid.slice(0, LANE_LABEL_PREFIX_LEN),
-      tooltip: rootUuid,
+      label: rootBody.slice(0, LANE_LABEL_PREFIX_LEN),
+      tooltip: rootBody,
       isMain: false,
     });
   });
 
-  it('uses a `thread <id>` fallback when a subthread has no root uuid', () => {
+  it(`falls back to "${NO_PREVIEW_LANE_LABEL}" with the root uuid as tooltip when the root message is not loaded yet`, () => {
+    const rootUuid = 'root-uuid-1';
+    const threads = [
+      thread(1),
+      thread(2, {
+        parent: 1,
+        rootUuid,
+        createdAt: '2026-01-01T00:05:00Z',
+      }),
+    ];
+    // No message map entry for the root — the per-thread fetch is in flight.
+    const lanes = buildTimelineLanes(threads, new Map());
+    expect(lanes[1].label).toBe(NO_PREVIEW_LANE_LABEL);
+    expect(lanes[1].tooltip).toBe(rootUuid);
+  });
+
+  it('uses a `thread <id>` fallback when a subthread has no root uuid at all', () => {
     const threads = [
       thread(1),
       thread(2, {
@@ -112,15 +176,79 @@ describe('buildTimelineLanes', () => {
     expect(lanes[1].tooltip).toBe('thread 2');
   });
 
-  it('places dots in seq order with equal spacing indices 0..N-1', () => {
-    const threads = [thread(1)];
-    const messages = [message(1, 2, 'm3'), message(1, 0, 'm1'), message(1, 1, 'm2')];
-    const lanes = buildTimelineLanes(threads, new Map([[1, messages]]));
-    expect(lanes[0].dots).toEqual([
-      { uuid: 'm1', threadId: 1, order: 0 },
-      { uuid: 'm2', threadId: 1, order: 1 },
-      { uuid: 'm3', threadId: 1, order: 2 },
+  it('places dots on the shared global axis sorted across lanes by `created_at`', () => {
+    // Two lanes that interleave in wall-clock time. The dot `order` values
+    // must reflect the merged chronological position, not the per-lane index:
+    // m1-0 -> 0, m2-0 -> 1, m1-1 -> 2, m2-1 -> 3.
+    const threads = [
+      thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
+      thread(2, {
+        parent: 1,
+        rootUuid: null,
+        createdAt: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' }),
+          message(1, 1, 'c', { createdAt: '2026-01-01T00:02:00Z' }),
+        ],
+      ],
+      [
+        2,
+        [
+          message(2, 0, 'b', { createdAt: '2026-01-01T00:01:00Z' }),
+          message(2, 1, 'd', { createdAt: '2026-01-01T00:03:00Z' }),
+        ],
+      ],
     ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    expect(lanes[0].dots).toEqual([
+      { uuid: 'a', threadId: 1, order: 0 },
+      { uuid: 'c', threadId: 1, order: 2 },
+    ]);
+    expect(lanes[1].dots).toEqual([
+      { uuid: 'b', threadId: 2, order: 1 },
+      { uuid: 'd', threadId: 2, order: 3 },
+    ]);
+  });
+
+  it('breaks `created_at` ties by `seq` so global order is total and stable', () => {
+    const threads = [
+      thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
+      thread(2, {
+        parent: 1,
+        rootUuid: null,
+        createdAt: '2026-01-01T00:00:00Z',
+      }),
+    ];
+    // Same created_at second across two lanes — `seq` (per-session monotonic)
+    // breaks the tie so the merged order is m1-0, m2-1, m1-2.
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' }),
+          message(1, 2, 'c', { createdAt: '2026-01-01T00:00:00Z' }),
+        ],
+      ],
+      [
+        2,
+        [message(2, 1, 'b', { createdAt: '2026-01-01T00:00:00Z' })],
+      ],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    const orderByUuid = new Map<string, number>();
+    for (const lane of lanes) {
+      for (const dot of lane.dots) {
+        orderByUuid.set(dot.uuid, dot.order);
+      }
+    }
+    expect(orderByUuid.get('a')).toBe(0);
+    expect(orderByUuid.get('b')).toBe(1);
+    expect(orderByUuid.get('c')).toBe(2);
   });
 
   it('returns an empty `dots` array for a thread missing from the messages map', () => {

@@ -10,6 +10,7 @@ import type { ThreadId } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
 import { useThreadsMessagesQueries } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
+import { useNavStore } from '../../store/navStore';
 import { buildTimelineLanes, type TimelineDot } from './timelineLanes';
 
 /**
@@ -18,8 +19,18 @@ import { buildTimelineLanes, type TimelineDot } from './timelineLanes';
  */
 export const TIMELINE_EXPANDED_STORAGE_KEY = 'delta.thread-timeline-overlay.expanded';
 
-/** Debounce window (ms) between hovering a dot and scrolling its message. */
+/** Debounce window (ms) between hovering a dot and triggering its jump. */
 export const HOVER_JUMP_DEBOUNCE_MS = 250;
+
+/**
+ * The payload a hover-jump fires with: enough to know both which message to
+ * scroll to AND which subthread it belongs to, so a cross-lane jump can
+ * switch the active thread before scrolling.
+ */
+export interface HoverJumpTarget {
+  uuid: string;
+  threadId: ThreadId;
+}
 
 /**
  * Read the persisted expanded preference; defaults to collapsed when no
@@ -75,14 +86,18 @@ export function useTimelineExpanded(): [boolean, () => void] {
 
 /**
  * Wire a debounced hover-jump on a swim-lane dot: hovering for at least
- * {@link HOVER_JUMP_DEBOUNCE_MS} fires {@link onJump} with the dot's uuid.
+ * {@link HOVER_JUMP_DEBOUNCE_MS} fires {@link onJump} with the target payload.
  * The dot keeps its hover visual immediately; the conversation pane reacts
  * only after the debounce elapses, intentionally minimising misfire churn.
  *
+ * Generic over the target type so callers control what the handler receives;
+ * the timeline passes the dot's `{ uuid, threadId }` pair so a cross-lane
+ * jump can switch the active thread before scrolling.
+ *
  * Exported for tests; the component below wires it into its dot handlers.
  */
-export function useHoverJump(onJump: (uuid: string) => void): {
-  onHover: (uuid: string) => void;
+export function useHoverJump<T>(onJump: (target: T) => void): {
+  onHover: (target: T) => void;
   onLeave: () => void;
 } {
   const timerRef = useRef<number | null>(null);
@@ -94,11 +109,11 @@ export function useHoverJump(onJump: (uuid: string) => void): {
   }, []);
   useEffect(() => cancel, [cancel]);
   const onHover = useCallback(
-    (uuid: string) => {
+    (target: T) => {
       cancel();
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
-        onJump(uuid);
+        onJump(target);
       }, HOVER_JUMP_DEBOUNCE_MS);
     },
     [cancel, onJump],
@@ -126,6 +141,35 @@ export function scrollMessageIntoView(
   }
 }
 
+/**
+ * Schedule {@link scrollMessageIntoView} to run after the next paint, so a
+ * preceding active-thread switch has time to render the target thread's
+ * messages into the DOM. Prefers `requestAnimationFrame`; falls back to a
+ * zero-delay `setTimeout` when rAF is unavailable (jsdom in vitest does not
+ * implement it natively).
+ *
+ * Returns a cancel handle the caller can fire to suppress the scroll if the
+ * component unmounts or another jump supersedes this one before paint.
+ */
+export function scheduleScrollAfterRender(
+  container: HTMLElement | null,
+  uuid: string,
+): () => void {
+  if (
+    typeof window !== 'undefined' &&
+    typeof window.requestAnimationFrame === 'function'
+  ) {
+    const handle = window.requestAnimationFrame(() => {
+      scrollMessageIntoView(container, uuid);
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }
+  const handle = setTimeout(() => {
+    scrollMessageIntoView(container, uuid);
+  }, 0);
+  return () => clearTimeout(handle);
+}
+
 export interface ThreadTimelineOverlayProps {
   /** All threads (main + subthreads) in the focused session. */
   threads: Thread[];
@@ -141,7 +185,7 @@ export interface ThreadTimelineOverlayProps {
 
 /** Lane row height in pixels. */
 const LANE_HEIGHT_PX = 18;
-/** Equal horizontal spacing between dots within a lane. */
+/** Equal horizontal spacing between dots along the shared global axis. */
 const DOT_SPACING_PX = 14;
 /** Dot diameter; the hit area is enlarged via padding in the wrapper. */
 const DOT_SIZE_PX = 8;
@@ -153,11 +197,14 @@ const LANE_RIGHT_PAD_PX = 16;
 /**
  * The fixed footer between the conversation pane and the composer: a swim-lane
  * timeline of every subthread (and the main thread). Each thread is a row,
- * each speech turn is a dot at its sequence index, and hovering a dot scrolls
- * the matching message into view in the conversation pane (debounced by
- * {@link HOVER_JUMP_DEBOUNCE_MS} ms). The footer is always present; clicking
- * the title bar collapses or expands the lanes, and the preference is
- * persisted per device.
+ * each speech turn is a dot, and every dot sits on a SHARED global utterance
+ * axis (all subthreads' messages sorted by `created_at`, ties broken by
+ * `seq`). Hovering a dot scrolls the matching message into view in the
+ * conversation pane (debounced by {@link HOVER_JUMP_DEBOUNCE_MS} ms); when
+ * the dot belongs to a different subthread, the active thread switches first
+ * and the scroll runs on the next frame so the target's messages are in the
+ * DOM. The footer is always present; clicking the title bar collapses or
+ * expands the lanes, and the preference is persisted per device.
  *
  * MVP intentionally omits cross-row derivation lines, kind-coded dots, and
  * click-to-pin — they are tracked as separate follow-ups.
@@ -168,6 +215,7 @@ export function ThreadTimelineOverlay({
   conversationBodyRef,
 }: ThreadTimelineOverlayProps) {
   const client = useApiClient();
+  const setActiveThread = useNavStore((state) => state.setActiveThread);
   const [expanded, toggle] = useTimelineExpanded();
 
   // N+1 is acceptable for MVP; the dedicated `all_threads=true` REST is
@@ -192,22 +240,62 @@ export function ThreadTimelineOverlay({
     [threads, messagesByThread],
   );
 
-  const handleJump = useCallback(
-    (uuid: string) => {
-      scrollMessageIntoView(conversationBodyRef.current, uuid);
-    },
-    [conversationBodyRef],
-  );
-  const { onHover, onLeave } = useHoverJump(handleJump);
+  // Track the active thread in a ref so the hover-jump handler can compare
+  // against the live value without re-creating itself (and thus re-arming the
+  // debounce) every time the active thread changes.
+  const activeThreadRef = useRef<ThreadId | null>(activeThreadId);
+  useEffect(() => {
+    activeThreadRef.current = activeThreadId;
+  }, [activeThreadId]);
 
-  const widestLaneDots = lanes.reduce(
-    (max, lane) => Math.max(max, lane.dots.length),
-    0,
+  // Hold a cancel handle for the pending render-frame scroll so a superseding
+  // jump (or unmount) can suppress an in-flight scroll before it runs.
+  const pendingScrollCancelRef = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      pendingScrollCancelRef.current?.();
+    },
+    [],
   );
-  const laneAxisWidth =
-    widestLaneDots > 0
-      ? DOT_SPACING_PX * Math.max(widestLaneDots - 1, 1) + DOT_SIZE_PX
-      : DOT_SIZE_PX;
+
+  const handleJump = useCallback(
+    (target: HoverJumpTarget) => {
+      pendingScrollCancelRef.current?.();
+      pendingScrollCancelRef.current = null;
+      const container = conversationBodyRef.current;
+      if (target.threadId === activeThreadRef.current) {
+        // Same lane: the target message is already in the DOM, scroll right
+        // away. No frame deferral, no thread switch.
+        scrollMessageIntoView(container, target.uuid);
+        return;
+      }
+      // Cross-lane jump: switch the active thread first so the conversation
+      // pane re-renders with the target lane's messages, then scroll on the
+      // next frame once those nodes have landed in the DOM.
+      setActiveThread(target.threadId);
+      pendingScrollCancelRef.current = scheduleScrollAfterRender(
+        container,
+        target.uuid,
+      );
+    },
+    [conversationBodyRef, setActiveThread],
+  );
+  const { onHover, onLeave } = useHoverJump<HoverJumpTarget>(handleJump);
+
+  // The shared axis spans every lane in lockstep; its width is driven by the
+  // highest global order across all dots, not by any single lane's count.
+  const maxDotOrder = lanes.reduce((max, lane) => {
+    for (const dot of lane.dots) {
+      if (dot.order > max) {
+        max = dot.order;
+      }
+    }
+    return max;
+  }, 0);
+  const hasAnyDot = lanes.some((lane) => lane.dots.length > 0);
+  const laneAxisWidth = hasAnyDot
+    ? DOT_SPACING_PX * Math.max(maxDotOrder, 1) + DOT_SIZE_PX
+    : DOT_SIZE_PX;
 
   return (
     <section
@@ -310,7 +398,7 @@ export function ThreadTimelineOverlay({
 
 interface TimelineDotMarkProps {
   dot: TimelineDot;
-  onHover: (uuid: string) => void;
+  onHover: (target: HoverJumpTarget) => void;
   onLeave: () => void;
 }
 
@@ -323,15 +411,17 @@ interface TimelineDotMarkProps {
 function TimelineDotMark({ dot, onHover, onLeave }: TimelineDotMarkProps) {
   const [hovered, setHovered] = useState(false);
   const left = dot.order * DOT_SPACING_PX;
+  const target: HoverJumpTarget = { uuid: dot.uuid, threadId: dot.threadId };
   return (
     <button
       type="button"
       data-testid="thread-timeline-dot"
       data-message-uuid={dot.uuid}
+      data-thread-id={dot.threadId}
       data-order={dot.order}
       onMouseEnter={() => {
         setHovered(true);
-        onHover(dot.uuid);
+        onHover(target);
       }}
       onMouseLeave={() => {
         setHovered(false);
@@ -339,7 +429,7 @@ function TimelineDotMark({ dot, onHover, onLeave }: TimelineDotMarkProps) {
       }}
       onFocus={() => {
         setHovered(true);
-        onHover(dot.uuid);
+        onHover(target);
       }}
       onBlur={() => {
         setHovered(false);
