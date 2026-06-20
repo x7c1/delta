@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Message, Thread } from '@delta/wire-gen';
 import {
-  LANE_LABEL_PREFIX_LEN,
   MAIN_LANE_LABEL,
-  NO_PREVIEW_LANE_LABEL,
   buildTimelineLanes,
+  classifyMessage,
   computeTimeRange,
   findActiveMessage,
-  laneLabelFromText,
-  messagePreviewText,
   messageTimeMs,
   xFraction,
 } from './timelineLanes';
@@ -19,16 +16,18 @@ function thread(
     parent = null,
     rootUuid = null,
     createdAt = '2026-01-01T00:00:00Z',
+    title,
   }: {
     parent?: number | null;
     rootUuid?: string | null;
     createdAt?: string;
+    title?: string;
   } = {},
 ): Thread {
   return {
     id,
     session_id: 'session-1',
-    title: `thread ${id}`,
+    title: title ?? `thread ${id}`,
     parent_thread_id: parent,
     root_message_uuid: rootUuid,
     created_at: createdAt,
@@ -43,13 +42,14 @@ function message(
     createdAt = '2026-01-01T00:00:00Z',
     contentText = null as string | null,
     content = [] as Message['content'],
+    role = 'user' as Message['role'],
   } = {},
 ): Message {
   return {
     uuid: uuid ?? `m-${threadId}-${seq}`,
     session_id: 'session-1',
     thread_id: threadId,
-    role: 'user',
+    role,
     linear_parent_uuid: null,
     semantic_parent_uuid: null,
     prompt_id: null,
@@ -64,46 +64,48 @@ function message(
   };
 }
 
-describe('laneLabelFromText', () => {
-  it(`returns at most ${LANE_LABEL_PREFIX_LEN} leading chars`, () => {
-    const long = 'a'.repeat(50);
-    expect(laneLabelFromText(long)).toBe(long.slice(0, LANE_LABEL_PREFIX_LEN));
-    expect(laneLabelFromText(long).length).toBe(LANE_LABEL_PREFIX_LEN);
+describe('classifyMessage', () => {
+  it('classifies a user-role message with author text as "user"', () => {
+    const m = message(1, 0, 'm', {
+      role: 'user',
+      content: [{ type: 'text', text: 'hello' }],
+    });
+    expect(classifyMessage(m)).toBe('user');
   });
 
-  it('returns the text unchanged when shorter than the prefix length', () => {
-    expect(laneLabelFromText('short')).toBe('short');
-  });
-});
-
-describe('messagePreviewText', () => {
-  it('prefers content_text when present', () => {
-    const m = message(1, 0, 'm1', { contentText: 'hello world' });
-    expect(messagePreviewText(m)).toBe('hello world');
-  });
-
-  it('falls back to joining `text` content blocks when content_text is null', () => {
-    const m = message(1, 0, 'm1', {
-      contentText: null,
+  it('classifies a user-role message that only carries tool results as "other"', () => {
+    // Matches MessageItem's left/right split: a tool-result carrier renders
+    // on the assistant side, so it counts as "other" here too.
+    const m = message(1, 0, 'm', {
+      role: 'user',
       content: [
-        { type: 'text', text: 'first ' },
-        { type: 'thinking', thinking: 'private' },
-        { type: 'text', text: 'second' },
+        { type: 'tool_result', tool_use_id: 't', content: '', is_error: false },
       ],
     });
-    expect(messagePreviewText(m)).toBe('first second');
+    expect(classifyMessage(m)).toBe('other');
   });
 
-  it('collapses newlines and runs of whitespace into single spaces', () => {
-    const m = message(1, 0, 'm1', {
-      contentText: '  line one\n\n  line  two\t\tend  ',
-    });
-    expect(messagePreviewText(m)).toBe('line one line two end');
-  });
-
-  it('returns empty string when there is no visible text', () => {
-    const m = message(1, 0, 'm1', { contentText: null, content: [] });
-    expect(messagePreviewText(m)).toBe('');
+  it('classifies assistant, meta, system, and other roles as "other"', () => {
+    expect(
+      classifyMessage(
+        message(1, 0, 'a', { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }),
+      ),
+    ).toBe('other');
+    expect(
+      classifyMessage(
+        message(1, 0, 'm', { role: 'meta', content: [{ type: 'text', text: 'sys' }] }),
+      ),
+    ).toBe('other');
+    expect(
+      classifyMessage(
+        message(1, 0, 's', { role: 'system', content: [{ type: 'text', text: 'sys' }] }),
+      ),
+    ).toBe('other');
+    expect(
+      classifyMessage(
+        message(1, 0, 'o', { role: 'other', content: [{ type: 'text', text: 'x' }] }),
+      ),
+    ).toBe('other');
   });
 });
 
@@ -184,7 +186,6 @@ describe('buildTimelineLanes', () => {
     const threads = [
       thread(2, {
         parent: 1,
-        rootUuid: 'uuid-a',
         createdAt: '2026-01-01T00:05:00Z',
       }),
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
@@ -193,57 +194,35 @@ describe('buildTimelineLanes', () => {
     expect(lanes.map((l) => l.threadId)).toEqual([1, 2]);
   });
 
-  it(`labels the main thread "${MAIN_LANE_LABEL}" and subthreads by the root message body prefix`, () => {
-    const rootUuid = 'root-uuid-1';
-    const rootBody = 'Plan the next migration step in detail';
+  it(`labels the main thread "${MAIN_LANE_LABEL}" regardless of the wire title`, () => {
     const threads = [
-      thread(1),
+      thread(1, { title: 'a long session prompt the server stored here' }),
       thread(2, {
         parent: 1,
-        rootUuid,
+        title: 'branch one',
         createdAt: '2026-01-01T00:05:00Z',
       }),
     ];
-    // The root message lives in the parent thread's message list — that is
-    // exactly the cross-lane lookup the builder has to perform.
-    const messagesByThread = new Map([
-      [1, [message(1, 0, rootUuid, { contentText: rootBody })]],
-    ]);
-    const lanes = buildTimelineLanes(threads, messagesByThread);
+    const lanes = buildTimelineLanes(threads, new Map());
     expect(lanes[0]).toMatchObject({
       label: MAIN_LANE_LABEL,
       tooltip: MAIN_LANE_LABEL,
       isMain: true,
     });
+    // Subthread label matches Navigator's source: the wire thread.title.
     expect(lanes[1]).toMatchObject({
-      label: rootBody.slice(0, LANE_LABEL_PREFIX_LEN),
-      tooltip: rootBody,
+      label: 'branch one',
+      tooltip: 'branch one',
       isMain: false,
     });
   });
 
-  it(`falls back to "${NO_PREVIEW_LANE_LABEL}" with the root uuid as tooltip when the root message is not loaded yet`, () => {
-    const rootUuid = 'root-uuid-1';
+  it('falls back to `thread <id>` when a subthread title is empty', () => {
     const threads = [
       thread(1),
       thread(2, {
         parent: 1,
-        rootUuid,
-        createdAt: '2026-01-01T00:05:00Z',
-      }),
-    ];
-    // No message map entry for the root — the per-thread fetch is in flight.
-    const lanes = buildTimelineLanes(threads, new Map());
-    expect(lanes[1].label).toBe(NO_PREVIEW_LANE_LABEL);
-    expect(lanes[1].tooltip).toBe(rootUuid);
-  });
-
-  it('uses a `thread <id>` fallback when a subthread has no root uuid at all', () => {
-    const threads = [
-      thread(1),
-      thread(2, {
-        parent: 1,
-        rootUuid: null,
+        title: '',
         createdAt: '2026-01-01T00:05:00Z',
       }),
     ];
@@ -253,14 +232,10 @@ describe('buildTimelineLanes', () => {
   });
 
   it('places dots on the shared time axis as fractions of created_at across every lane', () => {
-    // Two interleaving lanes spanning 8 minutes. The dot fractions must be
-    // proportional to the message timestamps, NOT to the per-lane index:
-    // earliest at 0, latest at 1, mid-span dots in between.
     const threads = [
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
       thread(2, {
         parent: 1,
-        rootUuid: null,
         createdAt: '2026-01-01T00:01:00Z',
       }),
     ];
@@ -281,33 +256,44 @@ describe('buildTimelineLanes', () => {
       ],
     ]);
     const lanes = buildTimelineLanes(threads, messagesByThread);
-    expect(lanes[0].dots).toEqual([
-      {
-        uuid: 'a',
-        threadId: 1,
-        x: 0,
-        timeMs: Date.parse('2026-01-01T00:00:00Z'),
-      },
-      {
-        uuid: 'c',
-        threadId: 1,
-        x: 0.5,
-        timeMs: Date.parse('2026-01-01T00:04:00Z'),
-      },
+    // x positions still derive purely from created_at; `kind` now annotates
+    // each dot for the renderer's color choice (every message here is a
+    // user-role line with no text blocks, so they classify as "other").
+    expect(lanes[0].dots.map((d) => ({ uuid: d.uuid, x: d.x }))).toEqual([
+      { uuid: 'a', x: 0 },
+      { uuid: 'c', x: 0.5 },
     ]);
-    expect(lanes[1].dots).toEqual([
-      {
-        uuid: 'b',
-        threadId: 2,
-        x: 0.25,
-        timeMs: Date.parse('2026-01-01T00:02:00Z'),
-      },
-      {
-        uuid: 'd',
-        threadId: 2,
-        x: 1,
-        timeMs: Date.parse('2026-01-01T00:08:00Z'),
-      },
+    expect(lanes[1].dots.map((d) => ({ uuid: d.uuid, x: d.x }))).toEqual([
+      { uuid: 'b', x: 0.25 },
+      { uuid: 'd', x: 1 },
+    ]);
+  });
+
+  it('annotates each dot with its classifyMessage kind', () => {
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          // A genuine human turn (user role + text block) → "user".
+          message(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hi' }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          // An assistant reply → "other".
+          message(1, 1, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hello' }],
+            createdAt: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    expect(lanes[0].dots.map((d) => ({ uuid: d.uuid, kind: d.kind }))).toEqual([
+      { uuid: 'u', kind: 'user' },
+      { uuid: 'a', kind: 'other' },
     ]);
   });
 
@@ -355,7 +341,6 @@ describe('findActiveMessage', () => {
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
       thread(2, {
         parent: 1,
-        rootUuid: null,
         createdAt: '2026-01-01T00:01:00Z',
       }),
     ];
@@ -386,7 +371,6 @@ describe('findActiveMessage', () => {
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
       thread(2, {
         parent: 1,
-        rootUuid: null,
         createdAt: '2026-01-01T00:00:00Z',
       }),
     ];

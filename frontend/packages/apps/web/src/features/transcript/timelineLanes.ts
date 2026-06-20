@@ -1,26 +1,40 @@
-import type { ThreadId } from '@delta/model';
+import {
+  MAIN_THREAD_DISPLAY_NAME,
+  threadDisplayName,
+  threadTooltip,
+  type ThreadId,
+} from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
 
 /**
- * Number of leading characters of a subthread's root-message body used as its
- * lane label. Picked from the 20–30 range called out in the spec — long enough
- * to disambiguate at a glance, short enough to fit in a compact label column
- * without truncation noise. The full body text is exposed via the lane's
- * `tooltip` so the trimmed prefix never loses the underlying context.
+ * Special label for the main thread's lane.
+ *
+ * Re-exported from the shared {@link MAIN_THREAD_DISPLAY_NAME} so the
+ * conventional name lives in one place. The timeline used to publish its own
+ * constant under this name — kept as a back-compat alias for existing tests
+ * and imports while the rename settles.
  */
-export const LANE_LABEL_PREFIX_LEN = 24;
-
-/** Special label for the main thread's lane. */
-export const MAIN_LANE_LABEL = 'main';
-
-/** Fallback label when a subthread's root message body cannot be resolved. */
-export const NO_PREVIEW_LANE_LABEL = '(no preview)';
+export const MAIN_LANE_LABEL = MAIN_THREAD_DISPLAY_NAME;
 
 /**
- * A single message dot in a lane. Its {@link x} is a 0..1 fraction along the
+ * Classification of a message's author for the timeline mark's color.
+ *
+ * - `user` — a genuine human turn (matches `MessageItem`'s `isUserTurn` rule:
+ *   `role === 'user'` AND at least one author-written text block). A user-role
+ *   message that only carries tool results is NOT classified as `user` here,
+ *   mirroring the transcript's left/right split where those render assistant-
+ *   side.
+ * - `other` — everything else (assistant, meta, system, tool-result carriers,
+ *   etc.). MVP picks a two-color scheme; finer-grained distinction within
+ *   `other` is deferred to a follow-up.
+ */
+export type TimelineDotKind = 'user' | 'other';
+
+/**
+ * A single message mark in a lane. Its {@link x} is a 0..1 fraction along the
  * shared time axis: 0 = earliest message in the whole session, 1 = latest.
- * Dots are positioned by their `created_at` timestamp, so idle/thinking gaps
- * are visible as horizontal whitespace between dots — the cross-lane axis
+ * Marks are positioned by their `created_at` timestamp, so idle/thinking gaps
+ * are visible as horizontal whitespace between marks — the cross-lane axis
  * reads as a chronological scrub rather than equal-spacing speech order.
  */
 export interface TimelineDot {
@@ -31,15 +45,21 @@ export interface TimelineDot {
   /**
    * Fraction of the shared time axis the message falls on: 0 for the earliest
    * message across the whole session, 1 for the latest. Multiplied by the
-   * lane's pixel width at render time to get the dot's absolute x.
+   * lane's pixel width at render time to get the mark's absolute x.
    */
   x: number;
   /**
    * Epoch milliseconds of {@link Message.created_at}, exposed so the active
    * message lookup can rank candidates by their absolute time when the
-   * playhead lands between dots.
+   * playhead lands between marks.
    */
   timeMs: number;
+  /**
+   * Author classification for the mark's color (see {@link TimelineDotKind}).
+   * Computed at lane-build time so the renderer is a pure function of the
+   * pre-computed dot data.
+   */
+  kind: TimelineDotKind;
 }
 
 /**
@@ -49,9 +69,17 @@ export interface TimelineDot {
  */
 export interface TimelineLane {
   threadId: ThreadId;
-  /** Compact label shown next to the lane: `main` or a body-text prefix. */
+  /**
+   * Label shown next to the lane: `main` for the main thread, or the wire
+   * `thread.title` for a subthread (same source Navigator displays, via the
+   * shared {@link threadDisplayName} helper). Visual truncation is the
+   * renderer's job (it reserves a fixed label column and CSS-truncates).
+   */
   label: string;
-  /** Full label content exposed on hover (e.g. the full root body). */
+  /**
+   * Tooltip content exposed on hover. For a subthread this is the full
+   * untrimmed title so a label cut by CSS truncation can still be read.
+   */
   tooltip: string;
   /** Whether this lane represents the session's main thread. */
   isMain: boolean;
@@ -70,37 +98,25 @@ export interface TimelineTimeRange {
 }
 
 /**
- * Truncate a string to its leading prefix for display next to a swim lane.
- * Returns the input unchanged when shorter than {@link LANE_LABEL_PREFIX_LEN}
- * so a short body is not padded.
- */
-export function laneLabelFromText(text: string): string {
-  return text.length > LANE_LABEL_PREFIX_LEN
-    ? text.slice(0, LANE_LABEL_PREFIX_LEN)
-    : text;
-}
-
-/**
- * The visible prose of a message, normalised to a single line for use in a
- * compact lane label.
+ * Classify a message's author for the timeline mark's color.
  *
- * Preference order matches the wire contract: the backend-precomputed
- * `content_text` is the canonical flat view, so it is used first; when it is
- * null or empty we fall back to concatenating the message's `text` content
- * blocks (the same shape `MessageItem` renders, minus the formatting). Runs
- * of whitespace — newlines included — collapse to single spaces so the
- * trimmed prefix reads smoothly even when the underlying body began with a
- * code fence or a list.
+ * Mirrors `MessageItem`'s `isUserTurn` rule so the timeline mark agrees with
+ * the transcript's own left/right split: a `role: 'user'` message that only
+ * carries tool results (no author-written text block) is a tool-result
+ * carrier, not a human turn — it counts as `other` here, the same side the
+ * transcript renders it on.
+ *
+ * Finer-grained distinction within `other` (assistant vs tool vs question
+ * card vs meta) is intentionally deferred — MVP uses a two-color scheme.
  */
-export function messagePreviewText(message: Message): string {
-  const raw =
-    message.content_text !== null && message.content_text !== ''
-      ? message.content_text
-      : message.content
-          .filter((block) => block.type === 'text')
-          .map((block) => block.text)
-          .join(' ');
-  return raw.replace(/\s+/g, ' ').trim();
+export function classifyMessage(message: Message): TimelineDotKind {
+  if (
+    message.role === 'user' &&
+    message.content.some((block) => block.type === 'text')
+  ) {
+    return 'user';
+  }
+  return 'other';
 }
 
 /**
@@ -166,21 +182,22 @@ export function xFraction(
  * Build the swim-lane structure for the timeline footer from a session's
  * thread list and a per-thread message map.
  *
- * Each thread becomes one lane; the main thread (no parent) is labelled
- * `main`, sub-threads use the first {@link LANE_LABEL_PREFIX_LEN} chars of
- * their root message's body (full body kept in `tooltip`). When the root
- * message cannot be resolved — e.g. the per-thread fetch has not landed yet
- * — the label falls back to {@link NO_PREVIEW_LANE_LABEL} and the tooltip
- * carries the full root uuid so the anchor stays recoverable.
+ * Each thread becomes one lane; lane labels go through the shared
+ * {@link threadDisplayName} / {@link threadTooltip} helpers — the same
+ * helpers Navigator uses — so a subthread cannot ever show two different
+ * names in two different panes. The main thread is labelled with the
+ * conventional {@link MAIN_THREAD_DISPLAY_NAME}.
  *
- * Dots within a lane are the thread's messages placed on a SHARED time axis
+ * Marks within a lane are the thread's messages placed on a SHARED time axis
  * spanning the earliest..latest `created_at` across every (sub)thread. Each
- * dot carries its 0..1 fraction so the renderer multiplies by the lane's
- * pixel width to get the dot's absolute x — idle/thinking gaps become visible
- * as horizontal whitespace, which is what makes the time order readable.
+ * mark carries its 0..1 fraction so the renderer multiplies by the lane's
+ * pixel width to get the absolute x — idle/thinking gaps become visible as
+ * horizontal whitespace, which is what makes the time order readable. Each
+ * mark also carries a {@link TimelineDotKind} so the renderer can color it
+ * by author (user vs everything else).
  *
  * A thread missing from `messagesByThread` contributes an empty lane (no
- * dots). This lets the footer still draw the lane row while the per-thread
+ * marks). This lets the footer still draw the lane row while the per-thread
  * fetch is in flight, instead of suppressing it and resizing the moment the
  * data arrives.
  */
@@ -199,45 +216,12 @@ export function buildTimelineLanes(
     return a.id - b.id;
   });
 
-  // Build a uuid → message index across ALL subthreads. Used for resolving
-  // each subthread's root-message preview (the root often lives in a different
-  // lane's message list whenever the subthread branched off from a message
-  // authored in the parent lane).
-  const messagesByUuid = new Map<string, Message>();
-  for (const messages of messagesByThread.values()) {
-    for (const message of messages) {
-      messagesByUuid.set(message.uuid, message);
-    }
-  }
-
   const range = computeTimeRange(messagesByThread);
 
   return sortedThreads.map((thread) => {
     const isMain = thread.parent_thread_id === null;
-    const rootUuid = thread.root_message_uuid ?? '';
-    const rootMessage =
-      rootUuid !== '' ? messagesByUuid.get(rootUuid) ?? null : null;
-    const rootPreview =
-      rootMessage !== null ? messagePreviewText(rootMessage) : '';
-
-    let label: string;
-    let tooltip: string;
-    if (isMain) {
-      label = MAIN_LANE_LABEL;
-      tooltip = MAIN_LANE_LABEL;
-    } else if (rootPreview !== '') {
-      label = laneLabelFromText(rootPreview);
-      tooltip = rootPreview;
-    } else if (rootUuid !== '') {
-      // Root uuid is known but the message itself is not in the merged set
-      // yet (or the body is empty). Fall back to a generic label and expose
-      // the full uuid as the tooltip so the anchor stays recoverable.
-      label = NO_PREVIEW_LANE_LABEL;
-      tooltip = rootUuid;
-    } else {
-      label = `thread ${thread.id}`;
-      tooltip = `thread ${thread.id}`;
-    }
+    const label = threadDisplayName(thread, { isMain });
+    const tooltip = threadTooltip(thread, { isMain });
 
     const rawMessages = messagesByThread.get(thread.id) ?? [];
     // Defensive sort by `seq`: the server returns messages in `seq` order, but
@@ -256,6 +240,7 @@ export function buildTimelineLanes(
         threadId: thread.id,
         x: xFraction(ms, range),
         timeMs: ms,
+        kind: classifyMessage(message),
       });
     }
     return { threadId: thread.id, label, tooltip, isMain, dots };

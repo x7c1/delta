@@ -25,13 +25,32 @@ import {
 export const TIMELINE_EXPANDED_STORAGE_KEY = 'delta.thread-timeline-overlay.expanded';
 
 /**
- * Pixels of playhead movement per unit of wheel delta. Tuned so a single
- * mouse-wheel notch (`deltaY = 100` on most browsers, with trackpad scrolls
- * emitting smaller per-event deltas) advances the playhead by a thumb-width
- * slice of the axis: small enough to feel precise, large enough that a
- * deliberate roll actually moves the highlight along.
+ * Pixels of playhead movement per unit of wheel delta. One standard wheel
+ * notch is `deltaY = 100` on most browsers, so this constant times 100 is the
+ * pixel travel per notch.
+ *
+ * Tuned low so a single notch lands ~1–2 % of the axis width per notch
+ * (≈3 px on a 240 px axis at the current value), letting the user stop on a
+ * specific message instead of overshooting whole lanes. v2 used `0.15`
+ * (≈6 %/notch), which dogfooding showed was too coarse for precision landing.
+ * The {@link MARK_SNAP_FRACTION_THRESHOLD} snap below covers the remaining
+ * "land exactly on a mark" gap when smooth scrubbing alone is not enough.
  */
-export const WHEEL_SCRUB_PX_PER_DELTA = 0.15;
+export const WHEEL_SCRUB_PX_PER_DELTA = 0.03;
+
+/**
+ * Fractional distance (in the same 0..1 unit the marks use) within which the
+ * playhead snaps onto the nearest mark after a wheel scrub. Smooth motion
+ * still works — the user can scrub past a mark and the snap then re-engages
+ * for the next mark — but landing precisely on a target message becomes
+ * effortless. Picked small enough that the snap is invisible at the speeds a
+ * user actually scrubs, and zero ⇒ disabled in tests that need exact x.
+ *
+ * The snap is intentionally NOT applied to click jumps: a click is already an
+ * explicit "I meant this exact x" gesture and the dot-distance lookup that
+ * picks the active message already maps clicks to a real mark.
+ */
+export const MARK_SNAP_FRACTION_THRESHOLD = 0.012;
 
 /**
  * Read the persisted expanded preference; defaults to collapsed when no
@@ -156,8 +175,49 @@ export interface ThreadTimelineOverlayProps {
 const LANE_HEIGHT_PX = 18;
 /** Minimum width (in px) the lane axis reserves so a single-dot session is still scrubbable. */
 const MIN_LANE_AXIS_PX = 240;
-/** Dot diameter; the hit area is enlarged via padding in the wrapper. */
-const DOT_SIZE_PX = 8;
+
+/**
+ * If the smoothed playhead x is within {@link MARK_SNAP_FRACTION_THRESHOLD}
+ * of any mark across every lane, snap it onto that mark's x. Otherwise
+ * return the raw x unchanged.
+ *
+ * Exported so a test can assert the snap behaviour without driving the
+ * full wheel-event loop. The threshold of 0 disables the snap (callers that
+ * want exact-x scrubbing for measurement can set the constant to 0).
+ */
+export function snapToNearestMark(
+  rawX: number,
+  lanes: { dots: { x: number }[] }[],
+  threshold: number = MARK_SNAP_FRACTION_THRESHOLD,
+): number {
+  if (threshold <= 0) {
+    return rawX;
+  }
+  let nearestX = rawX;
+  let nearestDistance = threshold;
+  for (const lane of lanes) {
+    for (const dot of lane.dots) {
+      const distance = Math.abs(dot.x - rawX);
+      if (distance <= nearestDistance) {
+        nearestDistance = distance;
+        nearestX = dot.x;
+      }
+    }
+  }
+  return nearestX;
+}
+
+/**
+ * Mark width / height in pixels.
+ *
+ * v3 switched from a circle to a thin vertical rectangle so a packed lane stays
+ * readable: rectangles don't overlap-blur the way circles do at high density,
+ * and the height makes the role color (user vs other) easy to scan along the
+ * lane. The width is small enough to land on a single mark when the wheel
+ * snap engages, and the height fills most of the lane row.
+ */
+const MARK_WIDTH_PX = 3;
+const MARK_HEIGHT_PX = 12;
 /** Width reserved on the left for lane labels. */
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
@@ -184,8 +244,9 @@ const LANE_RIGHT_PAD_PX = 16;
  * The footer is always present; clicking the title bar collapses or expands
  * the lanes, and the preference is persisted per device.
  *
- * MVP intentionally omits cross-row derivation lines, kind-coded dots,
- * playhead drag, zoom, and click-to-pin — they are tracked as separate
+ * Marks are color-coded by author (user vs everything else); cross-row
+ * derivation lines, playhead drag, zoom, click-to-pin, and finer-grained
+ * "other" coloring (assistant vs tool vs meta) are tracked as separate
  * follow-ups.
  */
 export function ThreadTimelineOverlay({
@@ -355,20 +416,27 @@ export function ThreadTimelineOverlay({
         return;
       }
       const px = rawDelta * WHEEL_SCRUB_PX_PER_DELTA;
-      // Map the pixel delta to a fractional delta on the same axis the dots
+      // Map the pixel delta to a fractional delta on the same axis the marks
       // use, then clamp into 0..1 so the playhead never strays off the axis.
       const fractionDelta = px / laneAxisWidth;
-      const next = Math.max(
+      const raw = Math.max(
         0,
         Math.min(1, playheadXRef.current + fractionDelta),
       );
-      if (next !== playheadXRef.current) {
-        setPlayheadX(next);
+      // Apply snap-to-nearest-mark: if the smoothed playhead position is
+      // within MARK_SNAP_FRACTION_THRESHOLD of any mark, pull it onto that
+      // mark's x. The threshold is small enough that continued wheel motion
+      // pushes the next step past the snap radius, so the playhead escapes
+      // toward the next mark instead of getting stuck — smooth scrubbing
+      // and precise landing coexist.
+      const snapped = snapToNearestMark(raw, lanes);
+      if (snapped !== playheadXRef.current) {
+        setPlayheadX(snapped);
       }
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [laneAxisWidth, expanded]);
+  }, [laneAxisWidth, expanded, lanes]);
 
   // Click anywhere on the timeline body jumps the playhead to that x.
   const handleClick = useCallback(
@@ -520,23 +588,39 @@ interface TimelineDotMarkProps {
 }
 
 /**
- * One dot within a lane. Hovering only changes the cursor — navigation is
- * driven by the playhead alone (click on the timeline to move it), so a dot
- * is purely a visual anchor.
+ * One mark within a lane. v3 renders it as a thin vertical rectangle (was a
+ * circle in earlier iterations) so a packed lane stays readable, and colors
+ * it by author kind — user turns in blue, everything else in slate — so the
+ * shape of the conversation is visible at a glance. The tokens mirror the
+ * transcript bubble palette (`bg-blue-*` for user, `bg-slate-*` for assistant
+ * /tool/etc.) so the timeline reads as the same conversation, just compressed.
+ *
+ * The mark is non-interactive: hover and click navigation flow through the
+ * playhead alone, so a mark is purely a visual anchor (and the wheel-snap's
+ * target).
  */
 function TimelineDotMark({ dot, laneAxisWidth }: TimelineDotMarkProps) {
   const left = dot.x * laneAxisWidth;
+  // Two-color scheme: user vs everything else. Mirrors `MessageItem`'s
+  // bubble palette family — blue for user, slate for the assistant side —
+  // but at a saturation that reads well at 3 × 12 px. Finer-grained
+  // distinction within "other" is deferred to a follow-up.
+  const colorClass =
+    dot.kind === 'user'
+      ? 'bg-blue-500'
+      : 'bg-slate-400';
   return (
     <span
       data-testid="thread-timeline-dot"
       data-message-uuid={dot.uuid}
       data-thread-id={dot.threadId}
+      data-message-kind={dot.kind}
       aria-hidden="true"
-      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400"
+      className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-sm ${colorClass}`}
       style={{
         left,
-        width: DOT_SIZE_PX,
-        height: DOT_SIZE_PX,
+        width: MARK_WIDTH_PX,
+        height: MARK_HEIGHT_PX,
       }}
     />
   );

@@ -201,63 +201,47 @@ describe('ThreadTimelineOverlay lane labels', () => {
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it("uses the root message's body prefix as the lane label, with the full body as the title", async () => {
-    const rootUuid = 'root-of-sub';
-    const rootBody = 'Investigate the staging migration failure end to end';
+  it("uses the wire thread.title as the lane label, matching Navigator", async () => {
+    const subTitle = 'Investigate the staging migration failure end to end';
     const threads = [
       makeThread(1, {
+        // The main thread's wire title is typically the session prompt; the
+        // lane labels it `"main"` regardless, mirroring Navigator's omission
+        // of the main row and the breadcrumb's left-most "main" crumb.
+        title: 'a long session prompt the server stored here',
         created_at: '2026-01-01T00:00:00Z',
       }),
       makeThread(2, {
+        title: subTitle,
         parent_thread_id: 1,
-        root_message_uuid: rootUuid,
+        root_message_uuid: 'root-of-sub',
         created_at: '2026-01-01T00:05:00Z',
       }),
     ];
-    // The subthread's root message lives in the main thread's history.
-    const messagesByThread = new Map([
-      [
-        1,
-        [
-          makeMessage(1, 0, rootUuid, {
-            content_text: rootBody,
-            created_at: '2026-01-01T00:00:00Z',
-          }),
-        ],
-      ],
-    ]);
-    renderOverlay({ threads, messagesByThread });
-    // The root message lookup needs the per-thread fetch to land before the
-    // label resolves from "(no preview)" to the body prefix, so wait for the
-    // title attribute to flip rather than reading on the first paint.
-    await waitFor(() => {
-      const labels = screen.getAllByTestId('thread-timeline-lane-label');
-      expect(labels[1]).toHaveAttribute('title', rootBody);
-    });
-    const labels = screen.getAllByTestId('thread-timeline-lane-label');
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const labels = await screen.findAllByTestId('thread-timeline-lane-label');
     expect(labels[0]).toHaveTextContent('main');
     expect(labels[0]).toHaveAttribute('title', 'main');
-    // The trimmed prefix lands in the DOM verbatim; jest-dom's text-content
-    // matcher collapses surrounding whitespace, so use the trimmed slice to
-    // compare apples to apples without relying on the normaliser's quirks.
-    expect(labels[1]).toHaveTextContent(rootBody.slice(0, 24).trim());
+    // Sub-thread label is the wire title verbatim; CSS `truncate` shortens
+    // visually but the full title remains in the DOM and in the tooltip.
+    expect(labels[1]).toHaveTextContent(subTitle);
+    expect(labels[1]).toHaveAttribute('title', subTitle);
   });
 
-  it('falls back to "(no preview)" with the root uuid as the title when the root message body has not loaded yet', async () => {
-    const rootUuid = 'root-uuid-only';
+  it('falls back to `thread <id>` when the wire title is empty', async () => {
     const threads = [
       makeThread(1),
       makeThread(2, {
+        title: '',
         parent_thread_id: 1,
-        root_message_uuid: rootUuid,
+        root_message_uuid: 'root-uuid-only',
         created_at: '2026-01-01T00:05:00Z',
       }),
     ];
-    // Empty messages map: the per-thread fetch resolved to no messages.
     renderOverlay({ threads, messagesByThread: new Map() });
     const labels = await screen.findAllByTestId('thread-timeline-lane-label');
-    expect(labels[1]).toHaveTextContent('(no preview)');
-    expect(labels[1]).toHaveAttribute('title', rootUuid);
+    expect(labels[1]).toHaveTextContent('thread 2');
+    expect(labels[1]).toHaveAttribute('title', 'thread 2');
   });
 });
 
@@ -468,6 +452,9 @@ describe('ThreadTimelineOverlay playhead', () => {
   it('moves the playhead and suppresses page scroll on a wheel event', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
+    // Use widely-spread dots so a small wheel shift does not land inside the
+    // snap radius, isolating the smooth-scrub math from the snap behaviour
+    // (the snap is covered by its own test below).
     const messages = new Map([
       [
         1,
@@ -489,10 +476,12 @@ describe('ThreadTimelineOverlay playhead', () => {
     // first lane's playhead `left` style to confirm the baseline.
     expect(playheadsBefore[0].style.left).toBe('240px');
 
-    // A negative wheel delta scrolls the playhead toward the left edge.
+    // A large negative wheel delta scrolls the playhead toward the left edge,
+    // far enough that the snap radius around msg-b (x=1, threshold 0.012) is
+    // cleanly escaped so the smooth-scrub displacement is observable.
     const body = screen.getByTestId('thread-timeline-body');
     const wheelEvent = new WheelEvent('wheel', {
-      deltaY: -200,
+      deltaY: -1000,
       bubbles: true,
       cancelable: true,
     });
@@ -502,9 +491,99 @@ describe('ThreadTimelineOverlay playhead', () => {
     });
     expect(preventDefault).toHaveBeenCalled();
     const playheadsAfter = screen.getAllByTestId('thread-timeline-playhead');
-    // -200 * 0.15 = -30px on a 240px axis = -0.125 fraction shift; clamped
-    // from 1.0 to 0.875 → 210px.
+    // -1000 * 0.03 = -30px on a 240px axis = -0.125 fraction shift; from 1.0
+    // to 0.875 → 210px. Outside msg-b's snap radius (1 - 0.875 = 0.125 > 0.012)
+    // and outside msg-a's snap radius (0.875 > 0.012), so smooth math wins.
     expect(playheadsAfter[0].style.left).toBe('210px');
+  });
+
+  it('snaps the playhead onto the nearest mark when a small wheel scrub lands inside the snap radius', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
+          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // A tiny scrub from x=1: -50 * 0.03 = -1.5px on 240px = -0.00625 fraction
+    // → 0.99375. That is within 0.012 of msg-b (x=1), so the snap pulls the
+    // playhead back onto msg-b's exact x → 240px.
+    const body = screen.getByTestId('thread-timeline-body');
+    const wheelEvent = new WheelEvent('wheel', {
+      deltaY: -50,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      body.dispatchEvent(wheelEvent);
+    });
+    const playheadsAfter = screen.getAllByTestId('thread-timeline-playhead');
+    expect(playheadsAfter[0].style.left).toBe('240px');
+  });
+});
+
+describe('ThreadTimelineOverlay mark rendering', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('renders rectangular marks (not circles) with role-coded color classes and a data-message-kind attribute', async () => {
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          // A genuine human turn (user role + text block) → `user` kind.
+          makeMessage(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hello' }],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          // An assistant reply → `other` kind.
+          makeMessage(1, 1, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hi' }],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const marks = await screen.findAllByTestId('thread-timeline-dot');
+    expect(marks).toHaveLength(2);
+    const userMark = marks.find(
+      (m) => m.getAttribute('data-message-uuid') === 'u',
+    )!;
+    const otherMark = marks.find(
+      (m) => m.getAttribute('data-message-uuid') === 'a',
+    )!;
+    // Rectangle, not circle: the marker is a `rounded-sm` block with separate
+    // width/height (the v2 round dot used `rounded-full` with equal w/h).
+    expect(userMark.className).toContain('rounded-sm');
+    expect(userMark.className).not.toContain('rounded-full');
+    expect(userMark.style.width).not.toBe(userMark.style.height);
+    // Role-coded color and data attribute (tested via class membership and
+    // the data attribute, not literal hex, so the tailwind tokens can move).
+    expect(userMark).toHaveAttribute('data-message-kind', 'user');
+    expect(userMark.className).toContain('bg-blue-500');
+    expect(otherMark).toHaveAttribute('data-message-kind', 'other');
+    expect(otherMark.className).toContain('bg-slate-400');
   });
 });
 
