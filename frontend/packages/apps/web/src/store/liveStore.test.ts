@@ -19,7 +19,6 @@ function reset() {
     unread: {},
     streamingMessages: {},
     runningSubagents: {},
-    endedBeforeRecorded: {},
     contextUsage: {},
     rateLimits: null,
   });
@@ -52,6 +51,25 @@ function beginThreadSending(overrides: { sessionId?: string; threadId?: number }
       kind: 'thread',
       sessionId: overrides.sessionId ?? 'sess-1',
       threadId: overrides.threadId ?? 1,
+    },
+    text: 'hi',
+    status: 'sending',
+    createdAt: 0,
+  });
+}
+
+/**
+ * A new-session submit chip, as `beginSending` records before its POST. The
+ * target carries no session id — the response mints it — so this stands in for
+ * the first-turn launch the new-session composer fires.
+ */
+function beginNewSessionSending(overrides: { id?: string } = {}) {
+  useLiveStore.getState().beginSending({
+    id: overrides.id ?? 'local-new-1',
+    target: {
+      kind: 'new-session',
+      workdir: null,
+      launchOptionIds: [],
     },
     text: 'hi',
     status: 'sending',
@@ -169,12 +187,34 @@ describe('liveStore turn tracking', () => {
     expect(useLiveStore.getState().localSends).toEqual({});
   });
 
-  it('does not track a send whose turn ended while its POST was still in flight', () => {
-    // The load race: a fast echo turn completes before `POST /api/sends`
+  it('records and drains normally when the POST returns before its turn ends (the race-won path)', () => {
+    // The common ordering: the POST `onSuccess` runs before the turn ends, so
+    // `recordLocalSend` stages the send and the turn-end drains it. No race
+    // flag is involved.
+    beginThreadSending();
+    useLiveStore.getState().removeSending('local-sess-1-1');
+    useLiveStore.getState().recordLocalSend(localSend());
+    expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['1']);
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 1,
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().localSends).toEqual({});
+    // No leaked state on the in-flight queue: the submit was already removed.
+    expect(useLiveStore.getState().sending).toEqual([]);
+  });
+
+  it('flags a racing thread submit on turn-end so the late POST drops the send instead of staging it', () => {
+    // The race-lost ordering: a fast echo turn completes before the POST
     // resolves. The submit chip is still in flight (`beginSending`), the
-    // turn-end lands first and drains nothing (the send is not tracked yet),
-    // then `onSuccess` records the send. Recording it would leave a chip with
-    // no remaining drain trigger; instead the credit from the turn-end drops it.
+    // turn-end lands first and finds nothing to drain. Without intervention
+    // the late `recordLocalSend` would stage a send whose turn already ended,
+    // leaving a chip with no future drain trigger — the chip the user keeps
+    // staring at. Instead the turn-end flags the racing submit `dropOnResolve`,
+    // and the submit hook reads that flag to skip `recordLocalSend` entirely.
     beginThreadSending();
 
     useLiveStore.getState().applyEvent({
@@ -183,17 +223,63 @@ describe('liveStore turn tracking', () => {
       thread_id: 1,
       stop_reason: null,
     });
-    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({ 'sess-1': 1 });
+    // The submit is flagged in place; nothing else changed about it.
+    expect(useLiveStore.getState().sending).toEqual([
+      expect.objectContaining({
+        id: 'local-sess-1-1',
+        status: 'sending',
+        dropOnResolve: true,
+      }),
+    ]);
+    // The store does not stash any separate per-session race counter.
+    expect(useLiveStore.getState()).not.toHaveProperty('endedBeforeRecorded');
 
-    // The POST resolves: its chip is removed and the send is recorded.
+    // The POST resolves. The submit hook (modeled here by checking the flag
+    // before recording) drops the send without staging.
+    const sendingItem = useLiveStore
+      .getState()
+      .sending.find((item) => item.id === 'local-sess-1-1');
+    expect(sendingItem?.dropOnResolve).toBe(true);
     useLiveStore.getState().removeSending('local-sess-1-1');
-    useLiveStore.getState().recordLocalSend(localSend());
-
+    // recordLocalSend is intentionally NOT called when the flag was set.
     expect(useLiveStore.getState().localSends).toEqual({});
-    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+    expect(useLiveStore.getState().sending).toEqual([]);
   });
 
-  it('credits each racing send independently when two turns end before recording', () => {
+  it('flags a racing new-session POST on turn-end before its session id is known', () => {
+    // The same race for the FIRST send of a freshly-spawned session: the
+    // launch POST is still in flight (its target is `new-session`, so the
+    // session id is unknown until the response), the echo turn completes
+    // first and drains nothing. A new-session submit cannot match by session
+    // id, so any in-flight new-session POST is treated as a possible racer
+    // for the ending session and flagged in submit order — without this gate
+    // the first-turn chip lingered forever (the reported flake).
+    beginNewSessionSending();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-spawn-1',
+      thread_id: 42,
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().sending).toEqual([
+      expect.objectContaining({
+        id: 'local-new-1',
+        status: 'sending',
+        dropOnResolve: true,
+      }),
+    ]);
+
+    // POST resolves and the submit hook drops the send under the minted ids.
+    useLiveStore.getState().removeSending('local-new-1');
+    expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
+  it('flags each racing submit independently when two turns end before recording', () => {
+    // Two POSTs are in flight at once and both their turns end before either
+    // POST returns. Each turn-end must flag a DIFFERENT submit (FIFO in submit
+    // order), so each late `onSuccess` drops the right send. Re-flagging the
+    // same submit would leave the second send staged with no drain trigger.
     beginThreadSending({ threadId: 1 });
     beginThreadSending({ threadId: 2 });
     useLiveStore.getState().applyEvent({
@@ -208,18 +294,18 @@ describe('liveStore turn tracking', () => {
       thread_id: 1,
       stop_reason: null,
     });
-    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({ 'sess-1': 2 });
-
-    useLiveStore.getState().recordLocalSend(localSend({ sendId: 1, threadId: 1 }));
-    useLiveStore.getState().recordLocalSend(localSend({ sendId: 2, threadId: 2 }));
-    expect(useLiveStore.getState().localSends).toEqual({});
-    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+    const flagged = useLiveStore
+      .getState()
+      .sending.filter((item) => item.dropOnResolve === true)
+      .map((item) => item.id);
+    expect(flagged).toEqual(['local-sess-1-1', 'local-sess-1-2']);
   });
 
-  it('does not credit a turn-end with no in-flight submit (normal already-drained turn)', () => {
+  it('does not flag a turn-end that already drained a tracked send (the common path)', () => {
     // A turn that drains a tracked send (the common case), or an external
-    // direct-pane turn with no browser submit, must not credit the session —
-    // a credit would wrongly swallow the NEXT genuinely-pending send.
+    // direct-pane turn with no browser submit, must not flag anything — a
+    // stray flag would wrongly drop the NEXT genuinely-pending submit.
+    beginThreadSending({ threadId: 2 });
     useLiveStore.getState().recordLocalSend(localSend());
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
@@ -228,14 +314,17 @@ describe('liveStore turn tracking', () => {
       stop_reason: null,
     });
     expect(useLiveStore.getState().localSends).toEqual({});
-    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+    expect(
+      useLiveStore.getState().sending.find((item) => item.dropOnResolve === true),
+    ).toBeUndefined();
 
-    // A later, legitimately pending send is tracked normally.
-    useLiveStore.getState().recordLocalSend(localSend({ sendId: 2 }));
+    // The unrelated still-in-flight submit is unaffected and a later send
+    // tracks normally.
+    useLiveStore.getState().recordLocalSend(localSend({ sendId: 2, threadId: 2 }));
     expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['2']);
   });
 
-  it('does not cross-credit: a turn ending in another session leaves this send tracked', () => {
+  it('does not cross-flag: a turn ending in another session leaves this submit unflagged', () => {
     beginThreadSending({ sessionId: 'sess-1' });
     useLiveStore.getState().applyEvent({
       kind: 'turn_completed',
@@ -243,10 +332,50 @@ describe('liveStore turn tracking', () => {
       thread_id: 1,
       stop_reason: null,
     });
-    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+    // A thread-targeted submit only matches a turn-end on its OWN session id.
+    expect(
+      useLiveStore.getState().sending[0]?.dropOnResolve,
+    ).toBeUndefined();
 
     useLiveStore.getState().recordLocalSend(localSend({ sessionId: 'sess-1' }));
     expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['1']);
+  });
+
+  it('does not re-flag a submit that already carries the dropOnResolve flag', () => {
+    // A second turn-end on the same session with only one in-flight submit
+    // must not double-flag it: there is no second drop to consume, and a
+    // duplicate flag would just be a no-op anyway.
+    beginThreadSending();
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 1,
+      stop_reason: null,
+    });
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 1,
+      stop_reason: null,
+    });
+    const flagged = useLiveStore
+      .getState()
+      .sending.filter((item) => item.dropOnResolve === true);
+    expect(flagged).toHaveLength(1);
+  });
+
+  it('does not flag a submit on session_closed (no further POST can follow)', () => {
+    // A closed session accepts no further sends, so the flag would never get
+    // consumed — better to leave the submit alone and let its retry (if any)
+    // run normally.
+    beginThreadSending();
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(
+      useLiveStore.getState().sending[0]?.dropOnResolve,
+    ).toBeUndefined();
   });
 
   it('drains turn state when the session closes', () => {
@@ -267,7 +396,7 @@ describe('liveStore turn tracking', () => {
     expect(useLiveStore.getState().runningThreads).toEqual({});
   });
 
-  it('resetTurnEphemera drops tracked sends, running flags, and permission notices, nothing else', () => {
+  it('resetTurnEphemera drops tracked sends, running flags, permission notices, and the race flag, nothing else', () => {
     useLiveStore.getState().recordLocalSend(localSend());
     useLiveStore.getState().applyEvent({
       kind: 'turn_started',
@@ -276,6 +405,11 @@ describe('liveStore turn tracking', () => {
       send_id: 1,
       matched_uuid: 'uuid-1',
     });
+    // An in-flight submit ALREADY race-flagged by a missed turn-end (modeled
+    // directly so the assertion is about reset behavior, not how the flag
+    // got there): without clearing on reset, the flag would survive the outage
+    // and wrongly drop the legitimately-pending send when the POST eventually
+    // resolves.
     useLiveStore.getState().beginSending({
       id: 'l1',
       target: { kind: 'thread', sessionId: 'sess-1', threadId: 1 },
@@ -283,6 +417,12 @@ describe('liveStore turn tracking', () => {
       status: 'sending',
       createdAt: 0,
     });
+    useLiveStore.setState((state) => ({
+      sending: state.sending.map((item) =>
+        item.id === 'l1' ? { ...item, dropOnResolve: true as const } : item,
+      ),
+    }));
+    expect(useLiveStore.getState().sending[0]?.dropOnResolve).toBe(true);
     useLiveStore.getState().trackSpawn({
       sessionId: 'sess-9',
       threadId: 42,
@@ -320,6 +460,9 @@ describe('liveStore turn tracking', () => {
     expect(useLiveStore.getState().localSends).toEqual({});
     expect(useLiveStore.getState().runningThreads).toEqual({});
     expect(useLiveStore.getState().sending).toHaveLength(1);
+    // The race flag is cleared so the POST `onSuccess` stages the send
+    // normally — we can no longer prove its turn is over.
+    expect(useLiveStore.getState().sending[0]?.dropOnResolve).toBeUndefined();
     expect(useLiveStore.getState().spawns).toHaveLength(1);
     expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
     expect(noticeOf(notices(), 'sess-1', 'external_input')).not.toBeNull();

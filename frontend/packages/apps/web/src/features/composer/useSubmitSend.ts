@@ -55,15 +55,31 @@ export function useSubmitSend(): (args: {
       });
       try {
         const { send } = await mutation.mutateAsync(body);
+        // The send's turn already ended before this `onSuccess` ran when its
+        // submit was flagged `dropOnResolve` by `endTurnForSession`: the
+        // turn-end raced ahead of the POST under load, and the racing submit
+        // is exactly the one with this id. Staging the send now would leave a
+        // chip with no future drain trigger (the turn-end already drained an
+        // empty set, and the same send is absent from the server's open list
+        // once it matches), so the submit is removed without `recordLocalSend`.
+        const raced =
+          useLiveStore.getState().sending.find((item) => item.id === id)
+            ?.dropOnResolve === true;
         removeSending(id);
-        recordLocalSend({
-          sendId: send.id,
-          sessionId: send.session_id,
-          threadId: send.thread_id,
-          text: send.text,
-          createdAt: Date.now(),
-        });
+        if (!raced) {
+          recordLocalSend({
+            sendId: send.id,
+            sessionId: send.session_id,
+            threadId: send.thread_id,
+            text: send.text,
+            createdAt: Date.now(),
+          });
+        }
         if (target.kind === 'new-session') {
+          // The spawn registration is independent of the per-send chip: it
+          // tracks the session itself (focus handoff, failure retry payload),
+          // so it always runs on a successful POST whether or not the first
+          // send raced its turn-end.
           trackSpawn({
             sessionId: send.session_id,
             threadId: send.thread_id,
