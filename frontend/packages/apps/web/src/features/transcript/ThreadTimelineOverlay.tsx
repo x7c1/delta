@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react';
 import type { ThreadId } from '@delta/model';
@@ -11,7 +12,11 @@ import type { Message, Thread } from '@delta/wire-gen';
 import { useThreadsMessagesQueries } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
-import { buildTimelineLanes, type TimelineDot } from './timelineLanes';
+import {
+  buildTimelineLanes,
+  findActiveMessage,
+  type TimelineDot,
+} from './timelineLanes';
 
 /**
  * localStorage key for the timeline footer's expanded/collapsed state. Per
@@ -19,18 +24,14 @@ import { buildTimelineLanes, type TimelineDot } from './timelineLanes';
  */
 export const TIMELINE_EXPANDED_STORAGE_KEY = 'delta.thread-timeline-overlay.expanded';
 
-/** Debounce window (ms) between hovering a dot and triggering its jump. */
-export const HOVER_JUMP_DEBOUNCE_MS = 250;
-
 /**
- * The payload a hover-jump fires with: enough to know both which message to
- * scroll to AND which subthread it belongs to, so a cross-lane jump can
- * switch the active thread before scrolling.
+ * Pixels of playhead movement per unit of wheel delta. Tuned so a single
+ * mouse-wheel notch (`deltaY = 100` on most browsers, with trackpad scrolls
+ * emitting smaller per-event deltas) advances the playhead by a thumb-width
+ * slice of the axis: small enough to feel precise, large enough that a
+ * deliberate roll actually moves the highlight along.
  */
-export interface HoverJumpTarget {
-  uuid: string;
-  threadId: ThreadId;
-}
+export const WHEEL_SCRUB_PX_PER_DELTA = 0.15;
 
 /**
  * Read the persisted expanded preference; defaults to collapsed when no
@@ -85,46 +86,14 @@ export function useTimelineExpanded(): [boolean, () => void] {
 }
 
 /**
- * Wire a debounced hover-jump on a swim-lane dot: hovering for at least
- * {@link HOVER_JUMP_DEBOUNCE_MS} fires {@link onJump} with the target payload.
- * The dot keeps its hover visual immediately; the conversation pane reacts
- * only after the debounce elapses, intentionally minimising misfire churn.
- *
- * Generic over the target type so callers control what the handler receives;
- * the timeline passes the dot's `{ uuid, threadId }` pair so a cross-lane
- * jump can switch the active thread before scrolling.
- *
- * Exported for tests; the component below wires it into its dot handlers.
- */
-export function useHoverJump<T>(onJump: (target: T) => void): {
-  onHover: (target: T) => void;
-  onLeave: () => void;
-} {
-  const timerRef = useRef<number | null>(null);
-  const cancel = useCallback(() => {
-    if (timerRef.current !== null) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
-  useEffect(() => cancel, [cancel]);
-  const onHover = useCallback(
-    (target: T) => {
-      cancel();
-      timerRef.current = window.setTimeout(() => {
-        timerRef.current = null;
-        onJump(target);
-      }, HOVER_JUMP_DEBOUNCE_MS);
-    },
-    [cancel, onJump],
-  );
-  return { onHover, onLeave: cancel };
-}
-
-/**
  * Scroll the matching transcript message into view, centred. Scoped to the
  * given container so a duplicate `data-message-uuid` outside the transcript
  * (e.g. in a portaled preview) cannot misdirect the jump.
+ *
+ * The `scrollIntoView` call is guarded against environments where it is
+ * unavailable (jsdom does not implement it on every element by default), so
+ * an automatic jump driven by the playhead settle cannot crash unrelated
+ * tests that render the overlay but never opted into a `scrollIntoView` stub.
  */
 export function scrollMessageIntoView(
   container: HTMLElement | null,
@@ -136,7 +105,7 @@ export function scrollMessageIntoView(
   const target = container.querySelector(
     `[data-message-uuid="${CSS.escape(uuid)}"]`,
   );
-  if (target) {
+  if (target && typeof target.scrollIntoView === 'function') {
     target.scrollIntoView({ block: 'center' });
   }
 }
@@ -173,20 +142,20 @@ export function scheduleScrollAfterRender(
 export interface ThreadTimelineOverlayProps {
   /** All threads (main + subthreads) in the focused session. */
   threads: Thread[];
-  /** The active thread; its lane is highlighted. */
+  /** The active thread; lane highlight defaults here until the playhead lands. */
   activeThreadId: ThreadId | null;
   /**
-   * The conversation-pane scroll container hover-jump targets. The lookup is
-   * scoped to it so an off-screen duplicate id (e.g. a portaled preview) does
-   * not misdirect the scroll.
+   * The conversation-pane scroll container the playhead's active-message jump
+   * targets. The lookup is scoped to it so an off-screen duplicate id (e.g.
+   * a portaled preview) does not misdirect the scroll.
    */
   conversationBodyRef: RefObject<HTMLElement | null>;
 }
 
 /** Lane row height in pixels. */
 const LANE_HEIGHT_PX = 18;
-/** Equal horizontal spacing between dots along the shared global axis. */
-const DOT_SPACING_PX = 14;
+/** Minimum width (in px) the lane axis reserves so a single-dot session is still scrubbable. */
+const MIN_LANE_AXIS_PX = 240;
 /** Dot diameter; the hit area is enlarged via padding in the wrapper. */
 const DOT_SIZE_PX = 8;
 /** Width reserved on the left for lane labels. */
@@ -197,17 +166,27 @@ const LANE_RIGHT_PAD_PX = 16;
 /**
  * The fixed footer between the conversation pane and the composer: a swim-lane
  * timeline of every subthread (and the main thread). Each thread is a row,
- * each speech turn is a dot, and every dot sits on a SHARED global utterance
- * axis (all subthreads' messages sorted by `created_at`, ties broken by
- * `seq`). Hovering a dot scrolls the matching message into view in the
- * conversation pane (debounced by {@link HOVER_JUMP_DEBOUNCE_MS} ms); when
- * the dot belongs to a different subthread, the active thread switches first
- * and the scroll runs on the next frame so the target's messages are in the
- * DOM. The footer is always present; clicking the title bar collapses or
- * expands the lanes, and the preference is persisted per device.
+ * each speech turn is a dot, and every dot sits on a SHARED time axis driven
+ * by the message's `created_at` — idle and thinking gaps render as horizontal
+ * whitespace, so the time order is visible at a glance rather than being
+ * flattened into equal speech-order spacing.
  *
- * MVP intentionally omits cross-row derivation lines, kind-coded dots, and
- * click-to-pin — they are tracked as separate follow-ups.
+ * A vertical playhead spans every lane and is the user's scrub handle:
+ * scrolling the mouse wheel over the footer moves it left/right (and the
+ * default vertical scroll is suppressed while the wheel is over the footer),
+ * and clicking the timeline jumps it to that x. Whichever message dot's x is
+ * closest to the playhead becomes "active": its lane is highlighted, the
+ * active thread switches to that lane (firing the existing nav setter), and
+ * after the next paint the matching message is scrolled into view in the
+ * conversation pane. Hovering a dot only changes the cursor — there is no
+ * hover-driven navigation; the playhead is the single source of truth.
+ *
+ * The footer is always present; clicking the title bar collapses or expands
+ * the lanes, and the preference is persisted per device.
+ *
+ * MVP intentionally omits cross-row derivation lines, kind-coded dots,
+ * playhead drag, zoom, and click-to-pin — they are tracked as separate
+ * follow-ups.
  */
 export function ThreadTimelineOverlay({
   threads,
@@ -240,9 +219,61 @@ export function ThreadTimelineOverlay({
     [threads, messagesByThread],
   );
 
-  // Track the active thread in a ref so the hover-jump handler can compare
-  // against the live value without re-creating itself (and thus re-arming the
-  // debounce) every time the active thread changes.
+  // The lane axis is fixed-width — horizontal scroll is acceptable for very
+  // long sessions in MVP. Keeping it bounded means dot positions are
+  // deterministic from the data alone (no parent-width measurement), which
+  // simplifies the click-to-jump and wheel-scrub math considerably.
+  const laneAxisWidth = MIN_LANE_AXIS_PX;
+
+  // Playhead position in the same 0..1 unit dots use. Initial position is the
+  // latest dot's x (so a freshly-opened session lands on the most recent
+  // utterance), falling back to 1 (the right edge) when no dot exists yet.
+  const latestDotX = useMemo(() => {
+    let max = -Infinity;
+    for (const lane of lanes) {
+      for (const dot of lane.dots) {
+        if (dot.x > max) {
+          max = dot.x;
+        }
+      }
+    }
+    return Number.isFinite(max) ? max : 1;
+  }, [lanes]);
+
+  const [playheadX, setPlayheadXState] = useState<number>(latestDotX);
+  // A monotonically-increasing counter incremented on every user-driven
+  // playhead move. The thread-switch + scroll effect below uses it as a
+  // re-trigger so a re-click at the playhead's current position (and thus the
+  // current active message) still re-fires the jump — without it React would
+  // bail out of the state set when the value is unchanged, swallowing the
+  // user's intent. The counter ALSO doubles as the "has the user scrubbed?"
+  // gate: while it sits at 0, the effect is intentionally inert so an
+  // automatic mount settle never hijacks the user's chosen thread.
+  const [scrubTick, setScrubTick] = useState(0);
+  const setPlayheadX = useCallback((next: number) => {
+    setScrubTick((tick) => tick + 1);
+    setPlayheadXState(next);
+  }, []);
+
+  // Re-anchor to the latest dot whenever a new message lands at a brand-new
+  // axis extreme — but only while the user has not yet scrubbed. A scrub
+  // pins the playhead to whatever value the user picked, and moving it off
+  // that point on a fresh message would feel like the timeline yanked away.
+  // Use a functional setter so we can compare against the live playhead
+  // without listing it as a dep (which would re-run this effect every time
+  // the user scrubs, just to confirm there is nothing to do).
+  useEffect(() => {
+    if (scrubTick !== 0) {
+      return;
+    }
+    setPlayheadXState((prev) => (prev === latestDotX ? prev : latestDotX));
+  }, [latestDotX, scrubTick]);
+
+  const activeMatch = useMemo(
+    () => findActiveMessage(lanes, playheadX),
+    [lanes, playheadX],
+  );
+
   const activeThreadRef = useRef<ThreadId | null>(activeThreadId);
   useEffect(() => {
     activeThreadRef.current = activeThreadId;
@@ -258,44 +289,119 @@ export function ThreadTimelineOverlay({
     [],
   );
 
-  const handleJump = useCallback(
-    (target: HoverJumpTarget) => {
-      pendingScrollCancelRef.current?.();
-      pendingScrollCancelRef.current = null;
-      const container = conversationBodyRef.current;
-      if (target.threadId === activeThreadRef.current) {
-        // Same lane: the target message is already in the DOM, scroll right
-        // away. No frame deferral, no thread switch.
-        scrollMessageIntoView(container, target.uuid);
+  useEffect(() => {
+    // Only react to scrubs the user actually initiated: while `scrubTick`
+    // sits at its initial 0 (a fresh mount with no click or wheel yet), the
+    // automatic settle must not flip the active thread the user chose
+    // elsewhere.
+    if (scrubTick === 0) {
+      return;
+    }
+    if (activeMatch === null) {
+      return;
+    }
+    pendingScrollCancelRef.current?.();
+    pendingScrollCancelRef.current = null;
+    const container = conversationBodyRef.current;
+    if (activeMatch.threadId === activeThreadRef.current) {
+      // Same lane: the target message is already in the DOM, scroll right
+      // away. No frame deferral, no thread switch.
+      scrollMessageIntoView(container, activeMatch.uuid);
+      return;
+    }
+    // Cross-lane jump: switch the active thread first so the conversation
+    // pane re-renders with the target lane's messages, then scroll on the
+    // next frame once those nodes have landed in the DOM.
+    setActiveThread(activeMatch.threadId);
+    pendingScrollCancelRef.current = scheduleScrollAfterRender(
+      container,
+      activeMatch.uuid,
+    );
+    // `scrubTick` is the re-trigger: a re-click at the playhead's current x
+    // (yielding the same activeMatch) bumps the tick and re-fires this
+    // effect, so a stale conversation-body scroll position is corrected even
+    // when the playhead did not move.
+  }, [scrubTick, activeMatch, conversationBodyRef, setActiveThread]);
+
+  // The lane the highlight follows: the playhead-active lane when there is
+  // one, else fall back to the prop so a freshly-mounted footer still marks
+  // the active thread before any dots have rendered.
+  const highlightedThreadId = activeMatch?.threadId ?? activeThreadId;
+
+  // The scrubbable area is the union of every lane's axis: a wheel over any
+  // part of the footer body moves the playhead. The body's onWheel is the
+  // entry point — its `passive: false` listener (registered via the effect
+  // below) is required to call `preventDefault` and suppress the page scroll.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const playheadXRef = useRef(playheadX);
+  useEffect(() => {
+    playheadXRef.current = playheadX;
+  }, [playheadX]);
+
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      // Suppress the page's vertical scroll while the wheel is over the
+      // footer: the wheel belongs to the playhead while it sits here.
+      event.preventDefault();
+      // `deltaX` from horizontal trackpad scrolls is honoured too — the user
+      // gets to pick whichever axis their device emits. Sum so a diagonal
+      // gesture (rare but possible) reads as the combined intent.
+      const rawDelta = event.deltaY + event.deltaX;
+      if (rawDelta === 0) {
         return;
       }
-      // Cross-lane jump: switch the active thread first so the conversation
-      // pane re-renders with the target lane's messages, then scroll on the
-      // next frame once those nodes have landed in the DOM.
-      setActiveThread(target.threadId);
-      pendingScrollCancelRef.current = scheduleScrollAfterRender(
-        container,
-        target.uuid,
+      const px = rawDelta * WHEEL_SCRUB_PX_PER_DELTA;
+      // Map the pixel delta to a fractional delta on the same axis the dots
+      // use, then clamp into 0..1 so the playhead never strays off the axis.
+      const fractionDelta = px / laneAxisWidth;
+      const next = Math.max(
+        0,
+        Math.min(1, playheadXRef.current + fractionDelta),
       );
-    },
-    [conversationBodyRef, setActiveThread],
-  );
-  const { onHover, onLeave } = useHoverJump<HoverJumpTarget>(handleJump);
-
-  // The shared axis spans every lane in lockstep; its width is driven by the
-  // highest global order across all dots, not by any single lane's count.
-  const maxDotOrder = lanes.reduce((max, lane) => {
-    for (const dot of lane.dots) {
-      if (dot.order > max) {
-        max = dot.order;
+      if (next !== playheadXRef.current) {
+        setPlayheadX(next);
       }
-    }
-    return max;
-  }, 0);
-  const hasAnyDot = lanes.some((lane) => lane.dots.length > 0);
-  const laneAxisWidth = hasAnyDot
-    ? DOT_SPACING_PX * Math.max(maxDotOrder, 1) + DOT_SIZE_PX
-    : DOT_SIZE_PX;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [laneAxisWidth, expanded]);
+
+  // Click anywhere on the timeline body jumps the playhead to that x.
+  const handleClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      // The click target is the lane-body div; the playhead row inside any
+      // lane is what carries the axis the playhead aligns against. Use the
+      // body's bounding rect minus the label column so the conversion mirrors
+      // the absolute positioning of the playhead line itself.
+      const body = bodyRef.current;
+      if (!body) {
+        return;
+      }
+      // Locate the first lane row (every lane shares the same axis width and
+      // x-origin) so the click → x conversion uses the axis the dots actually
+      // sit on. Falling back to the body's own rect would include the label
+      // column and right padding, throwing the conversion off.
+      const axisEl = body.querySelector<HTMLElement>('[data-timeline-axis]');
+      if (!axisEl) {
+        return;
+      }
+      const rect = axisEl.getBoundingClientRect();
+      // The axis row's pixel width includes the right padding the dots do not
+      // use; map against the dot-bearing width (`laneAxisWidth`) so a click
+      // exactly on a dot lands the playhead on it, not slightly off.
+      if (laneAxisWidth <= 0) {
+        return;
+      }
+      const fraction = (event.clientX - rect.left) / laneAxisWidth;
+      const clamped = Math.max(0, Math.min(1, fraction));
+      setPlayheadX(clamped);
+    },
+    [laneAxisWidth],
+  );
 
   return (
     <section
@@ -329,9 +435,10 @@ export function ThreadTimelineOverlay({
       </button>
       {expanded && (
         <div
+          ref={bodyRef}
           data-testid="thread-timeline-body"
           className="max-h-40 overflow-auto px-2 pb-1"
-          onMouseLeave={onLeave}
+          onClick={handleClick}
         >
           {lanes.length === 0 ? (
             <p className="px-1 py-1 text-[0.7rem] text-slate-400">
@@ -340,15 +447,15 @@ export function ThreadTimelineOverlay({
           ) : (
             <ul className="flex flex-col gap-0.5" role="list">
               {lanes.map((lane) => {
-                const isActive = lane.threadId === activeThreadId;
+                const isHighlighted = lane.threadId === highlightedThreadId;
                 return (
                   <li
                     key={lane.threadId}
                     data-testid="thread-timeline-lane"
                     data-thread-id={lane.threadId}
-                    data-active={isActive ? 'true' : 'false'}
+                    data-active={isHighlighted ? 'true' : 'false'}
                     className={`flex items-center gap-2 rounded-sm px-1 ${
-                      isActive
+                      isHighlighted
                         ? 'border-y border-slate-200 bg-slate-50'
                         : 'border-y border-transparent'
                     }`}
@@ -365,6 +472,7 @@ export function ThreadTimelineOverlay({
                       {lane.label}
                     </span>
                     <div
+                      data-timeline-axis=""
                       className="relative shrink-0"
                       style={{
                         width: laneAxisWidth + LANE_RIGHT_PAD_PX,
@@ -380,10 +488,20 @@ export function ThreadTimelineOverlay({
                         <TimelineDotMark
                           key={dot.uuid}
                           dot={dot}
-                          onHover={onHover}
-                          onLeave={onLeave}
+                          laneAxisWidth={laneAxisWidth}
                         />
                       ))}
+                      {/* Playhead: a thin vertical line that doubles as the
+                          lane-local segment of the global playhead. Each lane
+                          carries its own copy (instead of one absolute line
+                          spanning the body) so it scrolls with the lanes when
+                          the body becomes scrollable on a long session. */}
+                      <span
+                        aria-hidden="true"
+                        data-testid="thread-timeline-playhead"
+                        className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
+                        style={{ left: playheadX * laneAxisWidth }}
+                      />
                     </div>
                   </li>
                 );
@@ -398,57 +516,28 @@ export function ThreadTimelineOverlay({
 
 interface TimelineDotMarkProps {
   dot: TimelineDot;
-  onHover: (target: HoverJumpTarget) => void;
-  onLeave: () => void;
+  laneAxisWidth: number;
 }
 
 /**
- * One dot within a lane. Its hit area is intentionally larger than the visible
- * dot via padding, so the hover-jump triggers comfortably on small marks; the
- * visible dot only enlarges on hover so the user gets confirmation feedback
- * before the debounce fires.
+ * One dot within a lane. Hovering only changes the cursor — navigation is
+ * driven by the playhead alone (click on the timeline to move it), so a dot
+ * is purely a visual anchor.
  */
-function TimelineDotMark({ dot, onHover, onLeave }: TimelineDotMarkProps) {
-  const [hovered, setHovered] = useState(false);
-  const left = dot.order * DOT_SPACING_PX;
-  const target: HoverJumpTarget = { uuid: dot.uuid, threadId: dot.threadId };
+function TimelineDotMark({ dot, laneAxisWidth }: TimelineDotMarkProps) {
+  const left = dot.x * laneAxisWidth;
   return (
-    <button
-      type="button"
+    <span
       data-testid="thread-timeline-dot"
       data-message-uuid={dot.uuid}
       data-thread-id={dot.threadId}
-      data-order={dot.order}
-      onMouseEnter={() => {
-        setHovered(true);
-        onHover(target);
+      aria-hidden="true"
+      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400"
+      style={{
+        left,
+        width: DOT_SIZE_PX,
+        height: DOT_SIZE_PX,
       }}
-      onMouseLeave={() => {
-        setHovered(false);
-        onLeave();
-      }}
-      onFocus={() => {
-        setHovered(true);
-        onHover(target);
-      }}
-      onBlur={() => {
-        setHovered(false);
-        onLeave();
-      }}
-      aria-label={`Jump to message ${dot.uuid}`}
-      className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full p-1"
-      style={{ left: left + DOT_SIZE_PX / 2 }}
-    >
-      <span
-        aria-hidden="true"
-        className={`block rounded-full transition-colors ${
-          hovered ? 'bg-slate-700' : 'bg-slate-400'
-        }`}
-        style={{
-          width: hovered ? DOT_SIZE_PX + 2 : DOT_SIZE_PX,
-          height: hovered ? DOT_SIZE_PX + 2 : DOT_SIZE_PX,
-        }}
-      />
-    </button>
+    />
   );
 }

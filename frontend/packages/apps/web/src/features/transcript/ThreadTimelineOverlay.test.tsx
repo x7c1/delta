@@ -8,7 +8,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient } from '@delta/api-client';
 import type { Message, Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
@@ -16,7 +16,6 @@ import { useNavStore } from '../../store/navStore';
 import {
   ThreadTimelineOverlay,
   TIMELINE_EXPANDED_STORAGE_KEY,
-  HOVER_JUMP_DEBOUNCE_MS,
 } from './ThreadTimelineOverlay';
 
 function makeThread(
@@ -63,7 +62,7 @@ function makeMessage(
 /**
  * Render the overlay against a stubbed ApiClient that resolves
  * `getThreadMessages` from the provided in-memory map. The conversation body
- * is a sibling div carrying the article elements the hover-jump targets.
+ * is a sibling div carrying the article elements the playhead's jump targets.
  */
 function renderOverlay({
   threads,
@@ -121,6 +120,34 @@ function resetGlobals() {
     preNewSessionFocus: null,
     settingsOpen: false,
   });
+}
+
+/**
+ * Stub the first lane axis row's bounding rect so click-to-jump tests can
+ * supply deterministic playhead coordinates without measuring real layout
+ * (jsdom does not run CSS, so every rect is 0 by default).
+ */
+function stubAxisRect(rect: Partial<DOMRect>): void {
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+    function (this: HTMLElement) {
+      if (this.hasAttribute('data-timeline-axis')) {
+        return {
+          left: 0,
+          top: 0,
+          right: 240,
+          bottom: 18,
+          width: 240,
+          height: 18,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+          ...rect,
+        } as DOMRect;
+      }
+      return original.call(this);
+    },
+  );
 }
 
 describe('ThreadTimelineOverlay collapse toggle', () => {
@@ -234,21 +261,39 @@ describe('ThreadTimelineOverlay lane labels', () => {
   });
 });
 
-describe('ThreadTimelineOverlay hover-jump', () => {
+describe('ThreadTimelineOverlay playhead', () => {
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
-  afterEach(() => {
-    vi.useRealTimers();
+
+  it('renders one playhead per lane so the scrub indicator scrolls with the body', async () => {
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const playheads = await screen.findAllByTestId('thread-timeline-playhead');
+    expect(playheads).toHaveLength(2);
   });
 
-  it(`scrolls the matching message into view after ${HOVER_JUMP_DEBOUNCE_MS}ms of hover within the active lane`, async () => {
+  it('does not navigate when a dot is merely hovered (no hover-jump)', async () => {
     const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView as Element['scrollIntoView'];
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
     const threads = [makeThread(1)];
     const messages = new Map([
-      [1, [makeMessage(1, 0, 'msg-a'), makeMessage(1, 1, 'msg-b')]],
+      [
+        1,
+        [
+          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
+          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+        ],
+      ],
     ]);
     renderOverlay({
       threads,
@@ -256,61 +301,63 @@ describe('ThreadTimelineOverlay hover-jump', () => {
       activeThreadId: 1,
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
-    // React Query schedules its state updates as microtasks; await the dots
-    // landing with real timers, then switch to fake timers so the debounce
-    // can be driven deterministically without affecting query bookkeeping.
+    // The initial-settle is intentionally inert: the playhead lands on the
+    // latest dot but does NOT scroll the pane (or switch threads) until the
+    // user scrubs — so no one ever expects to see scrollIntoView called yet.
     const dots = await screen.findAllByTestId('thread-timeline-dot');
     expect(dots).toHaveLength(2);
-    vi.useFakeTimers();
-
-    const dotB = dots.find((d) => d.getAttribute('data-message-uuid') === 'msg-b');
-    expect(dotB).toBeDefined();
-    fireEvent.mouseEnter(dotB!);
-    // Before the debounce elapses, scrollIntoView must NOT have fired.
-    act(() => {
-      vi.advanceTimersByTime(HOVER_JUMP_DEBOUNCE_MS - 1);
-    });
     expect(scrollIntoView).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
-    // The targeted article is the one whose data-message-uuid matches the dot.
-    const target = within(screen.getByTestId('conversation-body')).getByText(
-      'msg-b',
-    );
-    expect(scrollIntoView.mock.instances[0]).toBe(target);
+    // Hovering and leaving any dot must not move the playhead or jump.
+    const dotA = dots.find((d) => d.getAttribute('data-message-uuid') === 'msg-a');
+    fireEvent.mouseEnter(dotA!);
+    fireEvent.mouseLeave(dotA!);
+    // Give microtasks a chance to run; nothing should fire from a hover.
+    await Promise.resolve();
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
-  it('cancels the pending jump when the dot is left before the debounce fires', async () => {
+  it('jumps the playhead to a clicked x and scrolls the matching message into view', async () => {
     const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView as Element['scrollIntoView'];
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
-    const messages = new Map([[1, [makeMessage(1, 0, 'msg-a')]]]);
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
+          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+        ],
+      ],
+    ]);
     renderOverlay({
       threads,
       messagesByThread: messages,
       activeThreadId: 1,
-      conversationArticles: [{ uuid: 'msg-a' }],
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
-    const dot = (await screen.findAllByTestId('thread-timeline-dot'))[0];
-    vi.useFakeTimers();
-    fireEvent.mouseEnter(dot);
-    act(() => {
-      vi.advanceTimersByTime(100);
-    });
-    fireEvent.mouseLeave(dot);
-    act(() => {
-      vi.advanceTimersByTime(HOVER_JUMP_DEBOUNCE_MS);
-    });
+    // Wait for the data-driven layout (dots + playhead) to land. The initial
+    // settle is intentionally silent; the click below is the only thing that
+    // should ever call scrollIntoView in this test.
+    await screen.findAllByTestId('thread-timeline-dot');
     expect(scrollIntoView).not.toHaveBeenCalled();
+    // The axis width is stubbed at 240; clicking at x=0 lands the playhead at
+    // fraction 0, which is msg-a (the earliest message).
+    fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+      clientX: 0,
+    });
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
+    const target = within(screen.getByTestId('conversation-body')).getByText(
+      'msg-a',
+    );
+    expect(scrollIntoView.mock.instances[0]).toBe(target);
   });
 
-  it('switches the active thread and defers the scroll until the next frame when hovering a dot in another lane', async () => {
+  it('switches the active thread and defers the scroll until the next frame when the playhead lands in another lane', async () => {
     const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView as Element['scrollIntoView'];
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
     // Capture rAF callbacks so the test can drive them after re-rendering
     // with the target lane's article in the DOM — mirroring how the live
     // app re-renders the conversation pane on active-thread change.
@@ -324,6 +371,7 @@ describe('ThreadTimelineOverlay hover-jump', () => {
     window.cancelAnimationFrame = (() => {
       /* tests do not exercise cancellation here */
     }) as typeof window.cancelAnimationFrame;
+    stubAxisRect({ left: 0, width: 240 });
     try {
       const threads = [
         makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
@@ -351,34 +399,34 @@ describe('ThreadTimelineOverlay hover-jump', () => {
           ],
         ],
       ]);
+      // Start with lane 1 active; only the active lane's article (msg-a) is
+      // rendered, mirroring the live app where the conversation pane only
+      // holds the active thread's messages.
       const { rerender, bodyRef } = renderOverlay({
         threads,
         messagesByThread: messages,
         activeThreadId: 1,
-        // Only the currently-active lane's article is present, mirroring
-        // the live app where the conversation pane only renders the active
-        // thread's messages.
         conversationArticles: [{ uuid: 'msg-a' }],
       });
-      const dots = await screen.findAllByTestId('thread-timeline-dot');
-      const targetDot = dots.find(
-        (d) => d.getAttribute('data-message-uuid') === 'msg-b',
-      );
-      expect(targetDot).toBeDefined();
+      await screen.findAllByTestId('thread-timeline-dot');
+      // The initial settle does NOT scroll on first mount (the user has
+      // not asked to be moved), so the click below is the only thing that
+      // should ever drive a thread switch or scroll in this test.
+      expect(scrollIntoView).not.toHaveBeenCalled();
 
-      vi.useFakeTimers();
-      fireEvent.mouseEnter(targetDot!);
-      act(() => {
-        vi.advanceTimersByTime(HOVER_JUMP_DEBOUNCE_MS);
+      // Click at the right edge: msg-b sits at x=1 on lane 2 (cross-lane).
+      fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+        clientX: 240,
       });
-      // The active thread must have flipped to the target's thread.
-      expect(useNavStore.getState().activeThreadId).toBe(2);
+      // The active thread must flip to msg-b's lane (thread 2).
+      await waitFor(() => {
+        expect(useNavStore.getState().activeThreadId).toBe(2);
+      });
       // The scroll is deferred to the next frame; nothing has scrolled yet.
       expect(scrollIntoView).not.toHaveBeenCalled();
 
       // Re-render with the target lane's article in the DOM and the active
       // thread updated, mirroring the live app's response to the switch.
-      vi.useRealTimers();
       rerender(
         <QueryClientProvider
           client={
@@ -405,7 +453,7 @@ describe('ThreadTimelineOverlay hover-jump', () => {
       for (const cb of drained) {
         cb(performance.now());
       }
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
       const target = within(screen.getByTestId('conversation-body')).getByText(
         'msg-b',
@@ -416,6 +464,48 @@ describe('ThreadTimelineOverlay hover-jump', () => {
       window.cancelAnimationFrame = originalCancelRaf;
     }
   });
+
+  it('moves the playhead and suppresses page scroll on a wheel event', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
+          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const playheadsBefore = screen.getAllByTestId('thread-timeline-playhead');
+    // The initial playhead position is the latest dot's x (1.0). Inspect the
+    // first lane's playhead `left` style to confirm the baseline.
+    expect(playheadsBefore[0].style.left).toBe('240px');
+
+    // A negative wheel delta scrolls the playhead toward the left edge.
+    const body = screen.getByTestId('thread-timeline-body');
+    const wheelEvent = new WheelEvent('wheel', {
+      deltaY: -200,
+      bubbles: true,
+      cancelable: true,
+    });
+    const preventDefault = vi.spyOn(wheelEvent, 'preventDefault');
+    act(() => {
+      body.dispatchEvent(wheelEvent);
+    });
+    expect(preventDefault).toHaveBeenCalled();
+    const playheadsAfter = screen.getAllByTestId('thread-timeline-playhead');
+    // -200 * 0.15 = -30px on a 240px axis = -0.125 fraction shift; clamped
+    // from 1.0 to 0.875 → 210px.
+    expect(playheadsAfter[0].style.left).toBe('210px');
+  });
 });
 
 describe('ThreadTimelineOverlay active lane highlight', () => {
@@ -424,7 +514,7 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('marks the active lane with data-active="true"', async () => {
+  it('falls back to the activeThreadId prop highlight when no dot is in view', async () => {
     const threads = [
       makeThread(1),
       makeThread(2, {
@@ -437,5 +527,33 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
     const lanes = await screen.findAllByTestId('thread-timeline-lane');
     expect(lanes[0]).toHaveAttribute('data-active', 'false');
     expect(lanes[1]).toHaveAttribute('data-active', 'true');
+  });
+
+  it('marks the lane containing the playhead-active message regardless of the activeThreadId prop', async () => {
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    const messages = new Map([
+      [1, [makeMessage(1, 0, 'a', { created_at: '2026-01-01T00:00:00Z' })]],
+      [2, [makeMessage(2, 0, 'b', { created_at: '2026-01-01T00:02:00Z' })]],
+    ]);
+    // The playhead's initial position is the latest dot (msg-b on lane 2),
+    // so the lane-2 highlight follows the playhead even when prop says lane 1.
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'a' }, { uuid: 'b' }],
+    });
+    const lanes = await screen.findAllByTestId('thread-timeline-lane');
+    await waitFor(() => {
+      expect(lanes[1]).toHaveAttribute('data-active', 'true');
+    });
+    expect(lanes[0]).toHaveAttribute('data-active', 'false');
   });
 });
