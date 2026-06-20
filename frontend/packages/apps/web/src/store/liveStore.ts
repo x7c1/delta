@@ -69,6 +69,21 @@ export interface SendingItem {
   /** sending: POST in flight; failed: POST rejected (dismiss or retry). */
   status: 'sending' | 'failed';
   createdAt: number;
+  /**
+   * Set when a `turn_completed` / `turn_interrupted` for this submit's session
+   * arrived BEFORE the POST's `onSuccess` ran — the load race
+   * {@link LiveState.endTurnForSession} detects. The POST's caller (the submit
+   * hook) reads this flag in `onSuccess`: if set, the send is dropped instead
+   * of staged into {@link LiveState.localSends}, so a chip with no remaining
+   * drain trigger never lands. A normal POST without a racing turn-end never
+   * carries the flag, so the standard `recordLocalSend` path runs.
+   *
+   * Storing the race signal directly on the in-flight submit keeps the race
+   * detection scoped to the same record that already represents "this POST is
+   * mid-flight" — no separate per-session counter that has to be kept in step
+   * with the {@link sending} array.
+   */
+  dropOnResolve?: true;
 }
 
 /**
@@ -455,24 +470,6 @@ export interface LiveState {
    */
   runningSubagents: Record<SessionId, SubagentActivity[]>;
   /**
-   * Per-session credit for a turn-end that arrived before the send it ended was
-   * recorded, keyed by session id. A `turn_completed` / `turn_interrupted`
-   * carries only a session id, and the only drain path for a tracked local send
-   * is such a turn-end event (see {@link LiveState.localSends}). An echo turn
-   * can complete in well under the time the `POST /api/sends` takes to resolve,
-   * so under load the turn-end event can land BEFORE that POST's `onSuccess`
-   * runs {@link LiveState.recordLocalSend}. The turn-end then drains nothing
-   * (the send is not tracked yet), and the late `recordLocalSend` inserts a send
-   * whose turn has already ended — a chip with no remaining drain trigger (it is
-   * also absent from the server's open-send list, so a refetch never re-includes
-   * it), lingering forever. {@link endTurnForSession} grants a credit here when a
-   * turn-end drains no local send yet still has an in-flight submit on the same
-   * session (the racing POST), and {@link recordLocalSend} consumes one to drop
-   * the just-ended send instead of tracking it. A counter, not a flag: two sends
-   * could be in flight at once. Cleared per session as it drains to zero.
-   */
-  endedBeforeRecorded: Record<SessionId, number>;
-  /**
    * The latest Claude Code status-line context-usage percentage per session,
    * keyed by session id. Replace-latest, not append: the status line fires
    * frequently, so only the most recent snapshot of each session is kept. Drives
@@ -748,6 +745,37 @@ function clearRunningThread(
   return { runningThreads };
 }
 
+/**
+ * Mark the first in-flight submit that could be racing this turn-end as
+ * "drop on POST resolve", returning the changed `sending` slice (empty object
+ * when nothing matched). A turn-end carries only a session id, while a
+ * new-session submit's target intentionally carries no session id — the POST
+ * response mints it — so any in-flight new-session POST is a possible racer for
+ * the ending session and qualifies just like a thread submit aimed at it. The
+ * eligible item is the OLDEST submit on the `sending` array still in the
+ * `sending` status without a flag yet, so two concurrent racing POSTs each get
+ * flagged by their own turn-end in submit order.
+ */
+function flagRacedSendingForSession(
+  state: LiveState,
+  sessionId: SessionId,
+): Partial<LiveState> {
+  const idx = state.sending.findIndex(
+    (item) =>
+      item.status === 'sending' &&
+      item.dropOnResolve === undefined &&
+      ((item.target.kind === 'thread' &&
+        item.target.sessionId === sessionId) ||
+        item.target.kind === 'new-session'),
+  );
+  if (idx === -1) {
+    return {};
+  }
+  const sending = state.sending.slice();
+  sending[idx] = { ...sending[idx], dropOnResolve: true };
+  return { sending };
+}
+
 function endTurnForSession(
   state: LiveState,
   sessionId: SessionId,
@@ -758,42 +786,22 @@ function endTurnForSession(
   const next: Partial<LiveState> = dropLocalSendsForSession(state, sessionId);
   // A turn ended but drained no tracked local send, yet a submit on this
   // session is still mid-POST: the turn-end raced ahead of that POST's
-  // `onSuccess`. Credit the session so the imminent `recordLocalSend` drops the
-  // already-ended send instead of leaving a chip with no future drain trigger.
+  // `onSuccess`. Flag the racing submit so its imminent `onSuccess` drops the
+  // already-ended send instead of staging a chip with no future drain trigger.
   // Gated on an in-flight submit so a normal already-drained turn-end (or a
-  // direct-pane turn with no browser submit) grants nothing. `session_closed`
+  // direct-pane turn with no browser submit) flags nothing. `session_closed`
   // is excluded: a closed session accepts no further sends, so no late
-  // `recordLocalSend` can follow. The credit is always consumed and never
-  // leaks: the server runs a turn only for an ACCEPTED send, so a turn-end
-  // implies its POST returned 2xx, whose `onSuccess` is the very
-  // `recordLocalSend` that consumes the credit. A rejected POST has no turn,
-  // so it cannot have raced a turn-end here.
-  if (
-    trigger === 'turn_end' &&
-    next.localSends === undefined &&
-    state.sending.some(
-      (item) =>
-        // A thread submit's target carries the session id directly. A
-        // new-session submit cannot — the session id is only minted by the
-        // POST response — so any in-flight new-session POST is a possible
-        // racer for THIS session id (the response that resolves it is the
-        // very `recordLocalSend` that consumes the credit). Without this
-        // branch the first-turn new-session race went unguarded and left
-        // a permanently undrainable chip when the echo turn completed
-        // before the POST resolved (the reported flake).
-        ((item.target.kind === 'thread' &&
-          item.target.sessionId === sessionId) ||
-          item.target.kind === 'new-session') &&
-        item.status === 'sending',
-    )
-  ) {
-    next.endedBeforeRecorded = {
-      ...state.endedBeforeRecorded,
-      [sessionId]: (state.endedBeforeRecorded[sessionId] ?? 0) + 1,
-    };
-  }
+  // `recordLocalSend` can follow. The flag is always consumed and never leaks:
+  // the server runs a turn only for an ACCEPTED send, so a turn-end implies
+  // its POST returned 2xx, whose `onSuccess` is the very consumer of the flag.
+  // A rejected POST has no turn, so it cannot have raced a turn-end here.
+  const flagged =
+    trigger === 'turn_end' && next.localSends === undefined
+      ? flagRacedSendingForSession(state, sessionId)
+      : {};
   return {
     ...next,
+    ...flagged,
     ...clearRunningThread(state, sessionId, threadId),
     ...(dropStreaming ? dropStreamingForSession(state, sessionId) : {}),
     // A FOREGROUND subagent cannot outlive the turn that spawned it, so any
@@ -822,7 +830,6 @@ export const useLiveStore = create<LiveState>((set) => ({
   unread: {},
   streamingMessages: {},
   runningSubagents: {},
-  endedBeforeRecorded: {},
   contextUsage: restoredStatus.contextUsage,
   rateLimits: restoredStatus.rateLimits,
 
@@ -844,25 +851,9 @@ export const useLiveStore = create<LiveState>((set) => ({
     })),
 
   recordLocalSend: (send) =>
-    set((state) => {
-      // The send's turn already ended before this POST `onSuccess` ran (the
-      // turn-end event raced ahead under load and credited the session — see
-      // {@link LiveState.endedBeforeRecorded}). Consume the credit and drop the
-      // send: tracking it now would leave a permanently undrainable chip.
-      const credit = state.endedBeforeRecorded[send.sessionId] ?? 0;
-      if (credit > 0) {
-        const endedBeforeRecorded = { ...state.endedBeforeRecorded };
-        if (credit > 1) {
-          endedBeforeRecorded[send.sessionId] = credit - 1;
-        } else {
-          delete endedBeforeRecorded[send.sessionId];
-        }
-        return { endedBeforeRecorded };
-      }
-      return {
-        localSends: { ...state.localSends, [send.sendId]: send },
-      };
-    }),
+    set((state) => ({
+      localSends: { ...state.localSends, [send.sendId]: send },
+    })),
 
   trackSpawn: (spawn) =>
     set((state) => {
@@ -921,10 +912,24 @@ export const useLiveStore = create<LiveState>((set) => ({
           notices[sessionId] = remaining;
         }
       }
+      // A `dropOnResolve` flag on an in-flight submit was set by the turn-end
+      // events that may now be missing across the outage; without the turn-end
+      // we cannot prove the send's turn is over, so clear the flags and let
+      // the POST `onSuccess` stage the send normally (the refetched sends list
+      // is the remaining truth for what the server still considers open).
+      const sending = state.sending.map((item) => {
+        if (item.dropOnResolve !== true) {
+          return item;
+        }
+        const copy = { ...item };
+        delete copy.dropOnResolve;
+        return copy;
+      });
       // The live previews' turn-end clears may also have been missed during the
       // outage and cannot be recovered (no re-seed of a partial stream this
       // PR), so drop them too — the flushed message renders from the refetch.
       return {
+        sending,
         localSends: {},
         runningThreads: {},
         notices,
@@ -935,7 +940,6 @@ export const useLiveStore = create<LiveState>((set) => ({
         // a `subagent_started`/`subagent_finished` missed during the outage is
         // not replayed.
         runningSubagents: {},
-        endedBeforeRecorded: {},
       };
     }),
 
