@@ -18,10 +18,18 @@ jobs:
       pull-requests: write
 
     steps:
+      # Both checkout's credential helper (used by the subsequent `git push`)
+      # and the script's `gh pr create` must authenticate as the PAT user, not
+      # as github-actions[bot]. GitHub's recursion-prevention rule does not
+      # auto-trigger `pull_request` workflows on bot-authored PRs, so a PR
+      # opened under GITHUB_TOKEN sits in `action_required` and never goes
+      # green. The PAT makes the resulting PR user-authored, which lets CI /
+      # Validate Release PR trigger on it normally.
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_PAT }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -35,4 +43,4 @@ jobs:
       - name: Create or update release PR
         run: .github/scripts/create-release-pr.sh
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}

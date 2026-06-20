@@ -16,8 +16,10 @@ v0.1.0 is the first tagged release and is alpha quality. Delta adopts
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from this version
 onward, but while it stays on `0.x` **no compatibility is guaranteed**: the
 SQLite schema, the browser↔server wire contract, and the supported Claude CLI
-version range may all change in any `0.x` bump. Supported platform is **Linux
-only** for now.
+version range may all change in any `0.x` bump. See
+[docs/guides/compatibility.md](docs/guides/compatibility.md) for the full
+policy — what is and is not promised for each surface, and which rules expire
+at `v1.0`. Supported platform is **Linux only** for now.
 
 ## Install
 

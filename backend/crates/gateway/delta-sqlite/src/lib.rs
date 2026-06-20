@@ -15,4 +15,5 @@ mod store;
 mod time;
 
 pub use error::{Error, Result};
+pub use schema::SCHEMA_VERSION;
 pub use store::SqliteStore;

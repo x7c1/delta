@@ -784,7 +784,7 @@ export function TranscriptPane({
                   the RIGHT edge leftward to the usage percentage, so the bar's
                   growing tip stays next to the `%` readout. A real DOM bar. */}
               <div
-                className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-indigo-400/80"
+                className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-slate-500"
                 style={{ width: `${Math.min(100, Math.max(0, contextUsage))}%` }}
                 data-testid="composer-context-fill"
                 role="meter"

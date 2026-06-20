@@ -17,13 +17,13 @@ test('a reload mid-conversation restores the same threads and messages', async (
   await startNewSession(page, 'reload-restore first message');
 
   // First turn completes: prompt + reply, pending drained.
-  await expect(page.getByTestId('message-item')).toHaveCount(2, { timeout: 15_000 });
-  await expect(page.getByTestId('pending-item')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId('message-item')).toHaveCount(2);
+  await expect(page.getByTestId('pending-item')).toHaveCount(0);
 
   // Second turn through the normal open-session send path.
   await sendMessage(page, 'and a second message');
-  await expect(page.getByTestId('message-item')).toHaveCount(4, { timeout: 15_000 });
-  await expect(page.getByTestId('pending-item')).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByTestId('message-item')).toHaveCount(4);
+  await expect(page.getByTestId('pending-item')).toHaveCount(0);
 
   await page.reload();
 

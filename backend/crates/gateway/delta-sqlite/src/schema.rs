@@ -13,11 +13,29 @@
 //! guarded step is a no-op there; an old database gains the column and is
 //! backfilled in the same open.
 //!
+//! [`SCHEMA_VERSION`] is the binary's expected on-disk schema generation,
+//! reflected into the SQLite file via `PRAGMA user_version`. The startup gate
+//! in [`crate::store::SqliteStore::init`] compares the two and refuses to
+//! continue on mismatch — see the compatibility policy doc for the rationale.
+//!
 //! Every table is `STRICT` (values must match the declared column types) and
 //! value domains are pinned with `CHECK` constraints, so a typo'd status or a
 //! mistyped bind surfaces as an immediate error instead of silently persisted
 //! garbage. Child tables cascade on session delete, so removing a session row
 //! removes everything it owns.
+
+/// The on-disk schema generation this binary expects.
+///
+/// Reflected into the SQLite file via `PRAGMA user_version` and checked on
+/// every open. Bump this whenever a destructive change ships (column dropped,
+/// table renamed, constraint tightened, etc.) so a stale overlay fails loud and
+/// early on startup with a `make reset` hint, instead of surfacing as confusing
+/// runtime errors mid-session. Additive changes that go through
+/// [`ADDITIVE_COLUMNS`] do *not* require a bump — those are transparently
+/// applied on open to an existing DB.
+///
+/// See the compatibility policy doc for the full rule set.
+pub const SCHEMA_VERSION: u32 = 1;
 
 /// All `CREATE TABLE`/`CREATE INDEX`/`CREATE TRIGGER` statements, idempotent
 /// via `IF NOT EXISTS`.

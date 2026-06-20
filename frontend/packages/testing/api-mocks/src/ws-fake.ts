@@ -31,8 +31,39 @@ export interface FakeEventSourceOptions {
 
 /** The default scripted sequence demonstrating each event variant. */
 export function defaultScript(): SessionEvent[] {
+  // Compute reset deadlines relative to the script's construction time (app
+  // boot in dev), so the navigator footer's 5h / 7d countdowns read as plausible
+  // remaining values (`02h13m`, `05d04h`) rather than a hard-coded epoch that
+  // would drift to "<1m" or a multi-year delta as time passed. Epoch seconds —
+  // the wire form expected by RateLimitWindow.resets_at.
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const fiveHourResetsAt = nowSeconds + 2 * 3600 + 13 * 60;
+  const sevenDayResetsAt = nowSeconds + 5 * 86400 + 4 * 3600;
   return [
     { kind: 'session_registered', session_id: SESSION_ID },
+    // Seed the account-wide rate-limit meters so the navigator's 5h/7d footer
+    // rows render in mock mode (they are hidden when no `status_updated` has
+    // arrived). Both windows populated with non-trivial values exercises the
+    // meter fill, the zero-padded percentage column, and the `↻ HHhMMm` /
+    // `↻ DDdHHh` countdown formats. `context_used_percentage` is set so the
+    // transcript composer's context-usage bar (top border of the composer card)
+    // also renders — it is hidden until the first non-null percentage arrives.
+    {
+      kind: 'status_updated',
+      session_id: SESSION_ID,
+      snapshot: {
+        model_id: 'claude-opus-4-8',
+        model_display_name: 'Opus 4.8',
+        context_used_percentage: 38,
+        context_window_size: null,
+        context_current_usage: null,
+        total_input_tokens: null,
+        five_hour: { used_percentage: 67, resets_at: fiveHourResetsAt },
+        seven_day: { used_percentage: 42, resets_at: sevenDayResetsAt },
+        total_cost_usd: null,
+        current_dir: null,
+      },
+    },
     {
       kind: 'turn_started',
       session_id: SESSION_ID,
