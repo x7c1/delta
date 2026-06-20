@@ -171,7 +171,7 @@ describe('NavigatorPane rate-limit meters', () => {
     );
     expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('8%');
     expect(screen.getByTestId('rate-limit-7d-reset')).toHaveTextContent(
-      '↻ 5d04h',
+      '↻ 05d04h',
     );
   });
 

@@ -120,8 +120,9 @@ function SettingsIcon({ className }: { className?: string }) {
 /**
  * One account-wide rate-limit row in the footer: a window label (`5h` / `7d`),
  * a {@link Meter} bar, the percentage, and a compact relative reset countdown.
- * The 5h and 7d rows carry distinct static accent colours purely so they can be
- * told apart — the colour does NOT change with the value (no threshold). The
+ * The two rows share the same neutral dark accent; they are told apart by the
+ * `5h` / `7d` label, not colour. The fill is anchored to the right edge of the
+ * track and grows leftward (see the `className` passed at the call site). The
  * caller hides the row entirely when its window is absent, so this only renders
  * a present window; a `null` percentage within a present window reads as 0%.
  */
@@ -129,11 +130,13 @@ function RateLimitRow({
   label,
   window: rateWindow,
   fillClassName,
+  meterClassName,
   testId,
 }: {
   label: string;
   window: RateLimitWindow;
   fillClassName: string;
+  meterClassName?: string;
   testId: string;
 }) {
   const percentage = rateWindow.used_percentage ?? 0;
@@ -150,6 +153,7 @@ function RateLimitRow({
       <Meter
         value={percentage}
         fillClassName={fillClassName}
+        className={meterClassName}
         title={`${label} rate limit: ${Math.round(percentage)}% used`}
       />
       <span className="shrink-0 tabular-nums" data-testid={`${testId}-pct`}>
@@ -320,8 +324,12 @@ export function NavigatorPane({
                 <RateLimitRow
                   label="5h"
                   window={rateLimits.fiveHour}
-                  // Distinct static accent — only to tell the two rows apart.
-                  fillClassName="bg-indigo-400"
+                  // Shared neutral accent — the rows are told apart by the label.
+                  fillClassName="bg-slate-600"
+                  // `flex justify-end` on the Meter's outer track pushes its
+                  // inner fill div to the right edge, so the bar grows leftward
+                  // from the reset side without modifying the Meter primitive.
+                  meterClassName="flex justify-end"
                   testId="rate-limit-5h"
                 />
               )}
@@ -329,8 +337,12 @@ export function NavigatorPane({
                 <RateLimitRow
                   label="7d"
                   window={rateLimits.sevenDay}
-                  // Distinct static accent — only to tell the two rows apart.
-                  fillClassName="bg-sky-400"
+                  // Shared neutral accent — the rows are told apart by the label.
+                  fillClassName="bg-slate-600"
+                  // `flex justify-end` on the Meter's outer track pushes its
+                  // inner fill div to the right edge, so the bar grows leftward
+                  // from the reset side without modifying the Meter primitive.
+                  meterClassName="flex justify-end"
                   testId="rate-limit-7d"
                 />
               )}

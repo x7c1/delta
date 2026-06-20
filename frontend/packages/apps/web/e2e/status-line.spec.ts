@@ -68,7 +68,7 @@ test('the footer meters and composer context bar reflect a status snapshot', asy
   await expect(page.getByTestId('rate-limit-5h-pct')).toHaveText('35%');
   await expect(page.getByTestId('rate-limit-5h-reset')).toHaveText('↻ 02h13m');
   await expect(page.getByTestId('rate-limit-7d-pct')).toHaveText('8%');
-  await expect(page.getByTestId('rate-limit-7d-reset')).toHaveText('↻ 5d04h');
+  await expect(page.getByTestId('rate-limit-7d-reset')).toHaveText('↻ 05d04h');
 
   // Composer: the top-edge context bar fills to the focused session's usage.
   const fill = page.getByTestId('composer-context-fill');
