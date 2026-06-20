@@ -114,6 +114,40 @@ body {
   background-color: rgba(250, 204, 21, 0.45);
 }
 
+/*
+ * Brief flash on a transcript message that the thread-timeline overlay just
+ * jumped to (see ThreadTimelineOverlay's flashMessageJump). After
+ * scrollIntoView centres the destination, the message animates a soft
+ * fluorescent-yellow background once so the eye spots where the navigation
+ * landed — the same family of yellow as the branch-origin highlight, so the
+ * "this is where we just went" cue reads as one design language across the
+ * transcript. The animation is short (matches TIMELINE_JUMP_FLASH_MS) and
+ * uses `forwards` so the final state has no lingering paint; the class is
+ * removed by the JS handler so a repeat jump to the same message re-runs
+ * the keyframe cleanly. `prefers-reduced-motion: reduce` disables the
+ * animation entirely for users who opt out of motion.
+ */
+.delta-timeline-jump-flash {
+  animation: delta-timeline-jump-flash 700ms ease-out forwards;
+  border-radius: 0.375rem;
+}
+@keyframes delta-timeline-jump-flash {
+  0% {
+    background-color: rgba(250, 204, 21, 0);
+  }
+  20% {
+    background-color: rgba(250, 204, 21, 0.45);
+  }
+  100% {
+    background-color: rgba(250, 204, 21, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .delta-timeline-jump-flash {
+    animation: none;
+  }
+}
+
 .markdown-body {
   overflow-wrap: break-word;
 }

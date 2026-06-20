@@ -31,6 +31,19 @@ export const MAIN_LANE_LABEL = MAIN_THREAD_DISPLAY_NAME;
 export type TimelineDotKind = 'user' | 'other';
 
 /**
+ * Size class for the timeline mark: marks the "main" turns of the conversation
+ * (a human turn or Claude's prose reply) larger than the surrounding tool
+ * calls, meta lines, and question cards so the eye reads the headline shape of
+ * the chat at a glance.
+ *
+ * - `large` — a human turn or an assistant turn that carries prose text. These
+ *   are the bubbles the transcript renders as the conversation's headline.
+ * - `small` — everything else (tool calls and their result carriers, meta
+ *   lines, system rows, the harness-injected task-notification card, etc.).
+ */
+export type TimelineDotSize = 'large' | 'small';
+
+/**
  * A single message mark in a lane. Its {@link x} is a 0..1 fraction along the
  * shared time axis: 0 = earliest message in the whole session, 1 = latest.
  * Marks are positioned by their `created_at` timestamp, so idle/thinking gaps
@@ -67,6 +80,13 @@ export interface TimelineDot {
    * pre-computed dot data.
    */
   kind: TimelineDotKind;
+  /**
+   * Size class for the mark's circle radius (see {@link TimelineDotSize}).
+   * The "main conversation" turns — a user message or an assistant text reply
+   * — render as the larger circle; everything else (tool calls, meta,
+   * question cards, etc.) renders smaller.
+   */
+  size: TimelineDotSize;
 }
 
 /**
@@ -124,6 +144,31 @@ export function classifyMessage(message: Message): TimelineDotKind {
     return 'user';
   }
   return 'other';
+}
+
+/**
+ * Decide whether a message is part of the "main" conversation (the headline
+ * turns the eye should track first) or an auxiliary line.
+ *
+ * A user-role message with an author-written text block is a real human turn —
+ * `large`. An assistant message that carries a prose `text` block is Claude's
+ * reply — also `large`. Everything else is auxiliary: pure tool calls and
+ * their result carriers, meta lines, harness-injected cards, system rows. The
+ * rule cares about "is there author prose to read?", not the role alone, so an
+ * assistant message that is JUST a tool call (no prose) is `small` and a
+ * user-role tool-result carrier (no prose) is `small` — matching the
+ * transcript's bubble-vs-collapsible split.
+ *
+ * The wheel-driven step navigation walks the `large` subset only, while click
+ * jumps still target every mark — small ones are visible anchors the user can
+ * still tap precisely when they want a specific tool call.
+ */
+export function classifyMessageSize(message: Message): TimelineDotSize {
+  const hasText = message.content.some((block) => block.type === 'text');
+  if (hasText && (message.role === 'user' || message.role === 'assistant')) {
+    return 'large';
+  }
+  return 'small';
 }
 
 /**
@@ -249,6 +294,7 @@ export function buildTimelineLanes(
         timeMs: ms,
         seq: message.seq,
         kind: classifyMessage(message),
+        size: classifyMessageSize(message),
       });
     }
     return { threadId: thread.id, label, tooltip, isMain, dots };
@@ -272,6 +318,12 @@ export interface SortedMessage {
   timeMs: number;
   /** Monotonic per-session sequence number (mirrors {@link TimelineDot.seq}). */
   seq: number;
+  /**
+   * Size class of the corresponding {@link TimelineDot}. Carried through so
+   * the wheel-step navigation can filter the global list down to the `large`
+   * (main-conversation) subset without needing to look up the original dot.
+   */
+  size: TimelineDotSize;
 }
 
 /**
@@ -294,6 +346,7 @@ export function buildSortedMessages(lanes: TimelineLane[]): SortedMessage[] {
         x: dot.x,
         timeMs: dot.timeMs,
         seq: dot.seq,
+        size: dot.size,
       });
     }
   }
@@ -304,6 +357,23 @@ export function buildSortedMessages(lanes: TimelineLane[]): SortedMessage[] {
     return a.seq - b.seq;
   });
   return entries;
+}
+
+/**
+ * Same shape as {@link buildSortedMessages} but restricted to the `large`
+ * (main-conversation) subset: user turns and Claude's prose replies. Drives
+ * the wheel-step navigation so one notch advances by one headline turn,
+ * skipping the surrounding tool calls, meta lines, and question cards. The
+ * click-to-jump path still uses the full {@link buildSortedMessages} so a
+ * direct tap on a small mark remains precise.
+ *
+ * Returns a fresh array each call, with the same `(timeMs, seq)` ascending
+ * order as the unfiltered list.
+ */
+export function buildLargeSortedMessages(
+  lanes: TimelineLane[],
+): SortedMessage[] {
+  return buildSortedMessages(lanes).filter((m) => m.size === 'large');
 }
 
 /**

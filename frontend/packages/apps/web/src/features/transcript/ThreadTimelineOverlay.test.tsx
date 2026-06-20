@@ -16,6 +16,7 @@ import { useNavStore } from '../../store/navStore';
 import {
   ThreadTimelineOverlay,
   TIMELINE_EXPANDED_STORAGE_KEY,
+  TIMELINE_JUMP_FLASH_CLASS,
   WHEEL_COOLDOWN_MS,
 } from './ThreadTimelineOverlay';
 
@@ -58,6 +59,25 @@ function makeMessage(
     response_time_ms: null,
     ...overrides,
   };
+}
+
+/**
+ * A user-role message carrying a single text block — i.e. a "large"
+ * main-conversation turn the wheel step navigation targets. Tests that
+ * exercise wheel stepping use this so the messages land in the
+ * `largeSortedMessages` subset (the wheel skips auxiliary tool/meta marks).
+ */
+function makeUserText(
+  threadId: number,
+  seq: number,
+  uuid: string,
+  createdAt: string,
+): Message {
+  return makeMessage(threadId, seq, uuid, {
+    role: 'user',
+    content: [{ type: 'text', text: `text ${uuid}` }],
+    created_at: createdAt,
+  });
 }
 
 /**
@@ -453,14 +473,16 @@ describe('ThreadTimelineOverlay playhead', () => {
   it('advances exactly one step per wheel notch and suppresses page scroll', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
-    // Three evenly-spaced messages: x=0, x=0.5, x=1 (px 0, 120, 240).
+    // Three evenly-spaced "large" turns: x=0, x=0.5, x=1 (px 0, 120, 240).
+    // The wheel step navigates the main-conversation subset, so each message
+    // must carry an authored text block to land on the large list.
     const messages = new Map([
       [
         1,
         [
-          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
-          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
-          makeMessage(1, 2, 'msg-c', { created_at: '2026-01-01T00:02:00Z' }),
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
         ],
       ],
     ]);
@@ -540,12 +562,14 @@ describe('ThreadTimelineOverlay playhead', () => {
     try {
       stubAxisRect({ left: 0, width: 240 });
       const threads = [makeThread(1)];
+      // Both messages must be "large" so they survive the wheel-step subset
+      // filter — the wheel only walks main-conversation turns.
       const messages = new Map([
         [
           1,
           [
-            makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
-            makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
           ],
         ],
       ]);
@@ -618,19 +642,19 @@ describe('ThreadTimelineOverlay playhead', () => {
           created_at: '2026-01-01T00:01:00Z',
         }),
       ];
+      // All three messages are "large" so the wheel-step subset includes
+      // them and the cross-lane walk steps msg-c → msg-b.
       const messages = new Map([
         [
           1,
           [
-            makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
-            makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
           ],
         ],
         [
           2,
-          [
-            makeMessage(2, 0, 'msg-c', { created_at: '2026-01-01T00:02:00Z' }),
-          ],
+          [makeUserText(2, 0, 'msg-c', '2026-01-01T00:02:00Z')],
         ],
       ]);
       // Start with lane 2 active; only msg-c is in the conversation pane.
@@ -706,17 +730,18 @@ describe('ThreadTimelineOverlay playhead', () => {
     try {
       stubAxisRect({ left: 0, width: 240 });
       const threads = [makeThread(1)];
-      // Five messages so a burst of wheel events would otherwise sweep
-      // the active index across multiple steps if it weren't throttled.
+      // Five "large" messages so a burst of wheel events would otherwise
+      // sweep the active index across multiple steps if it weren't
+      // throttled (large turns are the wheel-step subset).
       const messages = new Map([
         [
           1,
           [
-            makeMessage(1, 0, 'm0', { created_at: '2026-01-01T00:00:00Z' }),
-            makeMessage(1, 1, 'm1', { created_at: '2026-01-01T00:01:00Z' }),
-            makeMessage(1, 2, 'm2', { created_at: '2026-01-01T00:02:00Z' }),
-            makeMessage(1, 3, 'm3', { created_at: '2026-01-01T00:03:00Z' }),
-            makeMessage(1, 4, 'm4', { created_at: '2026-01-01T00:04:00Z' }),
+            makeUserText(1, 0, 'm0', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'm1', '2026-01-01T00:01:00Z'),
+            makeUserText(1, 2, 'm2', '2026-01-01T00:02:00Z'),
+            makeUserText(1, 3, 'm3', '2026-01-01T00:03:00Z'),
+            makeUserText(1, 4, 'm4', '2026-01-01T00:04:00Z'),
           ],
         ],
       ]);
@@ -761,7 +786,7 @@ describe('ThreadTimelineOverlay mark rendering', () => {
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('renders rectangular marks (not circles) with role-coded color classes and a data-message-kind attribute', async () => {
+  it('renders circular marks with role-coded color classes and a data-message-kind attribute', async () => {
     const threads = [makeThread(1)];
     const messages = new Map([
       [
@@ -795,17 +820,80 @@ describe('ThreadTimelineOverlay mark rendering', () => {
     const otherMark = marks.find(
       (m) => m.getAttribute('data-message-uuid') === 'a',
     )!;
-    // Rectangle, not circle: the marker is a `rounded-sm` block with separate
-    // width/height (the v2 round dot used `rounded-full` with equal w/h).
-    expect(userMark.className).toContain('rounded-sm');
-    expect(userMark.className).not.toContain('rounded-full');
-    expect(userMark.style.width).not.toBe(userMark.style.height);
+    // Circle: rounded-full with equal width/height. The packed-lane overlap
+    // problem that drove v3's rectangles is solved with a soft alpha fill
+    // plus a solid ring outline, so the shape can return to circles.
+    expect(userMark.className).toContain('rounded-full');
+    expect(userMark.style.width).toBe(userMark.style.height);
     // Role-coded color and data attribute (tested via class membership and
     // the data attribute, not literal hex, so the tailwind tokens can move).
+    // The alpha fill paints overlap clusters as a darker stack while the
+    // ring keeps individual circles discernible at the edge.
     expect(userMark).toHaveAttribute('data-message-kind', 'user');
-    expect(userMark.className).toContain('bg-blue-500');
+    expect(userMark.className).toContain('bg-blue-500/60');
+    expect(userMark.className).toContain('ring-blue-500');
     expect(otherMark).toHaveAttribute('data-message-kind', 'other');
-    expect(otherMark.className).toContain('bg-slate-400');
+    expect(otherMark.className).toContain('bg-slate-400/60');
+    expect(otherMark.className).toContain('ring-slate-400');
+  });
+
+  it('renders the main-conversation turns as a larger circle than the auxiliary turns', async () => {
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          // user turn → large
+          makeMessage(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hello' }],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          // assistant prose → large
+          makeMessage(1, 1, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hi' }],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+          // tool call → small
+          makeMessage(1, 2, 't', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:02:00Z',
+          }),
+          // meta line → small
+          makeMessage(1, 3, 'm', {
+            role: 'meta',
+            content: [{ type: 'text', text: 'sys' }],
+            created_at: '2026-01-01T00:03:00Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const marks = await screen.findAllByTestId('thread-timeline-dot');
+    const byUuid = new Map(
+      marks.map((m) => [m.getAttribute('data-message-uuid'), m]),
+    );
+    expect(byUuid.get('u')).toHaveAttribute('data-message-size', 'large');
+    expect(byUuid.get('a')).toHaveAttribute('data-message-size', 'large');
+    expect(byUuid.get('t')).toHaveAttribute('data-message-size', 'small');
+    expect(byUuid.get('m')).toHaveAttribute('data-message-size', 'small');
+    // The diameter of a "large" mark is greater than that of a "small" one
+    // (px values, not classes — the renderer applies them inline).
+    const largeDiameter = parseFloat(byUuid.get('u')!.style.width);
+    const smallDiameter = parseFloat(byUuid.get('t')!.style.width);
+    expect(largeDiameter).toBeGreaterThan(smallDiameter);
+    // The delta is subtle but visible — the lane should still read as one
+    // timeline, not two layers. Cap at 6 px so a future tweak that goes
+    // overboard is caught here.
+    expect(largeDiameter - smallDiameter).toBeLessThanOrEqual(6);
   });
 });
 
@@ -856,5 +944,264 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
       expect(lanes[1]).toHaveAttribute('data-active', 'true');
     });
     expect(lanes[0]).toHaveAttribute('data-active', 'false');
+  });
+});
+
+describe('ThreadTimelineOverlay wheel skips small marks', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('walks only the main-conversation (large) subset on wheel, jumping over tool calls', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    // Three large turns interleaved with a small tool call. The wheel-step
+    // navigation must skip the tool call so one notch advances by one
+    // headline turn — `large-b` should land between `large-a` and
+    // `large-c` regardless of the small dot's x.
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'large-a', '2026-01-01T00:00:00Z'),
+          makeMessage(1, 1, 'small-t', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+          makeUserText(1, 2, 'large-b', '2026-01-01T00:02:00Z'),
+          makeUserText(1, 3, 'large-c', '2026-01-01T00:03:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'large-a' },
+        { uuid: 'small-t' },
+        { uuid: 'large-b' },
+        { uuid: 'large-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Initial playhead lands on the latest message (large-c, x=1 → 240px).
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
+    // Wheel up: the previous LARGE turn is large-b (x=2/3 → 160px), NOT
+    // the small tool call between them.
+    const body = screen.getByTestId('thread-timeline-body');
+    act(() => {
+      body.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('160px');
+  });
+
+  it('still allows a click to target a small mark precisely', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    // A small tool call between two large turns. A click at the tool call's
+    // x must jump the playhead to it, even though the wheel would skip it.
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'large-a', '2026-01-01T00:00:00Z'),
+          makeMessage(1, 1, 'small-t', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            // Land at x=0.5 (the midpoint) so the click target is
+            // unambiguous and deterministic.
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+          makeUserText(1, 2, 'large-b', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'large-a' },
+        { uuid: 'small-t' },
+        { uuid: 'large-b' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Click at x=120 (midpoint) → small-t is the nearest mark.
+    fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+      clientX: 120,
+    });
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('120px');
+  });
+});
+
+describe('ThreadTimelineOverlay jump-target flash', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('flashes the destination message after a click jump so the eye spots it', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Click on x=0 (msg-a) to drive a same-lane jump.
+    fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+      clientX: 0,
+    });
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+    // The destination article carries the flash class right after the
+    // scroll lands. We assert the class is present rather than waiting for
+    // its removal — the keyframe is what fades the visual, the class is
+    // the trigger.
+    const target = within(screen.getByTestId('conversation-body')).getByText(
+      'msg-a',
+    );
+    expect(target.classList.contains(TIMELINE_JUMP_FLASH_CLASS)).toBe(true);
+  });
+});
+
+describe('ThreadTimelineOverlay does not override an external active-thread change', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('lets a Navigator-driven setActiveThread stick when the message-list reference changes underneath', async () => {
+    // Regression: v2-v4 had the timeline re-fire its auto-switch effect on
+    // any `activeMessage` reference change (a background message-list
+    // refetch landing right after a Navigator click was the common
+    // trigger), which then overwrote the Navigator's chosen thread.
+    //
+    // The fix snapshots the active message into a ref and depends on
+    // `scrubTick` alone, so only a deliberate scrub re-fires the effect.
+    // This test simulates the sequence: scrub to land the playhead on
+    // thread 1, then a Navigator click flips active thread to 2, then a
+    // re-render with a fresh messages map (the refetch) — the active
+    // thread must remain 2.
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    const buildMessages = () =>
+      new Map<number, Message[]>([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          ],
+        ],
+        [2, [makeUserText(2, 0, 'msg-c', '2026-01-01T00:02:00Z')]],
+      ]);
+    // Start with lane 2 active (the latest message lands there).
+    const { rerender, bodyRef } = renderOverlay({
+      threads,
+      messagesByThread: buildMessages(),
+      activeThreadId: 2,
+      conversationArticles: [{ uuid: 'msg-c' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Scrub: wheel-up from msg-c → msg-b lands the playhead on thread 1.
+    // (Both Navigator and the timeline would each call setActiveThread,
+    // so confirm the timeline DID flip the store to thread 1 first.)
+    const body = screen.getByTestId('thread-timeline-body');
+    act(() => {
+      body.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(useNavStore.getState().activeThreadId).toBe(1);
+    });
+    // Now a Navigator click flips the store back to thread 2.
+    act(() => {
+      useNavStore.getState().setActiveThread(2);
+    });
+    expect(useNavStore.getState().activeThreadId).toBe(2);
+    // Simulate the post-click refetch: a fresh messages map (new array
+    // identities) lands, the overlay re-renders. Without the fix, the
+    // active-message effect would re-fire and call setActiveThread(1)
+    // because the playhead is still on msg-b. With the fix, scrubTick
+    // did not change, so the effect stays inert.
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    const fresh = buildMessages();
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => ({
+        messages: fresh.get(threadId as number) ?? [],
+      }),
+    );
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-c">msg-c</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={2}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    // Give microtasks + any effect ticks a chance to run.
+    await Promise.resolve();
+    await Promise.resolve();
+    // The Navigator's choice (thread 2) must win — the timeline must not
+    // have overridden it back to thread 1.
+    expect(useNavStore.getState().activeThreadId).toBe(2);
   });
 });

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { Message, Thread } from '@delta/wire-gen';
 import {
   MAIN_LANE_LABEL,
+  buildLargeSortedMessages,
   buildSortedMessages,
   buildTimelineLanes,
   classifyMessage,
+  classifyMessageSize,
   computeTimeRange,
   findNearestMessageIndex,
   messageTimeMs,
@@ -107,6 +109,119 @@ describe('classifyMessage', () => {
         message(1, 0, 'o', { role: 'other', content: [{ type: 'text', text: 'x' }] }),
       ),
     ).toBe('other');
+  });
+});
+
+describe('classifyMessageSize', () => {
+  it('classifies a user-role message with author text as "large"', () => {
+    const m = message(1, 0, 'm', {
+      role: 'user',
+      content: [{ type: 'text', text: 'hi' }],
+    });
+    expect(classifyMessageSize(m)).toBe('large');
+  });
+
+  it('classifies an assistant-role message with prose text as "large"', () => {
+    const m = message(1, 0, 'a', {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello' }],
+    });
+    expect(classifyMessageSize(m)).toBe('large');
+  });
+
+  it('classifies an assistant tool-only call as "small"', () => {
+    // Pure tool_use, no prose text → small. The transcript renders this as
+    // a collapsible card, not a bubble, so the timeline mirrors that split.
+    const m = message(1, 0, 't', {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'tu', name: 'Bash', input: {} }],
+    });
+    expect(classifyMessageSize(m)).toBe('small');
+  });
+
+  it('classifies a user-role tool-result carrier as "small"', () => {
+    // No author text, just a tool_result block — the transcript renders
+    // this on the assistant side; the timeline mirrors with `small`.
+    const m = message(1, 0, 'r', {
+      role: 'user',
+      content: [
+        { type: 'tool_result', tool_use_id: 'tu', content: '', is_error: false },
+      ],
+    });
+    expect(classifyMessageSize(m)).toBe('small');
+  });
+
+  it('classifies meta and system rows as "small"', () => {
+    expect(
+      classifyMessageSize(
+        message(1, 0, 'm', { role: 'meta', content: [{ type: 'text', text: 'x' }] }),
+      ),
+    ).toBe('small');
+    expect(
+      classifyMessageSize(
+        message(1, 0, 's', { role: 'system', content: [{ type: 'text', text: 'x' }] }),
+      ),
+    ).toBe('small');
+  });
+});
+
+describe('buildLargeSortedMessages', () => {
+  it('returns only the main-conversation subset in the same (timeMs, seq) order', () => {
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hi' }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          message(1, 1, 't', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            createdAt: '2026-01-01T00:01:00Z',
+          }),
+          message(1, 2, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'reply' }],
+            createdAt: '2026-01-01T00:02:00Z',
+          }),
+          message(1, 3, 'm', {
+            role: 'meta',
+            content: [{ type: 'text', text: 'sys' }],
+            createdAt: '2026-01-01T00:03:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    const large = buildLargeSortedMessages(lanes);
+    expect(large.map((m) => m.uuid)).toEqual(['u', 'a']);
+    expect(large.every((m) => m.size === 'large')).toBe(true);
+  });
+
+  it('returns an empty list when no lane has any large messages', () => {
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 't', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+          }),
+        ],
+      ],
+    ]);
+    const large = buildLargeSortedMessages(
+      buildTimelineLanes(threads, messagesByThread),
+    );
+    expect(large).toEqual([]);
   });
 });
 
