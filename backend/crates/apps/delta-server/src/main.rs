@@ -5,6 +5,8 @@
 //! `127.0.0.1` only — Delta is a local tool and never listens on a public
 //! interface. All testable logic lives in the library crate.
 
+mod claude_version;
+
 use std::net::{Ipv4Addr, SocketAddr};
 
 use tracing_subscriber::EnvFilter;
@@ -22,7 +24,31 @@ async fn main() -> anyhow::Result<()> {
 
     let config = config_from_env();
 
-    let state = AppState::build(&config)?;
+    // Record which upstream `claude` binary this server is running against,
+    // before any session activity, so the boot banner carries the version
+    // string for post-hoc debugging. Pure observability: a missing or failing
+    // binary warns and continues — see `docs/guides/compatibility.md`
+    // (subdomain 3) and the `claude_version` module docs for the contract.
+    claude_version::log_claude_version(&config.launch.claude_bin);
+
+    // A SCHEMA_VERSION mismatch is the one startup error that demands a clear,
+    // user-facing message (the remediation is `make reset`) rather than a
+    // generic anyhow trace. Print the inner store error to stderr verbatim
+    // (its `Display` already names `make reset`) and exit non-zero; every
+    // other failure keeps the default `anyhow` propagation.
+    let state = match AppState::build(&config) {
+        Ok(state) => state,
+        Err(err) => {
+            if let Some(delta_bootstrap::Error::Store(
+                store_err @ delta_bootstrap::StoreError::SchemaMismatch { .. },
+            )) = err.downcast_ref::<delta_bootstrap::Error>()
+            {
+                eprintln!("delta-server: {store_err}");
+                std::process::exit(1);
+            }
+            return Err(err);
+        }
+    };
 
     // Continuously tail the transcript so assistant replies that Claude Code
     // flushes after the `Stop` hook still reach the browser within ~0.5s.

@@ -434,3 +434,33 @@ make down
 This stops `delta-server`, the frontend dev server (port 5173), and every
 `delta-<n>` tmux session the server spawned. To also delete the SQLite overlay
 so the next start recreates an empty schema, run `make reset` instead.
+
+## Release automation
+
+The `Create Release PR` workflow (`.github/workflows/create-release-pr.yml`)
+opens and updates the rolling release PR on every push to `main`. It pushes the
+`release/v<X.Y.Z>` branch and calls `gh pr create` under a **user-scoped
+personal access token**, exposed to the workflow as the repository secret
+**`RELEASE_PAT`**.
+
+A user-scoped token is required because GitHub's recursion-prevention rule
+suppresses `pull_request` workflow runs on PRs authored by `github-actions[bot]`.
+With the default `GITHUB_TOKEN` the release PR would be bot-authored, so `CI`
+and `Validate Release PR` would sit in `action_required` and never go green.
+Pushing and opening the PR under a user PAT makes the PR user-authored, which
+lets the existing checks trigger normally.
+
+**Required setup (one-time, per repo).** A maintainer must register
+`RELEASE_PAT` in the repository's Actions secrets with these scopes:
+
+- `contents: write` — push the `release/v<X.Y.Z>` branch.
+- `pull-requests: write` — create and edit the release PR.
+
+Without the secret, the workflow fails loudly at the `git push` step. There is
+no fallback to `GITHUB_TOKEN` by design: a silent fallback would mask exactly
+the misconfiguration the PAT is solving.
+
+The `Release` workflow (`.github/workflows/release.yml`) that tags and publishes
+after the release PR is merged keeps using the default `GITHUB_TOKEN` — it runs
+under a human-triggered merge event, so recursion is not a concern, and no
+workflow in this repo listens to tag pushes.
