@@ -773,8 +773,17 @@ function endTurnForSession(
     next.localSends === undefined &&
     state.sending.some(
       (item) =>
-        item.target.kind === 'thread' &&
-        item.target.sessionId === sessionId &&
+        // A thread submit's target carries the session id directly. A
+        // new-session submit cannot — the session id is only minted by the
+        // POST response — so any in-flight new-session POST is a possible
+        // racer for THIS session id (the response that resolves it is the
+        // very `recordLocalSend` that consumes the credit). Without this
+        // branch the first-turn new-session race went unguarded and left
+        // a permanently undrainable chip when the echo turn completed
+        // before the POST resolved (the reported flake).
+        ((item.target.kind === 'thread' &&
+          item.target.sessionId === sessionId) ||
+          item.target.kind === 'new-session') &&
         item.status === 'sending',
     )
   ) {

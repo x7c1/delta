@@ -59,6 +59,25 @@ function beginThreadSending(overrides: { sessionId?: string; threadId?: number }
   });
 }
 
+/**
+ * A new-session submit chip, as `beginSending` records before its POST. The
+ * target carries no session id — the response mints it — so this stands in for
+ * the first-turn launch the new-session composer fires.
+ */
+function beginNewSessionSending(overrides: { id?: string } = {}) {
+  useLiveStore.getState().beginSending({
+    id: overrides.id ?? 'local-new-1',
+    target: {
+      kind: 'new-session',
+      workdir: null,
+      launchOptionIds: [],
+    },
+    text: 'hi',
+    status: 'sending',
+    createdAt: 0,
+  });
+}
+
 /** The notices map, for `noticeOf` lookups in assertions. */
 function notices() {
   return useLiveStore.getState().notices;
@@ -188,6 +207,38 @@ describe('liveStore turn tracking', () => {
     // The POST resolves: its chip is removed and the send is recorded.
     useLiveStore.getState().removeSending('local-sess-1-1');
     useLiveStore.getState().recordLocalSend(localSend());
+
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
+  });
+
+  it('credits a racing new-session POST whose first-turn ended before recording', () => {
+    // The same load race for the FIRST send of a freshly-spawned session: the
+    // launch POST is still in flight (its target is `new-session`, so the
+    // session id is unknown until the response), the echo turn completes first
+    // and drains nothing, then `onSuccess` records the local send under the
+    // minted session id. The credit gate must fire for an in-flight new-session
+    // submit too — without this, the first-turn chip lingered forever (the
+    // reported flake) because the credit was previously thread-only.
+    beginNewSessionSending();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-spawn-1',
+      thread_id: 42,
+      stop_reason: null,
+    });
+    expect(useLiveStore.getState().endedBeforeRecorded).toEqual({
+      'sess-spawn-1': 1,
+    });
+
+    // The POST resolves: the response carries the minted session/thread ids,
+    // the sending chip is removed and the send is recorded — and dropped by
+    // the credit, with no permanently undrainable chip left behind.
+    useLiveStore.getState().removeSending('local-new-1');
+    useLiveStore
+      .getState()
+      .recordLocalSend(localSend({ sendId: 7, sessionId: 'sess-spawn-1', threadId: 42 }));
 
     expect(useLiveStore.getState().localSends).toEqual({});
     expect(useLiveStore.getState().endedBeforeRecorded).toEqual({});
