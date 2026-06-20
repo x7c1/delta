@@ -87,6 +87,7 @@ export function MessageItem({
       <article
         className="px-3 text-sm"
         data-role={message.role}
+        data-message-uuid={message.uuid}
         data-testid="message-item"
       >
         <Collapsible
@@ -127,6 +128,7 @@ export function MessageItem({
       <article
         className="px-3 text-sm"
         data-role={message.role}
+        data-message-uuid={message.uuid}
         data-task-notification="true"
         data-testid="message-item"
       >
@@ -282,6 +284,7 @@ export function MessageItem({
       <article
         className="flex flex-col items-end px-3 text-sm"
         data-role={message.role}
+        data-message-uuid={message.uuid}
         data-testid="message-item"
       >
         <div className="max-w-[85%] rounded-lg bg-blue-50 px-3 py-2 text-slate-800">
@@ -305,6 +308,7 @@ export function MessageItem({
     <article
       className="px-3 text-sm"
       data-role={message.role}
+      data-message-uuid={message.uuid}
       data-testid="message-item"
     >
       {inBubble ? (

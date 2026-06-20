@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
   type UseInfiniteQueryResult,
@@ -128,6 +129,38 @@ export function useThreadMessagesQuery(
     queryFn: () => client.getThreadMessages(threadId as ThreadId),
     enabled: threadId !== null,
   });
+}
+
+/** One thread's messages query result, keyed by the thread id it ran for. */
+export interface ThreadMessagesQueryEntry {
+  threadId: ThreadId;
+  result: UseQueryResult<MessagesResponse>;
+}
+
+/**
+ * Messages for several threads at once, one query per thread. Shares the
+ * `messages(threadId)` cache key with {@link useThreadMessagesQuery}, so the
+ * active thread's already-fetched messages are reused rather than re-requested.
+ *
+ * Used by the timeline footer to drive its swim-lane dots: the footer needs
+ * the message counts for every (sub)thread, not just the focused one. N+1 is
+ * acceptable in MVP — a dedicated `all_threads=true` REST is intentionally
+ * left for a later pass once usage shows the per-thread fan-out matters.
+ */
+export function useThreadsMessagesQueries(
+  client: ApiClient,
+  threadIds: ThreadId[],
+): ThreadMessagesQueryEntry[] {
+  const results = useQueries({
+    queries: threadIds.map((threadId) => ({
+      queryKey: queryKeys.messages(threadId),
+      queryFn: () => client.getThreadMessages(threadId),
+    })),
+  });
+  return results.map((result, index) => ({
+    threadId: threadIds[index],
+    result,
+  }));
 }
 
 /**

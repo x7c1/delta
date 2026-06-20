@@ -29,6 +29,7 @@ import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
 import { SubagentRunningIndicator } from './SubagentRunningIndicator';
+import { ThreadTimelineOverlay } from './ThreadTimelineOverlay';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
@@ -762,6 +763,20 @@ export function TranscriptPane({
 
             <PendingQueue entries={pendingEntries} />
           </div>
+        )}
+
+        {/* Subthread timeline footer. A swim-lane row per (sub)thread with a dot
+            per message; hovering a dot scrolls the matching message into view.
+            Always present for an existing session so the time order and
+            current position are visible at a glance; collapsed by default and
+            toggleable, preference persisted per device. Omitted on the
+            new-session screen where there are no threads to chart yet. */}
+        {!newSession && activeThread !== null && (
+          <ThreadTimelineOverlay
+            threads={threads}
+            activeThreadId={activeThread.id}
+            conversationBodyRef={bodyRef}
+          />
         )}
 
         {/* Composer card: the new-session launch pickers (which parameterize the
