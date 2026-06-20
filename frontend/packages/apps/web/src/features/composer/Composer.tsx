@@ -81,14 +81,8 @@ export function Composer({ mode }: ComposerProps) {
   const newSessionWorkdir = useComposerStore(
     (state) => state.newSessionWorkdir,
   );
-  const setNewSessionWorkdir = useComposerStore(
-    (state) => state.setNewSessionWorkdir,
-  );
   const newSessionLaunchOptionIds = useComposerStore(
     (state) => state.newSessionLaunchOptionIds,
-  );
-  const resetNewSessionLaunchOptions = useComposerStore(
-    (state) => state.resetNewSessionLaunchOptions,
   );
   const newSessionWorktreeEnabled = useComposerStore(
     (state) => state.newSessionWorktreeEnabled,
@@ -185,14 +179,9 @@ export function Composer({ mode }: ComposerProps) {
           text,
           body,
         });
-        if (isNew) {
-          // The spawn was accepted; reset the picker selections so the next new
-          // session starts from the defaults again. (The accepted spawn itself
-          // is tracked by the submission path; the workspace focuses it by its
-          // real id once it registers.)
-          setNewSessionWorkdir(null);
-          resetNewSessionLaunchOptions();
-        }
+        // Picker selections are reset by TranscriptPane's leave-effect when the
+        // new-session state is left; doing it here would briefly uncheck the
+        // boxes in place before the screen unmounts.
         if (branching) {
           // The backend created a fresh child thread for this branch send and
           // returns its id; drill into it. The pending chip needs no re-keying:
@@ -219,8 +208,6 @@ export function Composer({ mode }: ComposerProps) {
       clearDraft,
       submitSend,
       setBranchOrigin,
-      setNewSessionWorkdir,
-      resetNewSessionLaunchOptions,
       setActiveThread,
       clearResumeUnavailable,
     ],
