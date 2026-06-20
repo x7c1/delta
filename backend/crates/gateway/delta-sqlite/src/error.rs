@@ -16,6 +16,23 @@ pub enum Error {
     /// An expected row was missing.
     #[error("not found: {0}")]
     NotFound(String),
+
+    /// The on-disk schema generation (`PRAGMA user_version`) does not match the
+    /// binary's expected [`crate::SCHEMA_VERSION`]. Raised by the startup gate
+    /// in [`crate::SqliteStore::init`] so the server exits cleanly with a
+    /// `make reset` hint, instead of letting the mismatch surface later as
+    /// confusing runtime errors.
+    #[error(
+        "delta SQLite overlay schema version mismatch: \
+         database is at version {found}, this binary expects version {expected}. \
+         Run `make reset` to rebuild the overlay."
+    )]
+    SchemaMismatch {
+        /// The version stored in the on-disk file's `PRAGMA user_version`.
+        found: u32,
+        /// The version this binary was built against ([`crate::SCHEMA_VERSION`]).
+        expected: u32,
+    },
 }
 
 /// Convenience result alias for this crate.
