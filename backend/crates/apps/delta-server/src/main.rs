@@ -5,6 +5,8 @@
 //! `127.0.0.1` only — Delta is a local tool and never listens on a public
 //! interface. All testable logic lives in the library crate.
 
+mod claude_version;
+
 use std::net::{Ipv4Addr, SocketAddr};
 
 use tracing_subscriber::EnvFilter;
@@ -21,6 +23,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = config_from_env();
+
+    // Record which upstream `claude` binary this server is running against,
+    // before any session activity, so the boot banner carries the version
+    // string for post-hoc debugging. Pure observability: a missing or failing
+    // binary warns and continues — see `docs/guides/compatibility.md`
+    // (subdomain 3) and the `claude_version` module docs for the contract.
+    claude_version::log_claude_version(&config.launch.claude_bin);
 
     // A SCHEMA_VERSION mismatch is the one startup error that demands a clear,
     // user-facing message (the remediation is `make reset`) rather than a
