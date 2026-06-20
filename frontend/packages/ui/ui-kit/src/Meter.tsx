@@ -7,9 +7,9 @@ export interface MeterProps {
    */
   value: number;
   /**
-   * Tailwind classes for the fill bar — its colour, primarily. Distinct accents
-   * let sibling meters be told apart (e.g. the 5h vs 7d rate-limit rows); this
-   * is purely cosmetic and carries no threshold semantics.
+   * Tailwind classes for the fill bar — its colour, primarily. A generic hook
+   * for callers that want a non-default accent; purely cosmetic and carries no
+   * threshold semantics.
    */
   fillClassName?: string;
   /** Tailwind classes for the track (the unfilled groove). */

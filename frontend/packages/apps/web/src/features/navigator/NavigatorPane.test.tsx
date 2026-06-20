@@ -159,7 +159,7 @@ describe('NavigatorPane rate-limit meters', () => {
       'aria-valuenow',
       '37',
     );
-    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('37%');
+    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('037%');
     expect(screen.getByTestId('rate-limit-5h-reset')).toHaveTextContent(
       '↻ 02h13m',
     );
@@ -169,9 +169,9 @@ describe('NavigatorPane rate-limit meters', () => {
       'aria-valuenow',
       '8',
     );
-    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('8%');
+    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('008%');
     expect(screen.getByTestId('rate-limit-7d-reset')).toHaveTextContent(
-      '↻ 5d04h',
+      '↻ 05d04h',
     );
   });
 
@@ -235,7 +235,7 @@ describe('NavigatorPane rate-limit meters', () => {
       'aria-valuenow',
       '0',
     );
-    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('0%');
+    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('000%');
     expect(screen.queryByTestId('rate-limit-5h-reset')).not.toBeInTheDocument();
   });
 });

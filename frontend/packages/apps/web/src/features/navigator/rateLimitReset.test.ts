@@ -12,12 +12,12 @@ describe('formatResetCountdown', () => {
 
   it('shows days and hours past a day', () => {
     const resetsAt = NOW_S + 5 * 86400 + 4 * 3600;
-    expect(formatResetCountdown(resetsAt, NOW_MS)).toBe('5d04h');
+    expect(formatResetCountdown(resetsAt, NOW_MS)).toBe('05d04h');
   });
 
-  it('shows minutes only under an hour', () => {
+  it('shows minutes under an hour with a zero-padded hours prefix', () => {
     const resetsAt = NOW_S + 13 * 60;
-    expect(formatResetCountdown(resetsAt, NOW_MS)).toBe('13m');
+    expect(formatResetCountdown(resetsAt, NOW_MS)).toBe('00h13m');
   });
 
   it('reads <1m once under a minute or already elapsed', () => {
