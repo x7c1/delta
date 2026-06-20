@@ -16,6 +16,7 @@ import { useNavStore } from '../../store/navStore';
 import {
   ThreadTimelineOverlay,
   TIMELINE_EXPANDED_STORAGE_KEY,
+  WHEEL_COOLDOWN_MS,
 } from './ThreadTimelineOverlay';
 
 function makeThread(
@@ -449,18 +450,17 @@ describe('ThreadTimelineOverlay playhead', () => {
     }
   });
 
-  it('moves the playhead and suppresses page scroll on a wheel event', async () => {
+  it('advances exactly one step per wheel notch and suppresses page scroll', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
-    // Use widely-spread dots so a small wheel shift does not land inside the
-    // snap radius, isolating the smooth-scrub math from the snap behaviour
-    // (the snap is covered by its own test below).
+    // Three evenly-spaced messages: x=0, x=0.5, x=1 (px 0, 120, 240).
     const messages = new Map([
       [
         1,
         [
           makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
           makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+          makeMessage(1, 2, 'msg-c', { created_at: '2026-01-01T00:02:00Z' }),
         ],
       ],
     ]);
@@ -468,36 +468,32 @@ describe('ThreadTimelineOverlay playhead', () => {
       threads,
       messagesByThread: messages,
       activeThreadId: 1,
-      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }, { uuid: 'msg-c' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    const playheadsBefore = screen.getAllByTestId('thread-timeline-playhead');
-    // The initial playhead position is the latest dot's x (1.0). Inspect the
-    // first lane's playhead `left` style to confirm the baseline.
-    expect(playheadsBefore[0].style.left).toBe('240px');
-
-    // A large negative wheel delta scrolls the playhead toward the left edge,
-    // far enough that the snap radius around msg-b (x=1, threshold 0.012) is
-    // cleanly escaped so the smooth-scrub displacement is observable.
+    // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
+    // Wheel up (negative delta) → previous message. One notch, one step,
+    // regardless of magnitude — discrete navigation does not multiply.
     const body = screen.getByTestId('thread-timeline-body');
-    const wheelEvent = new WheelEvent('wheel', {
+    const wheel = new WheelEvent('wheel', {
       deltaY: -1000,
       bubbles: true,
       cancelable: true,
     });
-    const preventDefault = vi.spyOn(wheelEvent, 'preventDefault');
+    const preventDefault = vi.spyOn(wheel, 'preventDefault');
     act(() => {
-      body.dispatchEvent(wheelEvent);
+      body.dispatchEvent(wheel);
     });
     expect(preventDefault).toHaveBeenCalled();
-    const playheadsAfter = screen.getAllByTestId('thread-timeline-playhead');
-    // -1000 * 0.03 = -30px on a 240px axis = -0.125 fraction shift; from 1.0
-    // to 0.875 → 210px. Outside msg-b's snap radius (1 - 0.875 = 0.125 > 0.012)
-    // and outside msg-a's snap radius (0.875 > 0.012), so smooth math wins.
-    expect(playheadsAfter[0].style.left).toBe('210px');
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('120px');
   });
 
-  it('snaps the playhead onto the nearest mark when a small wheel scrub lands inside the snap radius', async () => {
+  it('clamps at the newest end: a wheel-down at the last message does not advance', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
     const messages = new Map([
@@ -516,20 +512,246 @@ describe('ThreadTimelineOverlay playhead', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    // A tiny scrub from x=1: -50 * 0.03 = -1.5px on 240px = -0.00625 fraction
-    // → 0.99375. That is within 0.012 of msg-b (x=1), so the snap pulls the
-    // playhead back onto msg-b's exact x → 240px.
+    // Initial position is the last message (msg-b, x=1 → 240px).
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
     const body = screen.getByTestId('thread-timeline-body');
-    const wheelEvent = new WheelEvent('wheel', {
-      deltaY: -50,
-      bubbles: true,
-      cancelable: true,
-    });
     act(() => {
-      body.dispatchEvent(wheelEvent);
+      body.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: 100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     });
-    const playheadsAfter = screen.getAllByTestId('thread-timeline-playhead');
-    expect(playheadsAfter[0].style.left).toBe('240px');
+    // Still at msg-b — the clamp blocks any further advance.
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
+  });
+
+  it('clamps at the oldest end: a wheel-up at the first message does not retreat', async () => {
+    // Drive the wheel cooldown via a mocked clock so several events fire
+    // back-to-back without sleeping the test.
+    let nowMs = 1_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
+            makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      const body = screen.getByTestId('thread-timeline-body');
+      // Step back once (msg-b → msg-a).
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -100,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('0px');
+      // Advance past the cooldown so the next event is accepted.
+      nowMs += WHEEL_COOLDOWN_MS + 1;
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -100,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // Still at msg-a — the clamp blocks any further retreat.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('0px');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("crosses lanes when wheel-stepping from lane A's last message into lane B's first", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* tests do not exercise cancellation here */
+    }) as typeof window.cancelAnimationFrame;
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      // Lane 1 holds msg-a then msg-b; lane 2 holds msg-c (later). The
+      // global sorted list is [msg-a, msg-b, msg-c], so wheel-up from the
+      // final position (msg-c) lands on msg-b, which lives on lane 1 — a
+      // cross-lane step from the user's starting subthread (lane 2).
+      const threads = [
+        makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+        makeThread(2, {
+          parent_thread_id: 1,
+          root_message_uuid: null,
+          created_at: '2026-01-01T00:01:00Z',
+        }),
+      ];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
+            makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+          ],
+        ],
+        [
+          2,
+          [
+            makeMessage(2, 0, 'msg-c', { created_at: '2026-01-01T00:02:00Z' }),
+          ],
+        ],
+      ]);
+      // Start with lane 2 active; only msg-c is in the conversation pane.
+      const { rerender, bodyRef } = renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 2,
+        conversationArticles: [{ uuid: 'msg-c' }],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Initial settle does not fire; nothing has scrolled yet.
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      // Wheel-up from msg-c → msg-b. msg-b lives on lane 1 (cross-lane).
+      const body = screen.getByTestId('thread-timeline-body');
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -100,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(useNavStore.getState().activeThreadId).toBe(1);
+      });
+      // The scroll is deferred to the next frame; nothing has scrolled yet.
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      // Re-render with lane 1 active and its article in the pane,
+      // mirroring the live app's response to the thread switch.
+      rerender(
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+            <div>
+              <div ref={bodyRef} data-testid="conversation-body">
+                <article data-message-uuid="msg-a">msg-a</article>
+                <article data-message-uuid="msg-b">msg-b</article>
+              </div>
+              <ThreadTimelineOverlay
+                threads={threads}
+                activeThreadId={1}
+                conversationBodyRef={bodyRef}
+              />
+            </div>
+          </ApiProvider>
+        </QueryClientProvider>,
+      );
+      const drained = rafCallbacks.splice(0, rafCallbacks.length);
+      for (const cb of drained) {
+        cb(performance.now());
+      }
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      const target = within(screen.getByTestId('conversation-body')).getByText(
+        'msg-b',
+      );
+      expect(scrollIntoView.mock.instances[0]).toBe(target);
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
+
+  it('debounces a burst of wheel events into one step per cooldown window', async () => {
+    const nowMs = 5_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      // Five messages so a burst of wheel events would otherwise sweep
+      // the active index across multiple steps if it weren't throttled.
+      const messages = new Map([
+        [
+          1,
+          [
+            makeMessage(1, 0, 'm0', { created_at: '2026-01-01T00:00:00Z' }),
+            makeMessage(1, 1, 'm1', { created_at: '2026-01-01T00:01:00Z' }),
+            makeMessage(1, 2, 'm2', { created_at: '2026-01-01T00:02:00Z' }),
+            makeMessage(1, 3, 'm3', { created_at: '2026-01-01T00:03:00Z' }),
+            makeMessage(1, 4, 'm4', { created_at: '2026-01-01T00:04:00Z' }),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Initial active = m4 (x=1 → 240px).
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('240px');
+      const body = screen.getByTestId('thread-timeline-body');
+      // Three back-to-back wheel-up events inside the cooldown window:
+      // only the first should advance the step (m4 → m3).
+      for (let i = 0; i < 3; i += 1) {
+        act(() => {
+          body.dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaY: -100,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        });
+      }
+      // m3 sits at x=0.75 → 180px.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('180px');
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 });
 

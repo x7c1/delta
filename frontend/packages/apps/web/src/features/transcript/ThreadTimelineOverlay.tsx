@@ -13,8 +13,9 @@ import { useThreadsMessagesQueries } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
+  buildSortedMessages,
   buildTimelineLanes,
-  findActiveMessage,
+  findNearestMessageIndex,
   type TimelineDot,
 } from './timelineLanes';
 
@@ -25,32 +26,25 @@ import {
 export const TIMELINE_EXPANDED_STORAGE_KEY = 'delta.thread-timeline-overlay.expanded';
 
 /**
- * Pixels of playhead movement per unit of wheel delta. One standard wheel
- * notch is `deltaY = 100` on most browsers, so this constant times 100 is the
- * pixel travel per notch.
+ * Minimum gap (ms) between two wheel notches that the navigation accepts as
+ * distinct steps. Trackpads (and high-resolution mice) fan a single deliberate
+ * gesture into many small `deltaY` events; without a cooldown the active index
+ * would skip several messages on one flick. Tuned to ~120 ms so a confident
+ * deliberate flick still produces one step, while continuous inertial spam
+ * collapses into one step per cooldown window.
  *
- * Tuned low so a single notch lands ~1–2 % of the axis width per notch
- * (≈3 px on a 240 px axis at the current value), letting the user stop on a
- * specific message instead of overshooting whole lanes. v2 used `0.15`
- * (≈6 %/notch), which dogfooding showed was too coarse for precision landing.
- * The {@link MARK_SNAP_FRACTION_THRESHOLD} snap below covers the remaining
- * "land exactly on a mark" gap when smooth scrubbing alone is not enough.
+ * Exported so a test can drive the cooldown explicitly without having to
+ * wait wall-clock time between dispatches.
  */
-export const WHEEL_SCRUB_PX_PER_DELTA = 0.03;
+export const WHEEL_COOLDOWN_MS = 120;
 
 /**
- * Fractional distance (in the same 0..1 unit the marks use) within which the
- * playhead snaps onto the nearest mark after a wheel scrub. Smooth motion
- * still works — the user can scrub past a mark and the snap then re-engages
- * for the next mark — but landing precisely on a target message becomes
- * effortless. Picked small enough that the snap is invisible at the speeds a
- * user actually scrubs, and zero ⇒ disabled in tests that need exact x.
- *
- * The snap is intentionally NOT applied to click jumps: a click is already an
- * explicit "I meant this exact x" gesture and the dot-distance lookup that
- * picks the active message already maps clicks to a real mark.
+ * CSS transition duration (ms) for the playhead's `left` animation. Short
+ * enough that the user always feels the playhead is "tracking" their input,
+ * long enough that the discrete step between adjacent messages does not
+ * teleport jarringly.
  */
-export const MARK_SNAP_FRACTION_THRESHOLD = 0.012;
+const PLAYHEAD_TRANSITION_MS = 100;
 
 /**
  * Read the persisted expanded preference; defaults to collapsed when no
@@ -177,44 +171,11 @@ const LANE_HEIGHT_PX = 18;
 const MIN_LANE_AXIS_PX = 240;
 
 /**
- * If the smoothed playhead x is within {@link MARK_SNAP_FRACTION_THRESHOLD}
- * of any mark across every lane, snap it onto that mark's x. Otherwise
- * return the raw x unchanged.
- *
- * Exported so a test can assert the snap behaviour without driving the
- * full wheel-event loop. The threshold of 0 disables the snap (callers that
- * want exact-x scrubbing for measurement can set the constant to 0).
- */
-export function snapToNearestMark(
-  rawX: number,
-  lanes: { dots: { x: number }[] }[],
-  threshold: number = MARK_SNAP_FRACTION_THRESHOLD,
-): number {
-  if (threshold <= 0) {
-    return rawX;
-  }
-  let nearestX = rawX;
-  let nearestDistance = threshold;
-  for (const lane of lanes) {
-    for (const dot of lane.dots) {
-      const distance = Math.abs(dot.x - rawX);
-      if (distance <= nearestDistance) {
-        nearestDistance = distance;
-        nearestX = dot.x;
-      }
-    }
-  }
-  return nearestX;
-}
-
-/**
  * Mark width / height in pixels.
  *
- * v3 switched from a circle to a thin vertical rectangle so a packed lane stays
- * readable: rectangles don't overlap-blur the way circles do at high density,
- * and the height makes the role color (user vs other) easy to scan along the
- * lane. The width is small enough to land on a single mark when the wheel
- * snap engages, and the height fills most of the lane row.
+ * Thin vertical rectangles so a packed lane stays readable: rectangles do not
+ * overlap-blur the way circles do at high density, and the height makes the
+ * role color (user vs other) easy to scan along the lane.
  */
 const MARK_WIDTH_PX = 3;
 const MARK_HEIGHT_PX = 12;
@@ -226,28 +187,29 @@ const LANE_RIGHT_PAD_PX = 16;
 /**
  * The fixed footer between the conversation pane and the composer: a swim-lane
  * timeline of every subthread (and the main thread). Each thread is a row,
- * each speech turn is a dot, and every dot sits on a SHARED time axis driven
+ * each speech turn is a mark, and every mark sits on a SHARED time axis driven
  * by the message's `created_at` — idle and thinking gaps render as horizontal
  * whitespace, so the time order is visible at a glance rather than being
  * flattened into equal speech-order spacing.
  *
- * A vertical playhead spans every lane and is the user's scrub handle:
- * scrolling the mouse wheel over the footer moves it left/right (and the
- * default vertical scroll is suppressed while the wheel is over the footer),
- * and clicking the timeline jumps it to that x. Whichever message dot's x is
- * closest to the playhead becomes "active": its lane is highlighted, the
- * active thread switches to that lane (firing the existing nav setter), and
- * after the next paint the matching message is scrolled into view in the
- * conversation pane. Hovering a dot only changes the cursor — there is no
- * hover-driven navigation; the playhead is the single source of truth.
+ * The vertical playhead is a follower: it tracks the active message's x and
+ * is never freely draggable. Wheel events advance discretely through the
+ * SINGLE timeline-sorted list of every (sub)thread's messages — one notch
+ * jumps to the next-or-previous message in global time order, including
+ * across lanes, with cooldown debouncing so a trackpad's inertial fan-out
+ * still reads as one deliberate step. Clicking anywhere on the timeline
+ * jumps the active index to the message whose x is closest to the click.
+ * Whichever message is active becomes the lane highlight, fires the existing
+ * nav setter, and after the next paint is scrolled into view in the
+ * conversation pane. Hovering a mark does nothing — the playhead is the
+ * single source of truth.
  *
  * The footer is always present; clicking the title bar collapses or expands
  * the lanes, and the preference is persisted per device.
  *
  * Marks are color-coded by author (user vs everything else); cross-row
- * derivation lines, playhead drag, zoom, click-to-pin, and finer-grained
- * "other" coloring (assistant vs tool vs meta) are tracked as separate
- * follow-ups.
+ * derivation lines, zoom, and finer-grained "other" coloring (assistant vs
+ * tool vs meta) are tracked as separate follow-ups.
  */
 export function ThreadTimelineOverlay({
   threads,
@@ -280,60 +242,80 @@ export function ThreadTimelineOverlay({
     [threads, messagesByThread],
   );
 
+  // The global sorted list of every message across every lane, ordered by
+  // (created_at asc, seq asc). The active index navigates this list directly,
+  // so a single wheel notch always advances by exactly one message — sparse
+  // and dense lanes alike step by 1, with no fractional-x math to overshoot.
+  const sortedMessages = useMemo(() => buildSortedMessages(lanes), [lanes]);
+
   // The lane axis is fixed-width — horizontal scroll is acceptable for very
   // long sessions in MVP. Keeping it bounded means dot positions are
   // deterministic from the data alone (no parent-width measurement), which
-  // simplifies the click-to-jump and wheel-scrub math considerably.
+  // simplifies the click-to-jump math considerably.
   const laneAxisWidth = MIN_LANE_AXIS_PX;
 
-  // Playhead position in the same 0..1 unit dots use. Initial position is the
-  // latest dot's x (so a freshly-opened session lands on the most recent
-  // utterance), falling back to 1 (the right edge) when no dot exists yet.
-  const latestDotX = useMemo(() => {
-    let max = -Infinity;
-    for (const lane of lanes) {
-      for (const dot of lane.dots) {
-        if (dot.x > max) {
-          max = dot.x;
-        }
-      }
-    }
-    return Number.isFinite(max) ? max : 1;
-  }, [lanes]);
+  // The active message's index in `sortedMessages`. A fresh mount lands on
+  // the latest message so a newly opened session highlights the most recent
+  // utterance. `null` means there are no messages to land on yet.
+  const [activeMessageIndex, setActiveMessageIndexState] = useState<number | null>(
+    () => (sortedMessages.length === 0 ? null : sortedMessages.length - 1),
+  );
 
-  const [playheadX, setPlayheadXState] = useState<number>(latestDotX);
   // A monotonically-increasing counter incremented on every user-driven
-  // playhead move. The thread-switch + scroll effect below uses it as a
-  // re-trigger so a re-click at the playhead's current position (and thus the
-  // current active message) still re-fires the jump — without it React would
-  // bail out of the state set when the value is unchanged, swallowing the
-  // user's intent. The counter ALSO doubles as the "has the user scrubbed?"
-  // gate: while it sits at 0, the effect is intentionally inert so an
-  // automatic mount settle never hijacks the user's chosen thread.
+  // navigation. The thread-switch + scroll effect below uses it as a
+  // re-trigger so a re-click at the playhead's current position (and thus
+  // the current active index) still re-fires the jump — without it React
+  // would bail out of the state set when the value is unchanged, swallowing
+  // the user's intent. The counter ALSO doubles as the "has the user
+  // navigated?" gate: while it sits at 0, the effect is intentionally inert
+  // so an automatic mount settle never hijacks the user's chosen thread.
   const [scrubTick, setScrubTick] = useState(0);
-  const setPlayheadX = useCallback((next: number) => {
-    setScrubTick((tick) => tick + 1);
-    setPlayheadXState(next);
-  }, []);
 
-  // Re-anchor to the latest dot whenever a new message lands at a brand-new
-  // axis extreme — but only while the user has not yet scrubbed. A scrub
-  // pins the playhead to whatever value the user picked, and moving it off
-  // that point on a fresh message would feel like the timeline yanked away.
-  // Use a functional setter so we can compare against the live playhead
-  // without listing it as a dep (which would re-run this effect every time
-  // the user scrubs, just to confirm there is nothing to do).
+  /**
+   * Clamp an index into the valid range for the current sorted list and
+   * commit it together with a tick bump that re-fires the navigation
+   * effect. Centralising the clamp + tick here keeps the wheel and click
+   * handlers from duplicating the same boilerplate.
+   */
+  const setActiveMessageIndex = useCallback(
+    (next: number) => {
+      if (sortedMessages.length === 0) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
+      setScrubTick((tick) => tick + 1);
+      setActiveMessageIndexState(clamped);
+    },
+    [sortedMessages.length],
+  );
+
+  // Re-anchor to the latest message whenever a new one lands at the tail
+  // while the user has not yet navigated. A navigation pins the active index
+  // to whatever the user picked, and moving it on a fresh message would feel
+  // like the timeline yanked away.
   useEffect(() => {
     if (scrubTick !== 0) {
       return;
     }
-    setPlayheadXState((prev) => (prev === latestDotX ? prev : latestDotX));
-  }, [latestDotX, scrubTick]);
+    setActiveMessageIndexState((prev) => {
+      if (sortedMessages.length === 0) {
+        return null;
+      }
+      const latest = sortedMessages.length - 1;
+      return prev === latest ? prev : latest;
+    });
+  }, [sortedMessages, scrubTick]);
 
-  const activeMatch = useMemo(
-    () => findActiveMessage(lanes, playheadX),
-    [lanes, playheadX],
-  );
+  // The active message itself, derived from the index — the single source of
+  // truth for the playhead's x. There is no separately-stored fractional
+  // position state: keeping the playhead a pure function of the active
+  // message means continuous wheel inertia can never desync from a discrete
+  // step.
+  const activeMessage =
+    activeMessageIndex !== null && activeMessageIndex < sortedMessages.length
+      ? sortedMessages[activeMessageIndex]
+      : null;
+  const playheadX = activeMessage?.x ?? 0;
 
   const activeThreadRef = useRef<ThreadId | null>(activeThreadId);
   useEffect(() => {
@@ -351,53 +333,64 @@ export function ThreadTimelineOverlay({
   );
 
   useEffect(() => {
-    // Only react to scrubs the user actually initiated: while `scrubTick`
-    // sits at its initial 0 (a fresh mount with no click or wheel yet), the
-    // automatic settle must not flip the active thread the user chose
-    // elsewhere.
+    // Only react to navigation the user actually initiated: while
+    // `scrubTick` sits at its initial 0 (a fresh mount with no wheel or
+    // click yet), the automatic settle must not flip the active thread the
+    // user chose elsewhere.
     if (scrubTick === 0) {
       return;
     }
-    if (activeMatch === null) {
+    if (activeMessage === null) {
       return;
     }
     pendingScrollCancelRef.current?.();
     pendingScrollCancelRef.current = null;
     const container = conversationBodyRef.current;
-    if (activeMatch.threadId === activeThreadRef.current) {
+    if (activeMessage.threadId === activeThreadRef.current) {
       // Same lane: the target message is already in the DOM, scroll right
       // away. No frame deferral, no thread switch.
-      scrollMessageIntoView(container, activeMatch.uuid);
+      scrollMessageIntoView(container, activeMessage.uuid);
       return;
     }
     // Cross-lane jump: switch the active thread first so the conversation
     // pane re-renders with the target lane's messages, then scroll on the
     // next frame once those nodes have landed in the DOM.
-    setActiveThread(activeMatch.threadId);
+    setActiveThread(activeMessage.threadId);
     pendingScrollCancelRef.current = scheduleScrollAfterRender(
       container,
-      activeMatch.uuid,
+      activeMessage.uuid,
     );
-    // `scrubTick` is the re-trigger: a re-click at the playhead's current x
-    // (yielding the same activeMatch) bumps the tick and re-fires this
-    // effect, so a stale conversation-body scroll position is corrected even
-    // when the playhead did not move.
-  }, [scrubTick, activeMatch, conversationBodyRef, setActiveThread]);
+    // `scrubTick` is the re-trigger: a re-click at the same x (yielding the
+    // same activeMessage) bumps the tick and re-fires this effect, so a
+    // stale conversation-body scroll position is corrected even when the
+    // active index did not move.
+  }, [scrubTick, activeMessage, conversationBodyRef, setActiveThread]);
 
-  // The lane the highlight follows: the playhead-active lane when there is
+  // The lane the highlight follows: the active message's lane when there is
   // one, else fall back to the prop so a freshly-mounted footer still marks
-  // the active thread before any dots have rendered.
-  const highlightedThreadId = activeMatch?.threadId ?? activeThreadId;
+  // the active thread before any messages have loaded.
+  const highlightedThreadId = activeMessage?.threadId ?? activeThreadId;
 
   // The scrubbable area is the union of every lane's axis: a wheel over any
-  // part of the footer body moves the playhead. The body's onWheel is the
-  // entry point — its `passive: false` listener (registered via the effect
-  // below) is required to call `preventDefault` and suppress the page scroll.
+  // part of the footer body advances the active index. The body's onWheel is
+  // the entry point — its `passive: false` listener (registered via the
+  // effect below) is required to call `preventDefault` and suppress the page
+  // scroll.
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const playheadXRef = useRef(playheadX);
+  const activeMessageIndexRef = useRef(activeMessageIndex);
   useEffect(() => {
-    playheadXRef.current = playheadX;
-  }, [playheadX]);
+    activeMessageIndexRef.current = activeMessageIndex;
+  }, [activeMessageIndex]);
+  const sortedMessagesRef = useRef(sortedMessages);
+  useEffect(() => {
+    sortedMessagesRef.current = sortedMessages;
+  }, [sortedMessages]);
+
+  // Last-accepted wheel timestamp for the cooldown debounce. A trackpad's
+  // inertial fan-out fires many small `deltaY` events for one deliberate
+  // gesture; the cooldown collapses that burst into a single step so the
+  // user cannot accidentally skip multiple messages.
+  const lastWheelMsRef = useRef(0);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -406,70 +399,104 @@ export function ThreadTimelineOverlay({
     }
     const onWheel = (event: WheelEvent) => {
       // Suppress the page's vertical scroll while the wheel is over the
-      // footer: the wheel belongs to the playhead while it sits here.
+      // footer: the wheel belongs to the active-index step while it sits
+      // here.
       event.preventDefault();
-      // `deltaX` from horizontal trackpad scrolls is honoured too — the user
-      // gets to pick whichever axis their device emits. Sum so a diagonal
-      // gesture (rare but possible) reads as the combined intent.
+      // `deltaX` from horizontal trackpad scrolls is honoured too — the
+      // user gets to pick whichever axis their device emits. Sum so a
+      // diagonal gesture (rare but possible) reads as the combined intent.
       const rawDelta = event.deltaY + event.deltaX;
       if (rawDelta === 0) {
         return;
       }
-      const px = rawDelta * WHEEL_SCRUB_PX_PER_DELTA;
-      // Map the pixel delta to a fractional delta on the same axis the marks
-      // use, then clamp into 0..1 so the playhead never strays off the axis.
-      const fractionDelta = px / laneAxisWidth;
-      const raw = Math.max(
-        0,
-        Math.min(1, playheadXRef.current + fractionDelta),
-      );
-      // Apply snap-to-nearest-mark: if the smoothed playhead position is
-      // within MARK_SNAP_FRACTION_THRESHOLD of any mark, pull it onto that
-      // mark's x. The threshold is small enough that continued wheel motion
-      // pushes the next step past the snap radius, so the playhead escapes
-      // toward the next mark instead of getting stuck — smooth scrubbing
-      // and precise landing coexist.
-      const snapped = snapToNearestMark(raw, lanes);
-      if (snapped !== playheadXRef.current) {
-        setPlayheadX(snapped);
+      const now =
+        typeof performance !== 'undefined' &&
+        typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      if (now - lastWheelMsRef.current < WHEEL_COOLDOWN_MS) {
+        return;
       }
+      lastWheelMsRef.current = now;
+      const total = sortedMessagesRef.current.length;
+      if (total === 0) {
+        return;
+      }
+      const currentIndex = activeMessageIndexRef.current ?? total - 1;
+      // Wheel down (positive delta) → next message (newer); wheel up →
+      // previous (older). Clamped to the ends — no wrap.
+      const step = rawDelta > 0 ? 1 : -1;
+      const next = Math.max(0, Math.min(total - 1, currentIndex + step));
+      if (next === currentIndex) {
+        return;
+      }
+      setActiveMessageIndex(next);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [laneAxisWidth, expanded, lanes]);
+  }, [expanded, setActiveMessageIndex]);
 
-  // Click anywhere on the timeline body jumps the playhead to that x.
+  // Click anywhere on the timeline body jumps the active index to the
+  // message whose x is closest to the click. There is no distance threshold:
+  // a click anywhere in the overlay accepts the global nearest message —
+  // the overlay is small enough that the closest mark is always the user's
+  // intent, and a threshold would otherwise swallow clicks on the empty
+  // axis whitespace between marks.
   const handleClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
-      // The click target is the lane-body div; the playhead row inside any
-      // lane is what carries the axis the playhead aligns against. Use the
-      // body's bounding rect minus the label column so the conversion mirrors
-      // the absolute positioning of the playhead line itself.
       const body = bodyRef.current;
       if (!body) {
         return;
       }
-      // Locate the first lane row (every lane shares the same axis width and
-      // x-origin) so the click → x conversion uses the axis the dots actually
-      // sit on. Falling back to the body's own rect would include the label
-      // column and right padding, throwing the conversion off.
+      // Locate the first lane row (every lane shares the same axis width
+      // and x-origin) so the click → x conversion uses the axis the dots
+      // actually sit on. Falling back to the body's own rect would include
+      // the label column and right padding, throwing the conversion off.
       const axisEl = body.querySelector<HTMLElement>('[data-timeline-axis]');
       if (!axisEl) {
         return;
       }
       const rect = axisEl.getBoundingClientRect();
-      // The axis row's pixel width includes the right padding the dots do not
-      // use; map against the dot-bearing width (`laneAxisWidth`) so a click
-      // exactly on a dot lands the playhead on it, not slightly off.
       if (laneAxisWidth <= 0) {
         return;
       }
       const fraction = (event.clientX - rect.left) / laneAxisWidth;
       const clamped = Math.max(0, Math.min(1, fraction));
-      setPlayheadX(clamped);
+      const nearest = findNearestMessageIndex(sortedMessages, clamped);
+      if (nearest < 0) {
+        return;
+      }
+      setActiveMessageIndex(nearest);
     },
-    [laneAxisWidth],
+    [laneAxisWidth, sortedMessages, setActiveMessageIndex],
   );
+
+  // After a user-driven navigation, ensure the playhead is visible inside
+  // the body's horizontal viewport. The lane axis is fixed-width so this
+  // only matters when the viewport is narrower than the axis (e.g. a narrow
+  // side panel); when the axis fits, no scroll is needed.
+  useEffect(() => {
+    if (scrubTick === 0) {
+      return;
+    }
+    const body = bodyRef.current;
+    if (!body || activeMessage === null) {
+      return;
+    }
+    const axisEl = body.querySelector<HTMLElement>('[data-timeline-axis]');
+    if (!axisEl) {
+      return;
+    }
+    // The playhead's offset within the scrollable body — its left position
+    // inside the axis plus the axis's offset from the body (lane label).
+    const playheadInAxis = activeMessage.x * laneAxisWidth;
+    const playheadInBody = axisEl.offsetLeft + playheadInAxis;
+    const viewLeft = body.scrollLeft;
+    const viewRight = viewLeft + body.clientWidth;
+    if (playheadInBody < viewLeft || playheadInBody > viewRight) {
+      body.scrollLeft = Math.max(0, playheadInBody - body.clientWidth / 2);
+    }
+  }, [scrubTick, activeMessage, laneAxisWidth]);
 
   return (
     <section
@@ -560,15 +587,23 @@ export function ThreadTimelineOverlay({
                         />
                       ))}
                       {/* Playhead: a thin vertical line that doubles as the
-                          lane-local segment of the global playhead. Each lane
-                          carries its own copy (instead of one absolute line
-                          spanning the body) so it scrolls with the lanes when
-                          the body becomes scrollable on a long session. */}
+                          lane-local segment of the global playhead. Each
+                          lane carries its own copy (instead of one absolute
+                          line spanning the body) so it scrolls with the
+                          lanes when the body becomes scrollable on a long
+                          session. A short CSS transition on `left` smooths
+                          the discrete step between adjacent messages so the
+                          eye can follow the move; the duration is short
+                          enough that the playhead always feels glued to the
+                          input. */}
                       <span
                         aria-hidden="true"
                         data-testid="thread-timeline-playhead"
                         className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
-                        style={{ left: playheadX * laneAxisWidth }}
+                        style={{
+                          left: playheadX * laneAxisWidth,
+                          transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
+                        }}
                       />
                     </div>
                   </li>
@@ -588,16 +623,15 @@ interface TimelineDotMarkProps {
 }
 
 /**
- * One mark within a lane. v3 renders it as a thin vertical rectangle (was a
- * circle in earlier iterations) so a packed lane stays readable, and colors
- * it by author kind — user turns in blue, everything else in slate — so the
- * shape of the conversation is visible at a glance. The tokens mirror the
- * transcript bubble palette (`bg-blue-*` for user, `bg-slate-*` for assistant
- * /tool/etc.) so the timeline reads as the same conversation, just compressed.
+ * One mark within a lane. Rendered as a thin vertical rectangle so a packed
+ * lane stays readable, colored by author kind — user turns in blue,
+ * everything else in slate — so the shape of the conversation is visible at
+ * a glance. The tokens mirror the transcript bubble palette (`bg-blue-*` for
+ * user, `bg-slate-*` for assistant/tool/etc.) so the timeline reads as the
+ * same conversation, just compressed.
  *
  * The mark is non-interactive: hover and click navigation flow through the
- * playhead alone, so a mark is purely a visual anchor (and the wheel-snap's
- * target).
+ * playhead alone, so a mark is purely a visual anchor.
  */
 function TimelineDotMark({ dot, laneAxisWidth }: TimelineDotMarkProps) {
   const left = dot.x * laneAxisWidth;

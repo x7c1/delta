@@ -55,6 +55,13 @@ export interface TimelineDot {
    */
   timeMs: number;
   /**
+   * Monotonic per-session sequence number from {@link Message.seq}. Used as
+   * the deterministic tie-break when two messages share the same `created_at`
+   * (the time axis cannot distinguish them, but `seq` always can) when the
+   * cross-lane sorted list orders messages for discrete step navigation.
+   */
+  seq: number;
+  /**
    * Author classification for the mark's color (see {@link TimelineDotKind}).
    * Computed at lane-build time so the renderer is a pure function of the
    * pre-computed dot data.
@@ -240,6 +247,7 @@ export function buildTimelineLanes(
         threadId: thread.id,
         x: xFraction(ms, range),
         timeMs: ms,
+        seq: message.seq,
         kind: classifyMessage(message),
       });
     }
@@ -247,64 +255,90 @@ export function buildTimelineLanes(
   });
 }
 
-/** A dot annotated with its owning lane index — what the playhead resolves to. */
-export interface ActiveMessageMatch {
-  /** Owning lane's index in the rendered lane array. */
-  laneIndex: number;
-  /** The matched dot's lane id, redundantly exposed for convenience. */
-  threadId: ThreadId;
-  /** The matched message's uuid. */
+/**
+ * A single message entry on the global, cross-lane sorted list that drives
+ * discrete step navigation. Each entry carries everything the navigation
+ * needs (uuid, owning thread, axis x) so the wheel handler can advance the
+ * active index without re-resolving the dot through its lane.
+ */
+export interface SortedMessage {
+  /** The message uuid; drives the conversation pane's scroll-into-view lookup. */
   uuid: string;
-  /** The matched dot's 0..1 x on the shared time axis. */
+  /** The owning thread's id; consumed by the active-thread switch. */
+  threadId: ThreadId;
+  /** Fraction of the shared time axis the message falls on (mirrors {@link TimelineDot.x}). */
   x: number;
-  /** The matched dot's epoch ms (mirrors {@link TimelineDot.timeMs}). */
+  /** Epoch milliseconds of `created_at` (mirrors {@link TimelineDot.timeMs}). */
   timeMs: number;
+  /** Monotonic per-session sequence number (mirrors {@link TimelineDot.seq}). */
+  seq: number;
 }
 
 /**
- * Find the message dot whose x is closest to the playhead's x across every
- * lane. Returns `null` when no lane has a dot to land on. Ties (two dots
- * equidistant from the playhead) are broken by the smaller `timeMs` first,
- * then by `uuid` lexicographically — both deterministic so the lookup never
- * flickers between equally-good candidates as the playhead moves.
+ * Flatten every lane's dots into a single timeline-sorted list of messages.
+ * The sort is `created_at` ascending, tie-broken by `seq` ascending — so a
+ * batch of messages emitted at the same millisecond still orders by the
+ * monotonic per-session sequence the transcript already shows them in.
+ *
+ * Lane / subthread boundaries are ignored: the next message after lane A's
+ * last entry may live in lane B, and the navigation steps right across that
+ * boundary the same way the transcript reads.
  */
-export function findActiveMessage(
-  lanes: TimelineLane[],
-  playheadX: number,
-): ActiveMessageMatch | null {
-  let best: ActiveMessageMatch | null = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (let laneIndex = 0; laneIndex < lanes.length; laneIndex += 1) {
-    const lane = lanes[laneIndex];
+export function buildSortedMessages(lanes: TimelineLane[]): SortedMessage[] {
+  const entries: SortedMessage[] = [];
+  for (const lane of lanes) {
     for (const dot of lane.dots) {
-      const distance = Math.abs(dot.x - playheadX);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        best = {
-          laneIndex,
-          threadId: dot.threadId,
-          uuid: dot.uuid,
-          x: dot.x,
-          timeMs: dot.timeMs,
-        };
-        continue;
-      }
-      if (distance === bestDistance && best !== null) {
-        // Deterministic tie-break: earlier `timeMs` first, then smaller uuid.
-        if (
-          dot.timeMs < best.timeMs ||
-          (dot.timeMs === best.timeMs && dot.uuid < best.uuid)
-        ) {
-          best = {
-            laneIndex,
-            threadId: dot.threadId,
-            uuid: dot.uuid,
-            x: dot.x,
-            timeMs: dot.timeMs,
-          };
-        }
+      entries.push({
+        uuid: dot.uuid,
+        threadId: dot.threadId,
+        x: dot.x,
+        timeMs: dot.timeMs,
+        seq: dot.seq,
+      });
+    }
+  }
+  entries.sort((a, b) => {
+    if (a.timeMs !== b.timeMs) {
+      return a.timeMs - b.timeMs;
+    }
+    return a.seq - b.seq;
+  });
+  return entries;
+}
+
+/**
+ * Index of the message in {@link sortedMessages} whose x is closest to the
+ * given fraction. Returns `-1` when the list is empty. Ties (two messages
+ * equidistant from the target x) are broken by the smaller `timeMs` first,
+ * then by smaller `seq` — both deterministic so a click never flickers
+ * between equally-good candidates.
+ */
+export function findNearestMessageIndex(
+  sortedMessages: SortedMessage[],
+  xFractionTarget: number,
+): number {
+  if (sortedMessages.length === 0) {
+    return -1;
+  }
+  let bestIndex = 0;
+  let bestDistance = Math.abs(sortedMessages[0].x - xFractionTarget);
+  for (let i = 1; i < sortedMessages.length; i += 1) {
+    const candidate = sortedMessages[i];
+    const distance = Math.abs(candidate.x - xFractionTarget);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = i;
+      continue;
+    }
+    if (distance === bestDistance) {
+      const current = sortedMessages[bestIndex];
+      if (
+        candidate.timeMs < current.timeMs ||
+        (candidate.timeMs === current.timeMs && candidate.seq < current.seq)
+      ) {
+        bestIndex = i;
       }
     }
   }
-  return best;
+  return bestIndex;
 }

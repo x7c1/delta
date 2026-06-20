@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { Message, Thread } from '@delta/wire-gen';
 import {
   MAIN_LANE_LABEL,
+  buildSortedMessages,
   buildTimelineLanes,
   classifyMessage,
   computeTimeRange,
-  findActiveMessage,
+  findNearestMessageIndex,
   messageTimeMs,
   xFraction,
 } from './timelineLanes';
@@ -335,8 +336,71 @@ describe('buildTimelineLanes', () => {
   });
 });
 
-describe('findActiveMessage', () => {
-  it('returns the dot whose x is closest to the playhead across all lanes', () => {
+describe('buildSortedMessages', () => {
+  it('flattens every lane into one (created_at, seq) ascending list across lanes', () => {
+    // Two lanes whose messages interleave in time — the wheel-driven step
+    // navigation must walk through them in clock order, NOT lane order.
+    const threads = [
+      thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
+      thread(2, {
+        parent: 1,
+        createdAt: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' }),
+          message(1, 1, 'c', { createdAt: '2026-01-01T00:04:00Z' }),
+        ],
+      ],
+      [
+        2,
+        [
+          message(2, 0, 'b', { createdAt: '2026-01-01T00:02:00Z' }),
+          message(2, 1, 'd', { createdAt: '2026-01-01T00:08:00Z' }),
+        ],
+      ],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    const sorted = buildSortedMessages(lanes);
+    expect(sorted.map((s) => s.uuid)).toEqual(['a', 'b', 'c', 'd']);
+    // Each entry carries the owning thread, so a cross-lane step knows
+    // which subthread to switch to.
+    expect(sorted.map((s) => s.threadId)).toEqual([1, 2, 1, 2]);
+  });
+
+  it('tie-breaks by ascending seq when two messages share the same created_at', () => {
+    // Same instant across two messages: the tie-break must be seq, not
+    // lane order or uuid — the transcript already orders by seq, and the
+    // timeline must agree.
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          // Out of seq order in the input to prove the sort fixes it.
+          message(1, 5, 'late', { createdAt: '2026-01-01T00:00:00Z' }),
+          message(1, 2, 'early', { createdAt: '2026-01-01T00:00:00Z' }),
+        ],
+      ],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    const sorted = buildSortedMessages(lanes);
+    expect(sorted.map((s) => s.uuid)).toEqual(['early', 'late']);
+    expect(sorted.map((s) => s.seq)).toEqual([2, 5]);
+  });
+
+  it('returns an empty list when no lane has any messages', () => {
+    const threads = [thread(1), thread(2, { parent: 1 })];
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, new Map()));
+    expect(sorted).toEqual([]);
+  });
+});
+
+describe('findNearestMessageIndex', () => {
+  it('returns the index of the message whose x is closest to the target', () => {
     const threads = [
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
       thread(2, {
@@ -359,14 +423,14 @@ describe('findActiveMessage', () => {
         ],
       ],
     ]);
-    const lanes = buildTimelineLanes(threads, messagesByThread);
-    // Dots: a=0, b=0.5, c=1
-    expect(findActiveMessage(lanes, 0.04)?.uuid).toBe('a');
-    expect(findActiveMessage(lanes, 0.45)?.uuid).toBe('b');
-    expect(findActiveMessage(lanes, 0.9)?.uuid).toBe('c');
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    // sorted is [a@0, b@0.5, c@1]
+    expect(sorted[findNearestMessageIndex(sorted, 0.04)].uuid).toBe('a');
+    expect(sorted[findNearestMessageIndex(sorted, 0.45)].uuid).toBe('b');
+    expect(sorted[findNearestMessageIndex(sorted, 0.9)].uuid).toBe('c');
   });
 
-  it('breaks ties by earlier timeMs first so the lookup is deterministic', () => {
+  it('breaks click-distance ties by earlier timeMs first so the lookup is deterministic', () => {
     const threads = [
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
       thread(2, {
@@ -374,17 +438,17 @@ describe('findActiveMessage', () => {
         createdAt: '2026-01-01T00:00:00Z',
       }),
     ];
-    // Two dots equidistant from x=0.5 (a at 0, b at 1). The earlier timeMs wins.
+    // Two messages equidistant from x=0.5 (a at 0, b at 1). The earlier
+    // timeMs wins.
     const messagesByThread = new Map([
       [1, [message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' })]],
       [2, [message(2, 0, 'b', { createdAt: '2026-01-01T00:01:00Z' })]],
     ]);
-    const lanes = buildTimelineLanes(threads, messagesByThread);
-    expect(findActiveMessage(lanes, 0.5)?.uuid).toBe('a');
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    expect(sorted[findNearestMessageIndex(sorted, 0.5)].uuid).toBe('a');
   });
 
-  it('returns null when no lane has any dots', () => {
-    const threads = [thread(1)];
-    expect(findActiveMessage(buildTimelineLanes(threads, new Map()), 0.5)).toBeNull();
+  it('returns -1 when the sorted list is empty', () => {
+    expect(findNearestMessageIndex([], 0.5)).toBe(-1);
   });
 });
