@@ -157,7 +157,8 @@ function RateLimitRow({
         title={`${label} rate limit: ${Math.round(percentage)}% used`}
       />
       <span className="shrink-0 tabular-nums" data-testid={`${testId}-pct`}>
-        {Math.round(percentage)}%
+        {/* Zero-pad to 3 digits so the percentage column lines up across rows. */}
+        {Math.round(percentage).toString().padStart(3, '0')}%
       </span>
       {reset !== null && (
         <span
