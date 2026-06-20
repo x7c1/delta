@@ -460,10 +460,11 @@ describe('Composer', () => {
         workdir: '/home/dev/projects/delta',
       });
     });
-    // A successful new-session send resets the picker selection.
-    await waitFor(() => {
-      expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
-    });
+    // The picker selection is preserved after submit; TranscriptPane resets it
+    // when the new-session state is left.
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(
+      '/home/dev/projects/delta',
+    );
   });
 
   it('includes the selected launch options on a new-session send, in order', async () => {
@@ -486,10 +487,14 @@ describe('Composer', () => {
         launch_option_ids: [3, 1],
       });
     });
-    // A successful new-session send resets the launch-option selection too.
-    await waitFor(() => {
-      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
-    });
+    // The picker selection is preserved after submit; TranscriptPane resets it
+    // when the new-session state is left.
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(
+      '/home/dev/projects/delta',
+    );
+    expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([
+      3, 1,
+    ]);
   });
 
   it('includes worktree with the chosen start-point when the toggle is on', async () => {
