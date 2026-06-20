@@ -184,59 +184,34 @@ annotations for breaking changes.
 
 ### Policy (v0.x)
 
-Delta does **not** publish a supported version range for the upstream
-`claude` CLI. Claude Code's own release cadence is fast — sometimes
-several updates per day — and any hand-maintained range would go stale
-faster than it can be reviewed.
+Delta publishes **nothing** about which versions of the upstream `claude`
+CLI it supports. There is no published version range, no
+`Verified-against:` marker, no last-green pin. Claude Code's own release
+cadence is fast — sometimes several updates per day — and any
+hand-maintained range would go stale faster than it can be reviewed;
+rather than commit to a freshness obligation that would pull in a cron
+or timer driver to satisfy, `v0.x` simply makes no public statement at
+all.
 
-Instead, delta publishes a single **last-green** marker:
-
-```
-Verified-against: claude X.Y.Z (last green: YYYY-MM-DD)
-```
-
-This line lives in the repository README. It is updated semi-automatically
-by the canary infrastructure described below, not by hand. The marker is
-the only compatibility statement delta makes for the upstream CLI.
-
-### How "last-green" is maintained
-
-`scripts/e2e-real-auto.sh` is a gating wrapper around the real-claude
-canary suite (`make e2e-real`). On each invocation it runs the canary
-only when **both**:
-
-- The installed `claude --version` differs from the version recorded at
-  the last attempt, and
-- At least 24 hours have passed since the last attempt.
-
-When the canary passes, the `Verified-against:` line in the README is
-rewritten to point at the freshly verified version and date, and the
-update is committed and pushed.
-
-**Implementation status.** The version-bump, commit, and push step is
-scheduled in a follow-up PR. Until that ships, the gating wrapper still
-runs (and still records last-attempt state per host); the README line is
-just maintained manually in the interim. The contract documented here —
-"the marker reflects the most recent passing canary against the
-currently-installed claude" — is what the automation will enforce.
-
-For the full gating mechanism, the per-host state files, and the
-periodic-driver setup, see
-[development.md — Automatic canary trigger](development.md#automatic-canary-trigger-opt-in).
+This is symmetric with subdomains 1 and 2: in `v0.x`, delta promises
+nothing about any of the three surfaces. The only on-disk record of
+what `claude` version a given installation actually ran against is the
+startup info log described below.
 
 ### Startup version log
 
 At startup, delta-server logs the output of `claude --version` at info
 level. There is **no** enforcement: delta does not refuse to start, does
 not warn, and does not perform any version compatibility check against
-the running binary. The log line exists to make post-hoc debugging
-straightforward when a real-claude breakage is reported.
+the running binary. The log line exists purely as an observability hook,
+so that a later breakage report can be correlated with the specific
+upstream `claude` version a given run was using.
 
-**Implementation status.** The startup version log is scheduled in a
-follow-up PR (the same one that lands the `SCHEMA_VERSION` gate, where
-practical). Until then, the runtime simply does not record the version
-it ran against; a user reporting a breakage will be asked for it
-manually.
+The behaviour and failure semantics (info on success, warn on
+spawn-failure or non-zero exit, startup continues in every case) are
+defined by the doc-comment on `log_claude_version` in
+`backend/crates/apps/delta-server/src/claude_version.rs`, which is the
+source of truth.
 
 ### Legacy-format parsing
 
@@ -255,18 +230,37 @@ the SQLite policy already implies.
 
 ### Fix window on upstream breakage
 
-When a real-claude canary fails (i.e. an upstream Claude Code release
-broke delta's parsing or hook handling), the fix window is
-**best-effort**. Delta does not promise a turnaround time. The canary is
-the *detection* mechanism, not a service-level commitment about how
-quickly the breakage gets repaired — that depends on maintainer
-bandwidth.
+When an upstream Claude Code release breaks delta's parsing or hook
+handling, the fix window is **best-effort**. Delta does not promise a
+turnaround time, and does not commit to any scheduled detection
+mechanism. In practice the fix happens when the maintainer notices the
+breakage during their own use of delta, not on a schedule and not in
+response to a public canary signal.
+
+### `scripts/e2e-real-auto.sh` as a retained tool
+
+`scripts/e2e-real-auto.sh` is a gating wrapper around the real-claude
+canary suite (`make e2e-real`) that runs the canary only when both the
+installed `claude --version` differs from the version recorded at the
+last attempt **and** at least 24 hours have passed since the last
+attempt. The wrapper and its per-host state files are kept in the tree
+as an **internal development tool**: the maintainer can invoke it by
+hand, or attach it to a periodic driver locally, when it is useful. It
+is not part of any public compatibility commitment — `v0.x` does not
+promise to run it on a schedule, and does not publish its results.
+
+For the gating mechanism, the per-host state files, and an optional
+periodic-driver setup, see
+[development.md — Automatic canary trigger](development.md#automatic-canary-trigger-opt-in).
 
 ### When this rule expires
 
-This policy — the absence of a published range, the no-enforcement
-startup log, the freedom to remove legacy branches, the best-effort fix
-window — is re-decided at `v1.0`.
+This policy — publishing nothing about upstream `claude` versions, the
+no-enforcement startup log, the freedom to remove legacy branches, the
+best-effort fix window, and the absence of any scheduled canary
+contract — is re-decided at `v1.0`, or earlier if the user base expands
+beyond a single developer. At that point a published version range and
+some form of automated update mechanism are likely to be re-evaluated.
 
 ## Summary: what carries forward to v1.0
 
@@ -279,7 +273,6 @@ window — is re-decided at `v1.0`.
 | `Accept-Version` / `/ws` handshake version | None | Likely introduced |
 | Wire bindings freshness CI gate | Kept | Kept |
 | Published `claude` version range | None | Re-decided |
-| Last-green `Verified-against:` README marker | Authoritative | Likely kept, may co-exist with a stricter pin |
 | Startup `claude --version` log | Info, no enforcement | Re-decided |
 | Removal of legacy transcript-format branches | Free | Re-decided (likely deprecation window) |
 | Fix window on upstream `claude` breakage | Best-effort | Re-decided |
