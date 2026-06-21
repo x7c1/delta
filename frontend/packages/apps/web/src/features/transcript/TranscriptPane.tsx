@@ -343,13 +343,33 @@ export function TranscriptPane({
   // rightClusterHeight)`, measured via the ResizeObservers below and
   // exposed as the `--delta-top-region-reserve` CSS variable.
   //
-  // In the EXPANDED state the timeline card sits in normal flow at the
-  // top of the body, and a single normal-flow row directly underneath it
-  // carries the breadcrumb (left) and the Terminal button (right). There
-  // is no overlay row in this state, so no reserve is needed —
-  // `topRegionReserve` is `null` and the CSS rule's `0` fallback applies.
+  // In the EXPANDED state the entire top region — the expanded timeline
+  // card AND the row carrying the breadcrumb + Terminal underneath it —
+  // sits inside a SINGLE absolute container pinned to the top of the
+  // Panel's body region (`absolute top-0 left-0 right-0 z-20`). The
+  // container does NOT scroll with the conversation: it anchors to the
+  // Panel's relative wrapper (outside the scrolling body), not to the
+  // body's scrolling content. Pinning the container — not its children
+  // — is what fixes v18's regression where scrubbing the expanded
+  // timeline scrolled the conversation, dragging the timeline itself
+  // off-screen so the user could not scrub again after the first jump.
+  // Inside the container the children use normal flow (the timeline
+  // card on top, the breadcrumb + Terminal row underneath); no child
+  // carries its own absolute positioning.
+  //
+  // Like the collapsed state, the expanded container does not occupy
+  // layout space inside the body, so the body reserves matching
+  // `padding-top` equal to the container's measured height. The
+  // ResizeObserver effect below switches its observation targets when
+  // `timelineExpanded` flips: collapsed observes the two floating
+  // cards' refs and writes their max, expanded observes the single
+  // container's ref and writes its height. Both feeds share the same
+  // `--delta-top-region-reserve` CSS variable so the body padding-top
+  // and the `scroll-margin-top` on `article[data-message-uuid]` (see
+  // index.css) track whichever state is live.
   const breadcrumbOverlayRef = useRef<HTMLDivElement | null>(null);
   const rightClusterOverlayRef = useRef<HTMLDivElement | null>(null);
+  const expandedContainerRef = useRef<HTMLDivElement | null>(null);
   const [topRegionReserve, setTopRegionReserve] = useState<number | null>(null);
 
   // `timelineExpanded` flips the entire top-row layout — not just the
@@ -358,10 +378,12 @@ export function TranscriptPane({
   //     top-left, {Thread + Terminal} cluster top-right) over the
   //     scrolling body, plus a measured `padding-top` reserve so the
   //     first message clears them.
-  //   - expanded: the timeline expanded card in normal flow at the top
-  //     of the body, with a single normal-flow row of breadcrumb +
-  //     Terminal underneath it. In this state there is no top overlay
-  //     at all, so no padding-top reserve and no ResizeObserver.
+  //   - expanded: a SINGLE absolute container pinned to the top of the
+  //     Panel's body region (does not scroll with the conversation),
+  //     holding the expanded timeline card on top and a single
+  //     normal-flow row of breadcrumb + Terminal underneath it. The
+  //     body reserves a measured `padding-top` equal to the container's
+  //     height so the first message clears it.
   // The state is shared with `ThreadTimelineOverlay` via a module-scoped
   // pub-sub inside `useTimelineExpanded` so a click on the toggle there
   // updates the layout here on the same tick.
@@ -964,34 +986,50 @@ export function TranscriptPane({
     return () => observer.disconnect();
   }, [bottomContent]);
 
-  // Track the COLLAPSED-state floating cards' actual heights and drive
-  // the body's `--delta-top-region-reserve` CSS variable from
-  // `max(breadcrumbHeight, rightClusterHeight)` — the visual row height
-  // those two independent absolute cards form together. The variable
-  // feeds both the body's `padding-top` (so the first message does not
-  // render under the floating cards) and the `scroll-margin-top` rule on
-  // `article[data-message-uuid]` (see index.css), so a timeline-jump
-  // `scrollIntoView({ block: 'start' })` lands the destination article
-  // just below the row rather than hidden underneath it.
+  // Track whichever top-region surface is currently mounted and drive
+  // the body's `--delta-top-region-reserve` CSS variable from its
+  // measured height. The variable feeds both the body's `padding-top`
+  // (so the first message does not render under the pinned region) and
+  // the `scroll-margin-top` rule on `article[data-message-uuid]` (see
+  // index.css), so a timeline-jump `scrollIntoView({ block: 'start' })`
+  // lands the destination article just below the pinned region rather
+  // than hidden underneath it.
   //
-  // The observer runs ONLY in the collapsed state: when the timeline is
-  // expanded the breadcrumb and Terminal sit in normal flow underneath
-  // the timeline card and already take their own layout space, so no
-  // reserve is needed (and observing nodes that no longer exist would
-  // race the effect cleanup). Entering expanded mode disconnects the
-  // observer and clears the reserve; entering collapsed mode reconnects
-  // it.
+  // The observation targets switch with `timelineExpanded`:
+  //   - collapsed: observe BOTH `breadcrumbOverlayRef` and
+  //     `rightClusterOverlayRef` (the two independent absolute floating
+  //     cards) and write `max(breadcrumbHeight, rightClusterHeight)` —
+  //     the visual row height those two cards form together.
+  //   - expanded: observe the single `expandedContainerRef` (the
+  //     absolute container pinned to the top of the Panel's body region,
+  //     holding the timeline card and the breadcrumb+Terminal under-row
+  //     in normal flow) and write the container's total height.
   //
-  // Re-bind when the collapsed cards' presence may have flipped (e.g.
-  // swapping between new-session and an active thread, or
-  // collapsed↔expanded) so the initial measurement still lands on the
-  // new nodes. This observes the floating cards only and writes the
-  // body's CSS variable, never the cards' own size, so it cannot feed
-  // back into a loop.
+  // Re-running the effect on the `timelineExpanded` flip disconnects
+  // the previous observer and binds a fresh one to the new state's
+  // node(s). The single ResizeObserver instance per render handles its
+  // own cleanup; observing nodes that no longer exist is impossible
+  // because the JSX for the unmounted state is not rendered. Re-bind
+  // also fires when the collapsed cards' presence may have flipped (a
+  // new-session ↔ active-thread swap, or the breadcrumb appearing for
+  // a sub-thread navigation) so the initial measurement still lands on
+  // the new nodes. The observer reads the cards/container size only
+  // and writes the body's CSS variable, never the observed nodes' own
+  // size, so it cannot feed back into a loop.
   useLayoutEffect(() => {
     if (timelineExpanded) {
-      setTopRegionReserve(null);
-      return;
+      const container = expandedContainerRef.current;
+      if (!container) {
+        setTopRegionReserve(null);
+        return;
+      }
+      const apply = () => {
+        setTopRegionReserve(container.getBoundingClientRect().height);
+      };
+      apply();
+      const observer = new ResizeObserver(apply);
+      observer.observe(container);
+      return () => observer.disconnect();
     }
     const breadcrumb = breadcrumbOverlayRef.current;
     const cluster = rightClusterOverlayRef.current;
@@ -1018,9 +1056,10 @@ export function TranscriptPane({
     }
     return () => observer.disconnect();
   }, [
-    // Re-bind when the collapsed cards' presence may have flipped, so
-    // the initial measurement still lands on the new nodes (or the
-    // reserve is cleared when no card is present).
+    // Re-bind when the observed surface flips (collapsed ↔ expanded) or
+    // when the collapsed cards' presence may have changed, so the
+    // initial measurement still lands on the new node(s) (or the
+    // reserve is cleared when no node is present).
     timelineExpanded,
     newSession,
     activeThread?.id,
@@ -1048,20 +1087,31 @@ export function TranscriptPane({
   //      taller of the two cards, so the first message clears them on
   //      initial paint.
   //
-  //   2. EXPANDED: the timeline expanded card sits full-width in normal
-  //      flow at the top of the body, with a single normal-flow row
-  //      directly underneath it carrying
-  //         [breadcrumb] [flex-1 spacer] [{Terminal}]
-  //      No Thread icon here — the expanded card itself replaces it.
-  //      Because the whole top region is in flow it already takes
-  //      layout space, so no padding-top reserve is needed.
+  //   2. EXPANDED: a SINGLE absolute container pinned to the top of
+  //      the Panel's body region holds the entire top region —
+  //         [expanded timeline card                                  ]
+  //         [breadcrumb] [flex-1 spacer]                  [{Terminal}]
+  //      The container is `absolute top-0 left-0 right-0 z-20`, so it
+  //      anchors to the Panel's relative wrapper (outside the
+  //      scrolling body) and STAYS PINNED across conversation scroll.
+  //      Inside the container the children use normal flow — the
+  //      timeline card on top, the breadcrumb + Terminal row directly
+  //      underneath — no child carries its own absolute positioning.
+  //      Pinning the container — not its children — is what fixes the
+  //      v18 regression where the expanded timeline scrolled away with
+  //      the conversation after the first scrub, breaking subsequent
+  //      scrubs. The body reserves `padding-top` equal to the
+  //      container's measured height (same `--delta-top-region-reserve`
+  //      mechanism as collapsed) so the first message clears it. No
+  //      Thread icon in the under-row — the expanded card itself
+  //      replaces it.
   //
   // The Panel's body wrapper (`Panel.tsx`) already carries
-  // `position: relative`, so the absolute cards anchor to the scroll
-  // viewport rather than to the scrolling content itself — they stay
-  // glued to the top edge while the conversation scrolls underneath. A
-  // high z-index (`z-20`) keeps them above any other in-flow content
-  // (streaming bubble, chip rows).
+  // `position: relative`, so the absolute floating cards / container
+  // anchor to the scroll viewport rather than to the scrolling content
+  // itself — they stay glued to the top edge while the conversation
+  // scrolls underneath. A high z-index (`z-20`) keeps them above any
+  // other in-flow content (streaming bubble, chip rows).
   const showTimeline = !newSession && activeThread !== null;
   const showBreadcrumb = isOnSubThread;
   // The single floating breadcrumb card (collapsed state only) — pinned
@@ -1103,43 +1153,38 @@ export function TranscriptPane({
       {terminalButton}
     </div>
   );
-  // The expanded-state in-flow row directly underneath the expanded
-  // timeline card: [breadcrumb] [flex-1 spacer] [Terminal]. The Thread
-  // icon is absent here — the expanded timeline above is the Thread
-  // affordance in this state. Rendered inside the same in-flow block as
-  // the expanded `ThreadTimelineOverlay` (see below); the wrapper itself
-  // is the in-flow `transcript-top-row` so a test can locate the row by
-  // testid in both states.
-  const expandedUnderRow = timelineExpanded && (showBreadcrumb || terminalButton) && (
-    <div
-      data-testid="transcript-top-row"
-      data-expanded="true"
-      className="flex items-center gap-2 px-3 pb-2"
-    >
-      {showBreadcrumb ? (
-        <div className={`${FLOATING_CARD_CLASS} px-3 py-1.5`}>
-          <Breadcrumb items={breadcrumbItems} />
-        </div>
-      ) : (
-        <span />
-      )}
-      <span className="flex-1" />
-      {terminalButton}
-    </div>
-  );
-  // The top region itself. In the collapsed state it is a transparent,
-  // layout-less wrapper whose children are individual absolute cards
-  // (each pinned to its own corner of the viewport). In the expanded
-  // state it is an in-flow column containing the expanded timeline card
-  // followed by the single under-row of breadcrumb + Terminal. The
-  // outermost wrapper has no chrome of its own — no `bg-white`, no
-  // padding — so the v17 full-width top bar is not re-introduced.
+  // The top region itself. Two completely different shapes by
+  // `timelineExpanded` (see the comment above for the full rationale):
+  //
+  //   - collapsed: a transparent, layout-less wrapper
+  //     (`display: contents`) hosting two independent absolute floating
+  //     cards (each pinned to its own corner of the Panel body region).
+  //
+  //   - expanded: a SINGLE absolute container pinned to the top of the
+  //     Panel body region (`absolute top-0 left-0 right-0 z-20`)
+  //     holding the expanded timeline card on top and a single
+  //     normal-flow row of breadcrumb + Terminal underneath it. The
+  //     container itself takes no layout space inside the scrolling
+  //     body — the body reserves matching `padding-top` from the
+  //     ResizeObserver-driven `--delta-top-region-reserve`, mirroring
+  //     the collapsed state's mechanism.
+  //
+  // Neither shape paints a shared white bar across the full top edge,
+  // so the v17 look the v18 design retracted is not re-introduced. The
+  // outer `transcript-top-region` wrapper carries the testid in both
+  // states for tests to locate.
   const topRegion = timelineExpanded ? (
     showTimeline ? (
       <div
+        ref={expandedContainerRef}
         data-testid="transcript-top-region"
         data-expanded="true"
-        className="flex flex-col gap-2 px-3 pt-3"
+        // Single absolute container pinned to the top of the Panel
+        // body region; anchored to Panel's relative wrapper (outside
+        // the scrolling body), so it STAYS PINNED across conversation
+        // scroll — the v19 fix for the v18 regression. Children use
+        // normal flow inside.
+        className="pointer-events-auto absolute left-0 right-0 top-0 z-20 flex flex-col gap-2 px-3 pt-3"
       >
         {activeThread !== null && (
           <ThreadTimelineOverlay
@@ -1148,7 +1193,23 @@ export function TranscriptPane({
             conversationBodyRef={bodyRef}
           />
         )}
-        {expandedUnderRow}
+        {(showBreadcrumb || terminalButton) && (
+          <div
+            data-testid="transcript-top-row"
+            data-expanded="true"
+            className="flex items-center gap-2 pb-2"
+          >
+            {showBreadcrumb ? (
+              <div className={`${FLOATING_CARD_CLASS} px-3 py-1.5`}>
+                <Breadcrumb items={breadcrumbItems} />
+              </div>
+            ) : (
+              <span />
+            )}
+            <span className="flex-1" />
+            {terminalButton}
+          </div>
+        )}
       </div>
     ) : null
   ) : (
@@ -1185,17 +1246,20 @@ export function TranscriptPane({
       // overlays over the body, so they carry no layout height — the
       // body must reserve an equivalent top gap, otherwise the first
       // message would render under them on initial paint. The reserve
-      // is `Math.max(breadcrumbHeight, rightClusterHeight)`, exposed
-      // via the `--delta-top-region-reserve` CSS variable (driven by the
-      // ResizeObservers on `breadcrumbOverlayRef` and
-      // `rightClusterOverlayRef`). The same variable also feeds the
-      // `article[data-message-uuid]` `scroll-margin-top` rule (index.css)
-      // so a timeline-jump `scrollIntoView({ block: 'start' })` lands the
-      // destination article just BELOW the overlay row rather than
-      // hidden underneath it. In the EXPANDED state the top region is
-      // in normal flow and `topRegionReserve` is `null`; the variable's
-      // `0` fallback then yields a zero padding and a zero scroll
-      // margin, and the in-flow row itself takes up the layout space.
+      // is `Math.max(breadcrumbHeight, rightClusterHeight)`. In the
+      // EXPANDED state the same mechanism reserves space for the single
+      // pinned container instead — the container is also `absolute`
+      // (so it stays glued to the top across conversation scroll, the
+      // v19 fix) and carries no layout height inside the body; the
+      // reserve is the container's measured height. Both feeds use the
+      // same `--delta-top-region-reserve` CSS variable (driven by the
+      // ResizeObserver effect on `breadcrumbOverlayRef` +
+      // `rightClusterOverlayRef` when collapsed, on `expandedContainerRef`
+      // when expanded), so the body's `padding-top` and the
+      // `scroll-margin-top` rule on `article[data-message-uuid]` (index.css)
+      // — used by timeline-jump `scrollIntoView({ block: 'start' })` to
+      // land the destination article just BELOW the pinned region —
+      // both track whichever state is live.
       //
       // `scrollbar-none` hides the body's scrollbar entirely (it still scrolls
       // via wheel/trackpad): the conversation reads as a clean page, and the

@@ -1419,15 +1419,19 @@ describe('TranscriptPane', () => {
       expect(body.scrollTop).toBe(600);
     });
 
-    // v18 top-row layout. The collapsed state places the breadcrumb and
+    // v19 top-row layout. The collapsed state places the breadcrumb and
     // the {Thread + Terminal} cluster as INDIVIDUAL absolute floating
-    // cards over the body, so the conversation shows through the gap
-    // between them rather than under one full-width white bar (which
-    // v17 had and v18 retracts). The expanded state moves everything
-    // into normal flow: the expanded timeline card on top, then a
-    // single row of breadcrumb + Terminal underneath it — no overlay
-    // anymore in that state.
-    describe('top region overlay (v18 individual floating cards)', () => {
+    // cards over the body (preserved from v18). The expanded state
+    // wraps the entire top region in a SINGLE absolute container
+    // pinned to the top of the Panel body region — it does NOT scroll
+    // with the conversation, so scrubbing the timeline (which scrolls
+    // the conversation) no longer drags the timeline off-screen the
+    // way v18's in-flow expanded layout did. Inside the container the
+    // children use normal flow: the timeline card on top, the
+    // breadcrumb + Terminal row underneath. The body reserves
+    // `padding-top` in BOTH states (via `--delta-top-region-reserve`)
+    // so the first message clears the pinned region.
+    describe('top region overlay (v19 pinned expanded container)', () => {
       it('renders the breadcrumb and the right-side cluster as individual absolute cards in the collapsed state — no shared white bar wrapper', async () => {
         renderPane(mockThreads, BRANCH_THREAD_ID);
         const topRegion = await screen.findByTestId('transcript-top-region');
@@ -1603,28 +1607,224 @@ describe('TranscriptPane', () => {
         ).toBeTruthy();
       });
 
-      it('does not reserve --delta-top-region-reserve in the expanded state (no overlay row to clear)', async () => {
-        // In the expanded state the top region is in normal flow and
-        // already takes layout space — the body must NOT add an
-        // additional `padding-top` reserve on top of it.
+      it('pins the expanded top region as a SINGLE absolute container so it does not scroll with the conversation (v19 regression fix)', async () => {
+        // The v18 expanded layout placed the timeline card + the
+        // breadcrumb/Terminal under-row directly into the scrolling
+        // body's normal flow. Scrubbing the timeline jumps the
+        // conversation; with the timeline in flow, the conversation
+        // scroll dragged the timeline itself off-screen and the user
+        // could not scrub again. v19 wraps the entire top region in a
+        // single absolute container that pins to the top of the Panel
+        // body region — the container does not participate in the
+        // body's scroll. This test pins that pinning contract.
         window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
         resetTimelineExpandedForTests();
 
         renderPane(mockThreads, BRANCH_THREAD_ID);
 
-        // The body still reads the variable through `padding-top` for
-        // forward compatibility, but the variable itself is not set
-        // (resolves to its `0` fallback). A non-empty value here would
-        // double up against the in-flow expanded row.
+        const region = await screen.findByTestId('transcript-top-region');
+        expect(region.getAttribute('data-expanded')).toBe('true');
+        // The container is `absolute top-0 left-0 right-0 z-20` so it
+        // anchors to the closest positioned ancestor (the Panel body
+        // wrapper, which is `position: relative`) — outside the
+        // scrolling body — and stays glued to the top edge across
+        // conversation scroll. Without these classes the v18 bug
+        // returns: the container would flow with the conversation.
+        expect(region.className).toContain('absolute');
+        expect(region.className).toContain('top-0');
+        expect(region.className).toContain('left-0');
+        expect(region.className).toContain('right-0');
+        expect(region.className).toContain('z-20');
+
+        // Proxy for "container stays inside the viewport after a body
+        // scroll": the container's closest positioned ancestor — the
+        // element absolute escapes to — is OUTSIDE the scrolling body
+        // (the Panel body div with `overflow-y-auto`). Walking the
+        // ancestry from the container, we should reach the relative
+        // positioning context BEFORE crossing the scroll body, so the
+        // container is anchored to the viewport-pinning region and
+        // never to the scroll content. A regression that put the
+        // container inside the scrolling body's positioning context
+        // (e.g. by making the body itself `position: relative`, or by
+        // dropping `absolute`) would fail this check.
+        const body = bodyEl();
+        let cursor: HTMLElement | null = region.parentElement;
+        let positionedAncestor: HTMLElement | null = null;
+        while (cursor !== null) {
+          // jsdom does not compute layout, but className inspection is
+          // enough: the Panel wrapper carries the `relative` Tailwind
+          // class, the scroll body carries `overflow-y-auto`.
+          if (cursor.className.includes('relative')) {
+            positionedAncestor = cursor;
+            break;
+          }
+          cursor = cursor.parentElement;
+        }
+        expect(positionedAncestor).not.toBeNull();
+        // The relative ancestor must be the Panel body region's
+        // wrapper, which is the PARENT of the scrolling body — NOT
+        // the scrolling body itself or any descendant of it.
+        expect(positionedAncestor!.contains(body)).toBe(true);
+        expect(body.contains(positionedAncestor!)).toBe(false);
+      });
+
+      it('renders the expanded under-row as a normal-flow child INSIDE the pinned container — no individual absolute positioning', async () => {
+        // Core v19 invariant: the container is pinned, the children
+        // are in normal flow. A regression that bolted `absolute` back
+        // onto the under-row (the v17 mistake, re-applied to the new
+        // container shape) would either escape the under-row from the
+        // container or stack it on top of the timeline card.
+        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        resetTimelineExpandedForTests();
+
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        });
+        const client = new ApiClient({ baseUrl: 'http://localhost' });
+        render(
+          <QueryClientProvider client={queryClient}>
+            <ApiProvider client={client}>
+              <TranscriptPane
+                threads={mockThreads}
+                activeThread={mockThreads.find((t) => t.id === BRANCH_THREAD_ID)!}
+                readOnly={false}
+                terminalButton={
+                  <button data-testid="terminal-toggle">Terminal</button>
+                }
+              />
+            </ApiProvider>
+          </QueryClientProvider>,
+        );
+
+        const region = await screen.findByTestId('transcript-top-region');
+        const timelineCard = within(region).getByTestId(
+          'thread-timeline-overlay',
+        );
+        const underRow = within(region).getByTestId('transcript-top-row');
+
+        // Container uses a flex column so its two children stack
+        // top-to-bottom in normal flow.
+        expect(region.className).toContain('flex');
+        expect(region.className).toContain('flex-col');
+
+        // Neither child carries its own `absolute` positioning — they
+        // are normal-flow children of the pinned container.
+        expect(timelineCard.className).not.toContain('absolute');
+        expect(underRow.className).not.toContain('absolute');
+
+        // DOM order: timeline card first, then the under-row underneath.
+        expect(
+          timelineCard.compareDocumentPosition(underRow) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      });
+
+      it("reserves the body's padding-top from --delta-top-region-reserve in the expanded state too (so the first message clears the pinned container)", async () => {
+        // v19: the expanded container is absolute (same as the
+        // collapsed floating cards), so it takes NO layout space
+        // inside the body — the body must reserve a matching
+        // `padding-top` from the container's measured height, or the
+        // first message renders under the container on initial paint.
+        // The mechanism mirrors collapsed: same CSS variable, same
+        // inline style on the body. A regression that dropped the
+        // expanded reserve (the v18 assumption that "expanded is in
+        // flow, no reserve needed") would let the conversation render
+        // under the pinned container.
+        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        resetTimelineExpandedForTests();
+
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+
+        const region = await screen.findByTestId('transcript-top-region');
+        await waitFor(() => expect(lookupObserver(region)).not.toBeNull());
+
+        region.getBoundingClientRect = () => ({ height: 220 }) as DOMRect;
+        act(() => {
+          const fire = lookupObserver(region)!;
+          fire([], fire as unknown as ResizeObserver);
+        });
+
         await waitFor(() =>
           expect(
             bodyEl().style.getPropertyValue('--delta-top-region-reserve'),
-          ).toBe(''),
+          ).toBe('220px'),
         );
-        // padding-top still references the variable so we do not break
-        // the CSS contract; with the variable unset it resolves to 0.
+        // The body's padding-top references the variable in BOTH
+        // states — same mechanism, only the variable's value differs.
         expect(bodyEl().style.paddingTop).toBe(
           'var(--delta-top-region-reserve, 0)',
+        );
+      });
+
+      it('switches the ResizeObserver target when timelineExpanded flips (collapsed cards → single expanded container)', async () => {
+        // Critical v19 mechanism: the ResizeObserver disconnects and
+        // re-binds when `timelineExpanded` changes, so the live
+        // observation target always matches the rendered state. Going
+        // collapsed → expanded must drop the breadcrumb/cluster
+        // observation and pick up the container; going back must do
+        // the reverse. A leak (observing nodes that no longer exist)
+        // or a stale binding (observing the wrong state's nodes)
+        // breaks the reserve when the user toggles.
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+
+        // Collapsed initially: the breadcrumb and right cluster are
+        // both observed.
+        const collapsedBreadcrumb = await screen.findByTestId(
+          'transcript-breadcrumb-overlay',
+        );
+        const collapsedCluster = await screen.findByTestId('transcript-top-row');
+        expect(collapsedCluster.getAttribute('data-expanded')).toBe('false');
+        await waitFor(() =>
+          expect(lookupObserver(collapsedBreadcrumb)).not.toBeNull(),
+        );
+        await waitFor(() =>
+          expect(lookupObserver(collapsedCluster)).not.toBeNull(),
+        );
+
+        // Toggle to expanded — the collapsed cards unmount, the
+        // expanded container mounts. The observer must disconnect
+        // from the old nodes and observe the new container.
+        const toggle = within(collapsedCluster).getByTestId(
+          'thread-timeline-toggle',
+        );
+        act(() => {
+          fireEvent.click(toggle);
+        });
+
+        const region = await screen.findByTestId('transcript-top-region');
+        expect(region.getAttribute('data-expanded')).toBe('true');
+
+        // Old nodes are gone from observations (the ControllableRO's
+        // `disconnect` clears them).
+        expect(lookupObserver(collapsedBreadcrumb)).toBeNull();
+        expect(lookupObserver(collapsedCluster)).toBeNull();
+        // The expanded container is now observed.
+        await waitFor(() => expect(lookupObserver(region)).not.toBeNull());
+
+        // Toggle back — re-binds on the collapsed cards.
+        const expandedToggle = within(region).getByTestId(
+          'thread-timeline-toggle',
+        );
+        act(() => {
+          fireEvent.click(expandedToggle);
+        });
+
+        const collapsedClusterAgain = await screen.findByTestId(
+          'transcript-top-row',
+        );
+        await waitFor(() =>
+          expect(collapsedClusterAgain.getAttribute('data-expanded')).toBe(
+            'false',
+          ),
+        );
+        await waitFor(() =>
+          expect(lookupObserver(collapsedClusterAgain)).not.toBeNull(),
+        );
+        const collapsedBreadcrumbAgain = await screen.findByTestId(
+          'transcript-breadcrumb-overlay',
+        );
+        await waitFor(() =>
+          expect(lookupObserver(collapsedBreadcrumbAgain)).not.toBeNull(),
         );
       });
 
