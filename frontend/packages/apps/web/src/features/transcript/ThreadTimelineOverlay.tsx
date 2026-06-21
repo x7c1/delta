@@ -788,7 +788,21 @@ export function ThreadTimelineOverlay({
               No threads to show yet.
             </p>
           ) : (
-            <ul className="flex flex-col gap-0.5" role="list">
+            // `w-max min-w-full` makes the ul as wide as the widest lane
+            // (label + axis + right padding), but never narrower than the
+            // body itself. Each `<li>` inside (`flex` items default to
+            // `align-self: stretch` on the cross axis of the column-flex
+            // parent) then stretches to that same intrinsic width, so the
+            // sticky label's containing block — the `<li>` — spans the
+            // FULL horizontal scroll range. Without `w-max`, the ul stays
+            // at the body's content width; the `<li>` stretches only to
+            // body-width while its `shrink-0` children overflow it; the
+            // sticky label then hits its `<li>`'s right edge partway
+            // through the scroll and gets pinned there, sliding leftward
+            // out of view as the body keeps scrolling right. `min-w-full`
+            // keeps short sessions (axis narrower than the body) at full
+            // width so the layout does not collapse to label-only.
+            <ul className="flex w-max min-w-full flex-col gap-0.5" role="list">
               {lanes.map((lane) => {
                 const isHighlighted = lane.threadId === highlightedThreadId;
                 // Collapse runs of 2+ consecutive small dots within this lane

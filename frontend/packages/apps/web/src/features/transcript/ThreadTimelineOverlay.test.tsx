@@ -1412,4 +1412,57 @@ describe('ThreadTimelineOverlay sticky lane labels', () => {
     // or `bg-slate-50` (active highlight).
     expect(label.className).toMatch(/bg-(white|slate-50)/);
   });
+
+  it('sizes the lane list to the full axis width so sticky spans the whole scroll range', async () => {
+    // Regression: v7 sized the lane `<ul>` only to the body's content
+    // width (default column-flex), so each `<li>` was body-wide while its
+    // `shrink-0` children (label + axis) overflowed to the right. The
+    // sticky label's containing block — the `<li>` — then ended at the
+    // body's right edge; once the user scrolled past
+    // `(li_width - LABEL_COLUMN_PX)` the label hit the `<li>`'s right
+    // edge and stopped following the viewport, sliding leftward out of
+    // view. The fix is `w-max min-w-full` on the `<ul>` so the list
+    // grows to the natural content width and sticky spans the FULL
+    // scroll range.
+    const threads = [makeThread(1)];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    // The lane list is the only `<ul>` inside the body.
+    const body = await screen.findByTestId('thread-timeline-body');
+    const ul = body.querySelector('ul');
+    expect(ul).not.toBeNull();
+    // `w-max` widens the list to its widest lane, `min-w-full` keeps it
+    // at least body-wide so a short session does not collapse.
+    expect(ul!.className).toMatch(/\bw-max\b/);
+    expect(ul!.className).toMatch(/\bmin-w-full\b/);
+  });
+
+  it('keeps the sticky label rendered when the body is scrolled to its maximum', async () => {
+    // Drive the body's `scrollLeft` to the full scroll range and assert
+    // the sticky label is still in the DOM with its `position: sticky;
+    // left: 0` contract intact. jsdom does not compute layout, so we
+    // cannot read a bounding rect that reflects sticky; the structural
+    // checks (class still applied, element still mounted at the
+    // leftmost position of its lane) are the testable surface for the
+    // FULL-scroll-range guarantee.
+    const threads = [makeThread(1)];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const body = await screen.findByTestId('thread-timeline-body');
+    // Stub the scroll geometry: a body of 200px viewport with 1200px of
+    // content (so a real browser scrolls 1000px horizontally before the
+    // right edge); set scrollLeft to that maximum.
+    Object.defineProperty(body, 'clientWidth', { value: 200, configurable: true });
+    Object.defineProperty(body, 'scrollWidth', { value: 1200, configurable: true });
+    body.scrollLeft = body.scrollWidth - body.clientWidth;
+    // The label is still the first child of its `<li>` (sticky preserves
+    // DOM order — only paint shifts), and the sticky/left-0 contract is
+    // still on it. A regression where the label gets unmounted, hidden,
+    // or loses the sticky class would fail here.
+    const lane = body.querySelector('li[data-testid="thread-timeline-lane"]');
+    expect(lane).not.toBeNull();
+    const label = lane!.querySelector('[data-testid="thread-timeline-lane-label"]');
+    expect(label).not.toBeNull();
+    expect(label).toBe(lane!.firstElementChild);
+    expect((label as HTMLElement).className).toMatch(/\bsticky\b/);
+    expect((label as HTMLElement).className).toMatch(/\bleft-0\b/);
+  });
 });
