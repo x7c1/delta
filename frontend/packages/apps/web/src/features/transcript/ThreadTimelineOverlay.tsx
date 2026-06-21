@@ -77,10 +77,15 @@ export const WHEEL_DELTA_PAGE_PX = 800;
  * entry maps "cumulative |delta| at least this large within the rolling
  * window" → "number of large-message steps to take on this wheel event".
  *
- * The thresholds are biased to mouse-wheel notch magnitudes (~100 px per
- * notch with the per-event clamp), so a leisurely 1-notch turn stays in
- * the slowest bucket (1 step) while a vigorous multi-notch spin trips the
- * higher buckets within the {@link WHEEL_VELOCITY_WINDOW_MS} window.
+ * The first acceleration bucket sits strictly above one notch's worth of
+ * accumulated |delta| ({@link WHEEL_PER_EVENT_CLAMP_PX} = 100 px), so a
+ * single leisurely notch ALWAYS lands in the slowest bucket (1 step) — the
+ * user can land on the immediate prev/next message. Acceleration only kicks
+ * in once a second notch arrives inside the rolling window (cum ≥ 200), at
+ * which point the staircase compounds: 2 / 3 / 5 / 8 steps at the 200 / 400
+ * / 700 / 1100 px thresholds. A sustained vigorous spin still traverses a
+ * long session in a handful of turns, but the bug where the very first
+ * notch already jumped two messages is gone.
  *
  * Exported so tests can assert the calculator's behaviour against the
  * same thresholds the live UI uses, without duplicating magic numbers.
@@ -89,10 +94,10 @@ export const WHEEL_STEP_STAIRCASE: ReadonlyArray<{
   readonly minCumulativePx: number;
   readonly steps: number;
 }> = [
-  { minCumulativePx: 1000, steps: 8 },
-  { minCumulativePx: 600, steps: 5 },
-  { minCumulativePx: 300, steps: 3 },
-  { minCumulativePx: 100, steps: 2 },
+  { minCumulativePx: 1100, steps: 8 },
+  { minCumulativePx: 700, steps: 5 },
+  { minCumulativePx: 400, steps: 3 },
+  { minCumulativePx: 200, steps: 2 },
   { minCumulativePx: 0, steps: 1 },
 ];
 
@@ -125,13 +130,17 @@ export function normalizeWheelDeltaPx(
 /**
  * Map a cumulative |delta| (px, within the rolling window) to a step count
  * by walking {@link WHEEL_STEP_STAIRCASE} from the top bucket down — the
- * first entry whose threshold the cumulative value meets wins. Exported for
- * unit testing.
+ * first entry whose threshold the cumulative value meets wins. Always
+ * returns at least 1: any nonzero wheel input deserves at least one step,
+ * so the user can always land on the immediate prev/next message with a
+ * single slow notch (with the staircase's first acceleration bucket sitting
+ * strictly above one notch's clamped contribution, a leisurely turn never
+ * trips a higher bucket). Exported for unit testing.
  */
 export function stepsForCumulativePx(cumulativePx: number): number {
   for (const entry of WHEEL_STEP_STAIRCASE) {
     if (cumulativePx >= entry.minCumulativePx) {
-      return entry.steps;
+      return Math.max(1, entry.steps);
     }
   }
   // Defensive: the last entry's threshold is 0 so the loop above always
@@ -692,12 +701,14 @@ export function ThreadTimelineOverlay({
   // the active thread before any messages have loaded.
   const highlightedThreadId = activeMessage?.threadId ?? activeThreadId;
 
-  // The scrubbable area is the union of every lane's axis: a wheel over any
-  // part of the footer body advances the active index. The body's onWheel is
-  // the entry point — its `passive: false` listener (registered via the
-  // effect below) is required to call `preventDefault` and suppress the page
-  // scroll.
+  // The scrubbable area is the axis column alone: a wheel over the labels
+  // column should behave like a normal vertical page scroll, so the wheel
+  // listener attaches to the axis container, not the outer body. The axis
+  // container's onWheel is the entry point — its `passive: false` listener
+  // (registered via the effect below) is required to call `preventDefault`
+  // and suppress the page scroll while scrubbing.
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const axisScrollRef = useRef<HTMLDivElement | null>(null);
   const activeMessageIndexRef = useRef(activeMessageIndex);
   useEffect(() => {
     activeMessageIndexRef.current = activeMessageIndex;
@@ -722,7 +733,7 @@ export function ThreadTimelineOverlay({
   const wheelWindowRef = useRef<Array<{ atMs: number; deltaPx: number }>>([]);
 
   useEffect(() => {
-    const el = bodyRef.current;
+    const el = axisScrollRef.current;
     if (!el) {
       return;
     }
@@ -803,23 +814,25 @@ export function ThreadTimelineOverlay({
     return () => el.removeEventListener('wheel', onWheel);
   }, [expanded, setActiveMessageIndex]);
 
-  // Click anywhere on the timeline body jumps the active index to the
-  // message whose x is closest to the click. There is no distance threshold:
-  // a click anywhere in the overlay accepts the global nearest message —
-  // the overlay is small enough that the closest mark is always the user's
-  // intent, and a threshold would otherwise swallow clicks on the empty
-  // axis whitespace between marks.
+  // Click anywhere on the axis column jumps the active index to the message
+  // whose x is closest to the click. Clicks on the label column are ignored
+  // — the handler attaches to the axis scroll container, not the outer
+  // body, so the label column behaves like a regular static label. There is
+  // no distance threshold inside the axis: a click anywhere in it accepts
+  // the global nearest message — the overlay is small enough that the
+  // closest mark is always the user's intent, and a threshold would
+  // otherwise swallow clicks on the empty axis whitespace between marks.
   const handleClick = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
-      const body = bodyRef.current;
-      if (!body) {
+      const scrollEl = axisScrollRef.current;
+      if (!scrollEl) {
         return;
       }
-      // Locate the first lane row (every lane shares the same axis width
-      // and x-origin) so the click → x conversion uses the axis the dots
-      // actually sit on. Falling back to the body's own rect would include
-      // the label column and right padding, throwing the conversion off.
-      const axisEl = body.querySelector<HTMLElement>('[data-timeline-axis]');
+      // Locate the first lane axis row (every lane shares the same axis
+      // width and x-origin) so the click → x conversion uses the axis the
+      // dots actually sit on. Falling back to the scroll container's rect
+      // would include the right-hand padding, throwing the conversion off.
+      const axisEl = scrollEl.querySelector<HTMLElement>('[data-timeline-axis]');
       if (!axisEl) {
         return;
       }
@@ -846,30 +859,26 @@ export function ThreadTimelineOverlay({
   );
 
   // After a user-driven navigation, ensure the playhead is visible inside
-  // the body's horizontal viewport. The lane axis is fixed-width so this
-  // only matters when the viewport is narrower than the axis (e.g. a narrow
-  // side panel); when the axis fits, no scroll is needed.
+  // the axis column's horizontal viewport. The lane axis is fixed-width so
+  // this only matters when the viewport is narrower than the axis (e.g. a
+  // narrow side panel); when the axis fits, no scroll is needed.
   useEffect(() => {
     if (scrubTick === 0) {
       return;
     }
-    const body = bodyRef.current;
-    if (!body || activeMessage === null) {
+    const scrollEl = axisScrollRef.current;
+    if (!scrollEl || activeMessage === null) {
       return;
     }
-    const axisEl = body.querySelector<HTMLElement>('[data-timeline-axis]');
-    if (!axisEl) {
-      return;
-    }
-    // The playhead's offset within the scrollable body — its left position
-    // inside the axis (from the global x map) plus the axis's offset from
-    // the body (lane label).
+    // The playhead's x is its position inside the axis (from the global x
+    // map); the axis row starts at x=0 inside the axis scroll container,
+    // so no extra left-offset is needed (unlike the v9 layout where the
+    // sticky label sat in the same scroll container).
     const playheadInAxis = messagePxByUuid.get(activeMessage.uuid) ?? 0;
-    const playheadInBody = axisEl.offsetLeft + playheadInAxis;
-    const viewLeft = body.scrollLeft;
-    const viewRight = viewLeft + body.clientWidth;
-    if (playheadInBody < viewLeft || playheadInBody > viewRight) {
-      body.scrollLeft = Math.max(0, playheadInBody - body.clientWidth / 2);
+    const viewLeft = scrollEl.scrollLeft;
+    const viewRight = viewLeft + scrollEl.clientWidth;
+    if (playheadInAxis < viewLeft || playheadInAxis > viewRight) {
+      scrollEl.scrollLeft = Math.max(0, playheadInAxis - scrollEl.clientWidth / 2);
     }
   }, [scrubTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 
@@ -907,127 +916,158 @@ export function ThreadTimelineOverlay({
         <div
           ref={bodyRef}
           data-testid="thread-timeline-body"
-          className="max-h-40 overflow-auto px-2 pb-1"
-          onClick={handleClick}
+          // Outer wrapper: shared vertical scroll for both columns. The
+          // label column is fixed-width and never scrolls horizontally;
+          // the axis column scrolls horizontally on its own so dots no
+          // longer slide behind the labels as the user pans the axis.
+          className="flex max-h-40 overflow-y-auto px-2 pb-1"
         >
           {lanes.length === 0 ? (
             <p className="px-1 py-1 text-[0.7rem] text-slate-400">
               No threads to show yet.
             </p>
           ) : (
-            // `w-max min-w-full` makes the ul as wide as the widest lane
-            // (label + axis + right padding), but never narrower than the
-            // body itself. Each `<li>` inside (`flex` items default to
-            // `align-self: stretch` on the cross axis of the column-flex
-            // parent) then stretches to that same intrinsic width, so the
-            // sticky label's containing block — the `<li>` — spans the
-            // FULL horizontal scroll range. Without `w-max`, the ul stays
-            // at the body's content width; the `<li>` stretches only to
-            // body-width while its `shrink-0` children overflow it; the
-            // sticky label then hits its `<li>`'s right edge partway
-            // through the scroll and gets pinned there, sliding leftward
-            // out of view as the body keeps scrolling right. `min-w-full`
-            // keeps short sessions (axis narrower than the body) at full
-            // width so the layout does not collapse to label-only.
-            <ul className="flex w-max min-w-full flex-col gap-0.5" role="list">
-              {lanes.map((lane) => {
-                const isHighlighted = lane.threadId === highlightedThreadId;
-                // Collapse runs of 2+ consecutive small dots within this lane
-                // into one cluster mark so a long stretch of tool calls / meta
-                // lines no longer floods the timeline. Lone small dots and
-                // every large dot still render individually.
-                const renderItems = buildLaneRenderItems(lane.dots);
-                return (
-                  <li
-                    key={lane.threadId}
-                    data-testid="thread-timeline-lane"
-                    data-thread-id={lane.threadId}
-                    data-active={isHighlighted ? 'true' : 'false'}
-                    // No `gap-2`: the sticky label carries its own right
-                    // padding so its background covers right up to the axis
-                    // — otherwise dots could show through the gap as the
-                    // body scrolls horizontally past the label.
-                    className={`flex items-center rounded-sm pr-1 ${
-                      isHighlighted
-                        ? 'border-y border-slate-200 bg-slate-50'
-                        : 'border-y border-transparent'
-                    }`}
-                    style={{ minHeight: LANE_HEIGHT_PX }}
-                  >
-                    <span
-                      title={lane.tooltip}
-                      data-testid="thread-timeline-lane-label"
-                      // The label column stays pinned to the left edge of
-                      // the body during horizontal scroll (`position: sticky;
-                      // left: 0`) so "which lane is which" never scrolls off
-                      // screen on a dense session. The background color
-                      // matches the lane (active = `bg-slate-50`, otherwise
-                      // the body's `bg-white`) so axis dots cannot show
-                      // through behind the label; the surrounding `gap-2`
-                      // would otherwise leave the label transparent.
-                      className={`sticky left-0 z-10 block shrink-0 truncate py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
-                        lane.isMain ? 'text-slate-700' : 'text-slate-500'
-                      } ${isHighlighted ? 'bg-slate-50' : 'bg-white'}`}
-                      style={{ width: LABEL_COLUMN_PX }}
-                    >
-                      {lane.label}
-                    </span>
-                    <div
-                      data-timeline-axis=""
-                      className="relative shrink-0"
-                      style={{
-                        width: laneAxisWidth + LANE_RIGHT_PAD_PX,
-                        height: LANE_HEIGHT_PX,
-                      }}
+            <>
+              {/* Left column: static lane labels. Sized to LABEL_COLUMN_PX
+                  so the right column's axis x-origin matches the v9 layout
+                  (the global x map and the click → x conversion are
+                  unchanged). No horizontal scroll — the label column stays
+                  put as the axis column scrolls underneath. */}
+              <ul
+                data-testid="thread-timeline-label-column"
+                className="flex shrink-0 flex-col gap-0.5"
+                style={{ width: LABEL_COLUMN_PX }}
+                role="list"
+              >
+                {lanes.map((lane) => {
+                  const isHighlighted = lane.threadId === highlightedThreadId;
+                  return (
+                    <li
+                      key={lane.threadId}
+                      data-testid="thread-timeline-lane-label-row"
+                      data-thread-id={lane.threadId}
+                      data-active={isHighlighted ? 'true' : 'false'}
+                      // The highlight (background + 1px top/bottom border)
+                      // is applied identically on the matching axis row so
+                      // the active lane reads as one continuous band across
+                      // both columns. Sharing the same `minHeight` and
+                      // border classes keeps the two rows pixel-aligned.
+                      className={`flex items-center rounded-sm ${
+                        isHighlighted
+                          ? 'border-y border-slate-200 bg-slate-50'
+                          : 'border-y border-transparent'
+                      }`}
+                      style={{ minHeight: LANE_HEIGHT_PX }}
                     >
                       <span
-                        aria-hidden="true"
-                        className="absolute left-0 top-1/2 h-px -translate-y-1/2 bg-slate-200"
-                        style={{ width: laneAxisWidth }}
-                      />
-                      {renderItems.map((item) =>
-                        item.kind === 'dot' ? (
-                          <TimelineDotMark
-                            key={item.dot.uuid}
-                            dot={item.dot}
-                            xPx={messagePxByUuid.get(item.dot.uuid) ?? 0}
+                        title={lane.tooltip}
+                        data-testid="thread-timeline-lane-label"
+                        className={`block w-full truncate py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
+                          lane.isMain ? 'text-slate-700' : 'text-slate-500'
+                        }`}
+                      >
+                        {lane.label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {/* Right column: the axis with dots. Scrolls horizontally on
+                  its own (`overflow-x-auto`); the wheel handler attaches
+                  here so a wheel over the labels falls through to normal
+                  page scroll while a wheel over the axis scrubs the
+                  timeline. The click handler also attaches here so a click
+                  on a label never triggers a jump. */}
+              <div
+                ref={axisScrollRef}
+                data-testid="thread-timeline-axis-column"
+                className="flex-1 overflow-x-auto"
+                onClick={handleClick}
+              >
+                <ul className="flex flex-col gap-0.5" role="list">
+                  {lanes.map((lane) => {
+                    const isHighlighted = lane.threadId === highlightedThreadId;
+                    // Collapse runs of 2+ consecutive small dots within
+                    // this lane into one cluster mark so a long stretch of
+                    // tool calls / meta lines no longer floods the
+                    // timeline. Lone small dots and every large dot still
+                    // render individually.
+                    const renderItems = buildLaneRenderItems(lane.dots);
+                    return (
+                      <li
+                        key={lane.threadId}
+                        data-testid="thread-timeline-lane"
+                        data-thread-id={lane.threadId}
+                        data-active={isHighlighted ? 'true' : 'false'}
+                        // Same highlight contract as the matching label
+                        // row: identical border + bg so the two columns
+                        // form one continuous highlighted band.
+                        className={`flex items-center rounded-sm pr-1 ${
+                          isHighlighted
+                            ? 'border-y border-slate-200 bg-slate-50'
+                            : 'border-y border-transparent'
+                        }`}
+                        style={{ minHeight: LANE_HEIGHT_PX }}
+                      >
+                        <div
+                          data-timeline-axis=""
+                          className="relative shrink-0"
+                          style={{
+                            width: laneAxisWidth + LANE_RIGHT_PAD_PX,
+                            height: LANE_HEIGHT_PX,
+                          }}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="absolute left-0 top-1/2 h-px -translate-y-1/2 bg-slate-200"
+                            style={{ width: laneAxisWidth }}
                           />
-                        ) : (
-                          <TimelineClusterMark
-                            key={item.cluster.key}
-                            cluster={item.cluster}
-                            xPx={
-                              messagePxByUuid.get(
-                                item.cluster.representativeUuid,
-                              ) ?? 0
-                            }
+                          {renderItems.map((item) =>
+                            item.kind === 'dot' ? (
+                              <TimelineDotMark
+                                key={item.dot.uuid}
+                                dot={item.dot}
+                                xPx={messagePxByUuid.get(item.dot.uuid) ?? 0}
+                              />
+                            ) : (
+                              <TimelineClusterMark
+                                key={item.cluster.key}
+                                cluster={item.cluster}
+                                xPx={
+                                  messagePxByUuid.get(
+                                    item.cluster.representativeUuid,
+                                  ) ?? 0
+                                }
+                              />
+                            ),
+                          )}
+                          {/* Playhead: a thin vertical line that doubles as
+                              the lane-local segment of the global playhead.
+                              Each lane carries its own copy (instead of one
+                              absolute line spanning the column) so it
+                              scrolls with the axis when the column becomes
+                              horizontally scrollable on a long session. A
+                              short CSS transition on `left` smooths the
+                              discrete step between adjacent messages so the
+                              eye can follow the move; the duration is short
+                              enough that the playhead always feels glued to
+                              the input. */}
+                          <span
+                            aria-hidden="true"
+                            data-testid="thread-timeline-playhead"
+                            className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
+                            style={{
+                              left: playheadX,
+                              transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
+                            }}
                           />
-                        ),
-                      )}
-                      {/* Playhead: a thin vertical line that doubles as the
-                          lane-local segment of the global playhead. Each
-                          lane carries its own copy (instead of one absolute
-                          line spanning the body) so it scrolls with the
-                          lanes when the body becomes scrollable on a long
-                          session. A short CSS transition on `left` smooths
-                          the discrete step between adjacent messages so the
-                          eye can follow the move; the duration is short
-                          enough that the playhead always feels glued to the
-                          input. */}
-                      <span
-                        aria-hidden="true"
-                        data-testid="thread-timeline-playhead"
-                        className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
-                        style={{
-                          left: playheadX,
-                          transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
-                        }}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </>
           )}
         </div>
       )}

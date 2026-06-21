@@ -360,7 +360,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
     // The axis width is stubbed at 240; clicking at x=0 lands the playhead at
     // fraction 0, which is msg-a (the earliest message).
-    fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+    fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
       clientX: 0,
     });
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1));
@@ -431,7 +431,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       expect(scrollIntoView).not.toHaveBeenCalled();
 
       // Click at the right edge: msg-b sits at x=1 on lane 2 (cross-lane).
-      fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+      fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
         clientX: 240,
       });
       // The active thread must flip to msg-b's lane (thread 2).
@@ -481,6 +481,64 @@ describe('ThreadTimelineOverlay playhead', () => {
     }
   });
 
+  it('advances exactly one step on a single slow full-notch wheel event', async () => {
+    // Regression for v9: the v9 staircase tripped the 2-step bucket at
+    // exactly one notch's worth of |delta| (100 px), so the user could
+    // never land on the immediate prev/next message — a slow single
+    // mouse-wheel notch always jumped two messages. The fix lifts the
+    // first acceleration bucket above the per-event clamp, so a single
+    // notch of any size up to the clamp always walks exactly one step.
+    const nowMs = 5_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+            makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('240px');
+      // A single full-notch wheel-up event (|deltaY| = 100, the canonical
+      // mouse-wheel notch on Linux/Chrome) lands the playhead on the
+      // immediate previous large turn (msg-b at x=0.5 → 120px), NOT msg-a.
+      const body = screen.getByTestId('thread-timeline-axis-column');
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -100,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('120px');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('advances one step on a leisurely sub-notch wheel event and suppresses page scroll', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
@@ -512,7 +570,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     // first staircase threshold) lands in the slowest bucket → exactly
     // one step back. preventDefault is also called so the page scroll
     // does not run alongside the navigation step.
-    const body = screen.getByTestId('thread-timeline-body');
+    const body = screen.getByTestId('thread-timeline-axis-column');
     const wheel = new WheelEvent('wheel', {
       deltaY: -50,
       bubbles: true,
@@ -554,7 +612,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe('240px');
-    const body = screen.getByTestId('thread-timeline-body');
+    const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
       body.dispatchEvent(
         new WheelEvent('wheel', {
@@ -596,7 +654,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      const body = screen.getByTestId('thread-timeline-body');
+      const body = screen.getByTestId('thread-timeline-axis-column');
       // Step back once (msg-b → msg-a).
       act(() => {
         body.dispatchEvent(
@@ -690,7 +748,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // A sub-notch event keeps the staircase at one step so the
       // assertion targets msg-b (the immediate large neighbour), not
       // msg-a (two steps back, which a 100-px notch would reach).
-      const body = screen.getByTestId('thread-timeline-body');
+      const body = screen.getByTestId('thread-timeline-axis-column');
       act(() => {
         body.dispatchEvent(
           new WheelEvent('wheel', {
@@ -778,7 +836,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
       ).toBe('240px');
-      const body = screen.getByTestId('thread-timeline-body');
+      const body = screen.getByTestId('thread-timeline-axis-column');
       act(() => {
         body.dispatchEvent(
           new WheelEvent('wheel', {
@@ -799,14 +857,11 @@ describe('ThreadTimelineOverlay playhead', () => {
 
   it('accelerates a fast burst across multiple steps via the staircase', async () => {
     // Five wheel events each at one notch (|deltaY| = 100), all within
-    // ~50 ms of each other. Cumulative |delta| after the fifth event is
-    // 500 px → the 300-bucket gives 3 steps on the fifth event, while
-    // earlier events bumped the playhead through smaller buckets. The
-    // assertion is on the final landing position, which captures the full
-    // burst's net advancement: from m9 (start) past several intermediate
-    // steps to m1 (4th from the start, after 1 + 1 + 2 + 2 + 3 = 9 steps
-    // backward, clamped at m0). The exact landing is robust against
-    // staircase tuning so long as the burst trips at least the 300 bucket.
+    // ~50 ms of each other. The first event sits in the slowest bucket
+    // (1 step — a single notch never accelerates) and later events trip
+    // the higher buckets as their cumulative |delta| grows inside the
+    // rolling window. The assertion is on the final landing position,
+    // which captures the full burst's net advancement.
     let nowMs = 5_000;
     const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
     try {
@@ -831,7 +886,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         conversationArticles: [],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      const body = screen.getByTestId('thread-timeline-body');
+      const body = screen.getByTestId('thread-timeline-axis-column');
       // Five back-to-back wheel-up events, 50 ms apart (all inside the
       // 250 ms rolling window).
       for (let i = 0; i < 5; i += 1) {
@@ -847,13 +902,14 @@ describe('ThreadTimelineOverlay playhead', () => {
         nowMs += 50;
       }
       // Cumulative steps walked backward across the five events (each
-      // event reads the cumulative AFTER its own contribution lands, so
-      // the first event already hits the 100 bucket → 2 steps):
-      //   cum=100 → bucket 100 (2) → m9 → m7
-      //   cum=200 → bucket 100 (2) → m7 → m5
-      //   cum=300 → bucket 300 (3) → m5 → m2
-      //   cum=400 → bucket 300 (3) → m2 → m0 (clamped after 2)
-      //   cum=500 → bucket 300 (3) → clamped at m0
+      // event reads the cumulative AFTER its own contribution lands).
+      // The first notch always sits in the slowest bucket (1 step) so
+      // the user can always land on the immediate neighbour:
+      //   cum=100 → bucket 0   (1) → m9 → m8
+      //   cum=200 → bucket 200 (2) → m8 → m6
+      //   cum=300 → bucket 200 (2) → m6 → m4
+      //   cum=400 → bucket 400 (3) → m4 → m1
+      //   cum=500 → bucket 400 (3) → m1 → m0 (clamped after 1)
       // The clamp at m0 (x=0) is the final landing.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
@@ -892,7 +948,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         conversationArticles: [],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      const body = screen.getByTestId('thread-timeline-body');
+      const body = screen.getByTestId('thread-timeline-axis-column');
       // First event: cum=50 → 1 step back (m5 → m4).
       act(() => {
         body.dispatchEvent(
@@ -956,7 +1012,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         conversationArticles: [],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      const body = screen.getByTestId('thread-timeline-body');
+      const body = screen.getByTestId('thread-timeline-axis-column');
       // First trackpad event of a burst (|deltaY| = 10). Cumulative is 10
       // → bucket 0 → 1 step back. m5 → m4 (x=192 on the 6-msg axis).
       act(() => {
@@ -978,10 +1034,14 @@ describe('ThreadTimelineOverlay playhead', () => {
   });
 
   it('treats deltaMode=1 (line) as ~40 px per line via normalization', async () => {
-    // A line-mode event with deltaY = 3 must behave like a pixel-mode
-    // event of ~120 px — i.e. cross the 100-bucket threshold and walk
-    // two large-message steps.
-    const nowMs = 5_000;
+    // A line-mode event with |deltaY| = 3 must behave like a pixel-mode
+    // event of ~120 px — i.e. clamped at the per-event cap (100 px) and
+    // tallied into the rolling-window accumulator at one notch's worth.
+    // Two such back-to-back events together push the cumulative above
+    // the 2-step bucket (200 px) so the burst walks 1 then 2 steps —
+    // 3 large-message steps in total, mirroring how a real line-mode
+    // device emits per-tick scrolls.
+    let nowMs = 5_000;
     const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
     try {
       stubAxisRect({ left: 0, width: 240 });
@@ -1004,23 +1064,28 @@ describe('ThreadTimelineOverlay playhead', () => {
         conversationArticles: [],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      const body = screen.getByTestId('thread-timeline-body');
-      // line-mode event, 3 lines back → 3 * 40 = 120 px → 2-step bucket.
-      act(() => {
-        body.dispatchEvent(
-          new WheelEvent('wheel', {
-            deltaY: -3,
-            deltaMode: 1,
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
-      });
-      // Six messages at x = 0, 48, 96, 144, 192, 240. Starting on m5 (x=240),
-      // two steps back → m3 (x=144).
+      const body = screen.getByTestId('thread-timeline-axis-column');
+      // Two line-mode events 50 ms apart, each 3 lines back → each
+      // contributes 3 * 40 = 120 px clamped to 100 → cum=100 then 200.
+      // Walks 1 step then 2 steps: m5 → m4 → m2.
+      for (let i = 0; i < 2; i += 1) {
+        act(() => {
+          body.dispatchEvent(
+            new WheelEvent('wheel', {
+              deltaY: -3,
+              deltaMode: 1,
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        });
+        nowMs += 50;
+      }
+      // Six messages at x = 0, 48, 96, 144, 192, 240. Starting on m5
+      // (x=240), three steps back → m2 (x=96).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('144px');
+      ).toBe('96px');
     } finally {
       nowSpy.mockRestore();
     }
@@ -1049,15 +1114,29 @@ describe('ThreadTimelineOverlay wheel calculator', () => {
 
   it('maps cumulative |delta| to the staircase step count', () => {
     expect(stepsForCumulativePx(0)).toBe(1);
-    expect(stepsForCumulativePx(99)).toBe(1);
-    expect(stepsForCumulativePx(100)).toBe(2);
-    expect(stepsForCumulativePx(299)).toBe(2);
-    expect(stepsForCumulativePx(300)).toBe(3);
-    expect(stepsForCumulativePx(599)).toBe(3);
-    expect(stepsForCumulativePx(600)).toBe(5);
-    expect(stepsForCumulativePx(999)).toBe(5);
-    expect(stepsForCumulativePx(1000)).toBe(8);
+    // The first acceleration bucket sits strictly above one notch's worth
+    // of clamped |delta| (WHEEL_PER_EVENT_CLAMP_PX = 100), so a single
+    // slow notch (cum=100, the maximum after one event) still walks just
+    // one step — the user can land on the immediate prev/next message.
+    expect(stepsForCumulativePx(100)).toBe(1);
+    expect(stepsForCumulativePx(199)).toBe(1);
+    expect(stepsForCumulativePx(200)).toBe(2);
+    expect(stepsForCumulativePx(399)).toBe(2);
+    expect(stepsForCumulativePx(400)).toBe(3);
+    expect(stepsForCumulativePx(699)).toBe(3);
+    expect(stepsForCumulativePx(700)).toBe(5);
+    expect(stepsForCumulativePx(1099)).toBe(5);
+    expect(stepsForCumulativePx(1100)).toBe(8);
     expect(stepsForCumulativePx(10_000)).toBe(8);
+  });
+
+  it('guarantees at least one step for any nonzero accumulator value', () => {
+    // Regression: a single slow wheel notch (any |delta| up to the
+    // per-event clamp of 100 px) must always advance exactly one step so
+    // the user can always land on the immediate prev/next message. The
+    // first acceleration bucket sits strictly above that ceiling.
+    expect(stepsForCumulativePx(1)).toBe(1);
+    expect(stepsForCumulativePx(WHEEL_PER_EVENT_CLAMP_PX)).toBe(1);
   });
 });
 
@@ -1290,7 +1369,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     // large-b (x=2/3 → 160px), NOT the small tool call between them. The
     // sub-notch keeps the staircase at one step so the assertion targets
     // the immediate large neighbour.
-    const body = screen.getByTestId('thread-timeline-body');
+    const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
       body.dispatchEvent(
         new WheelEvent('wheel', {
@@ -1340,7 +1419,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     });
     await screen.findAllByTestId('thread-timeline-dot');
     // Click at x=120 (midpoint) → small-t is the nearest mark.
-    fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+    fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
       clientX: 120,
     });
     expect(
@@ -1378,7 +1457,7 @@ describe('ThreadTimelineOverlay jump-target highlight', () => {
     });
     await screen.findAllByTestId('thread-timeline-dot');
     // Click on x=0 (msg-a) to drive a same-lane jump.
-    fireEvent.click(screen.getByTestId('thread-timeline-body'), {
+    fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
       clientX: 0,
     });
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
@@ -1442,7 +1521,7 @@ describe('ThreadTimelineOverlay does not override an external active-thread chan
     // Scrub: wheel-up from msg-c → msg-b lands the playhead on thread 1.
     // (Both Navigator and the timeline would each call setActiveThread,
     // so confirm the timeline DID flip the store to thread 1 first.)
-    const body = screen.getByTestId('thread-timeline-body');
+    const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
       body.dispatchEvent(
         new WheelEvent('wheel', {
@@ -1662,80 +1741,188 @@ describe('ThreadTimelineOverlay small-dot clustering', () => {
   });
 });
 
-describe('ThreadTimelineOverlay sticky lane labels', () => {
+describe('ThreadTimelineOverlay two-column layout', () => {
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('pins the label column to the body left during horizontal scroll', async () => {
-    // The label spans the LABEL_COLUMN_PX strip and must stay visible
-    // when the body scrolls horizontally past a long axis. CSS `position:
-    // sticky; left: 0` is the contract; we assert the inline class names
-    // (jsdom does not compute layout, so position/left are tested at the
-    // style/class level — the real browser provides the actual sticky
-    // behaviour).
+  it('renders the label column and axis column as siblings inside the body', async () => {
+    // Structural contract: the timeline body is a flex row holding two
+    // sibling columns — a static label column on the left, and the
+    // horizontally-scrollable axis column on the right. Dots and the
+    // playhead live inside the axis column so they can pan out from
+    // under the labels without sliding behind them (the v9 sticky-label
+    // layout had dots passing behind the labels during horizontal pan).
     const threads = [makeThread(1)];
     renderOverlay({ threads, messagesByThread: new Map() });
-    const label = await screen.findByTestId('thread-timeline-lane-label');
-    expect(label.className).toMatch(/\bsticky\b/);
-    expect(label.className).toMatch(/\bleft-0\b/);
-    // Label needs an opaque background so axis dots cannot show through
-    // it once the body scrolls horizontally — match `bg-white` (inactive)
-    // or `bg-slate-50` (active highlight).
-    expect(label.className).toMatch(/bg-(white|slate-50)/);
+    const labelColumn = await screen.findByTestId(
+      'thread-timeline-label-column',
+    );
+    const axisColumn = await screen.findByTestId(
+      'thread-timeline-axis-column',
+    );
+    // Both columns are direct children of the body — siblings, not
+    // nested — so the body's flex row lays them out side by side.
+    const body = screen.getByTestId('thread-timeline-body');
+    expect(labelColumn.parentElement).toBe(body);
+    expect(axisColumn.parentElement).toBe(body);
   });
 
-  it('sizes the lane list to the full axis width so sticky spans the whole scroll range', async () => {
-    // Regression: v7 sized the lane `<ul>` only to the body's content
-    // width (default column-flex), so each `<li>` was body-wide while its
-    // `shrink-0` children (label + axis) overflowed to the right. The
-    // sticky label's containing block — the `<li>` — then ended at the
-    // body's right edge; once the user scrolled past
-    // `(li_width - LABEL_COLUMN_PX)` the label hit the `<li>`'s right
-    // edge and stopped following the viewport, sliding leftward out of
-    // view. The fix is `w-max min-w-full` on the `<ul>` so the list
-    // grows to the natural content width and sticky spans the FULL
-    // scroll range.
-    const threads = [makeThread(1)];
-    renderOverlay({ threads, messagesByThread: new Map() });
-    // The lane list is the only `<ul>` inside the body.
-    const body = await screen.findByTestId('thread-timeline-body');
-    const ul = body.querySelector('ul');
-    expect(ul).not.toBeNull();
-    // `w-max` widens the list to its widest lane, `min-w-full` keeps it
-    // at least body-wide so a short session does not collapse.
-    expect(ul!.className).toMatch(/\bw-max\b/);
-    expect(ul!.className).toMatch(/\bmin-w-full\b/);
-  });
-
-  it('keeps the sticky label rendered when the body is scrolled to its maximum', async () => {
-    // Drive the body's `scrollLeft` to the full scroll range and assert
-    // the sticky label is still in the DOM with its `position: sticky;
-    // left: 0` contract intact. jsdom does not compute layout, so we
-    // cannot read a bounding rect that reflects sticky; the structural
-    // checks (class still applied, element still mounted at the
-    // leftmost position of its lane) are the testable surface for the
-    // FULL-scroll-range guarantee.
+  it('isolates horizontal scroll to the axis column so labels stay put', async () => {
+    // The outer body owns the vertical scroll only; the axis column owns
+    // horizontal scroll on its own so a wide axis pans under the labels
+    // without dragging them along. A regression that reattaches
+    // `overflow-x: auto` to the body (or removes it from the axis column)
+    // would surface here.
     const threads = [makeThread(1)];
     renderOverlay({ threads, messagesByThread: new Map() });
     const body = await screen.findByTestId('thread-timeline-body');
-    // Stub the scroll geometry: a body of 200px viewport with 1200px of
-    // content (so a real browser scrolls 1000px horizontally before the
-    // right edge); set scrollLeft to that maximum.
-    Object.defineProperty(body, 'clientWidth', { value: 200, configurable: true });
-    Object.defineProperty(body, 'scrollWidth', { value: 1200, configurable: true });
-    body.scrollLeft = body.scrollWidth - body.clientWidth;
-    // The label is still the first child of its `<li>` (sticky preserves
-    // DOM order — only paint shifts), and the sticky/left-0 contract is
-    // still on it. A regression where the label gets unmounted, hidden,
-    // or loses the sticky class would fail here.
-    const lane = body.querySelector('li[data-testid="thread-timeline-lane"]');
-    expect(lane).not.toBeNull();
-    const label = lane!.querySelector('[data-testid="thread-timeline-lane-label"]');
-    expect(label).not.toBeNull();
-    expect(label).toBe(lane!.firstElementChild);
-    expect((label as HTMLElement).className).toMatch(/\bsticky\b/);
-    expect((label as HTMLElement).className).toMatch(/\bleft-0\b/);
+    expect(body.className).toMatch(/\boverflow-y-auto\b/);
+    expect(body.className).not.toMatch(/\boverflow-x\b/);
+    const labelColumn = await screen.findByTestId(
+      'thread-timeline-label-column',
+    );
+    expect(labelColumn.className).not.toMatch(/\boverflow-x\b/);
+    const axisColumn = await screen.findByTestId(
+      'thread-timeline-axis-column',
+    );
+    expect(axisColumn.className).toMatch(/\boverflow-x-auto\b/);
+  });
+
+  it('reflects the lane active highlight in both columns simultaneously', async () => {
+    // The active lane is a single visual band that must span both columns
+    // — a half-highlighted lane would read as a bug. Each column's
+    // matching row carries the same highlight classes (border-y +
+    // bg-slate-50) so the two halves line up into one continuous band.
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({
+      threads,
+      messagesByThread: new Map(),
+      activeThreadId: 2,
+    });
+    const labelRows = await screen.findAllByTestId(
+      'thread-timeline-lane-label-row',
+    );
+    const axisRows = await screen.findAllByTestId('thread-timeline-lane');
+    // Both lanes are present in both columns and indexed in the same
+    // order — so the active highlight on lane 2 lands at the same row
+    // index on both sides.
+    expect(labelRows).toHaveLength(2);
+    expect(axisRows).toHaveLength(2);
+    expect(labelRows[1]).toHaveAttribute('data-active', 'true');
+    expect(axisRows[1]).toHaveAttribute('data-active', 'true');
+    expect(labelRows[0]).toHaveAttribute('data-active', 'false');
+    expect(axisRows[0]).toHaveAttribute('data-active', 'false');
+    // The visual highlight tokens are identical so the band reads as
+    // continuous across the two columns.
+    expect(labelRows[1].className).toMatch(/bg-slate-50/);
+    expect(axisRows[1].className).toMatch(/bg-slate-50/);
+    expect(labelRows[1].className).toMatch(/border-slate-200/);
+    expect(axisRows[1].className).toMatch(/border-slate-200/);
+  });
+
+  it('keeps the label column out of the wheel-scrub scope', async () => {
+    // A wheel event over the label column must NOT scrub the timeline —
+    // labels behave like normal page content. The wheel listener attaches
+    // to the axis column alone, and wheel events do not bubble from a
+    // parent to a child (axis is the body's sibling of labels, not its
+    // descendant), so dispatching the wheel on the label column should
+    // leave the playhead untouched.
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Initial playhead lands on the latest message (msg-b, x=1 → 240px).
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
+    // Wheel-up on the label column has no effect.
+    const labelColumn = screen.getByTestId('thread-timeline-label-column');
+    act(() => {
+      labelColumn.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
+    // A wheel on the axis column DOES scrub, proving the listener is
+    // wired — just scoped to the right column. With only two messages
+    // and the playhead starting on the last one, one step back lands on
+    // msg-a at x=0.
+    const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+    act(() => {
+      axisColumn.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('0px');
+  });
+
+  it('ignores clicks on the label column', async () => {
+    // Same scope contract for clicks: a click on a label is not a scrub
+    // intent. The handler attaches to the axis column only.
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // The playhead initially sits on msg-b (x=240).
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
+    // A click on the label column with clientX=0 (where msg-a would land
+    // if the axis click handler picked it up) must NOT move the playhead.
+    fireEvent.click(screen.getByTestId('thread-timeline-label-column'), {
+      clientX: 0,
+    });
+    expect(
+      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+    ).toBe('240px');
   });
 });
