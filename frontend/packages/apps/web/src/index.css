@@ -11,23 +11,23 @@
  */
 :root {
   /*
-   * Overlay layout. The transcript's composer and breadcrumb float as cards
-   * over the scrolling body (see TranscriptPane); the body reserves fixed
-   * padding so resting content clears them. Each reserve is derived as
-   * inset + card height, so the gap and the reserves can never drift apart:
+   * Overlay layout. The transcript's composer floats as a card over the
+   * scrolling body (see TranscriptPane); the body reserves fixed padding so
+   * resting content clears it. The reserve is derived as inset + card height,
+   * so the gap and the reserve can never drift apart:
    *
-   *   --delta-overlay-inset            0.75rem  (the cards' inset-*-3 of old)
+   *   --delta-overlay-inset            0.75rem  (the card's inset-*-3 of old)
    *   --delta-composer-body-reserve    0.75 + 13.25 = 14rem   (pb-56 of old)
-   *   --delta-breadcrumb-body-reserve  0.75 + 2.75  = 3.5rem  (pt-14 of old)
+   *
+   * The breadcrumb used to float as another card with its own
+   * `--delta-breadcrumb-body-reserve`; it is now an in-flow element at the
+   * top of the body (alongside the thread-timeline card and the Terminal
+   * toggle), so no top reserve is needed.
    */
   --delta-overlay-inset: 0.75rem;
   --delta-composer-card-reserve: 13.25rem;
-  --delta-breadcrumb-card-reserve: 2.75rem;
   --delta-composer-body-reserve: calc(
     var(--delta-overlay-inset) + var(--delta-composer-card-reserve)
-  );
-  --delta-breadcrumb-body-reserve: calc(
-    var(--delta-overlay-inset) + var(--delta-breadcrumb-card-reserve)
   );
 
   /* The embedded terminal's background — slate-900, shared by the panel body
@@ -174,22 +174,6 @@ body {
   .delta-timeline-jump-highlight > .max-w-\[85\%\] {
     animation: none;
   }
-}
-
-/*
- * Scroll alignment for transcript message articles. When the thread-timeline
- * overlay jumps to a message it uses `scrollIntoView({ block: 'start' })`,
- * which puts the article flush with the top of the scrollable body — but
- * TranscriptPane's breadcrumb card floats over that top edge on subthreads
- * (see --delta-breadcrumb-body-reserve). `scroll-margin-top` shifts the
- * landing position down by the same reserve so the article lands just below
- * the breadcrumb, mirroring how `pt-breadcrumb-reserve` already shifts
- * resting content. On the main thread (no breadcrumb) the small margin is
- * invisible — it only adds whitespace above the chosen message, which is
- * benign.
- */
-article[data-message-uuid] {
-  scroll-margin-top: var(--delta-breadcrumb-body-reserve);
 }
 
 .markdown-body {

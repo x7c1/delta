@@ -277,10 +277,10 @@ export function useTimelineExpanded(): [boolean, () => void] {
  * Using `block: 'start'` rather than the v6 `block: 'center'` means the
  * destination message becomes the first line the eye reads on the next
  * paint — a centred message wastes half the viewport above the line the
- * user just asked to jump to. The transcript body's floating breadcrumb
- * overlay would otherwise hide the top of the article; that is compensated
- * by a global `scroll-margin-top` rule on `article[data-message-uuid]` (see
- * index.css) so the article scrolls to just below the breadcrumb.
+ * user just asked to jump to. The top region (breadcrumb / timeline /
+ * Terminal button) lives inside the same scroll container and can be
+ * scrolled out of view, so no global `scroll-margin-top` compensation is
+ * needed — the article lands flush at the top of the visible viewport.
  *
  * The `scrollIntoView` call is guarded against environments where it is
  * unavailable (jsdom does not implement it on every element by default), so
@@ -516,6 +516,16 @@ export const MARK_CLUSTER_RING_COLOR = 'outline-slate-600';
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
 const LANE_RIGHT_PAD_PX = 16;
+/**
+ * Tailwind class string for the collapsed-state toggle button. Mirrors the
+ * Terminal button's shape exactly so the two buttons sit side-by-side in the
+ * top region without one reading as a different control type. The Terminal
+ * button lives in `WorkspaceScreen` and uses the same class chain — kept in
+ * sync via `TERMINAL_TOGGLE_BUTTON_CLASS` over there.
+ */
+export const TIMELINE_TOGGLE_BUTTON_CLASS =
+  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50';
+
 /**
  * Width reserved on the LEFT inside the lane axis so the leftmost mark — a
  * large 6 px dot centred on x=0 — is not clipped by the axis container's
@@ -1373,11 +1383,43 @@ export function ThreadTimelineOverlay({
     activeThreadId,
   ]);
 
+  // The collapsed state is just a single button styled to match the
+  // Terminal toggle that sits alongside it in the top region (see
+  // {@link TIMELINE_TOGGLE_BUTTON_CLASS}). The expanded state grows
+  // downward into a card whose chrome (border / shadow / background)
+  // matches the breadcrumb and composer cards (the shared
+  // {@link FLOATING_CARD_CLASS} family in `TranscriptPane`). Keeping the
+  // collapsed toggle visually identical to Terminal — and the expanded
+  // card visually identical to the other delta UI cards — is what makes
+  // the timeline land in the top region without reading as a third style
+  // of chrome.
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        onClick={toggle}
+        data-testid="thread-timeline-toggle"
+        data-expanded="false"
+        aria-expanded={false}
+        aria-label="Thread timeline"
+        className={TIMELINE_TOGGLE_BUTTON_CLASS}
+      >
+        <span
+          aria-hidden="true"
+          className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300"
+        />
+        Thread timeline
+        <span aria-hidden="true" className="ml-auto text-slate-400">
+          ▸
+        </span>
+      </button>
+    );
+  }
   return (
     <section
       data-testid="thread-timeline-overlay"
-      data-expanded={expanded ? 'true' : 'false'}
-      className="select-none rounded-md border border-slate-200 bg-white text-xs text-slate-600 shadow-sm"
+      data-expanded="true"
+      className="select-none rounded-md border border-slate-300 bg-white text-xs text-slate-600 shadow-md"
       aria-label="Subthread timeline"
     >
       <button
@@ -1385,19 +1427,17 @@ export function ThreadTimelineOverlay({
         onClick={toggle}
         data-testid="thread-timeline-toggle"
         aria-expanded={expanded}
-        className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left font-medium text-slate-500 transition-colors hover:bg-slate-50"
+        className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
       >
         <span className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
-            className={`inline-block h-1.5 w-1.5 rounded-full ${
-              expanded ? 'bg-slate-500' : 'bg-slate-300'
-            }`}
+            className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500"
           />
           Thread timeline
         </span>
         <span aria-hidden="true" className="text-slate-400">
-          {expanded ? '▾' : '▸'}
+          ▾
         </span>
       </button>
       {expanded && (

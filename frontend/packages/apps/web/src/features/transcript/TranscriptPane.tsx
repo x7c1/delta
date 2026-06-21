@@ -64,11 +64,12 @@ const OVERLAY_INSET_FALLBACK_PX = 12;
 const BODY_BOTTOM_READING_GAP_PX = 192;
 
 /**
- * Shared chrome for the floating cards that hover over the transcript (the
- * breadcrumb, the bottom notices card, and the composer card): a full border,
- * rounded corners, an opaque white fill that occludes the transcript beneath,
- * and a shadow so the card reads as lifted above the conversation rather than
- * fused to it. Per-card padding is applied at each use site.
+ * Shared chrome for the transcript pane's cards: the floating bottom notices
+ * card and composer card that hover over the conversation, plus the in-flow
+ * breadcrumb card that sits in the top region above it. A full border,
+ * rounded corners, an opaque white fill that occludes the conversation
+ * beneath, and a shadow so the card reads as lifted above its surroundings
+ * rather than fused to them. Per-card padding is applied at each use site.
  */
 const FLOATING_CARD_CLASS =
   'rounded-md border border-slate-300 bg-white shadow-md';
@@ -110,6 +111,15 @@ export interface TranscriptPaneProps {
    * user must select a directory before they can reach the new-session screen.
    */
   workdirMandatory?: boolean;
+  /**
+   * The "Terminal" reopen button, rendered at the right end of the top region
+   * (next to the collapsed timeline toggle) so the two controls share one row
+   * and the timeline card can grow downward without overlapping anything else.
+   * Optional: `null` (or absent) hides the slot entirely — used while the
+   * terminal pane is already open, or in tests that do not exercise the
+   * terminal at all.
+   */
+  terminalButton?: ReactNode;
 }
 
 /**
@@ -127,6 +137,7 @@ export function TranscriptPane({
   readOnly,
   newSession = false,
   workdirMandatory = false,
+  terminalButton = null,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -765,20 +776,6 @@ export function TranscriptPane({
           </div>
         )}
 
-        {/* Subthread timeline footer. A swim-lane row per (sub)thread with a dot
-            per message; hovering a dot scrolls the matching message into view.
-            Always present for an existing session so the time order and
-            current position are visible at a glance; collapsed by default and
-            toggleable, preference persisted per device. Omitted on the
-            new-session screen where there are no threads to chart yet. */}
-        {!newSession && activeThread !== null && (
-          <ThreadTimelineOverlay
-            threads={threads}
-            activeThreadId={activeThread.id}
-            conversationBodyRef={bodyRef}
-          />
-        )}
-
         {/* Composer card: the new-session launch pickers (which parameterize the
             spawn) sit directly above the input they configure. The focused
             session's context-window usage rides the card's TOP EDGE as a thin
@@ -921,15 +918,53 @@ export function TranscriptPane({
     return () => observer.disconnect();
   }, [bottomContent]);
 
-  // The breadcrumb gets the same floating-card treatment as the composer, pinned
-  // at the top-left and hugging its own width (rather than a full-width header
-  // bar). It floats over the transcript; the body reserves a fixed top padding
-  // (below) so the first turn is not hidden behind it at rest.
-  const breadcrumbOverlay = isOnSubThread && (
-    <div
-      className={`pointer-events-auto absolute left-overlay-inset top-overlay-inset max-w-[calc(100%-2*var(--delta-overlay-inset))] px-3 py-1.5 ${FLOATING_CARD_CLASS}`}
-    >
+  // The breadcrumb is a normal in-flow card at the top of the body. It used
+  // to float as an absolute card pinned to top-left, but that left no clean
+  // home for the thread timeline (which now also lives in the top region).
+  // Putting the breadcrumb in flow lets the timeline card sit above it and
+  // the Terminal button sit on the same row as the collapsed timeline
+  // toggle, with no element ever overlapping another.
+  const breadcrumbCard = isOnSubThread && (
+    <div className={`${FLOATING_CARD_CLASS} self-start px-3 py-1.5`}>
       <Breadcrumb items={breadcrumbItems} />
+    </div>
+  );
+
+  // The top region: rendered above the conversation in normal flow. The
+  // thread timeline (a card-or-toggle, depending on its expanded state)
+  // sits on the left of the top row; the Terminal reopen button sits on
+  // the right of the same row, so the two controls share one container.
+  // When the timeline is collapsed, its toggle is styled to match the
+  // Terminal button (see `TIMELINE_TOGGLE_BUTTON_CLASS`) so the row reads
+  // as two siblings of the same kind. When the timeline is expanded, the
+  // card grows downward inside the same top region and the Terminal
+  // button stays at the right of the top row above it. Omitted entirely
+  // on the new-session screen and when there is no active thread, where
+  // there are no threads to chart yet — the Terminal button still rides
+  // along on its own when present.
+  const showTimeline = !newSession && activeThread !== null;
+  const topRegion = (showTimeline || terminalButton || breadcrumbCard) && (
+    <div
+      data-testid="transcript-top-region"
+      className="flex flex-col gap-2 px-3 pt-3"
+    >
+      {(showTimeline || terminalButton) && (
+        <div className="flex items-start justify-between gap-2">
+          {showTimeline && activeThread !== null ? (
+            <div className="min-w-0 flex-1">
+              <ThreadTimelineOverlay
+                threads={threads}
+                activeThreadId={activeThread.id}
+                conversationBodyRef={bodyRef}
+              />
+            </div>
+          ) : (
+            <span className="flex-1" />
+          )}
+          {terminalButton}
+        </div>
+      )}
+      {breadcrumbCard}
     </div>
   );
 
@@ -943,17 +978,17 @@ export function TranscriptPane({
       // tail stays readable however tall the input gets. Until the first
       // measurement lands (and whenever there is no overlay) it falls back to the
       // fixed `--delta-composer-body-reserve` token, so the body never
-      // under-reserves on first paint. The top breadcrumb reserve stays a fixed
-      // class: the breadcrumb card does not grow, so a measured value would buy
-      // nothing.
+      // under-reserves on first paint. No top reserve is needed: the breadcrumb
+      // and thread timeline now sit in the body's normal flow (the `topRegion`
+      // rendered first below), so the first conversation turn already starts
+      // below them without an absolute-card overlap to compensate for.
+      //
       // `scrollbar-none` hides the body's scrollbar entirely (it still scrolls
       // via wheel/trackpad): the conversation reads as a clean page, and the
-      // floating composer/breadcrumb cards already sit over the right edge where
-      // a bar would otherwise run. `scrollbar-none` is declared after Panel's
+      // floating composer card already sits over the right edge where a bar
+      // would otherwise run. `scrollbar-none` is declared after Panel's
       // default `scrollbar-hover`, so it wins when both are present.
-      bodyClassName={
-        isOnSubThread ? 'scrollbar-none pt-breadcrumb-reserve' : 'scrollbar-none'
-      }
+      bodyClassName="scrollbar-none"
       bodyStyle={{
         paddingBottom:
           bottomReserve !== null
@@ -965,19 +1000,20 @@ export function TranscriptPane({
           <span className="text-sm font-semibold text-slate-700">
             New session
           </span>
-        ) : // `undefined` (not `null`) so Panel drops the header bar entirely. The
-        // breadcrumb is rendered as a floating card via `overlay` instead, and on
-        // the main thread there is nothing to show — no empty strip above.
+        ) : // `undefined` (not `null`) so Panel drops the header bar entirely.
+        // The breadcrumb / timeline / Terminal-toggle are rendered in flow at
+        // the top of the body via `topRegion`; on the main thread there is no
+        // breadcrumb but the timeline + Terminal still ride along.
         undefined
       }
       overlay={
         <>
-          {breadcrumbOverlay}
           {permissionOverlay}
           {bottomOverlay}
         </>
       }
     >
+      {topRegion}
       {newSession && (
         <>
           <p
