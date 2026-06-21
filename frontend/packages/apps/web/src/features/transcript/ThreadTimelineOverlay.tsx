@@ -14,11 +14,13 @@ import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
   buildGlobalXMap,
+  buildLaneRenderItems,
   buildLargeSortedMessages,
   buildSortedMessages,
   buildTimelineLanes,
   computeTimeRange,
   findNearestMessageIndex,
+  type LaneCluster,
   type SortedMessage,
   type TimelineDot,
   type TimelineDotSize,
@@ -53,23 +55,28 @@ const PLAYHEAD_TRANSITION_MS = 100;
 
 /**
  * CSS class added to a transcript message article right after a wheel/click
- * jump scrolls it into view, then removed after a short flash so the eye
- * spots where the navigation landed. Matches the keyframe animation under
- * `.delta-timeline-jump-flash` in index.css.
+ * jump scrolls it into view, then removed after the highlight fades so the
+ * eye spots where the navigation landed. The class drives a one-shot
+ * background-color fade on the inner message bubble — no overlay layer, the
+ * highlight lands directly on the element MessageItem paints with the rest
+ * color. Matches the rule under `.delta-timeline-jump-highlight` in
+ * index.css.
  *
  * Exported so a test can assert the class is applied without depending on
  * the literal string in two places.
  */
-export const TIMELINE_JUMP_FLASH_CLASS = 'delta-timeline-jump-flash';
+export const TIMELINE_JUMP_HIGHLIGHT_CLASS = 'delta-timeline-jump-highlight';
 
 /**
- * Duration (ms) the {@link TIMELINE_JUMP_FLASH_CLASS} stays applied. The
- * keyframe animation itself fades in and back out over this window; the
- * class is removed afterwards so a subsequent jump to the same message can
- * trigger the animation again. Tuned to ~700 ms — long enough for the eye
- * to catch, short enough that it does not feel like a lingering badge.
+ * Duration (ms) the {@link TIMELINE_JUMP_HIGHLIGHT_CLASS} stays applied. The
+ * CSS animation under that class fades the temporary amber background back
+ * to fully transparent over this window, exposing the bubble's resting
+ * color; once the class is removed the bubble is at its normal color and a
+ * subsequent jump to the same message can re-apply the highlight cleanly.
+ * Tuned slightly longer than the v6 flash (~1.5 s) so the fade reads as a
+ * smooth transition, not a quick blink.
  */
-export const TIMELINE_JUMP_FLASH_MS = 700;
+export const TIMELINE_JUMP_HIGHLIGHT_MS = 1500;
 
 /**
  * Read the persisted expanded preference; defaults to collapsed when no
@@ -124,9 +131,18 @@ export function useTimelineExpanded(): [boolean, () => void] {
 }
 
 /**
- * Scroll the matching transcript message into view, centred. Scoped to the
- * given container so a duplicate `data-message-uuid` outside the transcript
- * (e.g. in a portaled preview) cannot misdirect the jump.
+ * Scroll the matching transcript message into view, aligned to the top of
+ * the scrollable body. Scoped to the given container so a duplicate
+ * `data-message-uuid` outside the transcript (e.g. in a portaled preview)
+ * cannot misdirect the jump.
+ *
+ * Using `block: 'start'` rather than the v6 `block: 'center'` means the
+ * destination message becomes the first line the eye reads on the next
+ * paint — a centred message wastes half the viewport above the line the
+ * user just asked to jump to. The transcript body's floating breadcrumb
+ * overlay would otherwise hide the top of the article; that is compensated
+ * by a global `scroll-margin-top` rule on `article[data-message-uuid]` (see
+ * index.css) so the article scrolls to just below the breadcrumb.
  *
  * The `scrollIntoView` call is guarded against environments where it is
  * unavailable (jsdom does not implement it on every element by default), so
@@ -144,26 +160,29 @@ export function scrollMessageIntoView(
     `[data-message-uuid="${CSS.escape(uuid)}"]`,
   );
   if (target && typeof target.scrollIntoView === 'function') {
-    target.scrollIntoView({ block: 'center' });
+    target.scrollIntoView({ block: 'start' });
   }
 }
 
 /**
- * Briefly mark the matching transcript message with the jump-flash class so
- * the eye spots where the navigation landed. Scoped to the given container
- * for the same reason as {@link scrollMessageIntoView}: a duplicate
- * `data-message-uuid` outside the transcript (e.g. in a portaled preview)
- * must not steal the flash.
+ * Briefly mark the matching transcript message with the jump-highlight class
+ * so the eye spots where the navigation landed. The class sets a temporary
+ * background-color on the bubble and the CSS transition fades it back to the
+ * resting color — no overlay layer, the highlight lands directly on the
+ * message body. Scoped to the given container for the same reason as
+ * {@link scrollMessageIntoView}: a duplicate `data-message-uuid` outside
+ * the transcript (e.g. in a portaled preview) must not steal the highlight.
  *
- * Removing the class after {@link TIMELINE_JUMP_FLASH_MS} lets a subsequent
- * jump to the same message re-trigger the animation. The cleanup uses
- * `window.setTimeout` so the call is no-op safe under SSR or jsdom without
- * native timers (a missing `setTimeout` would just skip the flash).
+ * Removing the class after {@link TIMELINE_JUMP_HIGHLIGHT_MS} lets a
+ * subsequent jump to the same message re-apply the highlight from rest.
+ * The cleanup uses `window.setTimeout` so the call is no-op safe under SSR
+ * or jsdom without native timers (a missing `setTimeout` would just skip
+ * the highlight).
  *
  * Returns a cancel handle the caller can fire to clear the class early if
  * the component unmounts or a superseding jump arrives before the timer.
  */
-export function flashMessageJump(
+export function highlightMessageJump(
   container: HTMLElement | null,
   uuid: string,
 ): () => void {
@@ -176,25 +195,26 @@ export function flashMessageJump(
   if (!target) {
     return () => undefined;
   }
-  // Toggle the class off first so a repeat jump to the same message re-runs
-  // the keyframe animation (CSS animations only re-fire when the class
-  // changes; setting it to the same value is a no-op).
-  target.classList.remove(TIMELINE_JUMP_FLASH_CLASS);
+  // Toggle the class off first so a repeat jump to the same message can
+  // re-trigger the highlight cleanly (the CSS sets the temporary background
+  // when the class is present; removing it first then adding it is what
+  // restarts the visible transition).
+  target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
   // Force a reflow so the remove + add cycle is two paint frames apart and
-  // the keyframe restarts cleanly. Reading `offsetWidth` is the standard
+  // the transition restarts cleanly. Reading `offsetWidth` is the standard
   // trick; the assignment to a void variable keeps the side effect alive
   // under aggressive minifiers.
   void (target as HTMLElement).offsetWidth;
-  target.classList.add(TIMELINE_JUMP_FLASH_CLASS);
+  target.classList.add(TIMELINE_JUMP_HIGHLIGHT_CLASS);
   if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') {
-    return () => target.classList.remove(TIMELINE_JUMP_FLASH_CLASS);
+    return () => target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
   }
   const handle = window.setTimeout(() => {
-    target.classList.remove(TIMELINE_JUMP_FLASH_CLASS);
-  }, TIMELINE_JUMP_FLASH_MS);
+    target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
+  }, TIMELINE_JUMP_HIGHLIGHT_MS);
   return () => {
     window.clearTimeout(handle);
-    target.classList.remove(TIMELINE_JUMP_FLASH_CLASS);
+    target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
   };
 }
 
@@ -212,10 +232,10 @@ export function scheduleScrollAfterRender(
   container: HTMLElement | null,
   uuid: string,
 ): () => void {
-  let flashCancel: (() => void) | null = null;
+  let highlightCancel: (() => void) | null = null;
   const run = () => {
     scrollMessageIntoView(container, uuid);
-    flashCancel = flashMessageJump(container, uuid);
+    highlightCancel = highlightMessageJump(container, uuid);
   };
   if (
     typeof window !== 'undefined' &&
@@ -224,13 +244,13 @@ export function scheduleScrollAfterRender(
     const handle = window.requestAnimationFrame(run);
     return () => {
       window.cancelAnimationFrame(handle);
-      flashCancel?.();
+      highlightCancel?.();
     };
   }
   const handle = setTimeout(run, 0);
   return () => {
     clearTimeout(handle);
-    flashCancel?.();
+    highlightCancel?.();
   };
 }
 
@@ -269,6 +289,13 @@ const MIN_LANE_AXIS_PX = 240;
  */
 const MARK_LARGE_PX = 6;
 const MARK_SMALL_PX = 4;
+/**
+ * Diameter (px) of a cluster mark — slightly larger than a lone small dot so
+ * the eye distinguishes the two: a single small dot is one tool call, a
+ * cluster is "several here in a row". Kept below {@link MARK_LARGE_PX} so a
+ * cluster still reads as auxiliary chatter, not a headline turn.
+ */
+const MARK_CLUSTER_PX = 5;
 /** Width reserved on the left for lane labels. */
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
@@ -536,10 +563,10 @@ export function ThreadTimelineOverlay({
     const container = conversationBodyRef.current;
     if (current.threadId === activeThreadRef.current) {
       // Same lane: the target message is already in the DOM, scroll right
-      // away. No frame deferral, no thread switch. The flash fires right
-      // after the scroll so the eye spots where the playhead landed.
+      // away. No frame deferral, no thread switch. The highlight fires
+      // right after the scroll so the eye spots where the playhead landed.
       scrollMessageIntoView(container, current.uuid);
-      pendingScrollCancelRef.current = flashMessageJump(
+      pendingScrollCancelRef.current = highlightMessageJump(
         container,
         current.uuid,
       );
@@ -764,13 +791,22 @@ export function ThreadTimelineOverlay({
             <ul className="flex flex-col gap-0.5" role="list">
               {lanes.map((lane) => {
                 const isHighlighted = lane.threadId === highlightedThreadId;
+                // Collapse runs of 2+ consecutive small dots within this lane
+                // into one cluster mark so a long stretch of tool calls / meta
+                // lines no longer floods the timeline. Lone small dots and
+                // every large dot still render individually.
+                const renderItems = buildLaneRenderItems(lane.dots);
                 return (
                   <li
                     key={lane.threadId}
                     data-testid="thread-timeline-lane"
                     data-thread-id={lane.threadId}
                     data-active={isHighlighted ? 'true' : 'false'}
-                    className={`flex items-center gap-2 rounded-sm px-1 ${
+                    // No `gap-2`: the sticky label carries its own right
+                    // padding so its background covers right up to the axis
+                    // — otherwise dots could show through the gap as the
+                    // body scrolls horizontally past the label.
+                    className={`flex items-center rounded-sm pr-1 ${
                       isHighlighted
                         ? 'border-y border-slate-200 bg-slate-50'
                         : 'border-y border-transparent'
@@ -780,9 +816,17 @@ export function ThreadTimelineOverlay({
                     <span
                       title={lane.tooltip}
                       data-testid="thread-timeline-lane-label"
-                      className={`block shrink-0 truncate font-mono text-[0.65rem] ${
+                      // The label column stays pinned to the left edge of
+                      // the body during horizontal scroll (`position: sticky;
+                      // left: 0`) so "which lane is which" never scrolls off
+                      // screen on a dense session. The background color
+                      // matches the lane (active = `bg-slate-50`, otherwise
+                      // the body's `bg-white`) so axis dots cannot show
+                      // through behind the label; the surrounding `gap-2`
+                      // would otherwise leave the label transparent.
+                      className={`sticky left-0 z-10 block shrink-0 truncate py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
                         lane.isMain ? 'text-slate-700' : 'text-slate-500'
-                      }`}
+                      } ${isHighlighted ? 'bg-slate-50' : 'bg-white'}`}
                       style={{ width: LABEL_COLUMN_PX }}
                     >
                       {lane.label}
@@ -800,13 +844,25 @@ export function ThreadTimelineOverlay({
                         className="absolute left-0 top-1/2 h-px -translate-y-1/2 bg-slate-200"
                         style={{ width: laneAxisWidth }}
                       />
-                      {lane.dots.map((dot) => (
-                        <TimelineDotMark
-                          key={dot.uuid}
-                          dot={dot}
-                          xPx={messagePxByUuid.get(dot.uuid) ?? 0}
-                        />
-                      ))}
+                      {renderItems.map((item) =>
+                        item.kind === 'dot' ? (
+                          <TimelineDotMark
+                            key={item.dot.uuid}
+                            dot={item.dot}
+                            xPx={messagePxByUuid.get(item.dot.uuid) ?? 0}
+                          />
+                        ) : (
+                          <TimelineClusterMark
+                            key={item.cluster.key}
+                            cluster={item.cluster}
+                            xPx={
+                              messagePxByUuid.get(
+                                item.cluster.representativeUuid,
+                              ) ?? 0
+                            }
+                          />
+                        ),
+                      )}
                       {/* Playhead: a thin vertical line that doubles as the
                           lane-local segment of the global playhead. Each
                           lane carries its own copy (instead of one absolute
@@ -885,6 +941,48 @@ function TimelineDotMark({ dot, xPx }: TimelineDotMarkProps) {
         left: xPx,
         width: diameter,
         height: diameter,
+      }}
+    />
+  );
+}
+
+interface TimelineClusterMarkProps {
+  cluster: LaneCluster;
+  /**
+   * Absolute x in pixels for the cluster's representative (first member),
+   * resolved through the global x map shared across every lane. The cluster
+   * renders centred on this x; clicking near it snaps the playhead to the
+   * representative message via the global nearest-message lookup.
+   */
+  xPx: number;
+}
+
+/**
+ * A run of 2+ consecutive auxiliary marks (tool calls, meta lines, question
+ * cards) collapsed into one visible disc. The cluster sits at the leftmost
+ * member's x (its representative), so a left-to-right read of the lane stays
+ * chronological, and a click that lands closest to it snaps the playhead to
+ * the representative message via the global nearest-message lookup.
+ *
+ * The cluster is rendered slightly larger than a lone small dot
+ * ({@link MARK_CLUSTER_PX} vs {@link MARK_SMALL_PX}) so the eye can tell the
+ * two apart at a glance — "one tool call" versus "a run of N here". The data
+ * attributes carry the representative uuid (matching a regular dot's hook
+ * surface) and the member count for downstream diagnostics / tests.
+ */
+function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
+  return (
+    <span
+      data-testid="thread-timeline-cluster"
+      data-message-uuid={cluster.representativeUuid}
+      data-thread-id={cluster.threadId}
+      data-cluster-member-count={cluster.memberCount}
+      aria-hidden="true"
+      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400"
+      style={{
+        left: xPx,
+        width: MARK_CLUSTER_PX,
+        height: MARK_CLUSTER_PX,
       }}
     />
   );

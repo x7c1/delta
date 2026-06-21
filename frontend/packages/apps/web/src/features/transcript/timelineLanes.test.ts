@@ -3,6 +3,7 @@ import type { Message, Thread } from '@delta/wire-gen';
 import {
   MAIN_LANE_LABEL,
   buildGlobalXMap,
+  buildLaneRenderItems,
   buildLargeSortedMessages,
   buildSortedMessages,
   buildTimelineLanes,
@@ -10,8 +11,10 @@ import {
   classifyMessageSize,
   computeTimeRange,
   findNearestMessageIndex,
+  messageBelongsOnTimeline,
   messageTimeMs,
   xFraction,
+  type TimelineDot,
   type TimelineDotSize,
 } from './timelineLanes';
 
@@ -772,5 +775,209 @@ describe('buildGlobalXMap', () => {
     const { pxByUuid, axisWidth } = buildGlobalXMap([], null, 240, diameter, 240);
     expect(pxByUuid.size).toBe(0);
     expect(axisWidth).toBe(240);
+  });
+});
+
+describe('messageBelongsOnTimeline', () => {
+  it('keeps user / assistant / meta messages on the timeline', () => {
+    for (const role of ['user', 'assistant', 'meta'] as Message['role'][]) {
+      expect(
+        messageBelongsOnTimeline(
+          message(1, 0, 'm', { role, content: [{ type: 'text', text: 'x' }] }),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('drops system and other rows — they are ingest-only', () => {
+    // These rows are recorded for parser fidelity but never rendered in
+    // the transcript; including them in the timeline surfaced as "mystery"
+    // small dots to the LEFT of the first user message because their
+    // created_at often precedes the first prompt.
+    for (const role of ['system', 'other'] as Message['role'][]) {
+      expect(
+        messageBelongsOnTimeline(
+          message(1, 0, 'm', { role, content: [{ type: 'text', text: 'x' }] }),
+        ),
+      ).toBe(false);
+    }
+  });
+});
+
+describe('buildTimelineLanes role filter', () => {
+  it('excludes system and other rows from lane dots so a bootstrap stamp does not surface', () => {
+    // The bootstrap row's created_at is earlier than the first user prompt.
+    // Without the role filter it would surface as a small dot to the left of
+    // the user's first message — the v6 "mystery dot" symptom on real
+    // hardware. The filter must drop it without touching any user-readable
+    // message.
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'sys-boot', {
+            role: 'system',
+            content: [{ type: 'text', text: 'session bootstrap' }],
+            createdAt: '2025-12-31T23:59:00Z',
+          }),
+          message(1, 1, 'user-first', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hello' }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          message(1, 2, 'other-misc', {
+            role: 'other',
+            content: [{ type: 'text', text: 'misc' }],
+            createdAt: '2026-01-01T00:00:30Z',
+          }),
+          message(1, 3, 'assistant-reply', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hi' }],
+            createdAt: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const lanes = buildTimelineLanes(threads, messagesByThread);
+    expect(lanes[0].dots.map((d) => d.uuid)).toEqual([
+      'user-first',
+      'assistant-reply',
+    ]);
+  });
+
+  it('computes the time range from the filtered set so a bootstrap row does not stretch the axis left', () => {
+    // The bootstrap row's earlier stamp must not pull `minMs` back — that
+    // would shift every visible dot to the right of the axis origin and
+    // re-introduce a wide gap at the left edge where the dropped dot used
+    // to sit.
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'sys-boot', {
+            role: 'system',
+            createdAt: '2025-12-31T23:00:00Z',
+          }),
+          message(1, 1, 'user-first', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hi' }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          message(1, 2, 'assistant-reply', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'reply' }],
+            createdAt: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const range = computeTimeRange(messagesByThread);
+    expect(range).toEqual({
+      minMs: Date.parse('2026-01-01T00:00:00Z'),
+      maxMs: Date.parse('2026-01-01T00:01:00Z'),
+    });
+  });
+});
+
+describe('buildLaneRenderItems', () => {
+  function dot(
+    uuid: string,
+    size: TimelineDotSize,
+    overrides: Partial<TimelineDot> = {},
+  ): TimelineDot {
+    return {
+      uuid,
+      threadId: 1,
+      x: 0,
+      timeMs: 0,
+      seq: 0,
+      kind: 'other',
+      size,
+      ...overrides,
+    };
+  }
+
+  it('returns single-dot items when every dot is large (no clustering needed)', () => {
+    const items = buildLaneRenderItems([
+      dot('a', 'large'),
+      dot('b', 'large'),
+      dot('c', 'large'),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(['dot', 'dot', 'dot']);
+    expect(items).toHaveLength(3);
+  });
+
+  it('keeps a lone small dot as a single dot (clustering needs 2+)', () => {
+    const items = buildLaneRenderItems([
+      dot('L1', 'large'),
+      dot('s', 'small'),
+      dot('L2', 'large'),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(['dot', 'dot', 'dot']);
+  });
+
+  it('collapses 2+ consecutive small dots into one cluster pointing at the first', () => {
+    const items = buildLaneRenderItems([
+      dot('L1', 'large'),
+      dot('s1', 'small'),
+      dot('s2', 'small'),
+      dot('s3', 'small'),
+      dot('L2', 'large'),
+    ]);
+    expect(items).toHaveLength(3);
+    expect(items[0].kind).toBe('dot');
+    expect(items[2].kind).toBe('dot');
+    expect(items[1].kind).toBe('cluster');
+    if (items[1].kind === 'cluster') {
+      expect(items[1].cluster.representativeUuid).toBe('s1');
+      expect(items[1].cluster.memberCount).toBe(3);
+      expect(items[1].cluster.memberUuids).toEqual(['s1', 's2', 's3']);
+    }
+  });
+
+  it('does not cross a large dot when clustering — each run ends at the boundary', () => {
+    // Two small runs separated by a large dot. Each run must cluster on
+    // its own side; the cluster must not span the large dot in the middle.
+    const items = buildLaneRenderItems([
+      dot('s1', 'small'),
+      dot('s2', 'small'),
+      dot('L', 'large'),
+      dot('s3', 'small'),
+      dot('s4', 'small'),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(['cluster', 'dot', 'cluster']);
+    if (items[0].kind === 'cluster' && items[2].kind === 'cluster') {
+      expect(items[0].cluster.memberUuids).toEqual(['s1', 's2']);
+      expect(items[2].cluster.memberUuids).toEqual(['s3', 's4']);
+    }
+  });
+
+  it('clusters a small run that runs to the end of the lane', () => {
+    const items = buildLaneRenderItems([
+      dot('L', 'large'),
+      dot('s1', 'small'),
+      dot('s2', 'small'),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(['dot', 'cluster']);
+    if (items[1].kind === 'cluster') {
+      expect(items[1].cluster.memberUuids).toEqual(['s1', 's2']);
+    }
+  });
+
+  it('clusters a small run that starts at the very beginning of the lane', () => {
+    const items = buildLaneRenderItems([
+      dot('s1', 'small'),
+      dot('s2', 'small'),
+      dot('L', 'large'),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(['cluster', 'dot']);
+    if (items[0].kind === 'cluster') {
+      expect(items[0].cluster.memberUuids).toEqual(['s1', 's2']);
+    }
+  });
+
+  it('returns no items for an empty lane', () => {
+    expect(buildLaneRenderItems([])).toEqual([]);
   });
 });

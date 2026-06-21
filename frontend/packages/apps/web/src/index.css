@@ -115,37 +115,70 @@ body {
 }
 
 /*
- * Brief flash on a transcript message that the thread-timeline overlay just
- * jumped to (see ThreadTimelineOverlay's flashMessageJump). After
- * scrollIntoView centres the destination, the message animates a soft
- * fluorescent-yellow background once so the eye spots where the navigation
- * landed — the same family of yellow as the branch-origin highlight, so the
- * "this is where we just went" cue reads as one design language across the
- * transcript. The animation is short (matches TIMELINE_JUMP_FLASH_MS) and
- * uses `forwards` so the final state has no lingering paint; the class is
- * removed by the JS handler so a repeat jump to the same message re-runs
- * the keyframe cleanly. `prefers-reduced-motion: reduce` disables the
- * animation entirely for users who opt out of motion.
+ * Brief background-color highlight on a transcript message that the
+ * thread-timeline overlay just jumped to (see ThreadTimelineOverlay's
+ * highlightMessageJump). After scrollIntoView aligns the destination at the
+ * top of the body, the message bubble's background snaps to a soft amber
+ * and then fades back to the bubble's resting color over
+ * TIMELINE_JUMP_HIGHLIGHT_MS so the eye spots where the navigation landed
+ * without an overlay layer flashing on top.
+ *
+ * Implemented as a one-shot animation (rather than a transition) because the
+ * resting background lives on the bubble element MessageItem paints — a CSS
+ * transition would need a two-step class swap to drive the property change,
+ * while a keyframe with `forwards` runs cleanly from "amber at 0%" to
+ * "transparent at 100%" once and stops. Since the bubble's own background
+ * paints behind the keyframe (the rule sets background-color on the same
+ * element, the keyframe overrides it during the animation), the final
+ * `forwards` state is `transparent` so the bubble's resting color is
+ * visible the instant the highlight ends.
+ *
+ * The first selector targets the inner bubble divs MessageItem paints for a
+ * user turn (`max-w-[85%]`) and an assistant prose turn (the article's
+ * direct `.rounded-lg` child), so the highlight lands on the SAME element
+ * the resting bubble color sits on. Articles without an inner bubble (tool
+ * / meta / task-notification cards) fall through to the article-level rule
+ * so the effect is still visible. `prefers-reduced-motion: reduce` disables
+ * the animation entirely for users who opt out of motion.
  */
-.delta-timeline-jump-flash {
-  animation: delta-timeline-jump-flash 700ms ease-out forwards;
-  border-radius: 0.375rem;
+.delta-timeline-jump-highlight > .rounded-lg,
+.delta-timeline-jump-highlight > .max-w-\[85\%\] {
+  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
 }
-@keyframes delta-timeline-jump-flash {
+.delta-timeline-jump-highlight {
+  border-radius: 0.375rem;
+  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+}
+@keyframes delta-timeline-jump-highlight-fade {
   0% {
-    background-color: rgba(250, 204, 21, 0);
-  }
-  20% {
-    background-color: rgba(250, 204, 21, 0.45);
+    background-color: rgba(251, 191, 36, 0.55);
   }
   100% {
-    background-color: rgba(250, 204, 21, 0);
+    background-color: rgba(251, 191, 36, 0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .delta-timeline-jump-flash {
+  .delta-timeline-jump-highlight,
+  .delta-timeline-jump-highlight > .rounded-lg,
+  .delta-timeline-jump-highlight > .max-w-\[85\%\] {
     animation: none;
   }
+}
+
+/*
+ * Scroll alignment for transcript message articles. When the thread-timeline
+ * overlay jumps to a message it uses `scrollIntoView({ block: 'start' })`,
+ * which puts the article flush with the top of the scrollable body — but
+ * TranscriptPane's breadcrumb card floats over that top edge on subthreads
+ * (see --delta-breadcrumb-body-reserve). `scroll-margin-top` shifts the
+ * landing position down by the same reserve so the article lands just below
+ * the breadcrumb, mirroring how `pt-breadcrumb-reserve` already shifts
+ * resting content. On the main thread (no breadcrumb) the small margin is
+ * invisible — it only adds whitespace above the chosen message, which is
+ * benign.
+ */
+article[data-message-uuid] {
+  scroll-margin-top: var(--delta-breadcrumb-body-reserve);
 }
 
 .markdown-body {

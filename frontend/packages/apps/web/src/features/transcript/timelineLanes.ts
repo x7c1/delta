@@ -90,6 +90,56 @@ export interface TimelineDot {
 }
 
 /**
+ * A render item on a lane: either a single dot or a cluster of two or more
+ * consecutive small dots collapsed into one mark.
+ *
+ * Clustering keeps the timeline readable when a session has long stretches of
+ * tool calls / question cards / meta lines back-to-back: rather than rendering
+ * each as its own tiny circle (which flooded the lane on real sessions), the
+ * renderer paints one cluster mark at the leftmost member's x. The cluster is
+ * still a navigation target — a click that lands closest to it jumps to its
+ * representative (the first member). Wheel-step navigation is unchanged: it
+ * walks only the `large` subset, so clusters of small dots do not affect it.
+ *
+ * A lone small dot (no neighbour to cluster with that does not cross a large
+ * dot) renders as a single dot, the same as a large dot — clustering only
+ * activates when 2+ adjacent small dots can be collapsed.
+ */
+export type LaneRenderItem =
+  | { kind: 'dot'; dot: TimelineDot }
+  | { kind: 'cluster'; cluster: LaneCluster };
+
+/**
+ * A run of 2+ consecutive small dots within one lane, collapsed into one
+ * mark for rendering. "Consecutive" is defined per lane and does not cross a
+ * large dot: the moment a large dot interrupts a small-dot run, the run ends.
+ *
+ * The cluster mark renders at the leftmost member's x (the representative);
+ * a click that snaps to the cluster therefore lands the playhead on the
+ * first member, which mirrors how a user reads a chronological sequence
+ * left → right.
+ */
+export interface LaneCluster {
+  /**
+   * Stable key for React, derived from the first member's uuid so the
+   * cluster's identity is the same across re-renders as long as the same
+   * run of small dots persists.
+   */
+  key: string;
+  /** The first (leftmost) member's uuid. The playhead lands here on click. */
+  representativeUuid: string;
+  /**
+   * The owning thread's id; mirrors {@link TimelineLane.threadId} so the
+   * cluster render carries the same data attributes as a single dot.
+   */
+  threadId: ThreadId;
+  /** Every member's uuid in render order — exposed for diagnostics / tests. */
+  memberUuids: string[];
+  /** Member count; used to badge the cluster mark with "2+". */
+  memberCount: number;
+}
+
+/**
  * A swim lane in the timeline footer: one row per (sub)thread. Lanes are
  * sorted oldest → newest by the thread's `created_at`, matching the
  * navigator's tree order.
@@ -172,6 +222,31 @@ export function classifyMessageSize(message: Message): TimelineDotSize {
 }
 
 /**
+ * Whether a message should appear on the timeline at all.
+ *
+ * Mirrors the transcript's own render filter (see `TranscriptPane`): only
+ * `user`, `assistant`, and `meta` lines are surfaced to the reader. `system`
+ * and `other` rows are ingest-only — they are recorded for parser/debug
+ * fidelity but never rendered, and they often carry a `created_at` earlier
+ * than the first human prompt (session bootstrap, environment summaries,
+ * etc.). Including them in the timeline produced a swarm of "mystery" small
+ * dots to the LEFT of the first user message that did not correspond to any
+ * line in the transcript.
+ *
+ * Keeping this filter aligned with the transcript's own render filter is the
+ * safety contract: any message you can read in the transcript still has a
+ * dot on the timeline, and vice versa — no human-readable line is ever
+ * dropped.
+ */
+export function messageBelongsOnTimeline(message: Message): boolean {
+  return (
+    message.role === 'user' ||
+    message.role === 'assistant' ||
+    message.role === 'meta'
+  );
+}
+
+/**
  * Parse a message's `created_at` ISO-8601 string into epoch milliseconds, or
  * `null` when the field is empty (the wire contract for "no timestamp on the
  * transcript line") or otherwise unparseable. Messages without a timestamp
@@ -196,6 +271,12 @@ export function computeTimeRange(
   let maxMs = Number.NEGATIVE_INFINITY;
   for (const messages of messagesByThread.values()) {
     for (const message of messages) {
+      // Match `buildTimelineLanes`: ingest-only rows are excluded from the
+      // time range so a bootstrap row with a stamp older than the first
+      // human prompt does not stretch the axis to the left.
+      if (!messageBelongsOnTimeline(message)) {
+        continue;
+      }
       const ms = messageTimeMs(message);
       if (ms === null) {
         continue;
@@ -282,6 +363,13 @@ export function buildTimelineLanes(
     const sortedMessages = [...rawMessages].sort((a, b) => a.seq - b.seq);
     const dots: TimelineDot[] = [];
     for (const message of sortedMessages) {
+      if (!messageBelongsOnTimeline(message)) {
+        // Drop ingest-only rows (system, other) so the timeline only carries
+        // marks the user can actually see in the transcript — and so a
+        // bootstrap row with a stamp older than the first user message does
+        // not surface as a "mystery" small dot to the left of it.
+        continue;
+      }
       const ms = messageTimeMs(message);
       if (ms === null) {
         // No timestamp → no meaningful x. Skip rather than guess a position.
@@ -299,6 +387,61 @@ export function buildTimelineLanes(
     }
     return { threadId: thread.id, label, tooltip, isMain, dots };
   });
+}
+
+/**
+ * Group a lane's dots into render items: a run of 2+ consecutive small dots
+ * becomes a single {@link LaneCluster}; a lone small dot or any large dot
+ * renders as a single `dot` item. The run never crosses a large dot — the
+ * moment a large dot interrupts a small-dot run, the run ends and the next
+ * iteration starts fresh.
+ *
+ * The lane's underlying `dots` list (and the global sorted list it feeds) is
+ * left untouched: clustering is purely a render-time aggregation, so click /
+ * wheel navigation still walks every individual message and can target the
+ * cluster's first member precisely.
+ */
+export function buildLaneRenderItems(
+  laneDots: TimelineDot[],
+): LaneRenderItem[] {
+  const items: LaneRenderItem[] = [];
+  let runStart = -1;
+  for (let i = 0; i <= laneDots.length; i += 1) {
+    const isSmall = i < laneDots.length && laneDots[i].size === 'small';
+    if (isSmall) {
+      if (runStart < 0) {
+        runStart = i;
+      }
+      continue;
+    }
+    // Non-small (large dot or end-of-list) closes the current run, if any.
+    if (runStart >= 0) {
+      const runLength = i - runStart;
+      if (runLength >= 2) {
+        const members = laneDots.slice(runStart, i);
+        const memberUuids = members.map((m) => m.uuid);
+        items.push({
+          kind: 'cluster',
+          cluster: {
+            key: `cluster:${members[0].uuid}`,
+            representativeUuid: members[0].uuid,
+            threadId: members[0].threadId,
+            memberUuids,
+            memberCount: members.length,
+          },
+        });
+      } else {
+        // Single small dot — render as a lone dot, not a cluster.
+        items.push({ kind: 'dot', dot: laneDots[runStart] });
+      }
+      runStart = -1;
+    }
+    if (i < laneDots.length) {
+      // The interrupting large dot is rendered as its own dot item.
+      items.push({ kind: 'dot', dot: laneDots[i] });
+    }
+  }
+  return items;
 }
 
 /**

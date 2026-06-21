@@ -16,7 +16,7 @@ import { useNavStore } from '../../store/navStore';
 import {
   ThreadTimelineOverlay,
   TIMELINE_EXPANDED_STORAGE_KEY,
-  TIMELINE_JUMP_FLASH_CLASS,
+  TIMELINE_JUMP_HIGHLIGHT_CLASS,
   WHEEL_COOLDOWN_MS,
 } from './ThreadTimelineOverlay';
 
@@ -291,12 +291,16 @@ describe('ThreadTimelineOverlay playhead', () => {
     Element.prototype.scrollIntoView =
       scrollIntoView as Element['scrollIntoView'];
     const threads = [makeThread(1)];
+    // Use large (user-text) messages so they render as individual dots; two
+    // consecutive empty-content user messages would now collapse into a
+    // cluster (see small-dot clustering) and there would be no individual
+    // `msg-a` dot to hover.
     const messages = new Map([
       [
         1,
         [
-          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
-          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
         ],
       ],
     ]);
@@ -327,12 +331,15 @@ describe('ThreadTimelineOverlay playhead', () => {
       scrollIntoView as Element['scrollIntoView'];
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
+    // Use large (user-text) messages so each renders as an individual dot
+    // and a click can directly target msg-a's x without going through a
+    // cluster mark.
     const messages = new Map([
       [
         1,
         [
-          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
-          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
         ],
       ],
     ]);
@@ -459,7 +466,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         cb(performance.now());
       }
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
       const target = within(screen.getByTestId('conversation-body')).getByText(
         'msg-b',
       );
@@ -518,12 +525,15 @@ describe('ThreadTimelineOverlay playhead', () => {
   it('clamps at the newest end: a wheel-down at the last message does not advance', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
+    // Use large turns so each is a wheel-step target — the wheel handler
+    // walks the main-conversation subset, and empty-content user dots are
+    // small (and now cluster) which would put them outside the subset.
     const messages = new Map([
       [
         1,
         [
-          makeMessage(1, 0, 'msg-a', { created_at: '2026-01-01T00:00:00Z' }),
-          makeMessage(1, 1, 'msg-b', { created_at: '2026-01-01T00:01:00Z' }),
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
         ],
       ],
     ]);
@@ -713,7 +723,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         cb(performance.now());
       }
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
       const target = within(screen.getByTestId('conversation-body')).getByText(
         'msg-b',
       );
@@ -841,6 +851,9 @@ describe('ThreadTimelineOverlay mark rendering', () => {
   });
 
   it('renders the main-conversation turns as a larger circle than the auxiliary turns', async () => {
+    // One small dot sandwiched between two large dots on either side so
+    // each small dot stays a lone single-dot render item (the clustering
+    // logic needs 2+ adjacent smalls — see the small-dot clustering tests).
     const threads = [makeThread(1)];
     const messages = new Map([
       [
@@ -852,25 +865,31 @@ describe('ThreadTimelineOverlay mark rendering', () => {
             content: [{ type: 'text', text: 'hello' }],
             created_at: '2026-01-01T00:00:00Z',
           }),
-          // assistant prose → large
-          makeMessage(1, 1, 'a', {
-            role: 'assistant',
-            content: [{ type: 'text', text: 'hi' }],
-            created_at: '2026-01-01T00:01:00Z',
-          }),
-          // tool call → small
-          makeMessage(1, 2, 't', {
+          // tool call → small (sandwiched between u and a, no cluster)
+          makeMessage(1, 1, 't', {
             role: 'assistant',
             content: [
               { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
             ],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+          // assistant prose → large
+          makeMessage(1, 2, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hi' }],
             created_at: '2026-01-01T00:02:00Z',
           }),
-          // meta line → small
+          // meta line → small (lone, between large a and large u2)
           makeMessage(1, 3, 'm', {
             role: 'meta',
             content: [{ type: 'text', text: 'sys' }],
             created_at: '2026-01-01T00:03:00Z',
+          }),
+          // user turn → large (caps the trailing lone small)
+          makeMessage(1, 4, 'u2', {
+            role: 'user',
+            content: [{ type: 'text', text: 'bye' }],
+            created_at: '2026-01-01T00:04:00Z',
           }),
         ],
       ],
@@ -1057,13 +1076,13 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
   });
 });
 
-describe('ThreadTimelineOverlay jump-target flash', () => {
+describe('ThreadTimelineOverlay jump-target highlight', () => {
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('flashes the destination message after a click jump so the eye spots it', async () => {
+  it('highlights the destination message after a click jump so the eye spots it', async () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView =
       scrollIntoView as Element['scrollIntoView'];
@@ -1090,14 +1109,14 @@ describe('ThreadTimelineOverlay jump-target flash', () => {
       clientX: 0,
     });
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
-    // The destination article carries the flash class right after the
+    // The destination article carries the highlight class right after the
     // scroll lands. We assert the class is present rather than waiting for
-    // its removal — the keyframe is what fades the visual, the class is
-    // the trigger.
+    // its removal — the CSS animation fades the bubble background back to
+    // its rest color, the class is the trigger.
     const target = within(screen.getByTestId('conversation-body')).getByText(
       'msg-a',
     );
-    expect(target.classList.contains(TIMELINE_JUMP_FLASH_CLASS)).toBe(true);
+    expect(target.classList.contains(TIMELINE_JUMP_HIGHLIGHT_CLASS)).toBe(true);
   });
 });
 
@@ -1206,5 +1225,191 @@ describe('ThreadTimelineOverlay does not override an external active-thread chan
     // The Navigator's choice (thread 2) must win — the timeline must not
     // have overridden it back to thread 1.
     expect(useNavStore.getState().activeThreadId).toBe(2);
+  });
+});
+
+describe('ThreadTimelineOverlay mystery-dot filter', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('does not render dots for system or other ingest-only rows', async () => {
+    // Real sessions emit a handful of `role: "system"` rows on startup
+    // (and an occasional `other`) whose stamps land before the first
+    // user prompt. The transcript skips them; the timeline must too so
+    // they do not surface as mystery dots to the left of the first
+    // human-readable message.
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'sys', {
+            role: 'system',
+            content: [{ type: 'text', text: 'bootstrap' }],
+            created_at: '2025-12-31T23:59:00Z',
+          }),
+          makeMessage(1, 1, 'usr', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hi' }],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          makeMessage(1, 2, 'oth', {
+            role: 'other',
+            content: [{ type: 'text', text: 'misc' }],
+            created_at: '2026-01-01T00:00:30Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const marks = await screen.findAllByTestId('thread-timeline-dot');
+    const uuids = marks
+      .map((m) => m.getAttribute('data-message-uuid'))
+      .sort();
+    expect(uuids).toEqual(['usr']);
+  });
+});
+
+describe('ThreadTimelineOverlay small-dot clustering', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('renders 2+ consecutive small dots as a single cluster mark', async () => {
+    // A user turn, three tool calls in a row (each is a "small" auxiliary
+    // mark), then an assistant prose reply. The three tool calls must
+    // collapse into one cluster mark while the user and assistant turns
+    // still render as their own dots.
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'do stuff' }],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          makeMessage(1, 1, 't1', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:10Z',
+          }),
+          makeMessage(1, 2, 't2', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu2', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:20Z',
+          }),
+          makeMessage(1, 3, 't3', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu3', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:30Z',
+          }),
+          makeMessage(1, 4, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    // The lone large dots (u, a) still render as dots.
+    const dots = await screen.findAllByTestId('thread-timeline-dot');
+    const dotUuids = dots.map((d) => d.getAttribute('data-message-uuid'));
+    expect(dotUuids).toContain('u');
+    expect(dotUuids).toContain('a');
+    expect(dotUuids).not.toContain('t1');
+    expect(dotUuids).not.toContain('t2');
+    expect(dotUuids).not.toContain('t3');
+    // Exactly one cluster mark, pointing at the first member.
+    const clusters = await screen.findAllByTestId(
+      'thread-timeline-cluster',
+    );
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]).toHaveAttribute('data-message-uuid', 't1');
+    expect(clusters[0]).toHaveAttribute('data-cluster-member-count', '3');
+  });
+
+  it('renders a lone small dot as a regular dot, not a cluster', async () => {
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hi' }],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          makeMessage(1, 1, 't', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:30Z',
+          }),
+          makeMessage(1, 2, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const dots = await screen.findAllByTestId('thread-timeline-dot');
+    const dotUuids = dots.map((d) => d.getAttribute('data-message-uuid'));
+    expect(dotUuids).toContain('t');
+    // No cluster mark when only one consecutive small dot exists.
+    expect(screen.queryAllByTestId('thread-timeline-cluster')).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe('ThreadTimelineOverlay sticky lane labels', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('pins the label column to the body left during horizontal scroll', async () => {
+    // The label spans the LABEL_COLUMN_PX strip and must stay visible
+    // when the body scrolls horizontally past a long axis. CSS `position:
+    // sticky; left: 0` is the contract; we assert the inline class names
+    // (jsdom does not compute layout, so position/left are tested at the
+    // style/class level — the real browser provides the actual sticky
+    // behaviour).
+    const threads = [makeThread(1)];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const label = await screen.findByTestId('thread-timeline-lane-label');
+    expect(label.className).toMatch(/\bsticky\b/);
+    expect(label.className).toMatch(/\bleft-0\b/);
+    // Label needs an opaque background so axis dots cannot show through
+    // it once the body scrolls horizontally — match `bg-white` (inactive)
+    // or `bg-slate-50` (active highlight).
+    expect(label.className).toMatch(/bg-(white|slate-50)/);
   });
 });
