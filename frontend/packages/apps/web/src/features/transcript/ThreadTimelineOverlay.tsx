@@ -846,9 +846,12 @@ export function ThreadTimelineOverlay({
     }
   }, []);
 
-  // State-based guard for cross-lane jumps. Set to `true` the moment a
-  // cross-lane jump begins (before `setActiveThread` is called) and cleared
-  // only when the pending DOM-ready scroll itself completes or is cancelled.
+  // State-based guard for cross-lane jumps. A counter (not a boolean) so a
+  // burst of wheel scrubs that stacks multiple cross-lane jumps in flight is
+  // tracked independently — the guard only releases when EVERY in-flight
+  // jump has settled. With a single boolean the first jump's onScroll would
+  // clear the flag while later jumps were still polling, opening the exact
+  // race window the guard exists to close.
   //
   // The time-based {@link lastProgrammaticScrollAtRef} guard is insufficient
   // for cross-lane jumps because `scheduleScrollAfterRender` polls across
@@ -865,9 +868,18 @@ export function ThreadTimelineOverlay({
   //
   // Keeping the IO fully suppressed until the scroll lands ensures the
   // first-observation batch of the new thread is always ignored. Once the
-  // scroll fires (or times out / is cancelled), the flag is cleared so
-  // the user's subsequent manual scroll resumes normal pane → timeline sync.
-  const crossLaneJumpInFlightRef = useRef(false);
+  // scroll fires (or times out / is cancelled), the counter is decremented
+  // so the user's subsequent manual scroll resumes normal pane → timeline
+  // sync as soon as the last jump settles. Decrements are clamped at zero
+  // so a duplicate cancel (cancel handle invoked twice, or invoked after
+  // onScroll already fired) cannot wrap into a negative count that would
+  // leave the guard permanently armed.
+  const crossLaneJumpInFlightCountRef = useRef(0);
+  const decrementCrossLaneInFlight = useCallback(() => {
+    if (crossLaneJumpInFlightCountRef.current > 0) {
+      crossLaneJumpInFlightCountRef.current -= 1;
+    }
+  }, []);
 
   useEffect(() => {
     // Only react to navigation the user actually initiated: while
@@ -887,18 +899,20 @@ export function ThreadTimelineOverlay({
     }
     pendingScrollCancelRef.current?.();
     pendingScrollCancelRef.current = null;
-    // The pane-scroll → playhead follower (Improvement 3) is now about to
-    // see the scrollIntoView's IO ripples. Mark the moment so it skips any
-    // entry it receives within the next
-    // {@link PANE_SCROLL_PROGRAMMATIC_GUARD_MS}; without this the jump's
-    // own scroll would feed straight back into setActiveMessageIndex and
-    // re-trigger the jump (the classic ping-pong).
-    markProgrammaticScroll();
     const container = conversationBodyRef.current;
     if (current.threadId === activeThreadRef.current) {
       // Same lane: the target message is already in the DOM, scroll right
       // away. No frame deferral, no thread switch. The highlight fires
       // right after the scroll so the eye spots where the playhead landed.
+      //
+      // The time-based guard is stamped IMMEDIATELY before the scroll fires
+      // (not at the top of the effect): the guard window must start ticking
+      // from the moment the IO ripples actually begin, otherwise a slow
+      // re-trigger could let the window expire before the scroll lands.
+      // For a same-lane jump the two moments are the same tick — this is
+      // straightforward — but keeping the stamp adjacent to the scroll keeps
+      // the cross-lane path's analogous discipline (see below) easy to read.
+      markProgrammaticScroll();
       scrollMessageIntoView(container, current.uuid);
       pendingScrollCancelRef.current = highlightMessageJump(
         container,
@@ -906,43 +920,73 @@ export function ThreadTimelineOverlay({
       );
       return;
     }
-    // Cross-lane jump: raise the in-flight flag BEFORE switching the active
-    // thread so the IO effect (which re-runs on activeThreadId change) sees
-    // the guard already up when it first-fires its observation batch on the
-    // new thread's articles. The flag is cleared via the `onScroll` callback
-    // passed to scheduleScrollAfterRender — right before scrollIntoView fires,
-    // at which point the time-based guard (markProgrammaticScroll) takes over
-    // covering the remaining IO ripple window. If the jump is cancelled before
-    // the element lands (superseding jump or unmount), cancelWithFlagClear
-    // clears the flag immediately.
-    crossLaneJumpInFlightRef.current = true;
+    // Cross-lane jump: raise the in-flight counter BEFORE switching the
+    // active thread so the IO effect (which re-runs on activeThreadId
+    // change) sees the guard already up when it first-fires its observation
+    // batch on the new thread's articles. The counter is decremented via the
+    // `onScroll` callback passed to scheduleScrollAfterRender — right before
+    // scrollIntoView fires, at which point the time-based guard
+    // (markProgrammaticScroll, stamped at the same moment) takes over
+    // covering the remaining IO ripple window. If the jump is cancelled
+    // before the element lands (superseding jump or unmount),
+    // cancelWithCountClear decrements the counter immediately.
+    //
+    // CRITICAL: the time-based guard MUST be stamped here in the onScroll
+    // callback — NOT at jump-trigger time — because scheduleScrollAfterRender
+    // can poll for many frames waiting for the new thread's re-render. If we
+    // stamped the guard at trigger time the window could expire before the
+    // scroll lands, leaving the post-scroll IO ripples completely unguarded.
+    // That was the residual tail-jump race that survived the v12 fix.
+    crossLaneJumpInFlightCountRef.current += 1;
+    // `released` guards against double-release: if the cancel handle fires
+    // AFTER onScroll already ran (cancel-after-scroll for highlight cleanup),
+    // the counter must not double-decrement. Sharing one flag between the
+    // onScroll path and the cancel path is the simplest correct shape — the
+    // counter is decremented at most once per jump.
+    let released = false;
+    const releaseOnce = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      decrementCrossLaneInFlight();
+    };
     setActiveThread(current.threadId);
     const rawCancel = scheduleScrollAfterRender(
       container,
       current.uuid,
       () => {
         // onScroll: element is in the DOM, scrollIntoView is about to fire.
-        // Drop the in-flight flag here so the time-based guard, which
-        // markProgrammaticScroll set at jump-trigger time, covers the IO
-        // ripples from this scroll.
-        crossLaneJumpInFlightRef.current = false;
+        // Stamp the time-based guard NOW so its 200ms window starts ticking
+        // from the moment the IO ripples will arrive, then release the
+        // state-based counter so a tail-message IO batch arriving in the
+        // very next tick is suppressed by the time-based guard alone.
+        markProgrammaticScroll();
+        releaseOnce();
       },
     );
-    // Wrap the cancel so the flag is also cleared if the scroll is aborted
-    // (superseded by another jump or unmount) — otherwise the flag would
-    // block all future pane → timeline sync.
-    const cancelWithFlagClear = () => {
-      crossLaneJumpInFlightRef.current = false;
+    // Wrap the cancel so the counter is also released if the scroll is
+    // aborted (superseded by another jump or unmount) — otherwise a stacked
+    // jump's counter would never decrement and the guard would stay armed
+    // indefinitely.
+    const cancelWithCountClear = () => {
+      releaseOnce();
       rawCancel();
     };
-    pendingScrollCancelRef.current = cancelWithFlagClear;
+    pendingScrollCancelRef.current = cancelWithCountClear;
     // `scrubTick` is the re-trigger AND the gate: a fresh scrub bumps the
     // tick, re-fires this effect, and re-emits the (possibly identical)
     // navigation intent. A re-click at the same x bumps the tick even when
     // the active index does not move, so a stale scroll position is still
     // corrected — but a tick-less re-render never sneaks in an auto-switch
     // that the user did not ask for.
-  }, [scrubTick, conversationBodyRef, setActiveThread, markProgrammaticScroll]);
+  }, [
+    scrubTick,
+    conversationBodyRef,
+    setActiveThread,
+    markProgrammaticScroll,
+    decrementCrossLaneInFlight,
+  ]);
 
   // The lane the highlight follows: the active message's lane when there is
   // one, else fall back to the prop so a freshly-mounted footer still marks
@@ -1182,14 +1226,16 @@ export function ThreadTimelineOverlay({
     let debounceHandle: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
       debounceHandle = null;
-      // State-based guard for cross-lane jumps: a thread switch has fired
-      // but the DOM-ready scroll has not yet — the IO's first-observation
-      // batch on the new thread's articles must not commit the tail as the
-      // active index. This guard is cleared by scheduleScrollAfterRender's
-      // onScroll callback (right before scrollIntoView fires) or by the
-      // cancel handle (superseded jump / unmount), so it can never
-      // permanently block pane → timeline sync.
-      if (crossLaneJumpInFlightRef.current) {
+      // State-based guard for cross-lane jumps: at least one thread switch
+      // has fired but its DOM-ready scroll has not yet — the IO's first-
+      // observation batch on the new thread's articles must not commit the
+      // tail as the active index. A counter (not a boolean) so a stacked
+      // burst of cross-lane jumps suppresses the IO until EVERY in-flight
+      // jump has settled; the counter is decremented by
+      // scheduleScrollAfterRender's onScroll callback (right before
+      // scrollIntoView fires) or by the cancel handle (superseded jump /
+      // unmount), so it can never permanently block pane → timeline sync.
+      if (crossLaneJumpInFlightCountRef.current > 0) {
         return;
       }
       // Time-based guard: a same-lane programmatic scroll (scrollIntoView)
