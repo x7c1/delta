@@ -1159,16 +1159,9 @@ export function ThreadTimelineOverlay({
         // element is a no-op scroll. So we let `scheduleScrollAfterRender`'s
         // own scroll fire either way; only the side effects (guard,
         // counter, highlight) are gated.
-        const pending = pendingCrossLaneTargetRef.current;
         pendingCrossLaneTargetRef.current = null;
         markProgrammaticScroll();
         releaseOnce();
-        // If the layout effect already highlighted, drop the rAF-poll
-        // re-highlight so the jump-flash stays a single transition.
-        if (pending?.scrolled) {
-          // No-op signal: pendingScrollCancelRef already holds the
-          // layout effect's highlight cancel.
-        }
       },
       () => {
         // onTimeout: polling gave up without the article appearing.
