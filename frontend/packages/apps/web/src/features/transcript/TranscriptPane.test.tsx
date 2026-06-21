@@ -1196,21 +1196,39 @@ describe('TranscriptPane', () => {
     // the overlay's measured height and a controllable ResizeObserver, then fire
     // it to simulate the composer growing.
 
-    /** The single live observer instance and the element it watches. */
-    let observed: { el: Element; cb: ResizeObserverCallback } | null;
+    /**
+     * Live observations keyed by the observed element. TranscriptPane creates
+     * several ResizeObservers (body re-stick, bottom overlay, top region), so
+     * the per-test code looks up exactly the observer it cares about by node
+     * rather than reading the "most recent" one, which would race with effect
+     * ordering.
+     */
+    let observations: Map<Element, ResizeObserverCallback>;
     let originalRO: typeof ResizeObserver;
 
+    function lookupObserver(el: Element | null): ResizeObserverCallback | null {
+      return el ? observations.get(el) ?? null : null;
+    }
+
     beforeEach(() => {
-      observed = null;
+      observations = new Map();
       originalRO = globalThis.ResizeObserver;
       class ControllableRO implements ResizeObserver {
+        private observedEls = new Set<Element>();
         constructor(private cb: ResizeObserverCallback) {}
         observe(el: Element): void {
-          observed = { el, cb: this.cb };
+          observations.set(el, this.cb);
+          this.observedEls.add(el);
         }
-        unobserve(): void {}
+        unobserve(el: Element): void {
+          observations.delete(el);
+          this.observedEls.delete(el);
+        }
         disconnect(): void {
-          observed = null;
+          for (const el of this.observedEls) {
+            observations.delete(el);
+          }
+          this.observedEls.clear();
         }
       }
       globalThis.ResizeObserver =
@@ -1234,7 +1252,8 @@ describe('TranscriptPane', () => {
       const overlay = screen.getByTestId('bottom-overlay');
 
       // The overlay-measuring observer is watching the overlay node itself.
-      await waitFor(() => expect(observed?.el).toBe(overlay));
+      await waitFor(() => expect(lookupObserver(overlay)).not.toBeNull());
+      const fire = lookupObserver(overlay)!;
 
       // Stub the overlay's measured height, then fire the observer as a real
       // resize would. The body's padding-bottom = measured height + the overlay
@@ -1242,7 +1261,7 @@ describe('TranscriptPane', () => {
       // the 192px reading gap that keeps the last turn off the composer.
       overlay.getBoundingClientRect = () =>
         ({ height: 120 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => fire([], fire as unknown as ResizeObserver));
 
       await waitFor(() =>
         expect(bodyEl().style.paddingBottom).toBe('324px'),
@@ -1252,23 +1271,29 @@ describe('TranscriptPane', () => {
     it('grows the reserve when the overlay grows (composer auto-grow), keeping the tail above it', async () => {
       renderPane();
       const overlay = await screen.findByTestId('bottom-overlay');
-      await waitFor(() => expect(observed?.el).toBe(overlay));
+      await waitFor(() => expect(lookupObserver(overlay)).not.toBeNull());
 
       overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
       await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('284px'));
 
       // The composer grows (more lines typed): the overlay is taller, so the
       // reserve grows in lockstep — the last turn stays clear of the input.
       overlay.getBoundingClientRect = () => ({ height: 200 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
       await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('404px'));
     });
 
     it('re-sticks the body to the bottom when the overlay grows while sticking', async () => {
       renderPane();
       const overlay = await screen.findByTestId('bottom-overlay');
-      await waitFor(() => expect(observed?.el).toBe(overlay));
+      await waitFor(() => expect(lookupObserver(overlay)).not.toBeNull());
 
       // Make the body look scrollable and pinned at the bottom (sticking). jsdom
       // reports 0 for layout, so define the scroll geometry by hand.
@@ -1286,7 +1311,10 @@ describe('TranscriptPane', () => {
       fireEvent.scroll(body);
 
       overlay.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
 
       // The reserve grew (overlay 150 + 12 inset); the measurement re-stuck the
       // body to the new bottom (scrollTop := scrollHeight) so the tail stays
@@ -1300,7 +1328,7 @@ describe('TranscriptPane', () => {
     it('does not move the body when the user has scrolled up (not sticking)', async () => {
       renderPane();
       const overlay = await screen.findByTestId('bottom-overlay');
-      await waitFor(() => expect(observed?.el).toBe(overlay));
+      await waitFor(() => expect(lookupObserver(overlay)).not.toBeNull());
 
       const body = bodyEl();
       Object.defineProperty(body, 'scrollHeight', {
@@ -1316,7 +1344,10 @@ describe('TranscriptPane', () => {
       fireEvent.scroll(body);
 
       overlay.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
 
       // Reading scrollback is not yanked to the bottom; only the reserve updates.
       await waitFor(() =>
@@ -1334,11 +1365,14 @@ describe('TranscriptPane', () => {
       // stays put and the body is not re-stuck to the bottom.
       renderPane();
       const overlay = await screen.findByTestId('bottom-overlay');
-      await waitFor(() => expect(observed?.el).toBe(overlay));
+      await waitFor(() => expect(lookupObserver(overlay)).not.toBeNull());
 
       // Establish a baseline reserve before any branch is pending.
       overlay.getBoundingClientRect = () => ({ height: 80 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
       await waitFor(() => expect(bodyEl().style.paddingBottom).toBe('284px'));
 
       // Pin the body to the bottom (sticking) so a re-scroll would be visible.
@@ -1365,12 +1399,180 @@ describe('TranscriptPane', () => {
         }),
       );
       overlay.getBoundingClientRect = () => ({ height: 200 }) as DOMRect;
-      act(() => observed!.cb([], observed!.cb as unknown as ResizeObserver));
+      act(() => {
+        const fire = lookupObserver(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
 
       // The grown banner does NOT grow the reserve and does NOT re-stick the
       // body: the banner floats over the transcript tail instead of pushing it.
       expect(body.style.paddingBottom).toBe('284px');
       expect(body.scrollTop).toBe(600);
+    });
+
+    // The top region (breadcrumb / thread timeline / Terminal toggle) is
+    // sticky-pinned to the top of the scroll viewport so it stays on screen
+    // as the conversation scrolls underneath. These tests cover the CSS
+    // invariants and the dynamic `--delta-top-region-reserve` CSS variable
+    // that compensates for the sticky overlay when a timeline jump uses
+    // `scrollIntoView({ block: 'start' })` (which would otherwise land the
+    // destination article hidden behind the sticky region).
+    describe('sticky top region', () => {
+      it('renders the top region with position:sticky pinned to the scroll viewport top', async () => {
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+        const topRegion = await screen.findByTestId('transcript-top-region');
+
+        // Sticky positioning keeps the region on screen as the body scrolls.
+        // `top-0` is the offset Tailwind class for `top: 0` — without it,
+        // sticky has no anchor and falls back to relative positioning. The
+        // opaque background hides the conversation scrolling underneath.
+        expect(topRegion.className).toContain('sticky');
+        expect(topRegion.className).toContain('top-0');
+        expect(topRegion.className).toContain('bg-white');
+
+        // The breadcrumb and timeline render INSIDE this sticky container —
+        // not as siblings of it — so they all move together with the sticky
+        // wrapper and stay pinned as one unit.
+        expect(
+          within(topRegion).getByRole('navigation', { name: 'Breadcrumb' }),
+        ).toBeInTheDocument();
+        expect(
+          within(topRegion).getByTestId('thread-timeline-toggle'),
+        ).toBeInTheDocument();
+      });
+
+      it('places the Terminal button inside the same sticky top region as the timeline', async () => {
+        // The Terminal button is forwarded into TranscriptPane as the
+        // `terminalButton` slot (see WorkspaceScreen). It must render INSIDE
+        // the sticky wrapper so it stays on screen with the timeline; if it
+        // were a sibling, it would scroll away with the conversation.
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        });
+        const client = new ApiClient({ baseUrl: 'http://localhost' });
+        render(
+          <QueryClientProvider client={queryClient}>
+            <ApiProvider client={client}>
+              <TranscriptPane
+                threads={mockThreads}
+                activeThread={mockThreads.find((t) => t.id === MAIN_THREAD_ID)!}
+                readOnly={false}
+                terminalButton={
+                  <button data-testid="terminal-toggle">Terminal</button>
+                }
+              />
+            </ApiProvider>
+          </QueryClientProvider>,
+        );
+
+        const topRegion = await screen.findByTestId('transcript-top-region');
+        expect(
+          within(topRegion).getByTestId('terminal-toggle'),
+        ).toBeInTheDocument();
+      });
+
+      it('drives --delta-top-region-reserve from the top region\'s measured height', async () => {
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+        const topRegion = await screen.findByTestId('transcript-top-region');
+        await waitFor(() =>
+          expect(lookupObserver(topRegion)).not.toBeNull(),
+        );
+
+        // The reserve is the variable read by `article[data-message-uuid]`'s
+        // `scroll-margin-top` rule (index.css), so a timeline-jump
+        // `scrollIntoView({ block: 'start' })` lands the destination article
+        // just BELOW the sticky region rather than hidden underneath it.
+        topRegion.getBoundingClientRect = () => ({ height: 72 }) as DOMRect;
+        act(() => {
+          const fire = lookupObserver(topRegion)!;
+          fire([], fire as unknown as ResizeObserver);
+        });
+
+        // The variable is set via `style` (an inline CSS custom property),
+        // so it lands as a literal `px` value the rule's `var(...)` picks up.
+        await waitFor(() =>
+          expect(
+            bodyEl().style.getPropertyValue('--delta-top-region-reserve'),
+          ).toBe('72px'),
+        );
+      });
+
+      it('grows the reserve when the top region grows (timeline expanded), keeping jumped-to articles visible', async () => {
+        // The timeline card height varies with lane count; expanding it
+        // makes the sticky region taller, so the reserve must grow in
+        // lockstep — otherwise a post-expand jump would land the destination
+        // article half-hidden under the now-taller sticky overlay.
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+        const topRegion = await screen.findByTestId('transcript-top-region');
+        await waitFor(() =>
+          expect(lookupObserver(topRegion)).not.toBeNull(),
+        );
+
+        topRegion.getBoundingClientRect = () => ({ height: 48 }) as DOMRect;
+        act(() => {
+          const fire = lookupObserver(topRegion)!;
+          fire([], fire as unknown as ResizeObserver);
+        });
+        await waitFor(() =>
+          expect(
+            bodyEl().style.getPropertyValue('--delta-top-region-reserve'),
+          ).toBe('48px'),
+        );
+
+        // The user expands the timeline card: the sticky region grows.
+        topRegion.getBoundingClientRect = () => ({ height: 220 }) as DOMRect;
+        act(() => {
+          const fire = lookupObserver(topRegion)!;
+          fire([], fire as unknown as ResizeObserver);
+        });
+        await waitFor(() =>
+          expect(
+            bodyEl().style.getPropertyValue('--delta-top-region-reserve'),
+          ).toBe('220px'),
+        );
+      });
+
+      it('preserves the body\'s scrollTop when the top region is measured (no scroll yank)', async () => {
+        // Measuring the sticky region must not move the scroll position the
+        // user is reading: the reserve is a CSS variable consumed by the
+        // articles' `scroll-margin-top`, not the body's padding-top, so the
+        // body's scrollTop is left untouched. This guards against a future
+        // mistake where the reserve is mis-wired through a path that does
+        // reflow the body.
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+        const topRegion = await screen.findByTestId('transcript-top-region');
+        await waitFor(() =>
+          expect(lookupObserver(topRegion)).not.toBeNull(),
+        );
+
+        const body = bodyEl();
+        Object.defineProperty(body, 'scrollHeight', {
+          configurable: true,
+          get: () => 4000,
+        });
+        Object.defineProperty(body, 'clientHeight', {
+          configurable: true,
+          get: () => 400,
+        });
+        // Park the user well above the bottom (so stick-to-bottom is OFF):
+        // any unintended jump would land at scrollHeight (4000) instead.
+        body.scrollTop = 1200;
+        fireEvent.scroll(body);
+
+        topRegion.getBoundingClientRect = () => ({ height: 96 }) as DOMRect;
+        act(() => {
+          const fire = lookupObserver(topRegion)!;
+          fire([], fire as unknown as ResizeObserver);
+        });
+        await waitFor(() =>
+          expect(
+            bodyEl().style.getPropertyValue('--delta-top-region-reserve'),
+          ).toBe('96px'),
+        );
+
+        // The scroll position the user was reading at stays put.
+        expect(body.scrollTop).toBe(1200);
+      });
     });
   });
 
