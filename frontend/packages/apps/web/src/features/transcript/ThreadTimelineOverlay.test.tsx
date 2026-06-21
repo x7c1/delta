@@ -1912,6 +1912,105 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(label.style.left).toBe('0px');
   });
 
+  it('paints the sticky label with an opaque background via className (bg-white resting, bg-slate-50 active) so axis dots cannot peek through during a horizontal pan and the active highlight remains visible', async () => {
+    // The sticky label slides over the axis cell horizontally as the
+    // wrapper pans. Without an opaque background the axis line and dots
+    // would read through the label glyphs, which is illegible. The
+    // background MUST come from the className (not from an inline
+    // `style.background`): an inline background has higher specificity
+    // than a Tailwind class, so an inline `background: white` would win
+    // over an active-state `bg-slate-50` class and leave the sticky
+    // label white while the axis cell paints `bg-slate-50` — breaking
+    // the row's visual continuity, which is precisely what
+    // {@link applies the active highlight to both grid cells of the
+    // active lane} pins on the axis side.
+    //
+    // The contract is therefore: inactive sticky label paints `bg-white`
+    // (matching the body so axis dots never read through it), active
+    // sticky label paints `bg-slate-50` (matching the axis cell so the
+    // active band reads as one continuous row), and no inline
+    // `background` style is set that would override either.
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({
+      threads,
+      messagesByThread: new Map(),
+      activeThreadId: 2,
+    });
+    const lanes = await screen.findAllByTestId('thread-timeline-lane');
+    const inactiveLabel = within(lanes[0]).getByTestId(
+      'thread-timeline-lane-label',
+    );
+    const activeLabel = within(lanes[1]).getByTestId(
+      'thread-timeline-lane-label',
+    );
+    // Inactive sticky label is opaque white through the className.
+    expect(inactiveLabel.className).toMatch(/\bbg-white\b/);
+    expect(inactiveLabel.className).not.toMatch(/\bbg-slate-50\b/);
+    // Active sticky label is opaque slate-50 (matching the axis cell's
+    // highlight) and does NOT carry the resting bg-white token — so
+    // there is exactly one background class active per cell and the
+    // class set unambiguously identifies the visual state.
+    expect(activeLabel.className).toMatch(/\bbg-slate-50\b/);
+    expect(activeLabel.className).not.toMatch(/\bbg-white\b/);
+    // No inline background on either label — the background lives on
+    // className alone so the active class always wins. (Reading the
+    // style property directly catches both `background` and
+    // `background-color` short-hand variants on inline styles.)
+    expect(inactiveLabel.style.background).toBe('');
+    expect(inactiveLabel.style.backgroundColor).toBe('');
+    expect(activeLabel.style.background).toBe('');
+    expect(activeLabel.style.backgroundColor).toBe('');
+  });
+
+  it('keeps the sticky label visible at the wrapper left edge while the axis cell content scrolls horizontally', async () => {
+    // Behavioural pin for the sticky-label contract: when the axis-
+    // column wrapper scrolls horizontally, the sticky label MUST stay
+    // pinned at x=0 of the wrapper while the axis cell shifts left by
+    // the scroll amount. jsdom does not run CSS, so `position: sticky`
+    // does not move the label automatically — but it DOES report
+    // `scrollLeft` on the scroll container, and the inline style
+    // contract (`position: sticky; left: 0`) is what tells a real
+    // browser to pin. Assert both halves:
+    //
+    //   1. The label still carries the sticky positioning contract
+    //      after the wrapper has been scrolled (no regression that
+    //      drops the style under some state transition).
+    //   2. The wrapper's `scrollLeft` advances normally so the axis
+    //      cells visibly pan — the wrapper is the only horizontal
+    //      scroller, the label rides along sticky-pinned.
+    const threads = [makeThread(1)];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const axisColumn = await screen.findByTestId(
+      'thread-timeline-axis-column',
+    );
+    const label = (
+      await screen.findAllByTestId('thread-timeline-lane-label')
+    )[0];
+    // Simulate the wrapper being scrolled horizontally past zero — e.g.
+    // the user has panned a wide session's axis to the right.
+    act(() => {
+      axisColumn.scrollLeft = 120;
+    });
+    expect(axisColumn.scrollLeft).toBe(120);
+    // The sticky positioning contract is intact: a real browser holds
+    // the label at the wrapper's left edge while the axis cell content
+    // pans behind it.
+    expect(label.style.position).toBe('sticky');
+    expect(label.style.left).toBe('0px');
+    // The label sits in the same DOM ancestor as the axis cell of the
+    // same lane — i.e. inside the scrolling wrapper — so sticky has
+    // somewhere to pin. (A regression that moved the label out of the
+    // scroll container would defeat sticky entirely.)
+    expect(axisColumn.contains(label)).toBe(true);
+  });
+
   it('applies the active highlight to both grid cells of the active lane so the band reads as continuous', async () => {
     // With `display: contents` on the `<li>` the list-item itself has no
     // box, so a highlight applied to the `<li>` would never paint. The

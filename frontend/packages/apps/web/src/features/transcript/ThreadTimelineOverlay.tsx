@@ -1624,9 +1624,27 @@ export function ThreadTimelineOverlay({
                   // `<li>` cannot carry the highlight; each child cell
                   // does its own painting and the two halves line up
                   // because they share the same grid row.
+                  //
+                  // The label cell is sticky-positioned (left:0) and slides
+                  // over the axis cell as the wrapper pans horizontally, so
+                  // it MUST be opaque in EVERY state or axis dots would
+                  // show through the label during a pan. The axis cell can
+                  // stay transparent in the inactive state (the body's
+                  // white background reads through it just fine), so the
+                  // resting background only needs to be added to the label
+                  // class set. Doing it via className — `bg-white` resting,
+                  // `bg-slate-50` active — keeps className as the single
+                  // source of truth for the cell's visual state: an active
+                  // sticky label paints `bg-slate-50` (matching the active
+                  // axis cell so the band reads as one row), and an
+                  // inactive sticky label paints `bg-white` (matching the
+                  // body so axis dots cannot peek through).
                   const highlightClasses = isHighlighted
                     ? 'border-y border-slate-200 bg-slate-50'
                     : 'border-y border-transparent';
+                  const labelHighlightClasses = isHighlighted
+                    ? 'border-y border-slate-200 bg-slate-50'
+                    : 'border-y border-transparent bg-white';
                   // Collapse runs of 2+ consecutive small dots within
                   // this lane into one cluster mark so a long stretch of
                   // tool calls / meta lines no longer floods the
@@ -1654,17 +1672,24 @@ export function ThreadTimelineOverlay({
                         // to the left edge of the horizontal-scroll
                         // wrapper as the axis pans, so labels stay
                         // readable while the user scrubs a wide session.
-                        // The opaque background prevents axis dots from
-                        // peeking through during the pan; the z-index
-                        // keeps the label above the axis line and dots.
+                        // The opaque background (from `labelHighlightClasses`
+                        // — `bg-white` resting, `bg-slate-50` active)
+                        // prevents axis dots from peeking through during
+                        // the pan; the z-index keeps the label above the
+                        // axis line and dots. The background lives on the
+                        // className (not inline) so the active highlight's
+                        // `bg-slate-50` is the one that paints — an inline
+                        // background would win over the class and would
+                        // leave the sticky label white in the active state,
+                        // breaking the visual continuity with the axis
+                        // cell's highlight.
                         className={`block truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
                           lane.isMain ? 'text-slate-700' : 'text-slate-500'
-                        } ${highlightClasses}`}
+                        } ${labelHighlightClasses}`}
                         style={{
                           position: 'sticky',
                           left: 0,
                           zIndex: 1,
-                          background: 'white',
                           minHeight: LANE_HEIGHT_PX,
                           lineHeight: `${LANE_HEIGHT_PX}px`,
                         }}
