@@ -252,18 +252,64 @@ function writePersistedExpanded(expanded: boolean): void {
 }
 
 /**
+ * Module-scoped store for the timeline expanded preference. Multiple
+ * components read this same flag (the timeline itself, and the transcript
+ * pane that switches its top-row layout so the Terminal button moves below
+ * when the timeline is expanded). A click on the toggle must update every
+ * subscriber on the same tick — per-component `useState` would only sync via
+ * the `storage` event, which does not fire on same-document writes. A small
+ * pub-sub keeps every subscriber in lockstep without pulling a full store in
+ * for one boolean.
+ */
+let timelineExpandedCache: boolean | null = null;
+const timelineExpandedListeners = new Set<(value: boolean) => void>();
+
+function getTimelineExpanded(): boolean {
+  if (timelineExpandedCache === null) {
+    timelineExpandedCache = readPersistedExpanded();
+  }
+  return timelineExpandedCache;
+}
+
+function setTimelineExpanded(next: boolean): void {
+  timelineExpandedCache = next;
+  writePersistedExpanded(next);
+  for (const listener of timelineExpandedListeners) {
+    listener(next);
+  }
+}
+
+/**
+ * Drop the in-memory cache so a test that clears `localStorage` between cases
+ * starts from a fresh read rather than the previous case's last write.
+ * Production code does not need this — the cache lives for the page session.
+ */
+export function resetTimelineExpandedForTests(): void {
+  timelineExpandedCache = null;
+}
+
+/**
  * Expanded/collapsed state for the timeline footer, persisted to localStorage
  * so the preference survives reloads. Initial state is collapsed when no
- * preference has been saved. Exported so tests can drive the toggle directly.
+ * preference has been saved. All callers share one value (see the
+ * module-scoped store above), so toggling in one place updates the others on
+ * the same tick. Exported so tests and the transcript pane (which switches
+ * its top-row layout on the same flag) can read and drive the toggle.
  */
 export function useTimelineExpanded(): [boolean, () => void] {
-  const [expanded, setExpanded] = useState<boolean>(() => readPersistedExpanded());
+  const [expanded, setExpanded] = useState<boolean>(() => getTimelineExpanded());
+  useEffect(() => {
+    const listener = (value: boolean) => setExpanded(value);
+    timelineExpandedListeners.add(listener);
+    // Sync to the current value in case it changed between render and
+    // subscribe (e.g. another consumer toggled it in the same render pass).
+    setExpanded(getTimelineExpanded());
+    return () => {
+      timelineExpandedListeners.delete(listener);
+    };
+  }, []);
   const toggle = useCallback(() => {
-    setExpanded((prev) => {
-      const next = !prev;
-      writePersistedExpanded(next);
-      return next;
-    });
+    setTimelineExpanded(!getTimelineExpanded());
   }, []);
   return [expanded, toggle];
 }
@@ -563,6 +609,31 @@ const LANE_RIGHT_PAD_PX = 16;
  */
 export const TIMELINE_TOGGLE_BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50';
+
+/**
+ * Glyph for the collapsed "Thread" toggle button: a stylised activity / signal
+ * trace (a polyline of small peaks) so the button reads as a timeline at a
+ * glance. Mirrors {@link TerminalIcon} (in `WorkspaceScreen`) in size and
+ * stroke weight so the two buttons sit visually balanced in the same row.
+ * Decorative — always `aria-hidden`, so the button's accessible name stays
+ * its "Thread" label.
+ */
+function ThreadTimelineIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M3 12h3l3-7 4 14 3-7h5" />
+    </svg>
+  );
+}
 
 /**
  * Width reserved on the LEFT inside the lane axis so the leftmost mark — a
@@ -1446,17 +1517,11 @@ export function ThreadTimelineOverlay({
         data-testid="thread-timeline-toggle"
         data-expanded="false"
         aria-expanded={false}
-        aria-label="Thread timeline"
+        aria-label="Thread"
         className={TIMELINE_TOGGLE_BUTTON_CLASS}
       >
-        <span
-          aria-hidden="true"
-          className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300"
-        />
-        Thread timeline
-        <span aria-hidden="true" className="ml-auto text-slate-400">
-          ▸
-        </span>
+        <ThreadTimelineIcon className="h-3.5 w-3.5" />
+        Thread
       </button>
     );
   }
@@ -1475,11 +1540,8 @@ export function ThreadTimelineOverlay({
         className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
       >
         <span className="flex items-center gap-1.5">
-          <span
-            aria-hidden="true"
-            className="inline-block h-1.5 w-1.5 rounded-full bg-slate-500"
-          />
-          Thread timeline
+          <ThreadTimelineIcon className="h-3.5 w-3.5" />
+          Thread
         </span>
         <span aria-hidden="true" className="text-slate-400">
           ▾

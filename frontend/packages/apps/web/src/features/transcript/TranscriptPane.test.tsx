@@ -33,6 +33,10 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import { findAllQuoteRanges } from './branchHighlight';
+import {
+  TIMELINE_EXPANDED_STORAGE_KEY,
+  resetTimelineExpandedForTests,
+} from './ThreadTimelineOverlay';
 import { TranscriptPane } from './TranscriptPane';
 
 const server = setupServer(...createHandlers());
@@ -81,6 +85,11 @@ describe('TranscriptPane', () => {
       newSessionWorkdir: null,
       workdirDialogOpen: false,
     });
+    // Clear the timeline-expanded persisted preference and the in-memory
+    // cache so each test starts from the default collapsed state (some
+    // tests opt into expanded explicitly).
+    window.localStorage.removeItem(TIMELINE_EXPANDED_STORAGE_KEY);
+    resetTimelineExpandedForTests();
   });
 
   function renderNewSessionPane(
@@ -1410,29 +1419,42 @@ describe('TranscriptPane', () => {
       expect(body.scrollTop).toBe(600);
     });
 
-    // The top region (breadcrumb / thread timeline / Terminal toggle) is
-    // sticky-pinned to the top of the scroll viewport so it stays on screen
-    // as the conversation scrolls underneath. These tests cover the CSS
-    // invariants and the dynamic `--delta-top-region-reserve` CSS variable
-    // that compensates for the sticky overlay when a timeline jump uses
-    // `scrollIntoView({ block: 'start' })` (which would otherwise land the
-    // destination article hidden behind the sticky region).
-    describe('sticky top region', () => {
-      it('renders the top region with position:sticky pinned to the scroll viewport top', async () => {
+    // The top region (breadcrumb / thread timeline / Terminal toggle)
+    // floats over the scrollable body as an absolute overlay so it stays
+    // on screen as the conversation scrolls underneath. These tests cover
+    // the CSS invariants, the dynamic `--delta-top-region-reserve` CSS
+    // variable that compensates for the overlay both as the body's
+    // `padding-top` (so the first message does not render under it) and as
+    // the articles' `scroll-margin-top` (so a timeline jump using
+    // `scrollIntoView({ block: 'start' })` lands the destination article
+    // just below the overlay rather than hidden behind it), and the
+    // collapsed-vs-expanded layout switch in the row.
+    describe('top region overlay', () => {
+      it('renders the top region as an absolute overlay anchored to the scroll viewport top', async () => {
         renderPane(mockThreads, BRANCH_THREAD_ID);
         const topRegion = await screen.findByTestId('transcript-top-region');
 
-        // Sticky positioning keeps the region on screen as the body scrolls.
-        // `top-0` is the offset Tailwind class for `top: 0` — without it,
-        // sticky has no anchor and falls back to relative positioning. The
-        // opaque background hides the conversation scrolling underneath.
-        expect(topRegion.className).toContain('sticky');
+        // Absolute positioning floats the region over the body without
+        // taking layout space; the body reserves `padding-top` to keep the
+        // first message clear of it. The Panel's body wrapper carries
+        // `position: relative` so the overlay anchors there rather than
+        // scrolling with content. `top-0` / `left-0` / `right-0` glue the
+        // overlay to the wrapper's top edge full-width; `z-20` keeps it
+        // above any other in-flow children (streaming bubble, chip rows).
+        // The opaque background hides the conversation scrolling
+        // underneath.
+        expect(topRegion.className).toContain('absolute');
         expect(topRegion.className).toContain('top-0');
+        expect(topRegion.className).toContain('left-0');
+        expect(topRegion.className).toContain('right-0');
+        expect(topRegion.className).toContain('z-20');
         expect(topRegion.className).toContain('bg-white');
+        // The previous sticky-positioning era is gone.
+        expect(topRegion.className).not.toContain('sticky');
 
-        // The breadcrumb and timeline render INSIDE this sticky container —
-        // not as siblings of it — so they all move together with the sticky
-        // wrapper and stay pinned as one unit.
+        // The breadcrumb and timeline render INSIDE this overlay container —
+        // not as siblings of it — so they all move together with the
+        // overlay and stay pinned as one unit.
         expect(
           within(topRegion).getByRole('navigation', { name: 'Breadcrumb' }),
         ).toBeInTheDocument();
@@ -1441,11 +1463,22 @@ describe('TranscriptPane', () => {
         ).toBeInTheDocument();
       });
 
-      it('places the Terminal button inside the same sticky top region as the timeline', async () => {
+      it("reserves the body's padding-top from --delta-top-region-reserve so the first message clears the overlay", async () => {
+        renderPane(mockThreads, BRANCH_THREAD_ID);
+        // The body reads the variable through `padding-top` (set inline so
+        // jsdom can read it back as a literal CSS value). Without this
+        // reserve the first message would render under the absolute
+        // overlay on initial paint.
+        expect(bodyEl().style.paddingTop).toBe(
+          'var(--delta-top-region-reserve, 0)',
+        );
+      });
+
+      it('places the Terminal button inside the same top region overlay as the timeline', async () => {
         // The Terminal button is forwarded into TranscriptPane as the
         // `terminalButton` slot (see WorkspaceScreen). It must render INSIDE
-        // the sticky wrapper so it stays on screen with the timeline; if it
-        // were a sibling, it would scroll away with the conversation.
+        // the overlay so it stays on screen with the timeline; if it were
+        // a sibling, it would scroll away with the conversation.
         const queryClient = new QueryClient({
           defaultOptions: { queries: { retry: false } },
         });
@@ -1471,6 +1504,90 @@ describe('TranscriptPane', () => {
         ).toBeInTheDocument();
       });
 
+      it('places the Terminal button beside the timeline toggle when collapsed', async () => {
+        // Default state is collapsed (no localStorage preference saved),
+        // so the row is horizontal: timeline toggle on the left, Terminal
+        // button on the right — both in the same flex row.
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        });
+        const client = new ApiClient({ baseUrl: 'http://localhost' });
+        render(
+          <QueryClientProvider client={queryClient}>
+            <ApiProvider client={client}>
+              <TranscriptPane
+                threads={mockThreads}
+                activeThread={mockThreads.find((t) => t.id === MAIN_THREAD_ID)!}
+                readOnly={false}
+                terminalButton={
+                  <button data-testid="terminal-toggle">Terminal</button>
+                }
+              />
+            </ApiProvider>
+          </QueryClientProvider>,
+        );
+
+        const row = await screen.findByTestId('transcript-top-row');
+        expect(row.getAttribute('data-expanded')).toBe('false');
+        // Both the timeline toggle and the Terminal button live in this
+        // same row.
+        const toggle = within(row).getByTestId('thread-timeline-toggle');
+        const terminal = within(row).getByTestId('terminal-toggle');
+        expect(toggle).toBeInTheDocument();
+        expect(terminal).toBeInTheDocument();
+        // DOM order: timeline toggle first, then the Terminal button.
+        expect(
+          toggle.compareDocumentPosition(terminal) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      });
+
+      it('moves the Terminal button onto its own right-aligned row below the card when expanded', async () => {
+        // Seed the persisted preference to expanded so the timeline mounts
+        // open. The expanded card grows full-width on its own row; the
+        // Terminal button drops onto a second row beneath it, justified to
+        // the right.
+        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        resetTimelineExpandedForTests();
+
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false } },
+        });
+        const client = new ApiClient({ baseUrl: 'http://localhost' });
+        render(
+          <QueryClientProvider client={queryClient}>
+            <ApiProvider client={client}>
+              <TranscriptPane
+                threads={mockThreads}
+                activeThread={mockThreads.find((t) => t.id === MAIN_THREAD_ID)!}
+                readOnly={false}
+                terminalButton={
+                  <button data-testid="terminal-toggle">Terminal</button>
+                }
+              />
+            </ApiProvider>
+          </QueryClientProvider>,
+        );
+
+        const row = await screen.findByTestId('transcript-top-row');
+        expect(row.getAttribute('data-expanded')).toBe('true');
+        // Column layout when expanded so the card and the Terminal row
+        // stack.
+        expect(row.className).toContain('flex-col');
+        // The expanded timeline card and the Terminal button still live
+        // inside the same row container; the Terminal button must appear
+        // AFTER the timeline card in DOM order so it renders beneath it.
+        const timelineCard = within(row).getByTestId('thread-timeline-overlay');
+        const terminal = within(row).getByTestId('terminal-toggle');
+        expect(
+          timelineCard.compareDocumentPosition(terminal) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+        // The Terminal button's wrapping row is right-justified.
+        const terminalWrapper = terminal.parentElement;
+        expect(terminalWrapper?.className).toContain('justify-end');
+      });
+
       it('drives --delta-top-region-reserve from the top region\'s measured height', async () => {
         renderPane(mockThreads, BRANCH_THREAD_ID);
         const topRegion = await screen.findByTestId('transcript-top-region');
@@ -1478,10 +1595,12 @@ describe('TranscriptPane', () => {
           expect(lookupObserver(topRegion)).not.toBeNull(),
         );
 
-        // The reserve is the variable read by `article[data-message-uuid]`'s
-        // `scroll-margin-top` rule (index.css), so a timeline-jump
-        // `scrollIntoView({ block: 'start' })` lands the destination article
-        // just BELOW the sticky region rather than hidden underneath it.
+        // The reserve drives both the body's `padding-top` (so the first
+        // message clears the absolute overlay) and the variable read by
+        // `article[data-message-uuid]`'s `scroll-margin-top` rule
+        // (index.css), so a timeline-jump `scrollIntoView({ block: 'start' })`
+        // lands the destination article just BELOW the overlay rather
+        // than hidden underneath it.
         topRegion.getBoundingClientRect = () => ({ height: 72 }) as DOMRect;
         act(() => {
           const fire = lookupObserver(topRegion)!;
@@ -1499,9 +1618,9 @@ describe('TranscriptPane', () => {
 
       it('grows the reserve when the top region grows (timeline expanded), keeping jumped-to articles visible', async () => {
         // The timeline card height varies with lane count; expanding it
-        // makes the sticky region taller, so the reserve must grow in
-        // lockstep — otherwise a post-expand jump would land the destination
-        // article half-hidden under the now-taller sticky overlay.
+        // makes the overlay taller, so the reserve must grow in lockstep
+        // — otherwise a post-expand jump would land the destination
+        // article half-hidden under the now-taller overlay.
         renderPane(mockThreads, BRANCH_THREAD_ID);
         const topRegion = await screen.findByTestId('transcript-top-region');
         await waitFor(() =>
@@ -1519,7 +1638,7 @@ describe('TranscriptPane', () => {
           ).toBe('48px'),
         );
 
-        // The user expands the timeline card: the sticky region grows.
+        // The user expands the timeline card: the overlay grows.
         topRegion.getBoundingClientRect = () => ({ height: 220 }) as DOMRect;
         act(() => {
           const fire = lookupObserver(topRegion)!;
@@ -1533,12 +1652,13 @@ describe('TranscriptPane', () => {
       });
 
       it('preserves the body\'s scrollTop when the top region is measured (no scroll yank)', async () => {
-        // Measuring the sticky region must not move the scroll position the
-        // user is reading: the reserve is a CSS variable consumed by the
-        // articles' `scroll-margin-top`, not the body's padding-top, so the
-        // body's scrollTop is left untouched. This guards against a future
-        // mistake where the reserve is mis-wired through a path that does
-        // reflow the body.
+        // Measuring the overlay must not move the scroll position the user
+        // is reading. The observer effect only writes the
+        // `--delta-top-region-reserve` CSS variable on the body and never
+        // touches `scrollTop`. This guards against a future mistake where
+        // the reserve handler is mis-wired through a path that does reset
+        // scrollTop (e.g. accidentally re-using the bottom-overlay's
+        // re-stick logic).
         renderPane(mockThreads, BRANCH_THREAD_ID);
         const topRegion = await screen.findByTestId('transcript-top-region');
         await waitFor(() =>

@@ -181,14 +181,17 @@ body {
  * overlay jumps to a message it uses `scrollIntoView({ block: 'start' })`,
  * which puts the article flush with the top of the scrollable body — but
  * TranscriptPane's top region (breadcrumb / timeline / Terminal toggle) is
- * `position: sticky; top: 0;` over that top edge, so without compensation
- * the destination article would land hidden underneath it. The
- * `--delta-top-region-reserve` token is set inline on the body via React
- * (TranscriptPane measures the live sticky region's height with a
- * ResizeObserver, so the reserve tracks both the breadcrumb-only resting
- * state and the taller expanded-timeline state automatically). On panes
- * without a top region (the cold-start / new-session state) the token is
- * absent and `scroll-margin-top` falls back to `0`, which is benign.
+ * an absolute overlay (`position: absolute; top: 0; ...`) floating over
+ * that top edge, so without compensation the destination article would
+ * land hidden underneath it. The body also reserves matching
+ * `padding-top` from the same token so the first message does not render
+ * under the overlay on initial paint. The `--delta-top-region-reserve`
+ * token is set inline on the body via React (TranscriptPane measures the
+ * live overlay height with a ResizeObserver, so the reserve tracks both
+ * the breadcrumb-only resting state and the taller expanded-timeline
+ * state automatically). On panes without a top region (the cold-start /
+ * new-session state) the token is absent and `scroll-margin-top` falls
+ * back to `0`, which is benign.
  */
 article[data-message-uuid] {
   scroll-margin-top: var(--delta-top-region-reserve, 0);

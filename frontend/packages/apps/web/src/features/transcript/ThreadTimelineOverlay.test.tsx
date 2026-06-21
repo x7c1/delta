@@ -30,6 +30,7 @@ import {
   WHEEL_PER_EVENT_CLAMP_PX,
   WHEEL_VELOCITY_WINDOW_MS,
   normalizeWheelDeltaPx,
+  resetTimelineExpandedForTests,
   scheduleScrollAfterRender,
   scrollMessageIntoView,
   stepsForCumulativePx,
@@ -150,6 +151,10 @@ function renderOverlay({
  */
 function resetGlobals() {
   window.localStorage.clear();
+  // The expanded preference is cached in module state for cross-component
+  // sync (see `useTimelineExpanded`); reset the cache too so each test
+  // reads the freshly-cleared (or freshly-seeded) localStorage value.
+  resetTimelineExpandedForTests();
   useNavStore.setState({
     focusedSessionId: null,
     activeThreadId: null,
@@ -196,6 +201,21 @@ describe('ThreadTimelineOverlay collapse toggle', () => {
     const toggle = screen.getByTestId('thread-timeline-toggle');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByTestId('thread-timeline-body')).toBeNull();
+  });
+
+  it('labels the collapsed toggle "Thread" with a leading icon, matching the Terminal button shape', () => {
+    // The collapsed toggle reads "Thread" (short, paired with an icon)
+    // rather than "Thread timeline" so it sits visually balanced beside
+    // the Terminal toggle in the transcript pane's top region. The icon
+    // is an inline SVG (no icon library is used in this codebase).
+    renderOverlay({ threads: [makeThread(1)], messagesByThread: new Map() });
+    const toggle = screen.getByTestId('thread-timeline-toggle');
+    expect(toggle).toHaveAttribute('aria-label', 'Thread');
+    expect(toggle).toHaveTextContent('Thread');
+    expect(toggle).not.toHaveTextContent('Thread timeline');
+    // The leading glyph is an inline SVG. Querying by selector is the
+    // cleanest way (no semantic role for decorative icons).
+    expect(toggle.querySelector('svg')).not.toBeNull();
   });
 
   it('toggles open on click and persists the preference', () => {

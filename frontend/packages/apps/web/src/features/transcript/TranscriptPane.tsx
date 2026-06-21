@@ -30,7 +30,10 @@ import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
 import { SubagentRunningIndicator } from './SubagentRunningIndicator';
-import { ThreadTimelineOverlay } from './ThreadTimelineOverlay';
+import {
+  ThreadTimelineOverlay,
+  useTimelineExpanded,
+} from './ThreadTimelineOverlay';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
@@ -322,20 +325,32 @@ export function TranscriptPane({
   const bottomOverlayRef = useRef<HTMLDivElement | null>(null);
   const [bottomReserve, setBottomReserve] = useState<number | null>(null);
 
-  // The top region (breadcrumb / timeline / Terminal toggle) is sticky-pinned
-  // to the top of the scroll viewport (see the `topRegion` JSX below). A
-  // timeline jump uses `scrollIntoView({ block: 'start' })`, which lands the
-  // destination article at the body's scroll origin — i.e. underneath the
-  // sticky region. To compensate, the body's `scroll-margin-top` reserve is
-  // driven by the live height of the sticky region (varies with breadcrumb
-  // presence and the timeline's expanded/collapsed state), measured via the
-  // ResizeObserver below and exposed as a CSS variable read by the
-  // `article[data-message-uuid]` rule in `index.css`. `null` until measured
-  // (or when there is no top region at all): the variable is omitted and the
-  // CSS rule's `0` fallback applies, which is benign — there is nothing to
-  // hide under in that case.
+  // The top region (breadcrumb / timeline / Terminal toggle) floats over
+  // the body as an absolute overlay (see the `topRegion` JSX below). Two
+  // separate things compensate for the overlay not occupying layout space:
+  // the body reserves an equivalent `padding-top` so the first message
+  // does not render under it, and `article[data-message-uuid]` carries a
+  // matching `scroll-margin-top` (index.css) so a timeline-jump
+  // `scrollIntoView({ block: 'start' })` lands the destination article
+  // just BELOW the overlay rather than hidden underneath it. Both feeds
+  // share one source: the live height of the overlay, measured via the
+  // ResizeObserver below and exposed as the `--delta-top-region-reserve`
+  // CSS variable (varies with breadcrumb presence and the timeline's
+  // expanded/collapsed state). `null` until measured (or when there is no
+  // top region at all): the variable is omitted and the CSS rule's `0`
+  // fallback applies, which is benign — there is nothing to hide under in
+  // that case.
   const topRegionRef = useRef<HTMLDivElement | null>(null);
   const [topRegionReserve, setTopRegionReserve] = useState<number | null>(null);
+
+  // The expanded timeline pushes the Terminal button onto its own row below
+  // the card (otherwise the expanded card and the button would both compete
+  // for the same horizontal row, and the card's lane labels read worst when
+  // they end against a tall control). Collapsed, both buttons sit
+  // side-by-side. The state is shared with `ThreadTimelineOverlay` via a
+  // module-scoped pub-sub inside `useTimelineExpanded` so a click on the
+  // toggle there updates the layout here on the same tick.
+  const [timelineExpanded] = useTimelineExpanded();
 
   // When navigating UP to an ancestor via the breadcrumb, this holds the child
   // thread one level down toward where we were. After the ancestor renders, the
@@ -934,18 +949,20 @@ export function TranscriptPane({
     return () => observer.disconnect();
   }, [bottomContent]);
 
-  // Track the sticky top region's actual height and drive the body's
-  // `--delta-top-region-reserve` CSS variable from it. The variable feeds the
-  // `scroll-margin-top` rule on `article[data-message-uuid]` (see
-  // index.css), so a timeline-jump `scrollIntoView({ block: 'start' })`
-  // lands the destination article just below the sticky region rather than
-  // hidden underneath it. Re-bind when the top region appears/disappears
-  // (e.g. swapping between new-session and an active thread) so the ref
-  // tracks the live node; clear the reserve when the region is gone so the
-  // CSS rule's `0` fallback applies (there is nothing to clear, so any
-  // `scroll-margin-top` would just add stray whitespace above jumped-to
-  // articles). This observes the TOP REGION only and writes the body's CSS
-  // variable, never the region's own size, so it cannot feed back.
+  // Track the top region overlay's actual height and drive the body's
+  // `--delta-top-region-reserve` CSS variable from it. The variable feeds
+  // both the body's `padding-top` (so the first message does not render
+  // under the absolute overlay) and the `scroll-margin-top` rule on
+  // `article[data-message-uuid]` (see index.css), so a timeline-jump
+  // `scrollIntoView({ block: 'start' })` lands the destination article
+  // just below the overlay rather than hidden underneath it. Re-bind when
+  // the top region appears/disappears (e.g. swapping between new-session
+  // and an active thread) so the ref tracks the live node; clear the
+  // reserve when the region is gone so the CSS rule's `0` fallback
+  // applies (there is nothing to clear, so any padding/scroll-margin
+  // would just add stray whitespace above jumped-to articles). This
+  // observes the TOP REGION only and writes the body's CSS variable,
+  // never the region's own size, so it cannot feed back.
   useLayoutEffect(() => {
     const region = topRegionRef.current;
     if (!region) {
@@ -981,59 +998,93 @@ export function TranscriptPane({
     </div>
   );
 
-  // The top region: rendered above the conversation in normal flow but
-  // sticky-pinned to the top of the scroll viewport (`position: sticky;
-  // top: 0;`), so the breadcrumb, timeline, and Terminal button stay on
-  // screen as the user scrolls through the conversation rather than
-  // scrolling out with it. Sticky was chosen over an absolute overlay +
-  // reserve because the expanded timeline card height varies with lane
-  // count and would otherwise need ResizeObserver-driven reserve math
-  // (the bottom composer overlay already does that — see `bottomReserve`
-  // — and it is the most fragile part of this file); sticky lets the
-  // element occupy its own height in flow while clamping to the viewport
-  // top during scroll, with no reserve to drift.
+  // The top region: an absolute overlay anchored to the top of the
+  // conversation column (`position: absolute; top: 0; left: 0; right: 0`),
+  // so the breadcrumb, timeline, and Terminal button float above the
+  // scrolling content rather than scrolling away with it. The Panel's body
+  // wrapper (`Panel.tsx`) already carries `position: relative`, so the
+  // overlay anchors to that wrapper rather than to the scrolling content
+  // itself — it stays glued to the viewport top while the conversation
+  // scrolls underneath. A higher z-index (`z-20`) keeps it above any other
+  // in-flow content; the previous sticky version used `z-10` against
+  // articles only and the overlay now also has to win against the
+  // streaming bubble and chip rows.
   //
-  // The wrapper carries an opaque white background so the gap between
-  // its child cards does not let the scrolling conversation bleed
-  // through. Padding lives on the wrapper (not the cards) so the
-  // background extends to the body edges, matching the pane behind it.
-  // A z-index above the message articles lets the cards (and the gap
-  // between them) sit cleanly above content that scrolls underneath.
+  // The wrapper carries an opaque white background so the conversation
+  // scrolling underneath does not show through the gap between the
+  // wrapper's child cards. Padding lives on the wrapper (not the cards)
+  // so the background extends to the body edges, matching the pane behind
+  // it.
+  //
+  // Because the overlay does NOT occupy layout space, the scrollable body
+  // reserves an equivalent gap at the top via `padding-top:
+  // var(--delta-top-region-reserve)` (driven by the ResizeObserver below
+  // — the variable already exists for `scroll-margin-top` on jumped-to
+  // articles, so the same source drives both). Without that reserve the
+  // first message would render under the overlay on initial paint.
   //
   // The thread timeline (a card-or-toggle, depending on its expanded
   // state) sits on the left of the top row; the Terminal reopen button
   // sits on the right of the same row. When the timeline is collapsed,
   // its toggle is styled to match the Terminal button (see
   // `TIMELINE_TOGGLE_BUTTON_CLASS`) so the row reads as two siblings of
-  // the same kind. When the timeline is expanded, the card grows
-  // downward inside the same top region and the Terminal button stays at
-  // the right of the top row above it — the sticky wrapper grows with
-  // it. Omitted entirely on the new-session screen and when there is no
-  // active thread; the Terminal button still rides along on its own when
-  // present.
+  // the same kind. When the timeline is expanded the card grows downward
+  // and the Terminal button moves to its own right-aligned row below the
+  // card, so the expanded lane labels read against the page rather than
+  // ending against a tall control. Omitted entirely on the new-session
+  // screen and when there is no active thread; the Terminal button still
+  // rides along on its own when present.
   const showTimeline = !newSession && activeThread !== null;
+  // When the timeline is collapsed, the toggle and the Terminal button
+  // share one row (`flex-row` / `justify-between`). When expanded, the
+  // expanded card grows full-width on its own row and the Terminal button
+  // drops onto a second, right-aligned row beneath it (`flex-col` plus a
+  // `justify-end` sub-row).
+  const topRowExpanded = showTimeline && timelineExpanded;
   const topRegion = (showTimeline || terminalButton || breadcrumbCard) && (
     <div
       ref={topRegionRef}
       data-testid="transcript-top-region"
-      className="sticky top-0 z-10 flex flex-col gap-2 bg-white px-3 pt-3 pb-2"
+      className="absolute top-0 left-0 right-0 z-20 flex flex-col gap-2 bg-white px-3 pt-3 pb-2"
     >
-      {(showTimeline || terminalButton) && (
-        <div className="flex items-start justify-between gap-2">
-          {showTimeline && activeThread !== null ? (
-            <div className="min-w-0 flex-1">
+      {(showTimeline || terminalButton) &&
+        (topRowExpanded ? (
+          <div
+            data-testid="transcript-top-row"
+            data-expanded="true"
+            className="flex flex-col gap-2"
+          >
+            {showTimeline && activeThread !== null && (
               <ThreadTimelineOverlay
                 threads={threads}
                 activeThreadId={activeThread.id}
                 conversationBodyRef={bodyRef}
               />
-            </div>
-          ) : (
-            <span className="flex-1" />
-          )}
-          {terminalButton}
-        </div>
-      )}
+            )}
+            {terminalButton && (
+              <div className="flex justify-end">{terminalButton}</div>
+            )}
+          </div>
+        ) : (
+          <div
+            data-testid="transcript-top-row"
+            data-expanded="false"
+            className="flex items-start justify-between gap-2"
+          >
+            {showTimeline && activeThread !== null ? (
+              <div className="min-w-0 flex-1">
+                <ThreadTimelineOverlay
+                  threads={threads}
+                  activeThreadId={activeThread.id}
+                  conversationBodyRef={bodyRef}
+                />
+              </div>
+            ) : (
+              <span className="flex-1" />
+            )}
+            {terminalButton}
+          </div>
+        ))}
       {breadcrumbCard}
     </div>
   );
@@ -1050,16 +1101,18 @@ export function TranscriptPane({
       // fixed `--delta-composer-body-reserve` token, so the body never
       // under-reserves on first paint.
       //
-      // The top region (breadcrumb / timeline / Terminal toggle) is sticky-
-      // pinned to the top of the scroll viewport (see the `topRegion` JSX
-      // above), so it occupies its own height in flow on first paint and
-      // stays put as content scrolls past — no top padding is needed for
-      // resting layout. `--delta-top-region-reserve` carries the live sticky
-      // height onto the body so the `article[data-message-uuid]`
-      // `scroll-margin-top` rule (index.css) lands timeline-jump articles
-      // just below the sticky region rather than hidden underneath it.
-      // Omitted when there is no top region; the CSS rule's `0` fallback
-      // then applies.
+      // The top region (breadcrumb / timeline / Terminal toggle) floats over
+      // the body as an absolute overlay (see the `topRegion` JSX above), so
+      // it carries no layout height — the body must reserve an equivalent
+      // top gap, otherwise the first message would render under the overlay
+      // on initial paint. The reserve is the live overlay height, exposed
+      // via the `--delta-top-region-reserve` CSS variable (driven by the
+      // ResizeObserver on `topRegionRef`). The same variable also feeds the
+      // `article[data-message-uuid]` `scroll-margin-top` rule (index.css)
+      // so a timeline-jump `scrollIntoView({ block: 'start' })` lands the
+      // destination article just BELOW the overlay rather than hidden
+      // underneath it. Omitted when there is no top region; the variable's
+      // `0` fallback then yields a zero padding and a zero scroll margin.
       //
       // `scrollbar-none` hides the body's scrollbar entirely (it still scrolls
       // via wheel/trackpad): the conversation reads as a clean page, and the
@@ -1068,6 +1121,7 @@ export function TranscriptPane({
       // default `scrollbar-hover`, so it wins when both are present.
       bodyClassName="scrollbar-none"
       bodyStyle={{
+        paddingTop: 'var(--delta-top-region-reserve, 0)',
         paddingBottom:
           bottomReserve !== null
             ? `${bottomReserve}px`
