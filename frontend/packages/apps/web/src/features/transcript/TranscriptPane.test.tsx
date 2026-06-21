@@ -2031,3 +2031,249 @@ describe('TranscriptPane composer context bar', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('TranscriptPane cross-lane timeline scroll (v23 Improvement 1)', () => {
+  // Regression suite for the live dogfooding bug: after v20-v22's layout
+  // shuffles, clicking (or wheel-stepping) a dot on a lane different from
+  // the active thread's lane fails to scroll the conversation pane to the
+  // target message. The thread switch fires, but `scrollIntoView` never
+  // does — the article enters the DOM but the polling
+  // `scheduleScrollAfterRender` never sees it through `bodyRef.current`.
+  //
+  // The test renders a real TranscriptPane with MSW-backed messages for
+  // BOTH threads so the per-thread cache populated by the timeline's
+  // `useThreadsMessagesQueries` is the same one the active thread's pane
+  // reads when `setActiveThread` flips. The expanded timeline therefore
+  // mounts INSIDE the Panel body (the live structure), unlike the
+  // sibling-overlay layout the unit tests in `ThreadTimelineOverlay.test.tsx`
+  // use.
+  beforeEach(() => {
+    useNavStore.setState({
+      activeThreadId: MAIN_THREAD_ID,
+      focusedSessionId: NEW_SESSION_FOCUS,
+      preNewSessionFocus: null,
+    });
+    useLiveStore.setState({
+      sending: [],
+      localSends: {},
+      spawns: [],
+      notices: {},
+      streamingMessages: {},
+      runningSubagents: {},
+    });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+      workdirDialogOpen: false,
+    });
+    // Pre-expand so the lanes paint without an extra toggle click.
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    resetTimelineExpandedForTests();
+  });
+
+  function renderPaneExpanded(activeThreadId = MAIN_THREAD_ID) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const client = new ApiClient({ baseUrl: 'http://localhost' });
+    // The live WorkspaceScreen subscribes to `activeThreadId` from the
+    // nav store and re-derives `activeThread` on each change — when the
+    // timeline calls `setActiveThread`, the conversation pane must
+    // re-render with the new thread's messages. A static prop would
+    // mask the bug, since the body's articles would stay on the
+    // original thread.
+    function ConnectedPane() {
+      const liveActiveId = useNavStore((s) => s.activeThreadId);
+      const active =
+        mockThreads.find((t) => t.id === liveActiveId) ??
+        mockThreads.find((t) => t.id === activeThreadId)!;
+      return (
+        <TranscriptPane
+          threads={mockThreads}
+          activeThread={active}
+          readOnly={false}
+        />
+      );
+    }
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <ConnectedPane />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('scrolls the target article into view after expanding the timeline and wheeling into a dot in another lane', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+
+    // Start collapsed: clear the persisted expanded preference so the
+    // mount renders the single Thread button. This mimics the live
+    // "user opens the timeline for the first time" path.
+    window.localStorage.removeItem(TIMELINE_EXPANDED_STORAGE_KEY);
+    resetTimelineExpandedForTests();
+    useNavStore.setState({ activeThreadId: BRANCH_THREAD_ID });
+    renderPaneExpanded(BRANCH_THREAD_ID);
+
+    // Toggle the Thread button to expand. The collapsed and expanded
+    // ThreadTimelineOverlay are separate React instances (mounted under
+    // different parents in TranscriptPane), so this is a true fresh
+    // mount of the expanded variant.
+    const collapsedToggle = await screen.findByRole('button', {
+      name: 'Thread',
+    });
+    fireEvent.click(collapsedToggle);
+
+    await waitFor(() => {
+      const dots = screen.queryAllByTestId('thread-timeline-dot');
+      expect(dots.length).toBeGreaterThanOrEqual(6);
+    });
+
+    const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+    act(() => {
+      for (let i = 0; i < 4; i += 1) {
+        axisColumn.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    });
+    await waitFor(() => {
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
+    });
+    await waitFor(
+      () => {
+        expect(scrollIntoView).toHaveBeenCalled();
+      },
+      { timeout: 2000 },
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+  });
+
+  it('scrolls the target article into view when the user wheels into a dot in another lane', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+
+    // Start the active thread on BRANCH so that wheel-up steps cross
+    // back to MAIN. mockMessagesByThread puts BRANCH's two messages
+    // AFTER MAIN's four, so the initial active index is BRANCH's tail
+    // (the global last message).
+    useNavStore.setState({ activeThreadId: BRANCH_THREAD_ID });
+    renderPaneExpanded(BRANCH_THREAD_ID);
+
+    await waitFor(() => {
+      const dots = screen.queryAllByTestId('thread-timeline-dot');
+      expect(dots.length).toBeGreaterThanOrEqual(6);
+    });
+
+    // Wheel up — one notch is enough to land on the immediate previous
+    // large turn. The immediate prev of BRANCH-tail is BRANCH-root or
+    // MAIN-tail (depending on the message order); both are sufficient
+    // to exercise the cross-lane path IF the wheel-up crosses, and the
+    // same-lane path otherwise. The point is to exercise the actual
+    // wheel handler against the live structure.
+    const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+    act(() => {
+      // Multiple wheel-ups in a burst — each cumulative |delta| stays
+      // small enough that the staircase walks one notch at a time, so
+      // the burst eventually crosses back from BRANCH into MAIN.
+      for (let i = 0; i < 4; i += 1) {
+        axisColumn.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    });
+    // The active thread must switch back to MAIN at some point during
+    // the burst.
+    await waitFor(() => {
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
+    });
+    await waitFor(
+      () => {
+        expect(scrollIntoView).toHaveBeenCalled();
+      },
+      { timeout: 2000 },
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    const target = scrollIntoView.mock.instances[
+      scrollIntoView.mock.instances.length - 1
+    ] as HTMLElement;
+    expect(target.tagName.toLowerCase()).toBe('article');
+    const uuid = target.getAttribute('data-message-uuid');
+    expect(['uuid-u1', 'uuid-a1', 'uuid-u2', 'uuid-a2']).toContain(uuid);
+  });
+
+  it('scrolls the target article into view when the user clicks a dot in another lane', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    // Stub the axis cell's rect so click coordinates resolve deterministically
+    // (jsdom returns zeros for every layout measurement).
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.hasAttribute('data-timeline-axis')) {
+          return {
+            left: 0,
+            top: 0,
+            right: 480,
+            bottom: 18,
+            width: 480,
+            height: 18,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return originalRect.call(this);
+      },
+    );
+
+    renderPaneExpanded(MAIN_THREAD_ID);
+
+    // Wait for both lanes to populate (both per-thread queries settled, so
+    // the timeline has dots on every lane).
+    await waitFor(() => {
+      const dots = screen.queryAllByTestId('thread-timeline-dot');
+      // 4 messages on MAIN + 2 messages on BRANCH = 6 dots; allow >=
+      // because future fixture growth shouldn't make this brittle.
+      expect(dots.length).toBeGreaterThanOrEqual(6);
+    });
+    // The target message lives on BRANCH; the main article is currently
+    // active. Click somewhere far right so the global nearest message is
+    // a BRANCH dot (BRANCH messages are timestamped well after MAIN).
+    const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+    fireEvent.click(axisColumn, { clientX: 480 });
+
+    // The active thread must switch to BRANCH.
+    await waitFor(() => {
+      expect(useNavStore.getState().activeThreadId).toBe(BRANCH_THREAD_ID);
+    });
+
+    // Then `scrollIntoView` MUST fire on the target article inside the
+    // body. This is the live regression: today it does NOT fire.
+    await waitFor(
+      () => {
+        expect(scrollIntoView).toHaveBeenCalled();
+      },
+      { timeout: 1500 },
+    );
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+    // The instance must be one of the BRANCH thread's articles.
+    const target = scrollIntoView.mock.instances[0] as HTMLElement;
+    expect(target.tagName.toLowerCase()).toBe('article');
+    const uuid = target.getAttribute('data-message-uuid');
+    expect(uuid === 'uuid-b1' || uuid === 'uuid-b2').toBe(true);
+  });
+});
