@@ -322,11 +322,12 @@ export function useTimelineExpanded(): [boolean, () => void] {
  *
  * Without the tag anchor a `[data-message-uuid="X"]` query rooted at the
  * conversation pane's scroll container hits the timeline span first
- * (DOM-pre-order — the sticky top region renders before the message list),
- * so `scrollIntoView` lands on the already-visible dot (no-op) and the
- * pane-scroll IntersectionObserver observes the dot instead of the article.
- * Both regressions show up the moment the timeline starts living inside the
- * conversation pane's scroll container — see TranscriptPane's `topRegion`.
+ * (DOM-pre-order — the top-region floating cards render before the
+ * message list), so `scrollIntoView` lands on the already-visible dot
+ * (no-op) and the pane-scroll IntersectionObserver observes the dot
+ * instead of the article. Both regressions show up the moment the
+ * timeline starts living inside the conversation pane's scroll
+ * container — see TranscriptPane's `topRegion`.
  *
  * Exported so a regression test can pin the selector shape.
  */
@@ -338,8 +339,9 @@ export function articleMessageSelector(uuid: string): string {
  * CSS selector matching every transcript message article. The pane-scroll
  * IntersectionObserver iterates this set to track which article the user is
  * reading; the `<article>` tag anchor keeps the timeline's own dots — which
- * share the `data-message-uuid` attribute and now live in the same scroll
- * container via the sticky top region — out of the observation set.
+ * share the `data-message-uuid` attribute and (in the expanded state)
+ * live in the same scroll container as the message articles — out of the
+ * observation set.
  */
 export const ALL_ARTICLES_SELECTOR = 'article[data-message-uuid]';
 
@@ -353,12 +355,13 @@ export const ALL_ARTICLES_SELECTOR = 'article[data-message-uuid]';
  * Using `block: 'start'` rather than the v6 `block: 'center'` means the
  * destination message becomes the first line the eye reads on the next
  * paint — a centred message wastes half the viewport above the line the
- * user just asked to jump to. The transcript's sticky top region (the
- * breadcrumb / timeline / Terminal button) would otherwise hide the top
- * of the article; the `scroll-margin-top` rule on `article[data-message-uuid]`
- * (driven by the live sticky height via `--delta-top-region-reserve` — see
- * index.css and TranscriptPane) shifts the landing position down by that
- * height so the article lands just below the sticky region.
+ * user just asked to jump to. The transcript's top region overlay (the
+ * collapsed-state breadcrumb and {Thread + Terminal} floating cards)
+ * would otherwise hide the top of the article; the `scroll-margin-top`
+ * rule on `article[data-message-uuid]` (driven by the live overlay
+ * height via `--delta-top-region-reserve` — see index.css and
+ * TranscriptPane) shifts the landing position down by that height so
+ * the article lands just below the overlay row.
  *
  * The `scrollIntoView` call is guarded against environments where it is
  * unavailable (jsdom does not implement it on every element by default), so
@@ -1453,11 +1456,12 @@ export function ThreadTimelineOverlay({
     // rendered turn, so a single querySelectorAll covers all message
     // bodies. The selector is article-anchored ({@link ALL_ARTICLES_SELECTOR})
     // so the timeline's own dots and clusters — which share the
-    // `data-message-uuid` attribute and now live in the same scroll container
-    // via the sticky top region — are NOT observed; if they were, the dots
-    // would always win the topmost-visible race (they are sticky-pinned at
-    // the top of the viewport) and the playhead would never follow the
-    // user's conversation-pane scroll. The query is repeated below via a
+    // `data-message-uuid` attribute and (in the expanded state) live in
+    // the same scroll container as the message articles — are NOT
+    // observed; if they were, the dots would always win the
+    // topmost-visible race (they sit at the top of the viewport above
+    // the conversation) and the playhead would never follow the user's
+    // conversation-pane scroll. The query is repeated below via a
     // `MutationObserver` so articles that appear after this initial pass
     // (streaming arrival, a background refetch) are picked up without
     // remounting the IO.
