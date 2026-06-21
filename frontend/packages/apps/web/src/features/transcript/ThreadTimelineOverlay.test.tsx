@@ -2435,3 +2435,404 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
     }
   });
 });
+
+describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
+  // Regression suite for the tail-jump race: a cross-lane wheel-scrub near
+  // the left edge occasionally snapped the playhead to the right-edge (tail)
+  // message. Root cause: markProgrammaticScroll was called at jump-trigger
+  // time, but the actual scrollIntoView only fires after DOM-ready polling
+  // (scheduleScrollAfterRender). The 200 ms time-based guard expired during
+  // slow re-renders; the IO's first-observation batch on the new thread's
+  // articles (which always includes the tail if the pane is freshly rendered
+  // at the bottom) slipped through and committed the tail index.
+  //
+  // The fix adds a state-based crossLaneJumpInFlightRef that is true from
+  // the moment setActiveThread fires until scrollIntoView fires (or the
+  // jump is cancelled). The IO flush bails immediately while this flag is
+  // set, regardless of elapsed time.
+
+  /**
+   * Fake IO helper shared with the v11 tests above. Defined locally here so
+   * the suite is self-contained.
+   */
+  type FakeIO = {
+    callback: IntersectionObserverCallback;
+    options?: IntersectionObserverInit;
+    observed: Set<Element>;
+    emit: (entries: Partial<IntersectionObserverEntry>[]) => void;
+  };
+
+  function installFakeIO(): { instances: FakeIO[]; restore: () => void } {
+    const instances: FakeIO[] = [];
+    const original = (
+      globalThis as { IntersectionObserver?: typeof IntersectionObserver }
+    ).IntersectionObserver;
+    class FakeIntersectionObserver {
+      callback: IntersectionObserverCallback;
+      options?: IntersectionObserverInit;
+      observed = new Set<Element>();
+      emit!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+      constructor(
+        cb: IntersectionObserverCallback,
+        opts?: IntersectionObserverInit,
+      ) {
+        this.callback = cb;
+        this.options = opts;
+        this.emit = (entries) => {
+          this.callback(
+            entries as IntersectionObserverEntry[],
+            this as unknown as IntersectionObserver,
+          );
+        };
+        instances.push(this as unknown as FakeIO);
+      }
+      observe(el: Element) { this.observed.add(el); }
+      unobserve(el: Element) { this.observed.delete(el); }
+      disconnect() { this.observed.clear(); }
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+    }
+    (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver =
+      FakeIntersectionObserver;
+    return {
+      instances,
+      restore: () => {
+        (
+          globalThis as {
+            IntersectionObserver?: typeof IntersectionObserver | undefined;
+          }
+        ).IntersectionObserver = original;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('suppresses IO updates fired after the time-based guard expires but before the cross-lane scroll completes', async () => {
+    // This test pins the v12 fix: when a cross-lane jump triggers a slow
+    // re-render (> PANE_SCROLL_PROGRAMMATIC_GUARD_MS), the IO's first-
+    // observation batch on the new thread's articles must still be blocked
+    // by the state-based crossLaneJumpInFlightRef, even though the time-
+    // based guard has already expired.
+    //
+    // Sequence simulated:
+    //   1. Click → cross-lane jump to lane 2 (playhead = msg-a, index 0).
+    //   2. setActiveThread(2) fires; re-render takes longer than the guard.
+    //   3. IO re-binds on the new thread. IO fires: tail (msg-b) is visible.
+    //   4. Debounce fires — with only the time-based guard this would commit
+    //      msg-b (tail), snapping the playhead to the right edge.
+    //   5. With the state-based guard (flag still true), flush bails.
+    //   6. The DOM-ready poll finds msg-a → scroll fires → flag clears.
+    //   7. A subsequent IO emit is now honoured normally.
+    const fake = installFakeIO();
+    // Capture rAF callbacks to drive the DOM-ready poll manually.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised in this test */
+    }) as typeof window.cancelAnimationFrame;
+    // Drive performance.now so we can make the guard window expire on demand.
+    let nowMs = 10_000;
+    const originalPerfNow = window.performance.now;
+    window.performance.now = (() => nowMs) as typeof performance.now;
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      // Lane 1 holds msg-a (old subthread, left edge); lane 2 holds msg-b
+      // (new subthread, right/tail). The initial playhead lands on msg-b
+      // (latest), so a wheel-up from msg-b → msg-a triggers a cross-lane
+      // jump to lane 1.
+      const threads = [
+        makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+        makeThread(2, {
+          parent_thread_id: 1,
+          root_message_uuid: null,
+          created_at: '2026-01-01T00:01:00Z',
+        }),
+      ];
+      const messages = new Map([
+        [1, [makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z')]],
+        [2, [makeUserText(2, 0, 'msg-b', '2026-01-01T00:02:00Z')]],
+      ]);
+      // Start with lane 2 active; msg-b is in the pane.
+      const { rerender, bodyRef } = renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 2,
+        conversationArticles: [{ uuid: 'msg-b' }],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Initial playhead is on msg-b (the latest message, x=240).
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('240px');
+
+      // Wheel-up: one sub-notch step back → cross-lane jump to msg-a on lane 1.
+      const body = screen.getByTestId('thread-timeline-axis-column');
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // The active thread flips to lane 1 immediately.
+      await waitFor(() => {
+        expect(useNavStore.getState().activeThreadId).toBe(1);
+      });
+      // The IO re-binds now that activeThreadId changed. Re-render the pane
+      // with both articles so msg-b (the tail) is visible first.
+      rerender(
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+            <div>
+              <div ref={bodyRef} data-testid="conversation-body">
+                {/* msg-a is the jump target but msg-b (tail) is also visible */}
+                <article data-message-uuid="msg-a">msg-a</article>
+                <article data-message-uuid="msg-b">msg-b</article>
+              </div>
+              <ThreadTimelineOverlay
+                threads={threads}
+                activeThreadId={1}
+                conversationBodyRef={bodyRef}
+              />
+            </div>
+          </ApiProvider>
+        </QueryClientProvider>,
+      );
+      // Advance past the time-based guard window so only the state-based
+      // flag remains to block the flush.
+      nowMs += PANE_SCROLL_PROGRAMMATIC_GUARD_MS + 50;
+
+      // Simulate the IO firing for msg-b (tail) — exactly what happens when
+      // the new thread's pane is freshly rendered with the tail message at
+      // the bottom of the viewport.
+      const io = fake.instances[fake.instances.length - 1];
+      const articles = within(
+        screen.getByTestId('conversation-body'),
+      ).getAllByText(/msg-/);
+      const msgBArticle = articles.find((a) => a.textContent === 'msg-b')!;
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgBArticle,
+              isIntersecting: true,
+              boundingClientRect: { top: 0 } as DOMRect,
+            },
+          ]);
+        });
+        // Advance debounce — the flush fires but the state-based guard
+        // blocks it. The playhead must stay at msg-a (x=0), not jump to
+        // msg-b (x=240).
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // The playhead is still at msg-a's x (0) — the state-based guard held.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('0px');
+
+      // Now drain the rAF callbacks so the DOM-ready scroll fires (msg-a is
+      // already in the DOM), clearing the flag.
+      const drained = rafCallbacks.splice(0, rafCallbacks.length);
+      for (const cb of drained) {
+        cb(nowMs);
+      }
+      // After the flag clears, a genuine IO emit (user manually scrolling)
+      // IS honoured normally. Emit msg-b again as if the user scrolled down.
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgBArticle,
+              isIntersecting: true,
+              boundingClientRect: { top: 0 } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // The emit is now honoured — playhead moves to msg-b (x=240).
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('240px');
+    } finally {
+      fake.restore();
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+      window.performance.now = originalPerfNow;
+    }
+  });
+
+  it('clears the in-flight flag immediately when a superseding jump cancels the pending scroll', async () => {
+    // If a second jump fires before the first DOM-ready poll completes
+    // (the user scrubs again before the re-render lands), the cancel handle
+    // for the first jump must clear the flag — otherwise the flag would
+    // permanently block pane → timeline sync.
+    const fake = installFakeIO();
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised here */
+    }) as typeof window.cancelAnimationFrame;
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      // Three messages across two lanes. Cross-lane jump: msg-c → msg-b
+      // (lane 2 → lane 1). Then a second wheel-up supersedes it (msg-b →
+      // msg-a, same lane 1).
+      const threads = [
+        makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+        makeThread(2, {
+          parent_thread_id: 1,
+          root_message_uuid: null,
+          created_at: '2026-01-01T00:01:00Z',
+        }),
+      ];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          ],
+        ],
+        [2, [makeUserText(2, 0, 'msg-c', '2026-01-01T00:02:00Z')]],
+      ]);
+      // Start on lane 2 with msg-c active.
+      const { rerender, bodyRef } = renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 2,
+        conversationArticles: [{ uuid: 'msg-c' }],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+
+      // First wheel-up: cross-lane jump msg-c → msg-b (lane 2 → lane 1).
+      const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+      act(() => {
+        axisColumn.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: -50, bubbles: true, cancelable: true }),
+        );
+      });
+      await waitFor(() => {
+        expect(useNavStore.getState().activeThreadId).toBe(1);
+      });
+      // rAF callbacks are queued; the DOM-ready poll is in flight.
+      expect(rafCallbacks.length).toBeGreaterThan(0);
+
+      // Supersede the first jump with a second wheel-up while msg-a and
+      // msg-b are now in the DOM (same-lane jump msg-b → msg-a). The
+      // pending scroll cancel is invoked by the navigation effect, which
+      // clears the in-flight flag.
+      rerender(
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+            <div>
+              <div ref={bodyRef} data-testid="conversation-body">
+                <article data-message-uuid="msg-a">msg-a</article>
+                <article data-message-uuid="msg-b">msg-b</article>
+              </div>
+              <ThreadTimelineOverlay
+                threads={threads}
+                activeThreadId={1}
+                conversationBodyRef={bodyRef}
+              />
+            </div>
+          </ApiProvider>
+        </QueryClientProvider>,
+      );
+      act(() => {
+        axisColumn.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: -50, bubbles: true, cancelable: true }),
+        );
+      });
+      // The playhead is now on msg-a (the oldest message, x=0).
+      await waitFor(() => {
+        expect(
+          screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        ).toBe('0px');
+      });
+
+      // After the superseding jump, the in-flight flag must be cleared so
+      // subsequent IO emits are honoured. Emit msg-b (index 1, x=120px) as
+      // topmost-visible. The same-lane scroll from the superseding jump also
+      // set the time-based guard; advance performance.now past that window
+      // too so only the in-flight flag would block the flush (confirming it
+      // is cleared by the cancel-with-flag-clear wrapper).
+      const originalPerfNow = window.performance.now;
+      let nowMs = 20_000;
+      window.performance.now = (() => nowMs) as typeof performance.now;
+      const io = fake.instances[fake.instances.length - 1];
+      const articles = within(
+        screen.getByTestId('conversation-body'),
+      ).getAllByText(/msg-/);
+      // msg-b is the article at index 1 in sortedMessages (x=120px on a
+      // 3-message axis of width 240px: 0, 120, 240). Using msg-b (not the
+      // tail) keeps the expectation non-trivial: if the flag were NOT cleared,
+      // the flush would bail, and the playhead would stay at 0px.
+      const msgBArticle = articles.find((a) => a.textContent === 'msg-b')!;
+      vi.useFakeTimers();
+      try {
+        // Advance past the time-based guard window so only the state-based
+        // flag (if still set) could block the flush.
+        nowMs += PANE_SCROLL_PROGRAMMATIC_GUARD_MS + 50;
+        act(() => {
+          io.emit([
+            {
+              target: msgBArticle,
+              isIntersecting: true,
+              boundingClientRect: { top: 0 } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+        window.performance.now = originalPerfNow;
+      }
+      // The emit is honoured — the in-flight flag was cleared by the cancel
+      // handle when the superseding jump fired, and the time-based guard has
+      // also expired. msg-b sits at index 1 → x=120px on the shared axis.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('120px');
+    } finally {
+      fake.restore();
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
+});
