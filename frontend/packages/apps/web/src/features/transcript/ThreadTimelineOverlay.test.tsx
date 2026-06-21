@@ -14,6 +14,8 @@ import type { Message, Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
+  ALL_ARTICLES_SELECTOR,
+  articleMessageSelector,
   LANE_LEFT_PAD_PX,
   MARK_CLUSTER_PX,
   MARK_CLUSTER_RING_COLOR,
@@ -30,6 +32,7 @@ import {
   WHEEL_VELOCITY_WINDOW_MS,
   normalizeWheelDeltaPx,
   scheduleScrollAfterRender,
+  scrollMessageIntoView,
   stepsForCumulativePx,
 } from './ThreadTimelineOverlay';
 
@@ -3378,6 +3381,255 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       window.requestAnimationFrame = originalRaf;
       window.cancelAnimationFrame = originalCancelRaf;
       window.performance.now = originalPerfNow;
+    }
+  });
+});
+
+describe('ThreadTimelineOverlay article-anchored uuid selector (v16)', () => {
+  // v14 pt.2 moved the timeline into the conversation pane's scroll
+  // container; v15 then sticky-pinned that container to the top of the
+  // scroll viewport. Both `TimelineDotMark` and `TimelineClusterMark`
+  // stamp `data-message-uuid` (the dot/cluster identity matches its
+  // representative message), so a bare `[data-message-uuid="X"]` query
+  // rooted at the container hits the timeline span first in DOM-pre-
+  // order — the span lives in the sticky topRegion that renders before
+  // the article list. The result was a double regression:
+  //   - timeline click → conversation pane no longer scrolled to the
+  //     targeted message (scrollIntoView landed on the already-visible
+  //     dot, a no-op).
+  //   - conversation pane scroll → timeline playhead no longer followed
+  //     (the IntersectionObserver observed the sticky dots, which always
+  //     win the topmost-visible race at top: 0).
+  // v16 pins every uuid query to the `<article>` tag — the only tag
+  // `MessageItem` ever renders — via `articleMessageSelector` /
+  // `ALL_ARTICLES_SELECTOR`. These tests reproduce the regression by
+  // building a container that holds both an article and a span sharing
+  // the same uuid, then assert that v16's selectors only ever pick the
+  // article.
+
+  beforeEach(() => {
+    resetGlobals();
+  });
+
+  it('articleMessageSelector matches an <article> with the uuid but not a <span> with the same uuid', () => {
+    // Container modelling the live layout shape: the sticky region with
+    // the timeline span sits first; the message article sits below it,
+    // both inside the same conversation-pane scroll container.
+    const container = document.createElement('div');
+    const dot = document.createElement('span');
+    dot.setAttribute('data-message-uuid', 'msg-X');
+    dot.setAttribute('data-testid', 'thread-timeline-dot');
+    container.appendChild(dot);
+    const article = document.createElement('article');
+    article.setAttribute('data-message-uuid', 'msg-X');
+    container.appendChild(article);
+    document.body.appendChild(container);
+    try {
+      const sel = articleMessageSelector('msg-X');
+      const matches = container.querySelectorAll(sel);
+      expect(matches.length).toBe(1);
+      // Article wins, not the timeline span — even though the span comes
+      // first in DOM-pre-order.
+      expect(matches[0]).toBe(article);
+      // And the selector itself is shaped as `article[data-message-uuid="X"]`
+      // so a future regression that drops the tag anchor is visible.
+      expect(sel.startsWith('article[')).toBe(true);
+    } finally {
+      container.remove();
+    }
+  });
+
+  it('ALL_ARTICLES_SELECTOR observes only article elements with a uuid, never timeline dots or clusters', () => {
+    const container = document.createElement('div');
+    const dot = document.createElement('span');
+    dot.setAttribute('data-message-uuid', 'msg-X');
+    dot.setAttribute('data-testid', 'thread-timeline-dot');
+    container.appendChild(dot);
+    const cluster = document.createElement('span');
+    cluster.setAttribute('data-message-uuid', 'msg-X');
+    cluster.setAttribute('data-testid', 'thread-timeline-cluster');
+    container.appendChild(cluster);
+    const articleA = document.createElement('article');
+    articleA.setAttribute('data-message-uuid', 'msg-X');
+    container.appendChild(articleA);
+    const articleB = document.createElement('article');
+    articleB.setAttribute('data-message-uuid', 'msg-Y');
+    container.appendChild(articleB);
+    document.body.appendChild(container);
+    try {
+      const matches = Array.from(
+        container.querySelectorAll(ALL_ARTICLES_SELECTOR),
+      );
+      expect(matches).toHaveLength(2);
+      expect(matches).toContain(articleA);
+      expect(matches).toContain(articleB);
+      expect(matches).not.toContain(dot);
+      expect(matches).not.toContain(cluster);
+    } finally {
+      container.remove();
+    }
+  });
+
+  it('scrollMessageIntoView jumps to the article, not the timeline dot, when both share the uuid in the container', () => {
+    // The regression test for Issue 1: in the live app the timeline
+    // sits inside the conversation pane via TranscriptPane's sticky
+    // topRegion, so the conversation body contains BOTH the article
+    // (the scroll target) and the dot (the timeline identity). Before
+    // v16 the unscoped selector grabbed the dot, leaving the scroll a
+    // no-op. After v16 the article-anchored selector picks the article.
+    const container = document.createElement('div');
+    const dotScrollSpy = vi.fn();
+    const articleScrollSpy = vi.fn();
+    const dot = document.createElement('span');
+    dot.setAttribute('data-message-uuid', 'msg-X');
+    dot.scrollIntoView = dotScrollSpy as unknown as Element['scrollIntoView'];
+    container.appendChild(dot);
+    const article = document.createElement('article');
+    article.setAttribute('data-message-uuid', 'msg-X');
+    article.scrollIntoView =
+      articleScrollSpy as unknown as Element['scrollIntoView'];
+    container.appendChild(article);
+    document.body.appendChild(container);
+    try {
+      scrollMessageIntoView(container, 'msg-X');
+      // The article is the scroll target; the dot is left untouched.
+      expect(articleScrollSpy).toHaveBeenCalledTimes(1);
+      expect(articleScrollSpy).toHaveBeenCalledWith({ block: 'start' });
+      expect(dotScrollSpy).not.toHaveBeenCalled();
+    } finally {
+      container.remove();
+    }
+  });
+
+  it('the pane-scroll IntersectionObserver only observes article message elements, never timeline marks, even when both share the uuid in the same container', async () => {
+    // The regression test for Issue 2: before v16 the IO's
+    // `querySelectorAll('[data-message-uuid]')` picked up the timeline
+    // dots inside the sticky region, and those dots always reported
+    // `boundingClientRect.top` near 0 (sticky-pinned), so the
+    // topmost-visible race froze the playhead on a dot's uuid and the
+    // playhead never followed the user's pane scroll. After v16 the
+    // article-anchored selector keeps the dots out of the observation
+    // set entirely.
+    const fakeIO = {
+      instances: [] as Array<{
+        observed: Set<Element>;
+      }>,
+      restore: () => undefined as void,
+    };
+    const original = (
+      globalThis as { IntersectionObserver?: typeof IntersectionObserver }
+    ).IntersectionObserver;
+    class FakeIO {
+      observed = new Set<Element>();
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      constructor(_cb: IntersectionObserverCallback, _opts?: IntersectionObserverInit) {
+        fakeIO.instances.push(this);
+      }
+      observe(el: Element) {
+        this.observed.add(el);
+      }
+      unobserve(el: Element) {
+        this.observed.delete(el);
+      }
+      disconnect() {
+        this.observed.clear();
+      }
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    (
+      globalThis as { IntersectionObserver?: unknown }
+    ).IntersectionObserver = FakeIO;
+    fakeIO.restore = () => {
+      (
+        globalThis as {
+          IntersectionObserver?: typeof IntersectionObserver | undefined;
+        }
+      ).IntersectionObserver = original;
+    };
+    try {
+      // Render with the timeline expanded so it actually paints dots —
+      // a collapsed timeline is a single button with no
+      // `data-message-uuid`. Use the small-dot-clustering shape so the
+      // timeline produces both a regular dot AND a cluster (both
+      // carrying `data-message-uuid`).
+      window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeMessage(1, 1, 't1', {
+              role: 'assistant',
+              content: [
+                { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+              ],
+              created_at: '2026-01-01T00:00:30Z',
+            }),
+            makeMessage(1, 2, 't2', {
+              role: 'assistant',
+              content: [
+                { type: 'tool_use', id: 'tu2', name: 'Bash', input: {} },
+              ],
+              created_at: '2026-01-01T00:00:40Z',
+            }),
+            makeUserText(1, 3, 'msg-b', '2026-01-01T00:01:00Z'),
+          ],
+        ],
+      ]);
+      // Custom render where the TIMELINE LIVES INSIDE the conversation
+      // body — mirroring TranscriptPane's sticky topRegion layout. The
+      // existing `renderOverlay` puts them as siblings, which would
+      // mask the bug because the timeline marks live outside the
+      // observed container.
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+      vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+        async (threadId) => ({
+          messages: messages.get(threadId as number) ?? [],
+        }),
+      );
+      const bodyRef = createRef<HTMLDivElement>();
+      render(
+        <QueryClientProvider client={queryClient}>
+          <ApiProvider client={apiClient}>
+            <div ref={bodyRef} data-testid="conversation-body">
+              {/* Timeline sits FIRST inside the body, just like the
+                  sticky topRegion does in TranscriptPane. */}
+              <ThreadTimelineOverlay
+                threads={threads}
+                activeThreadId={1}
+                conversationBodyRef={bodyRef}
+              />
+              <article data-message-uuid="msg-a">msg-a</article>
+              <article data-message-uuid="t1">t1</article>
+              <article data-message-uuid="t2">t2</article>
+              <article data-message-uuid="msg-b">msg-b</article>
+            </div>
+          </ApiProvider>
+        </QueryClientProvider>,
+      );
+      await screen.findAllByTestId('thread-timeline-dot');
+      // The effect re-runs as the messages query settles; the live
+      // observer is the most recent.
+      expect(fakeIO.instances.length).toBeGreaterThan(0);
+      const io = fakeIO.instances[fakeIO.instances.length - 1];
+      // Every observed element must be an `<article>`. If the
+      // observer was still using a bare `[data-message-uuid]` selector,
+      // the timeline dots and the cluster span (both inside the
+      // conversation body now) would have crept into `io.observed`.
+      for (const el of io.observed) {
+        expect(el.tagName.toLowerCase()).toBe('article');
+      }
+      // And exactly the four articles are observed (one observer per
+      // unique element).
+      expect(io.observed.size).toBe(4);
+    } finally {
+      fakeIO.restore();
     }
   });
 });

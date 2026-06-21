@@ -269,18 +269,50 @@ export function useTimelineExpanded(): [boolean, () => void] {
 }
 
 /**
+ * CSS selector matching a transcript message article by uuid. The selector
+ * is anchored to the `<article>` tag so it never matches the timeline's own
+ * dots or clusters, which stamp the SAME `data-message-uuid` value on a
+ * `<span>` (see {@link TimelineDotMark} / {@link TimelineClusterMark}).
+ *
+ * Without the tag anchor a `[data-message-uuid="X"]` query rooted at the
+ * conversation pane's scroll container hits the timeline span first
+ * (DOM-pre-order — the sticky top region renders before the message list),
+ * so `scrollIntoView` lands on the already-visible dot (no-op) and the
+ * pane-scroll IntersectionObserver observes the dot instead of the article.
+ * Both regressions show up the moment the timeline starts living inside the
+ * conversation pane's scroll container — see TranscriptPane's `topRegion`.
+ *
+ * Exported so a regression test can pin the selector shape.
+ */
+export function articleMessageSelector(uuid: string): string {
+  return `article[data-message-uuid="${CSS.escape(uuid)}"]`;
+}
+
+/**
+ * CSS selector matching every transcript message article. The pane-scroll
+ * IntersectionObserver iterates this set to track which article the user is
+ * reading; the `<article>` tag anchor keeps the timeline's own dots — which
+ * share the `data-message-uuid` attribute and now live in the same scroll
+ * container via the sticky top region — out of the observation set.
+ */
+export const ALL_ARTICLES_SELECTOR = 'article[data-message-uuid]';
+
+/**
  * Scroll the matching transcript message into view, aligned to the top of
- * the scrollable body. Scoped to the given container so a duplicate
- * `data-message-uuid` outside the transcript (e.g. in a portaled preview)
- * cannot misdirect the jump.
+ * the scrollable body. Scoped to the given container by uuid AND tag (see
+ * {@link articleMessageSelector}), so neither a duplicate `data-message-uuid`
+ * outside the transcript (e.g. in a portaled preview) nor the timeline's
+ * own dots can misdirect the jump.
  *
  * Using `block: 'start'` rather than the v6 `block: 'center'` means the
  * destination message becomes the first line the eye reads on the next
  * paint — a centred message wastes half the viewport above the line the
- * user just asked to jump to. The top region (breadcrumb / timeline /
- * Terminal button) lives inside the same scroll container and can be
- * scrolled out of view, so no global `scroll-margin-top` compensation is
- * needed — the article lands flush at the top of the visible viewport.
+ * user just asked to jump to. The transcript's sticky top region (the
+ * breadcrumb / timeline / Terminal button) would otherwise hide the top
+ * of the article; the `scroll-margin-top` rule on `article[data-message-uuid]`
+ * (driven by the live sticky height via `--delta-top-region-reserve` — see
+ * index.css and TranscriptPane) shifts the landing position down by that
+ * height so the article lands just below the sticky region.
  *
  * The `scrollIntoView` call is guarded against environments where it is
  * unavailable (jsdom does not implement it on every element by default), so
@@ -294,9 +326,7 @@ export function scrollMessageIntoView(
   if (!container) {
     return;
   }
-  const target = container.querySelector(
-    `[data-message-uuid="${CSS.escape(uuid)}"]`,
-  );
+  const target = container.querySelector(articleMessageSelector(uuid));
   if (target && typeof target.scrollIntoView === 'function') {
     target.scrollIntoView({ block: 'start' });
   }
@@ -307,9 +337,11 @@ export function scrollMessageIntoView(
  * so the eye spots where the navigation landed. The class sets a temporary
  * background-color on the bubble and the CSS transition fades it back to the
  * resting color — no overlay layer, the highlight lands directly on the
- * message body. Scoped to the given container for the same reason as
- * {@link scrollMessageIntoView}: a duplicate `data-message-uuid` outside
- * the transcript (e.g. in a portaled preview) must not steal the highlight.
+ * message body. Scoped to the given container AND the `<article>` tag (see
+ * {@link articleMessageSelector}) so neither a duplicate uuid in a portaled
+ * preview nor the timeline's own dots steal the highlight (a dot
+ * highlighting amber would be confusing and would mask the missing
+ * article-level highlight).
  *
  * Removing the class after {@link TIMELINE_JUMP_HIGHLIGHT_MS} lets a
  * subsequent jump to the same message re-apply the highlight from rest.
@@ -327,9 +359,7 @@ export function highlightMessageJump(
   if (!container) {
     return () => undefined;
   }
-  const target = container.querySelector(
-    `[data-message-uuid="${CSS.escape(uuid)}"]`,
-  );
+  const target = container.querySelector(articleMessageSelector(uuid));
   if (!target) {
     return () => undefined;
   }
@@ -430,11 +460,13 @@ export function scheduleScrollAfterRender(
       }
       // Re-query each frame so a re-render that swapped the target node's
       // identity (or appended it for the first time) is picked up at the
-      // earliest possible paint.
+      // earliest possible paint. The selector is article-anchored (see
+      // {@link articleMessageSelector}) so the timeline's own dots — which
+      // share the uuid attribute and may already be present in the same
+      // container — never satisfy the wait early and cause a no-op scroll.
       const present =
         container !== null &&
-        container.querySelector(`[data-message-uuid="${CSS.escape(uuid)}"]`) !==
-          null;
+        container.querySelector(articleMessageSelector(uuid)) !== null;
       if (present) {
         run();
         return;
@@ -1342,12 +1374,19 @@ export function ThreadTimelineOverlay({
     // Observe every article that carries a `data-message-uuid` inside the
     // pane. The transcript's MessageItem stamps that attribute on every
     // rendered turn, so a single querySelectorAll covers all message
-    // bodies. The query is repeated below via a `MutationObserver` so
-    // articles that appear after this initial pass (streaming arrival, a
-    // background refetch) are picked up without remounting the IO.
+    // bodies. The selector is article-anchored ({@link ALL_ARTICLES_SELECTOR})
+    // so the timeline's own dots and clusters — which share the
+    // `data-message-uuid` attribute and now live in the same scroll container
+    // via the sticky top region — are NOT observed; if they were, the dots
+    // would always win the topmost-visible race (they are sticky-pinned at
+    // the top of the viewport) and the playhead would never follow the
+    // user's conversation-pane scroll. The query is repeated below via a
+    // `MutationObserver` so articles that appear after this initial pass
+    // (streaming arrival, a background refetch) are picked up without
+    // remounting the IO.
     const observed = new Set<Element>();
     const observeMatching = () => {
-      const targets = container.querySelectorAll('[data-message-uuid]');
+      const targets = container.querySelectorAll(ALL_ARTICLES_SELECTOR);
       for (const target of targets) {
         if (observed.has(target)) {
           continue;
