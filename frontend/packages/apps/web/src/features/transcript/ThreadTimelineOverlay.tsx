@@ -183,6 +183,40 @@ export const TIMELINE_JUMP_HIGHLIGHT_CLASS = 'delta-timeline-jump-highlight';
 export const TIMELINE_JUMP_HIGHLIGHT_MS = 1500;
 
 /**
+ * Debounce window (ms) for pane-scroll → playhead-follow updates. The
+ * conversation pane's IntersectionObserver fires bursts of entries as the
+ * user pans (every margin crossed); without debouncing the playhead would
+ * thrash and consume CPU while scrolling a long thread. ~100 ms is short
+ * enough that the playhead always feels "live" against the scroll and long
+ * enough to collapse a burst of overlapping IO callbacks into one commit.
+ * Exported so tests can drive the timing explicitly.
+ */
+export const PANE_SCROLL_DEBOUNCE_MS = 100;
+
+/**
+ * Cool-down window (ms) after a programmatic scroll (timeline → pane) during
+ * which pane-scroll → playhead updates are suppressed. The browser keeps
+ * firing IO entries while a `scrollIntoView` is animating into place, and
+ * those entries would otherwise feed straight back into the playhead and
+ * re-trigger a thread switch — the classic ping-pong. 200 ms is comfortably
+ * longer than a typical jump animation plus a debounce burst, while still
+ * short enough that a genuine user scroll moments after a jump is honoured.
+ * Exported so tests can drive the timing explicitly.
+ */
+export const PANE_SCROLL_PROGRAMMATIC_GUARD_MS = 200;
+
+/**
+ * IntersectionObserver `threshold` for the pane-scroll observer. A single
+ * 0-fraction entry is all we need: the moment any pixel of a message enters
+ * or leaves the root viewport, the callback fires with the latest
+ * `isIntersecting` state, which is enough to pick the topmost-visible
+ * message. A multi-threshold list would generate redundant callbacks for
+ * the same "the message is partially visible" state. Exported so tests can
+ * assert the wiring without re-deriving the magic number.
+ */
+export const PANE_SCROLL_OBSERVER_THRESHOLD = 0;
+
+/**
  * Read the persisted expanded preference; defaults to collapsed when no
  * preference has been saved yet or the storage layer is unavailable (SSR /
  * privacy-mode browsers).
@@ -323,14 +357,46 @@ export function highlightMessageJump(
 }
 
 /**
- * Schedule {@link scrollMessageIntoView} to run after the next paint, so a
- * preceding active-thread switch has time to render the target thread's
- * messages into the DOM. Prefers `requestAnimationFrame`; falls back to a
- * zero-delay `setTimeout` when rAF is unavailable (jsdom in vitest does not
- * implement it natively).
+ * Maximum time (ms) {@link scheduleScrollAfterRender} polls for the target
+ * message's element to appear in the DOM before giving up. The cross-lane
+ * jump path switches the active thread first, then has to wait for the
+ * conversation pane to re-render with the target thread's messages — which
+ * can take several paint frames depending on the data layer (query refetch,
+ * Suspense boundary, etc.). v10's single-rAF deferral was a no-op the
+ * moment the re-render took more than one frame: `querySelector` returned
+ * `null` and the scroll silently dropped. Polling across rAFs absorbs the
+ * variable delay; the timeout caps the wait so a deleted message (or a
+ * pane that genuinely never renders the uuid) cannot keep the loop running
+ * forever.
  *
- * Returns a cancel handle the caller can fire to suppress the scroll if the
- * component unmounts or another jump supersedes this one before paint.
+ * 1000 ms is roughly an order of magnitude above the worst observed
+ * re-render delay in dogfooding — comfortable margin without feeling
+ * stuck — and well below any "did the click do anything?" threshold a
+ * human would notice. Exported so tests can assert the cap explicitly.
+ */
+export const SCROLL_DOM_READY_TIMEOUT_MS = 1000;
+
+/**
+ * Schedule {@link scrollMessageIntoView} to run as soon as the target uuid's
+ * element appears in the DOM, so a preceding active-thread switch has time
+ * to render the target thread's messages before the scroll fires. Polls
+ * once per `requestAnimationFrame` until the element is present (or
+ * {@link SCROLL_DOM_READY_TIMEOUT_MS} elapses), then scrolls and applies
+ * the jump highlight in the same tick the element became visible.
+ *
+ * When the element never appears within the timeout the scroll is skipped
+ * silently — the prior behaviour was a no-op `querySelector(null)` anyway,
+ * so dropping the scroll on a missing target is not a behaviour change;
+ * what we gain is the common case (re-render takes 2–N frames) actually
+ * landing the scroll.
+ *
+ * Falls back to a zero-delay `setTimeout` when rAF is unavailable (older
+ * test runners); in that fallback the wait is a single tick rather than
+ * polled, matching the v10 deferral.
+ *
+ * Returns a cancel handle the caller can fire to abort the wait if the
+ * component unmounts or another jump supersedes this one before the element
+ * lands.
  */
 export function scheduleScrollAfterRender(
   container: HTMLElement | null,
@@ -343,11 +409,37 @@ export function scheduleScrollAfterRender(
   };
   if (
     typeof window !== 'undefined' &&
-    typeof window.requestAnimationFrame === 'function'
+    typeof window.requestAnimationFrame === 'function' &&
+    typeof window.performance !== 'undefined' &&
+    typeof window.performance.now === 'function'
   ) {
-    const handle = window.requestAnimationFrame(run);
+    let cancelled = false;
+    let rafHandle = 0;
+    const start = window.performance.now();
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
+      // Re-query each frame so a re-render that swapped the target node's
+      // identity (or appended it for the first time) is picked up at the
+      // earliest possible paint.
+      const present =
+        container !== null &&
+        container.querySelector(`[data-message-uuid="${CSS.escape(uuid)}"]`) !==
+          null;
+      if (present) {
+        run();
+        return;
+      }
+      if (window.performance.now() - start >= SCROLL_DOM_READY_TIMEOUT_MS) {
+        return;
+      }
+      rafHandle = window.requestAnimationFrame(tick);
+    };
+    rafHandle = window.requestAnimationFrame(tick);
     return () => {
-      window.cancelAnimationFrame(handle);
+      cancelled = true;
+      window.cancelAnimationFrame(rafHandle);
       highlightCancel?.();
     };
   }
@@ -391,15 +483,27 @@ const MIN_LANE_AXIS_PX = 240;
  * collide to the right by at least the sum of the two radii — so the marks
  * can stay solid-fill without any alpha or ring workaround.
  */
-const MARK_LARGE_PX = 6;
-const MARK_SMALL_PX = 4;
+export const MARK_LARGE_PX = 6;
+export const MARK_SMALL_PX = 4;
 /**
- * Diameter (px) of a cluster mark — slightly larger than a lone small dot so
- * the eye distinguishes the two: a single small dot is one tool call, a
- * cluster is "several here in a row". Kept below {@link MARK_LARGE_PX} so a
- * cluster still reads as auxiliary chatter, not a headline turn.
+ * Diameter (px) of a cluster mark — pinned to {@link MARK_SMALL_PX} so a
+ * cluster is the same size as a lone auxiliary dot, never the larger
+ * headline-turn size. v10 nudged the cluster a hair larger (5 px) to make it
+ * "stand out", but in practice it landed visually indistinguishable from the
+ * 6 px main-role dots and the user could no longer tell a cluster of tool
+ * calls from a user/Claude turn. "Cluster-ness" is conveyed through a thin
+ * outline ring instead (see {@link TimelineClusterMark}), which the eye
+ * picks up at a glance without bumping the dot into headline-turn territory.
  */
-const MARK_CLUSTER_PX = 5;
+export const MARK_CLUSTER_PX = MARK_SMALL_PX;
+/**
+ * Tailwind class for the cluster mark's outline ring. A muted slate that sits
+ * on the brighter cluster fill as a thin halo — visible enough that the eye
+ * picks the dot out as "a run of N here" without the ring shouting over the
+ * conversation. Kept as a constant so the test asserts the exact token the
+ * UI paints with (and a future palette tweak lands in one place).
+ */
+export const MARK_CLUSTER_RING_COLOR = 'outline-slate-600';
 /** Width reserved on the left for lane labels. */
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
@@ -531,14 +635,27 @@ export function ThreadTimelineOverlay({
   );
 
   // A monotonically-increasing counter incremented on every user-driven
-  // navigation. The thread-switch + scroll effect below uses it as a
-  // re-trigger so a re-click at the playhead's current position (and thus
-  // the current active index) still re-fires the jump — without it React
-  // would bail out of the state set when the value is unchanged, swallowing
-  // the user's intent. The counter ALSO doubles as the "has the user
-  // navigated?" gate: while it sits at 0, the effect is intentionally inert
-  // so an automatic mount settle never hijacks the user's chosen thread.
+  // navigation that should trigger a JUMP (wheel scrub / axis click). The
+  // thread-switch + scroll effect below uses it as a re-trigger so a
+  // re-click at the playhead's current position (and thus the current
+  // active index) still re-fires the jump — without it React would bail
+  // out of the state set when the value is unchanged, swallowing the
+  // user's intent. Bumped ONLY by the jump-driving setters; the pane →
+  // playhead follower (Improvement 3) uses {@link userActedTick} instead
+  // so it can pin the active index without re-firing a jump.
   const [scrubTick, setScrubTick] = useState(0);
+
+  // A separate "the user has acted on the timeline at all" gate that
+  // BOTH the jump path AND the pane-scroll follower bump. The auto-anchor
+  // effect ("re-anchor to latest message") reads this instead of
+  // {@link scrubTick} — without that change a pane scroll would commit a
+  // new active index, then the next render's auto-anchor effect would
+  // immediately reset it to the tail message, swallowing the follower's
+  // update.
+  const [userActedTick, setUserActedTick] = useState(0);
+  const bumpUserActedTick = useCallback(() => {
+    setUserActedTick((t) => t + 1);
+  }, []);
 
   /**
    * Clamp an index into the valid range for the current sorted list and
@@ -553,9 +670,50 @@ export function ThreadTimelineOverlay({
       }
       const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
       setScrubTick((tick) => tick + 1);
+      bumpUserActedTick();
       setActiveMessageIndexState(clamped);
     },
-    [sortedMessages.length],
+    [sortedMessages.length, bumpUserActedTick],
+  );
+
+  /**
+   * Commit a new active index that came from the pane-scroll → playhead
+   * follower (Improvement 3), deliberately WITHOUT bumping {@link scrubTick}.
+   * The tick is the re-trigger for the timeline → pane jump effect
+   * (`scheduleScrollAfterRender` + `setActiveThread`); bumping it here would
+   * close the ping-pong loop — the user's scroll would move the playhead,
+   * which would scroll the pane, which would re-fire the observer, ad
+   * infinitum.
+   *
+   * Skips when the index would not actually change (Object.is bail-out is
+   * not enough — the IntersectionObserver fires duplicate "topmost is X"
+   * entries while the user pans through X's reading band, and every commit
+   * is one wasted render). The active thread is intentionally left alone
+   * too: a pane scroll never switches lanes, because by definition the
+   * pane is already inside the active subthread.
+   */
+  const setActiveMessageIndexFromPaneScroll = useCallback(
+    (next: number) => {
+      if (sortedMessages.length === 0) {
+        return;
+      }
+      const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
+      let changed = false;
+      setActiveMessageIndexState((prev) => {
+        if (prev === clamped) {
+          return prev;
+        }
+        changed = true;
+        return clamped;
+      });
+      // Bump the "user has acted" gate only when we actually moved the
+      // index — repeat IO entries for the same topmost message should not
+      // keep flipping the auto-anchor gate on every burst.
+      if (changed) {
+        bumpUserActedTick();
+      }
+    },
+    [sortedMessages.length, bumpUserActedTick],
   );
 
   // The active message itself, derived from the index — the single source of
@@ -588,8 +746,13 @@ export function ThreadTimelineOverlay({
   // while the user has not yet navigated. A navigation pins the active index
   // to whatever the user picked, and moving it on a fresh message would feel
   // like the timeline yanked away.
+  //
+  // Gated on {@link userActedTick} (not {@link scrubTick}) so a pane-scroll
+  // follow update also counts as "user has navigated" — without that
+  // distinction the follower would commit a new index and this effect
+  // would yank it back to the tail on the very next render.
   useEffect(() => {
-    if (scrubTick !== 0) {
+    if (userActedTick !== 0) {
       return;
     }
     setActiveMessageIndexState((prev) => {
@@ -599,7 +762,7 @@ export function ThreadTimelineOverlay({
       const latest = sortedMessages.length - 1;
       return prev === latest ? prev : latest;
     });
-  }, [sortedMessages, scrubTick]);
+  }, [sortedMessages, userActedTick]);
 
   // Keep the active index pointing at the SAME message across a
   // `sortedMessages` reference change (e.g. a background refetch landed a
@@ -607,9 +770,11 @@ export function ThreadTimelineOverlay({
   // tail). Without this the index would drift relative to the message the
   // user picked, and the wheel/click handlers would step from the wrong
   // anchor. A `null` index (no messages yet, or the picked message vanished)
-  // falls back to the latest entry.
+  // falls back to the latest entry. Gated on {@link userActedTick} (same
+  // reason as the auto-anchor effect above): any user action — jump OR
+  // pane scroll — should preserve the picked message across refetches.
   useEffect(() => {
-    if (scrubTick === 0) {
+    if (userActedTick === 0) {
       return;
     }
     setActiveMessageIndexState((prev) => {
@@ -633,7 +798,7 @@ export function ThreadTimelineOverlay({
     });
     // `activeMessageRef` is intentionally not in deps — it is a ref kept in
     // sync by another effect, and reading it here is just a cached lookup.
-  }, [sortedMessages, scrubTick]);
+  }, [sortedMessages, userActedTick]);
 
   const activeThreadRef = useRef<ThreadId | null>(activeThreadId);
   useEffect(() => {
@@ -649,6 +814,25 @@ export function ThreadTimelineOverlay({
     },
     [],
   );
+
+  // Timestamp (performance.now ms) marking the most recent timeline →
+  // pane scroll we triggered programmatically. The pane-scroll observer
+  // (Improvement 3) reads this and skips any update fired within
+  // {@link PANE_SCROLL_PROGRAMMATIC_GUARD_MS} of it, so a jump's own
+  // scroll cannot feed back into the playhead and re-trigger the jump.
+  // `null` means "no recent programmatic scroll"; the observer treats
+  // `null` as "free to update".
+  const lastProgrammaticScrollAtRef = useRef<number | null>(null);
+  const markProgrammaticScroll = useCallback(() => {
+    if (
+      typeof performance !== 'undefined' &&
+      typeof performance.now === 'function'
+    ) {
+      lastProgrammaticScrollAtRef.current = performance.now();
+    } else {
+      lastProgrammaticScrollAtRef.current = Date.now();
+    }
+  }, []);
 
   useEffect(() => {
     // Only react to navigation the user actually initiated: while
@@ -668,6 +852,13 @@ export function ThreadTimelineOverlay({
     }
     pendingScrollCancelRef.current?.();
     pendingScrollCancelRef.current = null;
+    // The pane-scroll → playhead follower (Improvement 3) is now about to
+    // see the scrollIntoView's IO ripples. Mark the moment so it skips any
+    // entry it receives within the next
+    // {@link PANE_SCROLL_PROGRAMMATIC_GUARD_MS}; without this the jump's
+    // own scroll would feed straight back into setActiveMessageIndex and
+    // re-trigger the jump (the classic ping-pong).
+    markProgrammaticScroll();
     const container = conversationBodyRef.current;
     if (current.threadId === activeThreadRef.current) {
       // Same lane: the target message is already in the DOM, scroll right
@@ -694,7 +885,7 @@ export function ThreadTimelineOverlay({
     // the active index does not move, so a stale scroll position is still
     // corrected — but a tick-less re-render never sneaks in an auto-switch
     // that the user did not ask for.
-  }, [scrubTick, conversationBodyRef, setActiveThread]);
+  }, [scrubTick, conversationBodyRef, setActiveThread, markProgrammaticScroll]);
 
   // The lane the highlight follows: the active message's lane when there is
   // one, else fall back to the prop so a freshly-mounted footer still marks
@@ -881,6 +1072,173 @@ export function ThreadTimelineOverlay({
       scrollEl.scrollLeft = Math.max(0, playheadInAxis - scrollEl.clientWidth / 2);
     }
   }, [scrubTick, activeMessage, laneAxisWidth, messagePxByUuid]);
+
+  // Pane scroll → playhead follow (Improvement 3). Observe each rendered
+  // message article in the conversation pane; whichever one sits closest to
+  // the viewport TOP is the "current" message and drives the playhead.
+  // This is the bidirectional half of the sync: timeline → pane is already
+  // wired by the navigation effect above; this is pane → timeline.
+  //
+  // Design notes:
+  //  - We observe `IntersectionObserver` entries rather than wiring a
+  //    raw `scroll` listener + `elementFromPoint`: IO is debounced by
+  //    the browser, scopes naturally to "is this article on screen",
+  //    and avoids the layout reads `elementFromPoint` forces.
+  //  - The follower commits via {@link setActiveMessageIndexFromPaneScroll},
+  //    which does NOT bump {@link scrubTick} — so this update never
+  //    re-triggers the timeline → pane jump effect, breaking the
+  //    ping-pong before it starts.
+  //  - A programmatic-scroll guard (see {@link markProgrammaticScroll})
+  //    further blocks the IO callbacks that fire during the timeline's
+  //    own scrollIntoView. Without it, the jump's own scroll would still
+  //    nudge `activeMessageIndex` between the jump's target and the
+  //    message the scroll passes over en route.
+  //  - Debounced commit collapses a burst of "topmost is X / topmost is
+  //    Y" entries into one render while the user pans through.
+  //
+  // Observer is re-bound when the active thread changes (the pane swaps
+  // its DOM) or when the sorted-messages list changes (a fresh message
+  // landed and needs an `observe` call); guarded by `expanded` so a
+  // collapsed timeline has no follower running.
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+    if (typeof IntersectionObserver === 'undefined') {
+      // jsdom in older test runners may lack IO; the follower simply
+      // does not run there. Pane → timeline is purely additive UX, so
+      // skipping it is harmless.
+      return;
+    }
+    const container = conversationBodyRef.current;
+    if (!container) {
+      return;
+    }
+    // Build a uuid → global-index lookup once per re-bind, so the per-
+    // entry callback work stays O(1).
+    const indexByUuid = new Map<string, number>();
+    sortedMessages.forEach((m, i) => indexByUuid.set(m.uuid, i));
+    // The set of articles currently intersecting the viewport. We commit
+    // the topmost-visible by smallest `boundingClientRect.top` per
+    // debounce tick — that is the message the user is most likely reading.
+    const intersecting = new Map<string, number>();
+    let debounceHandle: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      debounceHandle = null;
+      // Programmatic-scroll guard: a recent timeline → pane jump is still
+      // settling. Honouring the IO entries here would feed the jump's own
+      // scroll back into the playhead.
+      const guardedAt = lastProgrammaticScrollAtRef.current;
+      if (guardedAt !== null) {
+        const now =
+          typeof performance !== 'undefined' &&
+          typeof performance.now === 'function'
+            ? performance.now()
+            : Date.now();
+        if (now - guardedAt < PANE_SCROLL_PROGRAMMATIC_GUARD_MS) {
+          return;
+        }
+        // Outside the window — clear so a true freshly-arriving scroll
+        // (no jump in between) gets honoured immediately on its first
+        // entry rather than queueing a redundant null check.
+        lastProgrammaticScrollAtRef.current = null;
+      }
+      if (intersecting.size === 0) {
+        return;
+      }
+      // Pick the topmost visible: smallest viewport-top wins. Ties (rare,
+      // and only if two articles share an exact y) fall back to smallest
+      // global index so the choice is deterministic.
+      let bestUuid: string | null = null;
+      let bestTop = Number.POSITIVE_INFINITY;
+      let bestIndex = Number.POSITIVE_INFINITY;
+      for (const [uuid, top] of intersecting) {
+        const idx = indexByUuid.get(uuid);
+        if (idx === undefined) {
+          continue;
+        }
+        if (top < bestTop || (top === bestTop && idx < bestIndex)) {
+          bestTop = top;
+          bestIndex = idx;
+          bestUuid = uuid;
+        }
+      }
+      if (bestUuid === null) {
+        return;
+      }
+      const targetIndex = indexByUuid.get(bestUuid);
+      if (targetIndex === undefined) {
+        return;
+      }
+      setActiveMessageIndexFromPaneScroll(targetIndex);
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const el = entry.target as HTMLElement;
+          const uuid = el.getAttribute('data-message-uuid');
+          if (!uuid) {
+            continue;
+          }
+          if (entry.isIntersecting) {
+            intersecting.set(uuid, entry.boundingClientRect.top);
+          } else {
+            intersecting.delete(uuid);
+          }
+        }
+        if (debounceHandle !== null) {
+          clearTimeout(debounceHandle);
+        }
+        debounceHandle = setTimeout(flush, PANE_SCROLL_DEBOUNCE_MS);
+      },
+      {
+        root: container,
+        threshold: PANE_SCROLL_OBSERVER_THRESHOLD,
+      },
+    );
+    // Observe every article that carries a `data-message-uuid` inside the
+    // pane. The transcript's MessageItem stamps that attribute on every
+    // rendered turn, so a single querySelectorAll covers all message
+    // bodies. The query is repeated below via a `MutationObserver` so
+    // articles that appear after this initial pass (streaming arrival, a
+    // background refetch) are picked up without remounting the IO.
+    const observed = new Set<Element>();
+    const observeMatching = () => {
+      const targets = container.querySelectorAll('[data-message-uuid]');
+      for (const target of targets) {
+        if (observed.has(target)) {
+          continue;
+        }
+        observed.add(target);
+        observer.observe(target);
+      }
+    };
+    observeMatching();
+    // Track newly-added articles too: when a fresh message lands or the
+    // pane re-renders the active thread's content, the new article needs
+    // to be observed for the follower to track scroll past it.
+    let mutationObserver: MutationObserver | null = null;
+    if (typeof MutationObserver !== 'undefined') {
+      mutationObserver = new MutationObserver(() => observeMatching());
+      mutationObserver.observe(container, {
+        childList: true,
+        subtree: true,
+      });
+    }
+    return () => {
+      observer.disconnect();
+      mutationObserver?.disconnect();
+      if (debounceHandle !== null) {
+        clearTimeout(debounceHandle);
+      }
+    };
+  }, [
+    expanded,
+    conversationBodyRef,
+    sortedMessages,
+    setActiveMessageIndexFromPaneScroll,
+    activeThreadId,
+  ]);
 
   return (
     <section
@@ -1145,11 +1503,16 @@ interface TimelineClusterMarkProps {
  * chronological, and a click that lands closest to it snaps the playhead to
  * the representative message via the global nearest-message lookup.
  *
- * The cluster is rendered slightly larger than a lone small dot
- * ({@link MARK_CLUSTER_PX} vs {@link MARK_SMALL_PX}) so the eye can tell the
- * two apart at a glance — "one tool call" versus "a run of N here". The data
- * attributes carry the representative uuid (matching a regular dot's hook
- * surface) and the member count for downstream diagnostics / tests.
+ * The cluster is rendered at exactly the same diameter as a lone small dot
+ * ({@link MARK_CLUSTER_PX} === {@link MARK_SMALL_PX}) so it can never be
+ * mistaken for the larger main-role dots — a hard requirement after v10,
+ * where the 5 px cluster sat between the 4 px small dot and the 6 px large
+ * dot and read like just another headline turn. "Cluster-ness" is conveyed
+ * through a thin {@link MARK_CLUSTER_RING_COLOR} ring outside the fill: the
+ * eye picks the ring up as "this dot is different" without the dot itself
+ * growing into headline-turn territory. The data attributes carry the
+ * representative uuid (matching a regular dot's hook surface) and the member
+ * count for downstream diagnostics / tests.
  */
 function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
   return (
@@ -1159,7 +1522,11 @@ function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
       data-thread-id={cluster.threadId}
       data-cluster-member-count={cluster.memberCount}
       aria-hidden="true"
-      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400"
+      // `outline` (not `border`) keeps the inner fill at MARK_CLUSTER_PX so
+      // the dot's solid area equals a lone small dot's area exactly; the
+      // ring sits OUTSIDE the box, so a cluster reads as a small dot with a
+      // halo rather than a slightly-grown disc.
+      className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400 outline outline-1 ${MARK_CLUSTER_RING_COLOR}`}
       style={{
         left: xPx,
         width: MARK_CLUSTER_PX,

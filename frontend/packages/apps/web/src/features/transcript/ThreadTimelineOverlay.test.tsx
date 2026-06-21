@@ -14,6 +14,13 @@ import type { Message, Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
+  MARK_CLUSTER_PX,
+  MARK_CLUSTER_RING_COLOR,
+  MARK_SMALL_PX,
+  PANE_SCROLL_DEBOUNCE_MS,
+  PANE_SCROLL_OBSERVER_THRESHOLD,
+  PANE_SCROLL_PROGRAMMATIC_GUARD_MS,
+  SCROLL_DOM_READY_TIMEOUT_MS,
   ThreadTimelineOverlay,
   TIMELINE_EXPANDED_STORAGE_KEY,
   TIMELINE_JUMP_HIGHLIGHT_CLASS,
@@ -21,6 +28,7 @@ import {
   WHEEL_PER_EVENT_CLAMP_PX,
   WHEEL_VELOCITY_WINDOW_MS,
   normalizeWheelDeltaPx,
+  scheduleScrollAfterRender,
   stepsForCumulativePx,
 } from './ThreadTimelineOverlay';
 
@@ -1924,5 +1932,506 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe('240px');
+  });
+});
+
+describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
+  // v10 dogfooding revealed that the cluster's render size (5 px) was
+  // visually indistinguishable from the 6 px main-role dots — the user
+  // could not tell a run-of-tool-calls cluster apart from a user/Claude
+  // turn. The contract now is: a cluster renders at the SMALL dot
+  // diameter exactly, and conveys "cluster-ness" through a thin outline
+  // ring instead of size. These tests pin the contract.
+
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('renders cluster dots at exactly the small-dot diameter', async () => {
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 'u', {
+            role: 'user',
+            content: [{ type: 'text', text: 'go' }],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          makeMessage(1, 1, 't1', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:10Z',
+          }),
+          makeMessage(1, 2, 't2', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu2', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:20Z',
+          }),
+          makeMessage(1, 3, 'a', {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const clusters = await screen.findAllByTestId('thread-timeline-cluster');
+    expect(clusters).toHaveLength(1);
+    const cluster = clusters[0];
+    expect(cluster.style.width).toBe(`${MARK_SMALL_PX}px`);
+    expect(cluster.style.height).toBe(`${MARK_SMALL_PX}px`);
+    // Cross-check the constant equality so a future "let's bump cluster
+    // size again" lands here, not in dogfooding.
+    expect(MARK_CLUSTER_PX).toBe(MARK_SMALL_PX);
+  });
+
+  it('paints the cluster ring outline so a cluster reads as a small dot with a halo', async () => {
+    // The cluster's distinguishing feature is the ring, NOT its size. A
+    // regression that drops the outline (or paints the same outline on
+    // every dot) is what these assertions guard against. Inner fill is
+    // the same slate-400 a small assistant dot uses, so the ring is
+    // strictly additive.
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 't1', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          makeMessage(1, 1, 't2', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu2', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:10Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const cluster = (await screen.findAllByTestId('thread-timeline-cluster'))[0];
+    expect(cluster.className).toMatch(/\boutline\b/);
+    expect(cluster.className).toMatch(/\boutline-1\b/);
+    expect(cluster.className).toMatch(
+      new RegExp(`\\b${MARK_CLUSTER_RING_COLOR}\\b`),
+    );
+  });
+});
+
+describe('ThreadTimelineOverlay scheduleScrollAfterRender DOM-ready wait (v11 Improvement 2)', () => {
+  // v10's cross-lane jump deferred the scroll a single rAF; when the
+  // subthread switch re-render took 2+ frames (which it usually does),
+  // querySelector found no target and the scroll silently dropped. The
+  // new behaviour polls each rAF until the uuid is in the DOM, capped
+  // by SCROLL_DOM_READY_TIMEOUT_MS.
+
+  beforeEach(() => {
+    resetGlobals();
+  });
+
+  it('waits across multiple rAFs for the target element, then scrolls when it appears', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    // Capture rAF callbacks so we can drive them one frame at a time.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* cancellation is exercised elsewhere */
+    }) as typeof window.cancelAnimationFrame;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        const cancel = scheduleScrollAfterRender(container, 'late-uuid');
+        // First two ticks: target absent, scroll must NOT fire.
+        expect(rafCallbacks).toHaveLength(1);
+        let cb = rafCallbacks.shift()!;
+        cb(performance.now());
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        // Polling re-queues itself for the next frame.
+        expect(rafCallbacks).toHaveLength(1);
+        cb = rafCallbacks.shift()!;
+        cb(performance.now());
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(rafCallbacks).toHaveLength(1);
+        // Third tick: target is now in the DOM (mirrors a real cross-lane
+        // re-render that took 3 frames). The scroll fires this tick.
+        const target = document.createElement('article');
+        target.setAttribute('data-message-uuid', 'late-uuid');
+        container.appendChild(target);
+        cb = rafCallbacks.shift()!;
+        cb(performance.now());
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        expect(scrollIntoView.mock.instances[0]).toBe(target);
+        cancel();
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
+
+  it('gives up after SCROLL_DOM_READY_TIMEOUT_MS when the target never appears', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    const originalPerfNow = window.performance.now;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised here */
+    }) as typeof window.cancelAnimationFrame;
+    // Drive performance.now so the loop crosses the timeout deterministically
+    // — first tick at t=0, second at t=TIMEOUT+1 ms.
+    let nowValue = 1_000;
+    window.performance.now = (() => nowValue) as typeof performance.now;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        // No matching child is ever appended.
+        scheduleScrollAfterRender(container, 'never-arrives');
+        expect(rafCallbacks).toHaveLength(1);
+        let cb = rafCallbacks.shift()!;
+        nowValue = 1_000; // first tick: t=0 elapsed
+        cb(nowValue);
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(rafCallbacks).toHaveLength(1);
+        // Advance past the timeout and tick again: the loop bails without
+        // re-queuing and without scrolling.
+        nowValue = 1_000 + SCROLL_DOM_READY_TIMEOUT_MS + 1;
+        cb = rafCallbacks.shift()!;
+        cb(nowValue);
+        expect(scrollIntoView).not.toHaveBeenCalled();
+        expect(rafCallbacks).toHaveLength(0);
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+      window.performance.now = originalPerfNow;
+    }
+  });
+});
+
+describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement 3)', () => {
+  // Pane-scroll → playhead is the bidirectional half of the sync: when
+  // the user manually scrolls the conversation pane, an IntersectionObserver
+  // on each message article picks the topmost-visible message and drives
+  // the playhead to it WITHOUT bumping `scrubTick` (so no thread switch,
+  // no scrollIntoView, no ping-pong). These tests exercise the wiring,
+  // the no-recursion guarantee, and the programmatic-scroll guard.
+
+  /**
+   * A handle on the IntersectionObserver instances the overlay creates so
+   * a test can synthesize entries directly: jsdom does not run a real
+   * layout / viewport, so we cannot rely on actual scroll positions to
+   * trigger callbacks.
+   */
+  type FakeIO = {
+    callback: IntersectionObserverCallback;
+    options?: IntersectionObserverInit;
+    observed: Set<Element>;
+    emit: (entries: Partial<IntersectionObserverEntry>[]) => void;
+  };
+
+  function installFakeIO(): { instances: FakeIO[]; restore: () => void } {
+    const instances: FakeIO[] = [];
+    const original = (
+      globalThis as { IntersectionObserver?: typeof IntersectionObserver }
+    ).IntersectionObserver;
+    class FakeIntersectionObserver {
+      callback: IntersectionObserverCallback;
+      options?: IntersectionObserverInit;
+      observed = new Set<Element>();
+      emit!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+      constructor(
+        cb: IntersectionObserverCallback,
+        opts?: IntersectionObserverInit,
+      ) {
+        this.callback = cb;
+        this.options = opts;
+        // Attach `emit` here so every instance has it the moment it
+        // lands in `instances` — earlier "post-construction patch"
+        // approaches missed the first push.
+        this.emit = (entries) => {
+          this.callback(
+            entries as IntersectionObserverEntry[],
+            this as unknown as IntersectionObserver,
+          );
+        };
+        instances.push(this as unknown as FakeIO);
+      }
+      observe(el: Element) {
+        this.observed.add(el);
+      }
+      unobserve(el: Element) {
+        this.observed.delete(el);
+      }
+      disconnect() {
+        this.observed.clear();
+      }
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    (
+      globalThis as { IntersectionObserver?: unknown }
+    ).IntersectionObserver = FakeIntersectionObserver;
+    return {
+      instances,
+      restore: () => {
+        (
+          globalThis as {
+            IntersectionObserver?: typeof IntersectionObserver | undefined;
+          }
+        ).IntersectionObserver = original;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  it('uses threshold=PANE_SCROLL_OBSERVER_THRESHOLD and observes every rendered message article', async () => {
+    const fake = installFakeIO();
+    try {
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+            makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // The effect re-runs when `sortedMessages` settles (async query
+      // arrival), so multiple FakeIO instances accumulate; the LIVE one
+      // is the most recent. Earlier instances were disconnected by the
+      // effect's cleanup.
+      expect(fake.instances.length).toBeGreaterThan(0);
+      const io = fake.instances[fake.instances.length - 1];
+      expect(io.options?.threshold).toBe(PANE_SCROLL_OBSERVER_THRESHOLD);
+      // Every article in the conversation body is observed by the live
+      // observer.
+      const articles = within(
+        screen.getByTestId('conversation-body'),
+      ).getAllByText(/msg-/);
+      for (const a of articles) {
+        expect(io.observed.has(a)).toBe(true);
+      }
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it('moves the playhead to the topmost-visible article on pane scroll, without bumping scrubTick', async () => {
+    const fake = installFakeIO();
+    const setActiveThreadSpy = vi.spyOn(
+      useNavStore.getState(),
+      'setActiveThread',
+    );
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+            makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Initial playhead sits on the last message (msg-c at x=240).
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('240px');
+      const io = fake.instances[fake.instances.length - 1];
+      const articles = within(
+        screen.getByTestId('conversation-body'),
+      ).getAllByText(/msg-/);
+      // Simulate the user scrolling up so msg-a is closest to the
+      // viewport top (smallest boundingClientRect.top) and msg-b is
+      // partially visible below it; msg-c is now off-screen.
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: articles[2],
+              isIntersecting: false,
+              boundingClientRect: { top: 9999 } as DOMRect,
+            },
+            {
+              target: articles[1],
+              isIntersecting: true,
+              boundingClientRect: { top: 120 } as DOMRect,
+            },
+            {
+              target: articles[0],
+              isIntersecting: true,
+              boundingClientRect: { top: 10 } as DOMRect,
+            },
+          ]);
+        });
+        // Debounce: advance past PANE_SCROLL_DEBOUNCE_MS so the flush
+        // fires. Wrapped in `act` separately so React commits the
+        // resulting state change.
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // Playhead snapped to msg-a's x (0) — the topmost-visible message
+      // wins.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('0px');
+      // CRUCIAL: pane-scroll updates must NOT trigger an active-thread
+      // switch (the pane is already inside the active subthread).
+      expect(setActiveThreadSpy).not.toHaveBeenCalled();
+    } finally {
+      fake.restore();
+      setActiveThreadSpy.mockRestore();
+    }
+  });
+
+  it('suppresses pane-scroll updates fired within the programmatic-scroll guard window', async () => {
+    // The classic ping-pong: a timeline → pane jump triggers
+    // scrollIntoView, which fires IO entries, which would re-update the
+    // playhead. The guard window after a programmatic scroll blocks that
+    // feedback. This test fires a click on the timeline (programmatic
+    // scroll), then immediately emits IO entries for a DIFFERENT
+    // message; the playhead must STAY at the clicked target, not jump
+    // to the IO-reported one.
+    const fake = installFakeIO();
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Click at x=0: timeline jumps to msg-a (programmatic scroll fires).
+      act(() => {
+        fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
+          clientX: 0,
+        });
+      });
+      // Playhead now at msg-a (x=0).
+      await waitFor(() => {
+        expect(
+          screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        ).toBe('0px');
+      });
+      // While inside the guard window, emit an IO entry claiming
+      // msg-b is topmost-visible — exactly what the jump's own scroll
+      // would produce as it animates past msg-b. The playhead must NOT
+      // jump to msg-b.
+      const io = fake.instances[fake.instances.length - 1];
+      const articles = within(
+        screen.getByTestId('conversation-body'),
+      ).getAllByText(/msg-/);
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: articles[1],
+              isIntersecting: true,
+              boundingClientRect: { top: 5 } as DOMRect,
+            },
+          ]);
+          // Debounce shorter than the guard window: still inside guard.
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('0px');
+      // Sanity: the guard exists as a constant the production code reads.
+      expect(PANE_SCROLL_PROGRAMMATIC_GUARD_MS).toBeGreaterThan(
+        PANE_SCROLL_DEBOUNCE_MS,
+      );
+    } finally {
+      fake.restore();
+    }
   });
 });
