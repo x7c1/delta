@@ -527,23 +527,29 @@ export const MARK_LARGE_PX = 6;
 export const MARK_SMALL_PX = 4;
 /**
  * Diameter (px) of a cluster mark — pinned to {@link MARK_SMALL_PX} so a
- * cluster is the same size as a lone auxiliary dot, never the larger
- * headline-turn size. v10 nudged the cluster a hair larger (5 px) to make it
- * "stand out", but in practice it landed visually indistinguishable from the
- * 6 px main-role dots and the user could no longer tell a cluster of tool
- * calls from a user/Claude turn. "Cluster-ness" is conveyed through a thin
- * outline ring instead (see {@link TimelineClusterMark}), which the eye
- * picks up at a glance without bumping the dot into headline-turn territory.
+ * cluster is the same VISUAL size as a lone auxiliary dot, never the larger
+ * headline-turn size. v10 nudged the inner fill a hair larger (5 px) to
+ * make a cluster "stand out"; v11 reverted the fill to 4 px but layered a
+ * 1 px outline outside the box for the same purpose. In dogfooding the
+ * outline turned out to occupy the FULL 1 px on each side OUTSIDE the
+ * disc (an `outline` is painted strictly outside the element's box, so the
+ * 4 px disc became a 6 px outer footprint — identical in TOTAL width to a
+ * 6 px main-role dot, and the user reported clusters as "large outlined
+ * circles". The outline was therefore the same regression the size bump
+ * had been, just dressed differently: it bumped the cluster's visible
+ * footprint back into headline-turn territory.
+ *
+ * The cluster now renders as a plain small dot — same fill colour, same
+ * outer extent — and "cluster-ness" is purely positional / interactive:
+ * the dot still occupies its representative's x, the data attributes
+ * still expose `data-cluster-member-count` for diagnostics, and a click
+ * still snaps the playhead to the representative member. Losing the
+ * visual distinction is a deliberate trade: a cluster that reads as a
+ * normal small dot is honest about being one mark on the timeline; the
+ * user cares about WHERE on the time axis it sits, not whether it
+ * collapses 2 or 6 underlying messages.
  */
 export const MARK_CLUSTER_PX = MARK_SMALL_PX;
-/**
- * Tailwind class for the cluster mark's outline ring. A muted slate that sits
- * on the brighter cluster fill as a thin halo — visible enough that the eye
- * picks the dot out as "a run of N here" without the ring shouting over the
- * conversation. Kept as a constant so the test asserts the exact token the
- * UI paints with (and a future palette tweak lands in one place).
- */
-export const MARK_CLUSTER_RING_COLOR = 'outline-slate-600';
 /** Width reserved on the left for lane labels. */
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
@@ -1727,16 +1733,18 @@ interface TimelineClusterMarkProps {
  * chronological, and a click that lands closest to it snaps the playhead to
  * the representative message via the global nearest-message lookup.
  *
- * The cluster is rendered at exactly the same diameter as a lone small dot
- * ({@link MARK_CLUSTER_PX} === {@link MARK_SMALL_PX}) so it can never be
- * mistaken for the larger main-role dots — a hard requirement after v10,
- * where the 5 px cluster sat between the 4 px small dot and the 6 px large
- * dot and read like just another headline turn. "Cluster-ness" is conveyed
- * through a thin {@link MARK_CLUSTER_RING_COLOR} ring outside the fill: the
- * eye picks the ring up as "this dot is different" without the dot itself
- * growing into headline-turn territory. The data attributes carry the
- * representative uuid (matching a regular dot's hook surface) and the member
- * count for downstream diagnostics / tests.
+ * The cluster renders at exactly the same diameter AND with no extra outline
+ * vs. a lone small dot, so its total visual footprint equals
+ * {@link MARK_CLUSTER_PX} px end-to-end — never the larger main-role
+ * footprint. Earlier revisions tried a 5 px fill (v10) and then a 4 px fill
+ * with a 1 px outline (v11) to make a cluster "stand out"; both produced a
+ * 6 px outer disc indistinguishable from a 6 px main-role dot when the user
+ * eyeballed the lane. The visual distinction is dropped on purpose: a
+ * cluster behaves like a normal small dot to the eye, and the cluster
+ * concept stays meaningful through (a) the representative x and (b) the
+ * `data-cluster-member-count` attribute for downstream diagnostics and
+ * tests. Click navigation keeps snapping to the representative member via
+ * the global nearest-message lookup, with or without a visual cue.
  */
 function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
   return (
@@ -1746,11 +1754,10 @@ function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
       data-thread-id={cluster.threadId}
       data-cluster-member-count={cluster.memberCount}
       aria-hidden="true"
-      // `outline` (not `border`) keeps the inner fill at MARK_CLUSTER_PX so
-      // the dot's solid area equals a lone small dot's area exactly; the
-      // ring sits OUTSIDE the box, so a cluster reads as a small dot with a
-      // halo rather than a slightly-grown disc.
-      className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400 outline outline-1 ${MARK_CLUSTER_RING_COLOR}`}
+      // No outline, no ring, no border — just the slate-400 fill a lone
+      // small assistant dot uses. The cluster's footprint equals a small
+      // dot's exactly, never larger.
+      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400"
       style={{
         left: xPx,
         width: MARK_CLUSTER_PX,

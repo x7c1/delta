@@ -18,7 +18,6 @@ import {
   articleMessageSelector,
   LANE_LEFT_PAD_PX,
   MARK_CLUSTER_PX,
-  MARK_CLUSTER_RING_COLOR,
   MARK_SMALL_PX,
   PANE_SCROLL_DEBOUNCE_MS,
   PANE_SCROLL_OBSERVER_THRESHOLD,
@@ -2007,12 +2006,16 @@ describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
     expect(MARK_CLUSTER_PX).toBe(4);
   });
 
-  it('paints the cluster ring outline so a cluster reads as a small dot with a halo', async () => {
-    // The cluster's distinguishing feature is the ring, NOT its size. A
-    // regression that drops the outline (or paints the same outline on
-    // every dot) is what these assertions guard against. Inner fill is
-    // the same slate-400 a small assistant dot uses, so the ring is
-    // strictly additive.
+  it('renders a cluster with no outline / ring / border so its visual footprint matches a lone small dot', async () => {
+    // v16: the v11 outline-based "halo" extended the cluster's painted
+    // footprint by 1 px on each side, so a 4 px disc became a 6 px outer
+    // disc — visually indistinguishable from the 6 px main-role dots,
+    // exactly the regression v11 thought it had fixed by dropping the
+    // 5 px fill. v16 drops the outline entirely. The cluster carries no
+    // outline / ring / border utility, no shadow, no transform; its
+    // visible footprint equals MARK_CLUSTER_PX end-to-end. "Cluster-ness"
+    // is purely positional / interactive — the representative x and the
+    // `data-cluster-member-count` attribute carry the meaning.
     const threads = [makeThread(1)];
     const messages = new Map([
       [
@@ -2041,10 +2044,79 @@ describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
       activeThreadId: 1,
     });
     const cluster = (await screen.findAllByTestId('thread-timeline-cluster'))[0];
-    expect(cluster.className).toMatch(/\boutline\b/);
-    expect(cluster.className).toMatch(/\boutline-1\b/);
-    expect(cluster.className).toMatch(
-      new RegExp(`\\b${MARK_CLUSTER_RING_COLOR}\\b`),
+    // No outline / ring / border utility — these are precisely the
+    // Tailwind tokens that would extend the visual footprint beyond the
+    // inline width/height of MARK_CLUSTER_PX. A single failed assertion
+    // here flags exactly which footprint-expanding utility crept back in.
+    expect(cluster.className).not.toMatch(/\boutline\b/);
+    expect(cluster.className).not.toMatch(/\boutline-1\b/);
+    expect(cluster.className).not.toMatch(/\boutline-/);
+    expect(cluster.className).not.toMatch(/\bring(?:-|\b)/);
+    expect(cluster.className).not.toMatch(/\bborder(?:-|\b)/);
+    expect(cluster.className).not.toMatch(/\bshadow(?:-|\b)/);
+    // Pin the fill colour explicitly: a cluster reads as a normal small
+    // assistant dot (same fill, same size, no halo).
+    expect(cluster.className).toMatch(/\bbg-slate-400\b/);
+    // No transform-scale either: a 4 px disc * scale-150 would also
+    // recreate the "looks 6 px" regression at a different code path.
+    expect(cluster.className).not.toMatch(/\bscale-/);
+  });
+
+  it('matches the inline width and height of a lone small dot exactly, including no outline contribution', async () => {
+    // The cluster's INLINE box is sized to MARK_CLUSTER_PX. The previous
+    // v11 contract relied on `outline` (which paints OUTSIDE the box and
+    // does not show up in `style.width`/`height`), so a width-equals-4px
+    // assertion alone could not catch the regression. This test pins
+    // both the inline width/height AND the absence of any
+    // footprint-extending utility class, so a future "let's add a tiny
+    // ring back" regression cannot slip past the size assertion.
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeMessage(1, 0, 't1', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu1', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:00Z',
+          }),
+          makeMessage(1, 1, 't2', {
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'tu2', name: 'Bash', input: {} },
+            ],
+            created_at: '2026-01-01T00:00:10Z',
+          }),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+    });
+    const cluster = (await screen.findAllByTestId('thread-timeline-cluster'))[0];
+    // Pin the literal value so the value of MARK_SMALL_PX in source can
+    // never silently bump the cluster footprint either.
+    expect(cluster.style.width).toBe(`${MARK_SMALL_PX}px`);
+    expect(cluster.style.height).toBe(`${MARK_SMALL_PX}px`);
+    expect(MARK_CLUSTER_PX).toBe(MARK_SMALL_PX);
+    expect(MARK_CLUSTER_PX).toBe(4);
+    // Cross-check that the resolved computed style (jsdom returns the
+    // inline width straight back, with no outline applied because no
+    // outline class is present) also matches — guarding against a future
+    // CSS-cascade rule that re-grows the disc via `width` rather than
+    // `outline`.
+    const computed = window.getComputedStyle(cluster);
+    expect(computed.width).toBe(`${MARK_SMALL_PX}px`);
+    expect(computed.height).toBe(`${MARK_SMALL_PX}px`);
+    expect(computed.outlineWidth === '' || computed.outlineWidth === '0px').toBe(
+      true,
+    );
+    expect(computed.borderTopWidth === '' || computed.borderTopWidth === '0px').toBe(
+      true,
     );
   });
 });
