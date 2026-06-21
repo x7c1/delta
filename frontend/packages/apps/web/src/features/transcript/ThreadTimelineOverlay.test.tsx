@@ -17,7 +17,11 @@ import {
   ThreadTimelineOverlay,
   TIMELINE_EXPANDED_STORAGE_KEY,
   TIMELINE_JUMP_HIGHLIGHT_CLASS,
-  WHEEL_COOLDOWN_MS,
+  WHEEL_DELTA_LINE_PX,
+  WHEEL_PER_EVENT_CLAMP_PX,
+  WHEEL_VELOCITY_WINDOW_MS,
+  normalizeWheelDeltaPx,
+  stepsForCumulativePx,
 } from './ThreadTimelineOverlay';
 
 function makeThread(
@@ -477,7 +481,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     }
   });
 
-  it('advances exactly one step per wheel notch and suppresses page scroll', async () => {
+  it('advances one step on a leisurely sub-notch wheel event and suppresses page scroll', async () => {
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
     // Three evenly-spaced "large" turns: x=0, x=0.5, x=1 (px 0, 120, 240).
@@ -504,11 +508,13 @@ describe('ThreadTimelineOverlay playhead', () => {
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe('240px');
-    // Wheel up (negative delta) → previous message. One notch, one step,
-    // regardless of magnitude — discrete navigation does not multiply.
+    // A single sub-notch wheel-up event (cumulative |delta| under the
+    // first staircase threshold) lands in the slowest bucket → exactly
+    // one step back. preventDefault is also called so the page scroll
+    // does not run alongside the navigation step.
     const body = screen.getByTestId('thread-timeline-body');
     const wheel = new WheelEvent('wheel', {
-      deltaY: -1000,
+      deltaY: -50,
       bubbles: true,
       cancelable: true,
     });
@@ -565,8 +571,8 @@ describe('ThreadTimelineOverlay playhead', () => {
   });
 
   it('clamps at the oldest end: a wheel-up at the first message does not retreat', async () => {
-    // Drive the wheel cooldown via a mocked clock so several events fire
-    // back-to-back without sleeping the test.
+    // Drive a virtual clock so the rolling-window accumulator can be reset
+    // between events without sleeping the test.
     let nowMs = 1_000;
     const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
     try {
@@ -604,8 +610,10 @@ describe('ThreadTimelineOverlay playhead', () => {
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
       ).toBe('0px');
-      // Advance past the cooldown so the next event is accepted.
-      nowMs += WHEEL_COOLDOWN_MS + 1;
+      // Advance past the rolling window so the accumulator resets — the
+      // next event is treated as a fresh leisurely turn rather than a
+      // continuation of the previous burst.
+      nowMs += WHEEL_VELOCITY_WINDOW_MS + 1;
       act(() => {
         body.dispatchEvent(
           new WheelEvent('wheel', {
@@ -679,11 +687,14 @@ describe('ThreadTimelineOverlay playhead', () => {
       expect(scrollIntoView).not.toHaveBeenCalled();
 
       // Wheel-up from msg-c → msg-b. msg-b lives on lane 1 (cross-lane).
+      // A sub-notch event keeps the staircase at one step so the
+      // assertion targets msg-b (the immediate large neighbour), not
+      // msg-a (two steps back, which a 100-px notch would reach).
       const body = screen.getByTestId('thread-timeline-body');
       act(() => {
         body.dispatchEvent(
           new WheelEvent('wheel', {
-            deltaY: -100,
+            deltaY: -50,
             bubbles: true,
             cancelable: true,
           }),
@@ -734,15 +745,16 @@ describe('ThreadTimelineOverlay playhead', () => {
     }
   });
 
-  it('debounces a burst of wheel events into one step per cooldown window', async () => {
+  it('advances exactly one large-message step on a single sub-notch turn', async () => {
+    // Single wheel event with |deltaY| = 50 — below the first staircase
+    // threshold (100), so the accumulator lands in the slowest bucket (1
+    // step). Five large turns so any off-by-one in the calculator would
+    // surface as a wrong landing px.
     const nowMs = 5_000;
     const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
     try {
       stubAxisRect({ left: 0, width: 240 });
       const threads = [makeThread(1)];
-      // Five "large" messages so a burst of wheel events would otherwise
-      // sweep the active index across multiple steps if it weren't
-      // throttled (large turns are the wheel-step subset).
       const messages = new Map([
         [
           1,
@@ -767,9 +779,62 @@ describe('ThreadTimelineOverlay playhead', () => {
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
       ).toBe('240px');
       const body = screen.getByTestId('thread-timeline-body');
-      // Three back-to-back wheel-up events inside the cooldown window:
-      // only the first should advance the step (m4 → m3).
-      for (let i = 0; i < 3; i += 1) {
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // m3 sits at x=0.75 → 180px — one step back, sub-notch event.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('180px');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('accelerates a fast burst across multiple steps via the staircase', async () => {
+    // Five wheel events each at one notch (|deltaY| = 100), all within
+    // ~50 ms of each other. Cumulative |delta| after the fifth event is
+    // 500 px → the 300-bucket gives 3 steps on the fifth event, while
+    // earlier events bumped the playhead through smaller buckets. The
+    // assertion is on the final landing position, which captures the full
+    // burst's net advancement: from m9 (start) past several intermediate
+    // steps to m1 (4th from the start, after 1 + 1 + 2 + 2 + 3 = 9 steps
+    // backward, clamped at m0). The exact landing is robust against
+    // staircase tuning so long as the burst trips at least the 300 bucket.
+    let nowMs = 5_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const msgs: Message[] = [];
+      for (let i = 0; i < 10; i += 1) {
+        msgs.push(
+          makeUserText(
+            1,
+            i,
+            `m${i}`,
+            `2026-01-01T00:${String(i).padStart(2, '0')}:00Z`,
+          ),
+        );
+      }
+      const messages = new Map([[1, msgs]]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      const body = screen.getByTestId('thread-timeline-body');
+      // Five back-to-back wheel-up events, 50 ms apart (all inside the
+      // 250 ms rolling window).
+      for (let i = 0; i < 5; i += 1) {
         act(() => {
           body.dispatchEvent(
             new WheelEvent('wheel', {
@@ -779,14 +844,220 @@ describe('ThreadTimelineOverlay playhead', () => {
             }),
           );
         });
+        nowMs += 50;
       }
-      // m3 sits at x=0.75 → 180px.
+      // Cumulative steps walked backward across the five events (each
+      // event reads the cumulative AFTER its own contribution lands, so
+      // the first event already hits the 100 bucket → 2 steps):
+      //   cum=100 → bucket 100 (2) → m9 → m7
+      //   cum=200 → bucket 100 (2) → m7 → m5
+      //   cum=300 → bucket 300 (3) → m5 → m2
+      //   cum=400 → bucket 300 (3) → m2 → m0 (clamped after 2)
+      //   cum=500 → bucket 300 (3) → clamped at m0
+      // The clamp at m0 (x=0) is the final landing.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('180px');
+      ).toBe('0px');
     } finally {
       nowSpy.mockRestore();
     }
+  });
+
+  it('resets the accumulator after the rolling window elapses', async () => {
+    // Two sub-notch events separated by a gap longer than the window. Each
+    // event alone contributes 50 px (bucket 0 → 1 step). With reset, the
+    // total is 2 steps; without reset, the second event's cumulative would
+    // be 100 (bucket 100 → 2 steps) and the total would be 3 — pinning the
+    // reset behaviour by total advancement.
+    let nowMs = 5_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const msgs: Message[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        msgs.push(
+          makeUserText(
+            1,
+            i,
+            `m${i}`,
+            `2026-01-01T00:${String(i).padStart(2, '0')}:00Z`,
+          ),
+        );
+      }
+      renderOverlay({
+        threads,
+        messagesByThread: new Map([[1, msgs]]),
+        activeThreadId: 1,
+        conversationArticles: [],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      const body = screen.getByTestId('thread-timeline-body');
+      // First event: cum=50 → 1 step back (m5 → m4).
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // Wait longer than the window so the accumulator resets.
+      nowMs += WHEEL_VELOCITY_WINDOW_MS + 150;
+      // Second event after the gap: fresh cum=50 → 1 step back (m4 → m3).
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // Six messages at x = 0, 48, 96, 144, 192, 240. m3 sits at x = 144.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('144px');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('caps a single trackpad-sized event at the slowest bucket via the per-event clamp', async () => {
+    // A single trackpad-sized event (|deltaY| = 10) lands in the slowest
+    // staircase bucket (1 step) regardless of `deltaMode`. The clamp's
+    // role is preventing a single noisy event from skipping straight to
+    // the top bucket; this test pins that contract by dispatching the
+    // burst's first event in isolation and asserting it advances exactly
+    // one large step (rather than e.g. ten, which would happen if the
+    // calculator multiplied steps by event count without going through
+    // the staircase).
+    const nowMs = 5_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const msgs: Message[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        msgs.push(
+          makeUserText(
+            1,
+            i,
+            `m${i}`,
+            `2026-01-01T00:${String(i).padStart(2, '0')}:00Z`,
+          ),
+        );
+      }
+      renderOverlay({
+        threads,
+        messagesByThread: new Map([[1, msgs]]),
+        activeThreadId: 1,
+        conversationArticles: [],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      const body = screen.getByTestId('thread-timeline-body');
+      // First trackpad event of a burst (|deltaY| = 10). Cumulative is 10
+      // → bucket 0 → 1 step back. m5 → m4 (x=192 on the 6-msg axis).
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -10,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // Six messages → 5 gaps → 240 / 5 = 48 px each. m4 sits at x=192.
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('192px');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('treats deltaMode=1 (line) as ~40 px per line via normalization', async () => {
+    // A line-mode event with deltaY = 3 must behave like a pixel-mode
+    // event of ~120 px — i.e. cross the 100-bucket threshold and walk
+    // two large-message steps.
+    const nowMs = 5_000;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const msgs: Message[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        msgs.push(
+          makeUserText(
+            1,
+            i,
+            `m${i}`,
+            `2026-01-01T00:${String(i).padStart(2, '0')}:00Z`,
+          ),
+        );
+      }
+      renderOverlay({
+        threads,
+        messagesByThread: new Map([[1, msgs]]),
+        activeThreadId: 1,
+        conversationArticles: [],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      const body = screen.getByTestId('thread-timeline-body');
+      // line-mode event, 3 lines back → 3 * 40 = 120 px → 2-step bucket.
+      act(() => {
+        body.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -3,
+            deltaMode: 1,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      // Six messages at x = 0, 48, 96, 144, 192, 240. Starting on m5 (x=240),
+      // two steps back → m3 (x=144).
+      expect(
+        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      ).toBe('144px');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+});
+
+describe('ThreadTimelineOverlay wheel calculator', () => {
+  it('normalizes pixel-mode |delta| with the per-event clamp', () => {
+    expect(normalizeWheelDeltaPx(50, 0)).toBe(50);
+    expect(normalizeWheelDeltaPx(-50, 0)).toBe(50);
+    // Above the clamp ceiling, contributions are capped.
+    expect(normalizeWheelDeltaPx(500, 0)).toBe(WHEEL_PER_EVENT_CLAMP_PX);
+  });
+
+  it('normalizes line-mode |delta| by the per-line pixel proxy', () => {
+    // 1 line ≈ 40 px, two lines ≈ 80 px (under the clamp).
+    expect(normalizeWheelDeltaPx(2, 1)).toBe(2 * WHEEL_DELTA_LINE_PX);
+    // 5 lines = 200 px → clamped to 100.
+    expect(normalizeWheelDeltaPx(5, 1)).toBe(WHEEL_PER_EVENT_CLAMP_PX);
+  });
+
+  it('normalizes page-mode |delta| by the per-page pixel proxy and clamps', () => {
+    // Even a single page-mode event is clamped to one notch.
+    expect(normalizeWheelDeltaPx(1, 2)).toBe(WHEEL_PER_EVENT_CLAMP_PX);
+  });
+
+  it('maps cumulative |delta| to the staircase step count', () => {
+    expect(stepsForCumulativePx(0)).toBe(1);
+    expect(stepsForCumulativePx(99)).toBe(1);
+    expect(stepsForCumulativePx(100)).toBe(2);
+    expect(stepsForCumulativePx(299)).toBe(2);
+    expect(stepsForCumulativePx(300)).toBe(3);
+    expect(stepsForCumulativePx(599)).toBe(3);
+    expect(stepsForCumulativePx(600)).toBe(5);
+    expect(stepsForCumulativePx(999)).toBe(5);
+    expect(stepsForCumulativePx(1000)).toBe(8);
+    expect(stepsForCumulativePx(10_000)).toBe(8);
   });
 });
 
@@ -1015,13 +1286,15 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe('240px');
-    // Wheel up: the previous LARGE turn is large-b (x=2/3 → 160px), NOT
-    // the small tool call between them.
+    // Wheel up (sub-notch event → one step): the previous LARGE turn is
+    // large-b (x=2/3 → 160px), NOT the small tool call between them. The
+    // sub-notch keeps the staircase at one step so the assertion targets
+    // the immediate large neighbour.
     const body = screen.getByTestId('thread-timeline-body');
     act(() => {
       body.dispatchEvent(
         new WheelEvent('wheel', {
-          deltaY: -100,
+          deltaY: -50,
           bubbles: true,
           cancelable: true,
         }),

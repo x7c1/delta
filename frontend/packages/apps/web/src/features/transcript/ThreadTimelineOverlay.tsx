@@ -33,17 +33,112 @@ import {
 export const TIMELINE_EXPANDED_STORAGE_KEY = 'delta.thread-timeline-overlay.expanded';
 
 /**
- * Minimum gap (ms) between two wheel notches that the navigation accepts as
- * distinct steps. Trackpads (and high-resolution mice) fan a single deliberate
- * gesture into many small `deltaY` events; without a cooldown the active index
- * would skip several messages on one flick. Tuned to ~120 ms so a confident
- * deliberate flick still produces one step, while continuous inertial spam
- * collapses into one step per cooldown window.
+ * Rolling window (ms) over which wheel-event |delta| magnitudes accumulate
+ * so a vigorous spin advances more steps than a leisurely turn. Each event's
+ * normalized contribution sticks around for this duration; once nothing
+ * fires for longer than the window the accumulator resets to 0 on the next
+ * event, so an unrelated later flick always starts fresh at the slowest
+ * step.
  *
- * Exported so a test can drive the cooldown explicitly without having to
- * wait wall-clock time between dispatches.
+ * Tuned to ~250 ms: short enough that two deliberate but slow turns stay
+ * independent (each at the lowest step), long enough that a multi-notch
+ * spin compounds into the higher staircase buckets while the user's fingers
+ * are still in motion. Exported so a test can drive the window timing
+ * without sleeping wall-clock time.
  */
-export const WHEEL_COOLDOWN_MS = 120;
+export const WHEEL_VELOCITY_WINDOW_MS = 250;
+
+/**
+ * Upper bound (px) on a single wheel event's |delta| contribution to the
+ * accumulator. Trackpads emit many small pixel-mode events per flick (often
+ * 5–20 px each); without per-event clamping a single inertial burst would
+ * pile up hundreds of px and explode straight into the top staircase
+ * bucket. The clamp sits at one mouse-wheel notch (~100 px on Linux /
+ * Chrome) so a single notch always contributes at most one notch's worth
+ * of acceleration regardless of the source device.
+ */
+export const WHEEL_PER_EVENT_CLAMP_PX = 100;
+
+/**
+ * `WheelEvent.deltaMode` indicates the unit of `deltaY` / `deltaX`. Pixel
+ * mode (0) is the trackpad / high-resolution-mouse default and needs no
+ * conversion; line mode (1) and page mode (2) report small integer counts
+ * that must be scaled to a pixel-equivalent magnitude before clamping so
+ * cross-device behaviour stays consistent. The multipliers are deliberate
+ * approximations — one line ≈ 40 px, one page ≈ 800 px — matching the
+ * staircase's notch-sized thresholds.
+ */
+export const WHEEL_DELTA_LINE_PX = 40;
+export const WHEEL_DELTA_PAGE_PX = 800;
+
+/**
+ * Velocity → step-count staircase, encoded as descending-threshold entries
+ * (highest bucket first so a top-down walk picks the first match). Each
+ * entry maps "cumulative |delta| at least this large within the rolling
+ * window" → "number of large-message steps to take on this wheel event".
+ *
+ * The thresholds are biased to mouse-wheel notch magnitudes (~100 px per
+ * notch with the per-event clamp), so a leisurely 1-notch turn stays in
+ * the slowest bucket (1 step) while a vigorous multi-notch spin trips the
+ * higher buckets within the {@link WHEEL_VELOCITY_WINDOW_MS} window.
+ *
+ * Exported so tests can assert the calculator's behaviour against the
+ * same thresholds the live UI uses, without duplicating magic numbers.
+ */
+export const WHEEL_STEP_STAIRCASE: ReadonlyArray<{
+  readonly minCumulativePx: number;
+  readonly steps: number;
+}> = [
+  { minCumulativePx: 1000, steps: 8 },
+  { minCumulativePx: 600, steps: 5 },
+  { minCumulativePx: 300, steps: 3 },
+  { minCumulativePx: 100, steps: 2 },
+  { minCumulativePx: 0, steps: 1 },
+];
+
+/**
+ * Convert a raw `WheelEvent.deltaY` magnitude in the event's native
+ * `deltaMode` to a pixel-equivalent magnitude, clamped to
+ * {@link WHEEL_PER_EVENT_CLAMP_PX}. The conversion lets line / page-mode
+ * scrolls compete on the same staircase as pixel-mode events; the clamp
+ * bounds a single trackpad event so an inertial burst cannot explode the
+ * accumulator.
+ *
+ * Exported for unit testing — the wheel handler is the only runtime caller.
+ */
+export function normalizeWheelDeltaPx(
+  deltaMagnitude: number,
+  deltaMode: number,
+): number {
+  const abs = Math.abs(deltaMagnitude);
+  let scaled: number;
+  if (deltaMode === 1) {
+    scaled = abs * WHEEL_DELTA_LINE_PX;
+  } else if (deltaMode === 2) {
+    scaled = abs * WHEEL_DELTA_PAGE_PX;
+  } else {
+    scaled = abs;
+  }
+  return Math.min(scaled, WHEEL_PER_EVENT_CLAMP_PX);
+}
+
+/**
+ * Map a cumulative |delta| (px, within the rolling window) to a step count
+ * by walking {@link WHEEL_STEP_STAIRCASE} from the top bucket down — the
+ * first entry whose threshold the cumulative value meets wins. Exported for
+ * unit testing.
+ */
+export function stepsForCumulativePx(cumulativePx: number): number {
+  for (const entry of WHEEL_STEP_STAIRCASE) {
+    if (cumulativePx >= entry.minCumulativePx) {
+      return entry.steps;
+    }
+  }
+  // Defensive: the last entry's threshold is 0 so the loop above always
+  // returns; keep an explicit fallback so a future edit that drops the
+  // 0-threshold entry still degrades gracefully to a single step.
+  return 1;
+}
 
 /**
  * CSS transition duration (ms) for the playhead's `left` animation. Short
@@ -323,9 +418,13 @@ function markDiameterPx(size: TimelineDotSize): number {
  * is never freely draggable. Wheel events advance discretely through the
  * MAIN-CONVERSATION subset of the cross-lane timeline (user turns + Claude's
  * prose replies) so one notch jumps to the next-or-previous headline turn,
- * skipping the surrounding tool calls, meta lines, and question cards. The
- * cooldown debounce keeps a trackpad's inertial fan-out reading as one
- * deliberate step. Clicking anywhere on the timeline jumps the active index
+ * skipping the surrounding tool calls, meta lines, and question cards. A
+ * velocity accelerator scales the step count from the cumulative |delta|
+ * inside a short rolling window: one leisurely notch advances one step, a
+ * vigorous spin within the window trips higher staircase buckets so a long
+ * session can be traversed in a handful of turns instead of dozens. Per-event
+ * |delta| is clamped before accumulating so a trackpad's inertial burst
+ * stays under control. Clicking anywhere on the timeline jumps the active index
  * to the message whose x is closest to the click — small auxiliary marks are
  * directly tappable, so the user can still reach a specific tool call when
  * they want it. Whichever message is active becomes the lane highlight,
@@ -612,11 +711,15 @@ export function ThreadTimelineOverlay({
     largeSortedMessagesRef.current = largeSortedMessages;
   }, [largeSortedMessages]);
 
-  // Last-accepted wheel timestamp for the cooldown debounce. A trackpad's
-  // inertial fan-out fires many small `deltaY` events for one deliberate
-  // gesture; the cooldown collapses that burst into a single step so the
-  // user cannot accidentally skip multiple messages.
-  const lastWheelMsRef = useRef(0);
+  // Rolling-window accumulator for wheel-event |delta|. Each entry is a
+  // single wheel event's normalized px contribution paired with the
+  // timestamp it landed on; the wheel handler evicts entries older than
+  // {@link WHEEL_VELOCITY_WINDOW_MS} before reading the sum, so a multi-
+  // notch spin compounds while the user's fingers are still moving but an
+  // unrelated later flick always starts fresh at the slowest staircase
+  // bucket. The accumulator's role replaces v4's hard cooldown: a long
+  // session traverses in a handful of vigorous turns instead of dozens.
+  const wheelWindowRef = useRef<Array<{ atMs: number; deltaPx: number }>>([]);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -635,37 +738,61 @@ export function ThreadTimelineOverlay({
       if (rawDelta === 0) {
         return;
       }
-      const now =
-        typeof performance !== 'undefined' &&
-        typeof performance.now === 'function'
-          ? performance.now()
-          : Date.now();
-      if (now - lastWheelMsRef.current < WHEEL_COOLDOWN_MS) {
-        return;
-      }
-      lastWheelMsRef.current = now;
       const total = sortedMessagesRef.current.length;
       const large = largeSortedMessagesRef.current;
       if (total === 0 || large.length === 0) {
         return;
       }
+      const now =
+        typeof performance !== 'undefined' &&
+        typeof performance.now === 'function'
+          ? performance.now()
+          : Date.now();
+      // Evict events older than the rolling window before accumulating so a
+      // pause longer than the window resets the staircase — the next wheel
+      // event starts the user at the slowest single-step bucket again.
+      const cutoff = now - WHEEL_VELOCITY_WINDOW_MS;
+      const window = wheelWindowRef.current;
+      while (window.length > 0 && window[0].atMs <= cutoff) {
+        window.shift();
+      }
+      // Normalize the per-event |delta| (deltaMode → px, clamped to one
+      // notch) so a trackpad's inertial fan-out cannot explode the
+      // accumulator while a deliberate mouse-wheel notch still registers
+      // as one full notch's worth of acceleration.
+      const contribPx = normalizeWheelDeltaPx(rawDelta, event.deltaMode);
+      window.push({ atMs: now, deltaPx: contribPx });
+      let cumulativePx = 0;
+      for (const entry of window) {
+        cumulativePx += entry.deltaPx;
+      }
+      const requestedSteps = stepsForCumulativePx(cumulativePx);
       // Wheel down (positive delta) → next message (newer); wheel up →
       // previous (older). Clamped to the ends — no wrap.
-      const step = rawDelta > 0 ? 1 : -1;
+      const direction: 1 | -1 = rawDelta > 0 ? 1 : -1;
       const currentIndex = activeMessageIndexRef.current ?? total - 1;
       const currentMessage = sortedMessagesRef.current[currentIndex];
-      // Find the next/previous LARGE message relative to where the playhead
-      // currently sits. When the playhead is on a large mark, that mark is in
-      // `large` itself — pick the neighbour at `largeIdx + step`. When it is
-      // on a small mark (a click jumped to a tool call), pick the nearest
-      // large neighbour in the requested direction so the very first wheel
-      // notch still produces a visible step rather than a no-op.
-      const nextLarge = pickNeighbourLargeMessage(large, currentMessage, step);
-      if (nextLarge === null) {
+      // Walk the large-message subset `requestedSteps` times in the
+      // requested direction, clamping at the ends. Walking the predicate
+      // explicitly (instead of multiplying the cursor's `(timeMs, seq)` by
+      // an estimated step size) keeps the staircase honest even when the
+      // playhead currently sits on a small mark — the very first step
+      // still snaps to the adjacent large neighbour.
+      let cursor: SortedMessage | undefined = currentMessage;
+      let landed: SortedMessage | null = null;
+      for (let i = 0; i < requestedSteps; i += 1) {
+        const next = pickNeighbourLargeMessage(large, cursor, direction);
+        if (next === null) {
+          break;
+        }
+        landed = next;
+        cursor = next;
+      }
+      if (landed === null) {
         return;
       }
       const nextGlobalIndex = sortedMessagesRef.current.findIndex(
-        (m) => m.uuid === nextLarge.uuid,
+        (m) => m.uuid === landed.uuid,
       );
       if (nextGlobalIndex < 0 || nextGlobalIndex === currentIndex) {
         return;
