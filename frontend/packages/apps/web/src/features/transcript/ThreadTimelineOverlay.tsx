@@ -13,12 +13,15 @@ import { useThreadsMessagesQueries } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
+  buildGlobalXMap,
   buildLargeSortedMessages,
   buildSortedMessages,
   buildTimelineLanes,
+  computeTimeRange,
   findNearestMessageIndex,
   type SortedMessage,
   type TimelineDot,
+  type TimelineDotSize,
 } from './timelineLanes';
 
 /**
@@ -258,17 +261,28 @@ const MIN_LANE_AXIS_PX = 240;
  * assistant prose) are the larger circle, and the auxiliary marks (tool
  * calls, meta lines, question cards) are the smaller circle. The size delta
  * is small (just visible) so the lane still reads as one timeline rather than
- * two layers, while the small ring helps the eye filter out auxiliary marks
- * at a glance. Overlap is mitigated by rendering each mark with a soft alpha
- * fill plus a solid outline ring — a stack of overlapping marks reads as a
- * darker cluster while every individual circle remains discernible.
+ * two layers, while the smaller dot helps the eye filter out auxiliary marks
+ * at a glance. Overlap is prevented at the layout level by the shared global
+ * x map (see {@link buildGlobalXMap}), which pushes any neighbour that would
+ * collide to the right by at least the sum of the two radii — so the marks
+ * can stay solid-fill without any alpha or ring workaround.
  */
-const MARK_LARGE_PX = 9;
-const MARK_SMALL_PX = 6;
+const MARK_LARGE_PX = 6;
+const MARK_SMALL_PX = 4;
 /** Width reserved on the left for lane labels. */
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
 const LANE_RIGHT_PAD_PX = 16;
+
+/**
+ * Pixel diameter for a mark of the given size class. Fed to
+ * {@link buildGlobalXMap} so the minimum spacing between two adjacent marks
+ * is the average of their diameters — i.e. their summed radii — and the two
+ * circles never paint into each other.
+ */
+function markDiameterPx(size: TimelineDotSize): number {
+  return size === 'large' ? MARK_LARGE_PX : MARK_SMALL_PX;
+}
 
 /**
  * The fixed footer between the conversation pane and the composer: a swim-lane
@@ -350,11 +364,29 @@ export function ThreadTimelineOverlay({
     [lanes],
   );
 
-  // The lane axis is fixed-width — horizontal scroll is acceptable for very
-  // long sessions in MVP. Keeping it bounded means dot positions are
-  // deterministic from the data alone (no parent-width measurement), which
-  // simplifies the click-to-jump math considerably.
-  const laneAxisWidth = MIN_LANE_AXIS_PX;
+  // One x map shared across every lane. Each message's px x is derived from
+  // its `(timeMs, seq)` once, globally, so a message at a given timestamp
+  // lands at exactly the same x in every lane — cross-lane jumps line up
+  // with the marks the user sees, and the playhead's x always agrees with
+  // the dot under it. The map also enforces the minimum spacing that keeps
+  // dense clusters readable without any alpha/ring workaround, expanding
+  // the axis past `MIN_LANE_AXIS_PX` when overlapping ideal positions get
+  // pushed right.
+  const timeRange = useMemo(
+    () => computeTimeRange(messagesByThread),
+    [messagesByThread],
+  );
+  const { pxByUuid: messagePxByUuid, axisWidth: laneAxisWidth } = useMemo(
+    () =>
+      buildGlobalXMap(
+        sortedMessages,
+        timeRange,
+        MIN_LANE_AXIS_PX,
+        markDiameterPx,
+        MIN_LANE_AXIS_PX,
+      ),
+    [sortedMessages, timeRange],
+  );
 
   // The active message's index in `sortedMessages`. A fresh mount lands on
   // the latest message so a newly opened session highlights the most recent
@@ -400,7 +432,11 @@ export function ThreadTimelineOverlay({
     activeMessageIndex !== null && activeMessageIndex < sortedMessages.length
       ? sortedMessages[activeMessageIndex]
       : null;
-  const playheadX = activeMessage?.x ?? 0;
+  // The playhead's x in pixels along the shared lane axis. Resolved through
+  // the global map so the playhead and the mark under it always agree, even
+  // when overlap mitigation pushed the mark off its ideal time-axis x.
+  const playheadX =
+    activeMessage === null ? 0 : messagePxByUuid.get(activeMessage.uuid) ?? 0;
 
   // Snapshot the active message into a ref so the navigation effect (which
   // depends on `scrubTick` alone) can read the latest pick without listing
@@ -637,15 +673,22 @@ export function ThreadTimelineOverlay({
       if (laneAxisWidth <= 0) {
         return;
       }
-      const fraction = (event.clientX - rect.left) / laneAxisWidth;
-      const clamped = Math.max(0, Math.min(1, fraction));
-      const nearest = findNearestMessageIndex(sortedMessages, clamped);
+      // Translate the click to the same absolute-px space the global x map
+      // uses, clamped to [0, axisWidth] so a click in the right-hand padding
+      // still snaps to the rightmost mark.
+      const offsetPx = event.clientX - rect.left;
+      const clampedPx = Math.max(0, Math.min(laneAxisWidth, offsetPx));
+      const nearest = findNearestMessageIndex(
+        sortedMessages,
+        messagePxByUuid,
+        clampedPx,
+      );
       if (nearest < 0) {
         return;
       }
       setActiveMessageIndex(nearest);
     },
-    [laneAxisWidth, sortedMessages, setActiveMessageIndex],
+    [laneAxisWidth, sortedMessages, messagePxByUuid, setActiveMessageIndex],
   );
 
   // After a user-driven navigation, ensure the playhead is visible inside
@@ -665,15 +708,16 @@ export function ThreadTimelineOverlay({
       return;
     }
     // The playhead's offset within the scrollable body — its left position
-    // inside the axis plus the axis's offset from the body (lane label).
-    const playheadInAxis = activeMessage.x * laneAxisWidth;
+    // inside the axis (from the global x map) plus the axis's offset from
+    // the body (lane label).
+    const playheadInAxis = messagePxByUuid.get(activeMessage.uuid) ?? 0;
     const playheadInBody = axisEl.offsetLeft + playheadInAxis;
     const viewLeft = body.scrollLeft;
     const viewRight = viewLeft + body.clientWidth;
     if (playheadInBody < viewLeft || playheadInBody > viewRight) {
       body.scrollLeft = Math.max(0, playheadInBody - body.clientWidth / 2);
     }
-  }, [scrubTick, activeMessage, laneAxisWidth]);
+  }, [scrubTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 
   return (
     <section
@@ -760,7 +804,7 @@ export function ThreadTimelineOverlay({
                         <TimelineDotMark
                           key={dot.uuid}
                           dot={dot}
-                          laneAxisWidth={laneAxisWidth}
+                          xPx={messagePxByUuid.get(dot.uuid) ?? 0}
                         />
                       ))}
                       {/* Playhead: a thin vertical line that doubles as the
@@ -778,7 +822,7 @@ export function ThreadTimelineOverlay({
                         data-testid="thread-timeline-playhead"
                         className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
                         style={{
-                          left: playheadX * laneAxisWidth,
+                          left: playheadX,
                           transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
                         }}
                       />
@@ -796,7 +840,12 @@ export function ThreadTimelineOverlay({
 
 interface TimelineDotMarkProps {
   dot: TimelineDot;
-  laneAxisWidth: number;
+  /**
+   * Absolute x in pixels for this mark, resolved through the global x map
+   * shared across every lane. The mark renders centred on this x so a
+   * cross-lane playhead lands on the same column as the mark.
+   */
+  xPx: number;
 }
 
 /**
@@ -808,27 +857,20 @@ interface TimelineDotMarkProps {
  * bubble palette family so the timeline reads as the same conversation, just
  * compressed.
  *
- * Overlap mitigation: dense lanes used to overlap circles into an illegible
- * smear, which is why v3 swapped them for rectangles. The circles return with
- * a soft alpha fill (`/60`) and a solid same-color outline ring, so a stack
- * of overlapping marks reads as a darker cluster while each individual circle
- * stays discernible at its edge. The fill alpha is high enough that the
- * solid-looking inner disc still reads as one mark in isolation.
+ * Overlap is prevented at the layout level: the shared global x map (see
+ * {@link buildGlobalXMap}) pushes any neighbour whose ideal time-axis x
+ * would collide with the previous mark, so adjacent circles always clear
+ * each other by at least the sum of their radii. The fill can therefore stay
+ * solid — no alpha, no ring — and each mark reads as one disc.
  *
  * The mark is non-interactive: hover and click navigation flow through the
  * playhead alone, so a mark is purely a visual anchor.
  */
-function TimelineDotMark({ dot, laneAxisWidth }: TimelineDotMarkProps) {
-  const left = dot.x * laneAxisWidth;
+function TimelineDotMark({ dot, xPx }: TimelineDotMarkProps) {
   // Two-color scheme: user vs everything else. Mirrors `MessageItem`'s
   // bubble palette family — blue for user, slate for the assistant side.
-  // The fill carries an alpha so overlapping marks stack into a darker
-  // cluster instead of painting flat over each other; the solid `ring`
-  // outlines the disc so individual circles in a cluster are still readable.
   const colorClasses =
-    dot.kind === 'user'
-      ? 'bg-blue-500/60 ring-1 ring-blue-500'
-      : 'bg-slate-400/60 ring-1 ring-slate-400';
+    dot.kind === 'user' ? 'bg-blue-500' : 'bg-slate-400';
   const diameter = dot.size === 'large' ? MARK_LARGE_PX : MARK_SMALL_PX;
   return (
     <span
@@ -840,7 +882,7 @@ function TimelineDotMark({ dot, laneAxisWidth }: TimelineDotMarkProps) {
       aria-hidden="true"
       className={`pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${colorClasses}`}
       style={{
-        left,
+        left: xPx,
         width: diameter,
         height: diameter,
       }}

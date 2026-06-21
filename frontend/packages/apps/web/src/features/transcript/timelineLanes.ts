@@ -377,24 +377,110 @@ export function buildLargeSortedMessages(
 }
 
 /**
- * Index of the message in {@link sortedMessages} whose x is closest to the
- * given fraction. Returns `-1` when the list is empty. Ties (two messages
- * equidistant from the target x) are broken by the smaller `timeMs` first,
- * then by smaller `seq` — both deterministic so a click never flickers
- * between equally-good candidates.
+ * Result of {@link buildGlobalXMap}: the per-message absolute x in pixels and
+ * the total axis width those positions occupy. Lane rendering, the playhead,
+ * click-to-jump, and the scroll-follow effect all read from the same map so
+ * one message has the same x in every lane and the spacing logic is the only
+ * source of truth.
+ */
+export interface GlobalXMap {
+  /**
+   * Absolute x in pixels for each message, keyed by uuid. Looking up a uuid
+   * not in the map yields `undefined` — callers should treat that as "the
+   * message is not on the timeline" and fall back to 0.
+   */
+  pxByUuid: Map<string, number>;
+  /**
+   * The widest x across every message, never below the caller-supplied
+   * `minWidth`. Lane renderers use this as the shared axis width so a dense
+   * session pushes the right edge out and an idle session stays at the
+   * minimum.
+   */
+  axisWidth: number;
+}
+
+/**
+ * Compute the per-message x positions for the shared lane axis. Each message
+ * is projected to its ideal `xFraction(timeMs, range) * baseWidth`, then a
+ * left-to-right greedy pass nudges any neighbour that would overlap to the
+ * right so adjacent marks always clear each other by at least the sum of
+ * their radii.
+ *
+ * The minimum spacing between two adjacent messages is the average of their
+ * mark diameters — i.e. the sum of their radii — so two large marks land 6 px
+ * apart, two small marks 4 px apart, and a large/small neighbour pair 5 px
+ * apart. That is the tightest spacing that still guarantees the two circles
+ * do not paint into each other; any tighter and dense clusters smear back
+ * into the illegible blur the soft alpha + ring workaround was patching over.
+ *
+ * The greedy push is one-directional (left → right): the leftmost message
+ * always sits on its ideal x, while the right edge can drift past `baseWidth`
+ * when the session is dense. `axisWidth` reflects that drift so the renderer
+ * extends the lane to fit — never below `minWidth`, so a single-dot session
+ * still has a scrubbable axis.
+ *
+ * Sharing one map across every lane is load-bearing: a message at a given
+ * timestamp must land at the same x in every lane so cross-lane playhead
+ * jumps line up with the marks the user sees.
+ */
+export function buildGlobalXMap(
+  sortedMessages: SortedMessage[],
+  range: TimelineTimeRange | null,
+  baseWidth: number,
+  markDiameter: (size: TimelineDotSize) => number,
+  minWidth: number,
+): GlobalXMap {
+  const pxByUuid = new Map<string, number>();
+  if (sortedMessages.length === 0) {
+    return { pxByUuid, axisWidth: minWidth };
+  }
+  let lastX = 0;
+  let lastDiameter = 0;
+  let widest = 0;
+  for (let i = 0; i < sortedMessages.length; i += 1) {
+    const msg = sortedMessages[i];
+    const ideal = xFraction(msg.timeMs, range) * baseWidth;
+    const diameter = markDiameter(msg.size);
+    let actual: number;
+    if (i === 0) {
+      actual = ideal;
+    } else {
+      const minSpacing = (lastDiameter + diameter) / 2;
+      actual = Math.max(ideal, lastX + minSpacing);
+    }
+    pxByUuid.set(msg.uuid, actual);
+    lastX = actual;
+    lastDiameter = diameter;
+    if (actual > widest) {
+      widest = actual;
+    }
+  }
+  return { pxByUuid, axisWidth: Math.max(minWidth, widest) };
+}
+
+/**
+ * Index of the message in {@link sortedMessages} whose absolute px x is
+ * closest to the given target. Reads each candidate's x from
+ * {@link GlobalXMap.pxByUuid} so the click-to-jump answer agrees with the
+ * marks the user actually sees. Returns `-1` when the list is empty. Ties
+ * (two messages equidistant from the target) are broken by the smaller
+ * `timeMs` first, then by smaller `seq` — both deterministic so a click
+ * never flickers between equally-good candidates.
  */
 export function findNearestMessageIndex(
   sortedMessages: SortedMessage[],
-  xFractionTarget: number,
+  pxByUuid: Map<string, number>,
+  pxTarget: number,
 ): number {
   if (sortedMessages.length === 0) {
     return -1;
   }
+  const xOf = (msg: SortedMessage) => pxByUuid.get(msg.uuid) ?? 0;
   let bestIndex = 0;
-  let bestDistance = Math.abs(sortedMessages[0].x - xFractionTarget);
+  let bestDistance = Math.abs(xOf(sortedMessages[0]) - pxTarget);
   for (let i = 1; i < sortedMessages.length; i += 1) {
     const candidate = sortedMessages[i];
-    const distance = Math.abs(candidate.x - xFractionTarget);
+    const distance = Math.abs(xOf(candidate) - pxTarget);
     if (distance < bestDistance) {
       bestDistance = distance;
       bestIndex = i;

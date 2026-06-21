@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Message, Thread } from '@delta/wire-gen';
 import {
   MAIN_LANE_LABEL,
+  buildGlobalXMap,
   buildLargeSortedMessages,
   buildSortedMessages,
   buildTimelineLanes,
@@ -11,6 +12,7 @@ import {
   findNearestMessageIndex,
   messageTimeMs,
   xFraction,
+  type TimelineDotSize,
 } from './timelineLanes';
 
 function thread(
@@ -515,7 +517,7 @@ describe('buildSortedMessages', () => {
 });
 
 describe('findNearestMessageIndex', () => {
-  it('returns the index of the message whose x is closest to the target', () => {
+  it('returns the index of the message whose px x is closest to the target', () => {
     const threads = [
       thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
       thread(2, {
@@ -538,11 +540,14 @@ describe('findNearestMessageIndex', () => {
         ],
       ],
     ]);
+    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    // sorted is [a@0, b@0.5, c@1]
-    expect(sorted[findNearestMessageIndex(sorted, 0.04)].uuid).toBe('a');
-    expect(sorted[findNearestMessageIndex(sorted, 0.45)].uuid).toBe('b');
-    expect(sorted[findNearestMessageIndex(sorted, 0.9)].uuid).toBe('c');
+    // Project onto a 240 px axis. With ideals 0, 120, 240 px and the
+    // greedy spacing push, the actuals stay at 0, 120, 240 (no collisions).
+    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, () => 6, 240);
+    expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 10)].uuid).toBe('a');
+    expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 110)].uuid).toBe('b');
+    expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 220)].uuid).toBe('c');
   });
 
   it('breaks click-distance ties by earlier timeMs first so the lookup is deterministic', () => {
@@ -553,17 +558,219 @@ describe('findNearestMessageIndex', () => {
         createdAt: '2026-01-01T00:00:00Z',
       }),
     ];
-    // Two messages equidistant from x=0.5 (a at 0, b at 1). The earlier
+    // Two messages equidistant from x=120 (a at 0, b at 240). The earlier
     // timeMs wins.
     const messagesByThread = new Map([
       [1, [message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' })]],
       [2, [message(2, 0, 'b', { createdAt: '2026-01-01T00:01:00Z' })]],
     ]);
+    const range = computeTimeRange(messagesByThread);
     const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
-    expect(sorted[findNearestMessageIndex(sorted, 0.5)].uuid).toBe('a');
+    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, () => 6, 240);
+    expect(sorted[findNearestMessageIndex(sorted, pxByUuid, 120)].uuid).toBe('a');
   });
 
   it('returns -1 when the sorted list is empty', () => {
-    expect(findNearestMessageIndex([], 0.5)).toBe(-1);
+    expect(findNearestMessageIndex([], new Map(), 0)).toBe(-1);
+  });
+});
+
+describe('buildGlobalXMap', () => {
+  // Real renderer values; tests pin the contract those constants drive.
+  const MARK_LARGE_PX = 6;
+  const MARK_SMALL_PX = 4;
+  const diameter = (size: TimelineDotSize) =>
+    size === 'large' ? MARK_LARGE_PX : MARK_SMALL_PX;
+
+  it('places a message at the same px x in every lane it appears next to', () => {
+    // Lane 1 carries msg-a (early) and msg-c (late). Lane 2 carries msg-b
+    // (mid) at the same instant a hypothetical lane-1 message would land —
+    // the test enforces that the global map collapses both ideal positions
+    // to ONE px value keyed by uuid, so cross-lane rendering lines up.
+    const threads = [
+      thread(1, { createdAt: '2026-01-01T00:00:00Z' }),
+      thread(2, { parent: 1, createdAt: '2026-01-01T00:01:00Z' }),
+    ];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'a', {
+            role: 'user',
+            content: [{ type: 'text', text: 'hi' }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          // c shares msg-b's timestamp — they collide ideally. The greedy
+          // push moves the later one (by seq) right by the min spacing, so
+          // both lanes still see the SAME map entries for both uuids.
+          message(1, 5, 'c', {
+            role: 'user',
+            content: [{ type: 'text', text: 'late' }],
+            createdAt: '2026-01-01T00:02:00Z',
+          }),
+        ],
+      ],
+      [
+        2,
+        [
+          message(2, 1, 'b', {
+            role: 'user',
+            content: [{ type: 'text', text: 'mid' }],
+            createdAt: '2026-01-01T00:02:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const range = computeTimeRange(messagesByThread);
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    // a at ts 0 → ideal 0 px → actual 0 px (first message keeps its ideal).
+    expect(pxByUuid.get('a')).toBe(0);
+    // b at ts 120s of 120s range → ideal 240 px → first to land at that
+    // timestamp, so actual = 240 px.
+    expect(pxByUuid.get('b')).toBe(240);
+    // c shares ts with b → ideal 240 px, but b already occupies 240. The
+    // greedy push moves c to 240 + (6+6)/2 = 246 px.
+    expect(pxByUuid.get('c')).toBe(246);
+  });
+
+  it('enforces minimum spacing so overlapping ideal positions get pushed apart', () => {
+    // Three large messages within a 1 ms window: their ideal positions
+    // collapse to ~0 px on a 240 px axis, so the greedy push must spread
+    // them out by 6 px each (large+large min spacing).
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'a', {
+            role: 'user',
+            content: [{ type: 'text', text: 'a' }],
+            createdAt: '2026-01-01T00:00:00.000Z',
+          }),
+          message(1, 1, 'b', {
+            role: 'user',
+            content: [{ type: 'text', text: 'b' }],
+            createdAt: '2026-01-01T00:00:00.001Z',
+          }),
+          message(1, 2, 'c', {
+            role: 'user',
+            content: [{ type: 'text', text: 'c' }],
+            createdAt: '2026-01-01T00:00:00.002Z',
+          }),
+        ],
+      ],
+    ]);
+    const range = computeTimeRange(messagesByThread);
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    const { pxByUuid, axisWidth } = buildGlobalXMap(
+      sorted,
+      range,
+      240,
+      diameter,
+      240,
+    );
+    expect(pxByUuid.get('a')).toBe(0);
+    // b's ideal is ~0.005 px (1 ms out of 2 ms range × 240 px = 120 px,
+    // actually, let me recompute: 1/2 × 240 = 120 px). Not overlapping,
+    // stays at 120.
+    expect(pxByUuid.get('b')).toBe(120);
+    expect(pxByUuid.get('c')).toBe(240);
+    expect(axisWidth).toBe(240);
+  });
+
+  it('enforces large+small min spacing of 5 px between mixed neighbours', () => {
+    // A large then a small, both at the same timestamp → ideals collide at
+    // 0 px. The push moves the small to (6+4)/2 = 5 px.
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'L', {
+            role: 'user',
+            content: [{ type: 'text', text: 'large' }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          // Same instant, classified small (tool_use only).
+          message(1, 1, 's', {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu', name: 'Bash', input: {} }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const range = computeTimeRange(messagesByThread);
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    expect(pxByUuid.get('L')).toBe(0);
+    expect(pxByUuid.get('s')).toBe(5);
+  });
+
+  it('enforces small+small min spacing of 4 px between two auxiliary neighbours', () => {
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 's1', {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: {} }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+          message(1, 1, 's2', {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu2', name: 'Bash', input: {} }],
+            createdAt: '2026-01-01T00:00:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const range = computeTimeRange(messagesByThread);
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    const { pxByUuid } = buildGlobalXMap(sorted, range, 240, diameter, 240);
+    expect(pxByUuid.get('s1')).toBe(0);
+    expect(pxByUuid.get('s2')).toBe(4);
+  });
+
+  it('expands axisWidth past the minimum when overlap pushes the last mark right', () => {
+    // Four messages, every one at the rightmost timestamp. The first lands
+    // at the ideal max (240 px); the next three get pushed right by 6 px
+    // each, so axisWidth grows past the minimum.
+    const threads = [thread(1)];
+    const messagesByThread = new Map([
+      [
+        1,
+        [
+          message(1, 0, 'a', { createdAt: '2026-01-01T00:00:00Z' }),
+          message(1, 1, 'b', { createdAt: '2026-01-01T00:01:00Z' }),
+          message(1, 2, 'c', { createdAt: '2026-01-01T00:01:00Z' }),
+          message(1, 3, 'd', { createdAt: '2026-01-01T00:01:00Z' }),
+        ],
+      ],
+    ]);
+    const range = computeTimeRange(messagesByThread);
+    const sorted = buildSortedMessages(buildTimelineLanes(threads, messagesByThread));
+    // Every message here is a user-role no-content → small (4 px). Spacing
+    // between two smalls is 4 px.
+    const { pxByUuid, axisWidth } = buildGlobalXMap(
+      sorted,
+      range,
+      240,
+      diameter,
+      240,
+    );
+    expect(pxByUuid.get('a')).toBe(0);
+    expect(pxByUuid.get('b')).toBe(240);
+    expect(pxByUuid.get('c')).toBe(244);
+    expect(pxByUuid.get('d')).toBe(248);
+    expect(axisWidth).toBe(248);
+  });
+
+  it('keeps axisWidth at the minimum when no message exists yet', () => {
+    const { pxByUuid, axisWidth } = buildGlobalXMap([], null, 240, diameter, 240);
+    expect(pxByUuid.size).toBe(0);
+    expect(axisWidth).toBe(240);
   });
 });

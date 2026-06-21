@@ -821,20 +821,23 @@ describe('ThreadTimelineOverlay mark rendering', () => {
       (m) => m.getAttribute('data-message-uuid') === 'a',
     )!;
     // Circle: rounded-full with equal width/height. The packed-lane overlap
-    // problem that drove v3's rectangles is solved with a soft alpha fill
-    // plus a solid ring outline, so the shape can return to circles.
+    // problem that drove v3's rectangles is solved at the layout level now
+    // (see buildGlobalXMap's minimum-spacing push), so the marks can stay
+    // solid-fill with no alpha/ring workaround.
     expect(userMark.className).toContain('rounded-full');
     expect(userMark.style.width).toBe(userMark.style.height);
     // Role-coded color and data attribute (tested via class membership and
     // the data attribute, not literal hex, so the tailwind tokens can move).
-    // The alpha fill paints overlap clusters as a darker stack while the
-    // ring keeps individual circles discernible at the edge.
+    // Solid fill on both — overlap is prevented by the global x map, not by
+    // alpha stacking, so the classes carry no alpha suffix or ring outline.
     expect(userMark).toHaveAttribute('data-message-kind', 'user');
-    expect(userMark.className).toContain('bg-blue-500/60');
-    expect(userMark.className).toContain('ring-blue-500');
+    expect(userMark.className).toContain('bg-blue-500');
+    expect(userMark.className).not.toContain('bg-blue-500/');
+    expect(userMark.className).not.toContain('ring-');
     expect(otherMark).toHaveAttribute('data-message-kind', 'other');
-    expect(otherMark.className).toContain('bg-slate-400/60');
-    expect(otherMark.className).toContain('ring-slate-400');
+    expect(otherMark.className).toContain('bg-slate-400');
+    expect(otherMark.className).not.toContain('bg-slate-400/');
+    expect(otherMark.className).not.toContain('ring-');
   });
 
   it('renders the main-conversation turns as a larger circle than the auxiliary turns', async () => {
