@@ -1772,60 +1772,152 @@ describe('ThreadTimelineOverlay small-dot clustering', () => {
   });
 });
 
-describe('ThreadTimelineOverlay two-column layout', () => {
+describe('ThreadTimelineOverlay grid lane layout', () => {
+  // The lane container is a CSS Grid with two columns: a `max-content`
+  // label column that auto-sizes to the widest label across every lane,
+  // and a `1fr` axis column carrying the dots and the playhead. The grid
+  // replaces an earlier two-`<ul>` flex layout whose label column was a
+  // hard-coded width (wasting space for short names) and whose per-row
+  // alignment between the label cell and the axis cell drifted as lanes
+  // accumulated because the label cell's padding inflated its height
+  // past the axis cell's fixed pixel height.
+  //
+  // The grid solves both at once: `max-content` shares the widest label
+  // across every row, and `align-items: center` centres each row's two
+  // cells on the same baseline so alignment never drifts no matter how
+  // many lanes pile up.
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('renders the label column and axis column as siblings inside the body', async () => {
-    // Structural contract: the timeline body is a flex row holding two
-    // sibling columns — a static label column on the left, and the
-    // horizontally-scrollable axis column on the right. Dots and the
-    // playhead live inside the axis column so they can pan out from
-    // under the labels without sliding behind them (the v9 sticky-label
-    // layout had dots passing behind the labels during horizontal pan).
+  it('uses CSS Grid with a max-content label column for the lane container', async () => {
+    // Structural contract: the lane `<ul>` is a grid with two columns
+    // sized `max-content 1fr`, and rows are centred via `align-items:
+    // center`. The label column being `max-content` is what gives every
+    // lane label the same width as the longest one (no hard-coded
+    // px gutter that wastes space when names are short).
     const threads = [makeThread(1)];
     renderOverlay({ threads, messagesByThread: new Map() });
-    const labelColumn = await screen.findByTestId(
-      'thread-timeline-label-column',
-    );
-    const axisColumn = await screen.findByTestId(
-      'thread-timeline-axis-column',
-    );
-    // Both columns are direct children of the body — siblings, not
-    // nested — so the body's flex row lays them out side by side.
-    const body = screen.getByTestId('thread-timeline-body');
-    expect(labelColumn.parentElement).toBe(body);
-    expect(axisColumn.parentElement).toBe(body);
+    const grid = await screen.findByTestId('thread-timeline-lane-grid');
+    expect(grid.style.display).toBe('grid');
+    expect(grid.style.gridTemplateColumns).toBe('max-content 1fr');
+    expect(grid.style.alignItems).toBe('center');
   });
 
-  it('isolates horizontal scroll to the axis column so labels stay put', async () => {
-    // The outer body owns the vertical scroll only; the axis column owns
-    // horizontal scroll on its own so a wide axis pans under the labels
-    // without dragging them along. A regression that reattaches
-    // `overflow-x: auto` to the body (or removes it from the axis column)
-    // would surface here.
+  it('renders one label cell and one axis cell per lane, each promoted to a grid item via display:contents on the <li>', async () => {
+    // Each lane is an `<li>` with `display: contents` (the list item is
+    // kept for semantics / a11y but stripped from layout), so its inner
+    // label `<span>` and axis `<div>` are promoted to direct grid items
+    // of the `<ul>` at LAYOUT time. The DOM tree itself still nests the
+    // cells under the `<li>` — that is what semantic markup demands —
+    // but `display: contents` elides the `<li>` box so the grid
+    // measures the cells as if they were direct children. The
+    // necessary conditions to verify here are: each lane has exactly
+    // one label cell and one axis cell, the `<li>` carries
+    // `display: contents`, and the `<li>` is a direct DOM child of the
+    // grid (so `display: contents` is enough to promote the cells —
+    // no extra wrapper sits between).
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const grid = await screen.findByTestId('thread-timeline-lane-grid');
+    const lanes = within(grid).getAllByTestId('thread-timeline-lane');
+    expect(lanes).toHaveLength(2);
+    for (const lane of lanes) {
+      expect(lane.style.display).toBe('contents');
+      // The `<li>` is a direct DOM child of the grid `<ul>` — no
+      // intermediate wrapper that would defeat `display: contents`.
+      expect(lane.parentElement).toBe(grid);
+      const label = within(lane).getByTestId('thread-timeline-lane-label');
+      // `data-timeline-axis` marks the axis cell of the lane.
+      const axisCell = lane.querySelector('[data-timeline-axis]');
+      expect(label).not.toBeNull();
+      expect(axisCell).not.toBeNull();
+      // The label and axis are direct children of the `<li>` (one level
+      // deep), so `display: contents` on the `<li>` promotes them
+      // straight to grid items at layout time.
+      expect(label.parentElement).toBe(lane);
+      expect(axisCell?.parentElement).toBe(lane);
+    }
+  });
+
+  it('shares the label column width across lanes so every label measures the same as the longest one', async () => {
+    // JSDOM does not run CSS layout, so we cannot read the resolved
+    // pixel width of each label cell directly. The structural contract
+    // we CAN pin is: every label sits in the same grid column (the
+    // `max-content` column) of the same grid container, and no per-lane
+    // explicit width overrides it. That is the necessary and sufficient
+    // condition for real browsers to render all labels at the longest
+    // label's width.
+    const threads = [
+      makeThread(1, { title: 'main', created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        title: 'short',
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+      makeThread(3, {
+        title: 'a very long subthread title that exceeds the others',
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:02:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const grid = await screen.findByTestId('thread-timeline-lane-grid');
+    const labels = within(grid).getAllByTestId('thread-timeline-lane-label');
+    expect(labels).toHaveLength(3);
+    // No label carries an explicit `width` style — width is governed by
+    // the grid's `max-content` column. (A regression that pinned a px
+    // width per label would defeat the auto-sized-to-longest contract.)
+    for (const label of labels) {
+      expect(label.style.width).toBe('');
+      // Each label sits inside its lane's `<li>` whose `display:
+      // contents` promotes the label to a direct grid item at layout
+      // time, so all labels share the same `max-content` column.
+      const lane = label.closest('[data-testid="thread-timeline-lane"]');
+      expect(lane).not.toBeNull();
+      expect((lane as HTMLElement).style.display).toBe('contents');
+      expect(lane?.parentElement).toBe(grid);
+    }
+  });
+
+  it('routes horizontal scroll through a single wrapper so the sticky label cells can pin to the left edge', async () => {
+    // Vertical scroll lives on the outer body (`overflow-y-auto`);
+    // horizontal scroll lives on the axis-column wrapper that hosts the
+    // grid. The label cells use `position: sticky; left: 0` to pin to
+    // the left edge during a horizontal pan, so a wide axis still leaves
+    // the labels readable.
     const threads = [makeThread(1)];
     renderOverlay({ threads, messagesByThread: new Map() });
     const body = await screen.findByTestId('thread-timeline-body');
     expect(body.className).toMatch(/\boverflow-y-auto\b/);
     expect(body.className).not.toMatch(/\boverflow-x\b/);
-    const labelColumn = await screen.findByTestId(
-      'thread-timeline-label-column',
-    );
-    expect(labelColumn.className).not.toMatch(/\boverflow-x\b/);
     const axisColumn = await screen.findByTestId(
       'thread-timeline-axis-column',
     );
     expect(axisColumn.className).toMatch(/\boverflow-x-auto\b/);
+    const label = (
+      await screen.findAllByTestId('thread-timeline-lane-label')
+    )[0];
+    expect(label.style.position).toBe('sticky');
+    expect(label.style.left).toBe('0px');
   });
 
-  it('reflects the lane active highlight in both columns simultaneously', async () => {
-    // The active lane is a single visual band that must span both columns
-    // — a half-highlighted lane would read as a bug. Each column's
-    // matching row carries the same highlight classes (border-y +
-    // bg-slate-50) so the two halves line up into one continuous band.
+  it('applies the active highlight to both grid cells of the active lane so the band reads as continuous', async () => {
+    // With `display: contents` on the `<li>` the list-item itself has no
+    // box, so a highlight applied to the `<li>` would never paint. The
+    // active highlight (border-y + bg-slate-50) lives on BOTH the label
+    // cell AND the axis cell individually, so the two halves of the
+    // active lane's grid row line up into one continuous visual band.
     const threads = [
       makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
       makeThread(2, {
@@ -1839,34 +1931,64 @@ describe('ThreadTimelineOverlay two-column layout', () => {
       messagesByThread: new Map(),
       activeThreadId: 2,
     });
-    const labelRows = await screen.findAllByTestId(
-      'thread-timeline-lane-label-row',
+    const lanes = await screen.findAllByTestId('thread-timeline-lane');
+    expect(lanes).toHaveLength(2);
+    expect(lanes[0]).toHaveAttribute('data-active', 'false');
+    expect(lanes[1]).toHaveAttribute('data-active', 'true');
+    const activeLabel = within(lanes[1]).getByTestId(
+      'thread-timeline-lane-label',
     );
-    const axisRows = await screen.findAllByTestId('thread-timeline-lane');
-    // Both lanes are present in both columns and indexed in the same
-    // order — so the active highlight on lane 2 lands at the same row
-    // index on both sides.
-    expect(labelRows).toHaveLength(2);
-    expect(axisRows).toHaveLength(2);
-    expect(labelRows[1]).toHaveAttribute('data-active', 'true');
-    expect(axisRows[1]).toHaveAttribute('data-active', 'true');
-    expect(labelRows[0]).toHaveAttribute('data-active', 'false');
-    expect(axisRows[0]).toHaveAttribute('data-active', 'false');
-    // The visual highlight tokens are identical so the band reads as
-    // continuous across the two columns.
-    expect(labelRows[1].className).toMatch(/bg-slate-50/);
-    expect(axisRows[1].className).toMatch(/bg-slate-50/);
-    expect(labelRows[1].className).toMatch(/border-slate-200/);
-    expect(axisRows[1].className).toMatch(/border-slate-200/);
+    const activeAxis = lanes[1].querySelector(
+      '[data-timeline-axis]',
+    ) as HTMLElement;
+    expect(activeLabel).toHaveAttribute('data-active', 'true');
+    expect(activeAxis).toHaveAttribute('data-active', 'true');
+    // Both cells carry the identical highlight token set so the band
+    // reads as continuous across the row.
+    expect(activeLabel.className).toMatch(/bg-slate-50/);
+    expect(activeAxis.className).toMatch(/bg-slate-50/);
+    expect(activeLabel.className).toMatch(/border-slate-200/);
+    expect(activeAxis.className).toMatch(/border-slate-200/);
+    // The inactive lane's cells do NOT carry the active tokens, so the
+    // highlight is per-lane rather than global.
+    const inactiveLabel = within(lanes[0]).getByTestId(
+      'thread-timeline-lane-label',
+    );
+    const inactiveAxis = lanes[0].querySelector(
+      '[data-timeline-axis]',
+    ) as HTMLElement;
+    expect(inactiveLabel.className).not.toMatch(/bg-slate-50/);
+    expect(inactiveAxis.className).not.toMatch(/bg-slate-50/);
   });
 
-  it('keeps the label column out of the wheel-scrub scope', async () => {
-    // A wheel event over the label column must NOT scrub the timeline —
-    // labels behave like normal page content. The wheel listener attaches
-    // to the axis column alone, and wheel events do not bubble from a
-    // parent to a child (axis is the body's sibling of labels, not its
-    // descendant), so dispatching the wheel on the label column should
-    // leave the playhead untouched.
+  it('keeps row alignment centred regardless of how many lanes accumulate', async () => {
+    // The grid's `align-items: center` is the single source of truth for
+    // row alignment between the label cell and the axis cell. A
+    // regression that swapped it for flex `items-center` on per-row
+    // containers (the earlier layout) would reintroduce the drift the
+    // grid fixes; pin the contract on the grid container itself so the
+    // alignment guarantee does not depend on lane count.
+    const threads = Array.from({ length: 8 }, (_, i) =>
+      makeThread(i + 1, {
+        title: `lane ${i + 1}`,
+        parent_thread_id: i === 0 ? null : 1,
+        root_message_uuid: i === 0 ? null : null,
+        created_at: `2026-01-01T00:0${i}:00Z`,
+      }),
+    );
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const grid = await screen.findByTestId('thread-timeline-lane-grid');
+    expect(grid.style.alignItems).toBe('center');
+    const lanes = within(grid).getAllByTestId('thread-timeline-lane');
+    expect(lanes).toHaveLength(8);
+  });
+
+  it('ignores wheel events whose target is a label cell so labels behave like normal page content', async () => {
+    // A wheel over a label cell must NOT scrub the timeline. The wheel
+    // listener attaches to the axis-column wrapper (which now hosts both
+    // the label and the axis cells, because the sticky label needs to
+    // share the same scroll container as the axis), so scope
+    // discrimination happens by event target.
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
     const messages = new Map([
@@ -1885,14 +2007,15 @@ describe('ThreadTimelineOverlay two-column layout', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    // Initial playhead lands on the latest message (msg-b, x=1 → 240px).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
-    // Wheel-up on the label column has no effect.
-    const labelColumn = screen.getByTestId('thread-timeline-label-column');
+    // Wheel originating on a label cell has no effect — the wheel
+    // bubbles to the axis-column wrapper but the handler returns early
+    // when the target sits inside a label cell.
+    const label = screen.getAllByTestId('thread-timeline-lane-label')[0];
     act(() => {
-      labelColumn.dispatchEvent(
+      label.dispatchEvent(
         new WheelEvent('wheel', {
           deltaY: -100,
           bubbles: true,
@@ -1903,10 +2026,9 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
-    // A wheel on the axis column DOES scrub, proving the listener is
-    // wired — just scoped to the right column. With only two messages
-    // and the playhead starting on the last one, one step back lands on
-    // msg-a at x=0.
+    // A wheel anywhere else inside the axis-column wrapper DOES scrub —
+    // proving the listener is wired but scoped past the labels. One
+    // step back from the tail (msg-b) lands on msg-a at x=0.
     const axisColumn = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
       axisColumn.dispatchEvent(
@@ -1922,9 +2044,11 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     ).toBe(`${LANE_LEFT_PAD_PX}px`);
   });
 
-  it('ignores clicks on the label column', async () => {
+  it('ignores click events whose target is a label cell', async () => {
     // Same scope contract for clicks: a click on a label is not a scrub
-    // intent. The handler attaches to the axis column only.
+    // intent. The handler attaches to the axis-column wrapper and the
+    // same label-target discrimination keeps label clicks out of the
+    // jump path.
     stubAxisRect({ left: 0, width: 240 });
     const threads = [makeThread(1)];
     const messages = new Map([
@@ -1943,13 +2067,12 @@ describe('ThreadTimelineOverlay two-column layout', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    // The playhead initially sits on msg-b (x=240).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
-    // A click on the label column with clientX=0 (where msg-a would land
-    // if the axis click handler picked it up) must NOT move the playhead.
-    fireEvent.click(screen.getByTestId('thread-timeline-label-column'), {
+    // A click on a label cell with clientX=0 (where msg-a would land if
+    // the axis click handler picked it up) must NOT move the playhead.
+    fireEvent.click(screen.getAllByTestId('thread-timeline-lane-label')[0], {
       clientX: 0,
     });
     expect(
