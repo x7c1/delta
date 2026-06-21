@@ -14,6 +14,7 @@ import type { Message, Thread } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
 import {
+  LANE_LEFT_PAD_PX,
   MARK_CLUSTER_PX,
   MARK_CLUSTER_RING_COLOR,
   MARK_SMALL_PX,
@@ -525,7 +526,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('240px');
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
       // A single full-notch wheel-up event (|deltaY| = 100, the canonical
       // mouse-wheel notch on Linux/Chrome) lands the playhead on the
       // immediate previous large turn (msg-b at x=0.5 → 120px), NOT msg-a.
@@ -541,7 +542,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('120px');
+      ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -573,7 +574,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // A single sub-notch wheel-up event (cumulative |delta| under the
     // first staircase threshold) lands in the slowest bucket → exactly
     // one step back. preventDefault is also called so the page scroll
@@ -591,7 +592,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     expect(preventDefault).toHaveBeenCalled();
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('120px');
+    ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
   });
 
   it('clamps at the newest end: a wheel-down at the last message does not advance', async () => {
@@ -619,7 +620,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     // Initial position is the last message (msg-b, x=1 → 240px).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
       body.dispatchEvent(
@@ -633,7 +634,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     // Still at msg-b — the clamp blocks any further advance.
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
   });
 
   it('clamps at the oldest end: a wheel-up at the first message does not retreat', async () => {
@@ -675,7 +676,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('0px');
+      ).toBe(`${LANE_LEFT_PAD_PX}px`);
       // Advance past the rolling window so the accumulator resets — the
       // next event is treated as a fresh leisurely turn rather than a
       // continuation of the previous burst.
@@ -692,7 +693,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // Still at msg-a — the clamp blocks any further retreat.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('0px');
+      ).toBe(`${LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -843,7 +844,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // Initial active = m4 (x=1 → 240px).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('240px');
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
       const body = screen.getByTestId('thread-timeline-axis-column');
       act(() => {
         body.dispatchEvent(
@@ -857,7 +858,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // m3 sits at x=0.75 → 180px — one step back, sub-notch event.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('180px');
+      ).toBe(`${180 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -921,7 +922,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // The clamp at m0 (x=0) is the final landing.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('0px');
+      ).toBe(`${LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -982,7 +983,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // Six messages at x = 0, 48, 96, 144, 192, 240. m3 sits at x = 144.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('144px');
+      ).toBe(`${144 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -1035,7 +1036,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // Six messages → 5 gaps → 240 / 5 = 48 px each. m4 sits at x=192.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('192px');
+      ).toBe(`${192 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -1093,7 +1094,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       // (x=240), three steps back → m2 (x=96).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('96px');
+      ).toBe(`${96 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
     }
@@ -1372,7 +1373,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     // Initial playhead lands on the latest message (large-c, x=1 → 240px).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // Wheel up (sub-notch event → one step): the previous LARGE turn is
     // large-b (x=2/3 → 160px), NOT the small tool call between them. The
     // sub-notch keeps the staircase at one step so the assertion targets
@@ -1389,7 +1390,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     });
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('160px');
+    ).toBe(`${160 + LANE_LEFT_PAD_PX}px`);
   });
 
   it('still allows a click to target a small mark precisely', async () => {
@@ -1432,7 +1433,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     });
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('120px');
+    ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
   });
 });
 
@@ -1865,7 +1866,7 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     // Initial playhead lands on the latest message (msg-b, x=1 → 240px).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // Wheel-up on the label column has no effect.
     const labelColumn = screen.getByTestId('thread-timeline-label-column');
     act(() => {
@@ -1879,7 +1880,7 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     });
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // A wheel on the axis column DOES scrub, proving the listener is
     // wired — just scoped to the right column. With only two messages
     // and the playhead starting on the last one, one step back lands on
@@ -1896,7 +1897,7 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     });
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('0px');
+    ).toBe(`${LANE_LEFT_PAD_PX}px`);
   });
 
   it('ignores clicks on the label column', async () => {
@@ -1923,7 +1924,7 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     // The playhead initially sits on msg-b (x=240).
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // A click on the label column with clientX=0 (where msg-a would land
     // if the axis click handler picked it up) must NOT move the playhead.
     fireEvent.click(screen.getByTestId('thread-timeline-label-column'), {
@@ -1931,7 +1932,7 @@ describe('ThreadTimelineOverlay two-column layout', () => {
     });
     expect(
       screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-    ).toBe('240px');
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
   });
 });
 
@@ -1991,9 +1992,16 @@ describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
     const cluster = clusters[0];
     expect(cluster.style.width).toBe(`${MARK_SMALL_PX}px`);
     expect(cluster.style.height).toBe(`${MARK_SMALL_PX}px`);
+    // Pin the literal value too — the v7/v11 contract is "cluster dots
+    // stay at 4px exactly, ring-only differentiation". A future tweak to
+    // MARK_SMALL_PX should break this assertion so the regression is
+    // visible at review time, not in dogfooding.
+    expect(cluster.style.width).toBe('4px');
+    expect(cluster.style.height).toBe('4px');
     // Cross-check the constant equality so a future "let's bump cluster
     // size again" lands here, not in dogfooding.
     expect(MARK_CLUSTER_PX).toBe(MARK_SMALL_PX);
+    expect(MARK_CLUSTER_PX).toBe(4);
   });
 
   it('paints the cluster ring outline so a cluster reads as a small dot with a halo', async () => {
@@ -2307,7 +2315,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       // Initial playhead sits on the last message (msg-c at x=240).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('240px');
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
       const io = fake.instances[fake.instances.length - 1];
       const articles = within(
         screen.getByTestId('conversation-body'),
@@ -2349,7 +2357,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       // wins.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('0px');
+      ).toBe(`${LANE_LEFT_PAD_PX}px`);
       // CRUCIAL: pane-scroll updates must NOT trigger an active-thread
       // switch (the pane is already inside the active subthread).
       expect(setActiveThreadSpy).not.toHaveBeenCalled();
@@ -2397,7 +2405,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       await waitFor(() => {
         expect(
           screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-        ).toBe('0px');
+        ).toBe(`${LANE_LEFT_PAD_PX}px`);
       });
       // While inside the guard window, emit an IO entry claiming
       // msg-b is topmost-visible — exactly what the jump's own scroll
@@ -2425,7 +2433,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       }
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('0px');
+      ).toBe(`${LANE_LEFT_PAD_PX}px`);
       // Sanity: the guard exists as a constant the production code reads.
       expect(PANE_SCROLL_PROGRAMMATIC_GUARD_MS).toBeGreaterThan(
         PANE_SCROLL_DEBOUNCE_MS,
@@ -2575,7 +2583,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // Initial playhead is on msg-b (the latest message, x=240).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('240px');
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Wheel-up: one sub-notch step back → cross-lane jump to msg-a on lane 1.
       const body = screen.getByTestId('thread-timeline-axis-column');
@@ -2651,7 +2659,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // The playhead is still at msg-a's x (0) — the state-based guard held.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('0px');
+      ).toBe(`${LANE_LEFT_PAD_PX}px`);
 
       // Now drain the rAF callbacks so the DOM-ready scroll fires (msg-a is
       // already in the DOM), clearing the in-flight counter. As of v13 the
@@ -2688,7 +2696,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // The emit is now honoured — playhead moves to msg-b (x=240).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('240px');
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
       window.requestAnimationFrame = originalRaf;
@@ -2792,7 +2800,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       await waitFor(() => {
         expect(
           screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-        ).toBe('0px');
+        ).toBe(`${LANE_LEFT_PAD_PX}px`);
       });
 
       // After the superseding jump, the in-flight flag must be cleared so
@@ -2840,7 +2848,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // shared axis.
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('120px');
+      ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
       window.requestAnimationFrame = originalRaf;
@@ -3006,7 +3014,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // Initial playhead is on msg-c (the latest, x=240).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('240px');
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Wheel-up: one sub-notch step back → cross-lane jump child → parent.
       // The global sorted order is by (created_at, seq), so backwards from
@@ -3090,7 +3098,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // from its timestamp fraction along the 240px axis: 120s / 240s range).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('120px');
+      ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
 
       // Now drain the rAF callbacks so the DOM-ready poll fires onScroll.
       // At this moment markProgrammaticScroll stamps the time-based guard
@@ -3128,7 +3136,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // would have snapped to msg-a (x=0).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('120px');
+      ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
       window.requestAnimationFrame = originalRaf;
@@ -3364,7 +3372,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // emit would have snapped the playhead to msg-a (x=0).
       expect(
         screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
-      ).toBe('120px');
+      ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
       window.requestAnimationFrame = originalRaf;

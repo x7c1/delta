@@ -115,6 +115,17 @@ describe('classifyMessage', () => {
       ),
     ).toBe('other');
   });
+
+  it('classifies a task-notification user turn as "other"', () => {
+    // The harness submits the notification as a normal user-role line with a
+    // `<task-notification>` prefix. It is not human prose, so the timeline
+    // mark must not paint it as a headline user turn.
+    const m = message(1, 0, 'tn', {
+      role: 'user',
+      content: [{ type: 'text', text: '<task-notification>foo</task-notification>' }],
+    });
+    expect(classifyMessage(m)).toBe('other');
+  });
 });
 
 describe('classifyMessageSize', () => {
@@ -167,6 +178,19 @@ describe('classifyMessageSize', () => {
         message(1, 0, 's', { role: 'system', content: [{ type: 'text', text: 'x' }] }),
       ),
     ).toBe('small');
+  });
+
+  it('classifies a task-notification user turn as "small"', () => {
+    // The harness wraps the notification in a `text` block, which would
+    // otherwise count as a "main" turn. Detect it explicitly so the timeline
+    // mark stays auxiliary alongside the surrounding tool calls.
+    const m = message(1, 0, 'tn', {
+      role: 'user',
+      content: [
+        { type: 'text', text: '<task-notification>foo</task-notification>' },
+      ],
+    });
+    expect(classifyMessageSize(m)).toBe('small');
   });
 });
 

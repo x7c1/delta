@@ -5,6 +5,7 @@ import {
   type ThreadId,
 } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
+import { isTaskNotificationMessage } from './claudeFormat';
 
 /**
  * Special label for the main thread's lane.
@@ -183,12 +184,18 @@ export interface TimelineTimeRange {
  * carrier, not a human turn — it counts as `other` here, the same side the
  * transcript renders it on.
  *
+ * Task-notification user turns are harness injections, not human prose — the
+ * transcript folds them into a nested card next to tool calls and meta lines.
+ * They are classified as `other` here so the timeline reads the same way: a
+ * secondary utterance, never a headline user turn.
+ *
  * Finer-grained distinction within `other` (assistant vs tool vs question
  * card vs meta) is intentionally deferred — MVP uses a two-color scheme.
  */
 export function classifyMessage(message: Message): TimelineDotKind {
   if (
     message.role === 'user' &&
+    !isTaskNotificationMessage(message) &&
     message.content.some((block) => block.type === 'text')
   ) {
     return 'user';
@@ -214,6 +221,13 @@ export function classifyMessage(message: Message): TimelineDotKind {
  * still tap precisely when they want a specific tool call.
  */
 export function classifyMessageSize(message: Message): TimelineDotSize {
+  // Task-notification user turns are harness-injected secondary utterances —
+  // the transcript folds them next to tool calls. They never count as a
+  // headline turn here, so the timeline marks them as `small` regardless of
+  // whether the harness wrapped the prompt in a `text` block.
+  if (isTaskNotificationMessage(message)) {
+    return 'small';
+  }
   const hasText = message.content.some((block) => block.type === 'text');
   if (hasText && (message.role === 'user' || message.role === 'assistant')) {
     return 'large';

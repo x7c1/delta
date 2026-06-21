@@ -516,6 +516,21 @@ export const MARK_CLUSTER_RING_COLOR = 'outline-slate-600';
 const LABEL_COLUMN_PX = 88;
 /** Width reserved for the right-hand padding inside the lane area. */
 const LANE_RIGHT_PAD_PX = 16;
+/**
+ * Width reserved on the LEFT inside the lane axis so the leftmost mark — a
+ * large 6 px dot centred on x=0 — is not clipped by the axis container's
+ * `overflow-x-auto` left edge. Without this padding the left half of the
+ * earliest dot disappears into the column boundary.
+ *
+ * Sized to mirror {@link LANE_RIGHT_PAD_PX} so the axis whitespace reads as
+ * symmetric on both ends. The dots' `xPx` values come from the shared global
+ * map (which still uses 0 as the leftmost time-axis x); the renderer adds
+ * this offset to every absolute-positioned child (dot, cluster, playhead,
+ * axis line) and the click handler subtracts it before resolving the
+ * nearest message. The total rendered axis container width is therefore
+ * {@link LANE_LEFT_PAD_PX} + `laneAxisWidth` + {@link LANE_RIGHT_PAD_PX}.
+ */
+export const LANE_LEFT_PAD_PX = 16;
 
 /**
  * Pixel diameter for a mark of the given size class. Fed to
@@ -1133,9 +1148,11 @@ export function ThreadTimelineOverlay({
         return;
       }
       // Translate the click to the same absolute-px space the global x map
-      // uses, clamped to [0, axisWidth] so a click in the right-hand padding
-      // still snaps to the rightmost mark.
-      const offsetPx = event.clientX - rect.left;
+      // uses. The axis rect now includes {@link LANE_LEFT_PAD_PX} on the
+      // left (so the leftmost large dot is not clipped), so subtract it
+      // before resolving the nearest message. Clamp to [0, axisWidth] so a
+      // click in either pad still snaps to the nearest mark.
+      const offsetPx = event.clientX - rect.left - LANE_LEFT_PAD_PX;
       const clampedPx = Math.max(0, Math.min(laneAxisWidth, offsetPx));
       const nearest = findNearestMessageIndex(
         sortedMessages,
@@ -1163,10 +1180,13 @@ export function ThreadTimelineOverlay({
       return;
     }
     // The playhead's x is its position inside the axis (from the global x
-    // map); the axis row starts at x=0 inside the axis scroll container,
-    // so no extra left-offset is needed (unlike the v9 layout where the
-    // sticky label sat in the same scroll container).
-    const playheadInAxis = messagePxByUuid.get(activeMessage.uuid) ?? 0;
+    // map) plus the axis's left pad (so the leftmost large dot is not
+    // clipped). The axis row starts at x=0 inside the axis scroll
+    // container, so the left pad is the only adjustment needed (unlike
+    // the v9 layout where the sticky label sat in the same scroll
+    // container).
+    const playheadInAxis =
+      (messagePxByUuid.get(activeMessage.uuid) ?? 0) + LANE_LEFT_PAD_PX;
     const viewLeft = scrollEl.scrollLeft;
     const viewRight = viewLeft + scrollEl.clientWidth;
     if (playheadInAxis < viewLeft || playheadInAxis > viewRight) {
@@ -1375,9 +1395,6 @@ export function ThreadTimelineOverlay({
             }`}
           />
           Thread timeline
-          {lanes.length > 0 && (
-            <span className="text-slate-400">({lanes.length})</span>
-          )}
         </span>
         <span aria-hidden="true" className="text-slate-400">
           {expanded ? '▾' : '▸'}
@@ -1452,7 +1469,13 @@ export function ThreadTimelineOverlay({
               <div
                 ref={axisScrollRef}
                 data-testid="thread-timeline-axis-column"
-                className="flex-1 overflow-x-auto"
+                // `scrollbar-none` hides the horizontal scrollbar visually
+                // (no bar, no reserved gutter) in both WebKit and Firefox
+                // while keeping the wheel / trackpad scroll behaviour
+                // intact. The timeline already scrubs the axis with the
+                // wheel, so a permanent bar reads as visual noise and
+                // clips the bottom row of dots.
+                className="scrollbar-none flex-1 overflow-x-auto"
                 onClick={handleClick}
               >
                 <ul className="flex flex-col gap-0.5" role="list">
@@ -1484,30 +1507,39 @@ export function ThreadTimelineOverlay({
                           data-timeline-axis=""
                           className="relative shrink-0"
                           style={{
-                            width: laneAxisWidth + LANE_RIGHT_PAD_PX,
+                            width:
+                              LANE_LEFT_PAD_PX +
+                              laneAxisWidth +
+                              LANE_RIGHT_PAD_PX,
                             height: LANE_HEIGHT_PX,
                           }}
                         >
                           <span
                             aria-hidden="true"
-                            className="absolute left-0 top-1/2 h-px -translate-y-1/2 bg-slate-200"
-                            style={{ width: laneAxisWidth }}
+                            className="absolute top-1/2 h-px -translate-y-1/2 bg-slate-200"
+                            style={{
+                              left: LANE_LEFT_PAD_PX,
+                              width: laneAxisWidth,
+                            }}
                           />
                           {renderItems.map((item) =>
                             item.kind === 'dot' ? (
                               <TimelineDotMark
                                 key={item.dot.uuid}
                                 dot={item.dot}
-                                xPx={messagePxByUuid.get(item.dot.uuid) ?? 0}
+                                xPx={
+                                  (messagePxByUuid.get(item.dot.uuid) ?? 0) +
+                                  LANE_LEFT_PAD_PX
+                                }
                               />
                             ) : (
                               <TimelineClusterMark
                                 key={item.cluster.key}
                                 cluster={item.cluster}
                                 xPx={
-                                  messagePxByUuid.get(
+                                  (messagePxByUuid.get(
                                     item.cluster.representativeUuid,
-                                  ) ?? 0
+                                  ) ?? 0) + LANE_LEFT_PAD_PX
                                 }
                               />
                             ),
@@ -1528,7 +1560,7 @@ export function ThreadTimelineOverlay({
                             data-testid="thread-timeline-playhead"
                             className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
                             style={{
-                              left: playheadX,
+                              left: playheadX + LANE_LEFT_PAD_PX,
                               transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
                             }}
                           />
