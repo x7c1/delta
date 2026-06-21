@@ -1608,10 +1608,29 @@ export function ThreadTimelineOverlay({
                 data-testid="thread-timeline-lane-grid"
                 role="list"
                 className="gap-y-0.5"
+                // `width: max-content` and `minWidth: 100%` together stretch
+                // the grid container to the natural width of its widest row
+                // — the axis cell carries an explicit pixel width
+                // (LANE_LEFT_PAD_PX + laneAxisWidth + LANE_RIGHT_PAD_PX), so
+                // `max-content` resolves to that full scrollable range,
+                // while `minWidth: 100%` keeps the `<ul>` at least viewport
+                // wide on short sessions where the axis fits without
+                // scroll. This matters because the label cell uses
+                // `position: sticky; left: 0`, and sticky only moves
+                // within its containing block (this `<ul>`). Without the
+                // width hint the block-level `<ul>` would stay at the
+                // visible viewport width even while its axis-cell child
+                // overflows the horizontal-scroll wrapper above — and
+                // `left: 0` would have nowhere to slide, so the label
+                // would scroll off-screen with the axis. Stretching the
+                // containing block to the full scroll range gives sticky
+                // somewhere to pin against.
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'max-content 1fr',
                   alignItems: 'center',
+                  width: 'max-content',
+                  minWidth: '100%',
                 }}
               >
                 {lanes.map((lane) => {

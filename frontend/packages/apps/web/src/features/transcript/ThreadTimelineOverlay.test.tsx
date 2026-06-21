@@ -1805,6 +1805,34 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(grid.style.alignItems).toBe('center');
   });
 
+  it('stretches the lane grid to the full axis content width via width:max-content + minWidth:100% so sticky labels have a containing block to pin against', async () => {
+    // The label cell uses `position: sticky; left: 0`, and sticky only
+    // moves within its containing block — for a grid item that block is
+    // the grid `<ul>` itself. The grid `<ul>` is a block-level child of
+    // the horizontal-scroll wrapper, so without an explicit width hint
+    // its used width stays equal to the wrapper's content-box width
+    // (i.e. the visible viewport), even when the axis grid item
+    // overflows it horizontally and triggers the wrapper's scrollbar.
+    // A containing block no wider than the viewport leaves `left: 0`
+    // with nowhere to slide, so the label scrolls off-screen with the
+    // axis — which is the regression a previous grid restructure shipped
+    // because it dropped this very width hint.
+    //
+    // `width: max-content` resolves to the sum of the grid tracks' max-
+    // content widths (the axis cells declare an explicit pixel width,
+    // so this stretches the `<ul>` to the full scrollable range), and
+    // `minWidth: 100%` keeps the `<ul>` at least viewport-wide on short
+    // sessions where the axis fits without scroll. jsdom does not run
+    // CSS layout, but the inline-style contract is what tells a real
+    // browser to stretch — pin both declarations so a future restructure
+    // cannot silently regress sticky pinning again.
+    const threads = [makeThread(1)];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const grid = await screen.findByTestId('thread-timeline-lane-grid');
+    expect(grid.style.width).toBe('max-content');
+    expect(grid.style.minWidth).toBe('100%');
+  });
+
   it('renders one label cell and one axis cell per lane, each promoted to a grid item via display:contents on the <li>', async () => {
     // Each lane is an `<li>` with `display: contents` (the list item is
     // kept for semantics / a11y but stripped from layout), so its inner
