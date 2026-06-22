@@ -489,10 +489,30 @@ export function scheduleScrollAfterRender(
   onScroll?: () => void,
 ): () => void {
   let highlightCancel: (() => void) | null = null;
+  let reflowRafHandle: number | null = null;
   const run = () => {
     onScroll?.();
     scrollMessageIntoView(container, uuid);
     highlightCancel = highlightMessageJump(container, uuid);
+    // Re-call scrollIntoView on the next animation frame so the browser has
+    // had a chance to resolve the article's computed `scroll-margin-top`
+    // (driven by the CSS variable `--delta-top-region-reserve` inherited
+    // from the body). A cross-lane jump mounts a freshly-rendered article
+    // whose computed scroll-margin-top is still 0 at first paint, so the
+    // initial scrollIntoView aligns the article with the viewport top —
+    // behind the overlay. After one frame, layout has resolved the margin
+    // and the second call positions the article just below the overlay.
+    // Same-lane jumps are unaffected: the second call is a no-op against an
+    // already correctly-positioned element.
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.requestAnimationFrame === 'function'
+    ) {
+      reflowRafHandle = window.requestAnimationFrame(() => {
+        reflowRafHandle = null;
+        scrollMessageIntoView(container, uuid);
+      });
+    }
   };
   if (
     typeof window !== 'undefined' &&
@@ -529,12 +549,24 @@ export function scheduleScrollAfterRender(
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(rafHandle);
+      if (reflowRafHandle !== null) {
+        window.cancelAnimationFrame(reflowRafHandle);
+        reflowRafHandle = null;
+      }
       highlightCancel?.();
     };
   }
   const handle = setTimeout(run, 0);
   return () => {
     clearTimeout(handle);
+    if (
+      reflowRafHandle !== null &&
+      typeof window !== 'undefined' &&
+      typeof window.cancelAnimationFrame === 'function'
+    ) {
+      window.cancelAnimationFrame(reflowRafHandle);
+      reflowRafHandle = null;
+    }
     highlightCancel?.();
   };
 }

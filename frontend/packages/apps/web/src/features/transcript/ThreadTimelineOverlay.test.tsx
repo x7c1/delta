@@ -2499,6 +2499,65 @@ describe('ThreadTimelineOverlay scheduleScrollAfterRender DOM-ready wait (v11 Im
       window.performance.now = originalPerfNow;
     }
   });
+
+  it('re-calls scrollIntoView after one animation frame so post-layout scroll-margin-top is honoured', async () => {
+    // Cross-lane jumps mount a freshly-rendered article whose computed
+    // scroll-margin-top resolves only after the first layout pass. The
+    // initial scrollIntoView therefore scrolls with margin=0 and the
+    // article lands behind the floating top overlay. Scheduling a second
+    // scrollIntoView in the next animation frame guarantees the browser
+    // recomputes the scroll with the resolved margin and the article lands
+    // just below the overlay.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* cancellation is exercised elsewhere */
+    }) as typeof window.cancelAnimationFrame;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        // Target article is already present so the polling loop fires its
+        // run() body on the very first tick — mirroring the cross-lane jump
+        // case after the new subthread's article has just been mounted.
+        const target = document.createElement('article');
+        target.setAttribute('data-message-uuid', 'reflow-uuid');
+        container.appendChild(target);
+        const cancel = scheduleScrollAfterRender(container, 'reflow-uuid');
+        // First tick: target is in the DOM, the initial scrollIntoView
+        // fires, and the helper schedules a follow-up rAF for the
+        // post-layout re-scroll.
+        expect(rafCallbacks).toHaveLength(1);
+        const initialTick = rafCallbacks.shift()!;
+        initialTick(performance.now());
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        expect(scrollIntoView.mock.instances[0]).toBe(target);
+        // The follow-up rAF is queued; until it fires, no second scroll.
+        expect(rafCallbacks).toHaveLength(1);
+        // Drive the follow-up frame: the second scrollIntoView fires on the
+        // same article. After this, layout has resolved scroll-margin-top
+        // and the browser scrolls honouring the reserved top region.
+        const reflowTick = rafCallbacks.shift()!;
+        reflowTick(performance.now());
+        expect(scrollIntoView).toHaveBeenCalledTimes(2);
+        expect(scrollIntoView.mock.instances[1]).toBe(target);
+        cancel();
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
 });
 
 describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement 3)', () => {
