@@ -13,3 +13,10 @@ export {
   type ThreadLike,
   type ThreadNode,
 } from './thread-tree';
+export {
+  MAIN_THREAD_DISPLAY_NAME,
+  emptyTitleFallback,
+  threadDisplayName,
+  threadTooltip,
+  type ThreadNamed,
+} from './thread-name';

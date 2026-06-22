@@ -1,5 +1,7 @@
 import {
   buildThreadTree,
+  threadDisplayName,
+  threadTooltip,
   type ThreadId,
   type ThreadNode,
 } from '@delta/model';
@@ -113,12 +115,12 @@ function ThreadTreeNode({
         )}
         aria-current={isActive ? 'true' : undefined}
       >
-        <span className="truncate">
+        <span className="truncate" title={threadTooltip(node.thread)}>
           {/* Every node rendered here is a sub-thread (main is not listed), so
               all levels get the branch marker — including the first level, now
               lifted to depth 0. Indentation still grows with depth. */}
           <span className="text-slate-400">⤷ </span>
-          {node.thread.title}
+          {threadDisplayName(node.thread)}
         </span>
         <span className="flex shrink-0 items-center gap-1.5">
           {running && (

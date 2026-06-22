@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import type { Message } from '@delta/wire-gen';
 import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -42,7 +42,15 @@ export interface MessageItemProps {
  * carrier, not a real user turn. Those render on the assistant side (left,
  * plain) so they don't masquerade as right-aligned user bubbles.
  */
-export function MessageItem({
+// Wrapped with React.memo so a parent re-render that keeps the same props skips
+// the message body work entirely. A cross-lane jump re-renders TranscriptPane
+// with N messages where every prop reference is stable (the parent uses
+// useCallback / useMemo to hold callback identity across unrelated state churn
+// like the timeline scrub or branch-chip hover), so the default shallow compare
+// is enough to bail every item that hasn't actually changed. The first cache hit
+// for a destination subthread still pays the O(N) initial mount; subsequent
+// updates pay O(1) per unchanged item.
+export const MessageItem = memo(function MessageItem({
   message,
   onSelectQuote,
   pairing,
@@ -87,6 +95,7 @@ export function MessageItem({
       <article
         className="px-3 text-sm"
         data-role={message.role}
+        data-message-uuid={message.uuid}
         data-testid="message-item"
       >
         <Collapsible
@@ -127,6 +136,7 @@ export function MessageItem({
       <article
         className="px-3 text-sm"
         data-role={message.role}
+        data-message-uuid={message.uuid}
         data-task-notification="true"
         data-testid="message-item"
       >
@@ -282,6 +292,7 @@ export function MessageItem({
       <article
         className="flex flex-col items-end px-3 text-sm"
         data-role={message.role}
+        data-message-uuid={message.uuid}
         data-testid="message-item"
       >
         <div className="max-w-[85%] rounded-lg bg-blue-50 px-3 py-2 text-slate-800">
@@ -305,6 +316,7 @@ export function MessageItem({
     <article
       className="px-3 text-sm"
       data-role={message.role}
+      data-message-uuid={message.uuid}
       data-testid="message-item"
     >
       {inBubble ? (
@@ -317,4 +329,4 @@ export function MessageItem({
       <MessageMeta message={message} timestamp={timestamp} isLatest={isLatest} />
     </article>
   );
-}
+});

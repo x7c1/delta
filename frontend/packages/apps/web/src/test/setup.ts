@@ -40,3 +40,38 @@ if (
     },
   });
 }
+
+// jsdom does not implement `Element.scrollTo`, but call sites that animate a
+// scroll (e.g. the thread-timeline playhead's edge re-centre) use it to opt
+// into the browser's smooth-scroll animation. Without a stub these call sites
+// throw `scrollTo is not a function` and crash unrelated tests. Mirror the
+// requested `left`/`top` onto `scrollLeft`/`scrollTop` so tests that assert on
+// the post-scroll position keep working; tests that care about the smooth
+// contract install their own `vi.fn()` over this default to spy on calls.
+if (typeof HTMLElement.prototype.scrollTo !== 'function') {
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+    configurable: true,
+    writable: true,
+    value: function scrollTo(
+      this: HTMLElement,
+      options?: ScrollToOptions | number,
+      maybeY?: number,
+    ): void {
+      if (typeof options === 'object' && options !== null) {
+        if (typeof options.left === 'number') {
+          this.scrollLeft = options.left;
+        }
+        if (typeof options.top === 'number') {
+          this.scrollTop = options.top;
+        }
+        return;
+      }
+      if (typeof options === 'number') {
+        this.scrollLeft = options;
+        if (typeof maybeY === 'number') {
+          this.scrollTop = maybeY;
+        }
+      }
+    },
+  });
+}
