@@ -1950,7 +1950,7 @@ export function ThreadTimelineOverlay({
                   The wrapper's `pr-3` keeps the right inset symmetric
                   with the left (12 px before the rightmost jump
                   button). */}
-      <div className="flex w-full items-center justify-between pr-3">
+      <div className="flex w-full items-center justify-between pr-1">
         <button
           type="button"
           onClick={toggle}
