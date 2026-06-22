@@ -4731,3 +4731,297 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
     expect(axisCells.length).toBe(labels.length);
   });
 });
+
+describe('ThreadTimelineOverlay external active-thread change', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  /**
+   * When `activeThreadId` flips because the user picked a subthread from
+   * outside the overlay (Navigator click, breadcrumb, etc.) the playhead
+   * must move to the new lane's latest main-conversation turn AND the
+   * timeline must horizontally scroll so that new x is on screen. Without
+   * the fix the playhead stayed pointed at the previous lane's message,
+   * and on long sessions the playhead's x sat outside the axis viewport —
+   * invisible to the user.
+   */
+  it('moves the playhead to the latest large message of the new lane on external activeThreadId change', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    // Lane 1 carries msg-a at t=0; lane 2 carries msg-b at t=1m and
+    // msg-c at t=2m. The latest large message in lane 2 is msg-c.
+    const messages = new Map([
+      [
+        1,
+        [makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z')],
+      ],
+      [
+        2,
+        [
+          makeUserText(2, 0, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(2, 1, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    // Mount with lane 1 active. The playhead initially lands on the
+    // latest message of the global sorted list (msg-c at x=240).
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => ({
+        messages: messages.get(threadId as number) ?? [],
+      }),
+    );
+    const bodyRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-a">msg-a</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={1}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Sanity: the initial playhead sits on the global tail (msg-c at x=240
+    // = LANE_LEFT_PAD_PX + 240). This is the auto-anchor effect's pick on
+    // first mount, not a deliberate "show me the latest of lane 1".
+    const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
+    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
+    // Now flip activeThreadId to lane 2 from the outside, mirroring a
+    // Navigator click. Re-render the pane with lane 2's articles so the
+    // DOM matches what the live app shows after the switch.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-b">msg-b</article>
+              <article data-message-uuid="msg-c">msg-c</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={2}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    // The effect picks the latest large message in the new lane (msg-c).
+    // msg-c sits at the global tail (x = 240 inside the axis), so the
+    // playhead's translateX must be LANE_LEFT_PAD_PX + 240. The lane-2
+    // playhead — not lane-1's — is the one that should track this x.
+    await waitFor(() => {
+      const lane2Playhead = playheads()[1];
+      expect(playheadLeftPx(lane2Playhead)).toBe(
+        `${LANE_LEFT_PAD_PX + 240}px`,
+      );
+    });
+    // The lane highlight follows the new active message's lane (lane 2).
+    const lanes = screen.getAllByTestId('thread-timeline-lane');
+    expect(lanes[1]).toHaveAttribute('data-active', 'true');
+    expect(lanes[0]).toHaveAttribute('data-active', 'false');
+  });
+
+  it('triggers horizontal scroll catch-up so the playhead lands inside the axis viewport after the external switch', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    // Pick widely-separated timestamps so the global x map keeps msg-a at
+    // x=0 and msg-c at the right end (x=240). Lane 2's latest large is
+    // msg-c — far to the right of the initial viewport.
+    const messages = new Map([
+      [
+        1,
+        [makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z')],
+      ],
+      [
+        2,
+        [
+          makeUserText(2, 0, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(2, 1, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => ({
+        messages: messages.get(threadId as number) ?? [],
+      }),
+    );
+    const bodyRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-a">msg-a</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={1}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    // Make the wrapper narrow so the scroll-follow effect actually runs.
+    Object.defineProperty(wrapper, 'clientWidth', {
+      configurable: true,
+      get: () => 100,
+    });
+    // Spy on the smooth-scroll API. The fix routes the catch-up through
+    // `scrollTo({ behavior: 'smooth' })` (gated on `userActedTick`), so
+    // the external active-thread switch must invoke it exactly like a
+    // wheel/click jump would.
+    const scrollToMock = vi.fn();
+    wrapper.scrollTo = scrollToMock as typeof wrapper.scrollTo;
+    // Pre-position the scroll at the left edge — msg-c at x=240 (axis-
+    // local) sits well outside [0, 100].
+    wrapper.scrollLeft = 0;
+    // Flip activeThreadId to lane 2 with the new lane's article in the DOM.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-b">msg-b</article>
+              <article data-message-uuid="msg-c">msg-c</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={2}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    // The horizontal scroll-follow effect must fire and request a smooth
+    // re-centre — that is the user-visible "playhead becomes visible"
+    // half of the fix. The exact left value depends on the live label
+    // offset (jsdom returns 0 for `offsetLeft` without explicit CSS), so
+    // just assert the call happened with the smooth API.
+    await waitFor(() => {
+      expect(scrollToMock).toHaveBeenCalled();
+    });
+    const lastCall = scrollToMock.mock.calls[scrollToMock.mock.calls.length - 1];
+    expect(lastCall[0]).toMatchObject({ behavior: 'smooth' });
+    expect(typeof (lastCall[0] as ScrollToOptions).left).toBe('number');
+  });
+
+  it('leaves the playhead alone when the new lane has no large messages yet', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    // Lane 2 has a non-text message only (e.g. a tool call placeholder
+    // before any large turn lands). The empty-content row is treated as a
+    // small mark, not a large one — and {@link buildLargeSortedMessages}
+    // includes only large rows, so the new effect must find no candidate
+    // and leave the playhead at its current position.
+    const messages = new Map([
+      [
+        1,
+        [makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z')],
+      ],
+      [
+        2,
+        [
+          // makeMessage's default content is `[]` — that produces a small
+          // (auxiliary) mark, NOT a large one.
+          makeMessage(2, 0, 'msg-b-small', {
+            created_at: '2026-01-01T00:01:00Z',
+          }),
+        ],
+      ],
+    ]);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => ({
+        messages: messages.get(threadId as number) ?? [],
+      }),
+    );
+    const bodyRef = createRef<HTMLDivElement>();
+    const { rerender } = render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-a">msg-a</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={1}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId('thread-timeline-dot');
+    const before = playheadLeftPx(
+      screen.getAllByTestId('thread-timeline-playhead')[0],
+    );
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body" />
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={2}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    // Give the effect a chance to run; nothing should change.
+    await Promise.resolve();
+    await Promise.resolve();
+    const after = playheadLeftPx(
+      screen.getAllByTestId('thread-timeline-playhead')[0],
+    );
+    expect(after).toBe(before);
+  });
+});

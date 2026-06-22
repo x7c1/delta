@@ -1054,6 +1054,128 @@ export function ThreadTimelineOverlay({
     }
   }, []);
 
+  // When `activeThreadId` is driven by an external setter (Navigator click in
+  // the left pane, breadcrumb, etc.) the conversation pane re-renders into
+  // the new subthread, but the timeline's playhead is left pointing at the
+  // previous lane's message. On a long session whose axis exceeds the
+  // viewport width, the playhead's x then sits outside the horizontal scroll
+  // window — invisible to the user — even though the lane highlight already
+  // moved to the new lane.
+  //
+  // Move the playhead to the new lane's latest "large" (main-conversation)
+  // turn whenever the external active thread changes to a lane that has at
+  // least one large message. The commit is routed through
+  // {@link setActiveMessageIndexFromPaneScroll} so it does NOT bump
+  // {@link scrubTick} — that would re-fire the timeline → pane jump effect
+  // (`scheduleScrollAfterRender` + `setActiveThread`) on the freshly-loaded
+  // pane, which is pointless work and would steal scroll focus from the user
+  // who just clicked a subthread.
+  //
+  // Bumping {@link userActedTick} (via `setActiveMessageIndexFromPaneScroll`)
+  // does, however, trigger the horizontal scroll catch-up effect below — so
+  // the playhead's new x is brought into view automatically. The pane-scroll
+  // observer is fenced off for a short window via
+  // {@link crossLaneJumpInFlightCountRef} so the IO's first-observation batch
+  // on the re-rendered pane cannot race and overwrite the deliberate
+  // "latest large turn" target the user implicitly asked for.
+  const externalThreadInitializedRef = useRef(false);
+  const lastObservedActiveThreadIdRef = useRef<ThreadId | null>(activeThreadId);
+  useEffect(() => {
+    // Skip the very first render — `activeThreadId` arrives as a prop and
+    // the auto-anchor effect already lands the playhead on the latest
+    // message of the global sorted list. Only react to subsequent changes
+    // (the user picked a different subthread from somewhere outside the
+    // overlay).
+    if (!externalThreadInitializedRef.current) {
+      externalThreadInitializedRef.current = true;
+      lastObservedActiveThreadIdRef.current = activeThreadId;
+      return;
+    }
+    if (lastObservedActiveThreadIdRef.current === activeThreadId) {
+      return;
+    }
+    lastObservedActiveThreadIdRef.current = activeThreadId;
+    if (activeThreadId === null) {
+      return;
+    }
+    // Suppress when the active thread change was driven BY the overlay
+    // itself (wheel/click cross-lane jump). That path has already raised
+    // {@link crossLaneJumpInFlightCountRef} for the deliberate jump target
+    // and is in the middle of polling for the destination article to
+    // render. Re-firing here would double-bump the counter and overwrite
+    // the user's pick with the lane's tail. Only EXTERNAL setters
+    // (Navigator click, breadcrumb, etc.) flip the prop without an
+    // in-flight overlay-driven jump.
+    if (crossLaneJumpInFlightCountRef.current > 0) {
+      return;
+    }
+    // The new lane's latest large turn = last entry in the global large
+    // list whose `threadId` matches. If the lane has no large messages
+    // yet (e.g. messages still loading, or the lane only carries tool
+    // calls), leave the playhead alone — the next render that brings the
+    // large message in will re-fire this effect via the
+    // `largeSortedMessages` dep.
+    let targetUuid: string | null = null;
+    for (let i = largeSortedMessages.length - 1; i >= 0; i -= 1) {
+      if (largeSortedMessages[i].threadId === activeThreadId) {
+        targetUuid = largeSortedMessages[i].uuid;
+        break;
+      }
+    }
+    if (targetUuid === null) {
+      return;
+    }
+    const targetIndex = sortedMessages.findIndex((m) => m.uuid === targetUuid);
+    if (targetIndex < 0) {
+      return;
+    }
+    // Suppress the pane-scroll observer for the same window the regular
+    // cross-lane jump uses. The pane is about to re-render the new thread's
+    // articles; without the guard, the IO's first-observation batch would
+    // commit the topmost-visible article and overwrite the "latest large
+    // turn" target we just committed. The counter is released by a timer
+    // sized to {@link PANE_SCROLL_PROGRAMMATIC_GUARD_MS}, which comfortably
+    // covers the IO debounce + the first paint of the freshly-rendered
+    // pane.
+    crossLaneJumpInFlightCountRef.current += 1;
+    markProgrammaticScroll();
+    setActiveMessageIndexFromPaneScroll(targetIndex);
+    // `setActiveMessageIndexFromPaneScroll` only bumps `userActedTick` when
+    // the index actually moves. The external thread switch is itself a
+    // user action though — and the horizontal scroll catch-up effect is
+    // gated on `userActedTick !== 0` — so bump unconditionally to make
+    // sure the new lane's playhead is brought into view even when the
+    // index happens to coincide with the previous active message (the
+    // global tail typically lives in the latest lane, so this is the
+    // common case on a freshly opened session).
+    bumpUserActedTick();
+    let released = false;
+    const releaseOnce = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      decrementCrossLaneInFlight();
+    };
+    if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') {
+      releaseOnce();
+      return;
+    }
+    const handle = window.setTimeout(releaseOnce, PANE_SCROLL_PROGRAMMATIC_GUARD_MS);
+    return () => {
+      window.clearTimeout(handle);
+      releaseOnce();
+    };
+  }, [
+    activeThreadId,
+    largeSortedMessages,
+    sortedMessages,
+    setActiveMessageIndexFromPaneScroll,
+    bumpUserActedTick,
+    markProgrammaticScroll,
+    decrementCrossLaneInFlight,
+  ]);
+
   useEffect(() => {
     // Only react to navigation the user actually initiated: while
     // `scrubTick` sits at its initial 0 (a fresh mount with no wheel or
@@ -1367,8 +1489,16 @@ export function ThreadTimelineOverlay({
   // playheads read as "in view" while their on-screen position was
   // already past the right edge, and late-message playheads triggered a
   // scroll past the real content.
+  //
+  // Gated on {@link userActedTick} (not {@link scrubTick}) so EVERY route
+  // that moves the active message — wheel/click jump, pane-scroll follower,
+  // and Navigator-driven cross-pane switch — keeps the playhead inside the
+  // axis viewport. A fresh mount still sits at `userActedTick === 0` and
+  // performs no scroll, matching the prior behaviour. The wider gate is
+  // what fixes the dogfooding bug where picking a subthread from the
+  // Navigator left the playhead off-screen on long sessions.
   useEffect(() => {
-    if (scrubTick === 0) {
+    if (userActedTick === 0) {
       return;
     }
     const scrollEl = axisScrollRef.current;
@@ -1417,7 +1547,7 @@ export function ThreadTimelineOverlay({
         behavior: 'smooth',
       });
     }
-  }, [scrubTick, activeMessage, laneAxisWidth, messagePxByUuid]);
+  }, [userActedTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 
   // Pane scroll → playhead follow (Improvement 3). Observe each rendered
   // message article in the conversation pane; whichever one sits closest to
