@@ -1,13 +1,27 @@
-//! Seeding Claude Code's per-directory workspace-trust flag.
+//! Pre-accepting Claude Code's blocking startup dialogs for a directory.
 //!
-//! Claude Code records workspace trust per absolute path in the user's global
-//! config (`~/.claude.json`) under
-//! `projects.<abs-path>.hasTrustDialogAccepted = true`. Launching `claude`
-//! interactively in a fresh directory that contains files pops a blocking
-//! "Do you trust the files in this folder?" dialog; there is no CLI flag to
-//! accept it. Pre-seeding that key before launch is the only way to keep a
-//! programmatic launch (e.g. in a freshly-created git worktree) from stalling
-//! on the dialog.
+//! Claude Code shows blocking interactive prompts at startup whose state lives
+//! per absolute path in the user's global config (`~/.claude.json`) under
+//! `projects.<abs-path>.<key>`. None of these prompts have a CLI flag to
+//! accept; pre-seeding the keys before launch is the only way to keep a
+//! programmatic launch (e.g. in a freshly-created git worktree) from stalling.
+//!
+//! Two distinct prompts are pre-accepted here:
+//!
+//! - **Workspace trust** — "Do you trust the files in this folder?". Fires
+//!   when `claude` is launched in a directory it has never seen before.
+//!   Skipped by setting `hasTrustDialogAccepted = true`.
+//! - **External CLAUDE.md imports** — "Allow external CLAUDE.md file
+//!   imports?". Fires at startup when an ancestor `CLAUDE.md` file uses
+//!   `@`-import syntax that points to paths outside the launch directory
+//!   (i.e. external from the launch dir's viewpoint). Skipped by setting
+//!   both `hasClaudeMdExternalIncludesApproved = true` and
+//!   `hasClaudeMdExternalIncludesWarningShown = true` — Claude Code re-shows
+//!   the prompt unless both flags are present.
+//!
+//! Both prompts are blocking and non-interactive launches (Delta's spawn flow)
+//! cannot answer them, so the reaper would eventually kill the spawn as
+//! `SpawnFailed`. Pre-seeding both is what keeps fresh-workdir spawns alive.
 //!
 //! ## Concurrency
 //!
@@ -27,15 +41,35 @@ use crate::error::Error;
 /// The config key Claude Code reads to skip the workspace-trust dialog.
 const TRUST_KEY: &str = "hasTrustDialogAccepted";
 
+/// The config key Claude Code reads to skip the "Allow external CLAUDE.md file
+/// imports?" prompt. Must be paired with [`EXTERNAL_INCLUDES_WARNING_SHOWN_KEY`]:
+/// Claude Code re-shows the prompt unless both keys are set.
+const EXTERNAL_INCLUDES_APPROVED_KEY: &str = "hasClaudeMdExternalIncludesApproved";
+
+/// The companion flag indicating Claude Code has already shown its external-
+/// includes warning for this directory; setting it alongside the approval key
+/// is what fully suppresses the prompt on the next launch.
+const EXTERNAL_INCLUDES_WARNING_SHOWN_KEY: &str = "hasClaudeMdExternalIncludesWarningShown";
+
+/// All boolean keys this module pre-seeds to `true` on a project entry. Kept
+/// in one place so the seeding loop and the idempotency check stay in sync.
+const SEEDED_KEYS: &[&str] = &[
+    TRUST_KEY,
+    EXTERNAL_INCLUDES_APPROVED_KEY,
+    EXTERNAL_INCLUDES_WARNING_SHOWN_KEY,
+];
+
 /// The top-level object keyed by absolute project path.
 const PROJECTS_KEY: &str = "projects";
 
-/// Ensure `dir` is marked trusted in the config file at `config_path`.
+/// Ensure `dir` is pre-accepted for every blocking startup dialog this module
+/// covers (workspace trust and external CLAUDE.md imports) in the config file
+/// at `config_path`.
 ///
-/// Idempotent: if the key is already `true`, the file is left untouched (no
-/// rewrite). A missing config file starts from an empty object; a config file
-/// that does not parse as JSON yields an error and is left untouched, so a
-/// corrupt or hand-edited file is never clobbered.
+/// Idempotent: if every seeded key is already `true`, the file is left
+/// untouched (no rewrite). A missing config file starts from an empty object;
+/// a config file that does not parse as JSON yields an error and is left
+/// untouched, so a corrupt or hand-edited file is never clobbered.
 pub(crate) async fn ensure_dir_trusted(config_path: &Path, dir: &str) -> Result<(), Error> {
     // Read the existing config, if any. A missing file is the normal first-run
     // case and starts from an empty object; any other read error propagates.
@@ -68,13 +102,21 @@ pub(crate) async fn ensure_dir_trusted(config_path: &Path, dir: &str) -> Result<
     }
     let project = project.as_object_mut().expect("project entry is an object");
 
-    // Idempotent fast path: already trusted, so skip the write entirely. This
-    // minimizes churn and shrinks the read-modify-write window for the common
-    // case where the dir was seeded on an earlier spawn/resume.
-    if project.get(TRUST_KEY) == Some(&Value::Bool(true)) {
+    // Idempotent fast path: if every seeded key is already `true`, skip the
+    // write entirely. This minimizes churn and shrinks the read-modify-write
+    // window for the common case where the dir was seeded on an earlier
+    // spawn/resume. A partial seed (e.g. only `hasTrustDialogAccepted` from an
+    // older Delta) still triggers a rewrite to fill in the missing keys.
+    let mut changed = false;
+    for &key in SEEDED_KEYS {
+        if project.get(key) != Some(&Value::Bool(true)) {
+            project.insert(key.to_owned(), Value::Bool(true));
+            changed = true;
+        }
+    }
+    if !changed {
         return Ok(());
     }
-    project.insert(TRUST_KEY.to_owned(), Value::Bool(true));
 
     let serialized = serde_json::to_vec_pretty(&root).map_err(|source| Error::TrustSerialize {
         path: config_path.display().to_string(),
@@ -162,6 +204,16 @@ mod tests {
             == Some(&Value::Bool(true))
     }
 
+    /// True iff every key this module seeds is `true` on `projects.<dir>`.
+    fn fully_seeded(value: &Value, dir: &str) -> bool {
+        let Some(project) = value.get(PROJECTS_KEY).and_then(|p| p.get(dir)) else {
+            return false;
+        };
+        SEEDED_KEYS
+            .iter()
+            .all(|key| project.get(*key) == Some(&Value::Bool(true)))
+    }
+
     #[tokio::test]
     async fn missing_file_creates_trusted_entry() {
         let tmp = tempfile::tempdir().unwrap();
@@ -171,7 +223,10 @@ mod tests {
         ensure_dir_trusted(&config, dir).await.unwrap();
 
         let value = read_json(&config).await;
-        assert!(trusted(&value, dir), "the dir is trusted, got {value}");
+        assert!(
+            fully_seeded(&value, dir),
+            "all three seeded keys are true, got {value}"
+        );
         // Nothing else leaked into the file.
         assert_eq!(
             value.as_object().unwrap().keys().collect::<Vec<_>>(),
@@ -201,8 +256,8 @@ mod tests {
         ensure_dir_trusted(&config, dir).await.unwrap();
 
         let value = read_json(&config).await;
-        // The new dir is trusted.
-        assert!(trusted(&value, dir));
+        // The new dir is fully seeded.
+        assert!(fully_seeded(&value, dir));
         // Every pre-existing top-level key is preserved verbatim.
         assert_eq!(value.get("numStartups"), Some(&Value::from(7)));
         assert_eq!(
@@ -237,7 +292,66 @@ mod tests {
         let after_mtime = tokio::fs::metadata(&config).await.unwrap().modified().unwrap();
         assert_eq!(before_bytes, after_bytes, "content unchanged");
         assert_eq!(before_mtime, after_mtime, "file was not rewritten");
-        assert!(trusted(&read_json(&config).await, dir));
+        assert!(fully_seeded(&read_json(&config).await, dir));
+    }
+
+    #[tokio::test]
+    async fn fully_seeded_is_idempotent_when_all_keys_already_true() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        let dir = "/home/u/repos/project";
+        let initial = serde_json::json!({
+            PROJECTS_KEY: {
+                dir: {
+                    TRUST_KEY: true,
+                    EXTERNAL_INCLUDES_APPROVED_KEY: true,
+                    EXTERNAL_INCLUDES_WARNING_SHOWN_KEY: true,
+                }
+            }
+        });
+        tokio::fs::write(&config, serde_json::to_vec_pretty(&initial).unwrap())
+            .await
+            .unwrap();
+
+        ensure_dir_trusted(&config, dir).await.unwrap();
+
+        // No-op: the JSON shape is identical to what we wrote.
+        let value = read_json(&config).await;
+        assert_eq!(value, initial, "the file is unchanged, got {value}");
+    }
+
+    #[tokio::test]
+    async fn partial_seed_fills_in_missing_external_includes_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join(".claude.json");
+        let dir = "/home/u/repos/project";
+        // An older Delta (or hand-edit) wrote only the trust key; the two
+        // external-includes keys are missing.
+        let initial = serde_json::json!({
+            PROJECTS_KEY: {
+                dir: {
+                    TRUST_KEY: true,
+                    "history": ["a", "b"],
+                }
+            }
+        });
+        tokio::fs::write(&config, serde_json::to_vec_pretty(&initial).unwrap())
+            .await
+            .unwrap();
+
+        ensure_dir_trusted(&config, dir).await.unwrap();
+
+        let value = read_json(&config).await;
+        // The two missing keys were added.
+        assert!(
+            fully_seeded(&value, dir),
+            "all three seeded keys are true, got {value}"
+        );
+        // The pre-existing key is still true (left alone, not rewritten away).
+        assert!(trusted(&value, dir));
+        // Unrelated keys on the same project entry are preserved verbatim.
+        let project = value.get(PROJECTS_KEY).and_then(|p| p.get(dir)).unwrap();
+        assert_eq!(project.get("history"), Some(&serde_json::json!(["a", "b"])));
     }
 
     #[tokio::test]
