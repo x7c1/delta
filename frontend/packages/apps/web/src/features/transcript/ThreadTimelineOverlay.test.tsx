@@ -1843,26 +1843,36 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
   // past the axis cell's fixed pixel height.
   //
   // The grid solves both at once: `max-content` shares the widest label
-  // across every row, and `align-items: center` centres each row's two
-  // cells on the same baseline so alignment never drifts no matter how
-  // many lanes pile up.
+  // across every row, and `align-items: stretch` makes each row's two
+  // cells share the row's full height so the active-highlight band and
+  // the per-lane playhead segment paint at identical vertical extents
+  // on both the label side and the axis side. (`center` was the prior
+  // contract; it left the axis cell — which carries an explicit pixel
+  // height — measurably shorter than the label cell whose height was
+  // governed by font metrics + padding, so the highlight band painted
+  // a thinner stripe on the axis side and the per-lane playhead looked
+  // disconnected between rows.)
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('uses CSS Grid with a max-content label column for the lane container', async () => {
+  it('uses CSS Grid with a max-content label column and stretched rows for the lane container', async () => {
     // Structural contract: the lane `<ul>` is a grid with two columns
-    // sized `max-content 1fr`, and rows are centred via `align-items:
-    // center`. The label column being `max-content` is what gives every
+    // sized `max-content 1fr`, and rows stretch via `align-items:
+    // stretch`. The label column being `max-content` is what gives every
     // lane label the same width as the longest one (no hard-coded
-    // px gutter that wastes space when names are short).
+    // px gutter that wastes space when names are short). `stretch`
+    // (rather than `center`) is what guarantees the two grid items of
+    // a single row paint at the same vertical extent — the necessary
+    // condition for the active-highlight band and the per-lane playhead
+    // segment to read as one continuous block across the row.
     const threads = [makeThread(1)];
     renderOverlay({ threads, messagesByThread: new Map() });
     const grid = await screen.findByTestId('thread-timeline-lane-grid');
     expect(grid.style.display).toBe('grid');
     expect(grid.style.gridTemplateColumns).toBe('max-content 1fr');
-    expect(grid.style.alignItems).toBe('center');
+    expect(grid.style.alignItems).toBe('stretch');
   });
 
   it('stretches the lane grid to the full axis content width via width:max-content + minWidth:100% so sticky labels have a containing block to pin against', async () => {
@@ -2148,13 +2158,82 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(inactiveAxis.className).not.toMatch(/bg-slate-50/);
   });
 
-  it('keeps row alignment centred regardless of how many lanes accumulate', async () => {
-    // The grid's `align-items: center` is the single source of truth for
-    // row alignment between the label cell and the axis cell. A
-    // regression that swapped it for flex `items-center` on per-row
-    // containers (the earlier layout) would reintroduce the drift the
-    // grid fixes; pin the contract on the grid container itself so the
-    // alignment guarantee does not depend on lane count.
+  it('paints the active-highlight band at matched heights on label and axis by stretching both grid items to the row height', async () => {
+    // Each grid item of a lane (the sticky label `<span>` and the axis
+    // `<div>` marked `data-timeline-axis`) carries `h-full` plus a
+    // `minHeight: LANE_HEIGHT_PX` floor. Combined with the grid
+    // container's `align-items: stretch`, this is the necessary and
+    // sufficient condition for the two cells of a single row to share
+    // the same painted height — so the active-highlight band
+    // (`bg-slate-50` + `border-y`) appears as one continuous block
+    // across the row rather than two stripes of mismatched height. A
+    // regression that dropped `h-full` from either side or pinned the
+    // axis to a fixed `height` would defeat the stretch and reintroduce
+    // the visible mismatch.
+    //
+    // jsdom does not run CSS layout, so we cannot read the resolved
+    // pixel height of each cell. The contract we CAN pin is the inline
+    // and class declarations themselves: both cells expose `h-full` in
+    // their className and `minHeight: LANE_HEIGHT_PX` (== 18px) inline.
+    const LANE_HEIGHT_PX = 18;
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({
+      threads,
+      messagesByThread: new Map(),
+      activeThreadId: 2,
+    });
+    const lanes = await screen.findAllByTestId('thread-timeline-lane');
+    for (const lane of lanes) {
+      const label = within(lane).getByTestId('thread-timeline-lane-label');
+      const axis = lane.querySelector(
+        '[data-timeline-axis]',
+      ) as HTMLElement;
+      expect(label).not.toBeNull();
+      expect(axis).not.toBeNull();
+      // Both cells declare `h-full` so each row's items grow to the row's
+      // stretched height instead of capping at their intrinsic height.
+      expect(label.className).toMatch(/(?:^|\s)h-full(?:\s|$)/);
+      expect(axis.className).toMatch(/(?:^|\s)h-full(?:\s|$)/);
+      // Both cells declare the same `minHeight` floor so an empty axis
+      // row still respects `LANE_HEIGHT_PX` rather than collapsing.
+      expect(label.style.minHeight).toBe(`${LANE_HEIGHT_PX}px`);
+      expect(axis.style.minHeight).toBe(`${LANE_HEIGHT_PX}px`);
+      // The axis side must NOT pin a fixed `height` — that would defeat
+      // the stretch by forcing the axis cell back to exactly
+      // `LANE_HEIGHT_PX` regardless of how tall the row grew.
+      expect(axis.style.height).toBe('');
+    }
+    // The active lane's both cells additionally carry the highlight
+    // tokens, so when the row stretches the band paints continuously
+    // across both halves at the same height.
+    const activeLane = lanes[1];
+    expect(activeLane).toHaveAttribute('data-active', 'true');
+    const activeLabel = within(activeLane).getByTestId(
+      'thread-timeline-lane-label',
+    );
+    const activeAxis = activeLane.querySelector(
+      '[data-timeline-axis]',
+    ) as HTMLElement;
+    expect(activeLabel.className).toMatch(/bg-slate-50/);
+    expect(activeAxis.className).toMatch(/bg-slate-50/);
+  });
+
+  it('keeps row alignment stretched regardless of how many lanes accumulate', async () => {
+    // The grid's `align-items: stretch` is the single source of truth for
+    // row alignment between the label cell and the axis cell — it
+    // guarantees the two cells share the row's full height so the
+    // active-highlight band and the per-lane playhead segment paint at
+    // identical vertical extents. A regression that swapped it for
+    // `center` (the prior contract) would reintroduce the visible
+    // mismatch in highlight band height; pin the contract on the grid
+    // container itself so the guarantee does not depend on lane count.
     const threads = Array.from({ length: 8 }, (_, i) =>
       makeThread(i + 1, {
         title: `lane ${i + 1}`,
@@ -2165,7 +2244,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     );
     renderOverlay({ threads, messagesByThread: new Map() });
     const grid = await screen.findByTestId('thread-timeline-lane-grid');
-    expect(grid.style.alignItems).toBe('center');
+    expect(grid.style.alignItems).toBe('stretch');
     const lanes = within(grid).getAllByTestId('thread-timeline-lane');
     expect(lanes).toHaveLength(8);
   });

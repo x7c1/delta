@@ -1666,7 +1666,21 @@ export function ThreadTimelineOverlay({
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'max-content 1fr',
-                  alignItems: 'center',
+                  // `align-items: stretch` makes each row's two grid items
+                  // (the sticky label cell and the axis cell) grow to the
+                  // tallest of the pair. Under `center` the axis cell — which
+                  // declares an explicit `LANE_HEIGHT_PX` height — could
+                  // render shorter than the label cell whose intrinsic
+                  // height is governed by font metrics + padding, producing
+                  // a vertically mismatched active-highlight band (the
+                  // axis-side bg-slate-50 painted a thinner stripe than the
+                  // label-side stripe) and a per-lane playhead that looked
+                  // disconnected between rows because its `h-full` only
+                  // filled the shorter axis cell. Stretching guarantees the
+                  // two cells share the row's full height, so the active
+                  // band reads as one continuous block and the per-lane
+                  // playhead segments line up edge to edge.
+                  alignItems: 'stretch',
                   width: 'max-content',
                   minWidth: '100%',
                 }}
@@ -1740,7 +1754,17 @@ export function ThreadTimelineOverlay({
                         // leave the sticky label white in the active state,
                         // breaking the visual continuity with the axis
                         // cell's highlight.
-                        className={`block truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
+                        // `h-full` opts the sticky label into the grid row's
+                        // full stretched height (see the `align-items:
+                        // stretch` rationale on the lane `<ul>`), so the
+                        // label-side background band paints the same vertical
+                        // extent as the axis-side band. `display: flex` +
+                        // `alignItems: center` keeps the glyph vertically
+                        // centred when the cell is taller than the text —
+                        // the old `lineHeight: LANE_HEIGHT_PX` centred only
+                        // at exactly that height and would leave the glyph
+                        // pinned to the top of a taller stretched cell.
+                        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
                           lane.isMain ? 'text-slate-700' : 'text-slate-500'
                         } ${labelHighlightClasses}`}
                         style={{
@@ -1748,7 +1772,6 @@ export function ThreadTimelineOverlay({
                           left: 0,
                           zIndex: 1,
                           minHeight: LANE_HEIGHT_PX,
-                          lineHeight: `${LANE_HEIGHT_PX}px`,
                         }}
                       >
                         {lane.label}
@@ -1757,13 +1780,21 @@ export function ThreadTimelineOverlay({
                         data-timeline-axis=""
                         data-thread-id={lane.threadId}
                         data-active={isHighlighted ? 'true' : 'false'}
-                        className={`relative rounded-sm ${highlightClasses}`}
+                        // `h-full` lets the axis cell expand to the grid
+                        // row's stretched height (see `align-items: stretch`
+                        // on the lane `<ul>`) so the axis-side highlight
+                        // band lines up with the label-side band. The
+                        // explicit `LANE_HEIGHT_PX` becomes a `minHeight`
+                        // floor (no-content rows still respect the lane
+                        // height) rather than a fixed `height` cap that
+                        // would defeat the stretch.
+                        className={`relative h-full rounded-sm ${highlightClasses}`}
                         style={{
                           width:
                             LANE_LEFT_PAD_PX +
                             laneAxisWidth +
                             LANE_RIGHT_PAD_PX,
-                          height: LANE_HEIGHT_PX,
+                          minHeight: LANE_HEIGHT_PX,
                         }}
                       >
                         <span
