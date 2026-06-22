@@ -314,6 +314,13 @@ export function computeTimeRange(
  * degenerate (every message landed at the same instant, or only one message
  * exists) every dot collapses to x=0 so they still render as a stacked column
  * at the lane's left edge instead of triggering a divide-by-zero.
+ *
+ * Note: this is the legacy linear-time projection. Rendering positions come
+ * from {@link buildGlobalXMap}, which clamps long idle gaps so an outlier
+ * gap does not dominate the axis. {@link TimelineDot.x} still carries the
+ * raw linear fraction so anything that needs the literal time mapping
+ * (analytics, future axis ticks) has it available, but the absolute pixel
+ * positions the renderer paints come from the global x map.
  */
 export function xFraction(
   timeMs: number,
@@ -324,6 +331,24 @@ export function xFraction(
   }
   return (timeMs - range.minMs) / (range.maxMs - range.minMs);
 }
+
+/**
+ * Factor applied to the 75th-percentile adjacent dt to derive the per-session
+ * idle-gap cap. A dt larger than `P75 * IDLE_GAP_CAP_FACTOR_K` is clamped
+ * down to that cap. Chosen so a typical "thinking pause" still reads as
+ * proportionally larger than a tight back-and-forth, while a single
+ * outlier idle gap (e.g. user walked away for an hour) cannot eat the
+ * majority of the axis.
+ */
+export const IDLE_GAP_CAP_FACTOR_K = 3;
+
+/**
+ * Floor for the per-session idle-gap cap, in milliseconds. A high-frequency
+ * session (every adjacent dt is small) would otherwise produce a tiny cap
+ * that flattens every gap into nothing; this floor keeps short gaps in
+ * dense sessions from getting clamped at all. 60 s = 1 minute.
+ */
+export const MIN_IDLE_GAP_CAP_MS = 60_000;
 
 /**
  * Build the swim-lane structure for the timeline footer from a session's
@@ -557,14 +582,31 @@ export interface GlobalXMap {
 }
 
 /**
- * Compute the per-message x positions for the shared lane axis. Each message
- * is projected to its ideal `xFraction(timeMs, range) * baseWidth`, then a
- * left-to-right greedy pass nudges any neighbour that would overlap to the
- * right so adjacent marks always clear each other by at least the sum of
- * their radii.
+ * Compute the per-message x positions for the shared lane axis.
  *
- * The minimum spacing between two adjacent messages is the average of their
- * mark diameters — i.e. the sum of their radii — so two large marks land 6 px
+ * Each message's ideal position is derived from the cumulative sum of
+ * adjacent inter-message dts, with each dt clamped to a per-session cap.
+ * The cap is `max(MIN_IDLE_GAP_CAP_MS, P75(dts) * IDLE_GAP_CAP_FACTOR_K)` —
+ * the 75th-percentile adjacent gap times a factor, floored at a minute so a
+ * uniformly tight session does not over-flatten. A single long idle gap
+ * (e.g. the user stepped away for an hour, then came back) would otherwise
+ * dominate the axis and squeeze the actually-conversational messages into a
+ * tight cluster; clamping the gap restores the legibility of the
+ * conversational rhythm while keeping the time ordering of every message.
+ *
+ * The cumulative-effective-dt approach degrades cleanly on the edge cases
+ * the linear projection used to handle:
+ * - zero messages → empty map at `minWidth`,
+ * - one message → x = 0 at `minWidth`,
+ * - every message at the same timestamp → all effective dts are 0, so every
+ *   ideal collapses to 0 and the greedy push (below) spreads them by mark
+ *   radius. No divide-by-zero is reachable.
+ *
+ * After the ideal positions are computed, a left-to-right greedy pass
+ * nudges any neighbour that would overlap to the right so adjacent marks
+ * always clear each other by at least the sum of their radii. The minimum
+ * spacing between two adjacent messages is the average of their mark
+ * diameters — i.e. the sum of their radii — so two large marks land 6 px
  * apart, two small marks 4 px apart, and a large/small neighbour pair 5 px
  * apart. That is the tightest spacing that still guarantees the two circles
  * do not paint into each other; any tighter and dense clusters smear back
@@ -579,6 +621,11 @@ export interface GlobalXMap {
  * Sharing one map across every lane is load-bearing: a message at a given
  * timestamp must land at the same x in every lane so cross-lane playhead
  * jumps line up with the marks the user sees.
+ *
+ * `range` is kept in the signature for symmetry with the lane-builder and
+ * for callers that might want to derive their own axis metadata, but it is
+ * NOT consulted by the layout: clamping looks at adjacent dts directly so
+ * the algorithm stays robust to the same-timestamp edge case.
  */
 export function buildGlobalXMap(
   sortedMessages: SortedMessage[],
@@ -587,16 +634,29 @@ export function buildGlobalXMap(
   markDiameter: (size: TimelineDotSize) => number,
   minWidth: number,
 ): GlobalXMap {
+  // `range` is intentionally unused. See the JSDoc note above: the algorithm
+  // works off adjacent dts, so the raw min/max range is not needed. Keep the
+  // parameter for signature stability with existing callers and tests.
+  void range;
   const pxByUuid = new Map<string, number>();
   if (sortedMessages.length === 0) {
     return { pxByUuid, axisWidth: minWidth };
   }
+  // Cumulative effective dt per message (index 0 → 0). The cap-then-sum
+  // construction guarantees the result is monotonic in input order, so the
+  // greedy push below stays correct.
+  const cumDt = computeCumulativeEffectiveDt(sortedMessages);
+  const totalEffectiveDt = cumDt[cumDt.length - 1];
+  // When the effective extent is zero (single message, or every message at
+  // the same instant) every ideal collapses to 0 and the greedy push spreads
+  // them by mark radius.
+  const scale = totalEffectiveDt > 0 ? baseWidth / totalEffectiveDt : 0;
   let lastX = 0;
   let lastDiameter = 0;
   let widest = 0;
   for (let i = 0; i < sortedMessages.length; i += 1) {
     const msg = sortedMessages[i];
-    const ideal = xFraction(msg.timeMs, range) * baseWidth;
+    const ideal = cumDt[i] * scale;
     const diameter = markDiameter(msg.size);
     let actual: number;
     if (i === 0) {
@@ -613,6 +673,59 @@ export function buildGlobalXMap(
     }
   }
   return { pxByUuid, axisWidth: Math.max(minWidth, widest) };
+}
+
+/**
+ * Compute the cumulative effective inter-message dts that drive
+ * {@link buildGlobalXMap}'s ideal positions. Returns one entry per message;
+ * entry 0 is always 0 (the leftmost message is the anchor), and entry `i`
+ * (for `i >= 1`) is the sum of the clamped dts from index 0..i. Each
+ * adjacent dt is clamped to the per-session cap so a single long idle gap
+ * cannot dominate the axis.
+ *
+ * Exported for tests; not part of the public API.
+ */
+function computeCumulativeEffectiveDt(
+  sortedMessages: SortedMessage[],
+): number[] {
+  const n = sortedMessages.length;
+  const cumDt = new Array<number>(n).fill(0);
+  if (n <= 1) {
+    return cumDt;
+  }
+  const dts = new Array<number>(n - 1);
+  for (let i = 1; i < n; i += 1) {
+    // Clamp at zero so an out-of-order pair (defensive; the caller sorts)
+    // does not introduce a negative dt that would shorten the axis.
+    dts[i - 1] = Math.max(0, sortedMessages[i].timeMs - sortedMessages[i - 1].timeMs);
+  }
+  const cap = computeIdleGapCapMs(dts);
+  let acc = 0;
+  for (let i = 1; i < n; i += 1) {
+    acc += Math.min(dts[i - 1], cap);
+    cumDt[i] = acc;
+  }
+  return cumDt;
+}
+
+/**
+ * Compute the per-session idle-gap cap, in milliseconds, from the adjacent
+ * dts. Uses nearest-rank (lower) at the 75th percentile so the cap is
+ * deterministic and library-free: `sortedDts[floor(0.75 * (n - 1))]`. The
+ * cap is the larger of `P75 * IDLE_GAP_CAP_FACTOR_K` and
+ * `MIN_IDLE_GAP_CAP_MS`, so a tight session keeps every gap intact while a
+ * sparse session has its outlier gap clamped at `P75 * K`.
+ *
+ * Exported for tests; not part of the public API.
+ */
+function computeIdleGapCapMs(dts: number[]): number {
+  if (dts.length === 0) {
+    return MIN_IDLE_GAP_CAP_MS;
+  }
+  const sorted = [...dts].sort((a, b) => a - b);
+  const p75Index = Math.floor(0.75 * (sorted.length - 1));
+  const p75 = sorted[p75Index];
+  return Math.max(MIN_IDLE_GAP_CAP_MS, p75 * IDLE_GAP_CAP_FACTOR_K);
 }
 
 /**
