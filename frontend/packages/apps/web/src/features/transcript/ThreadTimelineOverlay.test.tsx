@@ -4800,7 +4800,7 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
 describe('ThreadTimelineOverlay external active-thread change', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   /**
