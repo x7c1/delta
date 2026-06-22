@@ -1843,7 +1843,7 @@ export function ThreadTimelineOverlay({
                         <span
                           aria-hidden="true"
                           data-testid="thread-timeline-playhead"
-                          className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
+                          className="pointer-events-none absolute top-0 h-full w-[2px] bg-indigo-500"
                           style={{
                             left: playheadX + LANE_LEFT_PAD_PX,
                             transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
