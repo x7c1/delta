@@ -72,6 +72,17 @@ export function useSessionsQuery(
 const SESSION_THREADS_STALE_TIME = 30_000;
 
 /**
+ * Milliseconds a fetched thread's messages are considered fresh. Cross-lane
+ * jumps in the timeline revisit threads whose messages are already cached;
+ * without a stale window each revisit triggers a background refetch whose new
+ * array reference cascades through downstream `useMemo`s. WS-driven
+ * invalidation (`invalidateThreadMessages`, triggered by session events) still
+ * forces an immediate refresh because `invalidateQueries` overrides
+ * `staleTime`, so realtime freshness is preserved.
+ */
+const MESSAGES_STALE_TIME = 30_000;
+
+/**
  * A single session's thread tree. Disabled until a real session id is supplied.
  *
  * Both the focused-session query in the workspace and each visible session
@@ -128,6 +139,7 @@ export function useThreadMessagesQuery(
       threadId === null ? queryKeys.messagesNone : queryKeys.messages(threadId),
     queryFn: () => client.getThreadMessages(threadId as ThreadId),
     enabled: threadId !== null,
+    staleTime: MESSAGES_STALE_TIME,
   });
 }
 
@@ -155,6 +167,7 @@ export function useThreadsMessagesQueries(
     queries: threadIds.map((threadId) => ({
       queryKey: queryKeys.messages(threadId),
       queryFn: () => client.getThreadMessages(threadId),
+      staleTime: MESSAGES_STALE_TIME,
     })),
   });
   return results.map((result, index) => ({
