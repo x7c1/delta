@@ -339,6 +339,155 @@ describe('ThreadTimelineOverlay collapse toggle', () => {
   });
 });
 
+describe('ThreadTimelineOverlay jump-to-edge buttons', () => {
+  beforeEach(() => {
+    resetGlobals();
+  });
+
+  it('renders both jump buttons in the expanded header', () => {
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+    renderOverlay({ threads: [makeThread(1)], messagesByThread: new Map() });
+    const start = screen.getByTestId('thread-timeline-jump-start');
+    const end = screen.getByTestId('thread-timeline-jump-end');
+    expect(start).toHaveAttribute('aria-label', 'Jump to timeline start');
+    expect(end).toHaveAttribute('aria-label', 'Jump to timeline end');
+    // Both buttons are real <button>s, not nested inside the toggle — so
+    // clicking either one does not flip aria-expanded (see the dedicated
+    // case below). Each renders its own decorative SVG glyph.
+    expect(start.tagName).toBe('BUTTON');
+    expect(end.tagName).toBe('BUTTON');
+    expect(start.querySelector('svg')).not.toBeNull();
+    expect(end.querySelector('svg')).not.toBeNull();
+  });
+
+  it('omits both jump buttons in the collapsed state', () => {
+    // Collapsed default: the floating pill is the only control, no jump
+    // buttons. The jump buttons live inside the expanded header card.
+    renderOverlay({ threads: [makeThread(1)], messagesByThread: new Map() });
+    expect(screen.queryByTestId('thread-timeline-jump-start')).toBeNull();
+    expect(screen.queryByTestId('thread-timeline-jump-end')).toBeNull();
+  });
+
+  it('jumps the playhead to the first message on jump-start click', async () => {
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }, { uuid: 'msg-c' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+    expect(
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+
+    // Click jump-start: the playhead snaps to msg-a (x=0).
+    fireEvent.click(screen.getByTestId('thread-timeline-jump-start'));
+    await waitFor(() =>
+      expect(
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+      ).toBe(`${0 + LANE_LEFT_PAD_PX}px`),
+    );
+  });
+
+  it('jumps the playhead to the last message on jump-end click', async () => {
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }, { uuid: 'msg-c' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // Move off the latest first by clicking jump-start, so jump-end's effect
+    // is observable (the initial settle is already at the last message).
+    fireEvent.click(screen.getByTestId('thread-timeline-jump-start'));
+    await waitFor(() =>
+      expect(
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+      ).toBe(`${0 + LANE_LEFT_PAD_PX}px`),
+    );
+    fireEvent.click(screen.getByTestId('thread-timeline-jump-end'));
+    await waitFor(() =>
+      expect(
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`),
+    );
+  });
+
+  it('keeps the timeline expanded when either jump button is clicked', async () => {
+    // The jump buttons live OUTSIDE the toggle button, so a click on them
+    // must not bubble into a collapse. Both the aria state and the body
+    // testid have to stay put across consecutive clicks.
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    expect(
+      screen.getByTestId('thread-timeline-toggle'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByTestId('thread-timeline-jump-start'));
+    expect(
+      screen.getByTestId('thread-timeline-toggle'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('thread-timeline-body')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('thread-timeline-jump-end'));
+    expect(
+      screen.getByTestId('thread-timeline-toggle'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('thread-timeline-body')).toBeInTheDocument();
+  });
+
+  it('disables both jump buttons when there are no messages', () => {
+    // No threads => `sortedMessages` is empty, so there is nowhere to jump.
+    // The buttons render dimmed and refuse clicks (via the `disabled`
+    // attribute) rather than silently no-op'ing — clearer affordance.
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+    renderOverlay({ threads: [], messagesByThread: new Map() });
+    const start = screen.getByTestId('thread-timeline-jump-start');
+    const end = screen.getByTestId('thread-timeline-jump-end');
+    expect(start).toBeDisabled();
+    expect(end).toBeDisabled();
+  });
+});
+
 /**
  * The collapsed overlay still mounts `useThreadsMessagesQueries` (so the
  * `expanded` -> enabled transition lights it up without remount churn), but
