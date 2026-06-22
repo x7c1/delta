@@ -191,6 +191,29 @@ function stubAxisRect(rect: Partial<DOMRect>): void {
   );
 }
 
+/**
+ * Read a playhead element's resolved x in pixels along the lane axis.
+ *
+ * v30 switched the playhead from `style.left = "<px>"` to
+ * `style.transform = "translateX(<px>)"` so the 2 px bar paints on a
+ * GPU-composited layer and stops shimmering across subpixel boundaries.
+ * Every test that previously asserted on `.style.left` for the playhead now
+ * routes through this helper so the assertion target follows the implementation
+ * without spreading translateX-string parsing through hundreds of call sites.
+ */
+function playheadLeftPx(el: HTMLElement): string {
+  const transform = el.style.transform;
+  const match = /translateX\((-?\d+(?:\.\d+)?)px\)/.exec(transform);
+  if (match === null) {
+    throw new Error(
+      `playhead element is missing a translateX(...) transform (got transform=${JSON.stringify(
+        transform,
+      )}, left=${JSON.stringify(el.style.left)})`,
+    );
+  }
+  return `${match[1]}px`;
+}
+
 describe('ThreadTimelineOverlay collapse toggle', () => {
   beforeEach(() => {
     resetGlobals();
@@ -607,7 +630,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
       // A single full-notch wheel-up event (|deltaY| = 100, the canonical
       // mouse-wheel notch on Linux/Chrome) lands the playhead on the
@@ -623,7 +646,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         );
       });
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
@@ -655,7 +678,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // A single sub-notch wheel-up event (cumulative |delta| under the
     // first staircase threshold) lands in the slowest bucket → exactly
@@ -673,7 +696,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     });
     expect(preventDefault).toHaveBeenCalled();
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
   });
 
@@ -701,7 +724,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial position is the last message (msg-b, x=1 → 240px).
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
@@ -715,7 +738,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     });
     // Still at msg-b — the clamp blocks any further advance.
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
   });
 
@@ -757,7 +780,7 @@ describe('ThreadTimelineOverlay playhead', () => {
         );
       });
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${LANE_LEFT_PAD_PX}px`);
       // Advance past the rolling window so the accumulator resets — the
       // next event is treated as a fresh leisurely turn rather than a
@@ -774,7 +797,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       // Still at msg-a — the clamp blocks any further retreat.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
@@ -925,7 +948,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial active = m4 (x=1 → 240px).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
       const body = screen.getByTestId('thread-timeline-axis-column');
       act(() => {
@@ -939,7 +962,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       // m3 sits at x=0.75 → 180px — one step back, sub-notch event.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${180 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
@@ -1003,7 +1026,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       //   cum=500 → bucket 400 (3) → m1 → m0 (clamped after 1)
       // The clamp at m0 (x=0) is the final landing.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
@@ -1064,7 +1087,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       // Six messages at x = 0, 48, 96, 144, 192, 240. m3 sits at x = 144.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${144 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
@@ -1117,7 +1140,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       // Six messages → 5 gaps → 240 / 5 = 48 px each. m4 sits at x=192.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${192 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
@@ -1175,10 +1198,45 @@ describe('ThreadTimelineOverlay playhead', () => {
       // Six messages at x = 0, 48, 96, 144, 192, 240. Starting on m5
       // (x=240), three steps back → m2 (x=96).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${96 + LANE_LEFT_PAD_PX}px`);
     } finally {
       nowSpy.mockRestore();
+    }
+  });
+
+  // v30 fix 1: the playhead positions itself via `transform: translateX(...)`
+  // rather than `left: <px>`. At 2 px wide, a fractional `left` value lets the
+  // browser straddle a subpixel boundary so antialiasing paints ~1.5 px on one
+  // side and ~0.5 px on the other, producing a visible width-shimmer as the
+  // playhead steps across messages. `translateX` is GPU-composited on the
+  // existing 2 px box and keeps a stable 2 px footprint regardless of where it
+  // lands on the subpixel grid. This test pins the structural facts: the
+  // inline transform carries `translateX(...)`, the inline `left` is not used
+  // for positioning (a static `left-0` from className is acceptable, but the
+  // inline `style.left` must be empty), and the transition animates
+  // `transform` instead of `left`.
+  it('positions each playhead via transform: translateX, not inline left (v30)', async () => {
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const playheads = await screen.findAllByTestId('thread-timeline-playhead');
+    expect(playheads.length).toBeGreaterThanOrEqual(1);
+    for (const ph of playheads) {
+      // Structural: transform carries translateX(...), and the inline `left`
+      // is empty (the `left-0` className supplies a static 0 anchor).
+      expect(ph.style.transform).toMatch(/translateX\(/);
+      expect(ph.style.left).toBe('');
+      // Transition animates transform — animating `left` is what produced the
+      // subpixel shimmer in v29.
+      expect(ph.style.transition).toContain('transform');
+      expect(ph.style.transition).not.toContain('left');
     }
   });
 });
@@ -1408,6 +1466,65 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
     });
     expect(lanes[0]).toHaveAttribute('data-active', 'false');
   });
+
+  // v30 fix 2: the active-row hairline used to be `border-y border-slate-200`
+  // (active) / `border-y border-transparent` (inactive). The transparent
+  // placeholder kept the active and inactive rows the same height — but it
+  // also reserved 1 px of layout on the top and 1 px on the bottom of EVERY
+  // row, producing a ~2 px transparent stripe between adjacent rows under
+  // `align-items: stretch`. That stripe broke the per-lane playhead column
+  // visually even after v28 dropped the `<ul>`'s `gap-y-*`. v30 moves the
+  // active hairline to a pair of `inset box-shadow`s — non-layout, so
+  // adjacent rows now sit truly edge-to-edge.
+  //
+  // This test pins the structural facts: no row carries a `border-y`
+  // utility (active or inactive), and the active row's label and axis
+  // cells carry the shadow-inset class instead.
+  it('renders the active hairline via inset box-shadow rather than border-y placeholders (v30)', async () => {
+    const threads = [
+      makeThread(1),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: 'uuid-a',
+        created_at: '2026-01-01T00:05:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map(), activeThreadId: 2 });
+    const lanes = await screen.findAllByTestId('thread-timeline-lane');
+    // No lane (active or inactive) reserves layout via `border-y` — those
+    // transparent placeholders are exactly what produced the inter-row gap.
+    for (const lane of lanes) {
+      const cells = lane.querySelectorAll('[data-thread-id]');
+      for (const cell of Array.from(cells)) {
+        // The lane `<li>` itself is `display: contents`, so the two
+        // grid items are the label `<span>` and the axis `<div>`. Both
+        // must be free of `border-y` utilities (any direction-y border
+        // would reintroduce the layout-reserved stripe).
+        if (cell === lane) continue;
+        expect(cell.className).not.toMatch(/(^|\s)border-y(\s|$)/);
+      }
+    }
+    // The active lane's two cells both carry the shadow-inset utility that
+    // paints the hairline non-destructively. The inactive lane does not.
+    const activeLane = lanes.find(
+      (l) => l.getAttribute('data-active') === 'true',
+    )!;
+    const inactiveLane = lanes.find(
+      (l) => l.getAttribute('data-active') === 'false',
+    )!;
+    const activeCells = activeLane.querySelectorAll('[data-thread-id]');
+    expect(activeCells.length).toBeGreaterThanOrEqual(2);
+    for (const cell of Array.from(activeCells)) {
+      // Looking for the shadow utility's class name. We do not pin the
+      // exact pixel values (those are an implementation detail of the
+      // hairline colour) — only that a `shadow-[inset_...]` class is present.
+      expect(cell.className).toMatch(/shadow-\[inset_/);
+    }
+    const inactiveCells = inactiveLane.querySelectorAll('[data-thread-id]');
+    for (const cell of Array.from(inactiveCells)) {
+      expect(cell.className).not.toMatch(/shadow-\[inset_/);
+    }
+  });
 });
 
 describe('ThreadTimelineOverlay wheel skips small marks', () => {
@@ -1454,7 +1571,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial playhead lands on the latest message (large-c, x=1 → 240px).
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // Wheel up (sub-notch event → one step): the previous LARGE turn is
     // large-b (x=2/3 → 160px), NOT the small tool call between them. The
@@ -1471,7 +1588,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
       );
     });
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${160 + LANE_LEFT_PAD_PX}px`);
   });
 
@@ -1514,7 +1631,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
       clientX: 120,
     });
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
   });
 });
@@ -2135,9 +2252,15 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
   it('applies the active highlight to both grid cells of the active lane so the band reads as continuous', async () => {
     // With `display: contents` on the `<li>` the list-item itself has no
     // box, so a highlight applied to the `<li>` would never paint. The
-    // active highlight (border-y + bg-slate-50) lives on BOTH the label
-    // cell AND the axis cell individually, so the two halves of the
-    // active lane's grid row line up into one continuous visual band.
+    // active highlight lives on BOTH the label cell AND the axis cell
+    // individually, so the two halves of the active lane's grid row line
+    // up into one continuous visual band. v30 expresses the top/bottom
+    // hairline as an `inset box-shadow` rather than `border-y`, because
+    // `border-y border-transparent` (the prior inactive placeholder)
+    // reserved 1 px on top and 1 px on bottom of every row and produced
+    // a ~2 px transparent stripe between adjacent rows under
+    // `align-items: stretch`. The `bg-slate-50` background remains the
+    // active band's surface; the inset shadow draws its boundary.
     const threads = [
       makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
       makeThread(2, {
@@ -2167,8 +2290,11 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     // reads as continuous across the row.
     expect(activeLabel.className).toMatch(/bg-slate-50/);
     expect(activeAxis.className).toMatch(/bg-slate-50/);
-    expect(activeLabel.className).toMatch(/border-slate-200/);
-    expect(activeAxis.className).toMatch(/border-slate-200/);
+    // v30: the hairline is an inset box-shadow (non-layout), not a
+    // border-y placeholder (which used to reserve a 2 px gap between
+    // adjacent rows).
+    expect(activeLabel.className).toMatch(/shadow-\[inset_/);
+    expect(activeAxis.className).toMatch(/shadow-\[inset_/);
     // The inactive lane's cells do NOT carry the active tokens, so the
     // highlight is per-lane rather than global.
     const inactiveLabel = within(lanes[0]).getByTestId(
@@ -2179,6 +2305,10 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     ) as HTMLElement;
     expect(inactiveLabel.className).not.toMatch(/bg-slate-50/);
     expect(inactiveAxis.className).not.toMatch(/bg-slate-50/);
+    // Inactive rows must not carry the inset shadow either — otherwise
+    // the active state stops reading as distinct.
+    expect(inactiveLabel.className).not.toMatch(/shadow-\[inset_/);
+    expect(inactiveAxis.className).not.toMatch(/shadow-\[inset_/);
   });
 
   it('paints the active-highlight band at matched heights on label and axis by stretching both grid items to the row height', async () => {
@@ -2297,7 +2427,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     });
     await screen.findAllByTestId('thread-timeline-dot');
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // Wheel originating on a label cell has no effect — the wheel
     // bubbles to the axis-column wrapper but the handler returns early
@@ -2313,7 +2443,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
       );
     });
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // A wheel anywhere else inside the axis-column wrapper DOES scrub —
     // proving the listener is wired but scoped past the labels. One
@@ -2329,7 +2459,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
       );
     });
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${LANE_LEFT_PAD_PX}px`);
   });
 
@@ -2357,7 +2487,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     });
     await screen.findAllByTestId('thread-timeline-dot');
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // A click on a label cell with clientX=0 (where msg-a would land if
     // the axis click handler picked it up) must NOT move the playhead.
@@ -2365,8 +2495,45 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
       clientX: 0,
     });
     expect(
-      screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+  });
+
+  // v30 fix 3: the axis cell reserves a right-side pad mirroring the left
+  // pad so the rightmost large dot (6 px diameter centred on x = laneAxisWidth)
+  // does not clip into the column's right edge. The axis-cell's resolved
+  // width is `LANE_LEFT_PAD_PX + laneAxisWidth + LANE_RIGHT_PAD_PX`, and
+  // the inner axis-line `<span>` sits at `left = LANE_LEFT_PAD_PX` with
+  // `width = laneAxisWidth`. The trailing pad is therefore
+  // `axisCellWidth - axisLineLeft - axisLineWidth`. The structural
+  // contract we want to pin is `LANE_LEFT_PAD_PX === LANE_RIGHT_PAD_PX`
+  // (symmetric pads). Reading both off the rendered DOM avoids depending
+  // on an internal un-exported constant.
+  it('reserves symmetric left/right padding on the axis cell so the rightmost dot is not clipped (v30)', async () => {
+    const threads = [makeThread(1)];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const lane = await screen.findByTestId('thread-timeline-lane');
+    const axisCell = lane.querySelector('[data-timeline-axis]') as HTMLElement;
+    expect(axisCell).not.toBeNull();
+    // The axis line `<span>` is the only direct child of the axis cell
+    // with inline `left` AND `width` set in pixels (dots/playhead use
+    // either transform or no width). Pick it via that signature.
+    const axisLine = Array.from(
+      axisCell.querySelectorAll<HTMLElement>('span[aria-hidden="true"]'),
+    ).find(
+      (el) =>
+        /\d/.test(el.style.left ?? '') && /\d/.test(el.style.width ?? ''),
+    );
+    expect(axisLine).toBeDefined();
+    const axisLineLeft = parseFloat(axisLine!.style.left);
+    const axisLineWidth = parseFloat(axisLine!.style.width);
+    const axisCellWidth = parseFloat(axisCell.style.width);
+    const rightPad = axisCellWidth - axisLineLeft - axisLineWidth;
+    // Left pad mirrors right pad.
+    expect(rightPad).toBe(LANE_LEFT_PAD_PX);
+    // And the left pad itself is the exported constant — the axis line
+    // is anchored at exactly LANE_LEFT_PAD_PX from the cell's left edge.
+    expect(axisLineLeft).toBe(LANE_LEFT_PAD_PX);
   });
 });
 
@@ -2880,7 +3047,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead sits on the last message (msg-c at x=240).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
       const io = fake.instances[fake.instances.length - 1];
       const articles = within(
@@ -2922,7 +3089,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       // Playhead snapped to msg-a's x (0) — the topmost-visible message
       // wins.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${LANE_LEFT_PAD_PX}px`);
       // CRUCIAL: pane-scroll updates must NOT trigger an active-thread
       // switch (the pane is already inside the active subthread).
@@ -2970,7 +3137,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       // Playhead now at msg-a (x=0).
       await waitFor(() => {
         expect(
-          screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+          playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
         ).toBe(`${LANE_LEFT_PAD_PX}px`);
       });
       // While inside the guard window, emit an IO entry claiming
@@ -2998,7 +3165,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
         vi.useRealTimers();
       }
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${LANE_LEFT_PAD_PX}px`);
       // Sanity: the guard exists as a constant the production code reads.
       expect(PANE_SCROLL_PROGRAMMATIC_GUARD_MS).toBeGreaterThan(
@@ -3148,7 +3315,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead is on msg-b (the latest message, x=240).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Wheel-up: one sub-notch step back → cross-lane jump to msg-a on lane 1.
@@ -3224,7 +3391,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       }
       // The playhead is still at msg-a's x (0) — the state-based guard held.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${LANE_LEFT_PAD_PX}px`);
 
       // Now drain the rAF callbacks so the DOM-ready scroll fires (msg-a is
@@ -3261,7 +3428,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       }
       // The emit is now honoured — playhead moves to msg-b (x=240).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
@@ -3365,7 +3532,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // The playhead is now on msg-a (the oldest message, x=0).
       await waitFor(() => {
         expect(
-          screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+          playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
         ).toBe(`${LANE_LEFT_PAD_PX}px`);
       });
 
@@ -3413,7 +3580,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // guard has also expired. msg-b sits at index 1 → x=120px on the
       // shared axis.
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
@@ -3579,7 +3746,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead is on msg-c (the latest, x=240).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Wheel-up: one sub-notch step back → cross-lane jump child → parent.
@@ -3663,7 +3830,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // Counter is still held — playhead stays on msg-tail (x=120, derived
       // from its timestamp fraction along the 240px axis: 120s / 240s range).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
 
       // Now drain the rAF callbacks so the DOM-ready poll fires onScroll.
@@ -3701,7 +3868,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // the post-scroll IO ripple. In the broken v12 hand-off the playhead
       // would have snapped to msg-a (x=0).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();
@@ -3937,7 +4104,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // (x=120). If the counter had double-decremented and reached 0, the
       // emit would have snapped the playhead to msg-a (x=0).
       expect(
-        screen.getAllByTestId('thread-timeline-playhead')[0].style.left,
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
     } finally {
       fake.restore();

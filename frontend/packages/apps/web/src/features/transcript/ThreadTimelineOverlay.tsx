@@ -1712,12 +1712,29 @@ export function ThreadTimelineOverlay({
                   // axis cell so the band reads as one row), and an
                   // inactive sticky label paints `bg-white` (matching the
                   // body so axis dots cannot peek through).
+                  // The active-row visual treatment is a thin slate-200
+                  // hairline above and below the row. We render that hairline
+                  // as a pair of `inset box-shadow`s rather than `border-y`,
+                  // because `border-y border-transparent` (the previous
+                  // inactive placeholder used to keep active/inactive heights
+                  // equal) still reserves 1 px of layout on the top and 1 px
+                  // on the bottom. With `align-items: stretch` on the lane
+                  // grid, that placeholder showed up as a ~2 px transparent
+                  // stripe between adjacent rows — visible as a faint break
+                  // in the per-lane playhead column, even though all the
+                  // `<ul>`'s `gap-y-*` had already been removed in v28.
+                  // `box-shadow` is non-layout, so the active hairline can
+                  // paint without forcing every other row to reserve the
+                  // same vertical space, and adjacent rows now sit truly
+                  // edge-to-edge.
+                  const ACTIVE_HAIRLINE_SHADOW =
+                    'shadow-[inset_0_1px_0_0_rgb(226_232_240),inset_0_-1px_0_0_rgb(226_232_240)]';
                   const highlightClasses = isHighlighted
-                    ? 'border-y border-slate-200 bg-slate-50'
-                    : 'border-y border-transparent';
+                    ? `${ACTIVE_HAIRLINE_SHADOW} bg-slate-50`
+                    : '';
                   const labelHighlightClasses = isHighlighted
-                    ? 'border-y border-slate-200 bg-slate-50'
-                    : 'border-y border-transparent bg-white';
+                    ? `${ACTIVE_HAIRLINE_SHADOW} bg-slate-50`
+                    : 'bg-white';
                   // Collapse runs of 2+ consecutive small dots within
                   // this lane into one cluster mark so a long stretch of
                   // tool calls / meta lines no longer floods the
@@ -1843,10 +1860,20 @@ export function ThreadTimelineOverlay({
                         <span
                           aria-hidden="true"
                           data-testid="thread-timeline-playhead"
-                          className="pointer-events-none absolute top-0 h-full w-[2px] bg-indigo-500"
+                          // `left-0` plus `transform: translateX(...)` instead
+                          // of inline `left: <fractional px>`: at width 2 px,
+                          // a fractional `left` lets the browser straddle a
+                          // subpixel boundary so antialiasing paints ~1.5 px
+                          // on one side and ~0.5 px on the other — the bar
+                          // visibly shimmers between fat and thin as the
+                          // playhead steps across messages. `translateX` is
+                          // GPU-composited on the existing 2 px box so the
+                          // sprite keeps a stable 2 px footprint regardless
+                          // of where it lands on the subpixel grid.
+                          className="pointer-events-none absolute left-0 top-0 h-full w-[2px] bg-indigo-500"
                           style={{
-                            left: playheadX + LANE_LEFT_PAD_PX,
-                            transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
+                            transform: `translateX(${playheadX + LANE_LEFT_PAD_PX}px)`,
+                            transition: `transform ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
                           }}
                         />
                       </div>
