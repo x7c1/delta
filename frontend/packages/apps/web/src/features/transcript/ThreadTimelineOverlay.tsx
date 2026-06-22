@@ -713,6 +713,27 @@ export const TIMELINE_TOGGLE_BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50';
 
 /**
+ * Tailwind class string for the expanded-state jump-to-edge buttons (skip-back
+ * / skip-forward) that sit on the LEFT of the expanded header row.
+ *
+ * Visually intentionally lighter than the Timeline toggle on the right: no
+ * border, no fill, no shadow — just the icon in a muted slate, with a soft
+ * background tint on hover for click affordance. The icon itself matches the
+ * Timeline glyph's `h-3.5 w-3.5` size so the three header icons read as one
+ * set; the chrome around it is just what hover/disabled states need and
+ * nothing more, so the jump controls do not compete with the toggle pill
+ * (which is the primary control in the row).
+ *
+ * The `disabled:` variants neutralise the buttons when `sortedMessages` is
+ * empty (no messages to jump to); we keep them enabled when the playhead
+ * already sits at the edge, because re-clicking still bumps `scrubTick` and
+ * refreshes the horizontal scroll catch-up, which is a useful "snap me back"
+ * affordance.
+ */
+export const TIMELINE_JUMP_BUTTON_CLASS =
+  'inline-flex items-center justify-center rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed';
+
+/**
  * Glyph for the collapsed "Thread" toggle button: a stylised activity / signal
  * trace (a polyline of small peaks) so the button reads as a timeline at a
  * glance. Mirrors {@link TerminalIcon} (in `WorkspaceScreen`) in size and
@@ -733,6 +754,56 @@ function ThreadTimelineIcon({ className }: { className?: string }) {
       aria-hidden="true"
     >
       <path d="M3 12h3l3-7 4 14 3-7h5" />
+    </svg>
+  );
+}
+
+/**
+ * Glyph for the jump-to-start button: a Lucide-style skip-back icon — a
+ * left-pointing triangle with a short vertical bar pinned to the left edge,
+ * so the shape reads as "rewind to the start". Mirrors
+ * {@link ThreadTimelineIcon}'s stroke weight / line joins / viewBox so the
+ * three header icons read as a coherent set, and is always `aria-hidden`
+ * because the button carries its own accessible label.
+ */
+function SkipBackIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <polygon points="19,20 9,12 19,4" />
+      <line x1="5" y1="19" x2="5" y2="5" />
+    </svg>
+  );
+}
+
+/**
+ * Glyph for the jump-to-end button: the mirror of {@link SkipBackIcon} — a
+ * right-pointing triangle with a short vertical bar pinned to the right
+ * edge, reading as "skip to the end". Same stroke / join / viewBox as the
+ * other header icons.
+ */
+function SkipForwardIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <polygon points="5,4 15,12 5,20" />
+      <line x1="19" y1="5" x2="19" y2="19" />
     </svg>
   );
 }
@@ -1840,6 +1911,14 @@ export function ThreadTimelineOverlay({
       </button>
     );
   }
+  // Disable the jump buttons when there is nothing to jump to. The
+  // single-source flag matches `setActiveMessageIndex`'s own empty-list guard
+  // (L927) — calling it with no messages is a no-op anyway, but visibly
+  // dimming the buttons reads as "no targets" rather than "broken control".
+  // Clicking either button at the edge (e.g. "jump to start" when already at
+  // index 0) is intentionally still allowed — it bumps `scrubTick` which
+  // re-fires the horizontal-scroll catch-up, a useful "snap me back" gesture.
+  const noMessages = sortedMessages.length === 0;
   return (
     <section
       data-testid="thread-timeline-overlay"
@@ -1847,21 +1926,64 @@ export function ThreadTimelineOverlay({
       className="select-none rounded-md border border-slate-300 bg-white text-xs text-slate-600 shadow-md"
       aria-label="Subthread timeline"
     >
-      <button
-        type="button"
-        onClick={toggle}
-        data-testid="thread-timeline-toggle"
-        aria-expanded={expanded}
-        className="flex w-full items-center justify-between gap-2 rounded-md px-3 py-1.5 text-left text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
-      >
-        <span className="flex items-center gap-1.5">
-          <ThreadTimelineIcon className="h-3.5 w-3.5" />
+      {/* The expanded header is a two-region row:
+          LEFT  — the expand/collapse toggle (icon + "Timeline" label).
+                  The toggle is the primary control and sits in the first
+                  child position so the eye lands on it first when the
+                  header row enters view. No visible chevron — the
+                  button's `hover:bg-slate-50` carries the click
+                  affordance, and `aria-expanded` carries the
+                  open/collapsed state semantically for assistive tech.
+                  The toggle's own `px-3` provides the only left inset
+                  (12 px), matching the original single-pill layout.
+          RIGHT — two jump-to-edge buttons ([⏮][⏭]) for one-shot
+                  navigation to the very first / very last message across
+                  ALL lanes. They live in their own flex wrapper with no
+                  gap class so the two buttons sit flush against each
+                  other — they read as one "jump cluster", a quieter
+                  satellite to the toggle pill rather than two
+                  independent controls. The icons render at 12 px
+                  (`h-3 w-3`) — one notch smaller than the toggle's
+                  `h-3.5 w-3.5` — for the same "quieter satellite"
+                  reason. The jump buttons live outside the toggle so a
+                  click on either one does NOT collapse the timeline.
+                  The wrapper's `pr-3` keeps the right inset symmetric
+                  with the left (12 px before the rightmost jump
+                  button). */}
+      <div className="flex w-full items-center justify-between pr-1">
+        <button
+          type="button"
+          onClick={toggle}
+          data-testid="thread-timeline-toggle"
+          aria-expanded={expanded}
+          className="flex flex-1 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+        >
+          <span aria-hidden="true" className="text-slate-400">▾</span>
           Timeline
-        </span>
-        <span aria-hidden="true" className="text-slate-400">
-          ▾
-        </span>
-      </button>
+        </button>
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => setActiveMessageIndex(0)}
+            disabled={noMessages}
+            data-testid="thread-timeline-jump-start"
+            aria-label="Jump to timeline start"
+            className={TIMELINE_JUMP_BUTTON_CLASS}
+          >
+            <SkipBackIcon className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMessageIndex(sortedMessages.length - 1)}
+            disabled={noMessages}
+            data-testid="thread-timeline-jump-end"
+            aria-label="Jump to timeline end"
+            className={TIMELINE_JUMP_BUTTON_CLASS}
+          >
+            <SkipForwardIcon className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
       {expanded && (
         <div
           ref={bodyRef}
