@@ -1791,7 +1791,7 @@ export function ThreadTimelineOverlay({
           // Outer wrapper: vertical scroll only. Horizontal scroll lives on
           // the axis-column wrapper below so the sticky label cells can pin
           // to the left edge as the user pans a wide axis.
-          className="max-h-40 overflow-y-auto px-2 pb-1"
+          className="max-h-64 overflow-y-auto px-2 pb-1"
         >
           {lanes.length === 0 ? (
             <p className="px-1 py-1 text-[0.7rem] text-slate-400">
