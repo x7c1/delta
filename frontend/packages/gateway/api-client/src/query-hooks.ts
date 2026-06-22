@@ -158,16 +158,30 @@ export interface ThreadMessagesQueryEntry {
  * the message counts for every (sub)thread, not just the focused one. N+1 is
  * acceptable in MVP — a dedicated `all_threads=true` REST is intentionally
  * left for a later pass once usage shows the per-thread fan-out matters.
+ *
+ * `options.enabled` (default `true`, backward-compatible) gates the fan-out so
+ * callers can keep the hook mounted but suppress the per-thread fetches while
+ * their UI is hidden. At cold load the browser caps at six HTTP/1.1
+ * connections per host, so an always-on fan-out across many threads saturates
+ * the pool and stretches the focused thread's `useThreadMessagesQuery` behind
+ * it. Disabling here while the timeline is collapsed leaves the focused
+ * query untouched (it has its own `enabled` gate keyed on a non-null thread
+ * id), and because both hooks share `queryKeys.messages(threadId)` with the
+ * same `staleTime`, expanding the timeline later still reuses any messages
+ * the focused query has already pulled into cache.
  */
 export function useThreadsMessagesQueries(
   client: ApiClient,
   threadIds: ThreadId[],
+  options?: { enabled?: boolean },
 ): ThreadMessagesQueryEntry[] {
+  const enabled = options?.enabled ?? true;
   const results = useQueries({
     queries: threadIds.map((threadId) => ({
       queryKey: queryKeys.messages(threadId),
       queryFn: () => client.getThreadMessages(threadId),
       staleTime: MESSAGES_STALE_TIME,
+      enabled,
     })),
   });
   return results.map((result, index) => ({

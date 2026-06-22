@@ -741,9 +741,15 @@ export function ThreadTimelineOverlay({
   // N+1 is acceptable for MVP; the dedicated `all_threads=true` REST is
   // intentionally deferred. The query keys are shared with the focused
   // thread's `useThreadMessagesQuery`, so its messages are reused — no double
-  // request.
+  // request. The fan-out is gated on `expanded` so a collapsed timeline does
+  // not race the focused thread's load for the browser's six-per-host HTTP/1.1
+  // connection pool at cold start; the focused query keeps fetching through
+  // its own enabled gate and its result populates the same cache key, so the
+  // timeline reuses it the moment the user expands.
   const threadIds = useMemo(() => threads.map((t) => t.id), [threads]);
-  const messagesQueries = useThreadsMessagesQueries(client, threadIds);
+  const messagesQueries = useThreadsMessagesQueries(client, threadIds, {
+    enabled: expanded,
+  });
   const messagesByThread = useMemo(() => {
     const map = new Map<ThreadId, Message[]>();
     for (const entry of messagesQueries) {

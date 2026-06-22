@@ -251,6 +251,66 @@ describe('ThreadTimelineOverlay collapse toggle', () => {
   });
 });
 
+/**
+ * The collapsed overlay still mounts `useThreadsMessagesQueries` (so the
+ * `expanded` -> enabled transition lights it up without remount churn), but
+ * the per-thread fan-out must stay quiet until the user actually expands.
+ *
+ * Cold-load motivation: the browser caps at six HTTP/1.1 connections per host;
+ * an unconditional fan-out across many threads saturates the pool and stretches
+ * the focused-thread load that sits behind it. The fetched-per-thread state
+ * here is asserted on the mock `getThreadMessages`, not on a fetched-array
+ * reference, so the test stays insensitive to TanStack Query's internal
+ * `fetchStatus` plumbing.
+ */
+describe('ThreadTimelineOverlay collapsed query gating', () => {
+  beforeEach(() => {
+    resetGlobals();
+  });
+
+  it('does not fetch per-thread messages while collapsed', async () => {
+    const threads = [makeThread(1), makeThread(2), makeThread(3)];
+    const { apiClient } = renderOverlay({
+      threads,
+      messagesByThread: new Map(),
+    });
+    // The hook is mounted, but enabled=false: no thread-messages request fires.
+    // Flush microtasks so any (incorrect) auto-fetch would have shown up.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(apiClient.getThreadMessages).not.toHaveBeenCalled();
+  });
+
+  it('fetches per-thread messages once expanded by the user', async () => {
+    const threads = [makeThread(1), makeThread(2), makeThread(3)];
+    const { apiClient } = renderOverlay({
+      threads,
+      messagesByThread: new Map(),
+    });
+    expect(apiClient.getThreadMessages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('thread-timeline-toggle'));
+    await waitFor(() => {
+      expect(apiClient.getThreadMessages).toHaveBeenCalledTimes(threads.length);
+    });
+    const calledIds = vi
+      .mocked(apiClient.getThreadMessages)
+      .mock.calls.map((call) => call[0]);
+    expect(new Set(calledIds)).toEqual(new Set([1, 2, 3]));
+  });
+
+  it('fetches all threads on mount when the expanded preference is restored', async () => {
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    const threads = [makeThread(1), makeThread(2)];
+    const { apiClient } = renderOverlay({
+      threads,
+      messagesByThread: new Map(),
+    });
+    await waitFor(() => {
+      expect(apiClient.getThreadMessages).toHaveBeenCalledTimes(threads.length);
+    });
+  });
+});
+
 describe('ThreadTimelineOverlay lane labels', () => {
   beforeEach(() => {
     resetGlobals();
