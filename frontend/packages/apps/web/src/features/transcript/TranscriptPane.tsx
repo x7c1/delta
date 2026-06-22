@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -307,6 +308,30 @@ export function TranscriptPane({
     }
     return null;
   }, [renderedMessages]);
+
+  // Stabilize the per-message `onSelectQuote` callback so MessageItem (memoized)
+  // does not re-render every item on unrelated state churn (timeline scrub,
+  // branch-chip hover, bottom-reserve measurement, etc.). The dependency list
+  // is just the active thread id and the zustand setter (both stable across
+  // those updates), so the callback identity flips only when the user actually
+  // navigates to a different thread — exactly when a fresh closure is needed.
+  const activeThreadId = activeThread?.id ?? null;
+  const handleSelectQuote = useCallback(
+    (msg: Message, quote: string) => {
+      if (!activeThreadId) {
+        return;
+      }
+      // Branch-from-quote works on closed sessions too: the branch send
+      // resumes the session before creating the child thread, so an old
+      // conversation can be picked up from a selected passage.
+      setBranchOrigin({
+        parentThreadId: activeThreadId,
+        semanticParentUuid: msg.uuid,
+        locatorQuote: quote,
+      });
+    },
+    [activeThreadId, setBranchOrigin],
+  );
 
   // Stick-to-bottom: auto-scroll the transcript when new content arrives, but
   // only while the user is already near the bottom (so reading scrollback is
@@ -1381,16 +1406,7 @@ export function TranscriptPane({
               message={message}
               pairing={pairing}
               isLatest={message.uuid === latestAssistantUuid}
-              // Branch-from-quote works on closed sessions too: the branch send
-              // resumes the session before creating the child thread, so an old
-              // conversation can be picked up from a selected passage.
-              onSelectQuote={(msg, quote) =>
-                setBranchOrigin({
-                  parentThreadId: activeThread!.id,
-                  semanticParentUuid: msg.uuid,
-                  locatorQuote: quote,
-                })
-              }
+              onSelectQuote={handleSelectQuote}
             />
             {children.length > 0 && (
               <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">

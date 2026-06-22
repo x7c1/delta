@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { Profiler, type ProfilerOnRenderCallback } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ContentBlock, Message, MessageRole } from '@delta/wire-gen';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -420,5 +421,81 @@ describe('MessageItem', () => {
     expect(popover.textContent).not.toMatch(/token/i);
     expect(popover.textContent).not.toMatch(/cache/i);
     expect(popover.textContent).not.toMatch(/cost/i);
+  });
+
+  // The cross-lane jump in the transcript pane re-renders the whole list when
+  // unrelated state changes (timeline scrub, hover, bottom-reserve measurement).
+  // Wrapping MessageItem with React.memo plus stabilizing the parent's callback
+  // props lets each row bail when its inputs are unchanged. Without this, the N
+  // items pay full Markdown / stringifyContent cost on every parent update.
+  describe('React.memo bail-out', () => {
+    it('is wrapped in React.memo (carries the memo $$typeof tag)', () => {
+      // A structural sanity check: the export is the memoized object, not the
+      // raw function. This guards against an accidental future refactor that
+      // drops the wrapper.
+      const memoSymbol = Symbol.for('react.memo');
+      expect((MessageItem as unknown as { $$typeof: symbol }).$$typeof).toBe(
+        memoSymbol,
+      );
+    });
+
+    it('skips its render body when props are referentially equal (memo bail)', () => {
+      // Behavioural proof using React.Profiler: when MessageItem's props are
+      // shallow-equal between renders, memo bails and the subtree contributes
+      // no body work. We compare `actualDuration` between (a) re-rendering
+      // with the SAME prop references and (b) re-rendering with a FRESH
+      // callback reference. Profiler itself has a tiny constant overhead, so
+      // we assert a large multiplicative gap rather than a hard zero — when
+      // memo bails the cost is dominated by Profiler overhead, while when the
+      // body re-executes the full Markdown / formatLocalDateTime / blockSummary
+      // pipeline runs and the duration is meaningfully larger.
+
+      const message = makeMessage('assistant', 'memo target');
+      const stableCallback = vi.fn();
+
+      // Pass 1: capture an "update with no prop change" duration.
+      const onRenderStable = vi.fn<ProfilerOnRenderCallback>();
+      const { rerender: rerenderStable, unmount: unmountStable } = render(
+        <Profiler id="memo-stable" onRender={onRenderStable}>
+          <MessageItem message={message} onSelectQuote={stableCallback} />
+        </Profiler>,
+      );
+      rerenderStable(
+        <Profiler id="memo-stable" onRender={onRenderStable}>
+          <MessageItem message={message} onSelectQuote={stableCallback} />
+        </Profiler>,
+      );
+      const stableUpdate = onRenderStable.mock.calls.find(
+        (call) => call[1] === 'update',
+      );
+      expect(stableUpdate).toBeDefined();
+      const stableDuration = stableUpdate![2] as number;
+      unmountStable();
+
+      // Pass 2: capture an "update with a fresh callback identity" duration.
+      const onRenderChanging = vi.fn<ProfilerOnRenderCallback>();
+      const { rerender: rerenderChanging } = render(
+        <Profiler id="memo-changing" onRender={onRenderChanging}>
+          <MessageItem message={message} onSelectQuote={() => {}} />
+        </Profiler>,
+      );
+      rerenderChanging(
+        <Profiler id="memo-changing" onRender={onRenderChanging}>
+          <MessageItem message={message} onSelectQuote={() => {}} />
+        </Profiler>,
+      );
+      const changingUpdate = onRenderChanging.mock.calls.find(
+        (call) => call[1] === 'update',
+      );
+      expect(changingUpdate).toBeDefined();
+      const changingDuration = changingUpdate![2] as number;
+
+      // Memo-bailed update should be substantially cheaper than a full body
+      // re-render. A 2x gap is conservative — in practice the ratio is much
+      // larger (the bailed update is essentially Profiler overhead, while the
+      // changing update runs the entire MessageItem body) — but it leaves
+      // enough headroom for CI scheduler jitter.
+      expect(stableDuration).toBeLessThan(changingDuration / 2);
+    });
   });
 });
