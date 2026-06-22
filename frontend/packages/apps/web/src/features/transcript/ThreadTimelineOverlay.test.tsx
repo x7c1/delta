@@ -1875,6 +1875,29 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(grid.style.alignItems).toBe('stretch');
   });
 
+  it('carries no non-zero row-gap class on the lane grid so per-lane playhead spans align edge-to-edge across rows', async () => {
+    // Each lane renders its own per-lane playhead `<span>`. Any non-zero
+    // row gap on the lane `<ul>` shows as a visible break in the
+    // otherwise continuous vertical playhead line — a 2px `gap-y-0.5`
+    // gap, for instance, paints a 2px gap between every adjacent
+    // playhead segment. Pin the contract: the grid must not carry any
+    // `gap-y-*` class except `gap-y-0` (Tailwind's default row-gap is
+    // already 0, so the natural shape is to drop the class entirely).
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const grid = await screen.findByTestId('thread-timeline-lane-grid');
+    // Reject any `gap-y-<non-zero>` token. `gap-y-0` would still pass,
+    // but the natural shape is no class at all.
+    expect(grid.className).not.toMatch(/(?:^|\s)gap-y-(?!0(?:\s|$))/);
+  });
+
   it('stretches the lane grid to the full axis content width via width:max-content + minWidth:100% so sticky labels have a containing block to pin against', async () => {
     // The label cell uses `position: sticky; left: 0`, and sticky only
     // moves within its containing block — for a grid item that block is

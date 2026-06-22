@@ -1640,12 +1640,14 @@ export function ThreadTimelineOverlay({
                   each row's two cells on the same baseline, eliminating
                   the cumulative drift the prior flex layout suffered when
                   the label cell's padding inflated its height past the
-                  axis cell's fixed pixel height. Row gap mirrors the prior
-                  `gap-0.5` between lane rows. */}
+                  axis cell's fixed pixel height. The lane rows share
+                  `row-gap: 0` (the Tailwind default — no `gap-y-*` class)
+                  so the per-lane playhead spans align edge-to-edge across
+                  rows; any non-zero row gap would show as a visible break
+                  in the otherwise continuous vertical playhead line. */}
               <ul
                 data-testid="thread-timeline-lane-grid"
                 role="list"
-                className="gap-y-0.5"
                 // `width: max-content` and `minWidth: 100%` together stretch
                 // the grid container to the natural width of its widest row
                 // — the axis cell carries an explicit pixel width
