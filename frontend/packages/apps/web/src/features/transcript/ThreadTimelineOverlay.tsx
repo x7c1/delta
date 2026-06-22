@@ -1926,37 +1926,23 @@ export function ThreadTimelineOverlay({
       className="select-none rounded-md border border-slate-300 bg-white text-xs text-slate-600 shadow-md"
       aria-label="Subthread timeline"
     >
-      {/* The expanded header is a three-region row:
-          LEFT  — two jump-to-edge buttons ([⏮][⏭]) for one-shot navigation
-                  to the very first / very last message across ALL lanes.
-                  They live outside the toggle button so a click on either
-                  one does NOT collapse the timeline.
-          MID   — a flex spacer.
-          RIGHT — the existing expand/collapse toggle (icon + "Timeline"
-                  label + ▾ chevron), unchanged from the previous layout
-                  except for its position. */}
-      <div className="flex w-full items-center gap-1.5 px-2">
-        <button
-          type="button"
-          onClick={() => setActiveMessageIndex(0)}
-          disabled={noMessages}
-          data-testid="thread-timeline-jump-start"
-          aria-label="Jump to timeline start"
-          className={TIMELINE_JUMP_BUTTON_CLASS}
-        >
-          <SkipBackIcon className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveMessageIndex(sortedMessages.length - 1)}
-          disabled={noMessages}
-          data-testid="thread-timeline-jump-end"
-          aria-label="Jump to timeline end"
-          className={TIMELINE_JUMP_BUTTON_CLASS}
-        >
-          <SkipForwardIcon className="h-3.5 w-3.5" />
-        </button>
-        <span className="flex-1" />
+      {/* The expanded header is a two-region row:
+          LEFT  — the expand/collapse toggle (icon + "Timeline" label + ▾
+                  chevron). The toggle is the primary control and sits in
+                  the first child position so the eye lands on it first
+                  when the header row enters view.
+          RIGHT — two jump-to-edge buttons ([⏮][⏭]) for one-shot
+                  navigation to the very first / very last message across
+                  ALL lanes. They live in their own flex wrapper with no
+                  gap class so the two buttons sit flush against each
+                  other — they read as one "jump cluster", a quieter
+                  satellite to the toggle pill rather than two
+                  independent controls. The icons render at 12 px
+                  (`h-3 w-3`) — one notch smaller than the toggle's
+                  `h-3.5 w-3.5` — for the same "quieter satellite"
+                  reason. The jump buttons live outside the toggle so a
+                  click on either one does NOT collapse the timeline. */}
+      <div className="flex w-full items-center justify-between px-2">
         <button
           type="button"
           onClick={toggle}
@@ -1972,6 +1958,28 @@ export function ThreadTimelineOverlay({
             ▾
           </span>
         </button>
+        <div className="flex items-center">
+          <button
+            type="button"
+            onClick={() => setActiveMessageIndex(0)}
+            disabled={noMessages}
+            data-testid="thread-timeline-jump-start"
+            aria-label="Jump to timeline start"
+            className={TIMELINE_JUMP_BUTTON_CLASS}
+          >
+            <SkipBackIcon className="h-3 w-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMessageIndex(sortedMessages.length - 1)}
+            disabled={noMessages}
+            data-testid="thread-timeline-jump-end"
+            aria-label="Jump to timeline end"
+            className={TIMELINE_JUMP_BUTTON_CLASS}
+          >
+            <SkipForwardIcon className="h-3 w-3" />
+          </button>
+        </div>
       </div>
       {expanded && (
         <div
