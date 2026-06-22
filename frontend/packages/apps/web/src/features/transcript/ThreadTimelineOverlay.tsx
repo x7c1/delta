@@ -1347,6 +1347,26 @@ export function ThreadTimelineOverlay({
   // the axis column's horizontal viewport. The lane axis is fixed-width so
   // this only matters when the viewport is narrower than the axis (e.g. a
   // narrow side panel); when the axis fits, no scroll is needed.
+  //
+  // v31 fix 1: re-centre as soon as the playhead crosses INTO the edge
+  // margin, not only after it has gone completely off-screen. Without the
+  // margin, the scroll catch-up fires one full edge-width late and the
+  // playhead visibly disappears for ~one viewport before the scroll lands.
+  //
+  // v31 fix 2 (label-width offset): under the v20 grid layout the same
+  // scroll container hosts BOTH the sticky label column AND the axis cell
+  // — `<ul style="grid-template-columns: max-content 1fr; width: max-content">`
+  // — so scroll-content x=0 sits at the label cell's left edge, not at the
+  // axis's left edge. The dots' content-space x is therefore
+  // `labelWidth + LANE_LEFT_PAD_PX + xInAxis`, where the leading
+  // `labelWidth` only enters via the axis cell's `offsetLeft` (the prior
+  // v9 layout did not have this offset because labels lived outside the
+  // scroll container). The previous math used `LANE_LEFT_PAD_PX +
+  // xInAxis` alone, so the visibility check sat `labelWidth` pixels to
+  // the left of where the playhead actually paints — early-message
+  // playheads read as "in view" while their on-screen position was
+  // already past the right edge, and late-message playheads triggered a
+  // scroll past the real content.
   useEffect(() => {
     if (scrubTick === 0) {
       return;
@@ -1355,18 +1375,41 @@ export function ThreadTimelineOverlay({
     if (!scrollEl || activeMessage === null) {
       return;
     }
-    // The playhead's x is its position inside the axis (from the global x
-    // map) plus the axis's left pad (so the leftmost large dot is not
-    // clipped). The axis row starts at x=0 inside the axis scroll
-    // container, so the left pad is the only adjustment needed (unlike
-    // the v9 layout where the sticky label sat in the same scroll
-    // container).
-    const playheadInAxis =
-      (messagePxByUuid.get(activeMessage.uuid) ?? 0) + LANE_LEFT_PAD_PX;
+    // The first axis cell shares its content-space origin with every
+    // other lane (one grid column, same `<ul>`), so its `offsetLeft` is
+    // the label-column width inside the scroll container. Using the live
+    // measurement (rather than a hard-coded width) keeps the fix robust
+    // against future label-width tweaks. Falling back to 0 leaves us in
+    // the v30 coord system if the query misses (e.g. before first paint).
+    const axisEl = scrollEl.querySelector<HTMLElement>('[data-timeline-axis]');
+    const labelOffsetPx = axisEl?.offsetLeft ?? 0;
+    const playheadInContent =
+      labelOffsetPx +
+      (messagePxByUuid.get(activeMessage.uuid) ?? 0) +
+      LANE_LEFT_PAD_PX;
+    // Threshold-based scroll-follow. The margin keeps the playhead inside
+    // a comfortable band away from both viewport edges so the bar never
+    // visibly vanishes during a scrub: as the user steps the playhead
+    // toward an edge, the scroll re-centres BEFORE the bar reaches the
+    // boundary. The bound is `max(80, clientWidth / 5)`: 80 px is a hard
+    // floor so the threshold is meaningful even on narrow panels, and
+    // 20% of the viewport scales the margin up gracefully on wider ones.
+    // On a 600 px viewport the margin is 120 px (a fifth); on a 200 px
+    // panel it's the 80 px floor. Re-centering puts the playhead at the
+    // viewport's midpoint — the same generous landing the off-screen
+    // case used in v30 — which maximises the distance to either edge
+    // before the next step can trigger another scroll.
+    const margin = Math.max(80, scrollEl.clientWidth / 5);
     const viewLeft = scrollEl.scrollLeft;
     const viewRight = viewLeft + scrollEl.clientWidth;
-    if (playheadInAxis < viewLeft || playheadInAxis > viewRight) {
-      scrollEl.scrollLeft = Math.max(0, playheadInAxis - scrollEl.clientWidth / 2);
+    if (
+      playheadInContent < viewLeft + margin ||
+      playheadInContent > viewRight - margin
+    ) {
+      scrollEl.scrollLeft = Math.max(
+        0,
+        playheadInContent - scrollEl.clientWidth / 2,
+      );
     }
   }, [scrubTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 

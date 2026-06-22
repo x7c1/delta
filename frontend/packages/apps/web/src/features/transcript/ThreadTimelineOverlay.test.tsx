@@ -4363,3 +4363,276 @@ describe('ThreadTimelineOverlay article-anchored uuid selector (v16)', () => {
     }
   });
 });
+
+/**
+ * Horizontal scroll-follow effect (v31).
+ *
+ * The effect runs after a user-driven navigation (`scrubTick > 0`) and is
+ * responsible for keeping the playhead inside the axis-column wrapper's
+ * horizontal viewport when the viewport is narrower than the rendered
+ * content (a wide axis + a fixed-width side panel). v31 introduces two
+ * changes to the math:
+ *
+ *  1. A threshold margin so the scroll re-centres BEFORE the playhead
+ *     reaches the edge, not only after it has gone completely off-screen.
+ *     Without it the vertical playhead bar visibly disappears for one
+ *     viewport-width while the user keeps scrubbing.
+ *  2. The visibility check is now in the SAME coordinate system as
+ *     `scrollEl.scrollLeft`. Under the v20 grid layout the scroll content
+ *     contains BOTH the sticky label column AND the axis cell — so a
+ *     dot's content-space x is `labelWidth + LANE_LEFT_PAD_PX + xInAxis`,
+ *     not `LANE_LEFT_PAD_PX + xInAxis` (which is what the v30 effect
+ *     used). The fix derives `labelWidth` live from the first axis
+ *     cell's `offsetLeft`.
+ *
+ * jsdom does not run CSS, so `clientWidth`, `offsetLeft`, and `scrollLeft`
+ * are all 0 by default. The helpers below stub the layout we need on a
+ * per-element basis (using `Object.defineProperty` rather than spying on
+ * the prototype, so each test scopes its overrides cleanly).
+ */
+describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+  });
+
+  /**
+   * Override a layout property on a single DOM element. Returns a
+   * cleanup the test should call to restore the original (so a later
+   * test in the same file is not poisoned by the stub).
+   */
+  function defineLayoutProp(
+    el: HTMLElement,
+    prop: 'clientWidth' | 'offsetLeft',
+    value: number,
+  ): void {
+    Object.defineProperty(el, prop, {
+      configurable: true,
+      get: () => value,
+    });
+  }
+
+  it('treats `playheadInContent` as `labelOffset + LANE_LEFT_PAD_PX + xInAxis` so the visibility check is in the same coord system as scrollLeft', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          // Three large messages so a wheel-up from msg-c steps the
+          // playhead onto msg-b (x=0.5 → 120 px inside the axis).
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]');
+    expect(axisEl).not.toBeNull();
+    // Narrow viewport so the visibility check actually runs.
+    defineLayoutProp(wrapper, 'clientWidth', 200);
+    // Pretend the label column is 100 px wide. The axis cell's
+    // `offsetLeft` is the only signal the effect uses to recover that
+    // width, so this is the entire label-offset surface area.
+    defineLayoutProp(axisEl as HTMLElement, 'offsetLeft', 100);
+    // Pre-position the scroll well past the playhead's would-be
+    // position under the OLD (v30) math. msg-b at x=120 + LANE_LEFT_PAD
+    // is 136 in axis-local coords; the v30 effect would compare 136
+    // against `viewLeft=300`, see it as "to the left of viewport", and
+    // scroll to `max(0, 136 - 100) = 36`. But the dot actually paints
+    // at content x = 100 + 136 = 236, which IS visible inside
+    // [300, 500] only if scrollLeft <= 236 — i.e. the v30 fix would
+    // SHIFT the visible playhead even though it was already on screen
+    // had the math been correct.
+    wrapper.scrollLeft = 300;
+    // Scrub via wheel-up to step from msg-c → msg-b (bumps scrubTick).
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    // Under v31 the effect sees playheadInContent = 100 + 120 + 16 =
+    // 236, which is to the LEFT of the current view [300, 500], so it
+    // re-centres to max(0, 236 - 100) = 136 — a value that lands the
+    // dot's true content-space position (236) right at the viewport
+    // midpoint (136 + 100). The exact midpoint anchor is the assertion:
+    // half a clientWidth past the new scrollLeft must equal the dot's
+    // content x.
+    await waitFor(() => {
+      // playheadInContent = labelOffset + xInAxis + LANE_LEFT_PAD
+      const playheadInContent =
+        100 + 120 + LANE_LEFT_PAD_PX; // = 236
+      const expectedScrollLeft = Math.max(
+        0,
+        playheadInContent - 200 / 2,
+      ); // 200 = clientWidth
+      expect(wrapper.scrollLeft).toBe(expectedScrollLeft);
+    });
+  });
+
+  it('re-centres as soon as the playhead crosses INTO the edge margin, not only after it has left the viewport', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]');
+    expect(axisEl).not.toBeNull();
+    // 600 px viewport → margin = max(80, 600/5) = 120 px.
+    defineLayoutProp(wrapper, 'clientWidth', 600);
+    // No label offset for this test: we want to isolate the margin
+    // behaviour from the label-offset behaviour exercised above.
+    defineLayoutProp(axisEl as HTMLElement, 'offsetLeft', 0);
+    // Position the viewport so msg-b's playhead sits just INSIDE the
+    // visible area but well INSIDE the right-edge margin band — the v30
+    // effect (which only fires when the playhead is past the edge)
+    // would leave scrollLeft untouched.
+    //
+    //   msg-b at xInAxis = 120 + LANE_LEFT_PAD = 136
+    //   viewLeft = 0, viewRight = 600
+    //   right-edge margin band = [600 - 120, 600] = [480, 600]
+    //   Pick a position where playheadInContent (= 136) sits well
+    //   inside the LEFT margin band [0, 120] so the v30 effect (no
+    //   margin) does nothing — only v31 must fire.
+    //
+    // The cleanest setup: leave scrollLeft at 0 and assert that the
+    // initial-step settle still triggers a re-centre because the
+    // playhead at 136 sits inside the [0, 120] left-edge band when
+    // viewLeft=0 — i.e. 136 < 0 + 120? No, 136 > 120, so we need a
+    // different scenario. Bump viewLeft to 30 so the band becomes
+    // [30, 150]: 136 is inside it.
+    wrapper.scrollLeft = 30;
+    // Bump scrubTick by scrubbing via wheel.
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    // Expected: re-centred to 136 - 300 (clientWidth/2) = -164 → clamped to 0.
+    await waitFor(() => {
+      expect(wrapper.scrollLeft).toBe(0);
+    });
+  });
+
+  it('still re-centres when the playhead has gone completely off-screen', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]');
+    expect(axisEl).not.toBeNull();
+    defineLayoutProp(wrapper, 'clientWidth', 200);
+    defineLayoutProp(axisEl as HTMLElement, 'offsetLeft', 0);
+    // The previous viewport sits to the RIGHT of msg-b (which lives at
+    // x = 120 + 16 = 136). Scroll past it so msg-b is fully off-screen.
+    wrapper.scrollLeft = 400;
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    // The off-screen branch re-centres to max(0, 136 - 100) = 36.
+    await waitFor(() => {
+      expect(wrapper.scrollLeft).toBe(36);
+    });
+  });
+
+  it('axisScrollRef points at the wrapper that hosts both the sticky labels and the axis cells (one horizontal scroll surface, label-width baked in)', async () => {
+    // The "label-width hypothesis" check from v31. Confirms that:
+    //  - axisScrollRef's element is the same node tagged
+    //    `data-testid="thread-timeline-axis-column"`.
+    //  - That node DOES contain the sticky label cells — i.e. the
+    //    scroll content's x=0 sits at the label column's left edge,
+    //    not at the axis cell's left edge. (Used as the contract that
+    //    justifies the label-offset correction in the scroll-follow
+    //    effect.)
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const wrapper = await screen.findByTestId(
+      'thread-timeline-axis-column',
+    );
+    // The wrapper is what carries the horizontal scrollbar.
+    expect(wrapper.className).toContain('overflow-x-auto');
+    // Sticky labels live INSIDE this wrapper (they share the grid
+    // container so they can pin to the wrapper's left edge as the
+    // axis pans). If they were outside the scroll content, the
+    // label-width offset correction would be unnecessary.
+    const labels = within(wrapper).getAllByTestId(
+      'thread-timeline-lane-label',
+    );
+    expect(labels.length).toBeGreaterThan(0);
+    // And the axis cells live inside it too.
+    const axisCells = wrapper.querySelectorAll('[data-timeline-axis]');
+    expect(axisCells.length).toBe(labels.length);
+  });
+});
