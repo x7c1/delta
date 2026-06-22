@@ -1956,7 +1956,7 @@ export function ThreadTimelineOverlay({
           onClick={toggle}
           data-testid="thread-timeline-toggle"
           aria-expanded={expanded}
-          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          className="flex flex-1 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
           <span aria-hidden="true" className="text-slate-400">▾</span>
           Timeline
