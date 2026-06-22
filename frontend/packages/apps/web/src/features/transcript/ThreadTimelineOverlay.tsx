@@ -1406,10 +1406,16 @@ export function ThreadTimelineOverlay({
       playheadInContent < viewLeft + margin ||
       playheadInContent > viewRight - margin
     ) {
-      scrollEl.scrollLeft = Math.max(
-        0,
-        playheadInContent - scrollEl.clientWidth / 2,
-      );
+      // Use the native smooth-scroll API so the re-centre animates instead
+      // of snapping. A direct `scrollLeft = ...` assignment causes a visible
+      // jump as the playhead approaches the viewport edge; `scrollTo` lets
+      // the browser interpolate, and it also honours `prefers-reduced-motion`
+      // automatically — users who have disabled motion still get an instant
+      // jump via the same code path, with no explicit branch on our side.
+      scrollEl.scrollTo({
+        left: Math.max(0, playheadInContent - scrollEl.clientWidth / 2),
+        behavior: 'smooth',
+      });
     }
   }, [scrubTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 
@@ -1913,7 +1919,7 @@ export function ThreadTimelineOverlay({
                           // GPU-composited on the existing 2 px box so the
                           // sprite keeps a stable 2 px footprint regardless
                           // of where it lands on the subpixel grid.
-                          className="pointer-events-none absolute left-0 top-0 h-full w-[2px] bg-indigo-500"
+                          className="pointer-events-none absolute left-0 top-0 h-full w-[2px] bg-slate-500"
                           style={{
                             transform: `translateX(${playheadX + LANE_LEFT_PAD_PX}px)`,
                             transition: `transform ${PLAYHEAD_TRANSITION_MS}ms ease-out`,

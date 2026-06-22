@@ -1239,6 +1239,30 @@ describe('ThreadTimelineOverlay playhead', () => {
       expect(ph.style.transition).not.toContain('left');
     }
   });
+
+  // The playhead's bar colour reuses the dark-gray Tailwind token used by the
+  // navigator's rate-limit meter and the composer's context-usage progress
+  // bar (both `bg-slate-500`), so all three progress-style indicators read as
+  // one visual family. An earlier indigo accent (`bg-indigo-500`) clashed with
+  // the surrounding UI; this test pins the chosen token so a future style
+  // refactor cannot silently regress the unification.
+  it('uses the shared dark-gray progress-bar token, not the indigo accent', async () => {
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    renderOverlay({ threads, messagesByThread: new Map() });
+    const playheads = await screen.findAllByTestId('thread-timeline-playhead');
+    expect(playheads.length).toBeGreaterThanOrEqual(1);
+    for (const ph of playheads) {
+      expect(ph.className).toContain('bg-slate-500');
+      expect(ph.className).not.toContain('bg-indigo-500');
+    }
+  });
 });
 
 describe('ThreadTimelineOverlay wheel calculator', () => {
@@ -4598,6 +4622,77 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
     await waitFor(() => {
       expect(wrapper.scrollLeft).toBe(36);
     });
+  });
+
+  it('re-centres via scrollTo({ behavior: "smooth" }) so the auto-scroll animates instead of snapping', async () => {
+    // Re-install the mock so this test owns the call log (the suite-level
+    // `beforeEach` ran before this test body started, but its mock is shared
+    // with any earlier assertions; capturing a fresh reference makes the
+    // assertion local to this test).
+    const scrollToMock = vi.fn(function (
+      this: HTMLElement,
+      options: ScrollToOptions,
+    ) {
+      if (typeof options.left === 'number') {
+        this.scrollLeft = options.left;
+      }
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      writable: true,
+      value: scrollToMock,
+    });
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]');
+    expect(axisEl).not.toBeNull();
+    defineLayoutProp(wrapper, 'clientWidth', 200);
+    defineLayoutProp(axisEl as HTMLElement, 'offsetLeft', 0);
+    // Same "playhead fully off-screen" scenario as the previous test, so we
+    // know the re-centre branch fires deterministically.
+    wrapper.scrollLeft = 400;
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(scrollToMock).toHaveBeenCalled();
+    });
+    // Every call must use the smooth animation API, not a positional or
+    // behavior-less form. Without `behavior: 'smooth'` the auto-scroll
+    // snaps and the user sees a visible jump as the playhead approaches
+    // the viewport edge.
+    for (const call of scrollToMock.mock.calls) {
+      expect(call[0]).toMatchObject({ behavior: 'smooth' });
+      expect(typeof (call[0] as ScrollToOptions).left).toBe('number');
+    }
   });
 
   it('axisScrollRef points at the wrapper that hosts both the sticky labels and the axis cells (one horizontal scroll surface, label-width baked in)', async () => {
