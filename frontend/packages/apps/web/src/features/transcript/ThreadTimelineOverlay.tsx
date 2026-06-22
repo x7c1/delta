@@ -1624,11 +1624,11 @@ export function ThreadTimelineOverlay({
         data-testid="thread-timeline-toggle"
         data-expanded="false"
         aria-expanded={false}
-        aria-label="Thread"
+        aria-label="Timeline"
         className={TIMELINE_TOGGLE_BUTTON_CLASS}
       >
         <ThreadTimelineIcon className="h-3.5 w-3.5" />
-        Thread
+        Timeline
       </button>
     );
   }
@@ -1648,7 +1648,7 @@ export function ThreadTimelineOverlay({
       >
         <span className="flex items-center gap-1.5">
           <ThreadTimelineIcon className="h-3.5 w-3.5" />
-          Thread
+          Timeline
         </span>
         <span aria-hidden="true" className="text-slate-400">
           ▾
