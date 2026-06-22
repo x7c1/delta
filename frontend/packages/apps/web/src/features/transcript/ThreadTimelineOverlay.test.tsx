@@ -307,13 +307,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('renders exactly one unified playhead spanning the full lane grid height (v23 Improvement 3)', async () => {
-    // v23: the per-lane playhead segments were merged into a SINGLE
-    // `<span>` placed at the grid's column 2 spanning every row, so the
-    // line is continuous over the gaps between rows instead of broken
-    // into one short segment per lane. The track wrapper anchors the
-    // absolute playhead inside the axis column (no need to measure the
-    // dynamically-sized label column width).
+  it('renders one playhead per lane so the scrub indicator scrolls with the body', async () => {
     const threads = [
       makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
       makeThread(2, {
@@ -324,27 +318,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     ];
     renderOverlay({ threads, messagesByThread: new Map() });
     const playheads = await screen.findAllByTestId('thread-timeline-playhead');
-    expect(playheads).toHaveLength(1);
-    const playhead = playheads[0];
-    // Full-height inline style so the line covers every row (and the
-    // gaps between them) without any per-lane copy.
-    expect(playhead.style.height).toBe('100%');
-    // The `absolute` token comes from the Tailwind class chain (not
-    // inline style); pin the class so a refactor that moves to inline
-    // positioning surfaces here.
-    expect(playhead.className).toMatch(/(^|\s)absolute(\s|$)/);
-    // The track wrapper is a child of the `<ul>` placed at column 2,
-    // every row — i.e., the axis column — so the playhead's `left`
-    // is relative to the axis (no labelColumnWidth math needed).
-    const track = screen.getByTestId('thread-timeline-playhead-track');
-    expect(track.style.gridColumn).toBe('2');
-    expect(track.style.gridRow).toBe('1 / -1');
-    // The playhead is a direct child of the track wrapper, which lives
-    // directly under the `<ul>` so the line spans every row.
-    expect(playhead.parentElement).toBe(track);
-    expect(track.parentElement?.getAttribute('data-testid')).toBe(
-      'thread-timeline-lane-grid',
-    );
+    expect(playheads).toHaveLength(2);
   });
 
   it('does not navigate when a dot is merely hovered (no hover-jump)', async () => {
@@ -1817,23 +1791,18 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
   });
 
-  it('uses CSS Grid with a max-content label column and stretches rows so both cells paint the same vertical extent', async () => {
+  it('uses CSS Grid with a max-content label column for the lane container', async () => {
     // Structural contract: the lane `<ul>` is a grid with two columns
-    // sized `max-content 1fr`, and rows are stretched via
-    // `align-items: stretch` (the v23 Improvement 2 change) so both the
-    // label cell and the axis cell occupy the full row height — the
-    // active-lane background paints across exactly the same vertical
-    // extent on both halves, with no pixel mismatch from line-height
-    // / padding differences. `position: relative` is what makes the
-    // `<ul>` the containing block for the unified playhead's grid-
-    // placed track (v23 Improvement 3).
+    // sized `max-content 1fr`, and rows are centred via `align-items:
+    // center`. The label column being `max-content` is what gives every
+    // lane label the same width as the longest one (no hard-coded
+    // px gutter that wastes space when names are short).
     const threads = [makeThread(1)];
     renderOverlay({ threads, messagesByThread: new Map() });
     const grid = await screen.findByTestId('thread-timeline-lane-grid');
     expect(grid.style.display).toBe('grid');
     expect(grid.style.gridTemplateColumns).toBe('max-content 1fr');
-    expect(grid.style.alignItems).toBe('stretch');
-    expect(grid.style.position).toBe('relative');
+    expect(grid.style.alignItems).toBe('center');
   });
 
   it('stretches the lane grid to the full axis content width via width:max-content + minWidth:100% so sticky labels have a containing block to pin against', async () => {
@@ -2119,14 +2088,13 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(inactiveAxis.className).not.toMatch(/bg-slate-50/);
   });
 
-  it('stretches every row across the grid so label and axis cells share the same height regardless of how many lanes accumulate (v23 Improvement 2)', async () => {
-    // v23 swapped `align-items: center` for `align-items: stretch` so
-    // the label cell and the axis cell of every row fill the full row
-    // height (paired with `h-full` on both cells). This eliminates the
-    // pixel-level mismatch where the active-lane background paints a
-    // slightly different vertical extent on the label vs the axis —
-    // the v22 dogfooding regression. Pin the contract on the grid
-    // container so the guarantee does not depend on lane count.
+  it('keeps row alignment centred regardless of how many lanes accumulate', async () => {
+    // The grid's `align-items: center` is the single source of truth for
+    // row alignment between the label cell and the axis cell. A
+    // regression that swapped it for flex `items-center` on per-row
+    // containers (the earlier layout) would reintroduce the drift the
+    // grid fixes; pin the contract on the grid container itself so the
+    // alignment guarantee does not depend on lane count.
     const threads = Array.from({ length: 8 }, (_, i) =>
       makeThread(i + 1, {
         title: `lane ${i + 1}`,
@@ -2137,19 +2105,9 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     );
     renderOverlay({ threads, messagesByThread: new Map() });
     const grid = await screen.findByTestId('thread-timeline-lane-grid');
-    expect(grid.style.alignItems).toBe('stretch');
+    expect(grid.style.alignItems).toBe('center');
     const lanes = within(grid).getAllByTestId('thread-timeline-lane');
     expect(lanes).toHaveLength(8);
-    // Both the label and the axis cell of every lane carry `h-full`
-    // so the row-stretch translates into actual cell-height fill —
-    // without it, the cells would shrink to their own content height
-    // and the active-lane band would split into two unequal halves.
-    for (const lane of lanes) {
-      const label = within(lane).getByTestId('thread-timeline-lane-label');
-      const axis = lane.querySelector('[data-timeline-axis]') as HTMLElement;
-      expect(label.className).toMatch(/(^|\s)h-full(\s|$)/);
-      expect(axis.className).toMatch(/(^|\s)h-full(\s|$)/);
-    }
   });
 
   it('ignores wheel events whose target is a label cell so labels behave like normal page content', async () => {

@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -480,14 +479,6 @@ export const SCROLL_DOM_READY_TIMEOUT_MS = 1000;
  * the flag right before the scroll lets the time-based programmatic-scroll
  * guard cover the remaining IO ripple window.
  *
- * The optional `onTimeout` callback fires when the polling gives up without
- * the element ever appearing. The cross-lane caller passes it to release
- * the in-flight counter — otherwise a missing article would leave
- * `crossLaneJumpInFlightCountRef` permanently armed, suppressing the
- * pane-scroll → playhead follower for the rest of the session. Symmetric
- * with `onScroll`, so the counter is balanced on EVERY outcome (success,
- * timeout, or cancel).
- *
  * Returns a cancel handle the caller can fire to abort the wait if the
  * component unmounts or another jump supersedes this one before the element
  * lands.
@@ -496,7 +487,6 @@ export function scheduleScrollAfterRender(
   container: HTMLElement | null,
   uuid: string,
   onScroll?: () => void,
-  onTimeout?: () => void,
 ): () => void {
   let highlightCancel: (() => void) | null = null;
   const run = () => {
@@ -531,11 +521,6 @@ export function scheduleScrollAfterRender(
         return;
       }
       if (window.performance.now() - start >= SCROLL_DOM_READY_TIMEOUT_MS) {
-        // Polling timed out — invoke `onTimeout` so the cross-lane caller
-        // can release the in-flight counter. Without this the counter
-        // would stay > 0 forever and the IO follower would never sync the
-        // playhead to a manual pane scroll again.
-        onTimeout?.();
         return;
       }
       rafHandle = window.requestAnimationFrame(tick);
@@ -1031,29 +1016,6 @@ export function ThreadTimelineOverlay({
     }
   }, []);
 
-  // Pending cross-lane scroll target: set when the navigation effect kicks
-  // off a cross-lane jump, cleared the moment the rAF poll OR the
-  // synchronous {@link useLayoutEffect} below scrolls the destination
-  // article into view. The layout effect runs on EVERY render after
-  // commit (no deps); when its check finds the article AND the time-based
-  // guard is still in the window (the rAF poll has not already fired its
-  // onScroll for the same target), it scrolls — beating the rAF poll on
-  // the common path where the per-thread cache lands the new articles
-  // synchronously on the very next re-render. The rAF poll remains the
-  // fallback for the slow path.
-  //
-  // CRITICAL: the layout effect must NOT release the cross-lane in-flight
-  // counter on its own — releasing it before the IO observer for the new
-  // thread has had its first-fire batch consumed would unblock the IO
-  // flush and snap the playhead to the new thread's tail. The counter is
-  // released exclusively by the rAF poll's `onScroll` / `onTimeout`
-  // callbacks (or by the cancel path), which run AFTER the IO has had a
-  // chance to settle.
-  const pendingCrossLaneTargetRef = useRef<{
-    uuid: string;
-    scrolled: boolean;
-  } | null>(null);
-
   useEffect(() => {
     // Only react to navigation the user actually initiated: while
     // `scrubTick` sits at its initial 0 (a fresh mount with no wheel or
@@ -1111,18 +1073,11 @@ export function ThreadTimelineOverlay({
     // scroll lands, leaving the post-scroll IO ripples completely unguarded.
     // That was the residual tail-jump race that survived the v12 fix.
     crossLaneJumpInFlightCountRef.current += 1;
-    // `released` guards against double-release: the three paths that may
-    // settle a cross-lane jump's counter (rAF poll's onScroll, rAF poll's
-    // onTimeout, the cancel handle firing on a superseding jump /
-    // unmount) share this flag, so the counter is decremented at most
-    // once per jump. The synchronous {@link useLayoutEffect} below does
-    // NOT release the counter — it only performs the scroll and marks
-    // the target as already-scrolled so the rAF poll's onScroll skips
-    // the duplicate scroll. The counter release is therefore always
-    // gated through the poll path or the cancel path, keeping the IO
-    // observer's first-fire batch suppressed until the time-based guard
-    // window naturally takes over (the poll's onScroll stamps it as it
-    // releases).
+    // `released` guards against double-release: if the cancel handle fires
+    // AFTER onScroll already ran (cancel-after-scroll for highlight cleanup),
+    // the counter must not double-decrement. Sharing one flag between the
+    // onScroll path and the cancel path is the simplest correct shape — the
+    // counter is decremented at most once per jump.
     let released = false;
     const releaseOnce = () => {
       if (released) {
@@ -1131,45 +1086,17 @@ export function ThreadTimelineOverlay({
       released = true;
       decrementCrossLaneInFlight();
     };
-    // Stamp the pending target BEFORE setActiveThread so the synchronous
-    // useLayoutEffect below — which fires on the very next render after
-    // the active-thread switch propagates — can scroll the article into
-    // view as soon as it appears in the DOM, without waiting for the
-    // next paint frame's rAF poll. The poll remains in charge of
-    // releasing the counter (and stamping the time-based guard) so the
-    // IO guard chain remains intact.
-    pendingCrossLaneTargetRef.current = {
-      uuid: current.uuid,
-      scrolled: false,
-    };
     setActiveThread(current.threadId);
     const rawCancel = scheduleScrollAfterRender(
       container,
       current.uuid,
       () => {
-        // onScroll: the rAF poll found the article. Stamp the time-based
-        // guard now (so its 200ms window starts ticking from the moment
-        // the IO ripples will arrive), release the state-based counter,
-        // and clear the pending target so the useLayoutEffect does not
-        // re-fire on subsequent renders.
-        //
-        // NOTE: the scroll itself is already done if the useLayoutEffect
-        // beat the poll to the article. `scrollMessageIntoView` is
-        // idempotent — calling it a second time on an already-aligned
-        // element is a no-op scroll. So we let `scheduleScrollAfterRender`'s
-        // own scroll fire either way; only the side effects (guard,
-        // counter, highlight) are gated.
-        pendingCrossLaneTargetRef.current = null;
+        // onScroll: element is in the DOM, scrollIntoView is about to fire.
+        // Stamp the time-based guard NOW so its 200ms window starts ticking
+        // from the moment the IO ripples will arrive, then release the
+        // state-based counter so a tail-message IO batch arriving in the
+        // very next tick is suppressed by the time-based guard alone.
         markProgrammaticScroll();
-        releaseOnce();
-      },
-      () => {
-        // onTimeout: polling gave up without the article appearing.
-        // Release the counter so the IO follower is not permanently
-        // suppressed — same {@link releaseOnce} guard so a subsequent
-        // cancel cannot double-decrement. The pending target is also
-        // cleared so the useLayoutEffect does not keep trying.
-        pendingCrossLaneTargetRef.current = null;
         releaseOnce();
       },
     );
@@ -1178,7 +1105,6 @@ export function ThreadTimelineOverlay({
     // jump's counter would never decrement and the guard would stay armed
     // indefinitely.
     const cancelWithCountClear = () => {
-      pendingCrossLaneTargetRef.current = null;
       releaseOnce();
       rawCancel();
     };
@@ -1196,52 +1122,6 @@ export function ThreadTimelineOverlay({
     markProgrammaticScroll,
     decrementCrossLaneInFlight,
   ]);
-
-  // Synchronous cross-lane scroll path: runs after every commit (the
-  // navigation effect set {@link pendingCrossLaneTargetRef} and called
-  // `setActiveThread`; the parent re-renders the conversation pane with
-  // the new thread's messages; this layout effect fires before the next
-  // paint and checks whether the target article has landed in the body).
-  // If yes, scroll synchronously and MARK the pending target as scrolled
-  // — beating the {@link scheduleScrollAfterRender} rAF poll to the
-  // article on the common path (per-thread cache hit, so the new
-  // articles render on the very next commit). The poll keeps polling
-  // either way; once IT finds the article (next paint), its `run` will
-  // re-scroll (no-op since we already scrolled here) AND fire the
-  // counter release + highlight via the standard pipeline.
-  //
-  // CRITICAL: this layout effect MUST NOT touch
-  // {@link pendingScrollCancelRef} (which is the rAF poll's cancel
-  // handle, wrapped to release the in-flight counter) and MUST NOT
-  // release the counter directly. Releasing the counter here would
-  // unblock the IO follower BEFORE the new IO observer's first-fire
-  // batch has been consumed — the flush would then commit the new
-  // thread's tail message and snap the playhead to the wrong place.
-  // The counter release stays exclusively with the rAF poll's
-  // `onScroll` / `onTimeout` (or the cancel path), which fire on the
-  // NEXT paint frame — by which time the IO observer's first-fire
-  // batch has been collected and the time-based programmatic-scroll
-  // guard the poll stamps covers the rest of the debounce window.
-  useLayoutEffect(() => {
-    const pending = pendingCrossLaneTargetRef.current;
-    if (!pending || pending.scrolled) {
-      return;
-    }
-    const container = conversationBodyRef.current;
-    if (!container) {
-      return;
-    }
-    const target = container.querySelector(articleMessageSelector(pending.uuid));
-    if (!target) {
-      // Article has not landed yet; the rAF poll keeps watching. No-op
-      // this commit; the next render will try again.
-      return;
-    }
-    pending.scrolled = true;
-    if (typeof (target as HTMLElement).scrollIntoView === 'function') {
-      (target as HTMLElement).scrollIntoView({ block: 'start' });
-    }
-  });
 
   // The lane the highlight follows: the active message's lane when there is
   // one, else fall back to the prop so a freshly-mounted footer still marks
@@ -1745,32 +1625,10 @@ export function ThreadTimelineOverlay({
                 // would scroll off-screen with the axis. Stretching the
                 // containing block to the full scroll range gives sticky
                 // somewhere to pin against.
-                //
-                // `align-items: stretch` lets every grid item fill the
-                // full row height instead of collapsing to its own
-                // content height. Paired with `h-full` on the label
-                // `<span>` and axis `<div>` cells, both halves of a lane
-                // row paint the active-lane background across exactly
-                // the same vertical extent — no pixel-level mismatch
-                // from line-height / padding differences (v23
-                // Improvement 2). The {@link LANE_HEIGHT_PX} `min-height`
-                // on each row still floors the row height so a row with
-                // no dots is not visually collapsed.
-                //
-                // `position: relative` makes the `<ul>` the containing
-                // block for the unified playhead `<span>` below, which
-                // is absolutely positioned to span every lane row as
-                // one continuous vertical line (v23 Improvement 3).
-                // The playhead is rendered ONCE here as a child of the
-                // `<ul>` instead of once per lane, so there are no
-                // visual gaps between row backgrounds where the
-                // per-lane playhead used to break apart.
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'max-content 1fr',
-                  gridAutoRows: `minmax(${LANE_HEIGHT_PX}px, auto)`,
-                  alignItems: 'stretch',
-                  position: 'relative',
+                  alignItems: 'center',
                   width: 'max-content',
                   minWidth: '100%',
                 }}
@@ -1800,12 +1658,6 @@ export function ThreadTimelineOverlay({
                   // axis cell so the band reads as one row), and an
                   // inactive sticky label paints `bg-white` (matching the
                   // body so axis dots cannot peek through).
-                  //
-                  // Both cells carry `h-full` (height: 100%) so they fill
-                  // the full row height the grid's `align-items: stretch`
-                  // hands them — the active-lane background paints as a
-                  // single uniform band without the v23-era line-height
-                  // / padding mismatch.
                   const highlightClasses = isHighlighted
                     ? 'border-y border-slate-200 bg-slate-50'
                     : 'border-y border-transparent';
@@ -1850,20 +1702,7 @@ export function ThreadTimelineOverlay({
                         // leave the sticky label white in the active state,
                         // breaking the visual continuity with the axis
                         // cell's highlight.
-                        //
-                        // `h-full` (height: 100%) plus the grid's
-                        // `align-items: stretch` and per-row
-                        // `minmax(LANE_HEIGHT_PX, auto)` makes the label
-                        // paint across the exact same vertical extent
-                        // as the axis cell next to it — the active-lane
-                        // background bands line up without any pixel
-                        // mismatch from line-height / padding differences.
-                        // `flex items-center` is what now centres the
-                        // text vertically inside the (taller) cell
-                        // instead of the prior `line-height: LANE_HEIGHT_PX`
-                        // trick, which presumed the cell's exact pixel
-                        // height.
-                        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
+                        className={`block truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
                           lane.isMain ? 'text-slate-700' : 'text-slate-500'
                         } ${labelHighlightClasses}`}
                         style={{
@@ -1871,6 +1710,7 @@ export function ThreadTimelineOverlay({
                           left: 0,
                           zIndex: 1,
                           minHeight: LANE_HEIGHT_PX,
+                          lineHeight: `${LANE_HEIGHT_PX}px`,
                         }}
                       >
                         {lane.label}
@@ -1879,18 +1719,13 @@ export function ThreadTimelineOverlay({
                         data-timeline-axis=""
                         data-thread-id={lane.threadId}
                         data-active={isHighlighted ? 'true' : 'false'}
-                        // `h-full` (height: 100%) so the axis cell fills
-                        // the row the grid's `align-items: stretch` gave
-                        // it — matching the label cell next to it pixel-
-                        // for-pixel so the active-lane background bands
-                        // read as a single seamless row.
-                        className={`relative h-full rounded-sm ${highlightClasses}`}
+                        className={`relative rounded-sm ${highlightClasses}`}
                         style={{
                           width:
                             LANE_LEFT_PAD_PX +
                             laneAxisWidth +
                             LANE_RIGHT_PAD_PX,
-                          minHeight: LANE_HEIGHT_PX,
+                          height: LANE_HEIGHT_PX,
                         }}
                       >
                         <span
@@ -1923,60 +1758,30 @@ export function ThreadTimelineOverlay({
                             />
                           ),
                         )}
+                        {/* Playhead: a thin vertical line that doubles as
+                            the lane-local segment of the global playhead.
+                            Each lane carries its own copy (instead of one
+                            absolute line spanning the column) so it
+                            scrolls with the axis when the column becomes
+                            horizontally scrollable on a long session. A
+                            short CSS transition on `left` smooths the
+                            discrete step between adjacent messages so the
+                            eye can follow the move; the duration is short
+                            enough that the playhead always feels glued to
+                            the input. */}
+                        <span
+                          aria-hidden="true"
+                          data-testid="thread-timeline-playhead"
+                          className="pointer-events-none absolute top-0 h-full w-px bg-indigo-500"
+                          style={{
+                            left: playheadX + LANE_LEFT_PAD_PX,
+                            transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
+                          }}
+                        />
                       </div>
                     </li>
                   );
                 })}
-                {/* Unified playhead: a single vertical line spanning the
-                    full height of the lane grid, instead of one short
-                    segment per lane (the v23 Improvement 3 fix for the
-                    visual gaps the per-lane line left between
-                    `gap-y-0.5`-separated rows).
-
-                    Placement strategy: grid-place the playhead's
-                    POSITIONING CONTEXT inside column 2 (the axis
-                    column) spanning every row, so the playhead's
-                    `left: playheadX + LANE_LEFT_PAD_PX` is relative
-                    to the axis column's left edge — no need to
-                    measure the (dynamically-sized) label column width
-                    at runtime. The wrapper is `position: relative`
-                    and `pointer-events-none` so it never intercepts
-                    clicks meant for the axis cells underneath. The
-                    inner `<span>` is `position: absolute` with
-                    `height: 100%` so it stretches across every grid
-                    row including the row gaps (the row gaps are
-                    inside the wrapper, so 100% height covers them
-                    too).
-
-                    `z-index: 2` keeps the playhead above the axis
-                    dots (which sit at the axis cells' default stack)
-                    but below the sticky label cell (z-index 1 plus
-                    its own opaque background) for the brief moment
-                    of the leftmost pan, where the label slides over
-                    the playhead's `left`. A short CSS transition on
-                    `left` smooths the discrete step between adjacent
-                    messages so the eye can follow the move. */}
-                <div
-                  data-testid="thread-timeline-playhead-track"
-                  aria-hidden="true"
-                  className="pointer-events-none relative"
-                  style={{
-                    gridColumn: '2',
-                    gridRow: `1 / -1`,
-                  }}
-                >
-                  <span
-                    aria-hidden="true"
-                    data-testid="thread-timeline-playhead"
-                    className="pointer-events-none absolute top-0 w-px bg-indigo-500"
-                    style={{
-                      left: playheadX + LANE_LEFT_PAD_PX,
-                      height: '100%',
-                      zIndex: 2,
-                      transition: `left ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
-                    }}
-                  />
-                </div>
               </ul>
             </div>
           )}
