@@ -7,11 +7,15 @@ import {
   type MouseEvent as ReactMouseEvent,
   type RefObject,
 } from 'react';
-import type { ThreadId } from '@delta/model';
+import type { SessionId, ThreadId } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
 import { useThreadsMessagesQueries } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
-import { useNavStore } from '../../store/navStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
+import {
+  readSessionScoped,
+  writeSessionScoped,
+} from '../../store/sessionScopedStorage';
 import {
   buildGlobalXMap,
   buildLaneRenderItems,
@@ -27,10 +31,19 @@ import {
 } from './timelineLanes';
 
 /**
- * localStorage key for the timeline footer's expanded/collapsed state. Per
- * device, not per session — the user's preference travels across sessions.
+ * Sub-key under {@link sessionScopedKey} for the timeline footer's
+ * expanded/collapsed state. The preference is **per session** — sessions
+ * with many subthreads usually want the timeline expanded while
+ * single-thread sessions prefer it collapsed, and a global toggle made the
+ * UI flip on every session switch. The full localStorage key for a given
+ * session is `delta.session.<sessionId>.thread-timeline-overlay.expanded`.
+ *
+ * The previous device-global key (`delta.thread-timeline-overlay.expanded`)
+ * is intentionally NOT migrated — see delta's `docs/guides/compatibility.md`
+ * for the 0.x no-compat policy, and the related plan note: a global default
+ * is no longer meaningful once the preference is session-scoped.
  */
-export const TIMELINE_EXPANDED_STORAGE_KEY = 'delta.thread-timeline-overlay.expanded';
+export const TIMELINE_EXPANDED_SUBKEY = 'thread-timeline-overlay.expanded';
 
 /**
  * Rolling window (ms) over which wheel-event |delta| magnitudes accumulate
@@ -217,100 +230,156 @@ export const PANE_SCROLL_PROGRAMMATIC_GUARD_MS = 200;
 export const PANE_SCROLL_OBSERVER_THRESHOLD = 0;
 
 /**
- * Read the persisted expanded preference; defaults to collapsed when no
- * preference has been saved yet or the storage layer is unavailable (SSR /
- * privacy-mode browsers).
+ * Read the persisted expanded preference for a session; defaults to collapsed
+ * when no preference has been saved yet or the storage layer is unavailable
+ * (SSR / privacy-mode browsers). The boolean is encoded as the strings
+ * `'true'` / `'false'` (consistent with the previous device-global key) so a
+ * DevTools peek still reads naturally.
  */
-function readPersistedExpanded(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  try {
-    return window.localStorage.getItem(TIMELINE_EXPANDED_STORAGE_KEY) === 'true';
-  } catch {
-    return false;
-  }
+function readPersistedExpanded(sessionId: SessionId): boolean {
+  return (
+    readSessionScoped<boolean>(
+      sessionId,
+      TIMELINE_EXPANDED_SUBKEY,
+      (raw) => raw === 'true',
+    ) ?? false
+  );
 }
 
 /**
- * Persist the expanded preference. Failures are swallowed so a quota error or
- * a disabled-storage browser never crashes the footer — the UI keeps working
- * in-memory for the session.
+ * Persist the expanded preference for a session. Failures are swallowed by
+ * the helper so a quota error or a disabled-storage browser never crashes
+ * the footer — the UI keeps working in-memory for the page session.
  */
-function writePersistedExpanded(expanded: boolean): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      TIMELINE_EXPANDED_STORAGE_KEY,
-      expanded ? 'true' : 'false',
-    );
-  } catch {
-    // Storage may be unavailable (quota, privacy mode); ignore.
-  }
+function writePersistedExpanded(sessionId: SessionId, expanded: boolean): void {
+  writeSessionScoped<boolean>(
+    sessionId,
+    TIMELINE_EXPANDED_SUBKEY,
+    expanded,
+    (value) => (value ? 'true' : 'false'),
+  );
 }
 
 /**
- * Module-scoped store for the timeline expanded preference. Multiple
- * components read this same flag (the timeline itself, and the transcript
- * pane that switches its top-row layout so the Terminal button moves below
- * when the timeline is expanded). A click on the toggle must update every
- * subscriber on the same tick — per-component `useState` would only sync via
- * the `storage` event, which does not fire on same-document writes. A small
- * pub-sub keeps every subscriber in lockstep without pulling a full store in
- * for one boolean.
+ * Module-scoped store for the timeline expanded preference, keyed by session
+ * id. Multiple components read the same flag for a given session (the
+ * timeline itself, and the transcript pane that switches its top-row layout
+ * so the Terminal button moves below when the timeline is expanded). A click
+ * on the toggle must update every subscriber for THAT session on the same
+ * tick — per-component `useState` would only sync via the `storage` event,
+ * which does not fire on same-document writes. A small pub-sub keeps every
+ * subscriber in lockstep without pulling a full store in for one boolean
+ * per session.
+ *
+ * The cache is per-session because two open transcripts of different
+ * sessions (a `react-query` cache warmup, a debug overlay, etc.) must NOT
+ * share a value: that was the device-global behaviour the migration to
+ * per-session keys is meant to remove.
  */
-let timelineExpandedCache: boolean | null = null;
-const timelineExpandedListeners = new Set<(value: boolean) => void>();
-
-function getTimelineExpanded(): boolean {
-  if (timelineExpandedCache === null) {
-    timelineExpandedCache = readPersistedExpanded();
-  }
-  return timelineExpandedCache;
+interface TimelineExpandedEntry {
+  value: boolean | null;
+  listeners: Set<(value: boolean) => void>;
 }
 
-function setTimelineExpanded(next: boolean): void {
-  timelineExpandedCache = next;
-  writePersistedExpanded(next);
-  for (const listener of timelineExpandedListeners) {
+const timelineExpandedCache = new Map<SessionId, TimelineExpandedEntry>();
+
+function getEntry(sessionId: SessionId): TimelineExpandedEntry {
+  let entry = timelineExpandedCache.get(sessionId);
+  if (entry === undefined) {
+    entry = { value: null, listeners: new Set() };
+    timelineExpandedCache.set(sessionId, entry);
+  }
+  return entry;
+}
+
+function getTimelineExpanded(sessionId: SessionId): boolean {
+  const entry = getEntry(sessionId);
+  if (entry.value === null) {
+    entry.value = readPersistedExpanded(sessionId);
+  }
+  return entry.value;
+}
+
+function setTimelineExpanded(sessionId: SessionId, next: boolean): void {
+  const entry = getEntry(sessionId);
+  entry.value = next;
+  writePersistedExpanded(sessionId, next);
+  for (const listener of entry.listeners) {
     listener(next);
   }
 }
 
 /**
  * Drop the in-memory cache so a test that clears `localStorage` between cases
- * starts from a fresh read rather than the previous case's last write.
- * Production code does not need this — the cache lives for the page session.
+ * starts from a fresh read rather than the previous case's last write. With
+ * no argument, clears every session's cached value (the common test reset);
+ * with a specific id, clears just that one. Production code does not need
+ * this — the cache lives for the page session.
  */
-export function resetTimelineExpandedForTests(): void {
-  timelineExpandedCache = null;
+export function resetTimelineExpandedForTests(sessionId?: SessionId): void {
+  if (sessionId === undefined) {
+    timelineExpandedCache.clear();
+    return;
+  }
+  const entry = timelineExpandedCache.get(sessionId);
+  if (entry !== undefined) {
+    entry.value = null;
+  }
 }
 
 /**
  * Expanded/collapsed state for the timeline footer, persisted to localStorage
- * so the preference survives reloads. Initial state is collapsed when no
- * preference has been saved. All callers share one value (see the
- * module-scoped store above), so toggling in one place updates the others on
- * the same tick. Exported so tests and the transcript pane (which switches
- * its top-row layout on the same flag) can read and drive the toggle.
+ * per session so the preference is remembered independently for each session
+ * — large multi-thread sessions can stay expanded while short single-thread
+ * ones stay collapsed, instead of one device-wide toggle.
+ *
+ * The argument is the focused session id, or `null` while the session list
+ * is still loading / no session is focused. `null` falls back to in-memory
+ * only (no read, no write): the UI degrades to collapsed for that frame
+ * without leaking a literal `null` into the storage key. Once a real id
+ * arrives the hook re-subscribes and reads the per-session value.
+ *
+ * Initial state is collapsed when no preference has been saved for that
+ * session. All consumers of the same session share one value (see the
+ * module-scoped store above), so toggling in one place updates the others
+ * on the same tick. Exported so tests and the transcript pane (which
+ * switches its top-row layout on the same flag) can read and drive the
+ * toggle.
  */
-export function useTimelineExpanded(): [boolean, () => void] {
-  const [expanded, setExpanded] = useState<boolean>(() => getTimelineExpanded());
+export function useTimelineExpanded(
+  sessionId: SessionId | null,
+): [boolean, () => void] {
+  const [expanded, setExpanded] = useState<boolean>(() =>
+    sessionId === null ? false : getTimelineExpanded(sessionId),
+  );
   useEffect(() => {
+    if (sessionId === null) {
+      // No session to bind to: drop back to the collapsed default until a
+      // real id arrives. The previous subscription (if any) was already
+      // torn down by the previous effect's cleanup.
+      setExpanded(false);
+      return;
+    }
+    const entry = getEntry(sessionId);
     const listener = (value: boolean) => setExpanded(value);
-    timelineExpandedListeners.add(listener);
+    entry.listeners.add(listener);
     // Sync to the current value in case it changed between render and
-    // subscribe (e.g. another consumer toggled it in the same render pass).
-    setExpanded(getTimelineExpanded());
+    // subscribe (e.g. another consumer toggled it in the same render pass,
+    // or the session id just switched and the previous value was stale).
+    setExpanded(getTimelineExpanded(sessionId));
     return () => {
-      timelineExpandedListeners.delete(listener);
+      entry.listeners.delete(listener);
     };
-  }, []);
+  }, [sessionId]);
   const toggle = useCallback(() => {
-    setTimelineExpanded(!getTimelineExpanded());
-  }, []);
+    if (sessionId === null) {
+      // The toggle button is hidden by the caller when there is no session
+      // (the timeline does not render), so this branch is defensive — but
+      // a stray click during a session switch must not write a `null` id.
+      return;
+    }
+    setTimelineExpanded(sessionId, !getTimelineExpanded(sessionId));
+  }, [sessionId]);
   return [expanded, toggle];
 }
 
@@ -736,7 +805,16 @@ export function ThreadTimelineOverlay({
 }: ThreadTimelineOverlayProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
-  const [expanded, toggle] = useTimelineExpanded();
+  // The expanded preference is per-session — read the focused session id from
+  // `navStore` rather than threading it through props, so the call site in
+  // `TranscriptPane` does not need to know about the storage shape. The
+  // new-session sentinel is collapsed to `null`: it is not a real session id
+  // and must not write its own localStorage entry (which the GC could not
+  // distinguish from a real orphan).
+  const focusedSessionId = useNavStore((state) =>
+    state.focusedSessionId === NEW_SESSION_FOCUS ? null : state.focusedSessionId,
+  );
+  const [expanded, toggle] = useTimelineExpanded(focusedSessionId);
 
   // N+1 is acceptable for MVP; the dedicated `all_threads=true` REST is
   // intentionally deferred. The query keys are shared with the focused

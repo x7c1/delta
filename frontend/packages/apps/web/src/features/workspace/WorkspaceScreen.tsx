@@ -13,6 +13,7 @@ import {
   type FocusedSession,
 } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
+import { useGarbageCollectSessionScopedStorage } from '../../store/sessionScopedStorage';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { NavigatorPane } from '../navigator/NavigatorPane';
 import { SettingsView } from '../settings/SettingsView';
@@ -91,6 +92,24 @@ export function WorkspaceScreen() {
     () => sessionsQuery.data?.pages.flatMap((page) => page.sessions) ?? [],
     [sessionsQuery.data],
   );
+
+  // Drop localStorage entries for sessions that no longer exist — preferences
+  // keyed by session id (e.g. the timeline footer's expand/collapse) leak one
+  // key per session as sessions are deleted (here, on another device, or by
+  // direct DB edits). The GC runs once after every page of sessions arrives,
+  // gated until the full list is loaded so a still-paginating cold start does
+  // not falsely flag late-page sessions as orphans.
+  //
+  // This is the app-shell registration point: feature components must not
+  // invoke the GC themselves; the session list lives here.
+  const gcSessionIds = useMemo<readonly string[] | null>(
+    () =>
+      sessionsQuery.isSuccess && !sessionsQuery.hasNextPage
+        ? sessions.map((item) => item.session.id)
+        : null,
+    [sessionsQuery.isSuccess, sessionsQuery.hasNextPage, sessions],
+  );
+  useGarbageCollectSessionScopedStorage(gcSessionIds);
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const activeThreadId = useNavStore((state) => state.activeThreadId);
