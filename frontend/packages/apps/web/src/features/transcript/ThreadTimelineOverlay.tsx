@@ -714,23 +714,24 @@ export const TIMELINE_TOGGLE_BUTTON_CLASS =
 
 /**
  * Tailwind class string for the expanded-state jump-to-edge buttons (skip-back
- * / skip-forward) that sit on the LEFT of the expanded header row. Chrome is
- * deliberately the same family as {@link TIMELINE_TOGGLE_BUTTON_CLASS} —
- * slate-300 border, white resting / slate-50 hover background, slate-700 ink
- * — so the two new buttons read as siblings of the existing Timeline toggle
- * (which now lives on the RIGHT of the same row), and the header row reads
- * as a single control band rather than a mix of unrelated controls.
+ * / skip-forward) that sit on the LEFT of the expanded header row.
  *
- * The padding is tighter than the toggle's (`px-2` vs `px-3`) and there is no
- * `gap-*` because these buttons hold a single icon each — a wider gutter
- * around an icon-only button would read as wasted space. The `disabled:`
- * variants neutralise the buttons when `sortedMessages` is empty (no
- * messages to jump to); we keep them enabled when the playhead already sits
- * at the edge, because re-clicking still bumps `scrubTick` and refreshes the
- * horizontal scroll catch-up, which is a useful "snap me back" affordance.
+ * Visually intentionally lighter than the Timeline toggle on the right: no
+ * border, no fill, no shadow — just the icon in a muted slate, with a soft
+ * background tint on hover for click affordance. The icon itself matches the
+ * Timeline glyph's `h-3.5 w-3.5` size so the three header icons read as one
+ * set; the chrome around it is just what hover/disabled states need and
+ * nothing more, so the jump controls do not compete with the toggle pill
+ * (which is the primary control in the row).
+ *
+ * The `disabled:` variants neutralise the buttons when `sortedMessages` is
+ * empty (no messages to jump to); we keep them enabled when the playhead
+ * already sits at the edge, because re-clicking still bumps `scrubTick` and
+ * refreshes the horizontal scroll catch-up, which is a useful "snap me back"
+ * affordance.
  */
 export const TIMELINE_JUMP_BUTTON_CLASS =
-  'inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-2 py-1.5 text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed';
 
 /**
  * Glyph for the collapsed "Thread" toggle button: a stylised activity / signal
