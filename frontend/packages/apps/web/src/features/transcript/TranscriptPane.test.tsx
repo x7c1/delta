@@ -34,9 +34,21 @@ import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import { findAllQuoteRanges } from './branchHighlight';
 import {
-  TIMELINE_EXPANDED_STORAGE_KEY,
+  TIMELINE_EXPANDED_SUBKEY,
   resetTimelineExpandedForTests,
 } from './ThreadTimelineOverlay';
+import { sessionScopedKey } from '../../store/sessionScopedStorage';
+
+/**
+ * Compose the localStorage key the timeline uses for the mock session every
+ * test in this file points at. The TranscriptPane reads the focused session
+ * id from `navStore`; cases that seed an expanded preference (or assert one)
+ * also pin the focus to {@link SESSION_ID} so the hook persists against the
+ * matching per-session key.
+ */
+function timelineExpandedKey(sessionId: string = SESSION_ID): string {
+  return sessionScopedKey(sessionId, TIMELINE_EXPANDED_SUBKEY);
+}
 import { TranscriptPane } from './TranscriptPane';
 
 const server = setupServer(...createHandlers());
@@ -87,8 +99,10 @@ describe('TranscriptPane', () => {
     });
     // Clear the timeline-expanded persisted preference and the in-memory
     // cache so each test starts from the default collapsed state (some
-    // tests opt into expanded explicitly).
-    window.localStorage.removeItem(TIMELINE_EXPANDED_STORAGE_KEY);
+    // tests opt into expanded explicitly). The cache resets every per-session
+    // entry when called without an id; clearing localStorage in lockstep
+    // wipes any session-scoped keys an earlier case may have written.
+    window.localStorage.clear();
     resetTimelineExpandedForTests();
   });
 
@@ -1542,7 +1556,12 @@ describe('TranscriptPane', () => {
         // Terminal button (right) sits directly underneath it. The
         // Thread icon is absent in this row — the expanded card itself
         // replaces it.
-        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        // Point the focus at a real session id so the timeline's
+        // per-session expand hook can persist against the matching
+        // localStorage key — the beforeEach pins focus to
+        // `NEW_SESSION_FOCUS`, which collapses to a null id inside the hook.
+        useNavStore.setState({ focusedSessionId: SESSION_ID });
+        window.localStorage.setItem(timelineExpandedKey(), 'true');
         resetTimelineExpandedForTests();
 
         const queryClient = new QueryClient({
@@ -1617,7 +1636,12 @@ describe('TranscriptPane', () => {
         // single absolute container that pins to the top of the Panel
         // body region — the container does not participate in the
         // body's scroll. This test pins that pinning contract.
-        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        // Point the focus at a real session id so the timeline's
+        // per-session expand hook can persist against the matching
+        // localStorage key — the beforeEach pins focus to
+        // `NEW_SESSION_FOCUS`, which collapses to a null id inside the hook.
+        useNavStore.setState({ focusedSessionId: SESSION_ID });
+        window.localStorage.setItem(timelineExpandedKey(), 'true');
         resetTimelineExpandedForTests();
 
         renderPane(mockThreads, BRANCH_THREAD_ID);
@@ -1674,7 +1698,12 @@ describe('TranscriptPane', () => {
         // onto the under-row (the v17 mistake, re-applied to the new
         // container shape) would either escape the under-row from the
         // container or stack it on top of the timeline card.
-        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        // Point the focus at a real session id so the timeline's
+        // per-session expand hook can persist against the matching
+        // localStorage key — the beforeEach pins focus to
+        // `NEW_SESSION_FOCUS`, which collapses to a null id inside the hook.
+        useNavStore.setState({ focusedSessionId: SESSION_ID });
+        window.localStorage.setItem(timelineExpandedKey(), 'true');
         resetTimelineExpandedForTests();
 
         const queryClient = new QueryClient({
@@ -1730,7 +1759,12 @@ describe('TranscriptPane', () => {
         // expanded reserve (the v18 assumption that "expanded is in
         // flow, no reserve needed") would let the conversation render
         // under the pinned container.
-        window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+        // Point the focus at a real session id so the timeline's
+        // per-session expand hook can persist against the matching
+        // localStorage key — the beforeEach pins focus to
+        // `NEW_SESSION_FOCUS`, which collapses to a null id inside the hook.
+        useNavStore.setState({ focusedSessionId: SESSION_ID });
+        window.localStorage.setItem(timelineExpandedKey(), 'true');
         resetTimelineExpandedForTests();
 
         renderPane(mockThreads, BRANCH_THREAD_ID);
@@ -1765,6 +1799,11 @@ describe('TranscriptPane', () => {
         // the reverse. A leak (observing nodes that no longer exist)
         // or a stale binding (observing the wrong state's nodes)
         // breaks the reserve when the user toggles.
+        //
+        // Pin the focused session to a real id so the timeline's per-session
+        // expand toggle actually persists — under the new-session sentinel
+        // the toggle is a no-op (the hook has no id to bind to).
+        useNavStore.setState({ focusedSessionId: SESSION_ID });
         renderPane(mockThreads, BRANCH_THREAD_ID);
 
         // Collapsed initially: the breadcrumb and right cluster are

@@ -22,10 +22,7 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import type { MessageItemProps } from './MessageItem';
-import {
-  TIMELINE_EXPANDED_STORAGE_KEY,
-  resetTimelineExpandedForTests,
-} from './ThreadTimelineOverlay';
+import { resetTimelineExpandedForTests } from './ThreadTimelineOverlay';
 import { TranscriptPane } from './TranscriptPane';
 
 // Capture every onSelectQuote reference TranscriptPane hands the message rows.
@@ -93,7 +90,10 @@ describe('TranscriptPane onSelectQuote stability (v24)', () => {
       newSessionWorkdir: null,
       workdirDialogOpen: false,
     });
-    window.localStorage.removeItem(TIMELINE_EXPANDED_STORAGE_KEY);
+    // Reset the timeline-expanded cache so this test starts from the
+    // default collapsed state regardless of which case ran before. The
+    // localStorage clear avoids any stale per-session key bleeding in.
+    window.localStorage.clear();
     resetTimelineExpandedForTests();
   });
 

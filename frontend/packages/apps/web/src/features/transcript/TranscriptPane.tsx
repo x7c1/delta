@@ -13,7 +13,7 @@ import type { Message, Thread } from '@delta/wire-gen';
 import { useThreadMessagesQuery } from '@delta/api-client';
 import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
-import { useNavStore } from '../../store/navStore';
+import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
@@ -411,8 +411,15 @@ export function TranscriptPane({
   //     height so the first message clears it.
   // The state is shared with `ThreadTimelineOverlay` via a module-scoped
   // pub-sub inside `useTimelineExpanded` so a click on the toggle there
-  // updates the layout here on the same tick.
-  const [timelineExpanded] = useTimelineExpanded();
+  // updates the layout here on the same tick. The preference is per session,
+  // so both consumers must pass the SAME id — the focused session from
+  // `navStore`, collapsing the new-session sentinel to `null` for the same
+  // reason as in `ThreadTimelineOverlay` (the sentinel is not a real session
+  // id and must not occupy a localStorage entry).
+  const expandedSessionId = useNavStore((state) =>
+    state.focusedSessionId === NEW_SESSION_FOCUS ? null : state.focusedSessionId,
+  );
+  const [timelineExpanded] = useTimelineExpanded(expandedSessionId);
 
   // When navigating UP to an ancestor via the breadcrumb, this holds the child
   // thread one level down toward where we were. After the ancestor renders, the

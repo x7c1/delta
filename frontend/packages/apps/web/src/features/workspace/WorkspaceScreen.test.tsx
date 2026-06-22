@@ -304,6 +304,56 @@ describe('WorkspaceScreen multi-session', () => {
     expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
   });
 
+  it('garbage-collects session-scoped localStorage keys for sessions that no longer exist', async () => {
+    // Two preferences from earlier visits sit in localStorage: one for a
+    // session that still exists (`SESSION_ID`) and one for an orphan
+    // (`ghost-session`) that has been deleted since. The workspace's GC
+    // hook should sweep the orphan after the session list finishes loading,
+    // and leave the live session's preference untouched.
+    //
+    // The mock's single page covers the full list (next_cursor is null
+    // unless there is more to fetch), so the GC's `!hasNextPage` gate
+    // satisfies on the first response — no infinite-scroll plumbing
+    // needed here.
+    const liveKey = `delta.session.${SESSION_ID}.thread-timeline-overlay.expanded`;
+    const orphanKey = 'delta.session.ghost-session.thread-timeline-overlay.expanded';
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id: SESSION_ID,
+                cwd: '/work',
+                transcript_path: '/tmp/s1.jsonl',
+                title: null,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
+              },
+              open: true,
+              main_thread_id: MAIN_THREAD_ID,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+    window.localStorage.setItem(liveKey, 'true');
+    window.localStorage.setItem(orphanKey, 'true');
+
+    renderScreen();
+
+    // The orphan key disappears once the session list is fully loaded; the
+    // live session's key is left alone.
+    await waitFor(() =>
+      expect(window.localStorage.getItem(orphanKey)).toBeNull(),
+    );
+    expect(window.localStorage.getItem(liveKey)).toBe('true');
+  });
+
   it('flips the focused session to read-only after its Close button is clicked', async () => {
     renderScreen();
 

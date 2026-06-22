@@ -24,7 +24,7 @@ import {
   PANE_SCROLL_PROGRAMMATIC_GUARD_MS,
   SCROLL_DOM_READY_TIMEOUT_MS,
   ThreadTimelineOverlay,
-  TIMELINE_EXPANDED_STORAGE_KEY,
+  TIMELINE_EXPANDED_SUBKEY,
   TIMELINE_JUMP_HIGHLIGHT_CLASS,
   WHEEL_DELTA_LINE_PX,
   WHEEL_PER_EVENT_CLAMP_PX,
@@ -35,6 +35,26 @@ import {
   scrollMessageIntoView,
   stepsForCumulativePx,
 } from './ThreadTimelineOverlay';
+import { sessionScopedKey } from '../../store/sessionScopedStorage';
+
+/**
+ * Session id the test fixtures pin every thread / message to (see
+ * `makeThread` / `makeMessage`). The overlay reads the focused session id
+ * from `navStore` to scope its expand preference, so every test sets this
+ * value as the focus in `resetGlobals` — otherwise the hook falls back to
+ * the in-memory-only `null` branch and never persists.
+ */
+const TEST_SESSION_ID = 'session-1';
+
+/**
+ * Compose the localStorage key the overlay actually writes to for the
+ * current test session. Wraps the helper's `(sessionId, subKey)` shape so
+ * each test reads `localStorage.getItem(timelineExpandedKey())` rather than
+ * spelling the layout out by hand.
+ */
+function timelineExpandedKey(sessionId: string = TEST_SESSION_ID): string {
+  return sessionScopedKey(sessionId, TIMELINE_EXPANDED_SUBKEY);
+}
 
 function makeThread(
   id: number,
@@ -153,10 +173,15 @@ function resetGlobals() {
   window.localStorage.clear();
   // The expanded preference is cached in module state for cross-component
   // sync (see `useTimelineExpanded`); reset the cache too so each test
-  // reads the freshly-cleared (or freshly-seeded) localStorage value.
+  // reads the freshly-cleared (or freshly-seeded) localStorage value. With
+  // no argument every per-session entry is cleared.
   resetTimelineExpandedForTests();
   useNavStore.setState({
-    focusedSessionId: null,
+    // Pin the focused session so the overlay's per-session expand hook can
+    // read/write its localStorage entry — without a real id the hook falls
+    // back to in-memory only (collapsed default, no persistence) and the
+    // expand-preference cases never see anything written.
+    focusedSessionId: TEST_SESSION_ID,
     activeThreadId: null,
     preNewSessionFocus: null,
     settingsOpen: false,
@@ -248,13 +273,13 @@ describe('ThreadTimelineOverlay collapse toggle', () => {
       screen.getByTestId('thread-timeline-toggle'),
     ).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByTestId('thread-timeline-body')).toBeInTheDocument();
-    expect(window.localStorage.getItem(TIMELINE_EXPANDED_STORAGE_KEY)).toBe(
+    expect(window.localStorage.getItem(timelineExpandedKey())).toBe(
       'true',
     );
   });
 
   it('restores the persisted expanded preference on mount', () => {
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
     renderOverlay({ threads: [makeThread(1)], messagesByThread: new Map() });
     expect(
       screen.getByTestId('thread-timeline-toggle'),
@@ -262,15 +287,55 @@ describe('ThreadTimelineOverlay collapse toggle', () => {
   });
 
   it('toggles closed again and persists the change', () => {
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
     renderOverlay({ threads: [makeThread(1)], messagesByThread: new Map() });
     fireEvent.click(screen.getByTestId('thread-timeline-toggle'));
     expect(
       screen.getByTestId('thread-timeline-toggle'),
     ).toHaveAttribute('aria-expanded', 'false');
-    expect(window.localStorage.getItem(TIMELINE_EXPANDED_STORAGE_KEY)).toBe(
+    expect(window.localStorage.getItem(timelineExpandedKey())).toBe(
       'false',
     );
+  });
+
+  it('keeps the expand preference independent across sessions (no cross-talk)', () => {
+    // The preference is per session, not device-global: one session can be
+    // expanded while another stays collapsed. A regression that reverts to
+    // a single device-wide key would break this case — toggling under
+    // session A would suddenly affect session B's restored state.
+    const OTHER_SESSION = 'session-other';
+
+    // Seed session A's preference to expanded. Session B has no preference,
+    // so its restored state must be the default (collapsed).
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+
+    // Render once with session A's id focused: expanded.
+    const { unmount } = renderOverlay({
+      threads: [makeThread(1)],
+      messagesByThread: new Map(),
+    });
+    expect(
+      screen.getByTestId('thread-timeline-toggle'),
+    ).toHaveAttribute('aria-expanded', 'true');
+    unmount();
+
+    // Switch focus to a different session id, with no preference written
+    // for it. The overlay must mount collapsed — session B does not inherit
+    // session A's expand state.
+    useNavStore.setState({ focusedSessionId: OTHER_SESSION });
+    renderOverlay({ threads: [makeThread(1)], messagesByThread: new Map() });
+    expect(
+      screen.getByTestId('thread-timeline-toggle'),
+    ).toHaveAttribute('aria-expanded', 'false');
+
+    // And session A's localStorage entry is still intact — switching
+    // session does not clobber the other's preference.
+    expect(window.localStorage.getItem(timelineExpandedKey(TEST_SESSION_ID))).toBe(
+      'true',
+    );
+    expect(
+      window.localStorage.getItem(timelineExpandedKey(OTHER_SESSION)),
+    ).toBeNull();
   });
 });
 
@@ -322,7 +387,7 @@ describe('ThreadTimelineOverlay collapsed query gating', () => {
   });
 
   it('fetches all threads on mount when the expanded preference is restored', async () => {
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
     const threads = [makeThread(1), makeThread(2)];
     const { apiClient } = renderOverlay({
       threads,
@@ -337,7 +402,7 @@ describe('ThreadTimelineOverlay collapsed query gating', () => {
 describe('ThreadTimelineOverlay lane labels', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it("uses the wire thread.title as the lane label, matching Navigator", async () => {
@@ -387,7 +452,7 @@ describe('ThreadTimelineOverlay lane labels', () => {
 describe('ThreadTimelineOverlay playhead', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('renders one playhead per lane so the scrub indicator scrolls with the body', async () => {
@@ -1316,7 +1381,7 @@ describe('ThreadTimelineOverlay wheel calculator', () => {
 describe('ThreadTimelineOverlay mark rendering', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('renders circular marks with role-coded color classes and a data-message-kind attribute', async () => {
@@ -1445,7 +1510,7 @@ describe('ThreadTimelineOverlay mark rendering', () => {
 describe('ThreadTimelineOverlay active lane highlight', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('falls back to the activeThreadId prop highlight when no dot is in view', async () => {
@@ -1554,7 +1619,7 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
 describe('ThreadTimelineOverlay wheel skips small marks', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('walks only the main-conversation (large) subset on wheel, jumping over tool calls', async () => {
@@ -1663,7 +1728,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
 describe('ThreadTimelineOverlay jump-target highlight', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('highlights the destination message after a click jump so the eye spots it', async () => {
@@ -1707,7 +1772,7 @@ describe('ThreadTimelineOverlay jump-target highlight', () => {
 describe('ThreadTimelineOverlay does not override an external active-thread change', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('lets a Navigator-driven setActiveThread stick when the message-list reference changes underneath', async () => {
@@ -1815,7 +1880,7 @@ describe('ThreadTimelineOverlay does not override an external active-thread chan
 describe('ThreadTimelineOverlay mystery-dot filter', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('does not render dots for system or other ingest-only rows', async () => {
@@ -1863,7 +1928,7 @@ describe('ThreadTimelineOverlay mystery-dot filter', () => {
 describe('ThreadTimelineOverlay small-dot clustering', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('renders 2+ consecutive small dots as a single cluster mark', async () => {
@@ -1995,7 +2060,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
   // disconnected between rows.)
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('uses CSS Grid with a max-content label column and stretched rows for the lane container', async () => {
@@ -2571,7 +2636,7 @@ describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
 
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('renders cluster dots at exactly the small-dot diameter', async () => {
@@ -2991,7 +3056,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
 
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('uses threshold=PANE_SCROLL_OBSERVER_THRESHOLD and observes every rendered message article', async () => {
@@ -3276,7 +3341,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
 
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('suppresses IO updates fired after the time-based guard expires but before the cross-lane scroll completes', async () => {
@@ -3701,7 +3766,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
 
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   it('suppresses IO ripples that arrive after a slow cross-lane scroll lands (time-based guard starts at scroll-fire, not jump-trigger)', async () => {
@@ -4308,7 +4373,7 @@ describe('ThreadTimelineOverlay article-anchored uuid selector (v16)', () => {
       // `data-message-uuid`. Use the small-dot-clustering shape so the
       // timeline produces both a regular dot AND a cluster (both
       // carrying `data-message-uuid`).
-      window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+      window.localStorage.setItem(timelineExpandedKey(), 'true');
       const threads = [makeThread(1)];
       const messages = new Map([
         [
@@ -4417,7 +4482,7 @@ describe('ThreadTimelineOverlay article-anchored uuid selector (v16)', () => {
 describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   /**
@@ -4735,7 +4800,7 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
 describe('ThreadTimelineOverlay external active-thread change', () => {
   beforeEach(() => {
     resetGlobals();
-    window.localStorage.setItem(TIMELINE_EXPANDED_STORAGE_KEY, 'true');
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
   });
 
   /**
