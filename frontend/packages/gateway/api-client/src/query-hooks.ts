@@ -1,6 +1,7 @@
 import {
   useInfiniteQuery,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
   type UseInfiniteQueryResult,
@@ -71,6 +72,17 @@ export function useSessionsQuery(
 const SESSION_THREADS_STALE_TIME = 30_000;
 
 /**
+ * Milliseconds a fetched thread's messages are considered fresh. Cross-lane
+ * jumps in the timeline revisit threads whose messages are already cached;
+ * without a stale window each revisit triggers a background refetch whose new
+ * array reference cascades through downstream `useMemo`s. WS-driven
+ * invalidation (`invalidateThreadMessages`, triggered by session events) still
+ * forces an immediate refresh because `invalidateQueries` overrides
+ * `staleTime`, so realtime freshness is preserved.
+ */
+const MESSAGES_STALE_TIME = 30_000;
+
+/**
  * A single session's thread tree. Disabled until a real session id is supplied.
  *
  * Both the focused-session query in the workspace and each visible session
@@ -127,7 +139,55 @@ export function useThreadMessagesQuery(
       threadId === null ? queryKeys.messagesNone : queryKeys.messages(threadId),
     queryFn: () => client.getThreadMessages(threadId as ThreadId),
     enabled: threadId !== null,
+    staleTime: MESSAGES_STALE_TIME,
   });
+}
+
+/** One thread's messages query result, keyed by the thread id it ran for. */
+export interface ThreadMessagesQueryEntry {
+  threadId: ThreadId;
+  result: UseQueryResult<MessagesResponse>;
+}
+
+/**
+ * Messages for several threads at once, one query per thread. Shares the
+ * `messages(threadId)` cache key with {@link useThreadMessagesQuery}, so the
+ * active thread's already-fetched messages are reused rather than re-requested.
+ *
+ * Used by the timeline footer to drive its swim-lane dots: the footer needs
+ * the message counts for every (sub)thread, not just the focused one. N+1 is
+ * acceptable in MVP — a dedicated `all_threads=true` REST is intentionally
+ * left for a later pass once usage shows the per-thread fan-out matters.
+ *
+ * `options.enabled` (default `true`, backward-compatible) gates the fan-out so
+ * callers can keep the hook mounted but suppress the per-thread fetches while
+ * their UI is hidden. At cold load the browser caps at six HTTP/1.1
+ * connections per host, so an always-on fan-out across many threads saturates
+ * the pool and stretches the focused thread's `useThreadMessagesQuery` behind
+ * it. Disabling here while the timeline is collapsed leaves the focused
+ * query untouched (it has its own `enabled` gate keyed on a non-null thread
+ * id), and because both hooks share `queryKeys.messages(threadId)` with the
+ * same `staleTime`, expanding the timeline later still reuses any messages
+ * the focused query has already pulled into cache.
+ */
+export function useThreadsMessagesQueries(
+  client: ApiClient,
+  threadIds: ThreadId[],
+  options?: { enabled?: boolean },
+): ThreadMessagesQueryEntry[] {
+  const enabled = options?.enabled ?? true;
+  const results = useQueries({
+    queries: threadIds.map((threadId) => ({
+      queryKey: queryKeys.messages(threadId),
+      queryFn: () => client.getThreadMessages(threadId),
+      staleTime: MESSAGES_STALE_TIME,
+      enabled,
+    })),
+  });
+  return results.map((result, index) => ({
+    threadId: threadIds[index],
+    result,
+  }));
 }
 
 /**

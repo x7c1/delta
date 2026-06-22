@@ -11,23 +11,23 @@
  */
 :root {
   /*
-   * Overlay layout. The transcript's composer and breadcrumb float as cards
-   * over the scrolling body (see TranscriptPane); the body reserves fixed
-   * padding so resting content clears them. Each reserve is derived as
-   * inset + card height, so the gap and the reserves can never drift apart:
+   * Overlay layout. The transcript's composer floats as a card over the
+   * scrolling body (see TranscriptPane); the body reserves fixed padding so
+   * resting content clears it. The reserve is derived as inset + card height,
+   * so the gap and the reserve can never drift apart:
    *
-   *   --delta-overlay-inset            0.75rem  (the cards' inset-*-3 of old)
+   *   --delta-overlay-inset            0.75rem  (the card's inset-*-3 of old)
    *   --delta-composer-body-reserve    0.75 + 13.25 = 14rem   (pb-56 of old)
-   *   --delta-breadcrumb-body-reserve  0.75 + 2.75  = 3.5rem  (pt-14 of old)
+   *
+   * The breadcrumb used to float as another card with its own
+   * `--delta-breadcrumb-body-reserve`; it is now an in-flow element at the
+   * top of the body (alongside the thread-timeline card and the Terminal
+   * toggle), so no top reserve is needed.
    */
   --delta-overlay-inset: 0.75rem;
   --delta-composer-card-reserve: 13.25rem;
-  --delta-breadcrumb-card-reserve: 2.75rem;
   --delta-composer-body-reserve: calc(
     var(--delta-overlay-inset) + var(--delta-composer-card-reserve)
-  );
-  --delta-breadcrumb-body-reserve: calc(
-    var(--delta-overlay-inset) + var(--delta-breadcrumb-card-reserve)
   );
 
   /* The embedded terminal's background — slate-900, shared by the panel body
@@ -112,6 +112,89 @@ body {
  */
 ::highlight(branch-origin) {
   background-color: rgba(250, 204, 21, 0.45);
+}
+
+/*
+ * Brief background-color highlight on a transcript message that the
+ * thread-timeline overlay just jumped to (see ThreadTimelineOverlay's
+ * highlightMessageJump). After scrollIntoView aligns the destination at the
+ * top of the body, the message bubble's background fades from a faint
+ * amber wash back to the bubble's resting color over
+ * TIMELINE_JUMP_HIGHLIGHT_MS so the eye notices where the navigation landed
+ * without being shouted at.
+ *
+ * Implemented as a one-shot animation (rather than a transition) because the
+ * resting background lives on the bubble element MessageItem paints — a CSS
+ * transition would need a two-step class swap to drive the property change,
+ * while a keyframe with `forwards` runs cleanly from the wash at 0% to
+ * "transparent at 100%" once and stops. Since the bubble's own background
+ * paints behind the keyframe (the rule sets background-color on the same
+ * element, the keyframe overrides it during the animation), the final
+ * `forwards` state is `transparent` so the bubble's resting color is
+ * visible the instant the highlight ends.
+ *
+ * The first selector targets the inner bubble divs MessageItem paints for a
+ * user turn (`max-w-[85%]`) and an assistant prose turn (the article's
+ * direct `.rounded-lg` child), so the highlight lands on the SAME element
+ * the resting bubble color sits on — no overlay halo around the bubble.
+ *
+ * Articles without an inner bubble (tool / meta / task-notification cards)
+ * fall through to the article-level rule via `:not(:has(...))`, so the
+ * effect is still visible on those. The `:has()` guard is what kept v7's
+ * jump from doubling the highlight: previously the article rule fired
+ * unconditionally, painting amber behind the bubble's own amber, producing
+ * a visible halo. Modern browsers (Chrome 105+, Safari 15.4+, Firefox 121+)
+ * all support `:has()` natively.
+ *
+ * The wash uses Tailwind's `amber-100` (rgb(254 243 199), `#fef3c7`) at low
+ * alpha. It is the palest amber Tailwind ships and reads as a subtle warm
+ * tint on top of the bubble's resting blue-50 / slate-50 — enough to notice
+ * the landing, not enough to dominate the message. `prefers-reduced-motion:
+ * reduce` disables the animation entirely for users who opt out of motion.
+ */
+.delta-timeline-jump-highlight > .rounded-lg,
+.delta-timeline-jump-highlight > .max-w-\[85\%\] {
+  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+}
+.delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])) {
+  border-radius: 0.375rem;
+  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+}
+@keyframes delta-timeline-jump-highlight-fade {
+  0% {
+    background-color: rgb(254 243 199 / 0.7);
+  }
+  100% {
+    background-color: rgb(254 243 199 / 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])),
+  .delta-timeline-jump-highlight > .rounded-lg,
+  .delta-timeline-jump-highlight > .max-w-\[85\%\] {
+    animation: none;
+  }
+}
+
+/*
+ * Scroll alignment for transcript message articles. When the thread-timeline
+ * overlay jumps to a message it uses `scrollIntoView({ block: 'start' })`,
+ * which puts the article flush with the top of the scrollable body — but
+ * TranscriptPane's top region (breadcrumb / timeline / Terminal toggle) is
+ * an absolute overlay (`position: absolute; top: 0; ...`) floating over
+ * that top edge, so without compensation the destination article would
+ * land hidden underneath it. The body also reserves matching
+ * `padding-top` from the same token so the first message does not render
+ * under the overlay on initial paint. The `--delta-top-region-reserve`
+ * token is set inline on the body via React (TranscriptPane measures the
+ * live overlay height with a ResizeObserver, so the reserve tracks both
+ * the breadcrumb-only resting state and the taller expanded-timeline
+ * state automatically). On panes without a top region (the cold-start /
+ * new-session state) the token is absent and `scroll-margin-top` falls
+ * back to `0`, which is benign.
+ */
+article[data-message-uuid] {
+  scroll-margin-top: var(--delta-top-region-reserve, 0);
 }
 
 .markdown-body {

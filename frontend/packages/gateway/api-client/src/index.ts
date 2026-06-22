@@ -30,6 +30,8 @@ export {
   useCreateSendMutation,
   useCancelSendMutation,
   useThreadMessagesQuery,
+  useThreadsMessagesQueries,
+  type ThreadMessagesQueryEntry,
   useWorkdirListQuery,
   useHomeDirQuery,
   useRecentWorkdirsQuery,

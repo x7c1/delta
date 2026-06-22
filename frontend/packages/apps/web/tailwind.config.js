@@ -94,11 +94,13 @@ export default {
       },
       spacing: {
         // Overlay layout tokens (values in src/index.css). The floating-card
-        // insets and the scroll-body paddings that reserve space for those
-        // cards derive from the same variables, so they cannot drift apart.
+        // inset and the scroll-body padding that reserves space for the
+        // composer card derive from the same variables, so they cannot drift
+        // apart. The breadcrumb used to have its own reserve when it floated
+        // as a card; it is now an in-flow element at the top of the body, so
+        // no top reserve token is needed.
         'overlay-inset': 'var(--delta-overlay-inset)',
         'composer-reserve': 'var(--delta-composer-body-reserve)',
-        'breadcrumb-reserve': 'var(--delta-breadcrumb-body-reserve)',
       },
     },
   },

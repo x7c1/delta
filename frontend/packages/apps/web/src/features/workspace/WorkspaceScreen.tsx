@@ -46,6 +46,18 @@ function TerminalIcon({ className }: { className?: string }) {
 }
 
 /**
+ * Tailwind class string for the "Terminal" reopen button. Lives next to the
+ * matching collapsed-state class in `ThreadTimelineOverlay`
+ * ({@link TIMELINE_TOGGLE_BUTTON_CLASS}) — the two buttons sit side-by-side
+ * in the transcript pane's top region, so they must read as the same
+ * control shape: same border, radius, padding, font, shadow, and hover.
+ * Keeping the literal class chain spelled out here (rather than imported)
+ * keeps each side reviewable on its own.
+ */
+const TERMINAL_TOGGLE_BUTTON_CLASS =
+  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50';
+
+/**
  * Pick the session to focus on cold load from the session list: prefer the
  * most-recently-active open session, else the most-recently-active session,
  * else the new-session sentinel when the list is empty. The list is ordered by
@@ -261,6 +273,25 @@ export function WorkspaceScreen() {
     </ErrorBoundary>
   );
 
+  // The Terminal reopen button rides at the right end of the transcript
+  // pane's top region (next to the collapsed timeline toggle) so the two
+  // controls share one row and the timeline card can grow downward without
+  // overlapping anything. `null` while the terminal is open: the transcript
+  // pane drops the slot entirely and the top region centers on whatever is
+  // left (timeline toggle alone, or nothing at all on the new-session
+  // screen).
+  const terminalToggleButton = !terminalOpen ? (
+    <button
+      type="button"
+      onClick={toggleTerminal}
+      data-testid="terminal-toggle"
+      className={TERMINAL_TOGGLE_BUTTON_CLASS}
+    >
+      <TerminalIcon className="h-3.5 w-3.5" />
+      Terminal
+    </button>
+  ) : null;
+
   return (
     <div className="relative flex h-full overflow-hidden">
       {/* Left: navigator (session → thread tree) */}
@@ -285,12 +316,14 @@ export function WorkspaceScreen() {
             // directory picker is mandatory (non-dismissable) — the user must
             // choose a directory before reaching the new-session screen.
             workdirMandatory={sessions.length === 0}
+            terminalButton={terminalToggleButton}
           />
         ) : activeThread ? (
           <TranscriptPane
             threads={threads}
             activeThread={activeThread}
             readOnly={!focusedOpen}
+            terminalButton={terminalToggleButton}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -298,24 +331,6 @@ export function WorkspaceScreen() {
           </div>
         )}
       </div>
-
-      {/* Terminal toggle (visible when the terminal is collapsed). It mirrors the
-          transcript's breadcrumb card on the opposite corner: same overlay inset
-          (`*-overlay-inset`) and the same `px-3 py-1.5 text-xs rounded-md border
-          bg-white shadow-md` card shape, so the two float at a matching height and
-          size on the left/right of the conversation pane. */}
-      {!terminalOpen && (
-        <div className="absolute right-overlay-inset top-overlay-inset z-10">
-          <button
-            type="button"
-            onClick={toggleTerminal}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50"
-          >
-            <TerminalIcon className="h-3.5 w-3.5" />
-            Terminal
-          </button>
-        </div>
-      )}
 
       {/* Right: terminal — attaches to the focused session's pane. */}
       {terminalOpen &&
