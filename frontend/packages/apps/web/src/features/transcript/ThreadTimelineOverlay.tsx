@@ -1919,7 +1919,7 @@ export function ThreadTimelineOverlay({
                           // GPU-composited on the existing 2 px box so the
                           // sprite keeps a stable 2 px footprint regardless
                           // of where it lands on the subpixel grid.
-                          className="pointer-events-none absolute left-0 top-0 h-full w-[2px] bg-slate-500"
+                          className="pointer-events-none absolute left-0 top-0 h-full w-px bg-slate-500"
                           style={{
                             transform: `translateX(${playheadX + LANE_LEFT_PAD_PX}px)`,
                             transition: `transform ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
