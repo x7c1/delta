@@ -1927,10 +1927,15 @@ export function ThreadTimelineOverlay({
       aria-label="Subthread timeline"
     >
       {/* The expanded header is a two-region row:
-          LEFT  — the expand/collapse toggle (icon + "Timeline" label + ▾
-                  chevron). The toggle is the primary control and sits in
-                  the first child position so the eye lands on it first
-                  when the header row enters view.
+          LEFT  — the expand/collapse toggle (icon + "Timeline" label).
+                  The toggle is the primary control and sits in the first
+                  child position so the eye lands on it first when the
+                  header row enters view. No visible chevron — the
+                  button's `hover:bg-slate-50` carries the click
+                  affordance, and `aria-expanded` carries the
+                  open/collapsed state semantically for assistive tech.
+                  The toggle's own `px-3` provides the only left inset
+                  (12 px), matching the original single-pill layout.
           RIGHT — two jump-to-edge buttons ([⏮][⏭]) for one-shot
                   navigation to the very first / very last message across
                   ALL lanes. They live in their own flex wrapper with no
@@ -1941,22 +1946,20 @@ export function ThreadTimelineOverlay({
                   (`h-3 w-3`) — one notch smaller than the toggle's
                   `h-3.5 w-3.5` — for the same "quieter satellite"
                   reason. The jump buttons live outside the toggle so a
-                  click on either one does NOT collapse the timeline. */}
-      <div className="flex w-full items-center justify-between px-2">
+                  click on either one does NOT collapse the timeline.
+                  The wrapper's `pr-3` keeps the right inset symmetric
+                  with the left (12 px before the rightmost jump
+                  button). */}
+      <div className="flex w-full items-center justify-between pr-3">
         <button
           type="button"
           onClick={toggle}
           data-testid="thread-timeline-toggle"
           aria-expanded={expanded}
-          className="flex items-center gap-2 rounded-md px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
         >
-          <span className="flex items-center gap-1.5">
-            <ThreadTimelineIcon className="h-3.5 w-3.5" />
-            Timeline
-          </span>
-          <span aria-hidden="true" className="text-slate-400">
-            ▾
-          </span>
+          <ThreadTimelineIcon className="h-3.5 w-3.5" />
+          Timeline
         </button>
         <div className="flex items-center">
           <button
