@@ -1935,7 +1935,7 @@ export function ThreadTimelineOverlay({
           RIGHT — the existing expand/collapse toggle (icon + "Timeline"
                   label + ▾ chevron), unchanged from the previous layout
                   except for its position. */}
-      <div className="flex w-full items-center gap-1.5 px-2 py-1.5">
+      <div className="flex w-full items-center gap-1.5 px-2">
         <button
           type="button"
           onClick={() => setActiveMessageIndex(0)}
