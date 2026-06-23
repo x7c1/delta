@@ -96,13 +96,22 @@ pub(in crate::interactor) enum SessionInput {
         tool_use_id: String,
         reply: Reply<Vec<SessionEvent>>,
     },
-    /// `PostToolUse`: a tool call completed. Delta only acts on the
-    /// subagent (`Agent`/`Task`) case — it closes that subagent's running
-    /// window by `tool_use_id`. Routed through the mailbox so the clear is
-    /// ordered with the `PreToolUse` that opened it.
+    /// `PostToolUse`: a tool call completed. Delta acts on the subagent
+    /// (`Agent`/`Task`) case in two ways — for a foreground subagent it closes
+    /// the running window by `tool_use_id`; for a background subagent it
+    /// upgrades the matching launch row with the `agentId` reported in
+    /// `tool_response_json` so the eventual `<task-notification>` has a
+    /// fallback correlation key. Routed through the mailbox so the
+    /// clear/upgrade is ordered with the `PreToolUse` that opened the window.
     PostToolUse {
         tool_name: String,
         tool_use_id: String,
+        /// The `tool_response` content carried by the hook payload, serialized
+        /// as JSON text. Read by the subagent handler for an `agentId` field;
+        /// otherwise unused. Always a parseable JSON string (`"null"` or `"{}"`
+        /// when the hook carried nothing useful) so the consumer can `from_str`
+        /// without first handling an absent shape.
+        tool_response_json: String,
         reply: Reply<Vec<SessionEvent>>,
     },
     /// `PermissionRequest`: record the row, register a decision waiter, and

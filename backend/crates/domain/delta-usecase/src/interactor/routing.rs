@@ -374,19 +374,26 @@ where
         .await
     }
 
-    /// Handle a `PostToolUse` hook: a tool call completed. Delta only acts on
-    /// the subagent (`Agent`/`Task`) case, closing that subagent's running
-    /// window by `tool_use_id`. Routed through the session's mailbox so the
-    /// clear is ordered after the `PreToolUse` that opened it.
+    /// Handle a `PostToolUse` hook: a tool call completed. Delta acts on the
+    /// subagent (`Agent`/`Task`) case in two ways. For a foreground subagent
+    /// the running window is closed by `tool_use_id`. For a background subagent
+    /// the call returned, not the subagent — so the matching launch row is
+    /// upgraded with the `agentId` the tool's `tool_result` carries, giving
+    /// the eventual `<task-notification>` a fallback correlation key in case
+    /// Claude Code strips `<tool-use-id>` from the notification body. Routed
+    /// through the session's mailbox so the clear/upgrade is ordered after the
+    /// `PreToolUse` that opened the running window.
     pub async fn on_post_tool_use(
         &self,
         session_id: &SessionId,
         tool_name: &str,
         tool_use_id: &str,
+        tool_response_json: &str,
     ) -> Result<Vec<SessionEvent>> {
         self.request(session_id, |reply| SessionInput::PostToolUse {
             tool_name: tool_name.to_owned(),
             tool_use_id: tool_use_id.to_owned(),
+            tool_response_json: tool_response_json.to_owned(),
             reply,
         })
         .await

@@ -228,10 +228,21 @@ pub struct RunningSubagent {
     /// suppressed — until the subagent finishes, which for a BACKGROUND
     /// subagent outlives the launching turn.
     pub thread_id: ThreadId,
-    /// The `tool_use_id` of the `Agent`/`Task` call, the key that finishes it —
-    /// the matching `PostToolUse` for a foreground entry, or the completion
-    /// `<task-notification>` carrying this same id for a background entry.
+    /// The `tool_use_id` of the `Agent`/`Task` call, the primary key that
+    /// finishes it — the matching `PostToolUse` for a foreground entry, or the
+    /// completion `<task-notification>` carrying this same id for a background
+    /// entry.
     pub tool_use_id: String,
+    /// The background-task identifier the launching tool's `tool_result`
+    /// reports for a BACKGROUND subagent. Learned via the `PostToolUse(Agent)`
+    /// hook (which reads `agentId` from the result content) and used as a
+    /// fallback correlation key when matching a `<task-notification>` whose
+    /// `<tool-use-id>` element was stripped from the user-message body — the
+    /// notification's `<task-id>` element still routes back here. `None` until
+    /// that hook has run, and stays `None` for foreground subagents (their
+    /// `PostToolUse` finishes the entry directly, so the fallback key is
+    /// never needed).
+    pub task_id: Option<String>,
     /// The subagent type from the tool input (e.g. `general-purpose`), if the
     /// call carried one.
     pub subagent_type: Option<String>,
@@ -820,6 +831,50 @@ impl SessionRuntime {
         self.running_subagents
             .retain(|s| s.tool_use_id != tool_use_id);
         self.running_subagents.len() != before
+    }
+
+    /// Attach a learned `task_id` to the running subagent with this
+    /// `tool_use_id`, returning `true` when the entry's `task_id` actually
+    /// changed (so the caller knows to persist the upgrade through the store).
+    /// Upgrading an unknown id (or an entry already carrying a matching
+    /// `task_id`) returns `false` — no row was changed, so nothing downstream
+    /// needs to fire.
+    ///
+    /// This is the BACKGROUND subagent's `PostToolUse(Agent)` path: the hook
+    /// reads `agentId` from the launching tool's `tool_result` and records it
+    /// here so a subsequent `<task-notification>` whose `<tool-use-id>` element
+    /// was stripped can still be matched by its `<task-id>` element.
+    pub fn upgrade_subagent_task_id(&mut self, tool_use_id: &str, task_id: &str) -> bool {
+        let Some(entry) = self
+            .running_subagents
+            .iter_mut()
+            .find(|s| s.tool_use_id == tool_use_id)
+        else {
+            return false;
+        };
+        if entry.task_id.as_deref() == Some(task_id) {
+            return false;
+        }
+        entry.task_id = Some(task_id.to_owned());
+        true
+    }
+
+    /// The `task_id` the runtime knows for this `tool_use_id`, if any.
+    ///
+    /// Read by the sync path right after [`Effect::SubagentLaunched`] persists
+    /// the launch row: a background subagent's immediate `PostToolUse(Agent)`
+    /// usually fires before the launch line is folded, so the hook recorded
+    /// the `agentId` on the runtime entry but could not yet persist it on the
+    /// launch row (which did not exist). The sync flushes that pending upgrade
+    /// here so the persisted row carries the fallback correlation key for the
+    /// eventual `<task-notification>`.
+    ///
+    /// [`Effect::SubagentLaunched`]: delta_attribution::Effect::SubagentLaunched
+    pub fn pending_subagent_task_id(&self, tool_use_id: &str) -> Option<&str> {
+        self.running_subagents
+            .iter()
+            .find(|s| s.tool_use_id == tool_use_id)
+            .and_then(|s| s.task_id.as_deref())
     }
 
     /// The pending spawn, for the test seams that read launch state back.

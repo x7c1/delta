@@ -207,12 +207,21 @@ CREATE TABLE IF NOT EXISTS launch_option (
 -- that launched the task instead of whatever thread is current when it lands. A
 -- row is inserted when the launch is first seen and deleted when its
 -- notification is folded, so the table holds only still-outstanding launches.
--- This is a brand-new table, so a plain `CREATE TABLE IF NOT EXISTS` brings an
--- existing database up to date with no `ALTER TABLE` step.
+--
+-- `task_id` is the background-task identifier Claude Code mints for the
+-- subagent, learned from the launching tool's `tool_result` via the
+-- `PostToolUse(Agent)` hook (the row is inserted earlier with task_id NULL).
+-- Recent Claude Code versions sometimes drop `<tool-use-id>` from the user
+-- message `<task-notification>` body while keeping `<task-id>`, so this is the
+-- fallback correlation key that lets the fold still finish the running
+-- subagent in that case. It is additive (see `ADDITIVE_COLUMNS`), so an existing
+-- database gains it as NULL on every pre-existing row with no backfill — a
+-- launch that predates the upgrade keeps the legacy tool-use-id-only behaviour.
 CREATE TABLE IF NOT EXISTS subagent_launch (
   session_id  TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
   tool_use_id TEXT NOT NULL,
   thread_id   INTEGER NOT NULL REFERENCES thread(id),
+  task_id     TEXT,
   created_at  TEXT NOT NULL,
   PRIMARY KEY (session_id, tool_use_id)
 ) STRICT;
@@ -321,6 +330,16 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "session",
         column: "repo_root",
         add_column_sql: "ALTER TABLE session ADD COLUMN repo_root TEXT",
+    },
+    // Background-task identifier learned via `PostToolUse(Agent)`, added to
+    // `subagent_launch` after it first shipped. Nullable with no default: an
+    // existing database gains it as NULL on every pre-existing row, so a launch
+    // that predates the upgrade stays correlated only by tool_use_id (the
+    // legacy behaviour, still correct when the notification carries that id).
+    AdditiveColumn {
+        table: "subagent_launch",
+        column: "task_id",
+        add_column_sql: "ALTER TABLE subagent_launch ADD COLUMN task_id TEXT",
     },
 ];
 

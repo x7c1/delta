@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use delta_attribution::SubagentLaunch;
 use delta_model::{
     LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, Role, Send,
     SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
@@ -45,8 +46,10 @@ pub(crate) struct FakeStoreInner {
     pub(crate) launch_options: Vec<LaunchOption>,
     pub(crate) next_launch_option_id: i64,
     /// Outstanding background-task launches keyed by `(session_id,
-    /// tool_use_id)`, mirroring the SQL `subagent_launch` table.
-    pub(crate) subagent_launches: HashMap<(SessionId, String), ThreadId>,
+    /// tool_use_id)`, mirroring the SQL `subagent_launch` table. The value is
+    /// the `SubagentLaunch` carrying the launching thread plus the optional
+    /// `task_id` learned via the `PostToolUse(Agent)` hook.
+    pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
 }
 
 #[derive(Default)]
@@ -610,8 +613,35 @@ impl SessionStore for FakeStore {
         thread_id: ThreadId,
     ) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
-        g.subagent_launches
-            .insert((session_id.clone(), tool_use_id.to_owned()), thread_id);
+        // Mirrors the SQL UPSERT: the `task_id` of an already-upgraded row is
+        // preserved across a re-record (the launching thread refreshes; the
+        // separately-learned task id does not). A brand-new row starts with
+        // `task_id: None` until `upgrade_subagent_task_id` runs.
+        let key = (session_id.clone(), tool_use_id.to_owned());
+        let task_id = g.subagent_launches.get(&key).and_then(|l| l.task_id.clone());
+        g.subagent_launches.insert(
+            key,
+            SubagentLaunch {
+                thread_id,
+                task_id,
+            },
+        );
+        Ok(())
+    }
+
+    async fn upgrade_subagent_task_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        task_id: &str,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(launch) = g
+            .subagent_launches
+            .get_mut(&(session_id.clone(), tool_use_id.to_owned()))
+        {
+            launch.task_id = Some(task_id.to_owned());
+        }
         Ok(())
     }
 
@@ -629,12 +659,12 @@ impl SessionStore for FakeStore {
     async fn outstanding_subagent_launches(
         &self,
         session_id: &SessionId,
-    ) -> Result<BTreeMap<String, ThreadId>> {
+    ) -> Result<BTreeMap<String, SubagentLaunch>> {
         let g = self.inner.lock().unwrap();
         Ok(g.subagent_launches
             .iter()
             .filter(|((sid, _), _)| sid == session_id)
-            .map(|((_, tool_use_id), thread_id)| (tool_use_id.clone(), *thread_id))
+            .map(|((_, tool_use_id), launch)| (tool_use_id.clone(), launch.clone()))
             .collect())
     }
 

@@ -177,3 +177,34 @@ pub(crate) fn task_notification_line(uuid: &str, tool_use_id: &str) -> Transcrip
         ),
     )
 }
+
+/// A `<task-notification>` body that carries only `<task-id>` — the recent
+/// Claude Code shape that strips `<tool-use-id>` from the user-message body.
+/// Used by the task-id-fallback tests.
+pub(crate) fn task_notification_line_task_id_only(
+    uuid: &str,
+    task_id: &str,
+) -> TranscriptMessage {
+    user_line(
+        uuid,
+        &format!(
+            "<task-notification>\n\
+             <task-id>{task_id}</task-id>\n\
+             <status>completed</status>\n\
+             <summary>Agent completed</summary>\n\
+             </task-notification>"
+        ),
+    )
+}
+
+/// A `<task-notification>` body that carries NEITHER `<tool-use-id>` nor
+/// `<task-id>` — the future-Claude-Code shape we want the fold to log a
+/// warning for. Used by the tracing-warn test.
+pub(crate) fn task_notification_line_both_missing(uuid: &str) -> TranscriptMessage {
+    user_line(
+        uuid,
+        "<task-notification>\n\
+         <status>completed</status>\n\
+         </task-notification>",
+    )
+}

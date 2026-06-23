@@ -1592,12 +1592,22 @@ async fn subagent_launches_round_trip_and_clear() {
         .outstanding_subagent_launches(&session.id)
         .await
         .unwrap();
-    assert_eq!(launches.get("toolu_a"), Some(&child));
-    assert_eq!(launches.get("toolu_b"), Some(&main));
+    assert_eq!(
+        launches.get("toolu_a").map(|launch| launch.thread_id),
+        Some(child)
+    );
+    assert_eq!(
+        launches.get("toolu_b").map(|launch| launch.thread_id),
+        Some(main)
+    );
+    assert!(
+        launches.values().all(|launch| launch.task_id.is_none()),
+        "a fresh launch carries no task_id until upgrade_subagent_task_id runs"
+    );
 
-    // Re-recording the same id refreshes the thread rather than erroring.
+    // Upgrading an entry sets its task_id; re-record keeps that upgrade.
     store
-        .record_subagent_launch(&session.id, "toolu_a", main)
+        .upgrade_subagent_task_id(&session.id, "toolu_a", "a31425032172620ed")
         .await
         .unwrap();
     assert_eq!(
@@ -1605,9 +1615,34 @@ async fn subagent_launches_round_trip_and_clear() {
             .outstanding_subagent_launches(&session.id)
             .await
             .unwrap()
-            .get("toolu_a"),
-        Some(&main)
+            .get("toolu_a")
+            .and_then(|launch| launch.task_id.clone()),
+        Some("a31425032172620ed".to_owned())
     );
+
+    // Re-recording the same id refreshes the thread rather than erroring, and
+    // must NOT wipe the previously-upgraded task_id.
+    store
+        .record_subagent_launch(&session.id, "toolu_a", main)
+        .await
+        .unwrap();
+    let after = store
+        .outstanding_subagent_launches(&session.id)
+        .await
+        .unwrap();
+    assert_eq!(after.get("toolu_a").map(|launch| launch.thread_id), Some(main));
+    assert_eq!(
+        after.get("toolu_a").and_then(|launch| launch.task_id.clone()),
+        Some("a31425032172620ed".to_owned()),
+        "the previously-upgraded task_id survives a re-record"
+    );
+
+    // Upgrading an unknown id is a silent no-op (the launch may have already
+    // been folded by its completion notification).
+    store
+        .upgrade_subagent_task_id(&session.id, "toolu_unknown", "anything")
+        .await
+        .unwrap();
 
     // Clearing one leaves the other; clearing an unknown id is a no-op.
     store
@@ -1623,7 +1658,72 @@ async fn subagent_launches_round_trip_and_clear() {
         .await
         .unwrap();
     assert_eq!(remaining.len(), 1);
-    assert_eq!(remaining.get("toolu_b"), Some(&main));
+    assert_eq!(
+        remaining.get("toolu_b").map(|launch| launch.thread_id),
+        Some(main)
+    );
+}
+
+/// An existing database created before `subagent_launch.task_id` existed must
+/// gain the column on open, with pre-existing rows surfacing `task_id: None`.
+/// This is the additive-column smoke test that pins the recovery path the
+/// task-id-fallback fix relies on for already-deployed databases.
+#[tokio::test]
+async fn opening_a_pre_subagent_task_id_database_migrates_and_loads_old_rows_as_null() {
+    let dir = std::env::temp_dir().join(format!("delta-subagent-migrate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a "legacy" database: open through the store (which now adds
+    // `task_id`), seed a launch row, then physically drop the column so the
+    // file looks pre-migration.
+    let main = {
+        let legacy = SqliteStore::open(path_str).unwrap();
+        legacy.register_session(new_session()).await.unwrap();
+        let main = legacy.main_thread_id(&SessionId::from("sess-1")).await.unwrap();
+        legacy
+            .record_subagent_launch(&SessionId::from("sess-1"), "toolu_legacy", main)
+            .await
+            .unwrap();
+        // Strip the column so the file is a faithful pre-migration snapshot.
+        let conn = legacy.conn.lock().await;
+        conn.execute_batch("ALTER TABLE subagent_launch DROP COLUMN task_id;")
+            .unwrap();
+        main
+    };
+
+    // Re-opening applies the guarded ALTER. The legacy row keeps its
+    // thread_id and surfaces a NULL task_id, so the fold still seeds the
+    // launch correctly — it just lacks the fallback correlation key, which is
+    // the historical behaviour anyway.
+    let store = SqliteStore::open(path_str).unwrap();
+    let launches = store
+        .outstanding_subagent_launches(&SessionId::from("sess-1"))
+        .await
+        .unwrap();
+    let legacy = launches.get("toolu_legacy").expect("legacy launch survives migration");
+    assert_eq!(legacy.thread_id, main);
+    assert!(
+        legacy.task_id.is_none(),
+        "a pre-migration row migrates as NULL task_id"
+    );
+
+    // A subsequent upgrade fills the column for new launches.
+    store
+        .upgrade_subagent_task_id(&SessionId::from("sess-1"), "toolu_legacy", "agent_abc")
+        .await
+        .unwrap();
+    let after = store
+        .outstanding_subagent_launches(&SessionId::from("sess-1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        after.get("toolu_legacy").and_then(|l| l.task_id.clone()),
+        Some("agent_abc".to_owned())
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 // SCHEMA_VERSION startup gate. The four cases below are the contract from the

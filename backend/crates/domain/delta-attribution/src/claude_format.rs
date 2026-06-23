@@ -81,14 +81,36 @@ pub fn is_local_command_output(trimmed_text: &str) -> bool {
 /// than a full XML parse: the body is a flat, harness-generated block and the
 /// element value never contains markup.
 pub fn task_notification_tool_use_id(prompt: &str) -> Option<&str> {
+    task_notification_element(prompt, "tool-use-id")
+}
+
+/// The `<task-id>` element a `<task-notification>` body carries: the
+/// background-task identifier Claude Code mints for the subagent, separate
+/// from the launching `<tool-use-id>`. Recent Claude Code versions sometimes
+/// drop `<tool-use-id>` from the user-message notification body while keeping
+/// `<task-id>`, so it serves as a fallback correlation key when matching a
+/// completion back to its launching `RunningSubagent` entry.
+///
+/// Returns `None` when the text is not a task notification or carries no
+/// `<task-id>` element. Mirrors [`task_notification_tool_use_id`]: a minimal
+/// element scan over the flat, harness-generated body.
+pub fn task_notification_task_id(prompt: &str) -> Option<&str> {
+    task_notification_element(prompt, "task-id")
+}
+
+/// Inner-text extractor shared by [`task_notification_tool_use_id`] and
+/// [`task_notification_task_id`]. The body is gated on the task-notification
+/// prefix, then scanned for `<name>...</name>` — a minimal lookup that suits a
+/// flat, harness-generated block without pulling in a full XML parse.
+fn task_notification_element<'a>(prompt: &'a str, name: &str) -> Option<&'a str> {
     if !is_task_notification(prompt) {
         return None;
     }
-    let open = "<tool-use-id>";
-    let close = "</tool-use-id>";
-    let start = prompt.find(open)? + open.len();
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let start = prompt.find(&open)? + open.len();
     let rest = &prompt[start..];
-    let end = rest.find(close)?;
+    let end = rest.find(&close)?;
     Some(rest[..end].trim())
 }
 
@@ -150,6 +172,54 @@ mod tests {
         // A notification with no `<tool-use-id>` element (e.g. malformed).
         assert_eq!(
             task_notification_tool_use_id("<task-notification><status>completed</status></task-notification>"),
+            None
+        );
+    }
+
+    #[test]
+    fn task_id_is_extracted_from_a_task_notification_body() {
+        let body = "<task-notification>\n\
+                    <task-id>a31425032172620ed</task-id>\n\
+                    <tool-use-id>toolu_01PqcdgEeMZekxvwSqjBviuA</tool-use-id>\n\
+                    <output-file>/tmp/x.output</output-file>\n\
+                    <status>completed</status>\n\
+                    </task-notification>";
+        assert_eq!(
+            task_notification_task_id(body),
+            Some("a31425032172620ed")
+        );
+    }
+
+    #[test]
+    fn task_id_is_extracted_when_tool_use_id_is_missing() {
+        // The motivating case: recent Claude Code versions sometimes drop
+        // `<tool-use-id>` from the body while keeping `<task-id>`. The fallback
+        // key must still come back here.
+        let body = "<task-notification>\n\
+                    <task-id>a31425032172620ed</task-id>\n\
+                    <status>completed</status>\n\
+                    </task-notification>";
+        assert_eq!(
+            task_notification_tool_use_id(body),
+            None,
+            "the tool-use-id element really is absent"
+        );
+        assert_eq!(
+            task_notification_task_id(body),
+            Some("a31425032172620ed")
+        );
+    }
+
+    #[test]
+    fn task_id_extraction_ignores_non_notifications_and_missing_element() {
+        assert_eq!(
+            task_notification_task_id("<task-id>a31425032172620ed</task-id>"),
+            None
+        );
+        assert_eq!(
+            task_notification_task_id(
+                "<task-notification><status>completed</status></task-notification>"
+            ),
             None
         );
     }

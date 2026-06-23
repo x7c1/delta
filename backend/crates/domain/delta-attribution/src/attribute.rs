@@ -21,6 +21,12 @@ pub struct OutstandingSend {
     pub semantic_parent_uuid: Option<MessageUuid>,
     /// The dispatched prompt text; the echo is matched by trimmed equality.
     pub text: String,
+    /// The background-task identifier learned for the matching subagent launch,
+    /// when one has been observed. Unused for human-prompt echo matching (which
+    /// is text-based), present so a single struct can also carry the task-id
+    /// correlation used to finish a background subagent when its
+    /// `<task-notification>` is dropping the `<tool-use-id>` element.
+    pub task_id: Option<String>,
 }
 
 impl From<&Send> for OutstandingSend {
@@ -30,8 +36,32 @@ impl From<&Send> for OutstandingSend {
             thread_id: send.thread_id,
             semantic_parent_uuid: send.semantic_parent_uuid.clone(),
             text: send.text.clone(),
+            // The `Send` row has no background-task identifier of its own;
+            // task ids are minted per subagent launch and learned later via the
+            // `PostToolUse(Agent)` hook (see `RunningSubagent::task_id`).
+            task_id: None,
         }
     }
+}
+
+/// One outstanding background-task launch: the launching thread of the task,
+/// plus the [`task_id`] learned from the launching tool's `tool_result` once
+/// the `PostToolUse(Agent)` hook ran. The map [`AttributionState::launched_threads`]
+/// keys these by the launching tool_use id.
+///
+/// [`task_id`]: SubagentLaunch::task_id
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentLaunch {
+    /// The thread the launching `Agent`/`Task`/`Bash` tool_use was attributed
+    /// to. A completion `<task-notification>` carrying this launch's id (or
+    /// matching `task_id`) is attributed back to this thread.
+    pub thread_id: ThreadId,
+    /// The background-task identifier the launching tool's `tool_result`
+    /// reported, learned via the `PostToolUse(Agent)` hook. `None` until that
+    /// hook has run, or when the upgrade was never persisted (an older row).
+    /// Recorded so that a `<task-notification>` whose `<tool-use-id>` element
+    /// was stripped can still be matched by its `<task-id>` element.
+    pub task_id: Option<String>,
 }
 
 /// The state the fold threads from line to line (and the caller threads from
@@ -54,15 +84,22 @@ pub struct AttributionState {
     /// work: seeding every send of a session in dispatch order folds the full
     /// transcript in one pass, each echo consuming its send in turn.
     pub outstanding: VecDeque<OutstandingSend>,
-    /// The launching thread of each outstanding background task, keyed by the
-    /// launching tool_use `id` (the `toolu_...` value). A background subagent
-    /// or background Bash (`run_in_background: true`) returns immediately and
-    /// its completion is injected later as a `<task-notification>` user line
+    /// The outstanding background task launches, keyed by the launching
+    /// tool_use `id` (the `toolu_...` value). A background subagent or
+    /// background Bash (`run_in_background: true`) returns immediately and its
+    /// completion is injected later as a `<task-notification>` user line
     /// carrying that same id in its `<tool-use-id>` element. Looking the id up
     /// here attributes the notification (and the assistant continuation it
     /// drives) to the thread that LAUNCHED the task, instead of blindly
     /// inheriting whatever thread is current when it lands — which is wrong
     /// whenever the user moved threads while the task ran.
+    ///
+    /// Each entry also carries a `task_id` learned later (via the
+    /// `PostToolUse(Agent)` hook reading `agentId` out of the launching tool's
+    /// `tool_result`), used as a fallback correlation key when Claude Code's
+    /// notification body drops the `<tool-use-id>` element — only the
+    /// `<task-id>` survives in that case, and matching by it still routes the
+    /// completion to the launching thread.
     ///
     /// A map (not a single head) because several background tasks — launched
     /// from different threads, possibly nested — can be outstanding at once,
@@ -72,7 +109,7 @@ pub struct AttributionState {
     /// ([`Effect::SubagentLaunched`]) when first seen and cleared
     /// ([`Effect::SubagentCompleted`]) when its notification is folded.
     /// `BTreeMap` keeps the seed-from-store ↔ fold round-trip deterministic.
-    pub launched_threads: BTreeMap<String, ThreadId>,
+    pub launched_threads: BTreeMap<String, SubagentLaunch>,
     /// The `promptId`s of the slash/local-command groups seen in this fold. A
     /// local command (e.g. `/review-pr`) is recorded as several `type: "user"`
     /// lines sharing one `promptId`: a leading `<local-command-caveat>` (the
@@ -112,12 +149,13 @@ impl AttributionState {
 
     /// Seed a batch with the outstanding background-launch map alongside the
     /// carry thread and outstanding send. The map carries `(tool_use_id ->
-    /// launching thread)` for every background task still awaiting its
+    /// SubagentLaunch)` — the launching thread plus the optional `task_id`
+    /// learned later — for every background task still awaiting its
     /// `<task-notification>`.
     pub fn with_launches(
         carry_thread: ThreadId,
         outstanding: Option<OutstandingSend>,
-        launched_threads: BTreeMap<String, ThreadId>,
+        launched_threads: BTreeMap<String, SubagentLaunch>,
     ) -> Self {
         Self {
             launched_threads,
@@ -229,8 +267,13 @@ pub struct Attributed {
 ///   `launched_threads` (recorded when the background `Agent`/`Task`/`Bash`
 ///   tool_use was first seen), so the completion lands on the launching thread
 ///   even when the user has moved to a different thread while the task ran.
-///   Only when the id is absent from the map (the launch fell in an earlier,
-///   no-longer-seeded window) does it fall back to inheriting `carry_thread`.
+///   Recent Claude Code versions sometimes drop `<tool-use-id>` from the
+///   notification body while keeping `<task-id>`, so the lookup falls back to
+///   the `<task-id>` element matched against each entry's persisted `task_id`
+///   (learned at `PostToolUse(Agent)` time). Only when neither key matches a
+///   recorded launch (the launch fell in an earlier, no-longer-seeded window,
+///   or both elements were stripped) does it fall back to inheriting
+///   `carry_thread`.
 ///
 /// Whenever an assistant line carries a background `Agent`/`Task`/`Bash`
 /// tool_use (`run_in_background: true`), its `id` is recorded against the
@@ -314,9 +357,24 @@ pub fn attribute_lines(
                 ContentBlock::ToolUse { id, input, .. }
                     if claude_format::launches_in_background(input) =>
                 {
-                    state
+                    // Re-folding a launch line refreshes the launching thread.
+                    // If the same id was already seeded from the persisted
+                    // store with a `task_id` upgrade, preserve it — it was
+                    // learned later via `PostToolUse(Agent)` and a fresh fold
+                    // of the launch line itself has no newer information.
+                    // Mirrors the SQL `record_subagent_launch` UPSERT, which
+                    // only touches the `thread_id` column.
+                    let task_id = state
                         .launched_threads
-                        .insert(id.clone(), state.carry_thread);
+                        .get(id)
+                        .and_then(|launch| launch.task_id.clone());
+                    state.launched_threads.insert(
+                        id.clone(),
+                        SubagentLaunch {
+                            thread_id: state.carry_thread,
+                            task_id,
+                        },
+                    );
                     effects.push(Effect::SubagentLaunched {
                         tool_use_id: id.clone(),
                         thread_id: state.carry_thread,
@@ -436,28 +494,55 @@ pub fn attribute_lines(
         } else if is_task_notification {
             // A background task's completion: attribute it to the thread that
             // launched the task, not the thread that happens to be current now.
-            // The `<tool-use-id>` correlates back to the recorded launch; a
-            // match consumes it (emitting `SubagentCompleted` so the persisted
-            // correlation is cleared). When the id is unknown — the launch fell
-            // in an earlier window no longer seeded into `launched_threads` —
-            // fall back to inheriting `carry_thread`, the prior no-regression
-            // behaviour.
-            let launching_thread = claude_format::task_notification_tool_use_id(trimmed)
-                .and_then(|tool_use_id| {
-                    state
-                        .launched_threads
-                        .remove(tool_use_id)
-                        .map(|thread| (tool_use_id.to_owned(), thread))
-                });
-            match launching_thread {
-                Some((tool_use_id, thread)) => {
+            // The notification carries two correlation keys — `<tool-use-id>`
+            // and `<task-id>` — and Claude Code's user-message body sometimes
+            // ships only one of them. Prefer `<tool-use-id>` (the existing key,
+            // recorded at launch time); fall back to `<task-id>` (recorded
+            // later via `PostToolUse(Agent)`). A match consumes the entry and
+            // emits `SubagentCompleted` so the persisted correlation is
+            // cleared. When neither key matches a recorded launch — the launch
+            // fell in an earlier window no longer seeded into
+            // `launched_threads`, or both elements were stripped from the body
+            // — fall back to inheriting `carry_thread`, the prior no-regression
+            // behaviour. A body carrying NEITHER element is logged so a future
+            // Claude Code format change surfaces in the logs instead of as
+            // stuck running indicators.
+            let notification_tool_use_id = claude_format::task_notification_tool_use_id(trimmed);
+            let notification_task_id = claude_format::task_notification_task_id(trimmed);
+            if notification_tool_use_id.is_none() && notification_task_id.is_none() {
+                tracing::warn!(
+                    session_id = %session_id.as_str(),
+                    thread_id = state.carry_thread.value(),
+                    "<task-notification> body carries no <tool-use-id> nor <task-id>; \
+                     cannot match against any launched subagent — the running indicator \
+                     will not clear from this notification"
+                );
+            }
+            let by_tool_use_id = notification_tool_use_id
+                .filter(|id| state.launched_threads.contains_key(*id))
+                .map(str::to_owned);
+            let resolved = by_tool_use_id.or_else(|| {
+                let task_id = notification_task_id?;
+                state
+                    .launched_threads
+                    .iter()
+                    .find(|(_, launch)| launch.task_id.as_deref() == Some(task_id))
+                    .map(|(tool_use_id, _)| tool_use_id.clone())
+            });
+            match resolved.and_then(|key| {
+                state
+                    .launched_threads
+                    .remove(&key)
+                    .map(|launch| (key, launch))
+            }) {
+                Some((tool_use_id, launch)) => {
                     effects.push(Effect::SubagentCompleted { tool_use_id });
                     // Advance the turn onto the launching thread: the
                     // assistant's continuation of this notification belongs to
                     // the task's thread, not the thread that was current when
                     // the completion happened to land.
-                    state.carry_thread = thread;
-                    (thread, None)
+                    state.carry_thread = launch.thread_id;
+                    (launch.thread_id, None)
                 }
                 None => (state.carry_thread, None),
             }

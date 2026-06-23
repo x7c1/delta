@@ -228,6 +228,7 @@ fn load_case(dir: &Path) -> CorpusCase {
                 thread_id: ThreadId::from(s.thread_id),
                 semantic_parent_uuid: s.semantic_parent_uuid.map(MessageUuid::from),
                 text: s.text,
+                task_id: None,
             })
             .collect(),
         expected_path: dir.join("expected.json"),

@@ -212,6 +212,7 @@ pub fn send(id: i64, thread: ThreadId, text: &str) -> OutstandingSend {
         thread_id: thread,
         semantic_parent_uuid: None,
         text: text.into(),
+        task_id: None,
     }
 }
 

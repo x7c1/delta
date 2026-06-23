@@ -102,16 +102,38 @@ impl TranscriptWriter {
 
     /// Append the harness-injected `<task-notification>` line claude writes when
     /// a background tool call (`run_in_background: true`) completes: a plain
-    /// `role: user` line whose `<tool-use-id>` correlates back to the launching
-    /// tool call. It belongs to the in-flight turn (a programmatic continuation,
-    /// not a new human turn), exactly like a `tool_result`.
-    pub fn task_notification(&mut self, tool_use_id: &str) -> Result<(), String> {
-        let body = format!(
-            "<task-notification>\n\
-             <tool-use-id>{tool_use_id}</tool-use-id>\n\
-             <status>completed</status>\n\
-             </task-notification>"
-        );
+    /// `role: user` line whose correlation elements identify the launching
+    /// tool call. It belongs to the in-flight turn (a programmatic
+    /// continuation, not a new human turn), exactly like a `tool_result`.
+    ///
+    /// `task_id` is the background-task identifier (the launch's `agentId`)
+    /// and is always written into `<task-id>`. `tool_use_id` is the launching
+    /// tool's id and is written into `<tool-use-id>` unless `omit_tool_use_id`
+    /// is set — recent Claude Code versions drop that element while keeping
+    /// `<task-id>`, so omitting it here lets a scenario reproduce that exact
+    /// shape.
+    pub fn task_notification(
+        &mut self,
+        tool_use_id: &str,
+        task_id: &str,
+        omit_tool_use_id: bool,
+    ) -> Result<(), String> {
+        let body = if omit_tool_use_id {
+            format!(
+                "<task-notification>\n\
+                 <task-id>{task_id}</task-id>\n\
+                 <status>completed</status>\n\
+                 </task-notification>"
+            )
+        } else {
+            format!(
+                "<task-notification>\n\
+                 <task-id>{task_id}</task-id>\n\
+                 <tool-use-id>{tool_use_id}</tool-use-id>\n\
+                 <status>completed</status>\n\
+                 </task-notification>"
+            )
+        };
         self.user_text(&body)
     }
 

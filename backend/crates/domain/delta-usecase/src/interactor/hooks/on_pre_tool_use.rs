@@ -114,6 +114,13 @@ where
             let newly = self.state.start_subagent(RunningSubagent {
                 thread_id,
                 tool_use_id: tool_use_id.to_owned(),
+                // `task_id` is not knowable at launch time: Claude Code only
+                // returns the subagent's `agentId` in the launching tool's
+                // `tool_result`, which arrives at `PostToolUse(Agent)` time
+                // (immediate for a background subagent, later for a foreground
+                // one). The upgrade happens there via
+                // `SessionRuntime::upgrade_subagent_task_id`.
+                task_id: None,
                 subagent_type: subagent_type.clone(),
                 description: description.clone(),
                 background,
