@@ -480,11 +480,17 @@ so the next start recreates an empty schema, run `make reset` instead.
 
 ## Release automation
 
+For the developer-facing release flow (cutting a release, promoting to
+minor or major, allowed title transitions), see [release.md](release.md).
+This section covers the supporting setup: how the release PR is opened
+under a user PAT and why that is required.
+
 The `Create Release PR` workflow (`.github/workflows/create-release-pr.yml`)
-opens and updates the rolling release PR on every push to `main`. It pushes the
-`release/v<X.Y.Z>` branch and calls `gh pr create` under a **user-scoped
-personal access token**, exposed to the workflow as the repository secret
-**`RELEASE_PAT`**.
+opens and updates the rolling release PR on every push to `main`. It pushes a
+`release/since-<UTC date+time>` branch (chosen once when the PR is opened and
+reused for the lifetime of that PR) and calls `gh pr create` under a
+**user-scoped personal access token**, exposed to the workflow as the
+repository secret **`RELEASE_PAT`**.
 
 A user-scoped token is required because GitHub's recursion-prevention rule
 suppresses `pull_request` workflow runs on PRs authored by `github-actions[bot]`.
@@ -496,7 +502,7 @@ lets the existing checks trigger normally.
 **Required setup (one-time, per repo).** A maintainer must register
 `RELEASE_PAT` in the repository's Actions secrets with these scopes:
 
-- `contents: write` — push the `release/v<X.Y.Z>` branch.
+- `contents: write` — push the `release/since-<UTC date+time>` branch.
 - `pull-requests: write` — create and edit the release PR.
 
 Without the secret, the workflow fails loudly at the `git push` step. There is
