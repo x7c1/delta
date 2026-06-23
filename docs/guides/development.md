@@ -486,7 +486,13 @@ This section covers the supporting setup: how the release PR is opened
 under a user PAT and why that is required.
 
 The `Create Release PR` workflow (`.github/workflows/create-release-pr.yml`)
-opens and updates the rolling release PR on every push to `main`. It pushes a
+opens and updates the rolling release PR. It runs on two triggers: every push
+to `main`, and `pull_request: types: [edited]` so that promoting a release
+PR's title (e.g. `Release v0.1.1` → `Release v0.2.0`) is picked up immediately
+rather than waiting for the next main push. The `pull_request` branch is
+gated on an **open** PR carrying the `release` label whose **title actually
+changed** (`changes.title.from != null`), so body-only edits, no-op title
+saves, and bot self-edits do not retrigger the workflow. It pushes a
 `release/since-<UTC date+time>` branch (chosen once when the PR is opened and
 reused for the lifetime of that PR) and calls `gh pr create` under a
 **user-scoped personal access token**, exposed to the workflow as the

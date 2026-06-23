@@ -4,14 +4,26 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    types: [edited]
 
 jobs:
   create-release-pr:
     runs-on: ubuntu-latest
-    # Skip when the push that triggered us is the merge of a release PR
-    # itself — otherwise we'd loop, opening a new release PR for the very
-    # release that just landed.
-    if: ${{ !startsWith(github.event.head_commit.message, 'Release v') }}
+    # Gate both triggers:
+    # - push: skip the commit that merged a release PR (its message starts
+    #   with "Release v") — otherwise we'd loop, opening a new release PR
+    #   for the very release that just landed.
+    # - pull_request: only react to title edits (changes.title.from != null)
+    #   on an open PR labelled `release`, so body-only edits and bot
+    #   self-edits don't recurse.
+    if: |
+      (github.event_name == 'push' &&
+        !startsWith(github.event.head_commit.message, 'Release v')) ||
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.state == 'open' &&
+        contains(github.event.pull_request.labels.*.name, 'release') &&
+        github.event.changes.title.from != null)
 
     permissions:
       contents: write
