@@ -310,11 +310,23 @@ const SUBMIT_ENTER_DELAY: std::time::Duration = std::time::Duration::from_millis
 ///    see [`INPUT_CLEAR_BACKSPACES`]) clears the current line and any blank
 ///    lines stacked above it, so a prior submit's leftovers are never prepended
 ///    to this message and each programmatic send starts from an empty input.
-/// 2. `-l <text>` sends the text literally so it is not interpreted as tmux key
-///    names.
+/// 2. `-l <text>` sends the text literally, wrapped in xterm bracketed-paste
+///    markers (`ESC [ 200 ~` … `ESC [ 201 ~`), so the TUI treats the bytes as
+///    paste content rather than as keystrokes.
 ///
 /// The submit `Enter` is issued separately by [`submit_command`] after
-/// [`SUBMIT_ENTER_DELAY`], so Claude's paste-burst detection cannot absorb it.
+/// [`SUBMIT_ENTER_DELAY`], so Claude's paste-burst detection cannot absorb it,
+/// and stays *outside* the bracketed-paste region.
+///
+/// Why bracketed paste: outside paste mode, Claude's TUI input widget
+/// normalizes each embedded LF (0x0a) in typed input to a single space. A
+/// multi-line prompt typed via `send-keys -l` therefore echoes back via the
+/// `UserPromptSubmit` hook as space-joined text, which never matches the
+/// outstanding send's original `\n`-containing text. The mismatch is classified
+/// as external input and the send is requeued — then re-typed and re-mismatched
+/// on the next dispatch, looping forever. Wrapping the payload in
+/// `ESC [ 200 ~` … `ESC [ 201 ~` tells the TUI "this is a paste", which
+/// preserves embedded LFs verbatim and makes the hook echo match.
 fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
     vec![
         clear_input_commands(pane),
@@ -323,10 +335,20 @@ fn input_commands(pane: &str, text: &str) -> Vec<Vec<String>> {
             "-t".into(),
             pane.into(),
             "-l".into(),
-            text.into(),
+            format!("{BRACKETED_PASTE_START}{text}{BRACKETED_PASTE_END}"),
         ],
     ]
 }
+
+/// xterm bracketed-paste start marker (`ESC [ 200 ~`). Tells the receiving TUI
+/// that the bytes that follow are paste content, not keystrokes — preserving
+/// embedded LFs that would otherwise be normalized to spaces by the input
+/// widget. See [`input_commands`] for the bug this guards against.
+const BRACKETED_PASTE_START: &str = "\x1b[200~";
+
+/// xterm bracketed-paste end marker (`ESC [ 201 ~`); the paired terminator of
+/// [`BRACKETED_PASTE_START`]. See [`input_commands`].
+const BRACKETED_PASTE_END: &str = "\x1b[201~";
 
 /// Build the `tmux send-keys` invocation that submits the typed input as a lone
 /// `Enter` keystroke. Issued after [`SUBMIT_ENTER_DELAY`] (see [`input_commands`]).
@@ -449,7 +471,8 @@ mod tests {
         // Typing is clear → literal text, with NO Enter: the submit is issued
         // separately after a delay so Claude's paste-burst detection cannot
         // swallow it. `C-u` kills the current line and a run of `BSpace` deletes
-        // blank lines stacked above it.
+        // blank lines stacked above it. The literal text is wrapped in
+        // bracketed-paste markers so the TUI preserves embedded LFs.
         let commands = input_commands("delta-1:0.0", "hi");
 
         let mut expected_clear = vec!["send-keys", "-t", "delta-1:0.0", "C-u"];
@@ -457,7 +480,35 @@ mod tests {
         assert_eq!(commands[0], expected_clear);
         assert_eq!(
             &commands[1..],
-            &[vec!["send-keys", "-t", "delta-1:0.0", "-l", "hi"]],
+            &[vec![
+                "send-keys",
+                "-t",
+                "delta-1:0.0",
+                "-l",
+                "\x1b[200~hi\x1b[201~",
+            ]],
+        );
+    }
+
+    #[test]
+    fn input_commands_wraps_multiline_text_in_bracketed_paste_markers() {
+        // The regression case: a multi-line prompt must reach the TUI as paste
+        // content so the embedded LF is preserved verbatim. Without the
+        // wrapping markers the TUI normalizes the LF to a single space, the
+        // UserPromptSubmit echo no longer matches the outstanding send, and
+        // the send is requeued forever. The wrapped payload is bytewise
+        // `ESC [ 200 ~ line one \n line two ESC [ 201 ~`.
+        let commands = input_commands("delta-1:0.0", "line one\nline two");
+
+        assert_eq!(
+            &commands[1..],
+            &[vec![
+                "send-keys",
+                "-t",
+                "delta-1:0.0",
+                "-l",
+                "\x1b[200~line one\nline two\x1b[201~",
+            ]],
         );
     }
 
