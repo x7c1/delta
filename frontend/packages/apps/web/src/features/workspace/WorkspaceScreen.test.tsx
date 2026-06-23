@@ -366,15 +366,15 @@ describe('WorkspaceScreen multi-session', () => {
     );
     expect(screen.queryByTestId('readonly-notice')).not.toBeInTheDocument();
 
-    // Every row carries a fixed-width actions menu, but only the open session's
-    // is enabled; open it and pick the Close menu item. The closed session's
-    // menu is disabled, so the enabled trigger is the one that opens.
-    const actionTriggers = screen.getAllByRole('button', {
-      name: /^Session actions for/,
+    // Every row carries a fixed-width actions menu and every trigger is enabled
+    // (`Copy session ID` is always offered, even on a closed session). Pick the
+    // open session's row by its untitled label — SESSION_ID has no title, so it
+    // renders as `session <id-prefix>`, while the seeded closed sessions both
+    // have titles. From that trigger, `Close` is only listed on an open session.
+    const openTrigger = screen.getByRole('button', {
+      name: /^Session actions for session /,
     });
-    const openTrigger = actionTriggers.find((button) => !button.hasAttribute('disabled'));
-    expect(openTrigger).toBeDefined();
-    fireEvent.click(openTrigger!);
+    fireEvent.click(openTrigger);
     fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
 
     // The mock flips the session closed; the refetched list shows no open dot

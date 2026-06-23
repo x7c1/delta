@@ -69,8 +69,11 @@ function basename(path: string): string {
  * (RTL-truncated with the full path on hover; falls back to the cwd's basename,
  * then omitted entirely when even that yields no name) and the last-activity
  * time on the right) plus the kebab actions menu in a fixed-width slot at the
- * right end, enabled only when the session is open. The focused card is lifted
- * with an indigo border, tint, and ring.
+ * right end. The menu always offers `Copy session ID` (useful even for a
+ * closed session — copying its id, e.g. to feed `claude --resume`, does not
+ * require the session to be running) and additionally exposes `Close` while
+ * the session is open. The focused card is lifted with an indigo border, tint,
+ * and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -291,12 +294,27 @@ export function SessionNode({
           <Menu
             label={`Session actions for ${label}`}
             onOpenChange={setMenuOpen}
-            disabled={!item.open}
-            items={
-              item.open
-                ? [{ label: 'Close', onSelect: onClose, tone: 'danger' }]
-                : []
-            }
+            items={[
+              {
+                label: 'Copy session ID',
+                onSelect: () => {
+                  // Delta runs on localhost, so the page is a secure context and
+                  // clipboard permission is granted by default; fire-and-forget
+                  // is fine for local dogfooding. If we ever want toast feedback
+                  // on failure, add it in a follow-up.
+                  void navigator.clipboard.writeText(item.session.id);
+                },
+              },
+              ...(item.open
+                ? [
+                    {
+                      label: 'Close',
+                      onSelect: onClose,
+                      tone: 'danger' as const,
+                    },
+                  ]
+                : []),
+            ]}
           />
         </div>
 

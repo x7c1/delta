@@ -169,10 +169,14 @@ test('closing an open session via its kebab menu clears its open dot', async ({
   // is not detached by a row remount mid-click.
   await page.waitForLoadState('networkidle');
 
-  // The open session's actions menu is enabled; open it and select Close.
+  // Identify the open session by the unique "Open" status dot on its row, then
+  // open that row's actions menu and select Close. The kebab is no longer
+  // disabled on closed sessions (Copy session ID is always available), so we
+  // can't filter to the open one by disabled-state any more.
   await page
+    .locator('li')
+    .filter({ has: page.getByRole('status', { name: 'Open', exact: true }) })
     .getByRole('button', { name: /^Session actions for/ })
-    .and(page.locator(':not([disabled])'))
     .click();
   await page.getByRole('menuitem', { name: 'Close' }).click();
 
