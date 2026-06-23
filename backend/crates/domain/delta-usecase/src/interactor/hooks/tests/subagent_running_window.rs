@@ -81,7 +81,7 @@ async fn post_tool_use_agent_ends_the_window_and_broadcasts() {
         .unwrap();
 
     let events = ix
-        .on_post_tool_use(&session, "Agent", "toolu_a1")
+        .on_post_tool_use(&session, "Agent", "toolu_a1", "null")
         .await
         .unwrap();
 
@@ -118,7 +118,7 @@ async fn the_task_alias_drives_the_same_window() {
     );
 
     let finished = ix
-        .on_post_tool_use(&session, "Task", "toolu_t1")
+        .on_post_tool_use(&session, "Task", "toolu_t1", "null")
         .await
         .unwrap();
     assert!(
@@ -150,7 +150,7 @@ async fn a_subagent_internal_tool_call_does_not_flip_the_indicator() {
         "an internal Bash PreToolUse emits no subagent event"
     );
     let bash_post = ix
-        .on_post_tool_use(&session, "Bash", "toolu_b1")
+        .on_post_tool_use(&session, "Bash", "toolu_b1", "null")
         .await
         .unwrap();
     assert!(
@@ -184,7 +184,7 @@ async fn multiple_concurrent_subagents_are_tracked_independently() {
     );
 
     // Finishing one leaves the other running.
-    ix.on_post_tool_use(&session, "Agent", "toolu_a1")
+    ix.on_post_tool_use(&session, "Agent", "toolu_a1", "null")
         .await
         .unwrap();
     assert_eq!(
@@ -202,7 +202,7 @@ async fn post_tool_use_for_an_unknown_subagent_is_a_noop() {
 
     // No matching PreToolUse was ever recorded for this id.
     let events = ix
-        .on_post_tool_use(&session, "Agent", "toolu_never_started")
+        .on_post_tool_use(&session, "Agent", "toolu_never_started", "null")
         .await
         .unwrap();
     assert!(
@@ -317,7 +317,7 @@ async fn the_immediate_post_tool_use_does_not_finish_a_background_subagent() {
     // A background launch's `PostToolUse` fires immediately (the call returned,
     // the subagent did not), so it must NOT finish the running entry.
     let events = ix
-        .on_post_tool_use(&session, "Agent", "toolu_bg")
+        .on_post_tool_use(&session, "Agent", "toolu_bg", "null")
         .await
         .unwrap();
 
@@ -342,7 +342,7 @@ async fn a_background_subagent_survives_the_turn_ending() {
         .await
         .unwrap();
     // Its immediate PostToolUse (a no-op for the indicator).
-    ix.on_post_tool_use(&session, "Agent", "toolu_bg")
+    ix.on_post_tool_use(&session, "Agent", "toolu_bg", "null")
         .await
         .unwrap();
 
@@ -393,5 +393,232 @@ async fn a_foreground_and_a_background_subagent_diverge_at_turn_end() {
         running_tool_use_ids(&ix.live_state_for(&session).await),
         vec!["toolu_bg".to_owned()],
         "only the foreground subagent is swept at turn end"
+    );
+}
+
+/// A background `Agent` whose `PostToolUse(Agent)` reported the launch's
+/// `agentId` as `tool_response.agentId`: the upgrade is persisted on both the
+/// runtime entry and the launch store row, so a later
+/// `<task-notification>` whose `<tool-use-id>` element was stripped can still
+/// match by `<task-id>`.
+const POST_TOOL_USE_RESPONSE_WITH_AGENT_ID: &str = r#"{"agentId":"a31425032172620ed"}"#;
+
+#[tokio::test]
+async fn post_tool_use_upgrades_the_background_subagent_with_its_agent_id() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+
+    // The launch line is folded so the launch row exists in the store before
+    // the immediate `PostToolUse` upgrades it.
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
+    ix.on_stop(StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    // The background subagent's immediate `PostToolUse` carries the launch's
+    // `agentId` in `tool_response`. The handler reads it, upgrades the running
+    // entry, and persists the upgrade on the launch row.
+    let events = ix
+        .on_post_tool_use(
+            &session,
+            "Agent",
+            "toolu_bg",
+            POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        events.is_empty(),
+        "an immediate background PostToolUse broadcasts nothing"
+    );
+    let state = ix.live_state_for(&session).await;
+    let running = state
+        .running_subagents
+        .iter()
+        .find(|s| s.tool_use_id == "toolu_bg")
+        .expect("background subagent is still running");
+    assert_eq!(
+        running.task_id.as_deref(),
+        Some("a31425032172620ed"),
+        "the running entry was upgraded with the agentId"
+    );
+    let launch_task_id = ix
+        .store()
+        .outstanding_subagent_launches(&session)
+        .await
+        .unwrap()
+        .get("toolu_bg")
+        .and_then(|launch| launch.task_id.clone());
+    assert_eq!(
+        launch_task_id.as_deref(),
+        Some("a31425032172620ed"),
+        "the upgrade is persisted on the launch row too"
+    );
+}
+
+#[tokio::test]
+async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallback() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    // Launch a background subagent and persist its launch row.
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
+    ix.on_stop(StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    // The PostToolUse upgrade records the task_id so the eventual
+    // `<task-notification>` can be matched by it.
+    ix.on_post_tool_use(
+        &session,
+        "Agent",
+        "toolu_bg",
+        POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
+    )
+    .await
+    .unwrap();
+
+    // The completion notification arrives with ONLY `<task-id>` — Claude Code
+    // stripped `<tool-use-id>` from the user-message body. The server must
+    // still finish the background subagent via the fallback correlation.
+    ix.transcript_fake().push(task_notification_line_task_id_only(
+        "u-note",
+        "a31425032172620ed",
+    ));
+    let events = ix
+        .on_stop(StopHook {
+            session_id: session.clone(),
+            stop_reason: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::SubagentFinished { session_id, tool_use_id }
+                if *session_id == session && tool_use_id == "toolu_bg"
+        )),
+        "the task-id-only notification still emits SubagentFinished, got {events:?}"
+    );
+    assert!(
+        ix.live_state_for(&session)
+            .await
+            .running_subagents
+            .is_empty(),
+        "the running subagent was finished via the task-id fallback"
+    );
+    assert!(
+        ix.store()
+            .outstanding_subagent_launches(&session)
+            .await
+            .unwrap()
+            .is_empty(),
+        "the launch correlation was cleared"
+    );
+}
+
+#[tokio::test]
+async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_warns() {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt;
+
+    // Capture warn-level tracing output into a buffer so the test can assert
+    // the warn fires when a `<task-notification>` body carries neither
+    // correlation element. The subscriber is installed only for the duration
+    // of this test (via the `_guard` returned by `set_default`), so it does
+    // not leak across tests — the guard is held until the test ends.
+    #[derive(Clone, Default)]
+    struct BufferWriter(Arc<Mutex<Vec<u8>>>);
+    impl Write for BufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    impl<'a> fmt::MakeWriter<'a> for BufferWriter {
+        type Writer = BufferWriter;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    let buffer = BufferWriter::default();
+    let subscriber = fmt()
+        .with_writer(buffer.clone())
+        .with_max_level(tracing::Level::WARN)
+        .without_time()
+        .with_ansi(false)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    // Launch a background subagent and persist its launch row.
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
+    ix.on_stop(StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
+    .await
+    .unwrap();
+
+    // A notification body without either `<tool-use-id>` or `<task-id>` —
+    // a future Claude Code shape — must not silently drop the subagent:
+    // the entry stays running and the fold logs a warn so we notice.
+    ix.transcript_fake()
+        .push(task_notification_line_both_missing("u-note"));
+    let events = ix
+        .on_stop(StopHook {
+            session_id: session.clone(),
+            stop_reason: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::SubagentFinished { .. })),
+        "no SubagentFinished should fire when neither correlation key is present, got {events:?}"
+    );
+    assert_eq!(
+        running_tool_use_ids(&ix.live_state_for(&session).await),
+        vec!["toolu_bg".to_owned()],
+        "the running entry survives a no-key notification — its completion is unknown"
+    );
+
+    let captured = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    assert!(
+        captured.contains("WARN") && captured.contains("<task-notification>"),
+        "expected a WARN log for the missing-keys notification, got: {captured}"
     );
 }

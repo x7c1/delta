@@ -7,7 +7,7 @@
 
 mod support;
 
-use delta_attribution::{attribute_lines, AttributionState, Effect};
+use delta_attribution::{attribute_lines, AttributionState, Effect, SubagentLaunch};
 use delta_model::MessageUuid;
 use support::*;
 
@@ -321,7 +321,13 @@ fn a_background_completion_seeded_from_an_earlier_window_lands_on_its_launch() {
     // Carry is MAIN (the user has since moved on). The notification must still
     // resolve to CHILD via the seeded map, and only `SubagentCompleted` fires.
     let mut launched = std::collections::BTreeMap::new();
-    launched.insert("toolu-bg".to_owned(), CHILD);
+    launched.insert(
+        "toolu-bg".to_owned(),
+        SubagentLaunch {
+            thread_id: CHILD,
+            task_id: None,
+        },
+    );
     let outcome = attribute_lines(
         &session(),
         MAIN,

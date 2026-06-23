@@ -273,9 +273,19 @@ pub async fn post_tool_use(
 ) -> impl IntoResponse {
     let session_id = SessionId::from(payload.session_id);
 
+    // Serialize the tool_response as-is so the handler can inspect it without
+    // re-running JSON I/O. `Value::Null` and an empty object both round-trip to
+    // valid JSON, so an absent response is still a parseable string downstream.
+    let tool_response_json = payload.tool_response.to_string();
+
     match state
         .interactor()
-        .on_post_tool_use(&session_id, &payload.tool_name, &payload.tool_use_id)
+        .on_post_tool_use(
+            &session_id,
+            &payload.tool_name,
+            &payload.tool_use_id,
+            &tool_response_json,
+        )
         .await
     {
         Ok(events) => {

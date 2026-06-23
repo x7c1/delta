@@ -195,6 +195,7 @@ dependencies = [
  "delta-transcript",
  "serde",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
@@ -251,6 +252,7 @@ name = "delta-sqlite"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "delta-attribution",
  "delta-model",
  "delta-usecase",
  "rusqlite",
@@ -285,6 +287,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

@@ -327,6 +327,7 @@ mod tests {
                     RunningSubagent {
                         thread_id: ThreadId(2),
                         tool_use_id: "toolu_01".to_owned(),
+                        task_id: None,
                         subagent_type: Some("general-purpose".to_owned()),
                         description: Some("Probe the codebase".to_owned()),
                         background: false,
@@ -334,6 +335,7 @@ mod tests {
                     RunningSubagent {
                         thread_id: ThreadId(4),
                         tool_use_id: "toolu_02".to_owned(),
+                        task_id: None,
                         subagent_type: None,
                         description: None,
                         background: true,

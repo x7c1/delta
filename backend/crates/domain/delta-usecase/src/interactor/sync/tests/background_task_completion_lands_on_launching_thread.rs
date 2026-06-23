@@ -49,8 +49,9 @@ async fn background_task_completion_lands_on_launching_thread() {
             .outstanding_subagent_launches(&session)
             .await
             .unwrap()
-            .get("toolu_bg"),
-        Some(&child),
+            .get("toolu_bg")
+            .map(|launch| launch.thread_id),
+        Some(child),
         "the launch is recorded against the child thread"
     );
 

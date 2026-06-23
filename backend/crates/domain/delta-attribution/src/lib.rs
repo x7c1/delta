@@ -26,6 +26,8 @@ pub mod claude_format;
 mod replay;
 mod transcript_message;
 
-pub use attribute::{attribute_lines, Attributed, AttributionState, Effect, OutstandingSend};
+pub use attribute::{
+    attribute_lines, Attributed, AttributionState, Effect, OutstandingSend, SubagentLaunch,
+};
 pub use replay::replay;
 pub use transcript_message::TranscriptMessage;

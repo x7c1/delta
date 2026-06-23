@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 
+use delta_attribution::SubagentLaunch;
 use delta_model::{
     LaunchOption, Message, MessageUuid, PermissionRequest, Send, Session, SessionId, Thread,
     ThreadId,
@@ -331,12 +332,28 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// thread_id)` lets [`Self::outstanding_subagent_launches`] reseed the
     /// attribution fold so the notification is attributed to the launching
     /// thread rather than whatever thread is current when it lands. Idempotent:
-    /// re-recording the same id is a no-op refresh.
+    /// re-recording the same id is a no-op refresh (the row's `task_id`, if
+    /// previously set, is preserved — see [`Self::upgrade_subagent_task_id`]).
     async fn record_subagent_launch(
         &self,
         session_id: &SessionId,
         tool_use_id: &str,
         thread_id: ThreadId,
+    ) -> Result<()>;
+
+    /// Upgrade a recorded background-task launch with the `task_id` Claude Code
+    /// minted for the subagent. The id is learned later than the launch itself:
+    /// the `PostToolUse(Agent)` hook reads it from the launching tool's
+    /// `tool_result` (the `agentId` field) and persists it here so a subsequent
+    /// `<task-notification>` whose `<tool-use-id>` element was stripped can
+    /// still be matched by its `<task-id>` element. Idempotent: re-upgrading
+    /// the same id with the same `task_id` is a no-op refresh. Upgrading an
+    /// unknown launch is also a no-op (the launch may have been folded already).
+    async fn upgrade_subagent_task_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        task_id: &str,
     ) -> Result<()>;
 
     /// Clear a recorded background-task launch once its `<task-notification>`
@@ -345,13 +362,15 @@ pub trait SessionStore: std::marker::Send + Sync {
         -> Result<()>;
 
     /// The session's outstanding background-task launches as `(tool_use_id ->
-    /// launching thread)`: every background task still awaiting its
-    /// `<task-notification>`. Seeds the attribution fold at sync start so a
-    /// completion landing in a later window finds its launching thread.
+    /// SubagentLaunch)`: every background task still awaiting its
+    /// `<task-notification>`, each entry pairing the launching thread with the
+    /// optional `task_id` learned via `PostToolUse(Agent)`. Seeds the
+    /// attribution fold at sync start so a completion landing in a later
+    /// window finds its launching thread by either correlation key.
     async fn outstanding_subagent_launches(
         &self,
         session_id: &SessionId,
-    ) -> Result<BTreeMap<String, ThreadId>>;
+    ) -> Result<BTreeMap<String, SubagentLaunch>>;
 
     /// All registered launch options, newest first (descending `id`).
     async fn list_launch_options(&self) -> Result<Vec<LaunchOption>>;
@@ -589,6 +608,17 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
+    async fn upgrade_subagent_task_id(
+        &self,
+        session_id: &SessionId,
+        tool_use_id: &str,
+        task_id: &str,
+    ) -> Result<()> {
+        (**self)
+            .upgrade_subagent_task_id(session_id, tool_use_id, task_id)
+            .await
+    }
+
     async fn clear_subagent_launch(
         &self,
         session_id: &SessionId,
@@ -602,7 +632,7 @@ impl SessionStore for Box<dyn SessionStore> {
     async fn outstanding_subagent_launches(
         &self,
         session_id: &SessionId,
-    ) -> Result<BTreeMap<String, ThreadId>> {
+    ) -> Result<BTreeMap<String, SubagentLaunch>> {
         (**self).outstanding_subagent_launches(session_id).await
     }
 

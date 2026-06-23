@@ -11,6 +11,10 @@ delta-model = { workspace = true }
 # flag inside the `serde_json::Value` tool input (the same type `delta-model`'s
 # `ContentBlock::ToolUse.input` holds), which `claude_format` inspects.
 serde_json = { workspace = true }
+# A `<task-notification>` body without either `<tool-use-id>` or `<task-id>`
+# means no recorded launch can be finished — warn so future Claude Code format
+# changes surface in the logs instead of as stuck running indicators.
+tracing = { workspace = true }
 
 [dev-dependencies]
 # The golden-corpus tests feed sanitized raw JSONL fixtures through the real

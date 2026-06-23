@@ -22,3 +22,7 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+# Captures tracing events into a buffer so the task-id-fallback test can assert
+# the warn fires when a `<task-notification>` body carries neither correlation
+# key. Only used by tests.
+tracing-subscriber = { workspace = true }
