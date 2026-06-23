@@ -480,6 +480,11 @@ so the next start recreates an empty schema, run `make reset` instead.
 
 ## Release automation
 
+For the developer-facing release flow (cutting a release, promoting to
+minor or major, allowed title transitions), see [release.md](release.md).
+This section covers the supporting setup: how the release PR is opened
+under a user PAT and why that is required.
+
 The `Create Release PR` workflow (`.github/workflows/create-release-pr.yml`)
 opens and updates the rolling release PR on every push to `main`. It pushes a
 `release/since-<UTC date+time>` branch (chosen once when the PR is opened and
