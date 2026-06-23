@@ -212,6 +212,24 @@ where
                     self.store
                         .record_subagent_launch(&session.id, &tool_use_id, thread_id)
                         .await?;
+                    // For a background subagent the immediate `PostToolUse`
+                    // hook may have ALREADY arrived (and likely has — the call
+                    // returned synchronously at launch). The hook recorded the
+                    // launching tool's `agentId` on the in-memory running entry
+                    // but could not yet persist it on the launch row, which did
+                    // not exist until just now. Flush that pending upgrade so a
+                    // later `<task-notification>` whose `<tool-use-id>` element
+                    // was stripped can still match by `<task-id>` from the
+                    // reseeded launch map.
+                    if let Some(task_id) = self
+                        .state
+                        .pending_subagent_task_id(&tool_use_id)
+                        .map(str::to_owned)
+                    {
+                        self.store
+                            .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                            .await?;
+                    }
                 }
                 Effect::SubagentCompleted { tool_use_id } => {
                     // The notification was folded and matched its launch: the

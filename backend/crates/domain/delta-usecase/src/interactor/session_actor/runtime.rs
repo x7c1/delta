@@ -859,6 +859,24 @@ impl SessionRuntime {
         true
     }
 
+    /// The `task_id` the runtime knows for this `tool_use_id`, if any.
+    ///
+    /// Read by the sync path right after [`Effect::SubagentLaunched`] persists
+    /// the launch row: a background subagent's immediate `PostToolUse(Agent)`
+    /// usually fires before the launch line is folded, so the hook recorded
+    /// the `agentId` on the runtime entry but could not yet persist it on the
+    /// launch row (which did not exist). The sync flushes that pending upgrade
+    /// here so the persisted row carries the fallback correlation key for the
+    /// eventual `<task-notification>`.
+    ///
+    /// [`Effect::SubagentLaunched`]: delta_attribution::Effect::SubagentLaunched
+    pub fn pending_subagent_task_id(&self, tool_use_id: &str) -> Option<&str> {
+        self.running_subagents
+            .iter()
+            .find(|s| s.tool_use_id == tool_use_id)
+            .and_then(|s| s.task_id.as_deref())
+    }
+
     /// The pending spawn, for the test seams that read launch state back.
     #[cfg(test)]
     pub(crate) fn pending_spawn(&self) -> Option<&PendingSpawn> {

@@ -467,15 +467,43 @@ async fn post_tool_use_upgrades_the_background_subagent_with_its_agent_id() {
 }
 
 #[tokio::test]
-async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallback() {
+async fn post_tool_use_arriving_before_the_launch_is_folded_flushes_on_the_next_sync() {
+    // The real-world ordering: a background subagent's `PostToolUse(Agent)`
+    // fires immediately after the launch hook, BEFORE the assistant `tool_use`
+    // line lands in the transcript and is folded into a `subagent_launch` row.
+    // The hook records `agentId` on the runtime entry but the launch row does
+    // not exist yet, so the persisted upgrade is "pending". The next sync —
+    // which finally records the launch row via `Effect::SubagentLaunched` —
+    // must flush that pending task_id onto the freshly-created row.
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    // Launch a background subagent and persist its launch row.
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
         .await
         .unwrap();
+
+    // PostToolUse arrives BEFORE the launch line is folded: the runtime
+    // upgrade succeeds, the store upgrade is a no-op (no row yet).
+    ix.on_post_tool_use(
+        &session,
+        "Agent",
+        "toolu_bg",
+        POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
+    )
+    .await
+    .unwrap();
+    assert!(
+        ix.store()
+            .outstanding_subagent_launches(&session)
+            .await
+            .unwrap()
+            .is_empty(),
+        "no launch row exists yet — the assistant tool_use line has not been folded"
+    );
+
+    // Now the launch line is folded by the next sync, which records the row
+    // AND flushes the pending task_id from the runtime entry.
     ix.transcript_fake()
         .push(background_tool_use_line("a-launch", "toolu_bg"));
     ix.on_stop(StopHook {
@@ -485,14 +513,47 @@ async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallba
     .await
     .unwrap();
 
-    // The PostToolUse upgrade records the task_id so the eventual
-    // `<task-notification>` can be matched by it.
+    let launch_task_id = ix
+        .store()
+        .outstanding_subagent_launches(&session)
+        .await
+        .unwrap()
+        .get("toolu_bg")
+        .and_then(|launch| launch.task_id.clone());
+    assert_eq!(
+        launch_task_id.as_deref(),
+        Some("a31425032172620ed"),
+        "the pending upgrade was flushed onto the freshly-created launch row"
+    );
+}
+
+#[tokio::test]
+async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallback() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    // Launch a background subagent. In production the immediate
+    // `PostToolUse(Agent)` fires BEFORE the assistant tool_use line is folded,
+    // so this test mirrors that ordering: PreToolUse, then PostToolUse, then
+    // the launch sync that flushes the pending task_id onto the new row.
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .await
+        .unwrap();
     ix.on_post_tool_use(
         &session,
         "Agent",
         "toolu_bg",
         POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
     )
+    .await
+    .unwrap();
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
+    ix.on_stop(StopHook {
+        session_id: session.clone(),
+        stop_reason: None,
+    })
     .await
     .unwrap();
 
