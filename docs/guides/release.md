@@ -9,8 +9,6 @@ merging that PR.
 Delta uses a "merge the PR" release model. A bot opens and updates one
 rolling release PR against `main`; merging it triggers the `Release`
 workflow, which creates the matching `vX.Y.Z` tag and a GitHub Release.
-No build artefacts are uploaded — the GitHub Release exists purely as a
-changelog anchor.
 
 ## Normal flow (patch bump)
 
@@ -21,8 +19,7 @@ changelog anchor.
    from `git log` via `generate-changelog.sh`).
 3. Merge the PR when you want to cut the release. The `Release` workflow
    then runs after CI completes on `main`, creates the `vX.Y.Z` tag, and
-   publishes a GitHub Release with the same changelog. No build artefacts
-   are uploaded.
+   publishes a GitHub Release with the same changelog.
 
 ## Promoting to minor or major
 
