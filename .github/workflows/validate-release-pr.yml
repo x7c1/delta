@@ -18,10 +18,11 @@ jobs:
       # without needing to gate it on labels.
       - name: Skip when not a release PR
         id: gate
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          title="${{ github.event.pull_request.title }}"
-          if [[ ! "$title" =~ ^Release\ v ]]; then
-            echo "Not a release PR (title='${title}'); skipping."
+          if [[ ! "$PR_TITLE" =~ ^Release\ v ]]; then
+            echo "Not a release PR (title='${PR_TITLE}'); skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
