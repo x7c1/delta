@@ -1639,6 +1639,21 @@ export function ThreadTimelineOverlay({
   // already past the right edge, and late-message playheads triggered a
   // scroll past the real content.
   //
+  // v31 fix 3 (asymmetric edge thresholds): the sticky label cell paints
+  // over viewport-x `[0, labelOffsetPx]` on every frame (it is
+  // `position: sticky; left: 0; zIndex: 1` and the playhead carries no
+  // explicit z-index, so the label wins the stack). That means the
+  // playhead becomes physically hidden the moment its viewport-x drops
+  // below `labelOffsetPx`, even though it is still inside the scroll
+  // viewport mathematically. The left-edge catch-up therefore has to
+  // fire AT the back of the sticky band, not at the raw viewport left:
+  // `leftEdgeThreshold = viewLeft + labelOffsetPx + margin`. The right
+  // edge has no symmetric overlay (nothing pins to the right of the axis
+  // column), so it stays `viewRight - margin`. When `labelOffsetPx === 0`
+  // the left formula collapses back to `viewLeft + margin`, so this is a
+  // pure widening of the trigger band on layouts that do have a label
+  // column — the no-label path is unchanged.
+  //
   // Gated on {@link userActedTick} (not {@link scrubTick}) so EVERY route
   // that moves the active message — wheel/click jump, pane-scroll follower,
   // and Navigator-driven cross-pane switch — keeps the playhead inside the
@@ -1681,9 +1696,15 @@ export function ThreadTimelineOverlay({
     const margin = Math.max(80, scrollEl.clientWidth / 5);
     const viewLeft = scrollEl.scrollLeft;
     const viewRight = viewLeft + scrollEl.clientWidth;
+    // Asymmetric thresholds: the left edge accounts for the sticky label
+    // overlay (see "v31 fix 3" above) so the catch-up fires before the
+    // playhead disappears under it. The right edge stays at the raw
+    // viewport boundary because nothing covers it.
+    const leftEdgeThreshold = viewLeft + labelOffsetPx + margin;
+    const rightEdgeThreshold = viewRight - margin;
     if (
-      playheadInContent < viewLeft + margin ||
-      playheadInContent > viewRight - margin
+      playheadInContent < leftEdgeThreshold ||
+      playheadInContent > rightEdgeThreshold
     ) {
       // Use the native smooth-scroll API so the re-centre animates instead
       // of snapping. A direct `scrollLeft = ...` assignment causes a visible

@@ -4909,6 +4909,176 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
     }
   });
 
+  it('re-centres on a leftward step BEFORE the playhead hides behind the sticky label column when labelOffsetPx > margin', async () => {
+    // v31 fix 3 regression. The sticky label cell paints over viewport-x
+    // `[0, labelOffsetPx]` on every frame (it carries `position: sticky;
+    // left: 0; zIndex: 1` while the playhead has no explicit z-index, so
+    // the label wins the stack). When the user scrubs leftward the
+    // playhead becomes physically hidden the moment its viewport-x drops
+    // below `labelOffsetPx`, even though the v30 / v31-fix-2 visibility
+    // check would still consider it "inside the viewport" until it
+    // crossed `viewLeft + margin`. On layouts where the label is wider
+    // than the margin floor (typical lane labels are 120–180 px; the
+    // margin floor is 80 px) the playhead spends `labelOffsetPx - margin`
+    // pixels invisible under the sticky band before the scroll catches
+    // up. The fix is an asymmetric threshold: the left edge becomes
+    // `viewLeft + labelOffsetPx + margin`; the right edge stays
+    // `viewRight - margin` (nothing covers the right side of the axis
+    // column).
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]');
+    expect(axisEl).not.toBeNull();
+    // Narrow panel so the margin sits at its 80 px floor: `max(80, 300/5)
+    // = max(80, 60) = 80`. Picking a viewport smaller than `5 * 80 = 400`
+    // is what forces the floor to bite; on wider panels the 20% rule
+    // would already swallow most reasonable label widths and the bug
+    // would be invisible.
+    defineLayoutProp(wrapper, 'clientWidth', 300);
+    // Label column is 140 px — wider than the 80 px margin floor. This
+    // is the regime the fix targets: `labelOffsetPx (140) > margin (80)`
+    // means there is a `[margin, labelOffsetPx]` = `[80, 140]` viewport-x
+    // band where the playhead is geometrically "inside the viewport"
+    // (the v31-fix-2 condition `playheadInContent >= viewLeft + margin`
+    // holds) but actually painted under the sticky label.
+    defineLayoutProp(axisEl as HTMLElement, 'offsetLeft', 140);
+    // Position the viewport so msg-b's playhead (content x = 140 + 120 +
+    // 16 = 276) sits inside the hidden band:
+    //   viewLeft = 150
+    //   viewport-x of playhead = 276 - 150 = 126, which is inside
+    //   the sticky band [0, labelOffsetPx] = [0, 140] (so the playhead
+    //   is invisible) AND inside the old v31-fix-2 "in view" band
+    //   [margin, clientWidth - margin] = [80, 220] (so the OLD effect
+    //   would not fire).
+    //
+    // Under the old left-edge formula `viewLeft + margin = 230`:
+    //   playheadInContent (276) < 230?  No  → no catch-up.
+    // Under the new left-edge formula `viewLeft + labelOffsetPx + margin
+    // = 150 + 140 + 80 = 370`:
+    //   playheadInContent (276) < 370?  Yes → catch-up fires.
+    // Expected new scrollLeft: max(0, 276 - 300/2) = max(0, 126) = 126.
+    wrapper.scrollLeft = 150;
+    // Scrub via wheel-up to step msg-c → msg-b (bumps userActedTick).
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      // playheadInContent = labelOffset + xInAxis + LANE_LEFT_PAD
+      const playheadInContent = 140 + 120 + LANE_LEFT_PAD_PX; // = 276
+      const expectedScrollLeft = Math.max(
+        0,
+        playheadInContent - 300 / 2,
+      ); // = 126
+      expect(wrapper.scrollLeft).toBe(expectedScrollLeft);
+    });
+  });
+
+  it('keeps the right-edge threshold at `viewRight - margin` (no labelOffsetPx adjustment) so the asymmetry stays asymmetric', async () => {
+    // Companion to the "re-centres on a leftward step" test above. The
+    // sticky label only covers the LEFT side of the viewport, so the
+    // right edge must stay `viewRight - margin`. A naive "mirror the
+    // fix" implementation would shrink the right threshold to
+    // `viewRight - labelOffsetPx - margin` and would re-centre way too
+    // eagerly on rightward scrubs. This test pins the asymmetry in
+    // place: with `offsetLeft = 140`, place the playhead inside the
+    // right-edge margin band `[viewRight - margin, viewRight]` and
+    // assert the catch-up still fires there.
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [makeThread(1)];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    const axisEl = wrapper.querySelector<HTMLElement>('[data-timeline-axis]');
+    expect(axisEl).not.toBeNull();
+    // Same narrow panel + wide label as the leftward test. clientWidth
+    // 300 → margin floor 80; labelOffsetPx 140.
+    defineLayoutProp(wrapper, 'clientWidth', 300);
+    defineLayoutProp(axisEl as HTMLElement, 'offsetLeft', 140);
+    // Position the viewport so msg-b's playhead (content x = 276) sits
+    // inside the right-edge margin band `[viewLeft + 220, viewLeft + 300]`:
+    //   viewLeft = 30, viewRight = 330, right band = [250, 330].
+    //   playheadInContent (276) is inside [250, 330] ✓.
+    //   Left band under the fix: [30, 30 + 140 + 80] = [30, 250].
+    //   playheadInContent (276) is NOT in [30, 250] ✓.
+    // So only the right-edge branch can drive the catch-up — exactly
+    // what we want to verify.
+    //
+    // A hypothetical "symmetric" fix that subtracted labelOffsetPx from
+    // the right too would set the right boundary to
+    //   viewRight - labelOffsetPx - margin = 330 - 140 - 80 = 110,
+    // i.e. the catch-up would fire any time the playhead drifted past
+    // viewport-x 80 from the left — wildly over-eager and visibly
+    // janky on rightward scrubs. By leaving the right edge alone the
+    // catch-up only fires in the actual right-edge margin band.
+    wrapper.scrollLeft = 30;
+    // Scrub via wheel-up to step msg-c → msg-b (still bumps
+    // userActedTick, even though we're testing the right-edge branch).
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      const playheadInContent = 140 + 120 + LANE_LEFT_PAD_PX; // = 276
+      const expectedScrollLeft = Math.max(
+        0,
+        playheadInContent - 300 / 2,
+      ); // = 126
+      expect(wrapper.scrollLeft).toBe(expectedScrollLeft);
+    });
+  });
+
   it('axisScrollRef points at the wrapper that hosts both the sticky labels and the axis cells (one horizontal scroll surface, label-width baked in)', async () => {
     // The "label-width hypothesis" check from v31. Confirms that:
     //  - axisScrollRef's element is the same node tagged
