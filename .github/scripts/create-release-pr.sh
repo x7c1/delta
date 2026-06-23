@@ -10,13 +10,16 @@ set -euo pipefail
 # latest state, while preserving the developer-chosen title across runs.
 #
 # Behaviour:
-#   - First run after a release: there is no open release PR. The default
-#     next version is last_tag patch+1 (e.g. v0.1.0 -> v0.1.1), and a new
-#     `release/v<X.Y.Z>` branch + PR are created.
-#   - Subsequent runs while a release PR is open: the version is extracted
-#     from the PR title (so the developer can promote it to a minor or
-#     major bump by editing the title). The release branch is force-pushed
-#     to a fresh commit on top of the latest main that bumps the version.
+#   - First run after a release: there is no open release PR. A fresh
+#     `release/since-<UTC date and time>` branch is opened with the
+#     default next version (patch+1 of last_tag, e.g. v0.1.0 -> v0.1.1).
+#   - Subsequent runs while a release PR is open: reuse the PR's head
+#     branch (queried via `gh pr view --json headRefName`) so the branch
+#     pointer the PR follows stays the same across force-pushes. This is
+#     what lets the developer promote the title (patch -> minor/major)
+#     without orphaning the PR — the version lives in the title and the
+#     Cargo.toml, while the branch name is intentionally decoupled and
+#     fixed for the lifetime of the PR.
 #
 # In every code path, the chosen version is run through
 # validate-release-pr-title.sh — the same logic the required check uses on
@@ -38,7 +41,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 CARGO_TOML="${REPO_ROOT}/backend/Cargo.toml"
 
 main() {
-    local pr_number last_tag current_version next_version repo_url changelog
+    local pr_number last_tag current_version next_version repo_url changelog branch
 
     pr_number=$(find_existing_pr)
     last_tag=$(get_last_tag)
@@ -47,10 +50,12 @@ main() {
 
     if [ -n "$pr_number" ]; then
         next_version=$(version_from_pr_title "$pr_number")
-        echo "Existing release PR #${pr_number} targets v${next_version}"
+        branch=$(branch_from_pr "$pr_number")
+        echo "Existing release PR #${pr_number} on ${branch} targets v${next_version}"
     else
         next_version=$(default_next_version "$last_tag")
-        echo "No existing release PR; defaulting to v${next_version}"
+        branch=$(new_release_branch)
+        echo "No existing release PR; opening ${branch} for v${next_version}"
     fi
 
     # Twice-guard the title: the dedicated workflow runs on pull_request
@@ -61,12 +66,12 @@ main() {
     changelog=$(generate_changelog "$last_tag" "$repo_url")
 
     if [ -n "$pr_number" ]; then
-        update_release_pr "$pr_number" "$next_version" "$last_tag" "$changelog" "$repo_url"
+        update_release_pr "$pr_number" "$branch" "$next_version" "$last_tag" "$changelog" "$repo_url"
         emit_output "pr_number" "$pr_number"
         emit_output "action" "updated"
     else
         ensure_release_label
-        create_release_pr "$next_version" "$last_tag" "$changelog" "$repo_url"
+        create_release_pr "$branch" "$next_version" "$last_tag" "$changelog" "$repo_url"
         pr_number=$(find_existing_pr)
         emit_output "pr_number" "$pr_number"
         emit_output "action" "created"
@@ -75,6 +80,20 @@ main() {
 
 find_existing_pr() {
     gh pr list --label "release" --state open --json number --jq '.[0].number // empty'
+}
+
+# Read the head branch from an existing release PR. We reuse that
+# branch on every force-push so the PR keeps pointing at our work
+# regardless of how the title has been promoted.
+branch_from_pr() {
+    local pr_number="$1"
+    gh pr view "$pr_number" --json headRefName --jq '.headRefName'
+}
+
+# Mint a fresh release-PR branch. Use UTC so the name is independent
+# of the runner's timezone and reproducible from the workflow log.
+new_release_branch() {
+    printf 'release/since-%s\n' "$(date -u +'%Y-%m-%d-%H%M')"
 }
 
 get_last_tag() {
@@ -139,11 +158,11 @@ configure_bot_identity() {
 }
 
 create_release_pr() {
-    local version="$1"
-    local last_tag="$2"
-    local changelog="$3"
-    local repo_url="$4"
-    local branch="release/v${version}"
+    local branch="$1"
+    local version="$2"
+    local last_tag="$3"
+    local changelog="$4"
+    local repo_url="$5"
 
     configure_bot_identity
 
@@ -161,24 +180,24 @@ create_release_pr() {
     gh pr create \
         --title "Release v${version}" \
         --label "release" \
-        --body "$(render_pr_body "$version" "$last_tag" "$changelog" "$repo_url")"
+        --head "$branch" \
+        --body "$(render_pr_body "$branch" "$version" "$last_tag" "$changelog" "$repo_url")"
 }
 
 update_release_pr() {
     local pr_number="$1"
-    local version="$2"
-    local last_tag="$3"
-    local changelog="$4"
-    local repo_url="$5"
-    local branch="release/v${version}"
+    local branch="$2"
+    local version="$3"
+    local last_tag="$4"
+    local changelog="$5"
+    local repo_url="$6"
 
     configure_bot_identity
 
-    # The branch name encodes the version, so if the developer just
-    # promoted the title (e.g. patch -> minor), the existing branch is
-    # the wrong one. Recreate from the current main either way: that
-    # also keeps the release commit on top of every new commit landed
-    # since the last bot run.
+    # Rebuild the PR's existing head branch from the current main and
+    # re-apply the version bump on top. Reusing the same branch name is
+    # what keeps the PR's head pointer in sync with our push, even when
+    # the developer has promoted the title (patch -> minor/major).
     git fetch origin main
     git checkout -B "$branch" origin/main
 
@@ -190,23 +209,24 @@ update_release_pr() {
 
     gh pr edit "$pr_number" \
         --title "Release v${version}" \
-        --body "$(render_pr_body "$version" "$last_tag" "$changelog" "$repo_url")"
+        --body "$(render_pr_body "$branch" "$version" "$last_tag" "$changelog" "$repo_url")"
 }
 
 # PR body layout: changelog first, then a compare link against last_tag
 # pointing at the release branch (rewritten to point at the tag once the
 # release workflow has run — see update-release-pr-links.sh).
 render_pr_body() {
-    local version="$1"
-    local last_tag="$2"
-    local changelog="$3"
-    local repo_url="$4"
+    local branch="$1"
+    local version="$2"
+    local last_tag="$3"
+    local changelog="$4"
+    local repo_url="$5"
     local compare=""
 
     if [ -n "$last_tag" ]; then
         compare="## Changelog
 
-- [${last_tag}...v${version}](${repo_url}/compare/${last_tag}...release/v${version})"
+- [${last_tag}...v${version}](${repo_url}/compare/${last_tag}...${branch})"
     fi
 
     cat <<EOF
