@@ -10,6 +10,49 @@ for the full target list. This guide names the relevant `make` target for each
 task and keeps the underlying commands only where there is no target (one-time
 setup and env-overridden runs).
 
+## Supported platforms
+
+Delta is officially supported on **Linux** and **macOS** for both development
+and runtime. The dev scripts (`scripts/dev.sh`, `scripts/stop.sh`,
+`scripts/reset.sh`) and the `Makefile` target the common shell baseline shared
+by both — see "Portability conventions" below.
+
+### Prerequisites by platform
+
+| Platform | Prerequisites |
+|----------|---------------|
+| Linux | `tmux`, `lsof`, GNU `make`, `bash` — install via the system package manager (e.g. `apt install tmux lsof make`). |
+| macOS | `tmux` via Homebrew (`brew install tmux`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
+
+In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
+`corepack enable`), and an authenticated Claude Code (`claude`) — see the
+"Run the whole thing locally" section below.
+
+### `lsof` is assumed
+
+`scripts/dev.sh`'s `port_in_use` / `kill_port` helpers prefer `lsof` for port
+probing and teardown. They fall back to `ss` or `fuser` (Linux-only) when
+`lsof` is missing, gated by `command -v`, but a host without `lsof` is not a
+supported configuration. macOS ships `lsof` by default, so this is only a
+concern on stripped-down Linux images.
+
+### Portability conventions
+
+The dev scripts are written against a shell baseline that runs unmodified on
+both platforms. Keep changes within this baseline so macOS support does not
+regress:
+
+- Stick to **bash 3.2 / POSIX-compatible** idioms — macOS still ships bash 3.2
+  by default, and the scripts are run under that version.
+- Avoid bash-4-only features: associative arrays (`declare -A`),
+  `mapfile` / `readarray`, case-modifying expansions (`${var,,}` / `${var^^}`),
+  and `&>>` redirection.
+- Avoid GNU-only flags and tools: `readlink -f`, GNU-style `sed -i`,
+  `date -d`, `grep -P`, GNU `stat`, `nproc`, and reads from `/proc`.
+- When a feature genuinely needs a Linux-only tool (e.g. `ss`, `fuser`), gate
+  it with `command -v` and provide an `lsof`-based path or a no-op fallback so
+  the script still does the right thing on macOS.
+
 ## Backend (`backend/`)
 
 Quality gate — `make build`, `make test`, and `make lint` each cover both
