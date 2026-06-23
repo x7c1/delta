@@ -28,7 +28,11 @@ To cut a minor or major release, **edit the PR title only**:
 - `Release v0.1.1` → `Release v0.2.0` (minor)
 - `Release v0.1.1` → `Release v1.0.0` (major)
 
-On the next push to `main`, the bot:
+Saving the title edit triggers the bot immediately — you no longer have
+to wait for the next push to `main`. (The next push works too, so either
+path gets you there.) Body-only edits and no-op title saves are ignored,
+so re-opening the edit dialog without changing the title does not
+retrigger the bot. When the bot does run, it:
 
 1. Reads the new title and extracts the target version.
 2. Runs `cargo set-version --workspace <version>` to update
@@ -72,9 +76,11 @@ stays in sync with every force-push.
 
 ## Workflows involved
 
-- `.github/workflows/create-release-pr.yml` — on every push to `main`,
-  opens or updates the release PR (skipped when the push is itself the
-  merge of a release PR, to avoid looping).
+- `.github/workflows/create-release-pr.yml` — opens or updates the
+  release PR on every push to `main` (skipped when the push is itself
+  the merge of a release PR, to avoid looping). It also runs when a
+  release-labelled PR's title is edited, so promoting the title is
+  picked up immediately rather than waiting for the next main push.
 - `.github/workflows/validate-release-pr.yml` — on every release PR edit,
   enforces the allowed title transitions above.
 - `.github/workflows/release.yml` — when CI completes successfully on
