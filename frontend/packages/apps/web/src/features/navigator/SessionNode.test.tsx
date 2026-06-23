@@ -2,12 +2,14 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import type { ComponentProps } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import { createHandlers, SESSION_ID } from '@delta/api-mocks';
@@ -181,5 +183,81 @@ describe('SessionNode unread indicator', () => {
     expect(
       screen.queryByTestId('session-subagent-badge'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('SessionNode kebab menu', () => {
+  // jsdom does not implement `navigator.clipboard`, so install a stub holding a
+  // `vi.fn()` writeText. `configurable: true` lets afterAll restore the original
+  // descriptor cleanly.
+  const writeText = vi.fn<(text: string) => Promise<void>>();
+  const originalClipboard = Object.getOwnPropertyDescriptor(
+    navigator,
+    'clipboard',
+  );
+  beforeAll(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+  });
+  afterAll(() => {
+    if (originalClipboard) {
+      Object.defineProperty(navigator, 'clipboard', originalClipboard);
+    } else {
+      // The property did not exist before — drop the stub.
+      delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+    }
+  });
+  beforeEach(() => {
+    writeText.mockReset();
+    writeText.mockResolvedValue(undefined);
+  });
+
+  it('exposes both "Copy session ID" and "Close" while the session is open', () => {
+    renderNode({});
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+
+    expect(
+      screen.getByRole('menuitem', { name: 'Copy session ID' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: 'Close' }),
+    ).toBeInTheDocument();
+  });
+
+  it('exposes only "Copy session ID" when the session is closed', () => {
+    // The menu trigger must still be enabled for a closed session — copying the
+    // id is useful regardless of whether the session is running.
+    renderNode({ item: { ...item, open: false } });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+
+    expect(
+      screen.getByRole('menuitem', { name: 'Copy session ID' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('menuitem', { name: 'Close' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('writes the session id to the clipboard when "Copy session ID" is picked', () => {
+    renderNode({});
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+    fireEvent.click(
+      screen.getByRole('menuitem', { name: 'Copy session ID' }),
+    );
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith(item.session.id);
   });
 });
