@@ -73,6 +73,31 @@ export const WHEEL_VELOCITY_WINDOW_MS = 250;
 export const WHEEL_PER_EVENT_CLAMP_PX = 100;
 
 /**
+ * Cool-down window (ms) between consecutive step commits emitted by the
+ * wheel handler. Suppresses output (not input — the rolling-window
+ * accumulator keeps feeding through cooldown), so a trackpad's continuous
+ * pixel-mode event stream cannot fire more than one step per cooldown
+ * tick while a typical mouse-wheel cadence (notches 150+ ms apart)
+ * passes through unthrottled.
+ *
+ * Why the cooldown is needed in addition to the per-event clamp: the
+ * clamp assumes "1 wheel notch = 1 wheel event", which holds for
+ * traditional mouse wheels but NOT for macOS trackpads. A gentle trackpad
+ * gesture emits a continuous stream of small pixel-mode events (~5–20 px
+ * each, ~5–10 ms apart, plus inertial residue after the finger lifts);
+ * each individual event sits below the clamp, so the clamp does not
+ * protect the accumulator and the per-event 1-step commit fires on every
+ * event. The cooldown gates the output side instead — the accumulator
+ * and staircase keep working unchanged, only the commit rate is capped.
+ *
+ * 100 ms = 10 steps/sec ceiling. Mouse-wheel cadence is typically
+ * 150+ ms between notches in normal use, so realistic mouse-wheel
+ * scrubbing passes through unthrottled. Exported so tests can drive the
+ * timing explicitly and a future tuning PR has one knob.
+ */
+export const WHEEL_STEP_COOLDOWN_MS = 100;
+
+/**
  * `WheelEvent.deltaMode` indicates the unit of `deltaY` / `deltaX`. Pixel
  * mode (0) is the trackpad / high-resolution-mouse default and needs no
  * conversion; line mode (1) and page mode (2) report small integer counts
@@ -1466,7 +1491,24 @@ export function ThreadTimelineOverlay({
   // unrelated later flick always starts fresh at the slowest staircase
   // bucket. The accumulator's role replaces v4's hard cooldown: a long
   // session traverses in a handful of vigorous turns instead of dozens.
+  //
+  // A separate output-side gate ({@link WHEEL_STEP_COOLDOWN_MS},
+  // tracked by `lastStepCommitAtMsRef` below) caps the rate at which
+  // discrete step commits land. The accumulator keeps feeding during the
+  // cooldown so a sustained vigorous spin still trips the higher
+  // staircase buckets when the cooldown next clears — the cooldown
+  // bounds throughput, not acceleration.
   const wheelWindowRef = useRef<Array<{ atMs: number; deltaPx: number }>>([]);
+  // Timestamp (ms, from the same clock as the rolling-window entries) of
+  // the most recent step commit emitted by the wheel handler. `null`
+  // means "no prior commit", which bypasses the cooldown gate so the
+  // very first event after the component mounts — or after a long pause
+  // where `now - lastCommitAt` exceeds the cooldown — commits
+  // immediately. A trackpad's burst inside the cooldown window still
+  // feeds the accumulator (preserving staircase semantics) but does not
+  // commit until the gate clears, which keeps a gentle gesture from
+  // racing through multiple messages.
+  const lastStepCommitAtMsRef = useRef<number | null>(null);
 
   useEffect(() => {
     const el = axisScrollRef.current;
@@ -1527,6 +1569,24 @@ export function ThreadTimelineOverlay({
         cumulativePx += entry.deltaPx;
       }
       const requestedSteps = stepsForCumulativePx(cumulativePx);
+      // Output-side cooldown gate. Trackpads emit a continuous stream of
+      // small pixel-mode events for a single gesture, each sub-notch and
+      // therefore individually below the per-event clamp; without this
+      // gate every one of those events would commit a 1-step jump and
+      // the playhead would race through several messages on a gentle
+      // gesture. The accumulator above is already updated this tick, so
+      // the staircase still compounds across the burst — the cooldown
+      // only suppresses the commit until {@link WHEEL_STEP_COOLDOWN_MS}
+      // has elapsed since the last actual commit. The first event after
+      // mount (or after a pause long enough that `now - lastCommitAt`
+      // exceeds the cooldown) falls through immediately.
+      const lastCommitAt = lastStepCommitAtMsRef.current;
+      if (
+        lastCommitAt !== null &&
+        now - lastCommitAt < WHEEL_STEP_COOLDOWN_MS
+      ) {
+        return;
+      }
       // Wheel down (positive delta) → next message (newer); wheel up →
       // previous (older). Clamped to the ends — no wrap.
       const direction: 1 | -1 = rawDelta > 0 ? 1 : -1;
@@ -1558,6 +1618,12 @@ export function ThreadTimelineOverlay({
         return;
       }
       setActiveMessageIndex(nextGlobalIndex);
+      // Record the commit time so the cooldown gate above can suppress
+      // any further commits for the next {@link WHEEL_STEP_COOLDOWN_MS}.
+      // The ref is only written on actual commits — clamp-at-end and
+      // no-op events leave the prior commit time in place, which keeps
+      // the gate's "time since last visible step" reading honest.
+      lastStepCommitAtMsRef.current = now;
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
