@@ -189,7 +189,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "delta-attribution"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "delta-model",
  "delta-transcript",
@@ -199,7 +199,7 @@ dependencies = [
 
 [[package]]
 name = "delta-bootstrap"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "delta-model",
  "delta-sqlite",
@@ -214,14 +214,14 @@ dependencies = [
 
 [[package]]
 name = "delta-model"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "delta-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -248,7 +248,7 @@ dependencies = [
 
 [[package]]
 name = "delta-sqlite"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "delta-model",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "delta-transcript"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "delta-model",
@@ -276,7 +276,7 @@ dependencies = [
 
 [[package]]
 name = "delta-usecase"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "delta-attribution",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "delta-wire"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "delta-model",
  "delta-usecase",
@@ -333,7 +333,7 @@ dependencies = [
 
 [[package]]
 name = "fake-claude"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "delta-bootstrap",
@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "git-worktree"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -1290,7 +1290,7 @@ dependencies = [
 
 [[package]]
 name = "tmux-driver"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "workspace-fs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "delta-usecase",
