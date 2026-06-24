@@ -34,6 +34,12 @@ mod repositories_response;
 pub use repositories_response::{
     WireRepositoriesResponse, WireRepositoryClone, WireRepositoryEntry,
 };
+mod repository_scan_root_create_request;
+pub use repository_scan_root_create_request::WireCreateRepositoryScanRootRequest;
+mod repository_scan_roots_response;
+pub use repository_scan_roots_response::{
+    WireRepositoryScanRoot, WireRepositoryScanRootsResponse,
+};
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;

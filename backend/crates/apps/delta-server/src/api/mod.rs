@@ -20,6 +20,7 @@
 
 mod api_error;
 pub(crate) use api_error::ApiError;
+pub(crate) mod repository_scan_root_path;
 mod session_cursor;
 
 use axum::extract::{Path, Query, State};
@@ -29,12 +30,13 @@ use serde::Deserialize;
 
 use delta_usecase::{PullRequestLens, SessionId, ThreadId};
 use delta_wire::rest::{
-    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
-    WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
-    WireNewSessionResponse, WirePermissionDecisionRequest, WirePullRequestsResponse,
-    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRecentWorkdirItem,
-    WireRepositoriesResponse, WireRepositoryEntry, WireSendResponse, WireSendsResponse,
-    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
+    WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
+    WireMessagesResponse, WireNewSessionResponse, WirePermissionDecisionRequest,
+    WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
+    WireRecentWorkdirItem, WireRepositoriesResponse, WireRepositoryEntry, WireRepositoryScanRoot,
+    WireRepositoryScanRootsResponse, WireSendResponse, WireSendsResponse, WireSessionListItem,
+    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
     WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
@@ -241,6 +243,78 @@ pub(crate) async fn list_repositories(
             .map(WireRepositoryEntry::from)
             .collect(),
     }))
+}
+
+/// `GET /api/repository-scan-roots` — the registered repository scan roots.
+///
+/// Returns the parent directories the user has registered as scan starts for
+/// the Repository tab, newest first. Each entry carries only the path; the
+/// stored `created_at` is omitted from the wire because the Settings list
+/// does not show it.
+pub(crate) async fn list_repository_scan_roots(
+    State(state): State<AppState>,
+) -> Result<Json<WireRepositoryScanRootsResponse>, ApiError> {
+    let roots = state.interactor().list_repository_scan_roots().await?;
+    Ok(Json(WireRepositoryScanRootsResponse {
+        scan_roots: roots.into_iter().map(WireRepositoryScanRoot::from).collect(),
+    }))
+}
+
+/// `POST /api/repository-scan-roots` — register a new repository scan root.
+///
+/// `path` must be a non-blank absolute path (starting with `/`). Trailing
+/// slashes are trimmed for canonicalisation, so `/home/dev/projects/` and
+/// `/home/dev/projects` register the same row. The path is NOT required to
+/// exist or to contain git repos at registration time — a future-state scan
+/// root is allowed. Duplicate paths return `409` with code
+/// `scan_root_duplicate` so the Settings dialog can show an inline hint.
+pub(crate) async fn create_repository_scan_root(
+    State(state): State<AppState>,
+    Json(req): Json<WireCreateRepositoryScanRootRequest>,
+) -> Result<(StatusCode, Json<WireRepositoryScanRoot>), ApiError> {
+    let trimmed = req.path.trim();
+    // Strip trailing slashes (except a bare root `/`) so the user-typed form
+    // is canonicalised before the PRIMARY KEY check sees it.
+    let canonical = {
+        let stripped = trimmed.trim_end_matches('/');
+        if stripped.is_empty() { "/" } else { stripped }
+    };
+    if canonical.is_empty() {
+        return Err(ApiError::BadRequest(
+            "a scan root must have a non-blank `path`".to_owned(),
+        ));
+    }
+    if !canonical.starts_with('/') {
+        return Err(ApiError::BadRequest(
+            "a scan root `path` must be absolute (start with `/`)".to_owned(),
+        ));
+    }
+    let root = state
+        .interactor()
+        .add_repository_scan_root(canonical)
+        .await?;
+    Ok((StatusCode::CREATED, Json(WireRepositoryScanRoot::from(root))))
+}
+
+/// `DELETE /api/repository-scan-roots/{path_b64}` — unregister a scan root.
+///
+/// The registered absolute path is URL-safe base64 in the path segment to
+/// keep its embedded `/` characters out of the route match. A malformed token
+/// is a `400`; an unknown path is a silent no-op (idempotent), so a
+/// Settings dialog click never surfaces a 404 noise on a path the user just
+/// removed via another tab.
+pub(crate) async fn delete_repository_scan_root(
+    State(state): State<AppState>,
+    Path(path_b64): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let path = repository_scan_root_path::decode(&path_b64).ok_or_else(|| {
+        ApiError::BadRequest("malformed scan-root path token".to_owned())
+    })?;
+    state
+        .interactor()
+        .remove_repository_scan_root(&path)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Query parameters for `GET /api/prs`: which lens to query gh for.
