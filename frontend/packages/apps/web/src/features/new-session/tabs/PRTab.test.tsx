@@ -206,8 +206,11 @@ describe('PRTab', () => {
     });
     expect(new Set(labelClasses).size).toBe(1);
     // And the surviving class must NOT contain `font-semibold` — the
-    // single uniform style is the lighter, slate-500 baseline.
+    // single uniform style is the same `text-slate-700` weight the
+    // Repository tab's clickable rows use, so the two tabs read
+    // consistently. The divider supplies the grouping structure.
     expect(labelClasses[0]).not.toMatch(/font-semibold/);
+    expect(labelClasses[0]).toMatch(/text-slate-700/);
   });
 });
 
