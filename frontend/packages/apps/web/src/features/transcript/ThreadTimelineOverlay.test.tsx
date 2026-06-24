@@ -3416,6 +3416,31 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
     };
   }
 
+  /**
+   * Resolves the LIVE FakeIO that observes every expected article. The
+   * timeline effect re-runs as async query results settle and replaces its
+   * IntersectionObserver each time, leaving earlier instances disconnected
+   * (observed set cleared). Capturing `fake.instances[length - 1]`
+   * synchronously races that replacement: between the capture and the
+   * subsequent `io.emit(...)`, a later effect-run can wedge a new live
+   * observer ahead of the one we grabbed, and the emit then reaches a dead
+   * observer whose callback no longer fires.
+   *
+   * Polls until the most recent FakeIO observes `expectedObserved`
+   * elements — the live observer always re-`observe()`s every article on
+   * construction.
+   */
+  async function getLiveIO(
+    fake: { instances: FakeIO[] },
+    expectedObserved: number,
+  ): Promise<FakeIO> {
+    return waitFor(() => {
+      const candidate = fake.instances.at(-1);
+      expect(candidate?.observed.size).toBe(expectedObserved);
+      return candidate as FakeIO;
+    });
+  }
+
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(timelineExpandedKey(), 'true');
@@ -3451,13 +3476,13 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       // is the most recent. Earlier instances were disconnected by the
       // effect's cleanup.
       expect(fake.instances.length).toBeGreaterThan(0);
-      const io = fake.instances[fake.instances.length - 1];
-      expect(io.options?.threshold).toBe(PANE_SCROLL_OBSERVER_THRESHOLD);
-      // Every article in the conversation body is observed by the live
-      // observer.
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
+      const io = await getLiveIO(fake, articles.length);
+      expect(io.options?.threshold).toBe(PANE_SCROLL_OBSERVER_THRESHOLD);
+      // Every article in the conversation body is observed by the live
+      // observer.
       for (const a of articles) {
         expect(io.observed.has(a)).toBe(true);
       }
@@ -3500,10 +3525,10 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       expect(
         playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
-      const io = fake.instances[fake.instances.length - 1];
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
+      const io = await getLiveIO(fake, articles.length);
       // Simulate the user scrolling up so msg-a is closest to the
       // viewport top (smallest boundingClientRect.top) and msg-b is
       // partially visible below it; msg-c is now off-screen.
@@ -3595,10 +3620,10 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       // msg-b is topmost-visible — exactly what the jump's own scroll
       // would produce as it animates past msg-b. The playhead must NOT
       // jump to msg-b.
-      const io = fake.instances[fake.instances.length - 1];
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
+      const io = await getLiveIO(fake, articles.length);
       vi.useFakeTimers();
       try {
         act(() => {
@@ -3699,6 +3724,31 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
         ).IntersectionObserver = original;
       },
     };
+  }
+
+  /**
+   * Resolves the LIVE FakeIO that observes every expected article. The
+   * timeline effect re-runs as async query results settle and replaces its
+   * IntersectionObserver each time, leaving earlier instances disconnected
+   * (observed set cleared). Capturing `fake.instances[length - 1]`
+   * synchronously races that replacement: between the capture and the
+   * subsequent `io.emit(...)`, a later effect-run can wedge a new live
+   * observer ahead of the one we grabbed, and the emit then reaches a dead
+   * observer whose callback no longer fires.
+   *
+   * Polls until the most recent FakeIO observes `expectedObserved`
+   * elements — the live observer always re-`observe()`s every article on
+   * construction.
+   */
+  async function getLiveIO(
+    fake: { instances: FakeIO[] },
+    expectedObserved: number,
+  ): Promise<FakeIO> {
+    return waitFor(() => {
+      const candidate = fake.instances.at(-1);
+      expect(candidate?.observed.size).toBe(expectedObserved);
+      return candidate as FakeIO;
+    });
   }
 
   beforeEach(() => {
@@ -3815,10 +3865,10 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // Simulate the IO firing for msg-b (tail) — exactly what happens when
       // the new thread's pane is freshly rendered with the tail message at
       // the bottom of the viewport.
-      const io = fake.instances[fake.instances.length - 1];
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
+      const io = await getLiveIO(fake, articles.length);
       const msgBArticle = articles.find((a) => a.textContent === 'msg-b')!;
       vi.useFakeTimers();
       try {
@@ -4004,10 +4054,10 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       // set the time-based guard; advance performance.now past that window
       // too so only the in-flight flag would block the flush (confirming it
       // is cleared by the cancel-with-flag-clear wrapper).
-      const io = fake.instances[fake.instances.length - 1];
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
+      const io = await getLiveIO(fake, articles.length);
       // msg-b is the article at index 1 in sortedMessages (x=120px on a
       // 3-message axis of width 240px: 0, 120, 240). Using msg-b (not the
       // tail) keeps the expectation non-trivial: if the flag were NOT cleared,
@@ -4132,6 +4182,31 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
         ).IntersectionObserver = original;
       },
     };
+  }
+
+  /**
+   * Resolves the LIVE FakeIO that observes every expected article. The
+   * timeline effect re-runs as async query results settle and replaces its
+   * IntersectionObserver each time, leaving earlier instances disconnected
+   * (observed set cleared). Capturing `fake.instances[length - 1]`
+   * synchronously races that replacement: between the capture and the
+   * subsequent `io.emit(...)`, a later effect-run can wedge a new live
+   * observer ahead of the one we grabbed, and the emit then reaches a dead
+   * observer whose callback no longer fires.
+   *
+   * Polls until the most recent FakeIO observes `expectedObserved`
+   * elements — the live observer always re-`observe()`s every article on
+   * construction.
+   */
+  async function getLiveIO(
+    fake: { instances: FakeIO[] },
+    expectedObserved: number,
+  ): Promise<FakeIO> {
+    return waitFor(() => {
+      const candidate = fake.instances.at(-1);
+      expect(candidate?.observed.size).toBe(expectedObserved);
+      return candidate as FakeIO;
+    });
   }
 
   beforeEach(() => {
@@ -4264,10 +4339,10 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // window — assert it by emitting an IO entry for msg-a now and
       // confirming the flush bails.
       nowMs += 500;
-      const io = fake.instances[fake.instances.length - 1];
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
+      const io = await getLiveIO(fake, articles.length);
       const msgAArticle = articles.find((a) => a.textContent === 'msg-a')!;
       vi.useFakeTimers();
       try {
@@ -4530,7 +4605,6 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       // is already at msg-b, so we choose msg-a as the IO target — which
       // would snap the playhead BACK to msg-a if the guard were broken).
       nowMs += PANE_SCROLL_PROGRAMMATIC_GUARD_MS + 50;
-      const io = fake.instances[fake.instances.length - 1];
       // The pane only contains msg-b right now, so IO can only emit on
       // msg-b. We use msg-b as the IO target. Because msg-b is also the
       // playhead's current position, an honoured flush would be a no-op
@@ -4546,8 +4620,10 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       screen.getByTestId('conversation-body').appendChild(standin);
       // Observe the new article: the MutationObserver in the IO effect
       // catches DOM mutations and starts observing. Allow a microtask for
-      // the observation to register.
+      // the observation to register, then resolve the live IO once both
+      // msg-b and the stand-in are observed.
       await Promise.resolve();
+      const io = await getLiveIO(fake, 2);
       vi.useFakeTimers();
       try {
         act(() => {
