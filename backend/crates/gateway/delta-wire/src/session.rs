@@ -94,6 +94,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             branch_at_launch: Some("main".into()),
             repo_root: Some("/work/delta".into()),
+            requested_workdir: None,
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),

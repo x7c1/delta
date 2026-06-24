@@ -59,12 +59,20 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// repository (or HEAD is detached). They are persisted once here and
     /// never updated later: see [`Session::branch_at_launch`] /
     /// [`Session::repo_root`] for the spawn-snapshot semantics.
+    ///
+    /// `requested_workdir` is the dir the user picked before any worktree
+    /// resolution. It is `None` when no workdir was selected (the default
+    /// per-token scratch dir is used). For a worktree-on spawn it holds the
+    /// user-selected dir (the worktree's repo root), while `cwd` holds the
+    /// auto-generated worktree path; for a plain spawn with a user-selected
+    /// workdir it equals `cwd`. See [`Session::requested_workdir`].
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
@@ -411,9 +419,10 @@ impl SessionStore for Box<dyn SessionStore> {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         (**self)
-            .insert_spawning_session(id, cwd, branch_at_launch, repo_root)
+            .insert_spawning_session(id, cwd, branch_at_launch, repo_root, requested_workdir)
             .await
     }
 

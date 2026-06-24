@@ -94,6 +94,10 @@ impl SessionStore for FakeStore {
             // when this activate path runs.
             branch_at_launch: new.branch_at_launch,
             repo_root: new.repo_root,
+            // Same as the snapshot fields above: external-claude sessions have
+            // no Delta-known launch dir to record. Worktree dirs cannot appear
+            // here because external sessions don't go through worktree spawn.
+            requested_workdir: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -115,6 +119,7 @@ impl SessionStore for FakeStore {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -130,6 +135,7 @@ impl SessionStore for FakeStore {
             created_at: "2026-01-01T00:00:00Z".into(),
             branch_at_launch: branch_at_launch.map(str::to_owned),
             repo_root: repo_root.map(str::to_owned),
+            requested_workdir: requested_workdir.map(str::to_owned),
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -255,10 +261,12 @@ impl SessionStore for FakeStore {
 
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<crate::ports::RecentWorkdir>> {
         let g = self.inner.lock().unwrap();
-        // Per-session recency: latest message, else the session's created_at.
-        // A cwd's recency is the max across its sessions. Then distinct cwds,
-        // most recent first.
-        let mut by_cwd: std::collections::HashMap<String, String> =
+        // Mirror the SQLite query: group on `COALESCE(requested_workdir, cwd)`
+        // so worktree-managed paths drop out and legacy rows still surface by
+        // their `cwd`. Per-session recency is the latest message, else the
+        // session's `created_at`; a workdir's recency is the max across its
+        // sessions.
+        let mut by_workdir: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for s in &g.sessions {
             let recency = g
@@ -268,8 +276,9 @@ impl SessionStore for FakeStore {
                 .filter_map(|m| m.created_at.clone())
                 .max()
                 .unwrap_or_else(|| s.created_at.clone());
-            by_cwd
-                .entry(s.cwd.clone())
+            let workdir = s.requested_workdir.clone().unwrap_or_else(|| s.cwd.clone());
+            by_workdir
+                .entry(workdir)
                 .and_modify(|cur| {
                     if recency > *cur {
                         *cur = recency.clone();
@@ -277,9 +286,9 @@ impl SessionStore for FakeStore {
                 })
                 .or_insert(recency);
         }
-        let mut rows: Vec<(String, Option<String>)> = by_cwd
+        let mut rows: Vec<(String, Option<String>)> = by_workdir
             .into_iter()
-            .map(|(cwd, recency)| (cwd, Some(recency)))
+            .map(|(workdir, recency)| (workdir, Some(recency)))
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         rows.truncate(limit as usize);

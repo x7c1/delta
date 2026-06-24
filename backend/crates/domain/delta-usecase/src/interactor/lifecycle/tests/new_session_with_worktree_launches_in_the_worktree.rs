@@ -63,7 +63,9 @@ async fn new_session_with_worktree_launches_in_the_worktree() {
     );
 
     // The eager session row stored the worktree path as its cwd, so a later
-    // resume reattaches to the existing worktree.
+    // resume reattaches to the existing worktree. `requested_workdir` keeps
+    // the user-selected dir (here the canonicalized `/projects/app`) so the
+    // Recent dirs picker surfaces that instead of the worktree path.
     let stored = ix
         .store()
         .session(&session_id)
@@ -71,4 +73,9 @@ async fn new_session_with_worktree_launches_in_the_worktree() {
         .unwrap()
         .expect("the eager session row exists");
     assert_eq!(stored.cwd, expected_path, "stored cwd is the worktree path");
+    assert_eq!(
+        stored.requested_workdir.as_deref(),
+        Some(canonical.as_str()),
+        "requested_workdir keeps the user-selected dir, not the worktree path",
+    );
 }
