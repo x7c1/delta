@@ -34,7 +34,13 @@ test('picking a PR with a local clone pre-fills the composer and a Send carries 
     (request) =>
       request.url().endsWith('/api/sends') && request.method() === 'POST',
   );
-  await page.getByRole('textbox').fill('resume PR work');
+  // Switching the worktree on (via `use_remote_branch`) mounts a
+  // second textbox — the remote-branch input pre-filled with the PR
+  // head ref. Address the composer textarea explicitly by its
+  // placeholder so the fill is unambiguous.
+  await page
+    .getByPlaceholder('Message to start a new session…')
+    .fill('resume PR work');
   await page.getByRole('button', { name: 'Send' }).click();
 
   const request = await sendRequest;
