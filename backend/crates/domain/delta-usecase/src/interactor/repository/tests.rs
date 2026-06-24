@@ -274,3 +274,172 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
     );
     assert_eq!(repos[0].recently_used_clone_path, EXISTING_DIR);
 }
+
+// Helper: register `subdir` as an empty git-style clone (a directory with a
+// `.git` subdirectory) under `parent`, returning its canonical absolute path
+// for assertions against the scan output (which canonicalises every entry).
+async fn make_git_child(parent: &std::path::Path, name: &str) -> String {
+    let child = parent.join(name);
+    std::fs::create_dir(&child).unwrap();
+    std::fs::create_dir(child.join(".git")).unwrap();
+    tokio::fs::canonicalize(&child)
+        .await
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[tokio::test]
+async fn scan_only_repo_surfaces_without_a_session() {
+    // A scan root that contains a git clone the user has never launched a
+    // session in: the clone shows up as a `last_opened_at: None` repository so
+    // the PR tab's `has_local_clone` join picks it up (this is the whole
+    // motivation behind Phase D's umbrella-session fix).
+    let tmp = tempfile::tempdir().unwrap();
+    let clone_path = make_git_child(tmp.path(), "delta").await;
+    let git = FakeGitWorktree::default()
+        .with_origin_url(&clone_path, "git@github.com:x7c1/delta");
+    let ix = interactor_with_git(git);
+    ix.store()
+        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .await
+        .unwrap();
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert_eq!(
+        repos.len(),
+        1,
+        "the scan-derived clone is the sole repository"
+    );
+    assert_eq!(repos[0].identity_key, "github.com/x7c1/delta");
+    assert_eq!(repos[0].recently_used_clone_path, clone_path);
+    assert_eq!(repos[0].clones.len(), 1);
+    assert!(
+        repos[0].clones[0].last_opened_at.is_none(),
+        "a never-opened scan clone reports no recency"
+    );
+    assert!(
+        repos[0].clones[0].last_branch.is_none(),
+        "a never-opened scan clone reports no last branch"
+    );
+}
+
+#[tokio::test]
+async fn session_and_scan_clones_with_the_same_identity_key_union() {
+    // The same repository surfaces from both the session history (one clone
+    // path) and a scan root (a different clone path with the same origin):
+    // the two collapse into one Repository with both clones, the session-
+    // derived one keeping its recency and the scan-derived one carrying none.
+    let tmp = tempfile::tempdir().unwrap();
+    let scan_clone = make_git_child(tmp.path(), "delta-alt").await;
+    let git = FakeGitWorktree::default()
+        .with_origin_url(EXISTING_DIR, "git@github.com:x7c1/delta")
+        .with_origin_url(&scan_clone, "git@github.com:x7c1/delta");
+    let ix = interactor_with_git(git);
+    ix.store()
+        .insert_spawning_session(
+            &SessionId::from("s1"),
+            EXISTING_DIR,
+            Some("main"),
+            Some(EXISTING_DIR),
+            Some(EXISTING_DIR),
+        )
+        .await
+        .unwrap();
+    ix.store()
+        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .await
+        .unwrap();
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert_eq!(repos.len(), 1, "same origin = one repository");
+    let repo = &repos[0];
+    assert_eq!(repo.identity_key, "github.com/x7c1/delta");
+    assert_eq!(repo.clones.len(), 2, "both clones unioned in");
+    assert_eq!(
+        repo.recently_used_clone_path, EXISTING_DIR,
+        "the session-derived clone keeps its recency, so it wins the default"
+    );
+    let scan_clone_entry = repo
+        .clones
+        .iter()
+        .find(|c| c.path == scan_clone)
+        .expect("the scan-derived clone is present");
+    assert!(
+        scan_clone_entry.last_opened_at.is_none(),
+        "the scan-derived clone reports no recency"
+    );
+}
+
+#[tokio::test]
+async fn scan_clone_already_in_session_history_is_not_added_twice() {
+    // The user registered a scan root that points at a parent whose child is
+    // the very dir they already launched sessions in. The same path must not
+    // be double-counted: the session-derived row wins (carries the recency)
+    // and the scan-derived hit is dropped by the de-dup guard.
+    let tmp = tempfile::tempdir().unwrap();
+    let clone_path = make_git_child(tmp.path(), "delta").await;
+    let git = FakeGitWorktree::default()
+        .with_origin_url(&clone_path, "git@github.com:x7c1/delta");
+    let ix = interactor_with_git(git);
+    ix.store()
+        .insert_spawning_session(
+            &SessionId::from("s1"),
+            &clone_path,
+            Some("main"),
+            Some(&clone_path),
+            Some(&clone_path),
+        )
+        .await
+        .unwrap();
+    ix.store()
+        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .await
+        .unwrap();
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert_eq!(repos.len(), 1);
+    assert_eq!(
+        repos[0].clones.len(),
+        1,
+        "the same path appearing in both sources still collapses to one clone"
+    );
+    assert!(
+        repos[0].clones[0].last_opened_at.is_some(),
+        "the surviving entry is the session-derived one (carries recency)"
+    );
+}
+
+#[tokio::test]
+async fn scan_root_with_no_git_children_contributes_nothing() {
+    // A scan root that only contains plain (non-git) directories yields no
+    // clones — the depth-1 scan looks for `.git` and nothing else.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join("not-a-clone")).unwrap();
+    let ix = interactor_with_git(FakeGitWorktree::default());
+    ix.store()
+        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .await
+        .unwrap();
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert!(
+        repos.is_empty(),
+        "no .git children = nothing for the scan to add, got {repos:?}"
+    );
+}
+
+#[tokio::test]
+async fn missing_scan_root_path_is_skipped_silently() {
+    // The user's scan-root parent has been removed from disk since
+    // registration (or never existed): the call must not fail, the list just
+    // misses what that root would have contributed.
+    let ix = interactor_with_git(FakeGitWorktree::default());
+    ix.store()
+        .insert_repository_scan_root("/no/such/scan/root/path/anywhere")
+        .await
+        .unwrap();
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert!(repos.is_empty(), "a missing root simply contributes nothing");
+}

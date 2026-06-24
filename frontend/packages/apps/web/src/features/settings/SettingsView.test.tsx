@@ -156,4 +156,85 @@ describe('SettingsView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(useNavStore.getState().settingsOpen).toBe(false);
   });
+
+  describe('Repository scan roots section', () => {
+    it('renders the empty-state when no roots are registered', async () => {
+      renderSettings();
+      const section = await screen.findByTestId('scan-roots-section');
+      expect(
+        within(section).getByText('No scan roots registered yet.'),
+      ).toBeInTheDocument();
+      expect(within(section).queryByTestId('scan-roots-list')).toBeNull();
+    });
+
+    it('adds a scan root through the picker dialog', async () => {
+      renderSettings();
+      const section = await screen.findByTestId('scan-roots-section');
+      fireEvent.click(within(section).getByTestId('add-scan-root'));
+
+      // The picker dialog opens; the WorkdirPickerBody pre-selects the most
+      // recent directory as its candidate, so Add becomes enabled without
+      // needing to click a tree node first.
+      const confirm = await screen.findByTestId('scan-root-confirm');
+      await waitFor(() => expect(confirm).toBeEnabled());
+      fireEvent.click(confirm);
+
+      // After success the picker closes and the list shows the new entry.
+      await waitFor(() =>
+        expect(within(section).getByTestId('scan-roots-list')).toBeInTheDocument(),
+      );
+    });
+
+    it('shows an inline duplicate hint when adding the same root twice', async () => {
+      renderSettings();
+      const section = await screen.findByTestId('scan-roots-section');
+
+      // First registration: the picker opens, the candidate is auto-pre-
+      // selected (the WorkdirPickerBody seeds it from the recent list), and
+      // submitting succeeds.
+      fireEvent.click(within(section).getByTestId('add-scan-root'));
+      const firstConfirm = await screen.findByTestId('scan-root-confirm');
+      await waitFor(() => expect(firstConfirm).toBeEnabled());
+      fireEvent.click(firstConfirm);
+      await waitFor(() =>
+        expect(within(section).getByTestId('scan-roots-list')).toBeInTheDocument(),
+      );
+
+      // Second attempt at the same path: the server replies 409 with the
+      // stable code, and the picker shows an inline "Already registered" hint
+      // instead of a global toast.
+      fireEvent.click(within(section).getByTestId('add-scan-root'));
+      const secondConfirm = await screen.findByTestId('scan-root-confirm');
+      await waitFor(() => expect(secondConfirm).toBeEnabled());
+      fireEvent.click(secondConfirm);
+      await waitFor(() =>
+        expect(screen.getByTestId('scan-root-duplicate')).toBeInTheDocument(),
+      );
+    });
+
+    it('removes a registered scan root', async () => {
+      renderSettings();
+      const section = await screen.findByTestId('scan-roots-section');
+
+      // Register one first so there is a row to remove.
+      fireEvent.click(within(section).getByTestId('add-scan-root'));
+      const confirm = await screen.findByTestId('scan-root-confirm');
+      await waitFor(() => expect(confirm).toBeEnabled());
+      fireEvent.click(confirm);
+      const list = await within(section).findByTestId('scan-roots-list');
+
+      // Click the row's Remove button (the only button inside the list row),
+      // and the row disappears as the list refetches.
+      const removeButton = within(list).getByRole('button', {
+        name: /Remove scan root /,
+      });
+      fireEvent.click(removeButton);
+      await waitFor(() =>
+        expect(within(section).queryByTestId('scan-roots-list')).toBeNull(),
+      );
+      expect(
+        within(section).getByText('No scan roots registered yet.'),
+      ).toBeInTheDocument();
+    });
+  });
 });

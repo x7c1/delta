@@ -1,8 +1,11 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   CreateLaunchOptionRequest,
+  CreateRepositoryScanRootRequest,
   LaunchOption,
   LaunchOptionsResponse,
+  RepositoryScanRoot,
+  RepositoryScanRootsResponse,
   UpdateLaunchOptionRequest,
   MessagesResponse,
   PendingPermission,
@@ -45,6 +48,29 @@ import {
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
   return 'new_session' in body && body.new_session === true;
+}
+
+/**
+ * Decode a URL-safe base64 token used by the scan-root DELETE path segment,
+ * mirroring the server-side decoder. Returns `null` for any non-base64url
+ * byte or invalid UTF-8. The implementation uses `atob` after re-padding and
+ * substituting the URL-safe variants.
+ */
+function decodeBase64Url(token: string): string | null {
+  // Restore the standard base64 alphabet and re-pad to a multiple of 4 so
+  // `atob` can parse it.
+  const base64 = token.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -572,6 +598,67 @@ export function createMockApi(): MockApi {
       const id = Number(params.id);
       // Deleting an unknown id is a no-op (idempotent), like the real server.
       store.launchOptions = store.launchOptions.filter((o) => o.id !== id);
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // Repository scan roots: list, create, delete. The mock reproduces the
+    // real server's contract — newest-first ordering, trailing-slash trim,
+    // duplicate-path 409 with the stable `scan_root_duplicate` code, and an
+    // idempotent delete on an unknown path.
+    http.get('*/api/repository-scan-roots', () => {
+      const scan_roots = [...store.repositoryScanRoots].sort((a, b) =>
+        b.created_at.localeCompare(a.created_at) || a.path.localeCompare(b.path),
+      );
+      const body: RepositoryScanRootsResponse = {
+        scan_roots: scan_roots.map((root) => ({ path: root.path })),
+      };
+      return HttpResponse.json(body);
+    }),
+
+    http.post('*/api/repository-scan-roots', async ({ request }) => {
+      const payload = (await request.json()) as CreateRepositoryScanRootRequest;
+      const rawPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
+      const canonical = rawPath.replace(/\/+$/, '') || (rawPath ? '/' : '');
+      if (canonical.length === 0) {
+        return HttpResponse.json(
+          { error: 'a scan root must have a non-blank `path`' },
+          { status: 400 },
+        );
+      }
+      if (!canonical.startsWith('/')) {
+        return HttpResponse.json(
+          { error: 'a scan root `path` must be absolute (start with `/`)' },
+          { status: 400 },
+        );
+      }
+      if (store.repositoryScanRoots.some((r) => r.path === canonical)) {
+        return HttpResponse.json(
+          { error: `scan root already registered: ${canonical}`, code: 'scan_root_duplicate' },
+          { status: 409 },
+        );
+      }
+      store.repositoryScanRoots.push({
+        path: canonical,
+        // Stored only for the newest-first list ordering; stripped from the wire.
+        created_at: new Date().toISOString(),
+      });
+      const row: RepositoryScanRoot = { path: canonical };
+      return HttpResponse.json(row, { status: 201 });
+    }),
+
+    http.delete('*/api/repository-scan-roots/:path_b64', ({ params }) => {
+      const token = String(params.path_b64 ?? '');
+      const decoded = decodeBase64Url(token);
+      if (decoded === null) {
+        return HttpResponse.json(
+          { error: 'malformed scan-root path token' },
+          { status: 400 },
+        );
+      }
+      // Idempotent: an unknown path is still a 204.
+      store.repositoryScanRoots = store.repositoryScanRoots.filter(
+        (r) => r.path !== decoded,
+      );
       return new HttpResponse(null, { status: 204 });
     }),
   ];

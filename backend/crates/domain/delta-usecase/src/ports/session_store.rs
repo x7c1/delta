@@ -50,6 +50,16 @@ pub struct RepositoryCloneRow {
     pub last_branch: Option<String>,
 }
 
+/// One registered repository scan root: a parent directory whose direct children
+/// the Repository tab probes for git clones on every list call. Session-independent
+/// (no foreign key, never cascaded), so a scan root outlives any individual
+/// session and is only ever rewritten through the dedicated CRUD endpoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryScanRoot {
+    pub path: String,
+    pub created_at: String,
+}
+
 /// Persists and queries Delta's thread overlay.
 ///
 /// This is the irreplaceable data: thread assignment, the semantic-parent
@@ -159,6 +169,24 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// `branch_at_launch` of the latest such session. Ordering is undefined
     /// (the interactor sorts).
     async fn repository_clone_rows(&self) -> Result<Vec<RepositoryCloneRow>>;
+
+    /// The registered repository scan roots, most-recently-added first.
+    ///
+    /// Each row is a parent directory the Repository tab will probe for git
+    /// clones on every list call. The set is small (one entry per parent
+    /// directory the user has registered) so the whole list is returned at once.
+    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>>;
+
+    /// Register a new repository scan root. Returns the created row, or
+    /// [`crate::Error::RepositoryScanRootDuplicate`] when `path` is already
+    /// registered — the PRIMARY KEY constraint is the conflict gate, so callers
+    /// do not need a pre-check.
+    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot>;
+
+    /// Unregister a repository scan root. Deleting an unknown path is a no-op
+    /// (idempotent), so the Settings dialog's explicit Remove click never
+    /// surfaces a 404 noise on a path the user just removed via another tab.
+    async fn delete_repository_scan_root(&self, path: &str) -> Result<()>;
 
     /// Look up a thread by id.
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>>;
@@ -494,6 +522,18 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn repository_clone_rows(&self) -> Result<Vec<RepositoryCloneRow>> {
         (**self).repository_clone_rows().await
+    }
+
+    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>> {
+        (**self).list_repository_scan_roots().await
+    }
+
+    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot> {
+        (**self).insert_repository_scan_root(path).await
+    }
+
+    async fn delete_repository_scan_root(&self, path: &str) -> Result<()> {
+        (**self).delete_repository_scan_root(path).await
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {

@@ -11,6 +11,7 @@ import {
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   CreateLaunchOptionRequest,
+  CreateRepositoryScanRootRequest,
   GitBranchesResponse,
   GitRepoResponse,
   LaunchOption,
@@ -19,6 +20,8 @@ import type {
   NewSessionResponse,
   PullRequestsResponse,
   RepositoriesResponse,
+  RepositoryScanRoot,
+  RepositoryScanRootsResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -252,6 +255,14 @@ export function useRecentWorkdirsQuery(
  * Registered repositories for the new-session Repository tab
  * (`GET /api/repositories`), most-recently-active first. Gated by `enabled`
  * so it only fetches while the tab is mounted.
+ *
+ * `staleTime: 0` is the New-session-screen lifetime cache policy: the
+ * repository list (which unions session-derived clones with the scan-root
+ * depth-1 probe) is recomputed on every entry to the screen, so adding or
+ * removing a scan root via the Settings dialog and reopening New session
+ * sees the change. React Query still serves the cached payload first to
+ * keep the screen responsive — the refetch happens in the background and
+ * patches the list when it lands.
  */
 export function useRepositoriesQuery(
   client: ApiClient,
@@ -261,6 +272,7 @@ export function useRepositoriesQuery(
     queryKey: queryKeys.repositories,
     queryFn: () => client.getRepositories(),
     enabled,
+    staleTime: 0,
   });
 }
 
@@ -450,6 +462,76 @@ export function useDeleteLaunchOptionMutation(
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.launchOptions,
+      });
+    },
+  });
+}
+
+/**
+ * The registered repository scan roots (`GET /api/repository-scan-roots`),
+ * newest first. Used by the Settings dialog's "Repository scan roots"
+ * section. Gated by `enabled` so it only fetches while the section is
+ * mounted; mutations invalidate this key and the Repository list to refresh
+ * both.
+ *
+ * Like {@link useRepositoriesQuery}, `staleTime: 0` keeps the New-session-
+ * screen lifetime contract: every re-entry refetches so a registration made
+ * elsewhere is reflected immediately.
+ */
+export function useRepositoryScanRootsQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<RepositoryScanRootsResponse> {
+  return useQuery({
+    queryKey: queryKeys.repositoryScanRoots,
+    queryFn: () => client.getRepositoryScanRoots(),
+    enabled,
+    staleTime: 0,
+  });
+}
+
+/**
+ * Register a repository scan root (`POST /api/repository-scan-roots`).
+ * Invalidates the scan-root list and the Repository list, since a new scan
+ * root may surface previously-hidden clones in the Repository tab on the
+ * next render.
+ */
+export function useAddRepositoryScanRootMutation(
+  client: ApiClient,
+): UseMutationResult<RepositoryScanRoot, Error, CreateRepositoryScanRootRequest> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateRepositoryScanRootRequest) =>
+      client.createRepositoryScanRoot(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryScanRoots,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositories,
+      });
+    },
+  });
+}
+
+/**
+ * Unregister a repository scan root
+ * (`DELETE /api/repository-scan-roots/{path_b64}`). Invalidates the same two
+ * caches as the add mutation, since dropping a scan root can drop clones
+ * from the Repository list.
+ */
+export function useRemoveRepositoryScanRootMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) => client.deleteRepositoryScanRoot(path),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositoryScanRoots,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.repositories,
       });
     },
   });

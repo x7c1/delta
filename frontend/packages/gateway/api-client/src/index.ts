@@ -44,6 +44,9 @@ export {
   useCreateLaunchOptionMutation,
   useUpdateLaunchOptionMutation,
   useDeleteLaunchOptionMutation,
+  useRepositoryScanRootsQuery,
+  useAddRepositoryScanRootMutation,
+  useRemoveRepositoryScanRootMutation,
 } from './query-hooks';
 export {
   appendMessage,

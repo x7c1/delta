@@ -10,8 +10,10 @@ use delta_model::{
     SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
-use crate::error::Result;
-use crate::ports::{NewSession, RepositoryCloneRow, SessionPageRow, SessionStore};
+use crate::error::{Error, Result};
+use crate::ports::{
+    NewSession, RepositoryCloneRow, RepositoryScanRoot, SessionPageRow, SessionStore,
+};
 use crate::SessionPageCursor;
 
 /// Derive a thread's `root_message_uuid` the way the SQL store does: the
@@ -50,6 +52,7 @@ pub(crate) struct FakeStoreInner {
     /// the `SubagentLaunch` carrying the launching thread plus the optional
     /// `task_id` learned via the `PostToolUse(Agent)` hook.
     pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
+    pub(crate) repository_scan_roots: Vec<RepositoryScanRoot>,
 }
 
 #[derive(Default)]
@@ -796,6 +799,34 @@ impl SessionStore for FakeStore {
     async fn delete_launch_option(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         g.launch_options.retain(|o| o.id != id);
+        Ok(())
+    }
+
+    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>> {
+        let g = self.inner.lock().unwrap();
+        // Newest first (descending created_at), mirroring the SQL store. Ties
+        // on the seeded timestamp fall back to path ASC for a deterministic order.
+        let mut out = g.repository_scan_roots.clone();
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.path.cmp(&b.path)));
+        Ok(out)
+    }
+
+    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot> {
+        let mut g = self.inner.lock().unwrap();
+        if g.repository_scan_roots.iter().any(|r| r.path == path) {
+            return Err(Error::RepositoryScanRootDuplicate(path.to_owned()));
+        }
+        let row = RepositoryScanRoot {
+            path: path.to_owned(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        g.repository_scan_roots.push(row.clone());
+        Ok(row)
+    }
+
+    async fn delete_repository_scan_root(&self, path: &str) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.repository_scan_roots.retain(|r| r.path != path);
         Ok(())
     }
 }

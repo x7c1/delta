@@ -65,6 +65,12 @@ pub enum Error {
     #[error("send {0} is not cancellable")]
     SendNotCancellable(i64),
 
+    /// A repository scan root was registered twice with the same path. Surfaced
+    /// as `409` so the Settings dialog can show an inline "already registered"
+    /// hint without a generic failure toast.
+    #[error("scan root already registered: {0}")]
+    RepositoryScanRootDuplicate(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),

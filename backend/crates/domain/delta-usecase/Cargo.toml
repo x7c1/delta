@@ -26,3 +26,6 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 # the warn fires when a `<task-notification>` body carries neither correlation
 # key. Only used by tests.
 tracing-subscriber = { workspace = true }
+# Backs the repository-scan tests' on-disk fixtures (a parent dir whose
+# children are scripted git-style trees).
+tempfile = { workspace = true }

@@ -3,6 +3,8 @@
 //! Repository tab.
 
 mod list_repositories;
+mod scan;
+mod scan_roots;
 
 #[cfg(test)]
 mod tests;

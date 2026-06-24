@@ -1,9 +1,10 @@
 //! `list_repositories`: build the recency-ordered Repository tab list.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::error::Result;
 use crate::interactor::InteractorCore;
+use crate::interactor::repository::scan::scan_one_root;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::repository::{display_name, identity_key, Clone as RepoClone, Repository};
 
@@ -19,14 +20,26 @@ where
     /// repository the user has launched a session under, ordered by the most
     /// recent activity across its clones.
     ///
-    /// Each `(repo_root, clone_path)` pair from
-    /// [`SessionStore::repository_clone_rows`] is mapped to a Repository via
-    /// `git config --get remote.origin.url` on the `repo_root`
-    /// ([`GitWorktree::origin_url`], cached for the process's lifetime so the
-    /// same root is not re-shelled out per call). Clones with the same
-    /// `identity_key` bundle into one repository; clones whose path no longer
-    /// exists are filtered out (lazy GC), and a repository emptied by that
-    /// drops from the result.
+    /// Two clone sets are unioned by `identity_key`:
+    ///
+    /// 1. Session-derived: every `(repo_root, clone_path)` pair from
+    ///    [`SessionStore::repository_clone_rows`] mapped to a Repository via
+    ///    `git config --get remote.origin.url` on the `repo_root`
+    ///    ([`GitWorktree::origin_url`], cached for the process's lifetime so
+    ///    the same root is not re-shelled out per call). Carries per-clone
+    ///    `last_opened_at` / `last_branch` derived from the session history.
+    /// 2. Scan-derived: every registered scan root's depth-1 children that
+    ///    look like git workspaces (`<child>/.git` exists). Carries no
+    ///    per-clone history (`last_opened_at: None`) until the user actually
+    ///    launches a session in the path. This is how the umbrella-session
+    ///    pattern surfaces sub-repo clones the user has not yet started a
+    ///    session in.
+    ///
+    /// Same `identity_key` from both sets bundles into one repository; a clone
+    /// path already present from the session-derived side is not added a
+    /// second time from the scan side. Clones whose path no longer exists are
+    /// filtered out (lazy GC), and a repository emptied by that drops from the
+    /// result.
     pub async fn list_repositories(&self) -> Result<Vec<Repository>> {
         let rows = self.store.repository_clone_rows().await?;
 
@@ -49,6 +62,7 @@ where
                 latest_path: String::new(),
                 latest_opened_at: None,
                 clones: Vec::new(),
+                clone_paths: HashSet::new(),
             });
             for row in rows {
                 // Lazy GC: drop clones whose path no longer exists on disk so a
@@ -63,6 +77,7 @@ where
                     entry.latest_opened_at = row.last_opened_at.clone();
                     entry.latest_path = row.clone_path.clone();
                 }
+                entry.clone_paths.insert(row.clone_path.clone());
                 entry.clones.push(RepoClone {
                     path: row.clone_path,
                     last_opened_at: row.last_opened_at,
@@ -71,6 +86,49 @@ where
                     // is deferred to a follow-up PR; until then every clone
                     // reports empty/false here and the frontend falls back to
                     // its current per-spawn defaults. See the plan doc.
+                    last_launch_option_ids: Vec::new(),
+                    last_worktree_enabled: false,
+                    last_worktree_start_point: None,
+                });
+            }
+        }
+
+        // Scan-derived clones. Each registered scan root is enumerated depth-1;
+        // its child clones union into `by_identity` keyed by `origin_url` (when
+        // set on the child) or by the child's own path (otherwise — the same
+        // identity-key fallback the session-derived path uses). A scan-derived
+        // clone never overrides the session-derived `latest_path` /
+        // `latest_opened_at` (its recency is `None`); when a path already
+        // exists in the bundle from the session side it is skipped entirely
+        // (de-dup by clone path).
+        let scan_roots = self.store.list_repository_scan_roots().await?;
+        for root in scan_roots {
+            let scanned = scan_one_root(&root.path).await;
+            for clone in scanned {
+                let origin = self.cached_origin_url(&clone.path).await?;
+                let key = identity_key(origin, &clone.path);
+                let entry = by_identity.entry(key.clone()).or_insert_with(|| RepoAcc {
+                    identity_key: key,
+                    latest_path: clone.path.clone(),
+                    latest_opened_at: None,
+                    clones: Vec::new(),
+                    clone_paths: HashSet::new(),
+                });
+                if !entry.clone_paths.insert(clone.path.clone()) {
+                    continue;
+                }
+                // `latest_path` is unconditionally set to the scan-derived
+                // path when the accumulator is brand new (no session-derived
+                // clones), so a scan-only repo still has a sensible default
+                // clone. An accumulator that already has a session-derived
+                // `latest_path` keeps it — the session-derived recency wins.
+                if entry.latest_path.is_empty() {
+                    entry.latest_path = clone.path.clone();
+                }
+                entry.clones.push(RepoClone {
+                    path: clone.path,
+                    last_opened_at: None,
+                    last_branch: None,
                     last_launch_option_ids: Vec::new(),
                     last_worktree_enabled: false,
                     last_worktree_start_point: None,
@@ -148,4 +206,8 @@ struct RepoAcc {
     /// Every clone that survived the path-exists filter, in insertion order
     /// (sorted by recency once aggregation finishes).
     clones: Vec<RepoClone>,
+    /// The set of paths already present in `clones`, used to de-dup when a
+    /// scan-derived clone path matches one already added from the
+    /// session-derived side.
+    clone_paths: HashSet<String>,
 }
