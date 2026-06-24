@@ -40,7 +40,7 @@ function renderPanel() {
   );
 }
 
-describe('NewSessionPanel tab container', () => {
+describe('NewSessionPanel tab content', () => {
   beforeEach(() => {
     useComposerStore.setState({
       newSessionTab: DEFAULT_NEW_SESSION_TAB,
@@ -48,28 +48,31 @@ describe('NewSessionPanel tab container', () => {
     });
   });
 
-  it('lands on the Repository tab by default', async () => {
+  it('renders the active tab content but no inline tab strip', async () => {
+    // The TabBar moved to {@link NewSessionTabBar}, which TranscriptPane
+    // mounts in the Panel header so the tabs stay pinned while the body
+    // scrolls. Standalone NewSessionPanel renders only the active tab's
+    // body — the tab strip must NOT appear here, or it would render twice
+    // on the actual screen.
     renderPanel();
-    expect(screen.getByTestId('new-session-tab-repository')).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
     // The list arrives once the mocked /api/repositories query resolves.
     expect(await screen.findByTestId('repository-tab')).toBeInTheDocument();
+    expect(screen.queryByTestId('new-session-tabs')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
-  it('switches tabs on click and persists the choice to the store', async () => {
+  it('renders the PR tab body when the store selects "pr"', async () => {
+    useComposerStore.setState({ newSessionTab: 'pr' });
     renderPanel();
-    fireEvent.click(screen.getByTestId('new-session-tab-pr'));
-    expect(useComposerStore.getState().newSessionTab).toBe('pr');
-    // The PR tab now performs real network-backed queries; its
-    // top-level container appears once the mocked `/api/prs` responses
-    // resolve.
     expect(await screen.findByTestId('new-session-pr-tab')).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByTestId('new-session-tab-directory'));
-    expect(useComposerStore.getState().newSessionTab).toBe('directory');
-    expect(screen.getByTestId('new-session-directory-tab')).toBeInTheDocument();
+  it('renders the Directory tab body when the store selects "directory"', async () => {
+    useComposerStore.setState({ newSessionTab: 'directory' });
+    renderPanel();
+    expect(
+      screen.getByTestId('new-session-directory-tab'),
+    ).toBeInTheDocument();
   });
 });
 
