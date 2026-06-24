@@ -38,13 +38,18 @@ describe('composerStore workdir dialog', () => {
 });
 
 describe('composerStore worktree selection', () => {
-  it('defaults the toggle off with the HEAD start-point', () => {
+  it('defaults the toggle off with the pending-branch start-point', () => {
+    // Dogfooding default: the toggle is off, and once enabled the picker
+    // lands in "Other remote branch" mode (the `pending_remote_branch`
+    // sentinel) so the user picks a specific remote branch.
     const state = useComposerStore.getState();
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 
-  it('switching the toggle off resets the start-point to HEAD', () => {
+  it('switching the toggle off resets the start-point to the picker default', () => {
     const store = useComposerStore.getState();
     store.setNewSessionWorktreeEnabled(true);
     store.setNewSessionWorktreeStartPoint({
@@ -59,7 +64,28 @@ describe('composerStore worktree selection', () => {
     useComposerStore.getState().setNewSessionWorktreeEnabled(false);
     const state = useComposerStore.getState();
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
+  });
+
+  it('toggling the worktree off then on returns to the pending-branch default', () => {
+    // Regression: a stale branch pick from a previous worktree session must
+    // not bleed back when the toggle is re-enabled.
+    const store = useComposerStore.getState();
+    store.setNewSessionWorktreeEnabled(true);
+    store.setNewSessionWorktreeStartPoint({
+      kind: 'use_remote_branch',
+      name: 'feature/x',
+    });
+    store.setNewSessionWorktreeEnabled(false);
+    store.setNewSessionWorktreeEnabled(true);
+
+    const state = useComposerStore.getState();
+    expect(state.newSessionWorktreeEnabled).toBe(true);
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 
   it('changing the selected directory resets the worktree state', () => {
@@ -76,7 +102,9 @@ describe('composerStore worktree selection', () => {
     const state = useComposerStore.getState();
     expect(state.newSessionWorkdir).toBe('/home/dev/other');
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 
   it('clearing the directory (leaving new-session / on send) resets worktree state', () => {
@@ -88,7 +116,9 @@ describe('composerStore worktree selection', () => {
     const state = useComposerStore.getState();
     expect(state.newSessionWorkdir).toBeNull();
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 });
 

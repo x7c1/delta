@@ -50,10 +50,19 @@ export interface ComposerState {
    * for a branch start-point whether the worktree cuts a fresh branch
    * (`remote_branch`) or works on the branch itself (`use_remote_branch`). The
    * use-vs-new mode is encoded directly in the value's `kind`, so no separate
-   * field is needed. Defaults to the repo's current `HEAD` (the safe, no-fetch,
-   * always-new-branch choice). Only read when the toggle is on.
+   * field is needed.
+   *
+   * Carries the wire {@link WorktreeStartPoint} union plus an extra
+   * `pending_remote_branch` sentinel that records "the user toggled worktree
+   * on (or picked the Other-remote-branch radio) but has not chosen a concrete
+   * branch yet". Dogfooding showed the typical case is to start from a
+   * specific remote branch, so the toggle's default lands on the picker mode
+   * rather than silently committing to `HEAD`. The sentinel never reaches the
+   * wire — the composer omits `worktree` while it is present and the Send
+   * button stays disabled, so the backend (which rejects worktree requests
+   * without a concrete branch) never sees it. Only read when the toggle is on.
    */
-  newSessionWorktreeStartPoint: WorktreeStartPoint;
+  newSessionWorktreeStartPoint: WorktreeStartPointSelection;
   /**
    * The ids of the registered launch options selected for the next new
    * session, in selection order. Empty means "apply no extra launch flags"
@@ -96,7 +105,7 @@ export interface ComposerState {
   setBranchOrigin: (origin: BranchOrigin | null) => void;
   setNewSessionWorkdir: (workdir: string | null) => void;
   setNewSessionWorktreeEnabled: (enabled: boolean) => void;
-  setNewSessionWorktreeStartPoint: (startPoint: WorktreeStartPoint) => void;
+  setNewSessionWorktreeStartPoint: (startPoint: WorktreeStartPointSelection) => void;
   /**
    * Set the selected launch-option ids from a user interaction in the picker.
    * Marks the selection as seeded, so the picker will not later overwrite an
@@ -139,11 +148,28 @@ const NEW_SESSION_TABS: readonly NewSessionTab[] = ['pr', 'repository', 'directo
 export const DEFAULT_NEW_SESSION_TAB: NewSessionTab = 'repository';
 
 /**
- * The default worktree start-point: the repository's current `HEAD`. The safe
- * choice — it needs no `git fetch` — so it is both the initial value and what
- * the toggle resets to whenever it is switched off or the directory changes.
+ * Selection state for the worktree start-point: the wire union plus a
+ * `pending_remote_branch` sentinel for the "Other remote branch picker is
+ * open but no branch has been chosen yet" UI state. The sentinel never
+ * reaches the wire (see {@link ComposerState.newSessionWorktreeStartPoint}).
  */
-export const DEFAULT_WORKTREE_START_POINT: WorktreeStartPoint = { kind: 'head' };
+export type WorktreeStartPointSelection =
+  | WorktreeStartPoint
+  | { kind: 'pending_remote_branch' };
+
+/**
+ * The default worktree start-point when the toggle is first flipped on:
+ * "Other remote branch" with no branch picked yet. Dogfooding showed the
+ * typical case is to start from a specific remote branch, so the picker
+ * opens directly in branch-list mode rather than silently committing to
+ * `HEAD`. Send stays disabled until a concrete branch is chosen.
+ *
+ * Used by the store on directory change / toggle off too, so a stale branch
+ * pick can never bleed back into the next worktree session.
+ */
+export const DEFAULT_WORKTREE_START_POINT: WorktreeStartPointSelection = {
+  kind: 'pending_remote_branch',
+};
 
 /** localStorage key for the persisted composer state slice. */
 export const COMPOSER_STORAGE_KEY = 'delta-composer';
