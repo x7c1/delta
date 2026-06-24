@@ -69,6 +69,10 @@ pub fn router(state: AppState) -> Router {
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))
+        // Registered repositories for the new-session Repository tab: every
+        // distinct repo Delta has launched a session under, with its known
+        // clones bundled by origin URL and ordered by recency.
+        .route("/api/repositories", get(api::list_repositories))
         // Git detection for the worktree-at-start option (read-only): is the
         // selected directory a git repo, and what remote branches can a worktree
         // be based on.
@@ -218,6 +222,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn repositories_returns_an_empty_list_when_no_sessions() {
+        // No sessions registered yet → no repositories. The endpoint
+        // replies with `{ repositories: [] }`, not 404.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/repositories")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body["repositories"].as_array().unwrap().len(),
+            0,
+            "no sessions = no repositories"
+        );
     }
 
     #[tokio::test]
