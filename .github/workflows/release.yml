@@ -73,4 +73,5 @@ jobs:
         if: steps.version-check.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/update-release-pr-links.sh "${{ steps.version-check.outputs.version }}"
+          NEW_VERSION: ${{ steps.version-check.outputs.version }}
+        run: .github/scripts/update-release-pr-links.sh "$NEW_VERSION"
