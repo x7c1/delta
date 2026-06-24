@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { usePullRequestsQuery, useRepositoriesQuery } from '@delta/api-client';
+import { displayBranch } from '@delta/model';
 import type { PullRequest, PullRequestsResponse } from '@delta/wire-gen';
 import { Spinner, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../../data/apiContext';
@@ -280,7 +281,9 @@ function PrRow({ pr, isRepoFirstRow, onPick }: PrRowProps) {
         )}
       </div>
       <div className="flex w-full min-w-0 items-center gap-2 text-[0.7rem] text-slate-500">
-        <span className="shrink-0 font-mono">{pr.head_ref}</span>
+        <span className="shrink-0 font-mono" title={pr.head_ref}>
+          {displayBranch(pr.head_ref)}
+        </span>
         <span aria-hidden>·</span>
         <span className="shrink-0">{formatRelative(pr.updated_at)}</span>
         <span aria-hidden>·</span>

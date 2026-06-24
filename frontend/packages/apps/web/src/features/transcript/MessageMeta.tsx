@@ -1,3 +1,4 @@
+import { displayBranch } from '@delta/model';
 import type { Message } from '@delta/wire-gen';
 import { formatResponseTime } from '../../utils/formatResponseTime';
 import { formatDir } from '../../utils/formatDir';
@@ -36,7 +37,12 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
   const responseTime = formatResponseTime(message.response_time_ms);
   const model = message.model;
   const cwd = message.cwd;
+  // The wire `git_branch` is preserved as-is; only the inline display path
+  // shortens a delta-managed `delta-<uuid>` to a readable 8-char prefix. The
+  // popover keeps the full original name so the identifier is recoverable on
+  // hover. `displayBranch` is a no-op for any other shape.
   const branch = message.git_branch;
+  const branchDisplay = branch === null ? null : displayBranch(branch);
 
   const timestampWithPopover = timestamp && (
     <span className="group/info relative">
@@ -88,7 +94,11 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
     >
       <div className="flex flex-col items-start">
         {cwd && <span data-testid="meta-cwd">{formatDir(cwd)}</span>}
-        {branch && <span data-testid="meta-branch">{branch}</span>}
+        {branch && (
+          <span data-testid="meta-branch" title={branch}>
+            {branchDisplay}
+          </span>
+        )}
       </div>
       <div className="flex flex-col items-end">
         {timestampWithPopover}
