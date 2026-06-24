@@ -34,7 +34,7 @@ export function NewSessionTabBar() {
     <div
       role="tablist"
       aria-label="Start a session from"
-      className="flex w-full items-center gap-1"
+      className="inline-flex items-center gap-1"
       data-testid="new-session-tabs"
     >
       {tabs.map((tab) => (
@@ -45,7 +45,7 @@ export function NewSessionTabBar() {
           aria-selected={activeTab === tab.id}
           onClick={() => onSelect(tab.id)}
           className={cn(
-            'flex-1 rounded px-3 py-1.5 text-xs font-medium transition',
+            'rounded px-3 py-1.5 text-xs font-medium transition',
             activeTab === tab.id
               ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800',
