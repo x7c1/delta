@@ -151,6 +151,38 @@ async fn search_results_are_memoised_per_lens() {
 }
 
 #[tokio::test]
+async fn scan_only_repos_satisfy_the_local_clone_check() {
+    // The umbrella-session motivation: the user has never launched a session
+    // in `<atelier>/repos/x7c1/zatto`, but a scan root is registered at
+    // `<atelier>/repos/x7c1` and the child `.git` makes the clone discoverable.
+    // The PR tab must report `has_local_clone: true` for that PR even though
+    // no session row points at the sub-repo.
+    let tmp = tempfile::tempdir().unwrap();
+    let zatto_path = {
+        let dir = tmp.path().join("zatto");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::create_dir(dir.join(".git")).unwrap();
+        tokio::fs::canonicalize(&dir).await.unwrap().to_string_lossy().into_owned()
+    };
+    let git = FakeGitWorktree::default()
+        .with_origin_url(&zatto_path, "git@github.com:x7c1/zatto");
+    let prs = vec![fixture_pr("x7c1", "zatto", "feat/x")];
+    let gh = Arc::new(FakeGhCli::authenticated(prs, Vec::new()));
+    let ix = interactor_with_git_and_gh(git, gh);
+    ix.store()
+        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .await
+        .unwrap();
+
+    let list = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
+    assert_eq!(list.pull_requests.len(), 1);
+    assert!(
+        list.pull_requests[0].has_local_clone,
+        "a scan-derived clone counts as a registered local clone"
+    );
+}
+
+#[tokio::test]
 async fn path_keyed_repos_do_not_satisfy_the_local_clone_check() {
     // A session in a dir whose `origin` is unset is keyed by its path
     // (e.g. `/etc`); a `gh` PR could never collide with that key, so

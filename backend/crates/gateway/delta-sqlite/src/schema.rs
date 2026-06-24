@@ -236,6 +236,21 @@ CREATE TABLE IF NOT EXISTS subagent_launch (
   PRIMARY KEY (session_id, tool_use_id)
 ) STRICT;
 
+-- Registered repository scan roots: parent directories whose direct children
+-- the Repository tab probes for git clones, surfacing clones the user has not
+-- yet launched a session in (the "umbrella session" case where `session.repo_root`
+-- is the umbrella's path and the actual sub-repos never get a row of their own).
+-- One row per registered parent path; the table is session-independent (no foreign
+-- key, never cascaded) and is only ever rewritten through the dedicated CRUD
+-- endpoints. Adding this table does NOT bump `SCHEMA_VERSION`: the `IF NOT EXISTS`
+-- clause means an existing database picks it up on the next open with no
+-- migration step, exactly like `launch_option` and `subagent_launch` did when
+-- they were introduced.
+CREATE TABLE IF NOT EXISTS repository_scan_root (
+  path        TEXT PRIMARY KEY,
+  created_at  TEXT NOT NULL
+) STRICT;
+
 -- Full-text index over message content (groundwork: no search UI yet).
 -- External-content fts5 over `message.content_text`, keyed by the message
 -- table's rowid (a STRICT table still has a rowid unless WITHOUT ROWID).

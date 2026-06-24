@@ -31,10 +31,10 @@ pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, Clone, Repository};
 pub use ports::{
     pane_for, DirEntry, DirListing, GhCli, GitRepoInfo, GitWorktree, MessageDisplayHook,
-    NewSession, RateLimitWindow, RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook,
-    SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore,
-    StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage, TranscriptRead,
-    UserPromptSubmitHook, Workspace, WorktreeStartPoint,
+    NewSession, RateLimitWindow, RecentWorkdir, RemoteBranches, RepositoryCloneRow,
+    RepositoryScanRoot, SessionEndHook, SessionEvent, SessionLifecycle, SessionPageRow,
+    SessionStartHook, SessionStore, StatusSnapshot, StopHook, TmuxDriver, Transcript,
+    TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeStartPoint,
 };
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;

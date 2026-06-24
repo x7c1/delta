@@ -313,6 +313,7 @@ dependencies = [
  "delta-attribution",
  "delta-model",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
