@@ -104,6 +104,17 @@ pub trait GitWorktree: Send + Sync {
     /// (`origin/HEAD` unset) is the `None` signal. Best-effort: no fetch.
     async fn default_branch(&self, repo_root: &str) -> Result<Option<String>>;
 
+    /// The repository's `origin` remote URL (e.g. `git@github.com:x7c1/delta`
+    /// or `https://github.com/x7c1/delta.git`), or `None` when `remote.origin.url`
+    /// is unset (or the path is not inside a git repository).
+    ///
+    /// Runs `git -C <path> config --get remote.origin.url`: a non-zero exit
+    /// (no remote, or not a git repo) is the `None` signal, not an error to
+    /// propagate. The returned URL has any trailing newline trimmed. Used by
+    /// the Repository tab to bundle multiple local clones of the same upstream
+    /// under one identity.
+    async fn origin_url(&self, path: &str) -> Result<Option<String>>;
+
     /// Fetch the remote and list its branches, recomputing the default branch.
     ///
     /// Runs `git -C <repo_root> fetch --prune` first (the "always latest" path),
@@ -186,6 +197,10 @@ impl GitWorktree for Box<dyn GitWorktree> {
 
     async fn default_branch(&self, repo_root: &str) -> Result<Option<String>> {
         (**self).default_branch(repo_root).await
+    }
+
+    async fn origin_url(&self, path: &str) -> Result<Option<String>> {
+        (**self).origin_url(path).await
     }
 
     async fn fetch_remote_branches(&self, repo_root: &str) -> Result<RemoteBranches> {
