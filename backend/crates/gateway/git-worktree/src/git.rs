@@ -196,6 +196,30 @@ impl GitWorktree for Git {
         }
     }
 
+    async fn origin_url(
+        &self,
+        path: &str,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        // `config --get remote.origin.url` prints the URL and exits 0 when the
+        // setting exists; a non-zero exit (no remote, or not a git repo) is
+        // the expected "unset" signal, not an error to propagate. Trim the
+        // trailing newline so callers see a plain URL.
+        let output = self
+            .output(path, &["config", "--get", "remote.origin.url"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        if output.status.success() {
+            let url = trimmed_stdout(&output);
+            if url.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(url))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     async fn fetch_remote_branches(
         &self,
         repo_root: &str,

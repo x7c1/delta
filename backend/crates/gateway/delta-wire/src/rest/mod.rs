@@ -28,6 +28,10 @@ mod question_answer_request;
 pub use question_answer_request::WireQuestionAnswerRequest;
 mod question_cancel_request;
 pub use question_cancel_request::WireQuestionCancelRequest;
+mod repositories_response;
+pub use repositories_response::{
+    WireRepositoriesResponse, WireRepositoryClone, WireRepositoryEntry,
+};
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;

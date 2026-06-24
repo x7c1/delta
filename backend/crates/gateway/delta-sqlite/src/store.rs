@@ -11,7 +11,7 @@ use delta_model::{
     LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, PromptId, Role, Send,
     SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
-use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow, SessionStore};
+use delta_usecase::{NewSession, RecentWorkdir, RepositoryCloneRow, SessionPageCursor, SessionPageRow, SessionStore};
 
 use crate::content_record::{decode_content, encode_content};
 use crate::error::{Error, Result};
@@ -608,6 +608,47 @@ impl SessionStore for SqliteStore {
         let rows = stmt
             .query_map(params![limit], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)?);
+        }
+        Ok(out)
+    }
+
+    async fn repository_clone_rows(
+        &self,
+    ) -> std::result::Result<Vec<RepositoryCloneRow>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // One row per `(repo_root, clone_path)` pair, drawn from sessions
+        // with a non-null repo_root. The clone path coalesces
+        // `requested_workdir` with `cwd` so worktree-managed cwds (set only
+        // when worktree-on spawn rewrites `cwd`) do not leak in. The
+        // window function `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY
+        // recency DESC, id DESC)` picks the most recent session per
+        // (repo_root, clone) — without it, GROUP BY would only let us
+        // `MAX` aggregate, and `branch_at_launch` cannot be aggregated
+        // independently of recency. SQLite has supported window functions
+        // since 3.25 (2018), well below the minimum the rest of the store
+        // assumes.
+        //
+        // ISO-8601 UTC text compares correctly as time, so no datetime
+        // casting is needed for the recency key. Sessions with all-null
+        // recency keys sort to the bottom of their partition.
+        let mut stmt = conn
+            .prepare(
+                "WITH ranked AS (                    SELECT s.repo_root AS repo_root,                           COALESCE(s.requested_workdir, s.cwd) AS clone_path,                           s.branch_at_launch AS branch_at_launch,                           COALESCE(s.last_activity_at, s.created_at) AS recency,                           ROW_NUMBER() OVER (                             PARTITION BY s.repo_root, COALESCE(s.requested_workdir, s.cwd)                             ORDER BY COALESCE(s.last_activity_at, s.created_at) DESC, s.id DESC                           ) AS rn                    FROM session s                    WHERE s.repo_root IS NOT NULL                  ),                  latest AS (                    SELECT repo_root, clone_path, branch_at_launch, recency                    FROM ranked WHERE rn = 1                  ),                  maxed AS (                    SELECT s.repo_root AS repo_root,                           COALESCE(s.requested_workdir, s.cwd) AS clone_path,                           MAX(COALESCE(s.last_activity_at, s.created_at)) AS last_opened_at                    FROM session s                    WHERE s.repo_root IS NOT NULL                    GROUP BY s.repo_root, clone_path                  )                  SELECT m.repo_root, m.clone_path, m.last_opened_at, l.branch_at_launch                  FROM maxed m                  JOIN latest l                    ON m.repo_root = l.repo_root AND m.clone_path = l.clone_path",
+            )
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(RepositoryCloneRow {
+                    repo_root: row.get::<_, String>(0)?,
+                    clone_path: row.get::<_, String>(1)?,
+                    last_opened_at: row.get::<_, Option<String>>(2)?,
+                    last_branch: row.get::<_, Option<String>>(3)?,
+                })
             })
             .map_err(Error::from)?;
         let mut out = Vec::new();

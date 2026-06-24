@@ -19,10 +19,12 @@ test('a failed spawn turns the pending chip into a Retry / Dismiss error row', a
 
   // Enter the new-session composer state and choose a directory (mandatory
   // before the first message can be sent), then send the first message.
+  // Phase B: the Directory tab's inline picker commits on row click — no
+  // Select button to chase.
   await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.getByTestId('new-session-tab-directory').click();
   await page.getByTestId('workdir-use-current').click();
-  await page.getByTestId('workdir-confirm').click();
-  await expect(page.getByTestId('new-session-empty')).toBeVisible();
+  await expect(page.getByTestId('workdir-chip')).toBeVisible();
 
   await page.getByRole('textbox').fill('start something that never boots');
   await page.getByRole('button', { name: 'Send' }).click();

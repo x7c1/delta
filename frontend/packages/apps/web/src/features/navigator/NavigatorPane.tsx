@@ -277,10 +277,6 @@ export function NavigatorPane({
   const resetNewSessionLaunchOptions = useComposerStore(
     (state) => state.resetNewSessionLaunchOptions,
   );
-  const openWorkdirDialog = useComposerStore(
-    (state) => state.openWorkdirDialog,
-  );
-
   return (
     <Panel
       className="border-r border-slate-200"
@@ -296,11 +292,12 @@ export function NavigatorPane({
         // styled as an outlined button (transparent with a thin border, a faint
         // fill on hover) so it reads clearly as a button while staying lighter
         // than a solid fill. It always (re)starts the new-session flow even when
-        // already in that state — changing focus is not enough, the picker's open
-        // state lives in the store so it can open without a focus transition;
-        // reset any prior selection (directory and launch options) for a clean
-        // start. The header padding is set to `px-2` (via `headerClassName`) so
-        // the full-width button lines up with the body's 8px content column.
+        // already in that state — changing focus is not enough, the new-session
+        // screen now leads with the inline 3-tab picker (PR / Repository /
+        // Directory) so no modal is opened from here. Reset any prior selection
+        // (directory and launch options) for a clean start. The header padding
+        // is set to `px-2` (via `headerClassName`) so the full-width button
+        // lines up with the body's 8px content column.
         <Button
           variant="ghost"
           size="sm"
@@ -309,7 +306,6 @@ export function NavigatorPane({
             startNewSession();
             setNewSessionWorkdir(null);
             resetNewSessionLaunchOptions();
-            openWorkdirDialog();
           }}
         >
           <PlusIcon className="h-3.5 w-3.5" />

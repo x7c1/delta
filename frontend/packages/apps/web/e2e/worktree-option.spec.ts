@@ -20,12 +20,14 @@ async function startNewSessionIn(
   path: string,
 ): Promise<void> {
   await page.getByRole('button', { name: 'New session', exact: true }).click();
-  // The Recent rows are looked up by their stable `title` (full path); the
-  // visible label is abbreviated. Scope to the Recent section so the lookup is
-  // not ambiguous with a Browse entry that shares the same absolute path.
+  // Phase B: the Directory tab is where the Recent + Browse picker lives.
+  // Recent rows are looked up by their stable `title` (full path); the
+  // visible label is abbreviated. Scope to the Recent section so the lookup
+  // is not ambiguous with a Browse entry that shares the same absolute
+  // path. The inline picker commits on row click — no Select button.
+  await page.getByTestId('new-session-tab-directory').click();
   await page.getByTestId('workdir-recent').getByTitle(path).click();
-  await page.getByTestId('workdir-confirm').click();
-  await expect(page.getByTestId('new-session-empty')).toBeVisible();
+  await expect(page.getByTestId('workdir-chip')).toBeVisible();
 }
 
 test('opting into a worktree carries the start-point on the send', async ({

@@ -32,8 +32,9 @@ use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
     WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
     WireNewSessionResponse, WirePermissionDecisionRequest, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRecentWorkdirItem, WireSendResponse, WireSendsResponse,
-    WireSessionListItem, WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireQuestionCancelRequest, WireRecentWorkdirItem, WireRepositoriesResponse,
+    WireRepositoryEntry, WireSendResponse, WireSendsResponse, WireSessionListItem,
+    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
     WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
@@ -215,6 +216,29 @@ pub(crate) async fn recent_workdir(
         workdirs: workdirs
             .into_iter()
             .map(WireRecentWorkdirItem::from)
+            .collect(),
+    }))
+}
+
+/// `GET /api/repositories` — registered repositories for the new-session
+/// Repository tab, ordered by the most recent activity across each
+/// repository's clones.
+///
+/// Aggregates the session history: every distinct (repo_root, clone_path)
+/// pair becomes a clone, and clones whose `git config --get
+/// remote.origin.url` collapses to the same normalised key bundle under one
+/// repository. Clones whose path no longer exists on disk are filtered out
+/// (lazy GC); a repository drained of every clone disappears too. Sessions
+/// launched outside any git repo do not contribute — the Recent dirs list
+/// (Directory tab) is where those surface.
+pub(crate) async fn list_repositories(
+    State(state): State<AppState>,
+) -> Result<Json<WireRepositoriesResponse>, ApiError> {
+    let repositories = state.interactor().list_repositories().await?;
+    Ok(Json(WireRepositoriesResponse {
+        repositories: repositories
+            .into_iter()
+            .map(WireRepositoryEntry::from)
             .collect(),
     }))
 }

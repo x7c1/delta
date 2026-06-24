@@ -44,6 +44,9 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) current_branches: Mutex<Vec<(String, String)>>,
     /// The default branch `default_branch`/`fetch_remote_branches` report.
     pub(crate) default_branch: Mutex<Option<String>>,
+    /// Origin URLs `origin_url(path)` should return. A path absent from the
+    /// map resolves to `None` (no `remote.origin.url`, or not a git repo).
+    pub(crate) origins: Mutex<Vec<(String, String)>>,
     /// The remote branches `fetch_remote_branches` reports.
     pub(crate) remote_branches: Mutex<Vec<String>>,
     /// When set, `create_worktree` fails instead of recording the call,
@@ -79,6 +82,15 @@ impl FakeGitWorktree {
             .lock()
             .unwrap()
             .push((dir.to_owned(), branch.to_owned()));
+        self
+    }
+
+    /// Script `origin_url(path)` to report `url`.
+    pub(crate) fn with_origin_url(self, path: &str, url: &str) -> Self {
+        self.origins
+            .lock()
+            .unwrap()
+            .push((path.to_owned(), url.to_owned()));
         self
     }
 
@@ -118,6 +130,16 @@ impl GitWorktree for FakeGitWorktree {
 
     async fn default_branch(&self, _repo_root: &str) -> Result<Option<String>> {
         Ok(self.default_branch.lock().unwrap().clone())
+    }
+
+    async fn origin_url(&self, path: &str) -> Result<Option<String>> {
+        Ok(self
+            .origins
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(dir, _)| dir == path)
+            .map(|(_, url)| url.clone()))
     }
 
     async fn fetch_remote_branches(&self, _repo_root: &str) -> Result<RemoteBranches> {

@@ -671,3 +671,62 @@ export function gitBranches(path: string): {
     remote_branches: [...MOCK_GIT_REMOTE_BRANCHES],
   };
 }
+
+
+/** Mock repositories for the new-session Repository tab. The default
+ *  bundles two clones under one origin URL; the second is a single-clone
+ *  entry whose `origin` was unset so it falls back to a path-keyed entry. */
+export function mockRepositories(): {
+  identity_key: string;
+  display_name: string;
+  recently_used_clone_path: string;
+  clones: {
+    path: string;
+    last_opened_at: string | null;
+    last_branch: string | null;
+    last_launch_option_ids: number[];
+    last_worktree_enabled: boolean;
+    last_worktree_start_point: null;
+  }[];
+}[] {
+  return [
+    {
+      identity_key: 'github.com/x7c1/delta',
+      display_name: 'x7c1/delta',
+      recently_used_clone_path: '/home/dev/projects/delta',
+      clones: [
+        {
+          path: '/home/dev/projects/delta',
+          last_opened_at: '2026-01-03T00:00:00Z',
+          last_branch: 'main',
+          last_launch_option_ids: [],
+          last_worktree_enabled: false,
+          last_worktree_start_point: null,
+        },
+        {
+          path: '/home/dev/projects/delta-fork',
+          last_opened_at: '2026-01-02T00:00:00Z',
+          last_branch: 'feature/x',
+          last_launch_option_ids: [],
+          last_worktree_enabled: false,
+          last_worktree_start_point: null,
+        },
+      ],
+    },
+    {
+      identity_key: '/home/dev/projects/website',
+      display_name: 'website',
+      recently_used_clone_path: '/home/dev/projects/website',
+      clones: [
+        {
+          path: '/home/dev/projects/website',
+          last_opened_at: '2026-01-01T00:00:00Z',
+          last_branch: 'main',
+          last_launch_option_ids: [],
+          last_worktree_enabled: false,
+          last_worktree_start_point: null,
+        },
+      ],
+    },
+  ];
+}

@@ -298,10 +298,14 @@ describe('WorkspaceScreen multi-session', () => {
     );
     expect(screen.getByTestId('new-session-empty')).toBeInTheDocument();
 
-    // First run (zero sessions): the directory picker is mandatory, so it opens
-    // with no Cancel button — the user must choose a directory to proceed.
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
+    // Phase B retired the auto-opened directory modal: the new-session
+    // screen now leads with the inline 3-tab picker. The Directory tab
+    // exposes the same Recent + Browse content, so first-run users still
+    // have a clear path forward without a forced modal.
+    expect(
+      await screen.findByTestId('new-session-tabs'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('garbage-collects session-scoped localStorage keys for sessions that no longer exist', async () => {
@@ -398,17 +402,19 @@ describe('WorkspaceScreen multi-session', () => {
     const newButton = await screen.findByRole('button', { name: 'New session' });
     fireEvent.click(newButton);
 
-    // Focus moves to the sentinel, any prior selection is reset, and the picker
-    // is opened — all three driven by the single "New session" click.
+    // Focus moves to the sentinel and any prior workdir selection is reset.
+    // Phase B retired the auto-opened modal — the click no longer pops the
+    // dialog; the new-session screen leads with the inline tab picker.
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
-    expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
+    expect(useComposerStore.getState().workdirDialogOpen).toBe(false);
   });
 
-  it('re-opens the picker when "New session" is clicked while already in new-session', async () => {
-    // Already in the new-session state with a stale selection and the picker
-    // dismissed — the regression case where focus does not change, so a
-    // focus-driven auto-open would not re-fire.
+  it('resets the workdir selection when "New session" is clicked while already in new-session', async () => {
+    // Already in the new-session state with a stale selection — the
+    // regression case where focus does not change. Clicking "New session"
+    // must still wipe the stale workdir so the user starts from a clean
+    // slate in the tab picker.
     useNavStore.setState({
       focusedSessionId: NEW_SESSION_FOCUS,
       preNewSessionFocus: SESSION_ID,
@@ -422,11 +428,11 @@ describe('WorkspaceScreen multi-session', () => {
     const newButton = await screen.findByRole('button', { name: 'New session' });
     fireEvent.click(newButton);
 
-    // Clicking "New session" again (still in new-session) must reset the
-    // selection and re-open the picker.
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
     expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
-    expect(useComposerStore.getState().workdirDialogOpen).toBe(true);
+    // Phase B: no modal is auto-opened — the inline tab picker is the
+    // primary entry point. The dialog stays closed.
+    expect(useComposerStore.getState().workdirDialogOpen).toBe(false);
   });
 
   it('renders a closed focused session read-only', async () => {

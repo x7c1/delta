@@ -35,6 +35,7 @@ export {
   useWorkdirListQuery,
   useHomeDirQuery,
   useRecentWorkdirsQuery,
+  useRepositoriesQuery,
   useGitRepoInfoQuery,
   useGitBranchesQuery,
   useLaunchOptionsQuery,

@@ -18,6 +18,7 @@ import type {
   SessionsResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
+  RepositoriesResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
@@ -332,6 +333,17 @@ export class ApiClient {
    */
   getWorkdirRecent(): Promise<WorkdirRecentResponse> {
     return this.request<WorkdirRecentResponse>('/api/workdir/recent');
+  }
+
+  /**
+   * `GET /api/repositories` — registered repositories for the new-session
+   * Repository tab, most-recently-active first. Each entry bundles its
+   * known clones (one per `(repo_root, requested_workdir)` pair) under a
+   * single identity key derived from the repo's `origin` URL. Clones
+   * whose path no longer exists on disk are filtered out server-side.
+   */
+  getRepositories(): Promise<RepositoriesResponse> {
+    return this.request<RepositoriesResponse>('/api/repositories');
   }
 
   /**

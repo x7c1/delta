@@ -13,6 +13,7 @@ mod interactor;
 mod launch_config;
 mod pane_token;
 mod ports;
+mod repository;
 mod send_target;
 mod session_listing;
 mod session_page;
@@ -25,9 +26,10 @@ pub use interactor::{
 };
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
+pub use repository::{display_name, identity_key, Clone, Repository};
 pub use ports::{
     pane_for, DirEntry, DirListing, GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession,
-    RateLimitWindow, RecentWorkdir, RemoteBranches, SessionEndHook, SessionEvent, SessionLifecycle,
+    RateLimitWindow, RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent, SessionLifecycle,
     SessionPageRow, SessionStartHook, SessionStore, StatusSnapshot, StopHook, TmuxDriver,
     Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
     WorktreeStartPoint,

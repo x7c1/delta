@@ -38,6 +38,7 @@ export {
   MOCK_GIT_REPO_ROOT,
   workdirListing,
   recentWorkdirs,
+  mockRepositories,
   gitRepoInfo,
   gitBranches,
   type MockStore,

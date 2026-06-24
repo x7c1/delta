@@ -17,6 +17,7 @@ import type {
   LaunchOptionsResponse,
   MessagesResponse,
   NewSessionResponse,
+  RepositoriesResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -242,6 +243,22 @@ export function useRecentWorkdirsQuery(
   return useQuery({
     queryKey: queryKeys.workdirRecent,
     queryFn: () => client.getWorkdirRecent(),
+    enabled,
+  });
+}
+
+/**
+ * Registered repositories for the new-session Repository tab
+ * (`GET /api/repositories`), most-recently-active first. Gated by `enabled`
+ * so it only fetches while the tab is mounted.
+ */
+export function useRepositoriesQuery(
+  client: ApiClient,
+  enabled: boolean,
+): UseQueryResult<RepositoriesResponse> {
+  return useQuery({
+    queryKey: queryKeys.repositories,
+    queryFn: () => client.getRepositories(),
     enabled,
   });
 }

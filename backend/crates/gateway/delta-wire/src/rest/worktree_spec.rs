@@ -2,7 +2,7 @@
 //! send.
 
 use delta_usecase::{WorktreeSpec, WorktreeStartPoint};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Where a new session's worktree branch should start from.
@@ -14,7 +14,7 @@ use ts_rs::TS;
 /// `{ "kind": "use_remote_branch", "name": "..." }` works on the named branch
 /// itself in the worktree (reusing the worktree that already has it checked out,
 /// or creating one that checks it out).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(rename = "WorktreeStartPoint")]
 pub enum WireWorktreeStartPoint {
@@ -35,6 +35,18 @@ impl From<WireWorktreeStartPoint> for WorktreeStartPoint {
             WireWorktreeStartPoint::RemoteBranch { name } => WorktreeStartPoint::RemoteBranch(name),
             WireWorktreeStartPoint::UseRemoteBranch { name } => {
                 WorktreeStartPoint::UseRemoteBranch(name)
+            }
+        }
+    }
+}
+
+impl From<WorktreeStartPoint> for WireWorktreeStartPoint {
+    fn from(start_point: WorktreeStartPoint) -> Self {
+        match start_point {
+            WorktreeStartPoint::Head => WireWorktreeStartPoint::Head,
+            WorktreeStartPoint::RemoteBranch(name) => WireWorktreeStartPoint::RemoteBranch { name },
+            WorktreeStartPoint::UseRemoteBranch(name) => {
+                WireWorktreeStartPoint::UseRemoteBranch { name }
             }
         }
     }

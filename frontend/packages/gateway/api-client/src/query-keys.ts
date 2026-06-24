@@ -28,6 +28,8 @@ export const queryKeys = {
     ['workdir-list', path ?? 'default'] as const,
   /** Recently-used working directories (`GET /api/workdir/recent`). */
   workdirRecent: ['workdir-recent'] as const,
+  /** Registered repositories (`GET /api/repositories`) for the Repository tab. */
+  repositories: ['repositories'] as const,
   /**
    * Whether a selected directory is a git repository (`GET /api/workdir/git`),
    * keyed by the queried path so each selection caches independently.
