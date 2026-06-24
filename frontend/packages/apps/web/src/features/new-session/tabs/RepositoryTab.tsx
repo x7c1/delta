@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useHomeDirQuery, useRepositoriesQuery } from '@delta/api-client';
+import { displayBranch } from '@delta/model';
 import type { RepositoryEntry } from '@delta/wire-gen';
 import { Spinner, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../../data/apiContext';
@@ -138,8 +139,11 @@ export function RepositoryTab() {
                       {displayPath(clone.path, home)}
                     </span>
                     {clone.last_branch && (
-                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.7rem] text-slate-500">
-                        {clone.last_branch}
+                      <span
+                        className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.7rem] text-slate-500"
+                        title={clone.last_branch}
+                      >
+                        {displayBranch(clone.last_branch)}
                       </span>
                     )}
                   </button>
