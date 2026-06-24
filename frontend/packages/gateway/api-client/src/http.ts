@@ -10,6 +10,7 @@ import type {
   NewSessionResponse,
   PermissionDecision,
   PermissionDecisionRequest,
+  PullRequestsResponse,
   QuestionAnswerRequest,
   QuestionCancelRequest,
   SendRequest,
@@ -22,6 +23,9 @@ import type {
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
+
+/** The two PR-list lenses backed by the `gh search`-powered endpoint. */
+export type PullRequestLens = 'reviewer' | 'author';
 
 /**
  * The single place in the codebase where `fetch` is allowed. All REST calls to
@@ -344,6 +348,28 @@ export class ApiClient {
    */
   getRepositories(): Promise<RepositoriesResponse> {
     return this.request<RepositoriesResponse>('/api/repositories');
+  }
+
+  /**
+   * `GET /api/prs?lens=…` — open pull requests for the new-session PR
+   * tab, one of two lenses:
+   *
+   * - `reviewer` — open PRs that requested the authenticated user's
+   *   review, drafts excluded;
+   * - `author` — open PRs the authenticated user authored, drafts
+   *   included.
+   *
+   * The server reports `gh_available: false` when the `gh` CLI is not
+   * installed or `gh auth status` fails, so a host without gh still
+   * returns 200 with an empty list — the PR tab renders an inline
+   * "run `gh auth login`" hint rather than treating it as an error.
+   * Each row carries `has_local_clone` derived by the use case so the
+   * UI can gate the click → composer pre-fill.
+   */
+  getPullRequests(lens: PullRequestLens): Promise<PullRequestsResponse> {
+    return this.request<PullRequestsResponse>(
+      `/api/prs?lens=${encodeURIComponent(lens)}`,
+    );
   }
 
   /**

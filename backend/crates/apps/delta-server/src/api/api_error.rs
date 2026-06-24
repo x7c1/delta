@@ -111,6 +111,7 @@ impl IntoResponse for ApiError {
                     // Everything else is an internal failure.
                     Error::Tmux(_)
                     | Error::Git(_)
+                    | Error::Gh(_)
                     | Error::Transcript(_)
                     | Error::Store(_)
                     | Error::Workspace(_)

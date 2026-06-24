@@ -58,11 +58,14 @@ describe('NewSessionPanel tab container', () => {
     expect(await screen.findByTestId('repository-tab')).toBeInTheDocument();
   });
 
-  it('switches tabs on click and persists the choice to the store', () => {
+  it('switches tabs on click and persists the choice to the store', async () => {
     renderPanel();
     fireEvent.click(screen.getByTestId('new-session-tab-pr'));
     expect(useComposerStore.getState().newSessionTab).toBe('pr');
-    expect(screen.getByTestId('new-session-pr-tab')).toBeInTheDocument();
+    // The PR tab now performs real network-backed queries; its
+    // top-level container appears once the mocked `/api/prs` responses
+    // resolve.
+    expect(await screen.findByTestId('new-session-pr-tab')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('new-session-tab-directory'));
     expect(useComposerStore.getState().newSessionTab).toBe('directory');

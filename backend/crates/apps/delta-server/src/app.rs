@@ -73,6 +73,10 @@ pub fn router(state: AppState) -> Router {
         // distinct repo Delta has launched a session under, with its known
         // clones bundled by origin URL and ordered by recency.
         .route("/api/repositories", get(api::list_repositories))
+        // Pull requests for the new-session PR tab (per lens): drives
+        // `gh search prs` through the gh CLI gateway and tags each row
+        // with whether Delta has a local clone of the PR's repo.
+        .route("/api/prs", get(api::list_pull_requests))
         // Git detection for the worktree-at-start option (read-only): is the
         // selected directory a git repo, and what remote branches can a worktree
         // be based on.
@@ -216,6 +220,116 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/api/workdir/list?path=/no/such/path/here")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Build a `test_state()` whose gh CLI is stubbed to report
+    /// "unavailable", so the PR-route smoke tests are independent of
+    /// whether `gh` happens to be installed on the test host.
+    fn test_state_with_unavailable_gh() -> AppState {
+        // Mirror `test_state()`'s config exactly, then override the
+        // wired Interactor's gh driver with a deterministic stub.
+        use std::sync::Arc;
+
+        struct UnavailableGh;
+        #[async_trait::async_trait]
+        impl delta_usecase::GhCli for UnavailableGh {
+            async fn is_authenticated(&self) -> bool {
+                false
+            }
+            async fn search_prs(
+                &self,
+                _lens: delta_usecase::PullRequestLens,
+            ) -> delta_usecase::Result<Vec<delta_usecase::PullRequest>> {
+                Ok(Vec::new())
+            }
+        }
+        let config = delta_bootstrap::Config {
+            database_path: ":memory:".into(),
+            session_workdir_base: "/tmp/delta-test-session".into(),
+            worktree_base: "/tmp/delta-test-worktrees".into(),
+            tmux_socket: "delta-test".into(),
+            port: 7878,
+            launch: delta_usecase::LaunchConfig::default(),
+        };
+        let interactor = delta_bootstrap::build(&config)
+            .unwrap()
+            .with_gh_cli(Arc::new(UnavailableGh) as Arc<dyn delta_usecase::GhCli>);
+        AppState::from_interactor(interactor, &config.tmux_socket)
+    }
+
+    #[tokio::test]
+    async fn prs_returns_empty_with_gh_unavailable() {
+        // With the gh stub answering "unavailable", the route must
+        // return 200 + `{gh_available: false, pull_requests: []}` —
+        // the PR tab degrades gracefully on a host with no gh.
+        let response = router(test_state_with_unavailable_gh())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs?lens=reviewer")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["gh_available"], false);
+        assert_eq!(body["pull_requests"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn prs_accepts_the_author_lens_too() {
+        // Same fallback path, exercised through the author lens, so a
+        // typo in the per-lens dispatch fails this test loudly.
+        let response = router(test_state_with_unavailable_gh())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs?lens=author")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["gh_available"], false);
+    }
+
+    #[tokio::test]
+    async fn prs_rejects_an_unknown_lens_with_400() {
+        // The router test does not script `gh`, so we cannot make the
+        // happy path deterministic here without coupling to the host's
+        // installed gh. Lens validation, however, fails before the use
+        // case runs and is a pure router check — assert that.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs?lens=everyone")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn prs_rejects_a_missing_lens_with_400() {
+        // axum's query extractor rejects a missing required field with
+        // 400, so the handler does not have to special-case it.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs")
                     .body(Body::empty())
                     .unwrap(),
             )

@@ -43,6 +43,8 @@ export type { WorkdirRecentResponse } from './generated/WorkdirRecentResponse';
 export type { RepositoryClone } from './generated/RepositoryClone';
 export type { RepositoryEntry } from './generated/RepositoryEntry';
 export type { RepositoriesResponse } from './generated/RepositoriesResponse';
+export type { PullRequest } from './generated/PullRequest';
+export type { PullRequestsResponse } from './generated/PullRequestsResponse';
 export type { GitRepoResponse } from './generated/GitRepoResponse';
 export type { GitBranchesResponse } from './generated/GitBranchesResponse';
 export type { WorktreeSpec } from './generated/WorktreeSpec';

@@ -18,6 +18,7 @@ mod launch_options;
 mod lifecycle;
 mod listing;
 mod permission_decision;
+mod pull_requests;
 mod question_keys;
 mod repository;
 mod routing;
@@ -38,14 +39,33 @@ mod testing;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use delta_model::SessionId;
 
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GhCli, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::pull_request::{PullRequest, PullRequestLens};
 
 use session_actor::registry::SessionRegistry;
+
+/// How long a `gh search prs` result stays memoised before the next call
+/// re-shells out. Short enough that a refresh on the user's timescale wins,
+/// long enough that flipping tabs in the panel does not spam `gh`.
+pub(crate) const PR_SEARCH_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// Per-process memo for `gh search prs <lens>`.
+///
+/// Held under [`InteractorCore::pr_search_cache`] so toggling between
+/// lenses (or re-mounting the PR tab) does not re-shell out within the
+/// TTL. Each lens caches independently — the two lenses' result sets are
+/// largely disjoint and a stale reviewer list should not block a fresh
+/// author refresh.
+pub(crate) struct PrSearchCacheEntry {
+    pub(crate) fetched_at: Instant,
+    pub(crate) pull_requests: Vec<PullRequest>,
+}
 
 /// Holds the injected capabilities and implements Delta's use cases.
 ///
@@ -104,6 +124,17 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// fresh miss.
     pub(in crate::interactor) repository_origin_cache:
         tokio::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
+    /// The `gh` CLI driver. Held as a trait object (not generic) because the
+    /// PR tab is the only consumer and it does not flow through the session
+    /// actors — keeping it non-generic avoids threading a sixth type
+    /// parameter through every interactor impl block.
+    pub(in crate::interactor) gh_cli: Arc<dyn GhCli>,
+    /// Per-lens memo of the latest `gh search prs` result, keeping a focus
+    /// flip between the two lenses cheap. Bounded by
+    /// [`PR_SEARCH_CACHE_TTL`] so the picker still picks up newly-opened
+    /// PRs on the user's timescale.
+    pub(in crate::interactor) pr_search_cache:
+        tokio::sync::Mutex<std::collections::HashMap<PullRequestLens, PrSearchCacheEntry>>,
 }
 
 /// The public entry point: wraps the shared [`InteractorCore`] and routes
@@ -184,6 +215,8 @@ where
             launch: LaunchConfig::default(),
             minter: PaneTokenMinter::new(),
             repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            gh_cli: Arc::new(UnavailableGhCli),
+            pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
         Self {
@@ -212,6 +245,51 @@ where
             sessions,
             permission_index: self.permission_index,
         }
+    }
+
+    /// Inject the `gh` CLI driver for the PR tab.
+    ///
+    /// A builder-style override sibling of [`Self::with_launch_config`]:
+    /// the default constructor wires a stub driver that reports gh as
+    /// unavailable, so a configuration that does not care about the PR
+    /// tab (the existing call sites, tests) keeps working with no
+    /// changes; production wiring replaces it. Same constraint as
+    /// [`Self::with_launch_config`]: must run before any session actor is
+    /// spawned.
+    pub fn with_gh_cli(self, gh_cli: Arc<dyn GhCli>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_gh_cli must be called before any session actor is spawned");
+        };
+        core.gh_cli = gh_cli;
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self {
+            core,
+            sessions,
+            permission_index: self.permission_index,
+        }
+    }
+}
+
+/// Stub `gh` driver wired by [`Interactor::new`] when no real driver has
+/// been injected yet.
+///
+/// Reports gh as unavailable and an empty result list, so the PR tab
+/// renders its "run `gh auth login`" hint instead of crashing the server.
+/// Production wiring replaces this through [`Interactor::with_gh_cli`].
+struct UnavailableGhCli;
+
+#[async_trait::async_trait]
+impl GhCli for UnavailableGhCli {
+    async fn is_authenticated(&self) -> bool {
+        false
+    }
+
+    async fn search_prs(
+        &self,
+        _lens: PullRequestLens,
+    ) -> crate::error::Result<Vec<PullRequest>> {
+        Ok(Vec::new())
     }
 }
 
