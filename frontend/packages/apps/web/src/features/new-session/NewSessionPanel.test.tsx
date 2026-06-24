@@ -81,6 +81,7 @@ describe('RepositoryTab', () => {
     useComposerStore.setState({
       newSessionTab: 'repository',
       newSessionWorkdir: null,
+      newSessionSelectedPrUrl: null,
     });
   });
 
@@ -109,6 +110,24 @@ describe('RepositoryTab', () => {
     );
   });
 
+  it('clicking a clone clears any previously-set newSessionSelectedPrUrl', async () => {
+    // The "one highlighted row at most across tabs" rule: a Repository
+    // pick must clear the PR tab's selected url so the indigo highlight
+    // does not stick on the PR row after the user has moved on to a
+    // different starting point.
+    useComposerStore.setState({
+      newSessionSelectedPrUrl: 'https://github.com/x7c1/delta/pull/174',
+    });
+    renderPanel();
+    const cloneRows = await screen.findAllByTestId(
+      'repository-tab-clone-row',
+    );
+    fireEvent.click(cloneRows[0]);
+    await waitFor(() =>
+      expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull(),
+    );
+  });
+
   it('shows an empty-state hint when the repo list is empty', async () => {
     // Override the default mock with an empty list.
     server.use(
@@ -128,6 +147,7 @@ describe('DirectoryTab', () => {
     useComposerStore.setState({
       newSessionTab: 'directory',
       newSessionWorkdir: null,
+      newSessionSelectedPrUrl: null,
     });
   });
 
@@ -150,6 +170,21 @@ describe('DirectoryTab', () => {
       expect(useComposerStore.getState().newSessionWorkdir).toBe(
         '/home/dev/projects/delta',
       ),
+    );
+  });
+
+  it('committing a directory pick clears any previously-set newSessionSelectedPrUrl', async () => {
+    // Same mutual-exclusion rule as RepositoryTab: a Directory pick must
+    // clear the PR tab's selected url so the indigo highlight does not
+    // bleed across tabs.
+    useComposerStore.setState({
+      newSessionSelectedPrUrl: 'https://github.com/x7c1/delta/pull/174',
+    });
+    renderPanel();
+    const row = await screen.findByTitle('/home/dev/projects/delta');
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull(),
     );
   });
 });

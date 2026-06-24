@@ -52,6 +52,12 @@ export function PRTab() {
   const setNewSessionWorktreeStartPoint = useComposerStore(
     (state) => state.setNewSessionWorktreeStartPoint,
   );
+  const selectedPrUrl = useComposerStore(
+    (state) => state.newSessionSelectedPrUrl,
+  );
+  const setNewSessionSelectedPrUrl = useComposerStore(
+    (state) => state.setNewSessionSelectedPrUrl,
+  );
 
   // The PR endpoint's `gh_available` is the same value for both
   // lenses (it reflects whether `gh auth status` worked, not the
@@ -98,6 +104,12 @@ export function PRTab() {
       kind: 'use_remote_branch',
       name: pr.head_ref,
     });
+    // Mark the row as the active pick so it gets the indigo "you picked
+    // this" highlight. Set last: the earlier writes synchronously trigger
+    // `setNewSessionWorkdir`'s reset side-effects (see composerStore) —
+    // those don't touch the PR url, but the order keeps it obvious that
+    // the highlight reflects the final committed pick.
+    setNewSessionSelectedPrUrl(pr.url);
   };
 
   if (isAnyLoading) {
@@ -125,6 +137,7 @@ export function PRTab() {
         emptyMessage="No reviewer-requested PRs."
         data={reviewerQuery.data}
         onPick={onPickPr}
+        selectedPrUrl={selectedPrUrl}
       />
       <PrSection
         testId="pr-tab-author"
@@ -132,6 +145,7 @@ export function PRTab() {
         emptyMessage="No open PRs you authored."
         data={authorQuery.data}
         onPick={onPickPr}
+        selectedPrUrl={selectedPrUrl}
       />
     </div>
   );
@@ -175,9 +189,17 @@ interface PrSectionProps {
   emptyMessage: string;
   data: PullRequestsResponse | undefined;
   onPick: (pr: PullRequest) => void;
+  selectedPrUrl: string | null;
 }
 
-function PrSection({ testId, heading, emptyMessage, data, onPick }: PrSectionProps) {
+function PrSection({
+  testId,
+  heading,
+  emptyMessage,
+  data,
+  onPick,
+  selectedPrUrl,
+}: PrSectionProps) {
   const prs = data?.pull_requests ?? [];
   // Adjacency-group the section's rows by repo so a multi-PR repo
   // visually clusters. Sort by repo first, then by recency within
@@ -206,7 +228,11 @@ function PrSection({ testId, heading, emptyMessage, data, onPick }: PrSectionPro
                 />
               )}
               <li>
-                <PrRow pr={row.pr} onPick={onPick} />
+                <PrRow
+                  pr={row.pr}
+                  onPick={onPick}
+                  isSelected={row.pr.url === selectedPrUrl}
+                />
               </li>
             </Fragment>
           ))}
@@ -246,12 +272,19 @@ function groupPrsByRepo(prs: PullRequest[]): GroupedPrRow[] {
 interface PrRowProps {
   pr: PullRequest;
   onPick: (pr: PullRequest) => void;
+  isSelected: boolean;
 }
 
-function PrRow({ pr, onPick }: PrRowProps) {
+function PrRow({ pr, onPick, isSelected }: PrRowProps) {
   const disabled = !pr.has_local_clone;
   const repoLabel = `${pr.repo_owner}/${pr.repo_name}#${pr.number}`;
   const cloneHint = `gh repo clone ${pr.repo_owner}/${pr.repo_name}`;
+  // A disabled row stays a silent no-op on click, so it can never end up
+  // being the "selected" row even if state somehow held its url. Gating
+  // the highlight on `!disabled` also keeps the styling intent explicit:
+  // the indigo pill means "you picked this", which a non-clickable row
+  // by definition cannot be.
+  const showSelected = isSelected && !disabled;
   return (
     <button
       type="button"
@@ -261,14 +294,18 @@ function PrRow({ pr, onPick }: PrRowProps) {
       // a no-op. `aria-disabled` (not `disabled`) keeps the row
       // discoverable to screen readers while signalling the state.
       aria-disabled={disabled}
+      aria-pressed={showSelected}
       data-testid="pr-tab-row"
       data-has-local-clone={pr.has_local_clone ? 'true' : 'false'}
+      data-selected={showSelected ? 'true' : 'false'}
       title={disabled ? `No local clone — run \`${cloneHint}\` somewhere first.` : pr.url}
       className={cn(
         'flex w-full min-w-0 flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-xs',
         disabled
           ? 'cursor-not-allowed opacity-60'
-          : 'text-slate-700 hover:bg-slate-100',
+          : showSelected
+            ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
+            : 'text-slate-700 hover:bg-slate-100',
       )}
     >
       <div className="flex w-full min-w-0 items-center gap-2">

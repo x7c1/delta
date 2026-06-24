@@ -277,6 +277,9 @@ export function NavigatorPane({
   const resetNewSessionLaunchOptions = useComposerStore(
     (state) => state.resetNewSessionLaunchOptions,
   );
+  const setNewSessionSelectedPrUrl = useComposerStore(
+    (state) => state.setNewSessionSelectedPrUrl,
+  );
   return (
     <Panel
       className="border-r border-slate-200"
@@ -306,6 +309,7 @@ export function NavigatorPane({
             startNewSession();
             setNewSessionWorkdir(null);
             resetNewSessionLaunchOptions();
+            setNewSessionSelectedPrUrl(null);
           }}
         >
           <PlusIcon className="h-3.5 w-3.5" />

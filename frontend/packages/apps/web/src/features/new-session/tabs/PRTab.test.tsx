@@ -43,6 +43,7 @@ describe('PRTab', () => {
       newSessionWorkdir: null,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: { kind: 'head' },
+      newSessionSelectedPrUrl: null,
     });
   });
 
@@ -184,6 +185,57 @@ describe('PRTab', () => {
     expect(reviewerList).not.toBeNull();
     expect(reviewerList!.firstElementChild?.getAttribute('data-testid')).not.toBe(
       'pr-tab-repo-divider',
+    );
+  });
+
+  it('highlights only the clicked row, and a disabled click leaves the prior selection alone', async () => {
+    // Initial state: no row carries the selected styling — covers the
+    // "fresh tab open, no pick yet" baseline. Then click a clickable PR
+    // and assert that the indigo highlight lands on exactly that row.
+    // Finally click a disabled (no-local-clone) row and assert the
+    // previous selection is untouched, because the disabled click is a
+    // silent no-op.
+    renderTab();
+    await screen.findByTestId('pr-tab-reviewer');
+    let rows = await screen.findAllByTestId('pr-tab-row');
+    for (const row of rows) {
+      expect(row).toHaveAttribute('data-selected', 'false');
+      expect(row.className).not.toMatch(/bg-indigo-50/);
+      expect(row.className).not.toMatch(/ring-indigo-200/);
+    }
+
+    const clickable = rows.find(
+      (row) => row.getAttribute('data-has-local-clone') === 'true',
+    );
+    const disabledRow = rows.find(
+      (row) => row.getAttribute('data-has-local-clone') === 'false',
+    );
+    expect(clickable).toBeDefined();
+    expect(disabledRow).toBeDefined();
+
+    fireEvent.click(clickable!);
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
+        'https://github.com/x7c1/delta/pull/174',
+      );
+    });
+
+    rows = await screen.findAllByTestId('pr-tab-row');
+    const picked = rows.find(
+      (row) => row.getAttribute('data-has-local-clone') === 'true',
+    )!;
+    const others = rows.filter((row) => row !== picked);
+    expect(picked).toHaveAttribute('data-selected', 'true');
+    expect(picked.className).toMatch(/bg-indigo-50/);
+    expect(picked.className).toMatch(/ring-indigo-200/);
+    for (const row of others) {
+      expect(row).toHaveAttribute('data-selected', 'false');
+    }
+
+    // A disabled click is a no-op: the store retains the prior url.
+    fireEvent.click(disabledRow!);
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
+      'https://github.com/x7c1/delta/pull/174',
     );
   });
 

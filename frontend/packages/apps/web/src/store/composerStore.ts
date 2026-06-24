@@ -92,6 +92,16 @@ export interface ComposerState {
    */
   workdirDialogOpen: boolean;
   /**
+   * URL of the PR currently picked in the PR tab, or `null` when nothing is
+   * picked. Drives the "you picked this" indigo highlight on the matching row
+   * so the PR tab gives the same visual feedback as the Repository / Directory
+   * tabs. Session-only intent (not a remembered preference), so it matches the
+   * other `newSession*` ephemerals: cleared whenever the new-session compose
+   * state is left, and cleared by a Repository / Directory pick so at most one
+   * row is highlighted across the three tabs.
+   */
+  newSessionSelectedPrUrl: string | null;
+  /**
    * Which tab the new-session screen shows: PR / Repository / Directory.
    * Persisted to localStorage so a reload restores the user's last choice;
    * defaults to `'repository'` on first run because the dogfooding insight
@@ -127,6 +137,7 @@ export interface ComposerState {
   openWorkdirDialog: () => void;
   closeWorkdirDialog: () => void;
   setNewSessionTab: (tab: NewSessionTab) => void;
+  setNewSessionSelectedPrUrl: (url: string | null) => void;
 }
 
 /** The new-session screen's three tabs. */
@@ -186,6 +197,7 @@ export const useComposerStore = create<ComposerState>()(
       newSessionLaunchOptionsSeeded: false,
       workdirDialogOpen: false,
       newSessionTab: DEFAULT_NEW_SESSION_TAB,
+      newSessionSelectedPrUrl: null,
 
       setDraft: (threadId, text) =>
         set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
@@ -242,6 +254,8 @@ export const useComposerStore = create<ComposerState>()(
       closeWorkdirDialog: () => set({ workdirDialogOpen: false }),
 
       setNewSessionTab: (tab) => set({ newSessionTab: tab }),
+
+      setNewSessionSelectedPrUrl: (url) => set({ newSessionSelectedPrUrl: url }),
     }),
     {
       name: COMPOSER_STORAGE_KEY,
