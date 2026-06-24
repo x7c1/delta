@@ -31,6 +31,13 @@ export const queryKeys = {
   /** Registered repositories (`GET /api/repositories`) for the Repository tab. */
   repositories: ['repositories'] as const,
   /**
+   * Open pull requests for the new-session PR tab
+   * (`GET /api/prs?lens=…`), one cache entry per lens so flipping
+   * between the two sections does not invalidate the other.
+   */
+  pullRequests: (lens: 'reviewer' | 'author') =>
+    ['pull-requests', lens] as const,
+  /**
    * Whether a selected directory is a git repository (`GET /api/workdir/git`),
    * keyed by the queried path so each selection caches independently.
    */

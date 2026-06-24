@@ -3,6 +3,7 @@ export {
   ApiError,
   type ApiClientOptions,
   type ApiErrorCode,
+  type PullRequestLens,
 } from './http';
 export {
   EventEmitter,
@@ -36,6 +37,7 @@ export {
   useHomeDirQuery,
   useRecentWorkdirsQuery,
   useRepositoriesQuery,
+  usePullRequestsQuery,
   useGitRepoInfoQuery,
   useGitBranchesQuery,
   useLaunchOptionsQuery,

@@ -24,6 +24,8 @@ mod new_session_response;
 pub use new_session_response::{WireNewSessionResponse, WireSessionLifecycle};
 mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
+mod pull_requests_response;
+pub use pull_requests_response::{WirePullRequest, WirePullRequestsResponse};
 mod question_answer_request;
 pub use question_answer_request::WireQuestionAnswerRequest;
 mod question_cancel_request;

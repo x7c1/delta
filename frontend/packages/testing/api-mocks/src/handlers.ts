@@ -21,6 +21,7 @@ import type {
   ThreadsResponse,
   GitBranchesResponse,
   GitRepoResponse,
+  PullRequestsResponse,
   RepositoriesResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
@@ -32,7 +33,9 @@ import {
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
   recentWorkdirs,
+  mockAuthorPullRequests,
   mockRepositories,
+  mockReviewerPullRequests,
   seedData,
   SESSIONS_PAGE_SIZE,
   workdirListing,
@@ -457,6 +460,33 @@ export function createMockApi(): MockApi {
     http.get('*/api/repositories', () => {
       const responseBody: RepositoriesResponse = {
         repositories: mockRepositories(),
+      };
+      return HttpResponse.json(responseBody);
+    }),
+
+    // Pull requests for the PR tab. Each lens carries its own canned
+    // list (the reviewer fixture pairs a clone-having row with a
+    // no-clone row so the "silently blocked + inline hint" path is
+    // exercisable; the author fixture seeds one of the user's own
+    // drafts). An unknown lens is a 400, mirroring the server.
+    http.get('*/api/prs', ({ request }) => {
+      const url = new URL(request.url);
+      const lens = url.searchParams.get('lens');
+      const pull_requests =
+        lens === 'reviewer'
+          ? mockReviewerPullRequests()
+          : lens === 'author'
+            ? mockAuthorPullRequests()
+            : null;
+      if (pull_requests === null) {
+        return HttpResponse.json(
+          { error: `unknown lens '${lens ?? ''}'` },
+          { status: 400 },
+        );
+      }
+      const responseBody: PullRequestsResponse = {
+        gh_available: true,
+        pull_requests,
       };
       return HttpResponse.json(responseBody);
     }),

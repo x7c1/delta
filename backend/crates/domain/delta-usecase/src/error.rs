@@ -87,6 +87,13 @@ pub enum Error {
     #[error("git error: {0}")]
     Git(String),
 
+    /// A `gh` CLI invocation failed despite the gateway reporting gh as
+    /// authenticated. Surfaced as `500`. Missing/unauthenticated gh is
+    /// NOT routed here — it is reported via the use case's
+    /// `gh_available: false` flag so the PR tab degrades gracefully.
+    #[error("gh error: {0}")]
+    Gh(String),
+
     /// A transcript read/parse failure.
     #[error("transcript error: {0}")]
     Transcript(String),

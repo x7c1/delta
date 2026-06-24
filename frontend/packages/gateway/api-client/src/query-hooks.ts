@@ -17,6 +17,7 @@ import type {
   LaunchOptionsResponse,
   MessagesResponse,
   NewSessionResponse,
+  PullRequestsResponse,
   RepositoriesResponse,
   SendRequest,
   SendResponse,
@@ -28,7 +29,7 @@ import type {
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
 import { appendSessionSend } from './cache';
-import type { ApiClient } from './http';
+import type { ApiClient, PullRequestLens } from './http';
 import { queryKeys } from './query-keys';
 
 /** Sessions per page requested from `GET /api/sessions`. */
@@ -260,6 +261,27 @@ export function useRepositoriesQuery(
     queryKey: queryKeys.repositories,
     queryFn: () => client.getRepositories(),
     enabled,
+  });
+}
+
+/**
+ * Open pull requests for the new-session PR tab
+ * (`GET /api/prs?lens=…`), one query per lens so the reviewer and
+ * author sections refresh independently. Gated by `enabled` so it only
+ * fetches while the tab is mounted; `retry` is disabled because the
+ * unauthenticated/uninstalled-gh case is reported in-band (200 +
+ * `gh_available: false`), not as an error to retry.
+ */
+export function usePullRequestsQuery(
+  client: ApiClient,
+  lens: PullRequestLens,
+  enabled: boolean,
+): UseQueryResult<PullRequestsResponse> {
+  return useQuery({
+    queryKey: queryKeys.pullRequests(lens),
+    queryFn: () => client.getPullRequests(lens),
+    enabled,
+    retry: false,
   });
 }
 

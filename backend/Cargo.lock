@@ -206,6 +206,7 @@ dependencies = [
  "delta-sqlite",
  "delta-transcript",
  "delta-usecase",
+ "gh-cli",
  "git-worktree",
  "serde_json",
  "thiserror 1.0.69",
@@ -485,6 +486,19 @@ dependencies = [
  "r-efi 6.0.0",
  "wasip2",
  "wasip3",
+]
+
+[[package]]
+name = "gh-cli"
+version = "0.2.1"
+dependencies = [
+ "async-trait",
+ "delta-usecase",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

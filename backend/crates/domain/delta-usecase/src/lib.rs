@@ -13,6 +13,7 @@ mod interactor;
 mod launch_config;
 mod pane_token;
 mod ports;
+mod pull_request;
 mod repository;
 mod send_target;
 mod session_listing;
@@ -26,13 +27,14 @@ pub use interactor::{
 };
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
+pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, Clone, Repository};
 pub use ports::{
-    pane_for, DirEntry, DirListing, GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession,
-    RateLimitWindow, RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent, SessionLifecycle,
-    SessionPageRow, SessionStartHook, SessionStore, StatusSnapshot, StopHook, TmuxDriver,
-    Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
-    WorktreeStartPoint,
+    pane_for, DirEntry, DirListing, GhCli, GitRepoInfo, GitWorktree, MessageDisplayHook,
+    NewSession, RateLimitWindow, RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook,
+    SessionEvent, SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore,
+    StatusSnapshot, StopHook, TmuxDriver, Transcript, TranscriptMessage, TranscriptRead,
+    UserPromptSubmitHook, Workspace, WorktreeStartPoint,
 };
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;

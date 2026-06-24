@@ -13,5 +13,6 @@ delta-transcript = { workspace = true }
 tmux-driver = { workspace = true }
 workspace-fs = { workspace = true }
 git-worktree = { workspace = true }
+gh-cli = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
