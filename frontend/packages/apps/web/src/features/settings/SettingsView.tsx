@@ -1,14 +1,21 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
+  ApiError,
+  useAddRepositoryScanRootMutation,
   useCreateLaunchOptionMutation,
   useDeleteLaunchOptionMutation,
+  useHomeDirQuery,
   useLaunchOptionsQuery,
+  useRemoveRepositoryScanRootMutation,
+  useRepositoryScanRootsQuery,
   useUpdateLaunchOptionMutation,
 } from '@delta/api-client';
-import type { LaunchOption } from '@delta/wire-gen';
+import type { LaunchOption, RepositoryScanRoot } from '@delta/wire-gen';
 import { Button, Dialog, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
+import { displayPath } from '../../utils/displayPath';
+import { WorkdirPickerBody } from '../composer/WorkdirPickerBody';
 
 /**
  * The settings modal: manage the registry of custom `claude` CLI launch
@@ -75,7 +82,7 @@ export function SettingsView() {
     <Dialog
       open={settingsOpen}
       onClose={closeSettings}
-      title="Launch options"
+      title="Settings"
       // Wider than the default prompt-sized dialog: this is a settings panel
       // hosting a list plus an add form, and the option rows (label + monospace
       // flag/value) need room to read without truncating.
@@ -87,6 +94,9 @@ export function SettingsView() {
       }
     >
       <div className="w-full">
+        <h3 className="mb-1 text-sm font-semibold text-slate-700">
+          Launch options
+        </h3>
         <p className="mb-4 text-xs text-slate-500">
           Register custom <code>claude</code> CLI flags to apply when starting a
           session. <span className="font-medium">Name</span> is the flag (e.g.{' '}
@@ -207,8 +217,209 @@ export function SettingsView() {
             ))}
           </ul>
         )}
+
+        <hr className="my-6 border-slate-200" />
+
+        <RepositoryScanRootsSection active={settingsOpen} />
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * The "Repository scan roots" section of the Settings dialog: list of
+ * registered parent directories whose direct children every Repository tab
+ * refetch probes for git clones, plus a one-shot picker to register a new
+ * one. Drives the same backend the New session screen consults, so adding a
+ * scan root here surfaces previously-hidden clones on the very next refetch.
+ *
+ * `active` mirrors the dialog's `settingsOpen` so the query only runs while
+ * the section is mounted.
+ */
+function RepositoryScanRootsSection({ active }: { active: boolean }) {
+  const client = useApiClient();
+  const scanRootsQuery = useRepositoryScanRootsQuery(client, active);
+  const addScanRoot = useAddRepositoryScanRootMutation(client);
+  const removeScanRoot = useRemoveRepositoryScanRootMutation(client);
+  const home = useHomeDirQuery(client, active).data?.path ?? null;
+
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // The picker's candidate selection, lifted to this component so the dialog's
+  // Add button can drive submission and the Cancel button can dismiss without
+  // committing.
+  const [candidate, setCandidate] = useState<string | null>(null);
+
+  // The mutation's error is surfaced inline on the picker dialog so a 409
+  // duplicate shows a tiny "Already registered." hint instead of a global
+  // toast. Cleared whenever the picker reopens.
+  const duplicate =
+    addScanRoot.error instanceof ApiError &&
+    addScanRoot.error.code === 'scan_root_duplicate';
+
+  // React Query's mutation handle is a fresh object every render, so it
+  // cannot sit in the effect dependencies (it would re-fire forever). Pull
+  // `reset` out and depend on it (a stable function reference within a given
+  // QueryClient lifetime), which keeps the effect well-behaved.
+  const resetScanRootMutation = addScanRoot.reset;
+  useEffect(() => {
+    if (!pickerOpen) {
+      setCandidate(null);
+      resetScanRootMutation();
+    }
+  }, [pickerOpen, resetScanRootMutation]);
+
+  const submit = () => {
+    if (candidate === null) {
+      return;
+    }
+    addScanRoot.mutate(
+      { path: candidate },
+      {
+        onSuccess: () => setPickerOpen(false),
+      },
+    );
+  };
+
+  const scanRoots = scanRootsQuery.data?.scan_roots ?? [];
+
+  return (
+    <section className="space-y-3" data-testid="scan-roots-section">
+      <div>
+        <h3 className="mb-1 text-sm font-semibold text-slate-700">
+          Repository scan roots
+        </h3>
+        <p className="text-xs text-slate-500">
+          Delta scans the direct children of each path below for git
+          repositories so you can pick them from the Repository tab without
+          having to start a session there first.
+        </p>
+      </div>
+
+      {scanRootsQuery.isPending ? (
+        <div className="flex justify-center py-4">
+          <Spinner label="loading scan roots" />
+        </div>
+      ) : scanRootsQuery.isError ? (
+        <div className="flex flex-col items-center gap-2 py-4 text-sm text-slate-500">
+          <p>Could not load scan roots.</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => scanRootsQuery.refetch()}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : scanRoots.length === 0 ? (
+        <p className="py-3 text-center text-sm text-slate-400">
+          No scan roots registered yet.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-2" data-testid="scan-roots-list">
+          {scanRoots.map((root) => (
+            <ScanRootRow
+              key={root.path}
+              root={root}
+              home={home}
+              onRemove={() => removeScanRoot.mutate(root.path)}
+              removing={
+                removeScanRoot.isPending && removeScanRoot.variables === root.path
+              }
+            />
+          ))}
+        </ul>
+      )}
+
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => setPickerOpen(true)}
+          data-testid="add-scan-root"
+        >
+          Add scan root…
+        </Button>
+      </div>
+
+      <Dialog
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Pick a parent directory"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setPickerOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={submit}
+              disabled={candidate === null || addScanRoot.isPending}
+              data-testid="scan-root-confirm"
+            >
+              Add
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500">
+            Pick the parent of one or more git clones. The Repository tab will
+            then probe its direct children for <code>.git</code> on every
+            refetch.
+          </p>
+          <WorkdirPickerBody
+            active={pickerOpen}
+            candidate={candidate}
+            setCandidate={setCandidate}
+            onConfirm={submit}
+            showHelpText={false}
+          />
+          {duplicate && (
+            <p
+              className="text-xs text-amber-600"
+              role="alert"
+              data-testid="scan-root-duplicate"
+            >
+              Already registered.
+            </p>
+          )}
+          {addScanRoot.isError && !duplicate && (
+            <p className="text-xs text-red-600" role="alert">
+              Could not add the scan root. Please try again.
+            </p>
+          )}
+        </div>
+      </Dialog>
+    </section>
+  );
+}
+
+interface ScanRootRowProps {
+  root: RepositoryScanRoot;
+  home: string | null;
+  onRemove: () => void;
+  removing: boolean;
+}
+
+function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+      <span
+        className="truncate font-mono text-sm text-slate-800"
+        title={root.path}
+      >
+        {displayPath(root.path, home)}
+      </span>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={onRemove}
+        disabled={removing}
+        aria-label={`Remove scan root ${root.path}`}
+      >
+        Remove
+      </Button>
+    </li>
   );
 }
 
