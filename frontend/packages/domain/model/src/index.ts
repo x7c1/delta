@@ -20,3 +20,4 @@ export {
   threadTooltip,
   type ThreadNamed,
 } from './thread-name';
+export { displayBranch } from './display-branch';
