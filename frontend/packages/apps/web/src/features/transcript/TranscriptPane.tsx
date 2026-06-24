@@ -24,6 +24,7 @@ import {
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
 import { NewSessionPanel } from '../new-session/NewSessionPanel';
+import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
 import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -1305,10 +1306,12 @@ export function TranscriptPane({
           : {}),
       }}
       header={
+        // The new-session screen pins the PR / Repository / Directory tabs to
+        // the Panel's sticky header (Panel header lives outside the scroll
+        // region), so they stay put while the active tab's list scrolls
+        // underneath. The "New session" label is dropped — the tabs convey it.
         newSession ? (
-          <span className="text-sm font-semibold text-slate-700">
-            New session
-          </span>
+          <NewSessionTabBar />
         ) : // `undefined` (not `null`) so Panel drops the header bar entirely.
         // The breadcrumb / timeline / Terminal-toggle are rendered in flow at
         // the top of the body via `topRegion`; on the main thread there is no
@@ -1325,13 +1328,12 @@ export function TranscriptPane({
       {topRegion}
       {newSession && (
         <div className="space-y-4 px-3 pt-3 pb-2" data-testid="new-session-empty">
-          {/* The 3-tab picker (PR / Repository / Directory). The composer
-              card below stays where it was — the tabs only decide HOW the
+          {/* The active tab's content (PR / Repository / Directory). The
+              tab strip itself sits in the Panel's sticky header above; this
+              body only renders the chosen tab. The composer card below
+              stays where it was — the tabs only decide HOW the
               `newSessionWorkdir` etc. get populated, not the send body. */}
           <NewSessionPanel />
-          <p className="text-xs text-slate-400">
-            Pick a starting point above, then send the first message below.
-          </p>
           {/* The auto-open modal picker is retired (the Directory tab
               exposes Recent + Browse inline), but the standalone Dialog is
               still available so the WorkdirChip's pencil button — which

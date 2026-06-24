@@ -342,6 +342,47 @@ describe('Composer', () => {
     expect(locals[0].text).toBe('start fresh');
   });
 
+  it('disables Send while the worktree toggle is on but no branch is picked yet', async () => {
+    // Dogfooding default: toggling worktree ON lands on the Other-remote-
+    // branch picker (the `pending_remote_branch` sentinel) so the user picks
+    // a specific branch. The backend rejects a worktree request without a
+    // concrete branch, so Send must stay disabled until the user picks one
+    // — picking unblocks Send.
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: { kind: 'pending_remote_branch' },
+    });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+    // Picking a concrete branch unblocks Send.
+    act(() => {
+      useComposerStore.setState({
+        newSessionWorktreeStartPoint: {
+          kind: 'use_remote_branch',
+          name: 'develop',
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
+    });
+  });
+
   it('disables Send for a new session until a workdir is selected', async () => {
     // Default state: no directory chosen. Selection is mandatory for a new
     // session, so Send stays disabled even with text entered.

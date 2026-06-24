@@ -43,10 +43,12 @@ test('opting into a worktree carries the start-point on the send', async ({
   await expect(toggle).toBeVisible();
   await toggle.check();
 
-  // The start-point selector defaults to Current HEAD; switch to the default
-  // branch preset ("Latest main"). The use-vs-new default is "use this branch",
-  // so flip it explicitly here to exercise the `remote_branch` send path.
-  await expect(page.getByTestId('start-point-head')).toBeChecked();
+  // The toggle defaults to "Other remote branch" mode (dogfooding showed
+  // the typical case is to start from a specific remote branch). Switch to
+  // the default-branch preset ("Latest main"). The use-vs-new default is
+  // "use this branch", so flip it explicitly here to exercise the
+  // `remote_branch` send path.
+  await expect(page.getByTestId('start-point-other')).toBeChecked();
   await page.getByTestId('start-point-default-branch').check();
   await page.getByTestId('branch-mode-new').check();
 

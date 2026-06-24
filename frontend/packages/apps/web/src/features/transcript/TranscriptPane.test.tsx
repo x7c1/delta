@@ -1031,6 +1031,21 @@ describe('TranscriptPane', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('hoists the tab strip into the Panel header instead of a "New session" label', async () => {
+    // The tabs are pinned at the top of the pane (the Panel header lives
+    // outside the scrolling body), and the plain "New session" label is
+    // gone — the tabs convey the screen's identity.
+    renderNewSessionPane();
+    const tablist = await screen.findByRole('tablist', {
+      name: 'Start a session from',
+    });
+    // The Panel renders its header inside a <header> element; the tablist
+    // sits inside it, above the scroll viewport.
+    expect(tablist.closest('header')).not.toBeNull();
+    // The old plain "New session" label is removed.
+    expect(screen.queryByText('New session', { exact: true })).toBeNull();
+  });
+
   it('does not pop a modal even when workdirMandatory is set', async () => {
     // First run (no sessions to fall back to): in Phase B the tabbed picker
     // replaces the auto-opened modal entirely, so `workdirMandatory` has no
