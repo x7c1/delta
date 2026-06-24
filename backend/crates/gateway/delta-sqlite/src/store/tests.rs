@@ -674,9 +674,10 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
 #[tokio::test]
 async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
     let store = SqliteStore::open_in_memory().unwrap();
-    // A session with no messages still contributes its cwd, keyed by its own
-    // `created_at`, so a freshly-used directory is listed before any message
-    // lands.
+    // A session with no messages still contributes its workdir, keyed by its
+    // own `created_at`, so a freshly-used directory is listed before any
+    // message lands. With no `requested_workdir` set (the `register_session`
+    // path never sets it), the query falls back to `cwd` for the workdir key.
     let (_s, _main) = store
         .register_session(NewSession {
             id: "sess-1".into(),
@@ -694,6 +695,35 @@ async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
     assert!(
         recent[0].1.is_some(),
         "recency falls back to the session's created_at"
+    );
+}
+
+#[tokio::test]
+async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // Mirror a worktree-on spawn: `cwd` is the auto-generated worktree path
+    // under `$DELTA_WORKTREE_BASE`, `requested_workdir` is the dir the user
+    // picked (which is also the worktree's repo root). The Recent dirs query
+    // must surface the user-selected dir, not the worktree path.
+    let id = SessionId::from("sess-worktree");
+    store
+        .insert_spawning_session(
+            &id,
+            "/var/delta/worktrees/delta-sess-worktree",
+            Some("delta-sess-worktree"),
+            Some("/user-chosen"),
+            Some("/user-chosen"),
+        )
+        .await
+        .unwrap();
+
+    let recent = store.recent_workdirs(10).await.unwrap();
+    let paths: Vec<&str> = recent.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["/user-chosen"],
+        "Recent surfaces the user-selected dir, not the auto-generated worktree path"
     );
 }
 
@@ -994,7 +1024,7 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&spawning, "/work", None, None)
+        .insert_spawning_session(&spawning, "/work", None, None, None)
         .await
         .unwrap();
 
@@ -1309,7 +1339,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(&id, "/work", None, None)
+        .insert_spawning_session(&id, "/work", None, None, None)
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -1401,7 +1431,7 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&id, "/work", None, None)
+        .insert_spawning_session(&id, "/work", None, None, None)
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();

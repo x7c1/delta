@@ -181,6 +181,7 @@ struct SessionParts {
     created_at: String,
     branch_at_launch: Option<String>,
     repo_root: Option<String>,
+    requested_workdir: Option<String>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -193,6 +194,7 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         created_at: row.get(5)?,
         branch_at_launch: row.get(6)?,
         repo_root: row.get(7)?,
+        requested_workdir: row.get(8)?,
     })
 }
 
@@ -206,6 +208,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         created_at: parts.created_at,
         branch_at_launch: parts.branch_at_launch,
         repo_root: parts.repo_root,
+        requested_workdir: parts.requested_workdir,
     })
 }
 
@@ -215,7 +218,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 /// derivable from `last_activity_at`/`created_at` and not returned.
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
-    let last_activity_at: Option<String> = row.get(8)?;
+    let last_activity_at: Option<String> = row.get(9)?;
     Ok((session, last_activity_at))
 }
 
@@ -314,8 +317,8 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
     }
 }
 
-const SESSION_COLS: &str =
-    "id, cwd, transcript_path, title, status, created_at, branch_at_launch, repo_root";
+const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
+     branch_at_launch, repo_root, requested_workdir";
 /// Thread columns plus the derived `root_message_uuid`: the branch edge's
 /// canonical home is `message.semantic_parent_uuid`, so the root is computed
 /// from the thread's first semantically parented message — falling back to the
@@ -405,6 +408,7 @@ impl SessionStore for SqliteStore {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
@@ -415,9 +419,16 @@ impl SessionStore for SqliteStore {
         conn.execute(
             "INSERT INTO session
              (id, cwd, transcript_path, title, status, created_at,
-              branch_at_launch, repo_root)
-             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5)",
-            params![id.as_str(), cwd, now, branch_at_launch, repo_root],
+              branch_at_launch, repo_root, requested_workdir)
+             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6)",
+            params![
+                id.as_str(),
+                cwd,
+                now,
+                branch_at_launch,
+                repo_root,
+                requested_workdir
+            ],
         )
         .map_err(Error::from)?;
         let main_id = ensure_main_thread(&conn, id, &now)?;
@@ -431,6 +442,7 @@ impl SessionStore for SqliteStore {
                 created_at: now,
                 branch_at_launch: branch_at_launch.map(str::to_owned),
                 repo_root: repo_root.map(str::to_owned),
+                requested_workdir: requested_workdir.map(str::to_owned),
             },
             main_id,
         ))
@@ -568,20 +580,28 @@ impl SessionStore for SqliteStore {
         limit: u32,
     ) -> std::result::Result<Vec<RecentWorkdir>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        // One row per distinct `cwd`, ordered by the most recent activity of any
-        // session that ran in it. Per-session recency is
-        // `COALESCE(last_activity_at, created_at)` — the same denormalized key
-        // the session list uses, read straight from the column rather than
-        // recomputed with a correlated `MAX(message.created_at)` subquery — and
-        // a cwd's recency is the max of that across its sessions. ISO-8601 UTC
-        // text compares correctly as time, so no datetime casting is needed.
+        // One row per distinct workdir, ordered by the most recent activity of
+        // any session that ran in it. The grouping key is
+        // `COALESCE(requested_workdir, cwd)`: a worktree-on spawn stores the
+        // user-selected dir in `requested_workdir` and the auto-generated
+        // worktree path in `cwd`, so coalescing pulls the user-selected dir to
+        // the surface and the worktree path drops out of Recent. Sessions that
+        // predate `requested_workdir` (the column is additive and NULL for
+        // them) fall back to `cwd`, so legacy history stays visible.
+        //
+        // Per-session recency is `COALESCE(last_activity_at, created_at)` — the
+        // same denormalized key the session list uses, read straight from the
+        // column rather than recomputed with a correlated
+        // `MAX(message.created_at)` subquery — and a workdir's recency is the
+        // max of that across its sessions. ISO-8601 UTC text compares correctly
+        // as time, so no datetime casting is needed.
         let mut stmt = conn
             .prepare(
-                "SELECT s.cwd, \
+                "SELECT COALESCE(s.requested_workdir, s.cwd) AS workdir, \
                         MAX(COALESCE(s.last_activity_at, s.created_at)) AS recency \
                  FROM session s \
-                 GROUP BY s.cwd \
-                 ORDER BY recency DESC, s.cwd ASC \
+                 GROUP BY workdir \
+                 ORDER BY recency DESC, workdir ASC \
                  LIMIT ?1",
             )
             .map_err(Error::from)?;
