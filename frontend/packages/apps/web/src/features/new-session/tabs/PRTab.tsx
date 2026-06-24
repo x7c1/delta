@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { Fragment, useMemo } from 'react';
 import { usePullRequestsQuery, useRepositoriesQuery } from '@delta/api-client';
 import { displayBranch } from '@delta/model';
 import type { PullRequest, PullRequestsResponse } from '@delta/wire-gen';
@@ -194,14 +194,21 @@ function PrSection({ testId, heading, emptyMessage, data, onPick }: PrSectionPro
         <p className="text-xs text-slate-500">{emptyMessage}</p>
       ) : (
         <ul className="space-y-0.5">
-          {grouped.map((row) => (
-            <li key={`${row.pr.repo_owner}/${row.pr.repo_name}#${row.pr.number}`}>
-              <PrRow
-                pr={row.pr}
-                isRepoFirstRow={row.isRepoFirstRow}
-                onPick={onPick}
-              />
-            </li>
+          {grouped.map((row, index) => (
+            <Fragment
+              key={`${row.pr.repo_owner}/${row.pr.repo_name}#${row.pr.number}`}
+            >
+              {row.isRepoFirstRow && index > 0 && (
+                <li
+                  role="separator"
+                  data-testid="pr-tab-repo-divider"
+                  className="my-1 border-t border-slate-200"
+                />
+              )}
+              <li>
+                <PrRow pr={row.pr} onPick={onPick} />
+              </li>
+            </Fragment>
           ))}
         </ul>
       )}
@@ -211,8 +218,9 @@ function PrSection({ testId, heading, emptyMessage, data, onPick }: PrSectionPro
 
 interface GroupedPrRow {
   pr: PullRequest;
-  /** True for the first PR row inside each repo's cluster — used to
-   *  bump the font weight so the cluster boundary is visible. */
+  /** True for the first PR row inside each repo's cluster — drives
+   *  the horizontal divider rendered above the row so adjacent repo
+   *  clusters are visually separated. */
   isRepoFirstRow: boolean;
 }
 
@@ -237,11 +245,10 @@ function groupPrsByRepo(prs: PullRequest[]): GroupedPrRow[] {
 
 interface PrRowProps {
   pr: PullRequest;
-  isRepoFirstRow: boolean;
   onPick: (pr: PullRequest) => void;
 }
 
-function PrRow({ pr, isRepoFirstRow, onPick }: PrRowProps) {
+function PrRow({ pr, onPick }: PrRowProps) {
   const disabled = !pr.has_local_clone;
   const repoLabel = `${pr.repo_owner}/${pr.repo_name}#${pr.number}`;
   const cloneHint = `gh repo clone ${pr.repo_owner}/${pr.repo_name}`;
@@ -265,12 +272,7 @@ function PrRow({ pr, isRepoFirstRow, onPick }: PrRowProps) {
       )}
     >
       <div className="flex w-full min-w-0 items-center gap-2">
-        <span
-          className={cn(
-            'shrink-0 font-mono text-[0.7rem] text-slate-500',
-            isRepoFirstRow && 'font-semibold text-slate-700',
-          )}
-        >
+        <span className="shrink-0 font-mono text-[0.7rem] text-slate-700">
           {repoLabel}
         </span>
         <span className="min-w-0 flex-1 truncate">{pr.title}</span>
