@@ -13,6 +13,7 @@ const RESET_STATE = {
   newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
   workdirDialogOpen: false,
   newSessionTab: DEFAULT_NEW_SESSION_TAB,
+  newSessionSelectedPrUrl: null,
 } as const;
 
 beforeEach(() => {
@@ -135,5 +136,22 @@ describe('composerStore newSessionTab', () => {
 
     useComposerStore.getState().setNewSessionTab('pr');
     expect(useComposerStore.getState().newSessionTab).toBe('pr');
+  });
+});
+
+describe('composerStore newSessionSelectedPrUrl', () => {
+  it('defaults to null on a fresh state', () => {
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull();
+  });
+
+  it('setNewSessionSelectedPrUrl sets and clears the field', () => {
+    const store = useComposerStore.getState();
+    store.setNewSessionSelectedPrUrl('https://github.com/x7c1/delta/pull/174');
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
+      'https://github.com/x7c1/delta/pull/174',
+    );
+
+    useComposerStore.getState().setNewSessionSelectedPrUrl(null);
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull();
   });
 });

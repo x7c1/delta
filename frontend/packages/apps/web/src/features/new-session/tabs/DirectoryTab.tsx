@@ -13,15 +13,22 @@ import { WorkdirPickerBody } from '../../composer/WorkdirPickerBody';
 export function DirectoryTab() {
   const setSelected = useComposerStore((state) => state.setNewSessionWorkdir);
   const selectedPath = useComposerStore((state) => state.newSessionWorkdir);
+  const setNewSessionSelectedPrUrl = useComposerStore(
+    (state) => state.setNewSessionSelectedPrUrl,
+  );
   // Local candidate state mirrors the dialog's: the picker body lifts it
   // out so the Recent and Browse rows can highlight together. The tab
   // commits immediately rather than waiting on a Select button.
   const [candidate, setCandidate] = useState<string | null>(selectedPath);
 
+  // Committing a directory pick here is mutually exclusive with the PR tab's
+  // "selected row" highlight: clearing it keeps at most one row highlighted
+  // across the three tabs.
   const commit = (path: string | null) => {
     setCandidate(path);
     if (path !== null) {
       setSelected(path);
+      setNewSessionSelectedPrUrl(null);
     }
   };
 
@@ -34,6 +41,7 @@ export function DirectoryTab() {
         onConfirm={() => {
           if (candidate !== null) {
             setSelected(candidate);
+            setNewSessionSelectedPrUrl(null);
           }
         }}
       />
