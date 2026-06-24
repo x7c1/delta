@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_NEW_SESSION_TAB,
   DEFAULT_WORKTREE_START_POINT,
   useComposerStore,
 } from './composerStore';
@@ -11,6 +12,7 @@ const RESET_STATE = {
   newSessionWorktreeEnabled: false,
   newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
   workdirDialogOpen: false,
+  newSessionTab: DEFAULT_NEW_SESSION_TAB,
 } as const;
 
 beforeEach(() => {
@@ -87,5 +89,21 @@ describe('composerStore worktree selection', () => {
     expect(state.newSessionWorkdir).toBeNull();
     expect(state.newSessionWorktreeEnabled).toBe(false);
     expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+  });
+});
+
+
+describe('composerStore newSessionTab', () => {
+  it('defaults to repository on a fresh state', () => {
+    expect(useComposerStore.getState().newSessionTab).toBe(DEFAULT_NEW_SESSION_TAB);
+    expect(DEFAULT_NEW_SESSION_TAB).toBe('repository');
+  });
+
+  it('setNewSessionTab updates the active tab', () => {
+    useComposerStore.getState().setNewSessionTab('directory');
+    expect(useComposerStore.getState().newSessionTab).toBe('directory');
+
+    useComposerStore.getState().setNewSessionTab('pr');
+    expect(useComposerStore.getState().newSessionTab).toBe('pr');
   });
 });
