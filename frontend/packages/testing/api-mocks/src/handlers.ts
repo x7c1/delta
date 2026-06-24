@@ -21,6 +21,7 @@ import type {
   ThreadsResponse,
   GitBranchesResponse,
   GitRepoResponse,
+  RepositoriesResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
   Turn,
@@ -31,6 +32,7 @@ import {
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
   recentWorkdirs,
+  mockRepositories,
   seedData,
   SESSIONS_PAGE_SIZE,
   workdirListing,
@@ -443,6 +445,18 @@ export function createMockApi(): MockApi {
     http.get('*/api/workdir/recent', () => {
       const responseBody: WorkdirRecentResponse = {
         workdirs: recentWorkdirs(),
+      };
+      return HttpResponse.json(responseBody);
+    }),
+
+    // Registered repositories for the Repository tab. Mirrors the real
+    // endpoint's shape; the default list seeds two entries (one
+    // origin-deduplicated repo with two clones, one path-keyed single
+    // clone) so the picker's clone-expansion + path-key affordance are
+    // exercisable.
+    http.get('*/api/repositories', () => {
+      const responseBody: RepositoriesResponse = {
+        repositories: mockRepositories(),
       };
       return HttpResponse.json(responseBody);
     }),

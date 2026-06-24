@@ -4,7 +4,6 @@
 //! and assert the aggregated Repository tree round-trips correctly.
 
 use crate::interactor::testing::*;
-use crate::ports::NewSession;
 use delta_model::SessionId;
 
 /// A path the lazy-GC stat will reliably succeed on — `/` exists on every

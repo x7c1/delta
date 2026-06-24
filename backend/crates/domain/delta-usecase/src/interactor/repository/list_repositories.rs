@@ -81,8 +81,8 @@ where
         // Project the accumulators into Repository values, dropping any
         // accumulator with no surviving clones (every clone path was stale).
         let mut repositories: Vec<Repository> = by_identity
-            .into_iter()
-            .filter_map(|(_, mut acc)| {
+            .into_values()
+            .filter_map(|mut acc| {
                 if acc.clones.is_empty() {
                     return None;
                 }

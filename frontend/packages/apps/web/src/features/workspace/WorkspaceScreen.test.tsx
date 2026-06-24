@@ -298,10 +298,14 @@ describe('WorkspaceScreen multi-session', () => {
     );
     expect(screen.getByTestId('new-session-empty')).toBeInTheDocument();
 
-    // First run (zero sessions): the directory picker is mandatory, so it opens
-    // with no Cancel button — the user must choose a directory to proceed.
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
+    // Phase B retired the auto-opened directory modal: the new-session
+    // screen now leads with the inline 3-tab picker. The Directory tab
+    // exposes the same Recent + Browse content, so first-run users still
+    // have a clear path forward without a forced modal.
+    expect(
+      await screen.findByTestId('new-session-tabs'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('garbage-collects session-scoped localStorage keys for sessions that no longer exist', async () => {
