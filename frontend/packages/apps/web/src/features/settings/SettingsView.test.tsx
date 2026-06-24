@@ -20,6 +20,11 @@ import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { useNavStore } from '../../store/navStore';
+import {
+  DEFAULT_SETTINGS_CATEGORY,
+  SETTINGS_STORAGE_KEY,
+  useSettingsStore,
+} from '../../store/settingsStore';
 import { SettingsView } from './SettingsView';
 
 const server = setupServer(...createHandlers());
@@ -47,11 +52,19 @@ async function findList() {
   return screen.findByTestId('launch-options-list');
 }
 
+/** Switch the right pane to the Repository scan roots category. */
+function switchToScanRoots() {
+  fireEvent.click(screen.getByTestId('settings-category-scan-roots'));
+}
+
 describe('SettingsView', () => {
   beforeEach(() => {
     // The settings UI is a Dialog overlay gated on `settingsOpen`; open it so
-    // the dialog (and its content) renders.
+    // the dialog (and its content) renders. The active category is persisted,
+    // so reset it to the default between tests to keep them order-independent.
     useNavStore.setState({ settingsOpen: true });
+    useSettingsStore.setState({ activeCategory: DEFAULT_SETTINGS_CATEGORY });
+    localStorage.removeItem(SETTINGS_STORAGE_KEY);
   });
 
   it('renders nothing while the settings overlay is closed', () => {
@@ -157,9 +170,65 @@ describe('SettingsView', () => {
     expect(useNavStore.getState().settingsOpen).toBe(false);
   });
 
+  describe('category sidebar', () => {
+    it('opens on the persisted category and reveals its right pane', () => {
+      useSettingsStore.setState({ activeCategory: 'scan-roots' });
+      renderSettings();
+      expect(screen.getByTestId('settings-category-scan-roots')).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      expect(screen.getByTestId('scan-roots-section')).toBeInTheDocument();
+      expect(screen.queryByTestId('launch-options-section')).toBeNull();
+    });
+
+    it('switches the right pane content when a category is clicked', async () => {
+      renderSettings();
+      // Default landing pane is Launch options; the scan-roots pane is not
+      // mounted yet.
+      expect(screen.getByTestId('launch-options-section')).toBeInTheDocument();
+      expect(screen.queryByTestId('scan-roots-section')).toBeNull();
+
+      switchToScanRoots();
+
+      expect(screen.queryByTestId('launch-options-section')).toBeNull();
+      expect(await screen.findByTestId('scan-roots-section')).toBeInTheDocument();
+    });
+
+    it('persists the active category to localStorage', () => {
+      renderSettings();
+      switchToScanRoots();
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      // The persist middleware wraps state under `{ state, version }`; assert
+      // on the parsed shape rather than substring-matching the JSON.
+      const parsed = JSON.parse(raw ?? '{}');
+      expect(parsed.state.activeCategory).toBe('scan-roots');
+    });
+
+    it('exposes a vertical tablist with one tab per category', () => {
+      renderSettings();
+      const tablist = screen.getByRole('tablist');
+      expect(tablist).toHaveAttribute('aria-orientation', 'vertical');
+      const tabs = within(tablist).getAllByRole('tab');
+      expect(tabs.map((t) => t.textContent)).toEqual([
+        'Launch options',
+        'Repository scan roots',
+      ]);
+      expect(
+        screen.getByTestId('settings-category-launch-options'),
+      ).toHaveAttribute('aria-selected', 'true');
+      expect(
+        screen.getByTestId('settings-category-scan-roots'),
+      ).toHaveAttribute('aria-selected', 'false');
+    });
+
+  });
+
   describe('Repository scan roots section', () => {
     it('renders the empty-state when no roots are registered', async () => {
       renderSettings();
+      switchToScanRoots();
       const section = await screen.findByTestId('scan-roots-section');
       expect(
         within(section).getByText('No scan roots registered yet.'),
@@ -169,6 +238,7 @@ describe('SettingsView', () => {
 
     it('adds a scan root through the picker dialog', async () => {
       renderSettings();
+      switchToScanRoots();
       const section = await screen.findByTestId('scan-roots-section');
       fireEvent.click(within(section).getByTestId('add-scan-root'));
 
@@ -187,6 +257,7 @@ describe('SettingsView', () => {
 
     it('shows an inline duplicate hint when adding the same root twice', async () => {
       renderSettings();
+      switchToScanRoots();
       const section = await screen.findByTestId('scan-roots-section');
 
       // First registration: the picker opens, the candidate is auto-pre-
@@ -214,6 +285,7 @@ describe('SettingsView', () => {
 
     it('removes a registered scan root', async () => {
       renderSettings();
+      switchToScanRoots();
       const section = await screen.findByTestId('scan-roots-section');
 
       // Register one first so there is a row to remove.
