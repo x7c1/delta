@@ -26,6 +26,10 @@ delta-server = { path = "crates/apps/delta-server" }
 # Shared third-party dependencies
 anyhow = "1"
 async-trait = "0.1"
+# Default features include `clock`, which `Utc::now()` needs. No serde / wasm
+# bits required for the current use (computing a date-naive cutoff for gh
+# search queries).
+chrono = "0.4"
 libc = "0.2"
 axum = { version = "0.8", features = ["ws"] }
 futures-util = "0.3"
