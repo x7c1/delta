@@ -19,6 +19,7 @@ mod lifecycle;
 mod listing;
 mod permission_decision;
 mod question_keys;
+mod repository;
 mod routing;
 mod runtime;
 pub(crate) mod session_actor;
@@ -94,6 +95,15 @@ pub struct InteractorCore<T, X, S, W, G> {
     ///
     /// [`PaneToken`]: crate::pane_token::PaneToken
     pub(in crate::interactor) minter: PaneTokenMinter,
+    /// Per-process cache of `repo_root -> origin URL` (the `Option` is stored
+    /// faithfully so a missing origin is memoised too). An origin URL is a
+    /// property of the on-disk repo and effectively never changes for the
+    /// server's lifetime, so the cost of shelling out to `git config` for it
+    /// is paid once per root. Tokio mutex because the lookup happens inside
+    /// async code and may briefly hold the lock across an await point on a
+    /// fresh miss.
+    pub(in crate::interactor) repository_origin_cache:
+        tokio::sync::Mutex<std::collections::HashMap<String, Option<String>>>,
 }
 
 /// The public entry point: wraps the shared [`InteractorCore`] and routes
@@ -173,6 +183,7 @@ where
             session_settings_path: session_settings_path.into(),
             launch: LaunchConfig::default(),
             minter: PaneTokenMinter::new(),
+            repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
         Self {

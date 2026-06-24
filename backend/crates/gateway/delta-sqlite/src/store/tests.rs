@@ -1,6 +1,6 @@
 use delta_model::{
     ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus, SessionId,
-    SessionStatus,
+    SessionStatus, ThreadId,
 };
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
@@ -1905,4 +1905,111 @@ async fn schema_gate_opens_a_current_database_unchanged() {
     assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // Two sessions at the same (repo_root, requested_workdir) — the second is
+    // more recent and on a different branch. A third session at the SAME repo
+    // root but a different requested_workdir is its own clone row. A fourth
+    // session is outside any git repo (no repo_root) and must be excluded.
+    let s1 = SessionId::from("sess-1");
+    store
+        .insert_spawning_session(
+            &s1,
+            "/repo-a/wt-1",
+            Some("main"),
+            Some("/repo-a"),
+            Some("/repo-a"),
+        )
+        .await
+        .unwrap();
+    let s2 = SessionId::from("sess-2");
+    store
+        .insert_spawning_session(
+            &s2,
+            "/repo-a/wt-2",
+            Some("feature/x"),
+            Some("/repo-a"),
+            Some("/repo-a"),
+        )
+        .await
+        .unwrap();
+    let s3 = SessionId::from("sess-3");
+    store
+        .insert_spawning_session(
+            &s3,
+            "/repo-a-mirror",
+            Some("main"),
+            Some("/repo-a"),
+            Some("/repo-a-mirror"),
+        )
+        .await
+        .unwrap();
+    let s4 = SessionId::from("sess-4");
+    store
+        .insert_spawning_session(&s4, "/scratch", None, None, Some("/scratch"))
+        .await
+        .unwrap();
+
+    // Stamp `last_activity_at` for s1 and s2 explicitly so s2 is the latest at
+    // its `(repo_root, requested_workdir)` pair, driving the `last_branch`
+    // pick. The default `created_at` is `now`, which is later than any
+    // hard-coded past timestamp, so without explicit stamps s1 would sort
+    // newer than s2 by `COALESCE(last_activity_at, created_at)`.
+    let mk_msg = |session_id: SessionId, thread_id: ThreadId, uuid: &str, at: &str| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id,
+        thread_id,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: Some(at.into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+    };
+    let s1_thread = store.main_thread_id(&s1).await.unwrap();
+    let s2_thread = store.main_thread_id(&s2).await.unwrap();
+    store
+        .upsert_messages(&[
+            mk_msg(s1.clone(), s1_thread, "m-s1", "2026-01-01T00:00:00Z"),
+            mk_msg(s2.clone(), s2_thread, "m-s2", "2026-02-01T00:00:00Z"),
+        ])
+        .await
+        .unwrap();
+
+    let rows = store.repository_clone_rows().await.unwrap();
+    assert_eq!(rows.len(), 2, "non-git session is excluded; one row per pair");
+
+    // Find each row by its clone path.
+    let a = rows
+        .iter()
+        .find(|r| r.clone_path == "/repo-a")
+        .expect("the bundled /repo-a clone is present");
+    assert_eq!(a.repo_root, "/repo-a");
+    assert_eq!(
+        a.last_branch.as_deref(),
+        Some("feature/x"),
+        "the latest session at this pair (s2) contributes last_branch"
+    );
+    assert_eq!(
+        a.last_opened_at.as_deref(),
+        Some("2026-02-01T00:00:00Z"),
+        "last_opened_at uses the max recency across the pair's sessions"
+    );
+
+    let mirror = rows
+        .iter()
+        .find(|r| r.clone_path == "/repo-a-mirror")
+        .expect("the second clone of /repo-a is its own row");
+    assert_eq!(mirror.repo_root, "/repo-a");
+    assert_eq!(mirror.last_branch.as_deref(), Some("main"));
 }

@@ -21,7 +21,7 @@ pub use session_event::{RateLimitWindow, SessionEvent, StatusSnapshot};
 mod session_lifecycle;
 pub use session_lifecycle::SessionLifecycle;
 mod session_store;
-pub use session_store::{RecentWorkdir, SessionPageRow, SessionStore};
+pub use session_store::{RecentWorkdir, RepositoryCloneRow, SessionPageRow, SessionStore};
 mod stop_hook;
 pub use stop_hook::StopHook;
 mod tmux_driver;

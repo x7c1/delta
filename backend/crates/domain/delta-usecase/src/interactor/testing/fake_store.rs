@@ -11,7 +11,7 @@ use delta_model::{
 };
 
 use crate::error::Result;
-use crate::ports::{NewSession, SessionPageRow, SessionStore};
+use crate::ports::{NewSession, RepositoryCloneRow, SessionPageRow, SessionStore};
 use crate::SessionPageCursor;
 
 /// Derive a thread's `root_message_uuid` the way the SQL store does: the
@@ -293,6 +293,78 @@ impl SessionStore for FakeStore {
         rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         rows.truncate(limit as usize);
         Ok(rows)
+    }
+
+    async fn repository_clone_rows(&self) -> Result<Vec<RepositoryCloneRow>> {
+        let g = self.inner.lock().unwrap();
+        // Mirror the SQL: one row per `(repo_root, clone_path)` pair drawn
+        // from sessions with a non-null repo_root, with the clone path
+        // coalescing `requested_workdir` and `cwd`. The latest session per
+        // pair contributes `last_branch`; the max recency across the pair's
+        // sessions is `last_opened_at`.
+        struct Acc {
+            // (recency, insertion_index) of the latest session at this pair.
+            // Used both to select `last_branch` and as the running max for
+            // `last_opened_at` (since recency is the same projection).
+            latest_recency: Option<String>,
+            latest_branch: Option<String>,
+            latest_index: i64,
+        }
+        let mut by_pair: std::collections::HashMap<(String, String), Acc> =
+            std::collections::HashMap::new();
+        // The fake has no monotonic numeric session id, so insertion order is
+        // the closest proxy for the SQL store's `id` DESC tie-break.
+        for (index, s) in g.sessions.iter().enumerate() {
+            let index = index as i64;
+            let Some(repo_root) = &s.repo_root else { continue };
+            let clone_path = s
+                .requested_workdir
+                .clone()
+                .unwrap_or_else(|| s.cwd.clone());
+            let recency = g
+                .messages
+                .iter()
+                .filter(|m| m.session_id == s.id)
+                .filter_map(|m| m.created_at.clone())
+                .max()
+                .or_else(|| Some(s.created_at.clone()));
+            let key = (repo_root.clone(), clone_path);
+            let entry = by_pair.entry(key).or_insert_with(|| Acc {
+                latest_recency: recency.clone(),
+                latest_branch: s.branch_at_launch.clone(),
+                latest_index: index,
+            });
+            // Replace when this session is strictly more recent OR ties on
+            // recency with a higher index. Both branches preserve the existing
+            // record otherwise.
+            let beats = match (&recency, &entry.latest_recency) {
+                (Some(a), Some(b)) if a > b => true,
+                (Some(_), None) => true,
+                (Some(a), Some(b)) if a == b && index > entry.latest_index => true,
+                _ => false,
+            };
+            if beats {
+                entry.latest_recency = recency;
+                entry.latest_branch = s.branch_at_launch.clone();
+                entry.latest_index = index;
+            }
+        }
+        let mut out: Vec<RepositoryCloneRow> = by_pair
+            .into_iter()
+            .map(|((repo_root, clone_path), acc)| RepositoryCloneRow {
+                repo_root,
+                clone_path,
+                last_opened_at: acc.latest_recency,
+                last_branch: acc.latest_branch,
+            })
+            .collect();
+        out.sort_by(|a, b| {
+            b.last_opened_at
+                .cmp(&a.last_opened_at)
+                .then_with(|| a.repo_root.cmp(&b.repo_root))
+                .then_with(|| a.clone_path.cmp(&b.clone_path))
+        });
+        Ok(out)
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {

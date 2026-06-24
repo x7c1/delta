@@ -28,6 +28,28 @@ pub type SessionPageRow = (Session, Option<String>);
 /// separate working-directory history.
 pub type RecentWorkdir = (String, Option<String>);
 
+/// One row of the Repository tab's aggregation: a single `(repo_root, clone)`
+/// pair drawn from the session history, carrying enough state for the
+/// interactor to bundle clones into repositories.
+///
+/// - `repo_root`: the repository root the clone lives under. Sessions launched
+///   outside any git repo (no `session.repo_root`) never contribute — the
+///   Repository tab is by definition a list of git repositories.
+/// - `clone_path`: the dir the user picked at spawn time
+///   (`session.requested_workdir`, falling back to `session.cwd` for sessions
+///   that predate that column).
+/// - `last_opened_at`: the most recent activity at this `(repo_root, clone)`
+///   pair — `MAX(COALESCE(last_activity_at, created_at))` over its sessions.
+/// - `last_branch`: the `branch_at_launch` of the latest session at this pair,
+///   when one was recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryCloneRow {
+    pub repo_root: String,
+    pub clone_path: String,
+    pub last_opened_at: Option<String>,
+    pub last_branch: Option<String>,
+}
+
 /// Persists and queries Delta's thread overlay.
 ///
 /// This is the irreplaceable data: thread assignment, the semantic-parent
@@ -125,6 +147,18 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// reflects when it was last actually worked in. Each row carries that
     /// recency timestamp for display.
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>>;
+
+    /// One row per `(repo_root, clone_path)` pair in the session history, for
+    /// the Repository tab.
+    ///
+    /// Drawn from `session` rows with a non-null `repo_root` (sessions outside
+    /// any git repo do not contribute); the clone path is
+    /// `COALESCE(requested_workdir, cwd)` so worktree-managed cwds do not leak
+    /// in. Each row carries the most recent activity at that pair (the
+    /// `MAX(COALESCE(last_activity_at, created_at))` of its sessions) and the
+    /// `branch_at_launch` of the latest such session. Ordering is undefined
+    /// (the interactor sorts).
+    async fn repository_clone_rows(&self) -> Result<Vec<RepositoryCloneRow>>;
 
     /// Look up a thread by id.
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>>;
@@ -456,6 +490,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>> {
         (**self).recent_workdirs(limit).await
+    }
+
+    async fn repository_clone_rows(&self) -> Result<Vec<RepositoryCloneRow>> {
+        (**self).repository_clone_rows().await
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {
