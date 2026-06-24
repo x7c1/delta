@@ -1,6 +1,7 @@
 //! [`Gh`]: the concrete [`GhCli`].
 
 use async_trait::async_trait;
+use chrono::{Duration, NaiveDate, Utc};
 use tokio::process::Command;
 use tokio::sync::OnceCell;
 
@@ -12,6 +13,12 @@ use crate::parse::parse_search_response;
 /// Max rows we ask gh to return per lens. 50 lines is plenty to scroll
 /// through in the picker without inflating each call's payload.
 const SEARCH_LIMIT: i64 = 50;
+
+/// How far back (in days) the PR-search cutoff reaches. Today minus this
+/// many days becomes the `updated:>=YYYY-MM-DD` floor on every lens, so
+/// stale years-old PRs do not pollute the picker. Hardcoded for now; a
+/// future settings screen may expose it.
+const PR_FRESHNESS_DAYS: i64 = 365;
 
 /// GraphQL the gateway runs through `gh api graphql` to fetch a PR list
 /// for one lens.
@@ -95,7 +102,11 @@ impl GhCli for Gh {
         // `-F` for typed variables (the integer `first`); `-f` for
         // string variables (the query and the GraphQL document body).
         let first_arg = format!("first={SEARCH_LIMIT}");
-        let search_query = search_query_for(lens);
+        // Compute the freshness floor at call time so the cutoff slides with
+        // the calendar. The pure builder takes the date as an argument so it
+        // stays testable.
+        let cutoff = freshness_cutoff(Utc::now().date_naive());
+        let search_query = search_query_for(lens, cutoff);
         let q_arg = format!("q={search_query}");
         let doc_arg = format!("query={SEARCH_GRAPHQL}");
         let output = Command::new("gh")
@@ -128,14 +139,32 @@ impl GhCli for Gh {
 /// expects for the named lens.
 ///
 /// Mirrors `gh search prs`'s flag-to-qualifier translation: each lens
-/// is the same set of qualifiers, just expressed inline.
-fn search_query_for(lens: PullRequestLens) -> String {
+/// is the same set of qualifiers, just expressed inline. `cutoff_date`
+/// becomes an `updated:>=YYYY-MM-DD` floor so stale PRs (a year or more
+/// without an update) are filtered out at the source.
+fn search_query_for(lens: PullRequestLens, cutoff_date: NaiveDate) -> String {
+    // GitHub search expects `updated:>=YYYY-MM-DD`. `NaiveDate`'s `Display`
+    // already renders ISO-8601 (`YYYY-MM-DD`), which is the format the search
+    // qualifier requires.
+    let updated = format!("updated:>={cutoff_date}");
     match lens {
         // Open PRs that requested my review and are NOT drafts.
-        PullRequestLens::Reviewer => "is:pr is:open review-requested:@me -draft:true sort:updated-desc".to_owned(),
+        PullRequestLens::Reviewer => format!(
+            "is:pr is:open review-requested:@me -draft:true {updated} sort:updated-desc"
+        ),
         // Open PRs I authored (drafts included).
-        PullRequestLens::Author => "is:pr is:open author:@me sort:updated-desc".to_owned(),
+        PullRequestLens::Author => {
+            format!("is:pr is:open author:@me {updated} sort:updated-desc")
+        }
     }
+}
+
+/// Compute the `updated:>=…` floor for a given reference date by stepping
+/// back [`PR_FRESHNESS_DAYS`] days. Pulled out so the call site stays a
+/// one-liner and tests can pass a fixed `today` without going through
+/// `Utc::now`.
+fn freshness_cutoff(today: NaiveDate) -> NaiveDate {
+    today - Duration::days(PR_FRESHNESS_DAYS)
 }
 
 /// Run `gh auth status` and report whether gh considers itself
@@ -152,5 +181,57 @@ async fn run_auth_status() -> bool {
             tracing::debug!(error = %err, "gh auth status failed; treating gh as unavailable");
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fixed reference date used across the query-builder tests so
+    /// assertions do not depend on the wall clock.
+    fn fixed_today() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 6, 24).expect("valid date")
+    }
+
+    #[test]
+    fn freshness_cutoff_steps_back_one_year() {
+        // 2026 is not a leap year; stepping back 365 days lands one
+        // calendar year earlier on the same day.
+        let cutoff = freshness_cutoff(fixed_today());
+        assert_eq!(
+            cutoff,
+            NaiveDate::from_ymd_opt(2025, 6, 24).expect("valid date"),
+        );
+    }
+
+    #[test]
+    fn reviewer_query_includes_the_updated_floor() {
+        let cutoff = freshness_cutoff(fixed_today());
+        let query = search_query_for(PullRequestLens::Reviewer, cutoff);
+        assert_eq!(
+            query,
+            "is:pr is:open review-requested:@me -draft:true \
+             updated:>=2025-06-24 sort:updated-desc",
+        );
+    }
+
+    #[test]
+    fn author_query_includes_the_updated_floor() {
+        let cutoff = freshness_cutoff(fixed_today());
+        let query = search_query_for(PullRequestLens::Author, cutoff);
+        assert_eq!(
+            query,
+            "is:pr is:open author:@me updated:>=2025-06-24 sort:updated-desc",
+        );
+    }
+
+    #[test]
+    fn cutoff_renders_as_iso_8601_in_the_query() {
+        // A January-1st cutoff exercises zero-padding on month and day,
+        // which the `updated:>=…` qualifier requires.
+        let cutoff = NaiveDate::from_ymd_opt(2025, 1, 1).expect("valid date");
+        let query = search_query_for(PullRequestLens::Author, cutoff);
+        assert!(query.contains("updated:>=2025-01-01"), "got: {query}");
     }
 }

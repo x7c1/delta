@@ -30,11 +30,13 @@ import {
  * For any branch start-point (the default-branch preset or an explicit branch),
  * a use-vs-new choice picks the worktree's branch mode:
  *
- * - **New branch from it** — `{ kind: "remote_branch", name }`, the default
- *   (safest isolation): cut a fresh per-session branch from it.
- * - **Use this branch** — `{ kind: "use_remote_branch", name }`: work on the
- *   branch directly (the backend reuses the worktree that already has it
- *   checked out, including the main tree, or creates one that checks it out).
+ * - **Use this branch** — `{ kind: "use_remote_branch", name }`, the default:
+ *   work on the branch directly (the backend reuses the worktree that already
+ *   has it checked out, including the main tree, or creates one that checks it
+ *   out). Dogfooding showed the typical case is to continue work on the
+ *   selected branch directly, not to fork a fresh delta-managed branch off it.
+ * - **New branch from it** — `{ kind: "remote_branch", name }`: cut a fresh
+ *   per-session branch from it.
  *
  * The chosen toggle/start-point live in `composerStore`; the composer reads them
  * and attaches `worktree` to the new-session send. The start-point value itself
@@ -148,12 +150,12 @@ function WorktreeStartPointSelector({
   const [otherOpen, setOtherOpen] = useState(choice === 'other');
 
   // The current use-vs-new mode for a branch start-point, carried so switching
-  // which branch is selected preserves the user's choice. `head` is always a
-  // new branch, so when it is selected the mode reads as `remote_branch`.
+  // which branch is selected preserves the user's choice. When no branch is
+  // picked yet (`head`), default to `use_remote_branch` — dogfooding showed the
+  // typical case is to continue work on the selected branch directly. Once a
+  // branch is picked, `startPoint.kind` reflects the explicit choice.
   const mode: BranchMode =
-    startPoint.kind === 'use_remote_branch'
-      ? 'use_remote_branch'
-      : 'remote_branch';
+    startPoint.kind === 'remote_branch' ? 'remote_branch' : 'use_remote_branch';
 
   // Re-emit the currently-selected branch under `nextMode`. Only meaningful for
   // a branch start-point (not `head`), so a `null` name is a no-op.
@@ -272,8 +274,9 @@ interface BranchModeChoiceProps {
 
 /**
  * The "use this branch" vs "new branch from it" choice shown for a branch
- * start-point. Defaults to "new branch from it" (the safest isolation,
- * preserving the original behavior). "Use this branch" works on the branch
+ * start-point. Defaults to "use this branch" — dogfooding showed the typical
+ * case is to continue work on the selected branch directly, not to fork a
+ * fresh delta-managed branch off it. "Use this branch" works on the branch
  * directly in the worktree — the backend reuses the worktree that already has
  * it checked out (including the main working tree), or creates one that checks
  * it out.
