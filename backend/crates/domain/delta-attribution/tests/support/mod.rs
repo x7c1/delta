@@ -151,6 +151,17 @@ pub fn meta_line(uuid: &str, text: &str) -> TranscriptMessage {
     }
 }
 
+/// The synthetic user line Claude Code writes when `/compact` runs, carrying
+/// the previous-conversation summary. Flagged `isCompactSummary`, so the
+/// parser classifies it `Role::CompactSummary`; attribution must skip it
+/// (no send match, no `carry_thread` reset).
+pub fn compact_summary_line(uuid: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        role: Role::CompactSummary,
+        ..user_line(uuid, text)
+    }
+}
+
 /// Attach a `promptId` to a line, mirroring Claude's per-turn `promptId` that
 /// groups the members of a slash/local-command sequence.
 pub fn with_prompt_id(prompt_id: &str, line: TranscriptMessage) -> TranscriptMessage {
