@@ -243,6 +243,7 @@ impl Engine {
                         tool_name: name.clone(),
                         tool_input: input.clone(),
                         tool_use_id: id.clone(),
+                        transcript_path: self.transcript_path.clone(),
                     },
                 );
                 self.last_tool_use = Some(ToolUse {
@@ -281,6 +282,7 @@ impl Engine {
                         tool_name: tool_use.name.clone(),
                         tool_use_id: tool_use.id.clone(),
                         tool_response,
+                        transcript_path: self.transcript_path.clone(),
                     },
                 );
                 Ok(())
@@ -294,6 +296,7 @@ impl Engine {
                     session_id: self.session_id.clone(),
                     tool_name: tool_use.name.clone(),
                     tool_input: tool_use.input.clone(),
+                    transcript_path: self.transcript_path.clone(),
                 };
                 // `fire` reads the whole response before returning, so this
                 // BLOCKS until the server's permission hook responds — exactly

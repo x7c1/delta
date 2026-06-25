@@ -10,4 +10,10 @@ pub struct PermissionRequestPayload {
     pub tool_name: String,
     #[serde(default)]
     pub tool_input: serde_json::Value,
+    /// The JSONL the hook is firing against. For a nested subagent's tool call
+    /// this is the subagent's own transcript, not the parent session's. The
+    /// interactor compares this against the session row's stored path so a
+    /// permission dialog raised inside a nested subagent does not race a
+    /// parent-attributed waiter onto the wrong row.
+    pub transcript_path: String,
 }

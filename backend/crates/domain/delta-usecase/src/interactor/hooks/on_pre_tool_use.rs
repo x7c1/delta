@@ -51,7 +51,20 @@ where
         tool_name: &str,
         tool_input_json: &str,
         tool_use_id: &str,
+        transcript_path: &str,
     ) -> Result<Vec<SessionEvent>> {
+        // A nested subagent's tool call carries the PARENT session's
+        // `session_id` (Claude Code dispatches hooks that way) but its
+        // `transcript_path` points at the subagent's own JSONL. Recording the
+        // request here would attach it to the parent — and for an `Agent`
+        // tool, it would also light a running indicator that can never clear
+        // (the completion `<task-notification>` lands in the subagent's
+        // transcript, which Delta does not tail for the parent). Short-circuit
+        // so a nested hook is a no-op against the parent's state.
+        if self.is_foreign_transcript(transcript_path).await? {
+            return Ok(vec![]);
+        }
+
         let request = self
             .store
             .record_permission_request(self.id, tool_name, tool_input_json, Some(tool_use_id))

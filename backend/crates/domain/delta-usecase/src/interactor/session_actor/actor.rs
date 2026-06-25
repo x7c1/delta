@@ -177,31 +177,44 @@ where
             tool_name,
             tool_input_json,
             tool_use_id,
+            transcript_path,
             reply,
         } => {
             let _ = reply.send(
-                ctx.on_pre_tool_use(&tool_name, &tool_input_json, &tool_use_id)
-                    .await,
+                ctx.on_pre_tool_use(
+                    &tool_name,
+                    &tool_input_json,
+                    &tool_use_id,
+                    &transcript_path,
+                )
+                .await,
             );
         }
         SessionInput::PostToolUse {
             tool_name,
             tool_use_id,
             tool_response_json,
+            transcript_path,
             reply,
         } => {
             let _ = reply.send(
-                ctx.on_post_tool_use(&tool_name, &tool_use_id, &tool_response_json)
-                    .await,
+                ctx.on_post_tool_use(
+                    &tool_name,
+                    &tool_use_id,
+                    &tool_response_json,
+                    &transcript_path,
+                )
+                .await,
             );
         }
         SessionInput::PermissionRequest {
             tool_name,
             tool_input_json,
+            transcript_path,
             reply,
         } => {
             let _ = reply.send(
-                ctx.on_permission_request(&tool_name, &tool_input_json)
+                ctx.on_permission_request(&tool_name, &tool_input_json, &transcript_path)
                     .await,
             );
         }
