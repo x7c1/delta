@@ -81,17 +81,53 @@ describe('WorktreeOptions', () => {
     expect(screen.queryByTestId('worktree-start-point')).not.toBeInTheDocument();
   });
 
-  it('reveals the start-point selector with HEAD as the default when toggled on', async () => {
+  it('reveals the start-point selector in "Other remote branch" mode when toggled on', async () => {
+    // Dogfooding default: toggling worktree ON lands on the Other-remote-
+    // branch picker (the `pending_remote_branch` sentinel) with the branch
+    // list expanded, so the user picks a specific branch right away.
     useComposerStore.setState({ newSessionWorkdir: MOCK_GIT_REPO_ROOT });
     renderOptions();
 
     fireEvent.click(await screen.findByTestId('worktree-toggle'));
 
     expect(screen.getByTestId('worktree-start-point')).toBeInTheDocument();
-    expect(screen.getByTestId('start-point-head')).toBeChecked();
+    expect(screen.getByTestId('start-point-other')).toBeChecked();
+    expect(screen.getByTestId('start-point-head')).not.toBeChecked();
+    // The lazy remote-branch list is open immediately.
+    expect(
+      await screen.findByTestId('remote-branch-picker'),
+    ).toBeInTheDocument();
     expect(useComposerStore.getState().newSessionWorktreeEnabled).toBe(true);
     expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
+  });
+
+  it('switching to HEAD then back to "other" returns to the pending-branch picker', async () => {
+    // Switching radios across the default should land back on the pending
+    // sentinel — no stale branch name slipping into the store on the way.
+    useComposerStore.setState({
+      newSessionWorkdir: MOCK_GIT_REPO_ROOT,
+      newSessionWorktreeEnabled: true,
+    });
+    renderOptions();
+
+    await screen.findByTestId('start-point-other');
+    fireEvent.click(screen.getByTestId('start-point-head'));
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
       kind: 'head',
+    });
+    expect(
+      screen.queryByTestId('remote-branch-picker'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('start-point-other'));
+    expect(screen.getByTestId('start-point-other')).toBeChecked();
+    expect(
+      await screen.findByTestId('remote-branch-picker'),
+    ).toBeInTheDocument();
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
     });
   });
 
@@ -109,8 +145,9 @@ describe('WorktreeOptions', () => {
     );
 
     fireEvent.click(preset);
+    // The first branch pick defaults to "use this branch" (use_remote_branch).
     expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
-      kind: 'remote_branch',
+      kind: 'use_remote_branch',
       name: 'main',
     });
   });
@@ -119,6 +156,9 @@ describe('WorktreeOptions', () => {
     useComposerStore.setState({
       newSessionWorkdir: MOCK_GIT_REPO_ROOT,
       newSessionWorktreeEnabled: true,
+      // Force a non-other initial state to assert the picker is gated on the
+      // "other" choice — the default opens it immediately (covered above).
+      newSessionWorktreeStartPoint: { kind: 'head' },
     });
     renderOptions();
 
@@ -133,8 +173,9 @@ describe('WorktreeOptions', () => {
     // The fetched remote branches list (mock: main/develop/release/1.0).
     const develop = await screen.findByTestId('remote-branch-develop');
     fireEvent.click(develop);
+    // The first branch pick defaults to "use this branch" (use_remote_branch).
     expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
-      kind: 'remote_branch',
+      kind: 'use_remote_branch',
       name: 'develop',
     });
   });
@@ -161,6 +202,8 @@ describe('WorktreeOptions', () => {
     useComposerStore.setState({
       newSessionWorkdir: MOCK_GIT_REPO_ROOT,
       newSessionWorktreeEnabled: true,
+      // Force HEAD to exercise the "HEAD is new-branch-only" path.
+      newSessionWorktreeStartPoint: { kind: 'head' },
     });
     renderOptions();
 
@@ -169,29 +212,32 @@ describe('WorktreeOptions', () => {
     expect(screen.queryByTestId('branch-mode')).not.toBeInTheDocument();
 
     // Picking the default-branch preset surfaces the use-vs-new choice,
-    // defaulting to "new branch from it".
+    // defaulting to "use this branch".
     fireEvent.click(screen.getByTestId('start-point-default-branch'));
     expect(screen.getByTestId('branch-mode')).toBeInTheDocument();
-    expect(screen.getByTestId('branch-mode-new')).toBeChecked();
-    expect(screen.getByTestId('branch-mode-use')).not.toBeChecked();
+    expect(screen.getByTestId('branch-mode-use')).toBeChecked();
+    expect(screen.getByTestId('branch-mode-new')).not.toBeChecked();
   });
 
-  it('emits use_remote_branch when "use this branch" is chosen', async () => {
+  it('emits remote_branch when "new branch from it" is chosen', async () => {
     useComposerStore.setState({
       newSessionWorkdir: MOCK_GIT_REPO_ROOT,
       newSessionWorktreeEnabled: true,
     });
     renderOptions();
 
+    // Picking a branch start-point lands on `use_remote_branch` (the new
+    // default).
     fireEvent.click(await screen.findByTestId('start-point-default-branch'));
     expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
-      kind: 'remote_branch',
+      kind: 'use_remote_branch',
       name: 'main',
     });
 
-    fireEvent.click(screen.getByTestId('branch-mode-use'));
+    // Switching to "new branch from it" flips the kind.
+    fireEvent.click(screen.getByTestId('branch-mode-new'));
     expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
-      kind: 'use_remote_branch',
+      kind: 'remote_branch',
       name: 'main',
     });
   });
@@ -214,6 +260,29 @@ describe('WorktreeOptions', () => {
     fireEvent.click(develop);
     expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
       kind: 'use_remote_branch',
+      name: 'develop',
+    });
+  });
+
+  it('preserves the new-branch mode when switching the branch', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: MOCK_GIT_REPO_ROOT,
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: { kind: 'remote_branch', name: 'main' },
+    });
+    renderOptions();
+
+    // The explicit "new branch from it" mode reads as selected.
+    await screen.findByTestId('branch-mode-new');
+    expect(screen.getByTestId('branch-mode-new')).toBeChecked();
+
+    // Switching to "other" and picking another branch keeps the new-branch
+    // mode (the orthogonal use-vs-new state survives the start-point switch).
+    fireEvent.click(screen.getByTestId('start-point-other'));
+    const develop = await screen.findByTestId('remote-branch-develop');
+    fireEvent.click(develop);
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'remote_branch',
       name: 'develop',
     });
   });

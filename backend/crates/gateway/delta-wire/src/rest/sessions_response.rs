@@ -60,6 +60,7 @@ mod tests {
                 created_at: "2026-01-01T00:00:00Z".into(),
                 branch_at_launch: None,
                 repo_root: None,
+                requested_workdir: None,
             },
             open: true,
             main_thread_id: ThreadId(1),

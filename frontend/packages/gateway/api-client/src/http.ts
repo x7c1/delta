@@ -1,6 +1,7 @@
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   CreateLaunchOptionRequest,
+  CreateRepositoryScanRootRequest,
   CreateSendRequest,
   GitBranchesResponse,
   GitRepoResponse,
@@ -10,8 +11,12 @@ import type {
   NewSessionResponse,
   PermissionDecision,
   PermissionDecisionRequest,
+  PullRequestsResponse,
   QuestionAnswerRequest,
   QuestionCancelRequest,
+  RepositoriesResponse,
+  RepositoryScanRoot,
+  RepositoryScanRootsResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -21,6 +26,9 @@ import type {
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
+
+/** The two PR-list lenses backed by the `gh search`-powered endpoint. */
+export type PullRequestLens = 'reviewer' | 'author';
 
 /**
  * The single place in the codebase where `fetch` is allowed. All REST calls to
@@ -56,12 +64,17 @@ export interface ApiClientOptions {
  * already been dispatched into the pane, matched a transcript line, or was
  * already cancelled, or never existed). Callers treat it as benign and let the
  * pending strip reconcile from the next refetch.
+ *
+ * `scan_root_duplicate` means a repository scan root was registered twice with
+ * the same path. The Settings dialog shows an inline "already registered" hint
+ * on this code instead of a generic failure toast.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
   | 'permission_not_pending'
   | 'question_not_pending'
-  | 'send_not_cancellable';
+  | 'send_not_cancellable'
+  | 'scan_root_duplicate';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -335,6 +348,39 @@ export class ApiClient {
   }
 
   /**
+   * `GET /api/repositories` — registered repositories for the new-session
+   * Repository tab, most-recently-active first. Each entry bundles its
+   * known clones (one per `(repo_root, requested_workdir)` pair) under a
+   * single identity key derived from the repo's `origin` URL. Clones
+   * whose path no longer exists on disk are filtered out server-side.
+   */
+  getRepositories(): Promise<RepositoriesResponse> {
+    return this.request<RepositoriesResponse>('/api/repositories');
+  }
+
+  /**
+   * `GET /api/prs?lens=…` — open pull requests for the new-session PR
+   * tab, one of two lenses:
+   *
+   * - `reviewer` — open PRs that requested the authenticated user's
+   *   review, drafts excluded;
+   * - `author` — open PRs the authenticated user authored, drafts
+   *   included.
+   *
+   * The server reports `gh_available: false` when the `gh` CLI is not
+   * installed or `gh auth status` fails, so a host without gh still
+   * returns 200 with an empty list — the PR tab renders an inline
+   * "run `gh auth login`" hint rather than treating it as an error.
+   * Each row carries `has_local_clone` derived by the use case so the
+   * UI can gate the click → composer pre-fill.
+   */
+  getPullRequests(lens: PullRequestLens): Promise<PullRequestsResponse> {
+    return this.request<PullRequestsResponse>(
+      `/api/prs?lens=${encodeURIComponent(lens)}`,
+    );
+  }
+
+  /**
    * `GET /api/workdir/git` — whether a directory is inside a git repository.
    * `repo_root` is `null` when it is not, and `default_branch` carries the
    * repository's default branch short name when known. Computed without any
@@ -409,4 +455,60 @@ export class ApiClient {
       method: 'DELETE',
     });
   }
+
+  /**
+   * `GET /api/repository-scan-roots` — registered repository scan roots,
+   * newest first. Each scan root is a parent directory whose direct children
+   * the Repository tab probes for git clones on every refetch, surfacing
+   * clones the user has not yet started a session in.
+   */
+  getRepositoryScanRoots(): Promise<RepositoryScanRootsResponse> {
+    return this.request<RepositoryScanRootsResponse>('/api/repository-scan-roots');
+  }
+
+  /**
+   * `POST /api/repository-scan-roots` — register a new scan root. `path` must
+   * be a non-blank absolute path. The server trims a trailing slash. A
+   * duplicate path is a `409` with code `scan_root_duplicate`, surfaced as
+   * {@link ApiError} so the Settings dialog can show an inline hint.
+   */
+  createRepositoryScanRoot(
+    body: CreateRepositoryScanRootRequest,
+  ): Promise<RepositoryScanRoot> {
+    return this.request<RepositoryScanRoot>('/api/repository-scan-roots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `DELETE /api/repository-scan-roots/{path_b64}` — unregister a scan root
+   * (204). The registered path is URL-safe base64-encoded into the path
+   * segment so its embedded `/` characters survive routing. Deleting an
+   * unknown path is a no-op, so this is idempotent.
+   */
+  deleteRepositoryScanRoot(path: string): Promise<void> {
+    return this.requestNoContent(
+      `/api/repository-scan-roots/${encodeBase64Url(path)}`,
+      { method: 'DELETE' },
+    );
+  }
+}
+
+/**
+ * Encode `value` as URL-safe base64 (RFC 4648 §5), no padding. Used to wrap
+ * the registered scan-root path in the DELETE path segment without `%2F`
+ * escaping its embedded slashes. The implementation is small enough to inline
+ * rather than pull in a dependency.
+ */
+function encodeBase64Url(value: string): string {
+  // `btoa` only accepts Latin-1; encode the UTF-8 bytes first, then re-decode
+  // each as a Latin-1 code point so `btoa` reads exactly the original bytes.
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

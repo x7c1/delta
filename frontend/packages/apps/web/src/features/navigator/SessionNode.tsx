@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type Ref } from 'react';
-import type { ThreadId } from '@delta/model';
+import { displayBranch, type ThreadId } from '@delta/model';
 import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
@@ -133,8 +133,13 @@ export function SessionNode({
   // Line 1: the local branch checked out in the launch directory at spawn time,
   // captured once by the backend on `insert_spawning_session`. Falls back to
   // the session label for sessions launched outside a git repo (or that
-  // predate the snapshot — older databases store NULL).
+  // predate the snapshot — older databases store NULL). A delta-managed
+  // `delta-<uuid>` branch shortens for display (the prefix is noise inside
+  // delta and the 36-char UUID is unreadable); any other name passes through
+  // unchanged. The full original name stays on the hover `title`.
   const branchAtLaunch = item.session.branch_at_launch;
+  const branchDisplay =
+    branchAtLaunch === null ? null : displayBranch(branchAtLaunch);
   // Line 2 left: the basename of the repository root captured at spawn time,
   // falling back to the cwd basename so a session launched outside a repo
   // still identifies its working directory. `repoFull` carries the full path
@@ -233,7 +238,7 @@ export function SessionNode({
                 title={branchAtLaunch ?? label}
                 data-testid="session-branch"
               >
-                {branchAtLaunch ?? label}
+                {branchDisplay ?? label}
               </span>
               {running && (
                 // Compact: the rotating circle alone reads as "processing". The

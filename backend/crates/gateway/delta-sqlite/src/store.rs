@@ -11,7 +11,10 @@ use delta_model::{
     LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, PromptId, Role, Send,
     SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
-use delta_usecase::{NewSession, RecentWorkdir, SessionPageCursor, SessionPageRow, SessionStore};
+use delta_usecase::{
+    NewSession, RecentWorkdir, RepositoryCloneRow, RepositoryScanRoot, SessionPageCursor,
+    SessionPageRow, SessionStore,
+};
 
 use crate::content_record::{decode_content, encode_content};
 use crate::error::{Error, Result};
@@ -181,6 +184,7 @@ struct SessionParts {
     created_at: String,
     branch_at_launch: Option<String>,
     repo_root: Option<String>,
+    requested_workdir: Option<String>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -193,6 +197,7 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         created_at: row.get(5)?,
         branch_at_launch: row.get(6)?,
         repo_root: row.get(7)?,
+        requested_workdir: row.get(8)?,
     })
 }
 
@@ -206,6 +211,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         created_at: parts.created_at,
         branch_at_launch: parts.branch_at_launch,
         repo_root: parts.repo_root,
+        requested_workdir: parts.requested_workdir,
     })
 }
 
@@ -215,7 +221,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 /// derivable from `last_activity_at`/`created_at` and not returned.
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
-    let last_activity_at: Option<String> = row.get(8)?;
+    let last_activity_at: Option<String> = row.get(9)?;
     Ok((session, last_activity_at))
 }
 
@@ -314,8 +320,8 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
     }
 }
 
-const SESSION_COLS: &str =
-    "id, cwd, transcript_path, title, status, created_at, branch_at_launch, repo_root";
+const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
+     branch_at_launch, repo_root, requested_workdir";
 /// Thread columns plus the derived `root_message_uuid`: the branch edge's
 /// canonical home is `message.semantic_parent_uuid`, so the root is computed
 /// from the thread's first semantically parented message — falling back to the
@@ -405,6 +411,7 @@ impl SessionStore for SqliteStore {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
@@ -415,9 +422,16 @@ impl SessionStore for SqliteStore {
         conn.execute(
             "INSERT INTO session
              (id, cwd, transcript_path, title, status, created_at,
-              branch_at_launch, repo_root)
-             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5)",
-            params![id.as_str(), cwd, now, branch_at_launch, repo_root],
+              branch_at_launch, repo_root, requested_workdir)
+             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6)",
+            params![
+                id.as_str(),
+                cwd,
+                now,
+                branch_at_launch,
+                repo_root,
+                requested_workdir
+            ],
         )
         .map_err(Error::from)?;
         let main_id = ensure_main_thread(&conn, id, &now)?;
@@ -431,6 +445,7 @@ impl SessionStore for SqliteStore {
                 created_at: now,
                 branch_at_launch: branch_at_launch.map(str::to_owned),
                 repo_root: repo_root.map(str::to_owned),
+                requested_workdir: requested_workdir.map(str::to_owned),
             },
             main_id,
         ))
@@ -568,20 +583,28 @@ impl SessionStore for SqliteStore {
         limit: u32,
     ) -> std::result::Result<Vec<RecentWorkdir>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        // One row per distinct `cwd`, ordered by the most recent activity of any
-        // session that ran in it. Per-session recency is
-        // `COALESCE(last_activity_at, created_at)` — the same denormalized key
-        // the session list uses, read straight from the column rather than
-        // recomputed with a correlated `MAX(message.created_at)` subquery — and
-        // a cwd's recency is the max of that across its sessions. ISO-8601 UTC
-        // text compares correctly as time, so no datetime casting is needed.
+        // One row per distinct workdir, ordered by the most recent activity of
+        // any session that ran in it. The grouping key is
+        // `COALESCE(requested_workdir, cwd)`: a worktree-on spawn stores the
+        // user-selected dir in `requested_workdir` and the auto-generated
+        // worktree path in `cwd`, so coalescing pulls the user-selected dir to
+        // the surface and the worktree path drops out of Recent. Sessions that
+        // predate `requested_workdir` (the column is additive and NULL for
+        // them) fall back to `cwd`, so legacy history stays visible.
+        //
+        // Per-session recency is `COALESCE(last_activity_at, created_at)` — the
+        // same denormalized key the session list uses, read straight from the
+        // column rather than recomputed with a correlated
+        // `MAX(message.created_at)` subquery — and a workdir's recency is the
+        // max of that across its sessions. ISO-8601 UTC text compares correctly
+        // as time, so no datetime casting is needed.
         let mut stmt = conn
             .prepare(
-                "SELECT s.cwd, \
+                "SELECT COALESCE(s.requested_workdir, s.cwd) AS workdir, \
                         MAX(COALESCE(s.last_activity_at, s.created_at)) AS recency \
                  FROM session s \
-                 GROUP BY s.cwd \
-                 ORDER BY recency DESC, s.cwd ASC \
+                 GROUP BY workdir \
+                 ORDER BY recency DESC, workdir ASC \
                  LIMIT ?1",
             )
             .map_err(Error::from)?;
@@ -589,6 +612,106 @@ impl SessionStore for SqliteStore {
             .query_map(params![limit], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
             })
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)?);
+        }
+        Ok(out)
+    }
+
+    async fn repository_clone_rows(
+        &self,
+        worktree_base: &str,
+        active_repo_limit: i64,
+        user_clone_limit: i64,
+        generated_clone_limit: i64,
+    ) -> std::result::Result<Vec<RepositoryCloneRow>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // One row per `(repo_root, clone_path)` pair, drawn from sessions with
+        // a non-null repo_root, then bounded by per-repo and per-kind caps so
+        // the Repository tab cannot grow without limit as new worktree-on
+        // spawns are recorded.
+        //
+        // The CTE pipeline runs in four steps:
+        //
+        // 1. `ranked` — coalesce `requested_workdir` with `cwd` so
+        //    worktree-managed cwds do not leak in, classify each row as
+        //    `generated` (lies under `worktree_base + '/'`) or `user`
+        //    otherwise, and pick the most-recent session per
+        //    `(repo_root, clone_path)` pair via `ROW_NUMBER()`. SQLite has
+        //    supported window functions since 3.25 (2018), well below the
+        //    minimum the rest of the store assumes.
+        // 2. `latest` — keep only `rn = 1` from `ranked`: one row per pair,
+        //    carrying its `branch_at_launch` and the max recency at that pair.
+        // 3. `active_roots` — take the top `?2` `repo_root`s by their max
+        //    recency across `latest`. Older repos drop wholesale; they are
+        //    unlikely to be a useful start point for a new session.
+        // 4. `windowed` — within each retained `repo_root`, rank by `kind`
+        //    (user / generated) and keep at most `?3` user paths and `?4`
+        //    generated paths. Separate caps keep a burst of disposable
+        //    worktrees from squeezing out user-meaningful clones.
+        //
+        // ISO-8601 UTC text compares correctly as time, so no datetime
+        // casting is needed for the recency key. The `LIKE ?1 || '/%'`
+        // classifier rejects a clone path that *equals* `worktree_base` so
+        // a stray top-level entry is not misclassified as generated.
+        let mut stmt = conn
+            .prepare(
+                "WITH ranked AS (
+                  SELECT s.repo_root,
+                         COALESCE(s.requested_workdir, s.cwd) AS clone_path,
+                         s.branch_at_launch,
+                         COALESCE(s.last_activity_at, s.created_at) AS recency,
+                         CASE WHEN COALESCE(s.requested_workdir, s.cwd) LIKE ?1 || '/%' THEN 'generated' ELSE 'user' END AS kind,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY s.repo_root, COALESCE(s.requested_workdir, s.cwd)
+                           ORDER BY COALESCE(s.last_activity_at, s.created_at) DESC, s.id DESC
+                         ) AS rn
+                  FROM session s
+                  WHERE s.repo_root IS NOT NULL
+                ),
+                latest AS (SELECT * FROM ranked WHERE rn = 1),
+                active_roots AS (
+                  SELECT repo_root
+                  FROM latest
+                  GROUP BY repo_root
+                  ORDER BY MAX(recency) DESC, repo_root ASC
+                  LIMIT ?2
+                ),
+                windowed AS (
+                  SELECT l.*,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY l.repo_root, l.kind
+                      ORDER BY l.recency DESC, l.clone_path ASC
+                    ) AS rn_kind
+                  FROM latest l
+                  JOIN active_roots a ON l.repo_root = a.repo_root
+                )
+                SELECT repo_root, clone_path, recency AS last_opened_at, branch_at_launch
+                FROM windowed
+                WHERE (kind = 'user'      AND rn_kind <= ?3)
+                   OR (kind = 'generated' AND rn_kind <= ?4)
+                ORDER BY recency DESC, repo_root ASC, clone_path ASC",
+            )
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(
+                params![
+                    worktree_base,
+                    active_repo_limit,
+                    user_clone_limit,
+                    generated_clone_limit,
+                ],
+                |row| {
+                    Ok(RepositoryCloneRow {
+                        repo_root: row.get::<_, String>(0)?,
+                        clone_path: row.get::<_, String>(1)?,
+                        last_opened_at: row.get::<_, Option<String>>(2)?,
+                        last_branch: row.get::<_, Option<String>>(3)?,
+                    })
+                },
+            )
             .map_err(Error::from)?;
         let mut out = Vec::new();
         for row in rows {
@@ -1349,6 +1472,78 @@ impl SessionStore for SqliteStore {
         let conn = self.conn.lock().await;
         conn.execute("DELETE FROM launch_option WHERE id = ?1", params![id])
             .map_err(Error::from)?;
+        Ok(())
+    }
+
+    async fn list_repository_scan_roots(
+        &self,
+    ) -> std::result::Result<Vec<RepositoryScanRoot>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Newest first: the most recently added scan root is the one a user is
+        // most likely to be looking for in the Settings list (mirroring
+        // `list_launch_options`).
+        let mut stmt = conn
+            .prepare(
+                "SELECT path, created_at FROM repository_scan_root \
+                 ORDER BY created_at DESC, path ASC",
+            )
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(RepositoryScanRoot {
+                    path: row.get::<_, String>(0)?,
+                    created_at: row.get::<_, String>(1)?,
+                })
+            })
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)?);
+        }
+        Ok(out)
+    }
+
+    async fn insert_repository_scan_root(
+        &self,
+        path: &str,
+    ) -> std::result::Result<RepositoryScanRoot, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        let inserted = conn.execute(
+            "INSERT INTO repository_scan_root (path, created_at) VALUES (?1, ?2)",
+            params![path, now],
+        );
+        match inserted {
+            Ok(_) => Ok(RepositoryScanRoot {
+                path: path.to_owned(),
+                created_at: now,
+            }),
+            // The PRIMARY KEY constraint is the conflict gate: surface duplicates
+            // as a typed use-case error so the HTTP layer can map them to 409
+            // without parsing the generic store-error string.
+            Err(rusqlite::Error::SqliteFailure(err, _))
+                if err.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                Err(delta_usecase::Error::RepositoryScanRootDuplicate(
+                    path.to_owned(),
+                ))
+            }
+            Err(err) => Err(Error::from(err).into()),
+        }
+    }
+
+    async fn delete_repository_scan_root(
+        &self,
+        path: &str,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Idempotent: an explicit Remove click should not 404 on a path the user
+        // just removed via another tab; the row is gone either way after the call.
+        conn.execute(
+            "DELETE FROM repository_scan_root WHERE path = ?1",
+            params![path],
+        )
+        .map_err(Error::from)?;
         Ok(())
     }
 }

@@ -69,6 +69,27 @@ pub fn router(state: AppState) -> Router {
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))
+        // Registered repositories for the new-session Repository tab: every
+        // distinct repo Delta has launched a session under, with its known
+        // clones bundled by origin URL and ordered by recency.
+        .route("/api/repositories", get(api::list_repositories))
+        // Repository scan roots: parent directories whose direct children
+        // every `/api/repositories` call probes for git clones, surfacing
+        // clones the user has never launched a session in (the umbrella-
+        // session pattern). The registered path is URL-safe base64 in the
+        // DELETE path segment so its embedded `/` characters survive routing.
+        .route(
+            "/api/repository-scan-roots",
+            get(api::list_repository_scan_roots).post(api::create_repository_scan_root),
+        )
+        .route(
+            "/api/repository-scan-roots/{path_b64}",
+            axum::routing::delete(api::delete_repository_scan_root),
+        )
+        // Pull requests for the new-session PR tab (per lens): drives
+        // `gh search prs` through the gh CLI gateway and tags each row
+        // with whether Delta has a local clone of the PR's repo.
+        .route("/api/prs", get(api::list_pull_requests))
         // Git detection for the worktree-at-start option (read-only): is the
         // selected directory a git repo, and what remote branches can a worktree
         // be based on.
@@ -220,6 +241,140 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// Build a `test_state()` whose gh CLI is stubbed to report
+    /// "unavailable", so the PR-route smoke tests are independent of
+    /// whether `gh` happens to be installed on the test host.
+    fn test_state_with_unavailable_gh() -> AppState {
+        // Mirror `test_state()`'s config exactly, then override the
+        // wired Interactor's gh driver with a deterministic stub.
+        use std::sync::Arc;
+
+        struct UnavailableGh;
+        #[async_trait::async_trait]
+        impl delta_usecase::GhCli for UnavailableGh {
+            async fn is_authenticated(&self) -> bool {
+                false
+            }
+            async fn search_prs(
+                &self,
+                _lens: delta_usecase::PullRequestLens,
+            ) -> delta_usecase::Result<Vec<delta_usecase::PullRequest>> {
+                Ok(Vec::new())
+            }
+        }
+        let config = delta_bootstrap::Config {
+            database_path: ":memory:".into(),
+            session_workdir_base: "/tmp/delta-test-session".into(),
+            worktree_base: "/tmp/delta-test-worktrees".into(),
+            tmux_socket: "delta-test".into(),
+            port: 7878,
+            launch: delta_usecase::LaunchConfig::default(),
+        };
+        let interactor = delta_bootstrap::build(&config)
+            .unwrap()
+            .with_gh_cli(Arc::new(UnavailableGh) as Arc<dyn delta_usecase::GhCli>);
+        AppState::from_interactor(interactor, &config.tmux_socket)
+    }
+
+    #[tokio::test]
+    async fn prs_returns_empty_with_gh_unavailable() {
+        // With the gh stub answering "unavailable", the route must
+        // return 200 + `{gh_available: false, pull_requests: []}` —
+        // the PR tab degrades gracefully on a host with no gh.
+        let response = router(test_state_with_unavailable_gh())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs?lens=reviewer")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["gh_available"], false);
+        assert_eq!(body["pull_requests"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn prs_accepts_the_author_lens_too() {
+        // Same fallback path, exercised through the author lens, so a
+        // typo in the per-lens dispatch fails this test loudly.
+        let response = router(test_state_with_unavailable_gh())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs?lens=author")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["gh_available"], false);
+    }
+
+    #[tokio::test]
+    async fn prs_rejects_an_unknown_lens_with_400() {
+        // The router test does not script `gh`, so we cannot make the
+        // happy path deterministic here without coupling to the host's
+        // installed gh. Lens validation, however, fails before the use
+        // case runs and is a pure router check — assert that.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs?lens=everyone")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn prs_rejects_a_missing_lens_with_400() {
+        // axum's query extractor rejects a missing required field with
+        // 400, so the handler does not have to special-case it.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/prs")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn repositories_returns_an_empty_list_when_no_sessions() {
+        // No sessions registered yet → no repositories. The endpoint
+        // replies with `{ repositories: [] }`, not 404.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/repositories")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body["repositories"].as_array().unwrap().len(),
+            0,
+            "no sessions = no repositories"
+        );
+    }
+
     #[tokio::test]
     async fn workdir_recent_returns_an_empty_list_when_no_sessions() {
         let response = router(test_state())
@@ -348,6 +503,145 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn repository_scan_roots_round_trip_create_list_delete() {
+        let state = test_state();
+        let app = router(state);
+
+        // Empty on a fresh store.
+        let list = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/repository-scan-roots")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(list.status(), StatusCode::OK);
+        let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["scan_roots"].as_array().unwrap().len(), 0);
+
+        // Register one root.
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/repository-scan-roots")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"/home/dev/projects/"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::CREATED);
+        let bytes = to_bytes(create.into_body(), usize::MAX).await.unwrap();
+        let created: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        // Trailing slash is trimmed for canonicalisation.
+        assert_eq!(created["path"], "/home/dev/projects");
+
+        // Listed.
+        let list = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/repository-scan-roots")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["scan_roots"].as_array().unwrap().len(), 1);
+        assert_eq!(body["scan_roots"][0]["path"], "/home/dev/projects");
+
+        // Duplicate is a 409 with the stable error code.
+        let dup = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/repository-scan-roots")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"/home/dev/projects"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dup.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(dup.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], "scan_root_duplicate");
+
+        // Delete via the base64 path token.
+        let token = crate::api::repository_scan_root_path::encode("/home/dev/projects");
+        let delete = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/repository-scan-roots/{token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+
+        // The list is empty again.
+        let list = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/repository-scan-roots")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["scan_roots"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn create_repository_scan_root_rejects_a_non_absolute_path() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/repository-scan-roots")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"relative/path"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn delete_unknown_repository_scan_root_is_idempotent() {
+        // No registration first. The DELETE replies 204 anyway: a Settings
+        // dialog click on an unknown path is the user's intent ("ensure gone"),
+        // not a precondition.
+        let token = crate::api::repository_scan_root_path::encode("/never/registered");
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!("/api/repository-scan-roots/{token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]

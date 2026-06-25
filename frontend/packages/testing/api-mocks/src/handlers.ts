@@ -1,8 +1,11 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   CreateLaunchOptionRequest,
+  CreateRepositoryScanRootRequest,
   LaunchOption,
   LaunchOptionsResponse,
+  RepositoryScanRoot,
+  RepositoryScanRootsResponse,
   UpdateLaunchOptionRequest,
   MessagesResponse,
   PendingPermission,
@@ -21,6 +24,8 @@ import type {
   ThreadsResponse,
   GitBranchesResponse,
   GitRepoResponse,
+  PullRequestsResponse,
+  RepositoriesResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
   Turn,
@@ -31,6 +36,9 @@ import {
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
   recentWorkdirs,
+  mockAuthorPullRequests,
+  mockRepositories,
+  mockReviewerPullRequests,
   seedData,
   SESSIONS_PAGE_SIZE,
   workdirListing,
@@ -40,6 +48,29 @@ import {
 /** Discriminate a `POST /api/sends` body: new-session spawn vs thread target. */
 function isNewSessionSend(body: SendRequest): body is SendToNewSession {
   return 'new_session' in body && body.new_session === true;
+}
+
+/**
+ * Decode a URL-safe base64 token used by the scan-root DELETE path segment,
+ * mirroring the server-side decoder. Returns `null` for any non-base64url
+ * byte or invalid UTF-8. The implementation uses `atob` after re-padding and
+ * substituting the URL-safe variants.
+ */
+function decodeBase64Url(token: string): string | null {
+  // Restore the standard base64 alphabet and re-pad to a multiple of 4 so
+  // `atob` can parse it.
+  const base64 = token.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -447,6 +478,45 @@ export function createMockApi(): MockApi {
       return HttpResponse.json(responseBody);
     }),
 
+    // Registered repositories for the Repository tab. Mirrors the real
+    // endpoint's shape; the default list seeds two entries (one
+    // origin-deduplicated repo with two clones, one path-keyed single
+    // clone) so the picker's clone-expansion + path-key affordance are
+    // exercisable.
+    http.get('*/api/repositories', () => {
+      const responseBody: RepositoriesResponse = {
+        repositories: mockRepositories(),
+      };
+      return HttpResponse.json(responseBody);
+    }),
+
+    // Pull requests for the PR tab. Each lens carries its own canned
+    // list (the reviewer fixture pairs a clone-having row with a
+    // no-clone row so the "silently blocked + inline hint" path is
+    // exercisable; the author fixture seeds one of the user's own
+    // drafts). An unknown lens is a 400, mirroring the server.
+    http.get('*/api/prs', ({ request }) => {
+      const url = new URL(request.url);
+      const lens = url.searchParams.get('lens');
+      const pull_requests =
+        lens === 'reviewer'
+          ? mockReviewerPullRequests()
+          : lens === 'author'
+            ? mockAuthorPullRequests()
+            : null;
+      if (pull_requests === null) {
+        return HttpResponse.json(
+          { error: `unknown lens '${lens ?? ''}'` },
+          { status: 400 },
+        );
+      }
+      const responseBody: PullRequestsResponse = {
+        gh_available: true,
+        pull_requests,
+      };
+      return HttpResponse.json(responseBody);
+    }),
+
     // Whether the queried directory is a git repository, for the new-session
     // worktree option. Like the real endpoint this never errors: a non-git path
     // reports `repo_root: null`. A path under the mock repo reports its root and
@@ -528,6 +598,67 @@ export function createMockApi(): MockApi {
       const id = Number(params.id);
       // Deleting an unknown id is a no-op (idempotent), like the real server.
       store.launchOptions = store.launchOptions.filter((o) => o.id !== id);
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // Repository scan roots: list, create, delete. The mock reproduces the
+    // real server's contract — newest-first ordering, trailing-slash trim,
+    // duplicate-path 409 with the stable `scan_root_duplicate` code, and an
+    // idempotent delete on an unknown path.
+    http.get('*/api/repository-scan-roots', () => {
+      const scan_roots = [...store.repositoryScanRoots].sort((a, b) =>
+        b.created_at.localeCompare(a.created_at) || a.path.localeCompare(b.path),
+      );
+      const body: RepositoryScanRootsResponse = {
+        scan_roots: scan_roots.map((root) => ({ path: root.path })),
+      };
+      return HttpResponse.json(body);
+    }),
+
+    http.post('*/api/repository-scan-roots', async ({ request }) => {
+      const payload = (await request.json()) as CreateRepositoryScanRootRequest;
+      const rawPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
+      const canonical = rawPath.replace(/\/+$/, '') || (rawPath ? '/' : '');
+      if (canonical.length === 0) {
+        return HttpResponse.json(
+          { error: 'a scan root must have a non-blank `path`' },
+          { status: 400 },
+        );
+      }
+      if (!canonical.startsWith('/')) {
+        return HttpResponse.json(
+          { error: 'a scan root `path` must be absolute (start with `/`)' },
+          { status: 400 },
+        );
+      }
+      if (store.repositoryScanRoots.some((r) => r.path === canonical)) {
+        return HttpResponse.json(
+          { error: `scan root already registered: ${canonical}`, code: 'scan_root_duplicate' },
+          { status: 409 },
+        );
+      }
+      store.repositoryScanRoots.push({
+        path: canonical,
+        // Stored only for the newest-first list ordering; stripped from the wire.
+        created_at: new Date().toISOString(),
+      });
+      const row: RepositoryScanRoot = { path: canonical };
+      return HttpResponse.json(row, { status: 201 });
+    }),
+
+    http.delete('*/api/repository-scan-roots/:path_b64', ({ params }) => {
+      const token = String(params.path_b64 ?? '');
+      const decoded = decodeBase64Url(token);
+      if (decoded === null) {
+        return HttpResponse.json(
+          { error: 'malformed scan-root path token' },
+          { status: 400 },
+        );
+      }
+      // Idempotent: an unknown path is still a 204.
+      store.repositoryScanRoots = store.repositoryScanRoots.filter(
+        (r) => r.path !== decoded,
+      );
       return new HttpResponse(null, { status: 204 });
     }),
   ];

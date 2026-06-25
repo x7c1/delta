@@ -191,13 +191,13 @@ test('starting a new session shows the optimistic send', async ({ page }) => {
   await useManualEventControl(page);
   await page.goto('/');
 
-  // Enter the new-session composer state. A directory must be chosen before the
-  // first message can be sent, so the picker opens automatically — pick the
-  // default browsed directory and confirm.
+  // Enter the new-session composer state. Phase B retired the auto-opened
+  // modal; the Directory tab's inline picker now commits the workdir on
+  // a row click — no Select button to chase.
   await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.getByTestId('new-session-tab-directory').click();
   await page.getByTestId('workdir-use-current').click();
-  await page.getByTestId('workdir-confirm').click();
-  await expect(page.getByTestId('new-session-empty')).toBeVisible();
+  await expect(page.getByTestId('workdir-chip')).toBeVisible();
 
   // The first Send is shown optimistically in the pending queue.
   await page.getByRole('textbox').fill('hello new session');

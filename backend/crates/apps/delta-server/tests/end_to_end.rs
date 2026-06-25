@@ -181,6 +181,10 @@ impl GitWorktree for NoopGitWorktree {
         Ok(None)
     }
 
+    async fn origin_url(&self, _path: &str) -> delta_usecase::Result<Option<String>> {
+        Ok(None)
+    }
+
     async fn fetch_remote_branches(
         &self,
         _repo_root: &str,

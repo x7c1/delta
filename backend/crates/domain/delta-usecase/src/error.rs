@@ -65,6 +65,12 @@ pub enum Error {
     #[error("send {0} is not cancellable")]
     SendNotCancellable(i64),
 
+    /// A repository scan root was registered twice with the same path. Surfaced
+    /// as `409` so the Settings dialog can show an inline "already registered"
+    /// hint without a generic failure toast.
+    #[error("scan root already registered: {0}")]
+    RepositoryScanRootDuplicate(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),
@@ -86,6 +92,13 @@ pub enum Error {
     /// errored.
     #[error("git error: {0}")]
     Git(String),
+
+    /// A `gh` CLI invocation failed despite the gateway reporting gh as
+    /// authenticated. Surfaced as `500`. Missing/unauthenticated gh is
+    /// NOT routed here — it is reported via the use case's
+    /// `gh_available: false` flag so the PR tab degrades gracefully.
+    #[error("gh error: {0}")]
+    Gh(String),
 
     /// A transcript read/parse failure.
     #[error("transcript error: {0}")]

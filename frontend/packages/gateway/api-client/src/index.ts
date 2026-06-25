@@ -3,6 +3,7 @@ export {
   ApiError,
   type ApiClientOptions,
   type ApiErrorCode,
+  type PullRequestLens,
 } from './http';
 export {
   EventEmitter,
@@ -35,12 +36,17 @@ export {
   useWorkdirListQuery,
   useHomeDirQuery,
   useRecentWorkdirsQuery,
+  useRepositoriesQuery,
+  usePullRequestsQuery,
   useGitRepoInfoQuery,
   useGitBranchesQuery,
   useLaunchOptionsQuery,
   useCreateLaunchOptionMutation,
   useUpdateLaunchOptionMutation,
   useDeleteLaunchOptionMutation,
+  useRepositoryScanRootsQuery,
+  useAddRepositoryScanRootMutation,
+  useRemoveRepositoryScanRootMutation,
 } from './query-hooks';
 export {
   appendMessage,

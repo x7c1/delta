@@ -24,9 +24,12 @@ pub use delta_sqlite::Error as StoreError;
 // the use-case crate directly.
 pub use delta_usecase::LaunchConfig;
 
+use std::sync::Arc;
+
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{BoxedInteractor, Interactor};
+use delta_usecase::{BoxedInteractor, GhCli, Interactor};
+use gh_cli::Gh;
 use git_worktree::Git;
 use tmux_driver::Tmux;
 use workspace_fs::FsWorkspace;
@@ -109,6 +112,7 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
     let tmux = Tmux::new(config.tmux_socket.clone());
     let workspace = FsWorkspace::new();
     let git_worktree = Git::new();
+    let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -120,7 +124,8 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
         config.session_settings_json(),
         config.session_settings_path(),
     )
-    .with_launch_config(config.launch.clone()))
+    .with_launch_config(config.launch.clone())
+    .with_gh_cli(gh_cli))
 }
 
 #[cfg(test)]

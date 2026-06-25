@@ -28,6 +28,38 @@ pub type SessionPageRow = (Session, Option<String>);
 /// separate working-directory history.
 pub type RecentWorkdir = (String, Option<String>);
 
+/// One row of the Repository tab's aggregation: a single `(repo_root, clone)`
+/// pair drawn from the session history, carrying enough state for the
+/// interactor to bundle clones into repositories.
+///
+/// - `repo_root`: the repository root the clone lives under. Sessions launched
+///   outside any git repo (no `session.repo_root`) never contribute — the
+///   Repository tab is by definition a list of git repositories.
+/// - `clone_path`: the dir the user picked at spawn time
+///   (`session.requested_workdir`, falling back to `session.cwd` for sessions
+///   that predate that column).
+/// - `last_opened_at`: the most recent activity at this `(repo_root, clone)`
+///   pair — `MAX(COALESCE(last_activity_at, created_at))` over its sessions.
+/// - `last_branch`: the `branch_at_launch` of the latest session at this pair,
+///   when one was recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryCloneRow {
+    pub repo_root: String,
+    pub clone_path: String,
+    pub last_opened_at: Option<String>,
+    pub last_branch: Option<String>,
+}
+
+/// One registered repository scan root: a parent directory whose direct children
+/// the Repository tab probes for git clones on every list call. Session-independent
+/// (no foreign key, never cascaded), so a scan root outlives any individual
+/// session and is only ever rewritten through the dedicated CRUD endpoints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryScanRoot {
+    pub path: String,
+    pub created_at: String,
+}
+
 /// Persists and queries Delta's thread overlay.
 ///
 /// This is the irreplaceable data: thread assignment, the semantic-parent
@@ -59,12 +91,20 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// repository (or HEAD is detached). They are persisted once here and
     /// never updated later: see [`Session::branch_at_launch`] /
     /// [`Session::repo_root`] for the spawn-snapshot semantics.
+    ///
+    /// `requested_workdir` is the dir the user picked before any worktree
+    /// resolution. It is `None` when no workdir was selected (the default
+    /// per-token scratch dir is used). For a worktree-on spawn it holds the
+    /// user-selected dir (the worktree's repo root), while `cwd` holds the
+    /// auto-generated worktree path; for a plain spawn with a user-selected
+    /// workdir it equals `cwd`. See [`Session::requested_workdir`].
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
@@ -117,6 +157,61 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// reflects when it was last actually worked in. Each row carries that
     /// recency timestamp for display.
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>>;
+
+    /// One row per `(repo_root, clone_path)` pair in the session history, for
+    /// the Repository tab.
+    ///
+    /// Drawn from `session` rows with a non-null `repo_root` (sessions outside
+    /// any git repo do not contribute); the clone path is
+    /// `COALESCE(requested_workdir, cwd)` so worktree-managed cwds do not leak
+    /// in. Each row carries the most recent activity at that pair (the
+    /// `MAX(COALESCE(last_activity_at, created_at))` of its sessions) and the
+    /// `branch_at_launch` of the latest such session.
+    ///
+    /// The result set is bounded by three caps to keep the Repository tab from
+    /// growing without limit as new worktree-on spawns are recorded:
+    ///
+    /// - `worktree_base`: absolute path of `$DELTA_WORKTREE_BASE`. A clone
+    ///   path is classified as **generated** when it lies under
+    ///   `worktree_base` (matched as a `<base>/<child>` prefix — i.e. the path
+    ///   begins with `worktree_base + "/"`), and **user** otherwise.
+    /// - `active_repo_limit`: only the top-N most-recently-active
+    ///   `repo_root`s pass; the rest drop wholesale.
+    /// - `user_clone_limit`: per `repo_root`, cap on user-picked path rows.
+    /// - `generated_clone_limit`: per `repo_root`, cap on machine-generated
+    ///   (under-`worktree_base`) path rows. Kept separate from the user cap so
+    ///   a burst of disposable worktrees cannot squeeze out user-meaningful
+    ///   clones (the main tree, manual sibling clones).
+    ///
+    /// Ordering: most-recent first by `last_opened_at`, then by `repo_root`
+    /// ASC and `clone_path` ASC for determinism. The interactor de-dups by
+    /// `clone_path` again after grouping (the same path can appear under
+    /// different `repo_root`s for the same upstream).
+    async fn repository_clone_rows(
+        &self,
+        worktree_base: &str,
+        active_repo_limit: i64,
+        user_clone_limit: i64,
+        generated_clone_limit: i64,
+    ) -> Result<Vec<RepositoryCloneRow>>;
+
+    /// The registered repository scan roots, most-recently-added first.
+    ///
+    /// Each row is a parent directory the Repository tab will probe for git
+    /// clones on every list call. The set is small (one entry per parent
+    /// directory the user has registered) so the whole list is returned at once.
+    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>>;
+
+    /// Register a new repository scan root. Returns the created row, or
+    /// [`crate::Error::RepositoryScanRootDuplicate`] when `path` is already
+    /// registered — the PRIMARY KEY constraint is the conflict gate, so callers
+    /// do not need a pre-check.
+    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot>;
+
+    /// Unregister a repository scan root. Deleting an unknown path is a no-op
+    /// (idempotent), so the Settings dialog's explicit Remove click never
+    /// surfaces a 404 noise on a path the user just removed via another tab.
+    async fn delete_repository_scan_root(&self, path: &str) -> Result<()>;
 
     /// Look up a thread by id.
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>>;
@@ -411,9 +506,10 @@ impl SessionStore for Box<dyn SessionStore> {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         (**self)
-            .insert_spawning_session(id, cwd, branch_at_launch, repo_root)
+            .insert_spawning_session(id, cwd, branch_at_launch, repo_root, requested_workdir)
             .await
     }
 
@@ -447,6 +543,35 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>> {
         (**self).recent_workdirs(limit).await
+    }
+
+    async fn repository_clone_rows(
+        &self,
+        worktree_base: &str,
+        active_repo_limit: i64,
+        user_clone_limit: i64,
+        generated_clone_limit: i64,
+    ) -> Result<Vec<RepositoryCloneRow>> {
+        (**self)
+            .repository_clone_rows(
+                worktree_base,
+                active_repo_limit,
+                user_clone_limit,
+                generated_clone_limit,
+            )
+            .await
+    }
+
+    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>> {
+        (**self).list_repository_scan_roots().await
+    }
+
+    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot> {
+        (**self).insert_repository_scan_root(path).await
+    }
+
+    async fn delete_repository_scan_root(&self, path: &str) -> Result<()> {
+        (**self).delete_repository_scan_root(path).await
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {

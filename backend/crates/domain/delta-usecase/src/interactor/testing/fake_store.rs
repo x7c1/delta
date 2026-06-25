@@ -10,8 +10,10 @@ use delta_model::{
     SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
-use crate::error::Result;
-use crate::ports::{NewSession, SessionPageRow, SessionStore};
+use crate::error::{Error, Result};
+use crate::ports::{
+    NewSession, RepositoryCloneRow, RepositoryScanRoot, SessionPageRow, SessionStore,
+};
 use crate::SessionPageCursor;
 
 /// Derive a thread's `root_message_uuid` the way the SQL store does: the
@@ -50,6 +52,7 @@ pub(crate) struct FakeStoreInner {
     /// the `SubagentLaunch` carrying the launching thread plus the optional
     /// `task_id` learned via the `PostToolUse(Agent)` hook.
     pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
+    pub(crate) repository_scan_roots: Vec<RepositoryScanRoot>,
 }
 
 #[derive(Default)]
@@ -94,6 +97,10 @@ impl SessionStore for FakeStore {
             // when this activate path runs.
             branch_at_launch: new.branch_at_launch,
             repo_root: new.repo_root,
+            // Same as the snapshot fields above: external-claude sessions have
+            // no Delta-known launch dir to record. Worktree dirs cannot appear
+            // here because external sessions don't go through worktree spawn.
+            requested_workdir: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -115,6 +122,7 @@ impl SessionStore for FakeStore {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        requested_workdir: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -130,6 +138,7 @@ impl SessionStore for FakeStore {
             created_at: "2026-01-01T00:00:00Z".into(),
             branch_at_launch: branch_at_launch.map(str::to_owned),
             repo_root: repo_root.map(str::to_owned),
+            requested_workdir: requested_workdir.map(str::to_owned),
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -255,10 +264,12 @@ impl SessionStore for FakeStore {
 
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<crate::ports::RecentWorkdir>> {
         let g = self.inner.lock().unwrap();
-        // Per-session recency: latest message, else the session's created_at.
-        // A cwd's recency is the max across its sessions. Then distinct cwds,
-        // most recent first.
-        let mut by_cwd: std::collections::HashMap<String, String> =
+        // Mirror the SQLite query: group on `COALESCE(requested_workdir, cwd)`
+        // so worktree-managed paths drop out and legacy rows still surface by
+        // their `cwd`. Per-session recency is the latest message, else the
+        // session's `created_at`; a workdir's recency is the max across its
+        // sessions.
+        let mut by_workdir: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for s in &g.sessions {
             let recency = g
@@ -268,8 +279,9 @@ impl SessionStore for FakeStore {
                 .filter_map(|m| m.created_at.clone())
                 .max()
                 .unwrap_or_else(|| s.created_at.clone());
-            by_cwd
-                .entry(s.cwd.clone())
+            let workdir = s.requested_workdir.clone().unwrap_or_else(|| s.cwd.clone());
+            by_workdir
+                .entry(workdir)
                 .and_modify(|cur| {
                     if recency > *cur {
                         *cur = recency.clone();
@@ -277,13 +289,150 @@ impl SessionStore for FakeStore {
                 })
                 .or_insert(recency);
         }
-        let mut rows: Vec<(String, Option<String>)> = by_cwd
+        let mut rows: Vec<(String, Option<String>)> = by_workdir
             .into_iter()
-            .map(|(cwd, recency)| (cwd, Some(recency)))
+            .map(|(workdir, recency)| (workdir, Some(recency)))
             .collect();
         rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         rows.truncate(limit as usize);
         Ok(rows)
+    }
+
+    async fn repository_clone_rows(
+        &self,
+        worktree_base: &str,
+        active_repo_limit: i64,
+        user_clone_limit: i64,
+        generated_clone_limit: i64,
+    ) -> Result<Vec<RepositoryCloneRow>> {
+        let g = self.inner.lock().unwrap();
+        // Mirror the SQL pipeline in pure Rust:
+        //
+        // 1. Group all sessions by `(repo_root, clone_path)` and keep the
+        //    newest row per group. Recency is `last_activity_at` (the latest
+        //    message's `created_at`) when set, else the session's `created_at`;
+        //    ties break on insertion order (the fake's proxy for the real
+        //    store's monotonic `id` DESC tie-break).
+        // 2. Compute each `repo_root`'s recency as the max group recency, then
+        //    take the top `active_repo_limit` by `(recency DESC, repo_root
+        //    ASC)`.
+        // 3. Within each retained `repo_root`, classify each row's kind by the
+        //    `worktree_base + "/"` prefix and cap user/generated paths
+        //    separately.
+        // 4. Sort by `(recency DESC, repo_root ASC, clone_path ASC)`, matching
+        //    the SQL ORDER BY.
+        struct Acc {
+            latest_recency: Option<String>,
+            latest_branch: Option<String>,
+            latest_index: i64,
+        }
+        let mut by_pair: std::collections::HashMap<(String, String), Acc> =
+            std::collections::HashMap::new();
+        for (index, s) in g.sessions.iter().enumerate() {
+            let index = index as i64;
+            let Some(repo_root) = &s.repo_root else { continue };
+            let clone_path = s
+                .requested_workdir
+                .clone()
+                .unwrap_or_else(|| s.cwd.clone());
+            let recency = g
+                .messages
+                .iter()
+                .filter(|m| m.session_id == s.id)
+                .filter_map(|m| m.created_at.clone())
+                .max()
+                .or_else(|| Some(s.created_at.clone()));
+            let key = (repo_root.clone(), clone_path);
+            let entry = by_pair.entry(key).or_insert_with(|| Acc {
+                latest_recency: recency.clone(),
+                latest_branch: s.branch_at_launch.clone(),
+                latest_index: index,
+            });
+            let beats = match (&recency, &entry.latest_recency) {
+                (Some(a), Some(b)) if a > b => true,
+                (Some(_), None) => true,
+                (Some(a), Some(b)) if a == b && index > entry.latest_index => true,
+                _ => false,
+            };
+            if beats {
+                entry.latest_recency = recency;
+                entry.latest_branch = s.branch_at_launch.clone();
+                entry.latest_index = index;
+            }
+        }
+
+        // The `latest` row set: one per `(repo_root, clone_path)`.
+        let latest: Vec<RepositoryCloneRow> = by_pair
+            .into_iter()
+            .map(|((repo_root, clone_path), acc)| RepositoryCloneRow {
+                repo_root,
+                clone_path,
+                last_opened_at: acc.latest_recency,
+                last_branch: acc.latest_branch,
+            })
+            .collect();
+
+        // Active repo selection: sort repo_roots by (max recency DESC,
+        // repo_root ASC), keep the top `active_repo_limit`.
+        let mut by_root: std::collections::HashMap<String, Option<String>> =
+            std::collections::HashMap::new();
+        for row in &latest {
+            let entry = by_root.entry(row.repo_root.clone()).or_insert(None);
+            if row.last_opened_at > *entry {
+                *entry = row.last_opened_at.clone();
+            }
+        }
+        let mut root_recencies: Vec<(String, Option<String>)> = by_root.into_iter().collect();
+        root_recencies.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let active_roots: std::collections::HashSet<String> = root_recencies
+            .into_iter()
+            .take(active_repo_limit.max(0) as usize)
+            .map(|(root, _)| root)
+            .collect();
+
+        // Drop rows whose repo_root did not survive the active-repo cap, then
+        // partition each surviving repo_root's rows by kind (`worktree_base +
+        // "/"` prefix), sort each kind by (recency DESC, clone_path ASC), and
+        // take its respective cap.
+        let prefix = format!("{worktree_base}/");
+        let mut surviving: Vec<RepositoryCloneRow> = latest
+            .into_iter()
+            .filter(|row| active_roots.contains(&row.repo_root))
+            .collect();
+        // Group by repo_root.
+        let mut grouped: std::collections::HashMap<String, Vec<RepositoryCloneRow>> =
+            std::collections::HashMap::new();
+        for row in surviving.drain(..) {
+            grouped.entry(row.repo_root.clone()).or_default().push(row);
+        }
+        let mut out: Vec<RepositoryCloneRow> = Vec::new();
+        for (_, rows) in grouped {
+            let (mut generated, mut user): (Vec<_>, Vec<_>) = rows
+                .into_iter()
+                .partition(|r| r.clone_path.starts_with(&prefix));
+            let sort_rows = |v: &mut Vec<RepositoryCloneRow>| {
+                v.sort_by(|a, b| {
+                    b.last_opened_at
+                        .cmp(&a.last_opened_at)
+                        .then_with(|| a.clone_path.cmp(&b.clone_path))
+                });
+            };
+            sort_rows(&mut user);
+            sort_rows(&mut generated);
+            user.truncate(user_clone_limit.max(0) as usize);
+            generated.truncate(generated_clone_limit.max(0) as usize);
+            out.extend(user);
+            out.extend(generated);
+        }
+
+        // Final ORDER BY: (recency DESC, repo_root ASC, clone_path ASC).
+        out.sort_by(|a, b| {
+            b.last_opened_at
+                .cmp(&a.last_opened_at)
+                .then_with(|| a.repo_root.cmp(&b.repo_root))
+                .then_with(|| a.clone_path.cmp(&b.clone_path))
+        });
+        Ok(out)
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {
@@ -715,6 +864,34 @@ impl SessionStore for FakeStore {
     async fn delete_launch_option(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         g.launch_options.retain(|o| o.id != id);
+        Ok(())
+    }
+
+    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>> {
+        let g = self.inner.lock().unwrap();
+        // Newest first (descending created_at), mirroring the SQL store. Ties
+        // on the seeded timestamp fall back to path ASC for a deterministic order.
+        let mut out = g.repository_scan_roots.clone();
+        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.path.cmp(&b.path)));
+        Ok(out)
+    }
+
+    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot> {
+        let mut g = self.inner.lock().unwrap();
+        if g.repository_scan_roots.iter().any(|r| r.path == path) {
+            return Err(Error::RepositoryScanRootDuplicate(path.to_owned()));
+        }
+        let row = RepositoryScanRoot {
+            path: path.to_owned(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        g.repository_scan_roots.push(row.clone());
+        Ok(row)
+    }
+
+    async fn delete_repository_scan_root(&self, path: &str) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.repository_scan_roots.retain(|r| r.path != path);
         Ok(())
     }
 }
