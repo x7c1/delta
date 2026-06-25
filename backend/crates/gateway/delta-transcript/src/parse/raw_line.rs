@@ -43,4 +43,10 @@ pub(super) struct RawLine {
     /// the turn ended; it drives the transcript-driven turn-end fallback.
     #[serde(rename = "isApiErrorMessage")]
     pub is_api_error_message: Option<bool>,
+    /// Set on the synthetic user line Claude Code writes when `/compact` runs,
+    /// carrying the previous-conversation summary. Not a human-authored turn;
+    /// classified as [`Role::CompactSummary`] so attribution skips it (never
+    /// matches an outstanding send, never resets `carry_thread`).
+    #[serde(rename = "isCompactSummary")]
+    pub is_compact_summary: Option<bool>,
 }

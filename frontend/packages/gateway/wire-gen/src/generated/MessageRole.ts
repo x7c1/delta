@@ -5,7 +5,9 @@
  *
  * Mirrors the domain [`Role`] variant-for-variant; see that type for the
  * semantics of each role. This wire twin carries the serialization concerns
- * the domain type must not know about: the lowercase variant names and the
- * TypeScript export.
+ * the domain type must not know about: the snake_case variant names and the
+ * TypeScript export. The rename is `snake_case` (not `lowercase`) so the
+ * multi-word `compact_summary` round-trips its [`delta_model::Role::as_str`]
+ * label.
  */
-export type MessageRole = "user" | "assistant" | "system" | "meta" | "other";
+export type MessageRole = "user" | "assistant" | "system" | "meta" | "compact_summary" | "other";

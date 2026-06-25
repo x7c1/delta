@@ -113,6 +113,10 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // Read it before `raw.message` is moved out below.
     let is_meta = raw.is_meta == Some(true);
 
+    // `isCompactSummary` marks the synthetic `/compact` summary line; see the
+    // field docstring on [`RawLine`] for why it must classify away from `User`.
+    let is_compact_summary = raw.is_compact_summary == Some(true);
+
     // A slash/local command (e.g. `/review-pr`) records its captured output as
     // a `type: "user"` line WITHOUT `isMeta` — only the leading caveat line of
     // the group is flagged. So content-detect the `<local-command-stdout>` /
@@ -139,7 +143,9 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // the turn machine back to idle. Default `false` when the field is absent.
     let is_api_error = raw.is_api_error_message == Some(true);
 
-    let role = if is_queued_command {
+    let role = if is_compact_summary {
+        Role::CompactSummary
+    } else if is_queued_command {
         Role::User
     } else if is_meta || is_local_command_output {
         Role::Meta
@@ -330,6 +336,24 @@ mod tests {
         let line = r#"{"uuid":"u3","type":"user","message":{"role":"user","content":"hi"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::User);
+    }
+
+    #[test]
+    fn compact_summary_user_line_parses_as_compact_summary_role() {
+        // When `/compact` runs Claude Code writes a single synthetic line as a
+        // `type: "user"` record carrying `isCompactSummary: true` with the
+        // previous-conversation summary. It is not a human turn: classify it as
+        // `Role::CompactSummary` so attribution does not match it against an
+        // outstanding send (which would wedge the send forever) nor reset
+        // `carry_thread` to main (which would corrupt thread attribution).
+        let line = r#"{"uuid":"cs1","type":"user","isCompactSummary":true,"message":{"role":"user","content":"<summary of the previous conversation>"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::CompactSummary);
+        assert_eq!(
+            msg.flatten_text().as_deref(),
+            Some("<summary of the previous conversation>")
+        );
+        assert!(!msg.is_queued_command);
     }
 
     #[test]
