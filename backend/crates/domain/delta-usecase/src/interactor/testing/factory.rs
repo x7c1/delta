@@ -108,6 +108,13 @@ pub(crate) fn interactor_with_failing_create_session() -> TestInteractor {
     )
 }
 
+/// The transcript path the seed-session test hooks (`submit`/`session_start`)
+/// install on the session row. Tests that fire `PreToolUse` / `PostToolUse` /
+/// `PermissionRequest` against the seeded session use this same path so the
+/// hook is recognised as belonging to the parent session (and not filtered
+/// out as a nested subagent's hook by the transcript-path guard).
+pub(crate) const SEED_TRANSCRIPT_PATH: &str = "/tmp/t.jsonl";
+
 // Helper accessors used only in tests to reach into the fakes the interactor owns.
 impl TestInteractor {
     /// Register `sess-1` as an open, ready, idle session.

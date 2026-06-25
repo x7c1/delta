@@ -18,7 +18,7 @@ async fn the_turn_ending_clears_the_queryable_question() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1")
+    ix.on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(

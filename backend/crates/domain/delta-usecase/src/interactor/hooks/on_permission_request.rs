@@ -49,7 +49,27 @@ where
         &mut self,
         tool_name: &str,
         tool_input_json: &str,
+        transcript_path: &str,
     ) -> Result<PermissionWait> {
+        // A permission dialog raised by a nested subagent's tool call is
+        // dispatched under the parent session's id but its `transcript_path`
+        // points at the subagent's own JSONL. Short-circuit so the parent
+        // session does not record a row, register a waiter, or broadcast a
+        // notice for a dialog that is gated entirely inside the nested
+        // subagent's TUI. The transport pattern matches the
+        // `AskUserQuestion` short-circuit below: a dropped sender resolves
+        // the receiver immediately, so the hook answers Claude Code with an
+        // empty 200 and the dialog falls through to the TUI as normal.
+        if self.is_foreign_transcript(transcript_path).await? {
+            let (sender, receiver) = oneshot::channel();
+            drop(sender);
+            return Ok(PermissionWait {
+                request_id: 0,
+                decision: receiver,
+                events: vec![],
+            });
+        }
+
         // Claude Code's `AskUserQuestion` is not a gateable action — a hook
         // cannot return the chosen option, and the question card is already
         // driven off `PreToolUse` (see `on_pre_tool_use`). So short-circuit

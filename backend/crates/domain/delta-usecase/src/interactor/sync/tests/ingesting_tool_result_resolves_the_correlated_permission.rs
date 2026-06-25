@@ -23,6 +23,7 @@ async fn ingesting_tool_result_resolves_the_correlated_permission() {
         "Bash",
         r#"{"command":"ls"}"#,
         "toolu_01",
+        SEED_TRANSCRIPT_PATH,
     )
     .await
     .unwrap();

@@ -364,11 +364,13 @@ where
         tool_name: &str,
         tool_input_json: &str,
         tool_use_id: &str,
+        transcript_path: &str,
     ) -> Result<Vec<SessionEvent>> {
         self.request(session_id, |reply| SessionInput::PreToolUse {
             tool_name: tool_name.to_owned(),
             tool_input_json: tool_input_json.to_owned(),
             tool_use_id: tool_use_id.to_owned(),
+            transcript_path: transcript_path.to_owned(),
             reply,
         })
         .await
@@ -389,11 +391,13 @@ where
         tool_name: &str,
         tool_use_id: &str,
         tool_response_json: &str,
+        transcript_path: &str,
     ) -> Result<Vec<SessionEvent>> {
         self.request(session_id, |reply| SessionInput::PostToolUse {
             tool_name: tool_name.to_owned(),
             tool_use_id: tool_use_id.to_owned(),
             tool_response_json: tool_response_json.to_owned(),
+            transcript_path: transcript_path.to_owned(),
             reply,
         })
         .await
@@ -412,11 +416,13 @@ where
         session_id: &SessionId,
         tool_name: &str,
         tool_input_json: &str,
+        transcript_path: &str,
     ) -> Result<PermissionWait> {
         let wait = self
             .request(session_id, |reply| SessionInput::PermissionRequest {
                 tool_name: tool_name.to_owned(),
                 tool_input_json: tool_input_json.to_owned(),
+                transcript_path: transcript_path.to_owned(),
                 reply,
             })
             .await?;

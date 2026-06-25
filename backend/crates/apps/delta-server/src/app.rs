@@ -650,7 +650,8 @@ mod tests {
             "session_id": "sess-1",
             "tool_name": "Bash",
             "tool_input": {"command": "ls"},
-            "tool_use_id": "toolu_01"
+            "tool_use_id": "toolu_01",
+            "transcript_path": "/tmp/none.jsonl"
         })
         .to_string();
 
@@ -779,7 +780,8 @@ mod tests {
         let body = serde_json::json!({
             "session_id": "sess-1",
             "tool_name": "Bash",
-            "tool_input": {"command": "ls"}
+            "tool_input": {"command": "ls"},
+            "transcript_path": "/tmp/does-not-exist.jsonl"
         })
         .to_string();
 
@@ -815,7 +817,8 @@ mod tests {
         let hook_body = serde_json::json!({
             "session_id": "sess-1",
             "tool_name": "Bash",
-            "tool_input": {"command": "rm -rf scratch"}
+            "tool_input": {"command": "rm -rf scratch"},
+            "transcript_path": "/tmp/does-not-exist.jsonl"
         })
         .to_string();
         let hook = tokio::spawn(async move {

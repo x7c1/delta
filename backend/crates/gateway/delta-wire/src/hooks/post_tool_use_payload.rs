@@ -26,4 +26,11 @@ pub struct PostToolUsePayload {
     /// background `Agent` launch.
     #[serde(default)]
     pub tool_response: Value,
+    /// The JSONL the hook is firing against. For a nested subagent's tool call
+    /// this is the subagent's own transcript, not the parent session's. The
+    /// interactor compares this against the session row's stored path so a
+    /// hook fired against a nested transcript can be filtered out — its
+    /// `session_id` still names the parent but the tool call belongs to the
+    /// nested subagent's transcript.
+    pub transcript_path: String,
 }

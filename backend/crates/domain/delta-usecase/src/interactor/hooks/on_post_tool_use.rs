@@ -67,7 +67,18 @@ where
         tool_name: &str,
         tool_use_id: &str,
         tool_response_json: &str,
+        transcript_path: &str,
     ) -> Result<Vec<SessionEvent>> {
+        // A nested subagent's PostToolUse is dispatched under the parent
+        // session's id but its `transcript_path` points at the subagent's
+        // own JSONL. Ignore it so a nested completion cannot clear (or
+        // upgrade) a parent-tracked running entry that happens to share the
+        // same `tool_use_id` by accident, and so the symmetric `PreToolUse`
+        // no-op (above) is not contradicted later.
+        if self.is_foreign_transcript(transcript_path).await? {
+            return Ok(vec![]);
+        }
+
         if !is_subagent_tool(tool_name) {
             return Ok(vec![]);
         }

@@ -45,7 +45,7 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     let events = ix
-        .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+        .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -76,12 +76,12 @@ async fn post_tool_use_agent_ends_the_window_and_broadcasts() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
     let events = ix
-        .on_post_tool_use(&session, "Agent", "toolu_a1", "null")
+        .on_post_tool_use(&session, "Agent", "toolu_a1", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -109,7 +109,7 @@ async fn the_task_alias_drives_the_same_window() {
     let session = SessionId::from("sess-1");
 
     let started = ix
-        .on_pre_tool_use(&session, "Task", AGENT_INPUT, "toolu_t1")
+        .on_pre_tool_use(&session, "Task", AGENT_INPUT, "toolu_t1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(
@@ -118,7 +118,7 @@ async fn the_task_alias_drives_the_same_window() {
     );
 
     let finished = ix
-        .on_post_tool_use(&session, "Task", "toolu_t1", "null")
+        .on_post_tool_use(&session, "Task", "toolu_t1", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(
@@ -134,7 +134,7 @@ async fn a_subagent_internal_tool_call_does_not_flip_the_indicator() {
     let session = SessionId::from("sess-1");
 
     // Subagent running.
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -142,7 +142,7 @@ async fn a_subagent_internal_tool_call_does_not_flip_the_indicator() {
     // It must neither add a second running entry nor (on its Post) clear the
     // subagent's window.
     let bash_pre = ix
-        .on_pre_tool_use(&session, "Bash", r#"{"command":"ls"}"#, "toolu_b1")
+        .on_pre_tool_use(&session, "Bash", r#"{"command":"ls"}"#, "toolu_b1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(
@@ -150,7 +150,7 @@ async fn a_subagent_internal_tool_call_does_not_flip_the_indicator() {
         "an internal Bash PreToolUse emits no subagent event"
     );
     let bash_post = ix
-        .on_post_tool_use(&session, "Bash", "toolu_b1", "null")
+        .on_post_tool_use(&session, "Bash", "toolu_b1", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(
@@ -171,10 +171,10 @@ async fn multiple_concurrent_subagents_are_tracked_independently() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a2")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a2", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert_eq!(
@@ -184,7 +184,7 @@ async fn multiple_concurrent_subagents_are_tracked_independently() {
     );
 
     // Finishing one leaves the other running.
-    ix.on_post_tool_use(&session, "Agent", "toolu_a1", "null")
+    ix.on_post_tool_use(&session, "Agent", "toolu_a1", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert_eq!(
@@ -202,7 +202,7 @@ async fn post_tool_use_for_an_unknown_subagent_is_a_noop() {
 
     // No matching PreToolUse was ever recorded for this id.
     let events = ix
-        .on_post_tool_use(&session, "Agent", "toolu_never_started", "null")
+        .on_post_tool_use(&session, "Agent", "toolu_never_started", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(
@@ -217,11 +217,11 @@ async fn a_duplicate_pre_tool_use_does_not_double_track_or_double_broadcast() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     let again = ix
-        .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+        .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -242,7 +242,7 @@ async fn the_turn_ending_clears_a_still_running_subagent() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert!(
@@ -279,7 +279,7 @@ async fn a_background_launch_starts_a_background_running_entry() {
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
     let events = ix
-        .on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+        .on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -310,14 +310,14 @@ async fn the_immediate_post_tool_use_does_not_finish_a_background_subagent() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
     // A background launch's `PostToolUse` fires immediately (the call returned,
     // the subagent did not), so it must NOT finish the running entry.
     let events = ix
-        .on_post_tool_use(&session, "Agent", "toolu_bg", "null")
+        .on_post_tool_use(&session, "Agent", "toolu_bg", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -338,11 +338,11 @@ async fn a_background_subagent_survives_the_turn_ending() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     // Its immediate PostToolUse (a no-op for the indicator).
-    ix.on_post_tool_use(&session, "Agent", "toolu_bg", "null")
+    ix.on_post_tool_use(&session, "Agent", "toolu_bg", "null", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -370,10 +370,10 @@ async fn a_foreground_and_a_background_subagent_diverge_at_turn_end() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_fg")
+    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_fg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     assert_eq!(
@@ -409,7 +409,7 @@ async fn post_tool_use_upgrades_the_background_subagent_with_its_agent_id() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -433,6 +433,7 @@ async fn post_tool_use_upgrades_the_background_subagent_with_its_agent_id() {
             "Agent",
             "toolu_bg",
             POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
+            SEED_TRANSCRIPT_PATH,
         )
         .await
         .unwrap();
@@ -479,7 +480,7 @@ async fn post_tool_use_arriving_before_the_launch_is_folded_flushes_on_the_next_
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
@@ -490,6 +491,7 @@ async fn post_tool_use_arriving_before_the_launch_is_folded_flushes_on_the_next_
         "Agent",
         "toolu_bg",
         POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
+        SEED_TRANSCRIPT_PATH,
     )
     .await
     .unwrap();
@@ -537,7 +539,7 @@ async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallba
     // `PostToolUse(Agent)` fires BEFORE the assistant tool_use line is folded,
     // so this test mirrors that ordering: PreToolUse, then PostToolUse, then
     // the launch sync that flushes the pending task_id onto the new row.
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     ix.on_post_tool_use(
@@ -545,6 +547,7 @@ async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallba
         "Agent",
         "toolu_bg",
         POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
+        SEED_TRANSCRIPT_PATH,
     )
     .await
     .unwrap();
@@ -640,7 +643,7 @@ async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_wa
     let session = SessionId::from("sess-1");
 
     // Launch a background subagent and persist its launch row.
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg")
+    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     ix.transcript_fake()

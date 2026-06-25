@@ -28,6 +28,7 @@ async fn background_task_completion_clears_the_running_subagent() {
             "Agent",
             r#"{"subagent_type":"general-purpose","description":"Long crawl","run_in_background":true}"#,
             "toolu_bg",
+            SEED_TRANSCRIPT_PATH,
         )
         .await
         .unwrap();
