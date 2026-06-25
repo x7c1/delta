@@ -56,10 +56,20 @@ pub struct WireSession {
     /// updated on resume or a later `git checkout`; the per-message
     /// `git_branch` is a separate per-turn snapshot.
     pub branch_at_launch: Option<String>,
-    /// Spawn-time snapshot of the repository root containing `cwd`. `null`
+    /// Spawn-time snapshot of the working-tree root containing `cwd`. `null`
     /// when the launch directory was not inside a git repository, or for
-    /// sessions that predate this field.
+    /// sessions that predate this field. This is the working-tree path
+    /// itself when the session was launched from a linked git worktree —
+    /// see `repository_display_name` for the cross-worktree repository
+    /// identity label.
     pub repo_root: Option<String>,
+    /// Spawn-time short repository identity label (e.g. `org/repo`), derived
+    /// from the launch directory's `origin` URL and falling back to the
+    /// working-tree basename when no origin is configured. `null` when the
+    /// launch directory was not inside a git repository, or for sessions that
+    /// predate this field. The navigator renders this directly as the session
+    /// card's repo line, falling back to the `cwd` basename when `null`.
+    pub repository_display_name: Option<String>,
 }
 
 impl From<Session> for WireSession {
@@ -73,6 +83,7 @@ impl From<Session> for WireSession {
             created_at: session.created_at,
             branch_at_launch: session.branch_at_launch,
             repo_root: session.repo_root,
+            repository_display_name: session.repository_display_name,
         }
     }
 }
@@ -95,6 +106,7 @@ mod tests {
             branch_at_launch: Some("main".into()),
             repo_root: Some("/work/delta".into()),
             requested_workdir: None,
+            repository_display_name: Some("x7c1/delta".into()),
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -107,6 +119,7 @@ mod tests {
                 "created_at": "2026-01-01T00:00:00Z",
                 "branch_at_launch": "main",
                 "repo_root": "/work/delta",
+                "repository_display_name": "x7c1/delta",
             }),
         );
     }

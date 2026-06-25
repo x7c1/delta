@@ -67,6 +67,7 @@ const item: SessionListItem = {
     created_at: '2026-01-01T00:00:00Z',
     branch_at_launch: 'main',
     repo_root: '/home/dev/project',
+    repository_display_name: 'dev/project',
   },
   open: true,
   main_thread_id: 1,
@@ -183,6 +184,61 @@ describe('SessionNode unread indicator', () => {
     expect(
       screen.queryByTestId('session-subagent-badge'),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('SessionNode repo line', () => {
+  it('renders the backend repository_display_name and shows repo_root in the tooltip', () => {
+    renderNode({});
+
+    const repo = screen.getByTestId('session-repo');
+    expect(repo).toHaveTextContent('dev/project');
+    // The short label is the primary path; the tooltip carries the full
+    // working-tree path so the user can still see exactly where the
+    // session is running.
+    expect(repo).toHaveAttribute('title', '/home/dev/project');
+    // The primary path does NOT use RTL truncation — the label is short and
+    // reads naturally left-aligned.
+    expect(repo.className).not.toContain('[direction:rtl]');
+  });
+
+  it('falls back to the cwd basename and RTL-truncates when repository_display_name is null', () => {
+    // A legacy row (predates the column) OR a session launched outside any
+    // git repo: backend sends `repository_display_name: null`, frontend
+    // renders the cwd basename instead. The fallback path uses RTL
+    // truncation so a long local path keeps its meaningful tail.
+    const legacy: SessionListItem = {
+      ...item,
+      session: {
+        ...item.session,
+        repository_display_name: null,
+        repo_root: null,
+        cwd: '/Users/x7c1/projects/local-only',
+      },
+    };
+    renderNode({ item: legacy });
+
+    const repo = screen.getByTestId('session-repo');
+    expect(repo).toHaveTextContent('local-only');
+    expect(repo).toHaveAttribute('title', '/Users/x7c1/projects/local-only');
+    expect(repo.className).toContain('[direction:rtl]');
+  });
+
+  it('omits the repo span entirely when no usable label can be derived', () => {
+    // Neither a backend label nor a cwd basename — the line-2 left span is
+    // omitted (the rest of the row still renders).
+    const empty: SessionListItem = {
+      ...item,
+      session: {
+        ...item.session,
+        repository_display_name: null,
+        repo_root: null,
+        cwd: '',
+      },
+    };
+    renderNode({ item: empty });
+
+    expect(screen.queryByTestId('session-repo')).not.toBeInTheDocument();
   });
 });
 

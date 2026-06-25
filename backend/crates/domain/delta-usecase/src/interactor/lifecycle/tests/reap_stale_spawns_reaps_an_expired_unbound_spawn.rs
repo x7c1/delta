@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use delta_model::SessionId;
 
-use crate::interactor::testing::*;
 use crate::interactor::session_actor::runtime::PENDING_SPAWN_DEADLINE;
+use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
 /// An unbound spawn whose deadline has passed is reaped: its pane is killed, it
@@ -20,7 +20,7 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
     // spawn stamped one second past its deadline, with a live tmux session so
     // the reaper actually issues (and we can observe) the kill.
     ix.store()
-        .insert_spawning_session(&session_id, "/work", None, None, None)
+        .insert_spawning_session(&session_id, "/work", None, None, None, None)
         .await
         .unwrap();
     ix.push_pending_spawn_at(
@@ -29,7 +29,11 @@ async fn reap_stale_spawns_reaps_an_expired_unbound_spawn() {
         now - PENDING_SPAWN_DEADLINE - std::time::Duration::from_secs(1),
     )
     .await;
-    ix.tmux_fake().live.lock().unwrap().push("delta-1".to_owned());
+    ix.tmux_fake()
+        .live
+        .lock()
+        .unwrap()
+        .push("delta-1".to_owned());
 
     let events = ix.reap_stale_spawns(now).await.unwrap();
 

@@ -16,6 +16,7 @@ async fn recent_workdirs_lists_distinct_session_cwds() {
             transcript_path: "/tmp/a.jsonl".into(),
             branch_at_launch: None,
             repo_root: None,
+            repository_display_name: None,
         })
         .await
         .unwrap();
@@ -26,6 +27,7 @@ async fn recent_workdirs_lists_distinct_session_cwds() {
             transcript_path: "/tmp/b.jsonl".into(),
             branch_at_launch: None,
             repo_root: None,
+            repository_display_name: None,
         })
         .await
         .unwrap();

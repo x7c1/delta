@@ -12,8 +12,13 @@ pub struct NewSession {
     /// `None` when the launch directory is not inside a git repository or
     /// HEAD was detached. See [`delta_model::Session::branch_at_launch`].
     pub branch_at_launch: Option<String>,
-    /// Spawn-time snapshot of the repository root containing the launch
+    /// Spawn-time snapshot of the working-tree root containing the launch
     /// directory. `None` when the launch directory is not inside a git
     /// repository. See [`delta_model::Session::repo_root`].
     pub repo_root: Option<String>,
+    /// Spawn-time short repository identity label (e.g. `org/repo`). `None`
+    /// when the launch directory is not inside a git repository, or when no
+    /// origin URL is configured and no fallback could be computed. See
+    /// [`delta_model::Session::repository_display_name`].
+    pub repository_display_name: Option<String>,
 }

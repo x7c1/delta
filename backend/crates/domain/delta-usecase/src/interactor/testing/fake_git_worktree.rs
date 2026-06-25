@@ -44,8 +44,10 @@ pub(crate) struct FakeGitWorktree {
     pub(crate) current_branches: Mutex<Vec<(String, String)>>,
     /// The default branch `default_branch`/`fetch_remote_branches` report.
     pub(crate) default_branch: Mutex<Option<String>>,
-    /// Origin URLs `origin_url(path)` should return. A path absent from the
-    /// map resolves to `None` (no `remote.origin.url`, or not a git repo).
+    /// The remote `origin` URL `origin_url(path)` should return for a given
+    /// directory. A directory absent from the map resolves to `None`
+    /// ("origin unset" or "not a git repo"). Mirrors the real gateway's
+    /// behavior, which reads `remote.origin.url` from the shared `.git/config`.
     pub(crate) origins: Mutex<Vec<(String, String)>>,
     /// The remote branches `fetch_remote_branches` reports.
     pub(crate) remote_branches: Mutex<Vec<String>>,

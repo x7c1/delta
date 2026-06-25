@@ -74,6 +74,7 @@ async fn has_local_clone_is_set_only_for_registered_repos() {
             Some("main"),
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -201,6 +202,7 @@ async fn path_keyed_repos_do_not_satisfy_the_local_clone_check() {
             Some("main"),
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR_2),
+            None,
         )
         .await
         .unwrap();

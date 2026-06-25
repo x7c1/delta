@@ -372,14 +372,15 @@ export function createMockApi(): MockApi {
             title: null,
             status: 'spawning',
             created_at: createdAt,
-            // `branch_at_launch`/`repo_root` are captured server-side at the
-            // spawn moment. The mock has no real git, so seed both `null` —
-            // mirroring "spawning, no hook yet" / the real server's
-            // "non-git launch directory" path. The frontend then falls back
-            // to the cwd basename for the repo line and to the session label
-            // for the branch line.
+            // `branch_at_launch`/`repo_root`/`repository_display_name` are
+            // captured server-side at the spawn moment. The mock has no real
+            // git, so seed all three `null` — mirroring "spawning, no hook
+            // yet" / the real server's "non-git launch directory" path. The
+            // frontend then falls back to the cwd basename for the repo line
+            // and to the session label for the branch line.
             branch_at_launch: null,
             repo_root: null,
+            repository_display_name: null,
           },
           open: false,
           spawning: true,

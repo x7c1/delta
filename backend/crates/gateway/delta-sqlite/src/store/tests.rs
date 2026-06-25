@@ -13,6 +13,7 @@ fn new_session() -> NewSession {
         transcript_path: "/tmp/t.jsonl".into(),
         branch_at_launch: None,
         repo_root: None,
+        repository_display_name: None,
     }
 }
 
@@ -23,6 +24,7 @@ fn new_session_with(id: &str) -> NewSession {
         transcript_path: format!("/tmp/{id}.jsonl"),
         branch_at_launch: None,
         repo_root: None,
+        repository_display_name: None,
     }
 }
 
@@ -76,7 +78,11 @@ async fn dispatched_send_fifo_and_match() {
         .await
         .unwrap();
 
-    let head = store.head_dispatched_send(&session.id).await.unwrap().unwrap();
+    let head = store
+        .head_dispatched_send(&session.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(head.id, first.id, "FIFO returns the oldest");
     assert_eq!(head.locator_quote.as_deref(), Some("[q]"));
 
@@ -85,7 +91,11 @@ async fn dispatched_send_fifo_and_match() {
         .await
         .unwrap();
 
-    let head = store.head_dispatched_send(&session.id).await.unwrap().unwrap();
+    let head = store
+        .head_dispatched_send(&session.id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(head.text, "second", "matched send leaves the queue");
 }
 
@@ -103,7 +113,11 @@ async fn requeue_send_returns_a_dispatched_send_to_queued() {
     // Requeue moves it out of the dispatched slot and back into the queue.
     store.requeue_send(send.id).await.unwrap();
     assert!(
-        store.head_dispatched_send(&session.id).await.unwrap().is_none(),
+        store
+            .head_dispatched_send(&session.id)
+            .await
+            .unwrap()
+            .is_none(),
         "a requeued send is no longer outstanding"
     );
     let next = store
@@ -375,6 +389,7 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
                 transcript_path: "/tmp/with.jsonl".into(),
                 branch_at_launch: None,
                 repo_root: None,
+                repository_display_name: None,
             })
             .await
             .unwrap();
@@ -385,6 +400,7 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
                 transcript_path: "/tmp/no.jsonl".into(),
                 branch_at_launch: None,
                 repo_root: None,
+                repository_display_name: None,
             })
             .await
             .unwrap();
@@ -607,6 +623,7 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
         transcript_path: format!("/tmp/{id}.jsonl"),
         branch_at_launch: None,
         repo_root: None,
+        repository_display_name: None,
     };
 
     // Three sessions across two distinct cwds. `/projects/b` is used by two
@@ -685,6 +702,7 @@ async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
             transcript_path: "/tmp/s.jsonl".into(),
             branch_at_launch: None,
             repo_root: None,
+            repository_display_name: None,
         })
         .await
         .unwrap();
@@ -714,6 +732,7 @@ async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
             Some("delta-sess-worktree"),
             Some("/user-chosen"),
             Some("/user-chosen"),
+            None,
         )
         .await
         .unwrap();
@@ -969,10 +988,7 @@ async fn list_sessions_page_advances_across_pages_without_gap_or_overlap() {
         created_at: last_session.created_at.clone(),
         id: last_session.id.as_str().to_owned(),
     };
-    let second = store
-        .list_sessions_page(Some(cursor), 2)
-        .await
-        .unwrap();
+    let second = store.list_sessions_page(Some(cursor), 2).await.unwrap();
     assert_eq!(
         page_ids(&second),
         vec!["sess-c", "sess-d"],
@@ -1024,7 +1040,7 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&spawning, "/work", None, None, None)
+        .insert_spawning_session(&spawning, "/work", None, None, None, None)
         .await
         .unwrap();
 
@@ -1042,6 +1058,7 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
             transcript_path: "/tmp/spawn.jsonl".into(),
             branch_at_launch: None,
             repo_root: None,
+            repository_display_name: None,
         })
         .await
         .unwrap();
@@ -1128,7 +1145,12 @@ async fn resolve_settles_the_pending_dialog_row_too() {
     let (session, _) = store.register_session(new_session()).await.unwrap();
     // The PreToolUse row and the hook-owned dialog row for the same call.
     let pre = store
-        .record_permission_request(&session.id, "Bash", r#"{"command":"rm x"}"#, Some("toolu_01"))
+        .record_permission_request(
+            &session.id,
+            "Bash",
+            r#"{"command":"rm x"}"#,
+            Some("toolu_01"),
+        )
         .await
         .unwrap();
     let dialog = store
@@ -1192,7 +1214,11 @@ async fn queued_send_is_held_then_promoted_to_dispatched() {
         .unwrap();
     assert_eq!(queued.status, SendStatus::Queued);
     assert!(
-        store.head_dispatched_send(&session.id).await.unwrap().is_none(),
+        store
+            .head_dispatched_send(&session.id)
+            .await
+            .unwrap()
+            .is_none(),
         "a queued send is not a dispatched FIFO head"
     );
 
@@ -1339,7 +1365,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(&id, "/work", None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None)
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -1355,11 +1381,15 @@ async fn spawning_session_inserts_then_activates_on_register() {
             transcript_path: "/tmp/spawn.jsonl".into(),
             branch_at_launch: None,
             repo_root: None,
+            repository_display_name: None,
         })
         .await
         .unwrap();
     assert_eq!(activated.status, SessionStatus::Active);
-    assert_eq!(activated.transcript_path.as_deref(), Some("/tmp/spawn.jsonl"));
+    assert_eq!(
+        activated.transcript_path.as_deref(),
+        Some("/tmp/spawn.jsonl")
+    );
     assert_eq!(activated.cwd, "/work/real");
     assert_eq!(main2, main, "the eagerly-created main thread is reused");
 
@@ -1371,6 +1401,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
             transcript_path: "/tmp/other.jsonl".into(),
             branch_at_launch: None,
             repo_root: None,
+            repository_display_name: None,
         })
         .await
         .unwrap();
@@ -1408,7 +1439,10 @@ async fn delete_session_cascades_to_children() {
         }])
         .await
         .unwrap();
-    store.set_transcript_lines_read(&session.id, 3).await.unwrap();
+    store
+        .set_transcript_lines_read(&session.id, 3)
+        .await
+        .unwrap();
 
     store.delete_session(&session.id).await.unwrap();
 
@@ -1431,7 +1465,7 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&id, "/work", None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None)
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();
@@ -1507,7 +1541,12 @@ async fn launch_options_round_trip_create_list_delete() {
     // A flag with a label and a value persists every field, including the
     // pre-checked `default_enabled` flag.
     let plugin = store
-        .create_launch_option(Some("My plugins"), "--plugin-dir", Some("/opt/plugins"), true)
+        .create_launch_option(
+            Some("My plugins"),
+            "--plugin-dir",
+            Some("/opt/plugins"),
+            true,
+        )
         .await
         .unwrap();
     assert_eq!(plugin.label.as_deref(), Some("My plugins"));
@@ -1660,9 +1699,14 @@ async fn subagent_launches_round_trip_and_clear() {
         .outstanding_subagent_launches(&session.id)
         .await
         .unwrap();
-    assert_eq!(after.get("toolu_a").map(|launch| launch.thread_id), Some(main));
     assert_eq!(
-        after.get("toolu_a").and_then(|launch| launch.task_id.clone()),
+        after.get("toolu_a").map(|launch| launch.thread_id),
+        Some(main)
+    );
+    assert_eq!(
+        after
+            .get("toolu_a")
+            .and_then(|launch| launch.task_id.clone()),
         Some("a31425032172620ed".to_owned()),
         "the previously-upgraded task_id survives a re-record"
     );
@@ -1711,7 +1755,10 @@ async fn opening_a_pre_subagent_task_id_database_migrates_and_loads_old_rows_as_
     let main = {
         let legacy = SqliteStore::open(path_str).unwrap();
         legacy.register_session(new_session()).await.unwrap();
-        let main = legacy.main_thread_id(&SessionId::from("sess-1")).await.unwrap();
+        let main = legacy
+            .main_thread_id(&SessionId::from("sess-1"))
+            .await
+            .unwrap();
         legacy
             .record_subagent_launch(&SessionId::from("sess-1"), "toolu_legacy", main)
             .await
@@ -1732,7 +1779,9 @@ async fn opening_a_pre_subagent_task_id_database_migrates_and_loads_old_rows_as_
         .outstanding_subagent_launches(&SessionId::from("sess-1"))
         .await
         .unwrap();
-    let legacy = launches.get("toolu_legacy").expect("legacy launch survives migration");
+    let legacy = launches
+        .get("toolu_legacy")
+        .expect("legacy launch survives migration");
     assert_eq!(legacy.thread_id, main);
     assert!(
         legacy.task_id.is_none(),
@@ -1789,10 +1838,7 @@ async fn schema_gate_stamps_a_fresh_database_with_the_current_version() {
     // The gate stamped the file current, so a re-open takes the match path.
     assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
     let reopened = SqliteStore::open(path_str).unwrap();
-    let again = reopened
-        .session(&SessionId::from("sess-1"))
-        .await
-        .unwrap();
+    let again = reopened.session(&SessionId::from("sess-1")).await.unwrap();
     assert!(again.is_some(), "the stamped DB re-opens normally");
 
     std::fs::remove_dir_all(&dir).ok();
@@ -1800,8 +1846,7 @@ async fn schema_gate_stamps_a_fresh_database_with_the_current_version() {
 
 #[tokio::test]
 async fn schema_gate_rescues_a_pre_gate_v0_1_0_database() {
-    let dir =
-        std::env::temp_dir().join(format!("delta-schema-rescue-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("delta-schema-rescue-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("legacy.sqlite");
     let path_str = path.to_str().unwrap();
@@ -1836,8 +1881,7 @@ async fn schema_gate_rescues_a_pre_gate_v0_1_0_database() {
 
 #[tokio::test]
 async fn schema_gate_refuses_a_non_matching_version() {
-    let dir =
-        std::env::temp_dir().join(format!("delta-schema-mismatch-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("delta-schema-mismatch-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("future.sqlite");
     let path_str = path.to_str().unwrap();
@@ -1879,8 +1923,7 @@ async fn schema_gate_refuses_a_non_matching_version() {
 
 #[tokio::test]
 async fn schema_gate_opens_a_current_database_unchanged() {
-    let dir =
-        std::env::temp_dir().join(format!("delta-schema-match-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("delta-schema-match-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("current.sqlite");
     let path_str = path.to_str().unwrap();
@@ -1923,6 +1966,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("main"),
             Some("/repo-a"),
             Some("/repo-a"),
+            None,
         )
         .await
         .unwrap();
@@ -1934,6 +1978,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("feature/x"),
             Some("/repo-a"),
             Some("/repo-a"),
+            None,
         )
         .await
         .unwrap();
@@ -1945,12 +1990,13 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("main"),
             Some("/repo-a"),
             Some("/repo-a-mirror"),
+            None,
         )
         .await
         .unwrap();
     let s4 = SessionId::from("sess-4");
     store
-        .insert_spawning_session(&s4, "/scratch", None, None, Some("/scratch"))
+        .insert_spawning_session(&s4, "/scratch", None, None, Some("/scratch"), None)
         .await
         .unwrap();
 

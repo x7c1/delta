@@ -65,15 +65,16 @@ function basename(path: string): string {
  * indicator plus the session's *launch-time* local git branch (the primary
  * identifier, right-truncated with the full name on hover; falls back to the
  * session label when the launch directory was not in a git repo); line 2 shows
- * the basename of the launch-time repository root on the left
- * (RTL-truncated with the full path on hover; falls back to the cwd's basename,
- * then omitted entirely when even that yields no name) and the last-activity
- * time on the right) plus the kebab actions menu in a fixed-width slot at the
- * right end. The menu always offers `Copy session ID` (useful even for a
- * closed session — copying its id, e.g. to feed `claude --resume`, does not
- * require the session to be running) and additionally exposes `Close` while
- * the session is open. The focused card is lifted with an indigo border, tint,
- * and ring.
+ * the launch-time repository identity on the left (preferring the backend's
+ * short `repository_display_name` label, e.g. `org/repo`, and falling back to
+ * the cwd basename — RTL-truncated only on the fallback so a long local path's
+ * tail stays visible; omitted entirely when both yield no name) and the
+ * last-activity time on the right) plus the kebab actions menu in a
+ * fixed-width slot at the right end. The menu always offers `Copy session ID`
+ * (useful even for a closed session — copying its id, e.g. to feed
+ * `claude --resume`, does not require the session to be running) and
+ * additionally exposes `Close` while the session is open. The focused card is
+ * lifted with an indigo border, tint, and ring.
  *
  * Every session that has branched into sub-threads shows its {@link ThreadTree}
  * expanded by default — focused or not — so the whole visible list reads as a
@@ -140,14 +141,26 @@ export function SessionNode({
   const branchAtLaunch = item.session.branch_at_launch;
   const branchDisplay =
     branchAtLaunch === null ? null : displayBranch(branchAtLaunch);
-  // Line 2 left: the basename of the repository root captured at spawn time,
-  // falling back to the cwd basename so a session launched outside a repo
-  // still identifies its working directory. `repoFull` carries the full path
-  // for the hover tooltip; an empty `repoName` means no usable basename and
-  // the line-2 left span is omitted entirely.
+  // Line 2 left: the launch-time repository identity, captured at spawn time.
+  // Prefer the backend's short `repository_display_name` label (e.g.
+  // `org/repo`, normalised from the launch dir's `origin` URL — stable across
+  // worktrees of the same clone). When that is `null` (a session launched
+  // outside any git repo, or a legacy row that predates this column), fall
+  // back to the cwd basename so the line still identifies the working
+  // directory. On the primary path the tooltip carries `repo_root` (or `cwd`
+  // when that is also `null`) so the user can still see exactly where the
+  // session is running; on the fallback path the tooltip carries the cwd.
+  // An empty `repoLabel` means no usable label and the line-2 left span is
+  // omitted.
+  const repositoryDisplayName = item.session.repository_display_name;
   const repoRoot = item.session.repo_root;
-  const repoFull = repoRoot ?? item.session.cwd;
-  const repoName = basename(repoFull);
+  const cwd = item.session.cwd;
+  const repoLabel = repositoryDisplayName ?? basename(cwd);
+  const repoTooltip = repositoryDisplayName ? (repoRoot ?? cwd) : cwd;
+  // Only the fallback path needs RTL truncation: a long local path is more
+  // meaningful from the tail (e.g. `…/projects/delta`), but the primary
+  // `org/repo` label is short and reads more naturally left-aligned.
+  const repoUsesFallback = repositoryDisplayName === null;
   // Show the sub-thread list only once the session has branched. The main
   // thread itself is never listed (it is reached by clicking this card's
   // header — see NavigatorPane); a session with no sub-threads shows no tree at
@@ -273,19 +286,24 @@ export function SessionNode({
                 </span>
               )}
             </span>
-            {/* Line 2: the launch-time repo basename on the left (RTL-truncated
-                so a long worktree path keeps its meaningful tail, e.g.
-                `…/projects/delta`) and the last-activity time on the right.
-                The repo span is omitted entirely when neither `repo_root`
-                nor `cwd` yields a usable basename. */}
+            {/* Line 2: the launch-time repository identity on the left and
+                the last-activity time on the right. Primary path renders the
+                backend's short `repository_display_name` label left-aligned;
+                fallback path renders the cwd basename RTL-truncated so a
+                long local path keeps its meaningful tail (e.g.
+                `…/projects/delta`). The repo span is omitted entirely when
+                neither yields a usable label. */}
             <span className="flex items-baseline gap-2 text-xs text-slate-400">
-              {repoName && (
+              {repoLabel && (
                 <span
-                  className="min-w-0 flex-1 truncate text-left [direction:rtl]"
-                  title={repoFull}
+                  className={cn(
+                    'min-w-0 flex-1 truncate text-left',
+                    repoUsesFallback && '[direction:rtl]',
+                  )}
+                  title={repoTooltip}
                   data-testid="session-repo"
                 >
-                  {repoName}
+                  {repoLabel}
                 </span>
               )}
               {lastActivity && (

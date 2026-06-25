@@ -59,6 +59,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some("main"),
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -69,6 +70,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some("feature/x"),
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR_2),
+            None,
         )
         .await
         .unwrap();
@@ -79,6 +81,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some("main"),
             Some(EXISTING_DIR_3),
             Some(EXISTING_DIR_3),
+            None,
         )
         .await
         .unwrap();
@@ -128,6 +131,7 @@ async fn clones_without_origin_stand_alone_by_path() {
             Some("main"),
             Some(EXISTING_DIR),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -137,6 +141,7 @@ async fn clones_without_origin_stand_alone_by_path() {
             EXISTING_DIR_2,
             Some("main"),
             Some(EXISTING_DIR_2),
+            None,
             None,
         )
         .await
@@ -166,6 +171,7 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
             Some("main"),
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -176,6 +182,7 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
             Some("main"),
             Some(MISSING_DIR),
             Some(MISSING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -201,6 +208,7 @@ async fn sessions_outside_a_git_repo_never_contribute() {
             None,
             None,
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -228,6 +236,7 @@ async fn deferred_per_clone_fields_are_empty_by_default() {
             Some("main"),
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -261,6 +270,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some("main"),
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR_2),
+            None,
         )
         .await
         .unwrap();
@@ -271,6 +281,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some("main"),
             Some(EXISTING_DIR_3),
             Some(EXISTING_DIR_3),
+            None,
         )
         .await
         .unwrap();
@@ -281,6 +292,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some("main"),
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -366,6 +378,7 @@ async fn session_and_scan_clones_with_the_same_identity_key_union() {
             Some("main"),
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -412,6 +425,7 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
             Some("main"),
             Some(&clone_path),
             Some(&clone_path),
+            None,
         )
         .await
         .unwrap();
@@ -490,6 +504,7 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
             Some("old"),
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -512,6 +527,7 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
             Some("new"),
             Some(EXISTING_DIR_3),
             Some(EXISTING_DIR),
+            None,
         )
         .await
         .unwrap();
@@ -593,6 +609,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
                 Some("main"),
                 Some(repo_root.as_str()),
                 Some(p),
+                None,
             )
             .await
             .unwrap();
@@ -606,6 +623,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
                 Some("main"),
                 Some(repo_root.as_str()),
                 Some(p),
+                None,
             )
             .await
             .unwrap();
@@ -667,7 +685,7 @@ async fn active_repo_limit_drops_oldest_repositories() {
     for (i, p) in paths.iter().enumerate() {
         let sid = SessionId::from(format!("s-{i:03}").as_str());
         ix.store()
-            .insert_spawning_session(&sid, p, Some("main"), Some(p), Some(p))
+            .insert_spawning_session(&sid, p, Some("main"), Some(p), Some(p), None)
             .await
             .unwrap();
         // Stamp a message timestamp that grows with i, so repo i is strictly

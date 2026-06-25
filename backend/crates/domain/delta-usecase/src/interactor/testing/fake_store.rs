@@ -101,6 +101,7 @@ impl SessionStore for FakeStore {
             // no Delta-known launch dir to record. Worktree dirs cannot appear
             // here because external sessions don't go through worktree spawn.
             requested_workdir: None,
+            repository_display_name: new.repository_display_name,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -123,6 +124,7 @@ impl SessionStore for FakeStore {
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -139,6 +141,7 @@ impl SessionStore for FakeStore {
             branch_at_launch: branch_at_launch.map(str::to_owned),
             repo_root: repo_root.map(str::to_owned),
             requested_workdir: requested_workdir.map(str::to_owned),
+            repository_display_name: repository_display_name.map(str::to_owned),
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -767,14 +770,12 @@ impl SessionStore for FakeStore {
         // separately-learned task id does not). A brand-new row starts with
         // `task_id: None` until `upgrade_subagent_task_id` runs.
         let key = (session_id.clone(), tool_use_id.to_owned());
-        let task_id = g.subagent_launches.get(&key).and_then(|l| l.task_id.clone());
-        g.subagent_launches.insert(
-            key,
-            SubagentLaunch {
-                thread_id,
-                task_id,
-            },
-        );
+        let task_id = g
+            .subagent_launches
+            .get(&key)
+            .and_then(|l| l.task_id.clone());
+        g.subagent_launches
+            .insert(key, SubagentLaunch { thread_id, task_id });
         Ok(())
     }
 
@@ -794,11 +795,7 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn clear_subagent_launch(
-        &self,
-        session_id: &SessionId,
-        tool_use_id: &str,
-    ) -> Result<()> {
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         g.subagent_launches
             .remove(&(session_id.clone(), tool_use_id.to_owned()));

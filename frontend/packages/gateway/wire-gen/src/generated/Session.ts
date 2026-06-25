@@ -30,8 +30,20 @@ created_at: string,
  */
 branch_at_launch: string | null, 
 /**
- * Spawn-time snapshot of the repository root containing `cwd`. `null`
+ * Spawn-time snapshot of the working-tree root containing `cwd`. `null`
  * when the launch directory was not inside a git repository, or for
- * sessions that predate this field.
+ * sessions that predate this field. This is the working-tree path
+ * itself when the session was launched from a linked git worktree —
+ * see `repository_display_name` for the cross-worktree repository
+ * identity label.
  */
-repo_root: string | null, };
+repo_root: string | null, 
+/**
+ * Spawn-time short repository identity label (e.g. `org/repo`), derived
+ * from the launch directory's `origin` URL and falling back to the
+ * working-tree basename when no origin is configured. `null` when the
+ * launch directory was not inside a git repository, or for sessions that
+ * predate this field. The navigator renders this directly as the session
+ * card's repo line, falling back to the `cwd` basename when `null`.
+ */
+repository_display_name: string | null, };

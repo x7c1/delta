@@ -185,6 +185,7 @@ struct SessionParts {
     branch_at_launch: Option<String>,
     repo_root: Option<String>,
     requested_workdir: Option<String>,
+    repository_display_name: Option<String>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -198,6 +199,7 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         branch_at_launch: row.get(6)?,
         repo_root: row.get(7)?,
         requested_workdir: row.get(8)?,
+        repository_display_name: row.get(9)?,
     })
 }
 
@@ -212,6 +214,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         branch_at_launch: parts.branch_at_launch,
         repo_root: parts.repo_root,
         requested_workdir: parts.requested_workdir,
+        repository_display_name: parts.repository_display_name,
     })
 }
 
@@ -221,7 +224,7 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 /// derivable from `last_activity_at`/`created_at` and not returned.
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
-    let last_activity_at: Option<String> = row.get(9)?;
+    let last_activity_at: Option<String> = row.get(10)?;
     Ok((session, last_activity_at))
 }
 
@@ -321,7 +324,7 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
 }
 
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
-     branch_at_launch, repo_root, requested_workdir";
+     branch_at_launch, repo_root, requested_workdir, repository_display_name";
 /// Thread columns plus the derived `root_message_uuid`: the branch edge's
 /// canonical home is `message.semantic_parent_uuid`, so the root is computed
 /// from the thread's first semantically parented message — falling back to the
@@ -381,11 +384,11 @@ impl SessionStore for SqliteStore {
         // `active` and the hook-reported transcript path (unknown at mint time)
         // is filled in. An already-active/ended row is left untouched.
         //
-        // `branch_at_launch` and `repo_root` are NOT touched on the activate
-        // path: the eager spawn has already recorded the launch-time snapshot
-        // via `insert_spawning_session`, and an externally-started `claude`
-        // (the fresh-insert path here) has no Delta-known launch git context,
-        // so both stay NULL for it.
+        // `branch_at_launch`, `repo_root`, and `repository_display_name` are
+        // NOT touched on the activate path: the eager spawn has already
+        // recorded the launch-time snapshot via `insert_spawning_session`, and
+        // an externally-started `claude` (the fresh-insert path here) has no
+        // Delta-known launch git context, so all three stay NULL for it.
         conn.execute(
             "INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
              VALUES (?1, ?2, ?3, NULL, 'active', ?4)
@@ -412,25 +415,29 @@ impl SessionStore for SqliteStore {
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         // A plain INSERT: the id is a freshly-minted UUID v7, so a conflict is
         // a programming error worth surfacing, not a case to paper over. The
-        // spawn-time git snapshot (`branch_at_launch`, `repo_root`) is written
-        // once here and never updated later — see the doc on `Session`.
+        // spawn-time git snapshot (`branch_at_launch`, `repo_root`,
+        // `repository_display_name`) and the user-selected `requested_workdir`
+        // are written once here and never updated later — see the doc on
+        // `Session`.
         conn.execute(
             "INSERT INTO session
              (id, cwd, transcript_path, title, status, created_at,
-              branch_at_launch, repo_root, requested_workdir)
-             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6)",
+              branch_at_launch, repo_root, requested_workdir, repository_display_name)
+             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6, ?7)",
             params![
                 id.as_str(),
                 cwd,
                 now,
                 branch_at_launch,
                 repo_root,
-                requested_workdir
+                requested_workdir,
+                repository_display_name,
             ],
         )
         .map_err(Error::from)?;
@@ -446,6 +453,7 @@ impl SessionStore for SqliteStore {
                 branch_at_launch: branch_at_launch.map(str::to_owned),
                 repo_root: repo_root.map(str::to_owned),
                 requested_workdir: requested_workdir.map(str::to_owned),
+                repository_display_name: repository_display_name.map(str::to_owned),
             },
             main_id,
         ))
@@ -1465,10 +1473,7 @@ impl SessionStore for SqliteStore {
         Ok(option)
     }
 
-    async fn delete_launch_option(
-        &self,
-        id: i64,
-    ) -> std::result::Result<(), delta_usecase::Error> {
+    async fn delete_launch_option(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         conn.execute("DELETE FROM launch_option WHERE id = ?1", params![id])
             .map_err(Error::from)?;

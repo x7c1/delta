@@ -98,6 +98,13 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// user-selected dir (the worktree's repo root), while `cwd` holds the
     /// auto-generated worktree path; for a plain spawn with a user-selected
     /// workdir it equals `cwd`. See [`Session::requested_workdir`].
+    ///
+    /// `repository_display_name` is the cross-worktree repository identity
+    /// label (`org/repo` from the `origin` URL, or the working-tree basename
+    /// when no origin is set). It is `None` when the launch directory is not
+    /// inside a git repository. Persisted once here and never updated later:
+    /// see [`Session::repository_display_name`] for the spawn-snapshot
+    /// semantics.
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
@@ -105,6 +112,7 @@ pub trait SessionStore: std::marker::Send + Sync {
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
@@ -453,8 +461,7 @@ pub trait SessionStore: std::marker::Send + Sync {
 
     /// Clear a recorded background-task launch once its `<task-notification>`
     /// has been folded. Clearing an unknown id is a no-op.
-    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str)
-        -> Result<()>;
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()>;
 
     /// The session's outstanding background-task launches as `(tool_use_id ->
     /// SubagentLaunch)`: every background task still awaiting its
@@ -507,9 +514,17 @@ impl SessionStore for Box<dyn SessionStore> {
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         (**self)
-            .insert_spawning_session(id, cwd, branch_at_launch, repo_root, requested_workdir)
+            .insert_spawning_session(
+                id,
+                cwd,
+                branch_at_launch,
+                repo_root,
+                requested_workdir,
+                repository_display_name,
+            )
             .await
     }
 
@@ -708,7 +723,9 @@ impl SessionStore for Box<dyn SessionStore> {
         request_id: i64,
         allowed: bool,
     ) -> Result<Option<PermissionRequest>> {
-        (**self).decide_permission_request(request_id, allowed).await
+        (**self)
+            .decide_permission_request(request_id, allowed)
+            .await
     }
 
     async fn resolve_permission_by_tool_use_id(
@@ -744,11 +761,7 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
-    async fn clear_subagent_launch(
-        &self,
-        session_id: &SessionId,
-        tool_use_id: &str,
-    ) -> Result<()> {
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()> {
         (**self)
             .clear_subagent_launch(session_id, tool_use_id)
             .await
