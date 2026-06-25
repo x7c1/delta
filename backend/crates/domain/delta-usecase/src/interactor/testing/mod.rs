@@ -17,8 +17,8 @@ mod transcript_lines;
 
 pub(crate) use factory::{
     interactor, interactor_with_failing_create_session, interactor_with_failing_tmux,
-    interactor_with_git, interactor_with_git_and_gh, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH,
-    TEST_WORKDIR_BASE, TEST_WORKTREE_BASE,
+    interactor_with_git, interactor_with_git_and_gh, interactor_with_git_and_worktree_base,
+    TEST_SETTINGS_JSON, TEST_SETTINGS_PATH, TEST_WORKDIR_BASE, TEST_WORKTREE_BASE,
 };
 pub(crate) use fake_gh_cli::FakeGhCli;
 pub(crate) use fake_git_worktree::FakeGitWorktree;
