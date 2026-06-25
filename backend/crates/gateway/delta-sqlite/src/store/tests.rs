@@ -1986,7 +1986,10 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
         .await
         .unwrap();
 
-    let rows = store.repository_clone_rows().await.unwrap();
+    let rows = store
+        .repository_clone_rows("/no/such/worktree-base", 20, 5, 10)
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 2, "non-git session is excluded; one row per pair");
 
     // Find each row by its clone path.

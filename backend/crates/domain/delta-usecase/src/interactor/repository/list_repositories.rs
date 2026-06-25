@@ -8,6 +8,21 @@ use crate::interactor::repository::scan::scan_one_root;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::repository::{display_name, identity_key, Clone as RepoClone, Repository};
 
+/// Maximum number of repositories included in the per-repo cap below.
+/// Older repositories are dropped wholesale — they're unlikely to be a
+/// useful start point for a new session.
+pub(crate) const ACTIVE_REPOSITORY_LIMIT: i64 = 20;
+
+/// Per-repository cap on user-picked clone paths (paths outside the
+/// auto-generated worktree base). Keeps the main tree and manual sibling
+/// clones reliably reachable even when worktree activity is heavy.
+pub(crate) const USER_CLONE_PATH_LIMIT: i64 = 5;
+
+/// Per-repository cap on auto-generated worktree paths (children of
+/// `$DELTA_WORKTREE_BASE`). Separate from the user-picked cap so a burst
+/// of disposable worktrees cannot squeeze out user-meaningful clones.
+pub(crate) const GENERATED_CLONE_PATH_LIMIT: i64 = 10;
+
 impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
@@ -41,7 +56,15 @@ where
     /// filtered out (lazy GC), and a repository emptied by that drops from the
     /// result.
     pub async fn list_repositories(&self) -> Result<Vec<Repository>> {
-        let rows = self.store.repository_clone_rows().await?;
+        let rows = self
+            .store
+            .repository_clone_rows(
+                self.worktree_base.as_str(),
+                ACTIVE_REPOSITORY_LIMIT,
+                USER_CLONE_PATH_LIMIT,
+                GENERATED_CLONE_PATH_LIMIT,
+            )
+            .await?;
 
         // Group raw rows by repo_root, then resolve each root's identity_key
         // once (the `origin_url` lookup is the cost we want to amortise).
@@ -152,6 +175,11 @@ where
                         .cmp(&a.last_opened_at)
                         .then_with(|| a.path.cmp(&b.path))
                 });
+                // Dedup clones by path. After the sort above the most-recent entry comes
+                // first within each path, so retaining the first occurrence keeps the
+                // latest branch_at_launch and drops the older repo_root's row.
+                let mut seen = std::collections::HashSet::new();
+                acc.clones.retain(|c| seen.insert(c.path.clone()));
                 Some(Repository {
                     display_name: display_name(&acc.identity_key, &acc.latest_path),
                     identity_key: acc.identity_key,

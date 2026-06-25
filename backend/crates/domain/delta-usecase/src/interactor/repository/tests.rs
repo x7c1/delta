@@ -4,7 +4,30 @@
 //! and assert the aggregated Repository tree round-trips correctly.
 
 use crate::interactor::testing::*;
-use delta_model::SessionId;
+use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
+
+/// Build a minimal user-role message whose only purpose is to stamp a
+/// session's `last_activity_at` to `created_at`. The other Message fields are
+/// inert for the repository-tab tests.
+fn mk_msg(session_id: &SessionId, thread_id: ThreadId, uuid: &str, created_at: &str) -> Message {
+    Message {
+        uuid: MessageUuid::from(uuid),
+        session_id: session_id.clone(),
+        thread_id,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: Some(created_at.into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+    }
+}
 
 /// A path the lazy-GC stat will reliably succeed on — `/` exists on every
 /// platform delta runs on, so a row pointing at it survives the filter.
@@ -442,4 +465,236 @@ async fn missing_scan_root_path_is_skipped_silently() {
 
     let repos = ix.list_repositories().await.unwrap();
     assert!(repos.is_empty(), "a missing root simply contributes nothing");
+}
+
+#[tokio::test]
+async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
+    // Two sessions share the same `clone_path = EXISTING_DIR` but with
+    // different `repo_root` values (A and B). Both roots resolve to the same
+    // origin URL, so the interactor groups them under one identity_key. With
+    // the old SQL partitioning by `(repo_root, clone_path)` they would surface
+    // as two clone entries with different `branch_at_launch` ("old" vs
+    // "new"); the Rust-side path dedup must collapse them into one, keeping
+    // the entry from the more recent session (branch = "new").
+    let git = FakeGitWorktree::default()
+        .with_origin_url(EXISTING_DIR_2, "git@github.com:x7c1/delta")
+        .with_origin_url(EXISTING_DIR_3, "git@github.com:x7c1/delta");
+    let ix = interactor_with_git(git);
+
+    // Insert s_old first: its message stamps `last_activity_at` to the
+    // earlier timestamp.
+    ix.store()
+        .insert_spawning_session(
+            &SessionId::from("s_old"),
+            EXISTING_DIR,
+            Some("old"),
+            Some(EXISTING_DIR_2),
+            Some(EXISTING_DIR),
+        )
+        .await
+        .unwrap();
+    let s_old_thread = ix.store().main_thread_id(&SessionId::from("s_old")).await.unwrap();
+    ix.store()
+        .upsert_messages(&[mk_msg(
+            &SessionId::from("s_old"),
+            s_old_thread,
+            "m-old",
+            "2026-01-01T00:00:00Z",
+        )])
+        .await
+        .unwrap();
+
+    // Then s_new: more recent activity, distinct repo_root, same clone path.
+    ix.store()
+        .insert_spawning_session(
+            &SessionId::from("s_new"),
+            EXISTING_DIR,
+            Some("new"),
+            Some(EXISTING_DIR_3),
+            Some(EXISTING_DIR),
+        )
+        .await
+        .unwrap();
+    let s_new_thread = ix.store().main_thread_id(&SessionId::from("s_new")).await.unwrap();
+    ix.store()
+        .upsert_messages(&[mk_msg(
+            &SessionId::from("s_new"),
+            s_new_thread,
+            "m-new",
+            "2026-02-01T00:00:00Z",
+        )])
+        .await
+        .unwrap();
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert_eq!(repos.len(), 1, "both repo_roots collapse to one identity_key");
+    let repo = &repos[0];
+    let matches: Vec<_> = repo.clones.iter().filter(|c| c.path == EXISTING_DIR).collect();
+    assert_eq!(
+        matches.len(),
+        1,
+        "the shared clone_path appears exactly once after dedup, got {:?}",
+        repo.clones,
+    );
+    assert_eq!(
+        matches[0].last_branch.as_deref(),
+        Some("new"),
+        "the surviving entry is the most-recent one (branch = \"new\")",
+    );
+}
+
+#[tokio::test]
+async fn generated_paths_have_independent_cap_from_user_paths() {
+    // For one repo, insert 3 user-picked paths (none under `worktree_base`)
+    // and 12 generated paths (all children of `worktree_base`). The per-repo
+    // caps are USER_CLONE_PATH_LIMIT = 5 and GENERATED_CLONE_PATH_LIMIT = 10,
+    // so the result keeps all 3 user paths plus 10 generated paths (= 13
+    // total). All paths are real on-disk directories so the lazy-GC stat
+    // does not drop them.
+    let tmp_worktrees = tempfile::tempdir().unwrap();
+    let tmp_user = tempfile::tempdir().unwrap();
+    let worktree_base = tmp_worktrees.path().to_string_lossy().into_owned();
+
+    // 3 user-picked paths under the (separate) user tempdir.
+    let mut user_paths = Vec::new();
+    for i in 0..3 {
+        let p = tmp_user.path().join(format!("user-{i:02}"));
+        std::fs::create_dir(&p).unwrap();
+        user_paths.push(p.to_string_lossy().into_owned());
+    }
+    // 12 generated paths under worktree_base.
+    let mut generated_paths = Vec::new();
+    for i in 0..12 {
+        let p = tmp_worktrees.path().join(format!("delta-gen-{i:02}"));
+        std::fs::create_dir(&p).unwrap();
+        generated_paths.push(p.to_string_lossy().into_owned());
+    }
+
+    // One repo_root (a third tempdir, also user-picked) with the shared
+    // origin. Every clone path resolves to the same origin URL, so they all
+    // bundle into the same Repository.
+    let repo_root = tmp_user.path().join("repo-root");
+    std::fs::create_dir(&repo_root).unwrap();
+    let repo_root = repo_root.to_string_lossy().into_owned();
+
+    let mut git = FakeGitWorktree::default();
+    for p in user_paths.iter().chain(generated_paths.iter()) {
+        git = git.with_origin_url(p.as_str(), "git@github.com:x7c1/delta");
+    }
+    git = git.with_origin_url(repo_root.as_str(), "git@github.com:x7c1/delta");
+    let ix = interactor_with_git_and_worktree_base(git, &worktree_base);
+
+    let mut idx = 0;
+    for p in &user_paths {
+        ix.store()
+            .insert_spawning_session(
+                &SessionId::from(format!("s-user-{idx}").as_str()),
+                p,
+                Some("main"),
+                Some(repo_root.as_str()),
+                Some(p),
+            )
+            .await
+            .unwrap();
+        idx += 1;
+    }
+    for p in &generated_paths {
+        ix.store()
+            .insert_spawning_session(
+                &SessionId::from(format!("s-gen-{idx}").as_str()),
+                p,
+                Some("main"),
+                Some(repo_root.as_str()),
+                Some(p),
+            )
+            .await
+            .unwrap();
+        idx += 1;
+    }
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert_eq!(repos.len(), 1, "one origin, one repository");
+    let clones = &repos[0].clones;
+    assert_eq!(
+        clones.len(),
+        13,
+        "user cap (5) is not binding for 3 user paths, generated cap (10) clips 12 → 10, total 3 + 10 = 13 — got {clones:?}",
+    );
+    // Every user path survives: the user cap is 5, only 3 were inserted.
+    for p in &user_paths {
+        assert!(
+            clones.iter().any(|c| &c.path == p),
+            "the user-picked path {p} must reach the result (not squeezed out by the generated burst)",
+        );
+    }
+    // Exactly 10 of the 12 generated paths survive.
+    let kept_generated = clones
+        .iter()
+        .filter(|c| generated_paths.iter().any(|p| p == &c.path))
+        .count();
+    assert_eq!(
+        kept_generated, 10,
+        "the generated cap clips 12 → 10",
+    );
+}
+
+#[tokio::test]
+async fn active_repo_limit_drops_oldest_repositories() {
+    // Insert ACTIVE_REPOSITORY_LIMIT + 1 distinct repo_roots, each with one
+    // session whose activity timestamp grows monotonically by index. The
+    // oldest repository (s-00) must be dropped wholesale by the active-repo
+    // cap — its identity_key is absent from the result.
+    use crate::interactor::repository::list_repositories::ACTIVE_REPOSITORY_LIMIT;
+    let n = (ACTIVE_REPOSITORY_LIMIT as usize) + 1;
+
+    let tmp = tempfile::tempdir().unwrap();
+    // Build one on-disk clone path per repo so the lazy-GC stat keeps the rows.
+    let mut paths = Vec::new();
+    for i in 0..n {
+        let p = tmp.path().join(format!("clone-{i:03}"));
+        std::fs::create_dir(&p).unwrap();
+        paths.push(p.to_string_lossy().into_owned());
+    }
+
+    // Give each repo a distinct upstream so they stay separate Repositories,
+    // and wire its origin URL so the interactor reaches it.
+    let mut git = FakeGitWorktree::default();
+    for (i, p) in paths.iter().enumerate() {
+        git = git.with_origin_url(p.as_str(), format!("git@github.com:x7c1/r-{i:03}").as_str());
+    }
+    let ix = interactor_with_git(git);
+
+    for (i, p) in paths.iter().enumerate() {
+        let sid = SessionId::from(format!("s-{i:03}").as_str());
+        ix.store()
+            .insert_spawning_session(&sid, p, Some("main"), Some(p), Some(p))
+            .await
+            .unwrap();
+        // Stamp a message timestamp that grows with i, so repo i is strictly
+        // more recent than repo i-1. The 1970-base keeps the format short and
+        // sortable.
+        let thread = ix.store().main_thread_id(&sid).await.unwrap();
+        ix.store()
+            .upsert_messages(&[mk_msg(
+                &sid,
+                thread,
+                format!("m-{i:03}").as_str(),
+                format!("1970-01-{:02}T00:00:00Z", i + 1).as_str(),
+            )])
+            .await
+            .unwrap();
+    }
+
+    let repos = ix.list_repositories().await.unwrap();
+    assert_eq!(
+        repos.len(),
+        ACTIVE_REPOSITORY_LIMIT as usize,
+        "the active-repo cap clips {n} → {ACTIVE_REPOSITORY_LIMIT}",
+    );
+    let oldest_key = format!("github.com/x7c1/r-{:03}", 0);
+    assert!(
+        repos.iter().all(|r| r.identity_key != oldest_key),
+        "the oldest repository ({oldest_key}) must be absent, got {:?}",
+        repos.iter().map(|r| r.identity_key.as_str()).collect::<Vec<_>>(),
+    );
 }
