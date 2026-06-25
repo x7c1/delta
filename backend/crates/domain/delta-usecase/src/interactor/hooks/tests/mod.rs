@@ -7,6 +7,7 @@ mod cancelling_a_question_injects_escape_into_the_pane;
 mod ask_user_question_never_outlives_its_turn;
 mod first_submit_registers_session;
 mod message_display_streams_and_clears;
+mod nested_subagent_hook_is_filtered;
 mod on_stop_routes_sync_by_hook_session_id;
 mod pending_permission_is_queryable_live_state;
 mod permission_request_registers_dialog_and_decision_resolves;

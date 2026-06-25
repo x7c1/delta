@@ -12,6 +12,7 @@ async fn pre_tool_use_records_request_without_notifying() {
             "Bash",
             r#"{"command":"ls"}"#,
             "toolu_01",
+            SEED_TRANSCRIPT_PATH,
         )
         .await
         .unwrap();

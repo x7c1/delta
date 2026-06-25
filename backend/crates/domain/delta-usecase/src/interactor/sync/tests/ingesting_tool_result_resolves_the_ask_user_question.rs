@@ -17,7 +17,7 @@ async fn ingesting_tool_result_resolves_the_ask_user_question() {
     let session = SessionId::from("sess-1");
     ix.bind_open_session("delta-1", &session).await;
 
-    ix.on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1")
+    ix.on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
     let request_id = {

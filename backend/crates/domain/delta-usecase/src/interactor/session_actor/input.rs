@@ -94,6 +94,11 @@ pub(in crate::interactor) enum SessionInput {
         tool_name: String,
         tool_input_json: String,
         tool_use_id: String,
+        /// The JSONL the hook is firing against. Compared against the session
+        /// row's `transcript_path` so a hook fired by a nested subagent (whose
+        /// own transcript differs from the parent's) can be short-circuited
+        /// before it leaks runtime state onto the parent.
+        transcript_path: String,
         reply: Reply<Vec<SessionEvent>>,
     },
     /// `PostToolUse`: a tool call completed. Delta acts on the subagent
@@ -112,6 +117,11 @@ pub(in crate::interactor) enum SessionInput {
         /// when the hook carried nothing useful) so the consumer can `from_str`
         /// without first handling an absent shape.
         tool_response_json: String,
+        /// The JSONL the hook is firing against. Compared against the session
+        /// row's `transcript_path` so a hook fired by a nested subagent (whose
+        /// own transcript differs from the parent's) can be short-circuited
+        /// before it touches the parent's running window.
+        transcript_path: String,
         reply: Reply<Vec<SessionEvent>>,
     },
     /// `PermissionRequest`: record the row, register a decision waiter, and
@@ -119,6 +129,10 @@ pub(in crate::interactor) enum SessionInput {
     PermissionRequest {
         tool_name: String,
         tool_input_json: String,
+        /// The JSONL the hook is firing against. Compared against the session
+        /// row's `transcript_path` so a permission dialog raised inside a
+        /// nested subagent does not register a parent-attributed waiter.
+        transcript_path: String,
         reply: Reply<PermissionWait>,
     },
 

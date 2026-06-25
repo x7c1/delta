@@ -152,7 +152,12 @@ pub async fn permission_request(
     let tool_input_json = payload.tool_input.to_string();
     let wait = match state
         .interactor()
-        .on_permission_request(&session_id, &payload.tool_name, &tool_input_json)
+        .on_permission_request(
+            &session_id,
+            &payload.tool_name,
+            &tool_input_json,
+            &payload.transcript_path,
+        )
         .await
     {
         Ok(wait) => wait,
@@ -252,6 +257,7 @@ pub async fn pre_tool_use(
             &payload.tool_name,
             &tool_input_json,
             &payload.tool_use_id,
+            &payload.transcript_path,
         )
         .await
     {
@@ -285,6 +291,7 @@ pub async fn post_tool_use(
             &payload.tool_name,
             &payload.tool_use_id,
             &tool_response_json,
+            &payload.transcript_path,
         )
         .await
     {
