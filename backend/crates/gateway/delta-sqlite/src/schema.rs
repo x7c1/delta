@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS session (
   -- backfill — the navigator's frontend falls back to the cwd basename then.
   branch_at_launch  TEXT,
   repo_root         TEXT,
+  -- The user-selected launch directory, before any worktree resolution. For a
+  -- worktree-on spawn `cwd` holds the auto-generated worktree path (under
+  -- `$DELTA_WORKTREE_BASE`) while this holds the dir the user actually picked
+  -- (which is also the worktree's repo_root); for a plain spawn it equals
+  -- `cwd`. NULL when no workdir was selected (the default per-token scratch
+  -- dir) and for sessions that predate this column. The Recent dirs query
+  -- groups on `COALESCE(requested_workdir, cwd)` so worktree-managed paths
+  -- drop out and legacy rows still appear by their `cwd`. Additive (see
+  -- `ADDITIVE_COLUMNS`).
+  requested_workdir TEXT,
   -- Spawn-time short repository identity label (e.g. `org/repo`), derived
   -- from the launch directory's `origin` URL and falling back to the
   -- working-tree basename when no origin is configured. NULL when the launch
@@ -235,6 +245,21 @@ CREATE TABLE IF NOT EXISTS subagent_launch (
   PRIMARY KEY (session_id, tool_use_id)
 ) STRICT;
 
+-- Registered repository scan roots: parent directories whose direct children
+-- the Repository tab probes for git clones, surfacing clones the user has not
+-- yet launched a session in (the "umbrella session" case where `session.repo_root`
+-- is the umbrella's path and the actual sub-repos never get a row of their own).
+-- One row per registered parent path; the table is session-independent (no foreign
+-- key, never cascaded) and is only ever rewritten through the dedicated CRUD
+-- endpoints. Adding this table does NOT bump `SCHEMA_VERSION`: the `IF NOT EXISTS`
+-- clause means an existing database picks it up on the next open with no
+-- migration step, exactly like `launch_option` and `subagent_launch` did when
+-- they were introduced.
+CREATE TABLE IF NOT EXISTS repository_scan_root (
+  path        TEXT PRIMARY KEY,
+  created_at  TEXT NOT NULL
+) STRICT;
+
 -- Full-text index over message content (groundwork: no search UI yet).
 -- External-content fts5 over `message.content_text`, keyed by the message
 -- table's rowid (a STRICT table still has a rowid unless WITHOUT ROWID).
@@ -339,6 +364,17 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "session",
         column: "repo_root",
         add_column_sql: "ALTER TABLE session ADD COLUMN repo_root TEXT",
+    },
+    // The user-selected launch directory, added to `session` after it first
+    // shipped. Nullable with no default: an existing database gains it as NULL
+    // on every pre-existing row, so the Recent dirs query's
+    // `COALESCE(requested_workdir, cwd)` keeps legacy sessions visible by their
+    // `cwd` while new worktree-on sessions surface their user-selected dir
+    // instead of the auto-generated worktree path.
+    AdditiveColumn {
+        table: "session",
+        column: "requested_workdir",
+        add_column_sql: "ALTER TABLE session ADD COLUMN requested_workdir TEXT",
     },
     // Cross-worktree repository identity label, added to `session` after the
     // table first shipped. Nullable with no default: an existing database

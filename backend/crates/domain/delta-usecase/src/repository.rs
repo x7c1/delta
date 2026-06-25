@@ -1,150 +1,146 @@
-//! Repository identity helpers: turning a remote origin URL into a stable
-//! `host/org/repo` identity key and a short `org/repo` display name.
+//! Repository identity for the new-session Repository tab.
 //!
-//! Two repositories are "the same" when their identity keys match. The key is
-//! deliberately origin-shaped (`host/org/repo`) so an SSH clone
-//! (`git@github.com:org/repo.git`) and an HTTPS clone
-//! (`https://github.com/org/repo.git`) collide on the same key — they are the
-//! same repository. When the launch directory has no origin URL configured,
-//! the key falls back to the path itself so distinct local-only repos still
-//! get distinct identities.
-//!
-//! These helpers are pure — they do not shell out — so they live in the
-//! use-case crate next to the [`crate::GitWorktree`] port that produces the
-//! raw origin URL string. The gateway is responsible only for `git config
-//! --get remote.origin.url`; normalising the answer happens here so every
-//! caller agrees on the canonical form.
-//!
-//! [`crate::GitWorktree`]: crate::ports::GitWorktree
+//! A Repository bundles one or more local clones of the same upstream under a
+//! single recency-ordered entry. The identity that bundles them is derived
+//! from the `origin` URL (when set), normalised so the same upstream reached
+//! over SSH and HTTPS — or with different casing on the host — collapses to
+//! one key. When `origin` is unset the clone stands alone, keyed by its
+//! absolute path.
 
-/// A canonical, comparable identity for a repository.
-///
-/// Computed by normalising the remote `origin` URL — strip credentials,
-/// lowercase the host, strip a trailing `.git`, take the path segments — into
-/// `host/org/repo` form. When the origin URL is missing or unparseable, the
-/// `fallback_path` is used as the key instead (so a local-only repo still has
-/// a stable identity, distinct from any other path).
-///
-/// The output is the bare key string, suitable for equality comparison and
-/// for feeding into [`display_name`] to render a short human-friendly label.
-pub fn identity_key(origin_url: Option<String>, fallback_path: &str) -> String {
-    if let Some(url) = origin_url.as_deref() {
-        if let Some(key) = normalise_origin(url) {
-            return key;
-        }
-    }
-    fallback_path.to_owned()
+use crate::ports::WorktreeStartPoint;
+
+/// A registered repository: identity, display name, the clone to default to,
+/// and the per-clone state for every clone known to belong to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repository {
+    /// Stable identity used to bundle clones. Either the normalised origin URL
+    /// (when set on every clone) or — when no `origin` was found — the clone's
+    /// own absolute path verbatim.
+    pub identity_key: String,
+    /// Human-readable name derived from `identity_key` (e.g. `x7c1/delta`) or,
+    /// when no `org/repo` segment can be recovered, the basename of the
+    /// recently-used clone path.
+    pub display_name: String,
+    /// The default clone to pre-select: the one with the most recent
+    /// activity across this repository's clones.
+    pub recently_used_clone_path: String,
+    /// All known clones for this repository, ordered most-recent first.
+    pub clones: Vec<Clone>,
 }
 
-/// A short, human-friendly name for a repository, derived from an
-/// [`identity_key`].
-///
-/// When the key is origin-shaped (`host/org/repo` — exactly three slash
-/// segments, the first looking like a host with a dot), return `org/repo`.
-/// Otherwise the key is a filesystem path (the [`identity_key`] fallback),
-/// and the basename of `fallback_path` (the launch directory the key was
-/// derived from) is returned — the same basename the navigator would have
-/// rendered without this code path.
-pub fn display_name(key: &str, fallback_path: &str) -> String {
-    if let Some((_host, org_repo)) = split_origin_key(key) {
-        return org_repo.to_owned();
-    }
-    basename(fallback_path)
+/// One local clone of a repository: its absolute path and the per-clone state
+/// derived from the session history at that path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Clone {
+    /// Absolute path of the clone (the dir the user picked at spawn time).
+    pub path: String,
+    /// Timestamp of the most recent activity at this clone (`MAX` of the
+    /// sessions' `last_activity_at`/`created_at`), ISO-8601 UTC. `None` only
+    /// when every contributing session is itself activity-less.
+    pub last_opened_at: Option<String>,
+    /// Local branch checked out by the most recent session at this clone
+    /// (its `branch_at_launch`). `None` for sessions that recorded none (not
+    /// a git repo, detached HEAD, or pre-dating the snapshot column).
+    pub last_branch: Option<String>,
+    /// Launch-option ids selected for the most recent session at this clone.
+    /// Phase B always returns `[]` — per-session launch-option persistence is
+    /// deferred to a follow-up PR (see `Repository tab` plan).
+    pub last_launch_option_ids: Vec<i64>,
+    /// Whether the most recent session at this clone opted into a worktree.
+    /// Phase B always returns `false` — per-session worktree-state persistence
+    /// is deferred to a follow-up PR.
+    pub last_worktree_enabled: bool,
+    /// The most recent session's worktree start point, when one was chosen.
+    /// Phase B always returns `None` — per-session worktree-state persistence
+    /// is deferred to a follow-up PR.
+    pub last_worktree_start_point: Option<WorktreeStartPoint>,
 }
 
-/// Normalise an origin URL string into a `host/org/repo` key.
+/// Derive a stable identity key for the repository containing `fallback_path`.
 ///
-/// Accepts both forms git emits:
-/// - SSH `git@host:org/repo(.git)?`
-/// - HTTPS `https://[user[:pass]@]host/org/repo(.git)?` (any scheme that
-///   contains `://`, including `http`, `ssh`, `git`).
+/// When `origin` is `Some`, the URL is normalised so SSH and HTTPS forms of
+/// the same upstream collapse to one key: trailing `.git` is stripped, an
+/// SSH `git@host:org/repo` URL is rewritten to `host/org/repo`, an HTTPS
+/// `https://host/org/repo` URL is rewritten to `host/org/repo` (with any
+/// embedded `user:token@` credentials stripped), and the host portion is
+/// lowercased while path segments stay case-sensitive (Git semantics).
 ///
-/// Returns `None` when the URL does not parse into at least a host plus two
-/// path segments. The host is lowercased; case in the path is preserved (most
-/// forges treat `Org/Repo` as the same as `org/repo` on the wire but the
-/// canonical capitalisation belongs to the path itself).
-fn normalise_origin(url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let (host, path) = if let Some((_scheme, authority_and_path)) = trimmed.split_once("://") {
-        // scheme://[creds@]host[/]path...
-        let (authority, raw_path) = match authority_and_path.split_once('/') {
-            Some((authority, path)) => (authority, path),
-            None => return None,
-        };
-        // Strip credentials.
-        let host_part = match authority.rsplit_once('@') {
-            Some((_creds, host)) => host,
-            None => authority,
-        };
-        // Strip a possible `:port`.
-        let host_only = host_part
-            .split_once(':')
-            .map(|(h, _)| h)
-            .unwrap_or(host_part);
-        if host_only.is_empty() {
-            return None;
-        }
-        (host_only.to_owned(), raw_path.to_owned())
-    } else if let Some((authority, raw_path)) = trimmed.split_once(':') {
-        // SCP-style SSH: `[user@]host:path`. The split must NOT be a `scheme:`
-        // — guard by requiring the right side to look like a path (does not
-        // start with `//`), and the left side to be non-empty.
-        if raw_path.starts_with("//") || authority.is_empty() {
-            return None;
-        }
-        let host_part = match authority.rsplit_once('@') {
-            Some((_user, host)) => host,
-            None => authority,
-        };
-        if host_part.is_empty() {
-            return None;
-        }
-        (host_part.to_owned(), raw_path.to_owned())
-    } else {
-        return None;
+/// When `origin` is `None` the function falls back to `fallback_path`
+/// verbatim — the clone stands alone in the Repository tab.
+pub fn identity_key(origin: Option<String>, fallback_path: &str) -> String {
+    let Some(raw) = origin else {
+        return fallback_path.to_owned();
     };
-
-    // Strip a trailing `.git` and any surrounding slashes.
-    let path = path.trim_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-
-    // Require at least `org/repo`.
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    if segments.len() < 2 {
-        return None;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return fallback_path.to_owned();
     }
-    let org_repo = segments.join("/");
+    // Strip a trailing `.git` once.
+    let trimmed = raw.strip_suffix(".git").unwrap_or(raw);
 
-    Some(format!("{}/{}", host.to_lowercase(), org_repo))
+    // Scheme-bearing URLs come first so the SSH `user@host:path` branch below
+    // does not mis-parse `https:` as a `user@host` separator.
+    for scheme in ["https://", "http://", "ssh://", "git://"] {
+        if let Some(rest) = trimmed.strip_prefix(scheme) {
+            // Drop any embedded `user[:token]@` credentials so the same URL
+            // with and without a token collapses to one key.
+            let rest = rest.rsplit_once('@').map(|(_, after)| after).unwrap_or(rest);
+            let (host, path) = match rest.split_once('/') {
+                Some((host, path)) => (host, path),
+                None => (rest, ""),
+            };
+            if path.is_empty() {
+                return host.to_ascii_lowercase();
+            }
+            return format!("{}/{}", host.to_ascii_lowercase(), path);
+        }
+    }
+
+    // SSH form: `git@host:org/repo` (or any `user@host:path`).
+    if let Some((user_host, rest)) = trimmed.split_once(':') {
+        if !user_host.contains('/') {
+            let host = user_host
+                .rsplit_once('@')
+                .map(|(_, h)| h)
+                .unwrap_or(user_host);
+            return format!("{}/{}", host.to_ascii_lowercase(), rest);
+        }
+    }
+
+    // Unknown form: keep verbatim (after the `.git` strip) — the caller
+    // bundles by exact match in that case.
+    trimmed.to_owned()
 }
 
-/// Split an `host/org/repo` identity key into `(host, org_repo)` when it is
-/// origin-shaped: at least three slash segments and a host that contains a
-/// dot. `None` otherwise (e.g. a filesystem-path fallback key).
-fn split_origin_key(key: &str) -> Option<(&str, &str)> {
-    let (host, rest) = key.split_once('/')?;
-    if !host.contains('.') {
-        return None;
+/// Derive a human-readable display name from a `identity_key`.
+///
+/// When the key looks like `host/org/repo` (or `host/org/sub/repo`), the
+/// trailing two segments (`org/repo`) become the display name. Otherwise the
+/// basename of `fallback_path` is used (e.g. for a key that *is* a filesystem
+/// path because `origin` was unset).
+pub fn display_name(identity_key: &str, fallback_path: &str) -> String {
+    // A normalised origin key starts with a non-empty host segment (e.g.
+    // `github.com/org/repo`); a path key starts with an empty segment
+    // (the leading `/`), so split-on-`/` is enough to tell them apart
+    // without baking host-shape heuristics in.
+    let segments: Vec<&str> = identity_key.split('/').collect();
+    let is_origin_shaped = segments
+        .first()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+        && segments.len() >= 3;
+    if is_origin_shaped {
+        // `host/org/repo` or deeper: take the last two segments as `org/repo`.
+        let n = segments.len();
+        return format!("{}/{}", segments[n - 2], segments[n - 1]);
     }
-    // `rest` must itself contain at least `org/repo`.
-    if rest.split('/').filter(|s| !s.is_empty()).count() < 2 {
-        return None;
-    }
-    Some((host, rest))
-}
-
-/// The basename of `path`, or the path itself when it has no slash.
-/// Trailing slashes are stripped first so `/a/b/` resolves to `b`.
-fn basename(path: &str) -> String {
-    let trimmed = path.trim_end_matches('/');
-    match trimmed.rsplit_once('/') {
-        Some((_, last)) => last.to_owned(),
-        None => trimmed.to_owned(),
-    }
+    // Fallback: the basename of the fallback path (skip empty trailing slash).
+    fallback_path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or(fallback_path)
+        .to_owned()
 }
 
 #[cfg(test)]
@@ -152,73 +148,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identity_key_normalises_https_url() {
-        let key = identity_key(
-            Some("https://github.com/x7c1/delta.git".into()),
-            "/anywhere",
+    fn https_url_collapses_to_host_org_repo() {
+        assert_eq!(
+            identity_key(Some("https://github.com/x7c1/delta.git".into()), "/x"),
+            "github.com/x7c1/delta"
         );
-        assert_eq!(key, "github.com/x7c1/delta");
     }
 
     #[test]
-    fn identity_key_normalises_ssh_url_to_same_key_as_https() {
-        let ssh = identity_key(Some("git@github.com:x7c1/delta.git".into()), "/anywhere");
-        let https = identity_key(
-            Some("https://github.com/x7c1/delta.git".into()),
-            "/anywhere",
+    fn ssh_url_collapses_to_host_org_repo() {
+        assert_eq!(
+            identity_key(Some("git@github.com:x7c1/delta".into()), "/x"),
+            "github.com/x7c1/delta"
         );
-        assert_eq!(ssh, https, "SSH and HTTPS clones share one identity");
     }
 
     #[test]
-    fn identity_key_strips_credentials_from_https() {
-        let key = identity_key(
-            Some("https://user:token@github.com/x7c1/delta.git".into()),
-            "/anywhere",
+    fn ssh_and_https_collapse_to_the_same_key() {
+        let ssh = identity_key(Some("git@github.com:x7c1/delta.git".into()), "/a");
+        let https = identity_key(Some("https://github.com/x7c1/delta".into()), "/b");
+        assert_eq!(ssh, https);
+    }
+
+    #[test]
+    fn host_case_is_normalised_but_path_case_is_preserved() {
+        assert_eq!(
+            identity_key(Some("https://GitHub.com/X7c1/Delta".into()), "/a"),
+            "github.com/X7c1/Delta"
         );
-        assert_eq!(key, "github.com/x7c1/delta");
     }
 
     #[test]
-    fn identity_key_lowercases_host_only() {
-        // Host is lowercased; path segments preserve their capitalisation.
-        let key = identity_key(
-            Some("https://GitHub.com/X7C1/Delta.git".into()),
-            "/anywhere",
+    fn embedded_credentials_are_stripped() {
+        assert_eq!(
+            identity_key(
+                Some("https://oauth2:token@github.com/x7c1/delta.git".into()),
+                "/x"
+            ),
+            "github.com/x7c1/delta"
         );
-        assert_eq!(key, "github.com/X7C1/Delta");
     }
 
     #[test]
-    fn identity_key_falls_back_to_path_when_origin_missing() {
-        let key = identity_key(None, "/work/local-only");
-        assert_eq!(key, "/work/local-only");
+    fn none_origin_falls_back_to_path() {
+        assert_eq!(identity_key(None, "/projects/scratch"), "/projects/scratch");
     }
 
     #[test]
-    fn identity_key_falls_back_to_path_when_origin_is_unparseable() {
-        let key = identity_key(Some("not-a-url".into()), "/work/local-only");
-        assert_eq!(key, "/work/local-only");
-    }
-
-    #[test]
-    fn display_name_returns_org_repo_for_origin_key() {
-        let key = identity_key(
-            Some("https://github.com/x7c1/delta.git".into()),
-            "/work/anywhere",
+    fn empty_origin_falls_back_to_path() {
+        assert_eq!(
+            identity_key(Some("   ".into()), "/projects/scratch"),
+            "/projects/scratch"
         );
-        assert_eq!(display_name(&key, "/work/anywhere"), "x7c1/delta");
     }
 
     #[test]
-    fn display_name_falls_back_to_basename_for_path_key() {
-        let key = identity_key(None, "/work/local-only");
-        assert_eq!(display_name(&key, "/work/local-only"), "local-only");
+    fn display_name_uses_org_repo_when_present() {
+        assert_eq!(display_name("github.com/x7c1/delta", "/path"), "x7c1/delta");
     }
 
     #[test]
-    fn display_name_basename_handles_trailing_slash() {
-        let key = identity_key(None, "/work/local-only/");
-        assert_eq!(display_name(&key, "/work/local-only/"), "local-only");
+    fn display_name_falls_back_to_basename_for_a_path_key() {
+        assert_eq!(
+            display_name("/projects/scratch", "/projects/scratch"),
+            "scratch"
+        );
     }
 }

@@ -27,6 +27,11 @@ const QUESTION_NOT_PENDING_CODE: &str = "question_not_pending";
 /// code.
 const SEND_NOT_CANCELLABLE_CODE: &str = "send_not_cancellable";
 
+/// Stable machine-readable code for a repository scan root registered twice
+/// with the same path. The Settings dialog shows an inline "already registered"
+/// hint instead of a generic failure toast on this code.
+const SCAN_ROOT_DUPLICATE_CODE: &str = "scan_root_duplicate";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -92,6 +97,12 @@ impl IntoResponse for ApiError {
                     Error::SendNotCancellable(_) => {
                         (StatusCode::CONFLICT, Some(SEND_NOT_CANCELLABLE_CODE))
                     }
+                    // A repository scan root registered twice: a conflict with
+                    // current state, with a stable code so the Settings dialog
+                    // shows an inline hint instead of a generic failure toast.
+                    Error::RepositoryScanRootDuplicate(_) => {
+                        (StatusCode::CONFLICT, Some(SCAN_ROOT_DUPLICATE_CODE))
+                    }
                     // The browser's selection could not be turned into a key
                     // sequence (malformed, or an unsupported sub-case): the
                     // caller sent a bad answer, so `400`.
@@ -111,6 +122,7 @@ impl IntoResponse for ApiError {
                     // Everything else is an internal failure.
                     Error::Tmux(_)
                     | Error::Git(_)
+                    | Error::Gh(_)
                     | Error::Transcript(_)
                     | Error::Store(_)
                     | Error::Workspace(_)

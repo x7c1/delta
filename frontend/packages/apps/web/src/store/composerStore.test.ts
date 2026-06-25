@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_NEW_SESSION_TAB,
   DEFAULT_WORKTREE_START_POINT,
   useComposerStore,
 } from './composerStore';
@@ -11,6 +12,8 @@ const RESET_STATE = {
   newSessionWorktreeEnabled: false,
   newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
   workdirDialogOpen: false,
+  newSessionTab: DEFAULT_NEW_SESSION_TAB,
+  newSessionSelectedPrUrl: null,
 } as const;
 
 beforeEach(() => {
@@ -36,13 +39,18 @@ describe('composerStore workdir dialog', () => {
 });
 
 describe('composerStore worktree selection', () => {
-  it('defaults the toggle off with the HEAD start-point', () => {
+  it('defaults the toggle off with the pending-branch start-point', () => {
+    // Dogfooding default: the toggle is off, and once enabled the picker
+    // lands in "Other remote branch" mode (the `pending_remote_branch`
+    // sentinel) so the user picks a specific remote branch.
     const state = useComposerStore.getState();
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 
-  it('switching the toggle off resets the start-point to HEAD', () => {
+  it('switching the toggle off resets the start-point to the picker default', () => {
     const store = useComposerStore.getState();
     store.setNewSessionWorktreeEnabled(true);
     store.setNewSessionWorktreeStartPoint({
@@ -57,7 +65,28 @@ describe('composerStore worktree selection', () => {
     useComposerStore.getState().setNewSessionWorktreeEnabled(false);
     const state = useComposerStore.getState();
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
+  });
+
+  it('toggling the worktree off then on returns to the pending-branch default', () => {
+    // Regression: a stale branch pick from a previous worktree session must
+    // not bleed back when the toggle is re-enabled.
+    const store = useComposerStore.getState();
+    store.setNewSessionWorktreeEnabled(true);
+    store.setNewSessionWorktreeStartPoint({
+      kind: 'use_remote_branch',
+      name: 'feature/x',
+    });
+    store.setNewSessionWorktreeEnabled(false);
+    store.setNewSessionWorktreeEnabled(true);
+
+    const state = useComposerStore.getState();
+    expect(state.newSessionWorktreeEnabled).toBe(true);
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 
   it('changing the selected directory resets the worktree state', () => {
@@ -74,7 +103,9 @@ describe('composerStore worktree selection', () => {
     const state = useComposerStore.getState();
     expect(state.newSessionWorkdir).toBe('/home/dev/other');
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
   });
 
   it('clearing the directory (leaving new-session / on send) resets worktree state', () => {
@@ -86,6 +117,41 @@ describe('composerStore worktree selection', () => {
     const state = useComposerStore.getState();
     expect(state.newSessionWorkdir).toBeNull();
     expect(state.newSessionWorktreeEnabled).toBe(false);
-    expect(state.newSessionWorktreeStartPoint).toEqual({ kind: 'head' });
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'pending_remote_branch',
+    });
+  });
+});
+
+
+describe('composerStore newSessionTab', () => {
+  it('defaults to repository on a fresh state', () => {
+    expect(useComposerStore.getState().newSessionTab).toBe(DEFAULT_NEW_SESSION_TAB);
+    expect(DEFAULT_NEW_SESSION_TAB).toBe('repository');
+  });
+
+  it('setNewSessionTab updates the active tab', () => {
+    useComposerStore.getState().setNewSessionTab('directory');
+    expect(useComposerStore.getState().newSessionTab).toBe('directory');
+
+    useComposerStore.getState().setNewSessionTab('pr');
+    expect(useComposerStore.getState().newSessionTab).toBe('pr');
+  });
+});
+
+describe('composerStore newSessionSelectedPrUrl', () => {
+  it('defaults to null on a fresh state', () => {
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull();
+  });
+
+  it('setNewSessionSelectedPrUrl sets and clears the field', () => {
+    const store = useComposerStore.getState();
+    store.setNewSessionSelectedPrUrl('https://github.com/x7c1/delta/pull/174');
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
+      'https://github.com/x7c1/delta/pull/174',
+    );
+
+    useComposerStore.getState().setNewSessionSelectedPrUrl(null);
+    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 use delta_model::{
     ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus, SessionId,
-    SessionStatus,
+    SessionStatus, ThreadId,
 };
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
@@ -691,9 +691,10 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
 #[tokio::test]
 async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
     let store = SqliteStore::open_in_memory().unwrap();
-    // A session with no messages still contributes its cwd, keyed by its own
-    // `created_at`, so a freshly-used directory is listed before any message
-    // lands.
+    // A session with no messages still contributes its workdir, keyed by its
+    // own `created_at`, so a freshly-used directory is listed before any
+    // message lands. With no `requested_workdir` set (the `register_session`
+    // path never sets it), the query falls back to `cwd` for the workdir key.
     let (_s, _main) = store
         .register_session(NewSession {
             id: "sess-1".into(),
@@ -712,6 +713,36 @@ async fn recent_workdirs_falls_back_to_created_at_for_message_less_sessions() {
     assert!(
         recent[0].1.is_some(),
         "recency falls back to the session's created_at"
+    );
+}
+
+#[tokio::test]
+async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // Mirror a worktree-on spawn: `cwd` is the auto-generated worktree path
+    // under `$DELTA_WORKTREE_BASE`, `requested_workdir` is the dir the user
+    // picked (which is also the worktree's repo root). The Recent dirs query
+    // must surface the user-selected dir, not the worktree path.
+    let id = SessionId::from("sess-worktree");
+    store
+        .insert_spawning_session(
+            &id,
+            "/var/delta/worktrees/delta-sess-worktree",
+            Some("delta-sess-worktree"),
+            Some("/user-chosen"),
+            Some("/user-chosen"),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let recent = store.recent_workdirs(10).await.unwrap();
+    let paths: Vec<&str> = recent.iter().map(|(p, _)| p.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["/user-chosen"],
+        "Recent surfaces the user-selected dir, not the auto-generated worktree path"
     );
 }
 
@@ -1009,7 +1040,7 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&spawning, "/work", None, None, None)
+        .insert_spawning_session(&spawning, "/work", None, None, None, None)
         .await
         .unwrap();
 
@@ -1334,7 +1365,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(&id, "/work", None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None)
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -1434,7 +1465,7 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&id, "/work", None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None)
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();
@@ -1917,4 +1948,180 @@ async fn schema_gate_opens_a_current_database_unchanged() {
     assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
+async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // Two sessions at the same (repo_root, requested_workdir) — the second is
+    // more recent and on a different branch. A third session at the SAME repo
+    // root but a different requested_workdir is its own clone row. A fourth
+    // session is outside any git repo (no repo_root) and must be excluded.
+    let s1 = SessionId::from("sess-1");
+    store
+        .insert_spawning_session(
+            &s1,
+            "/repo-a/wt-1",
+            Some("main"),
+            Some("/repo-a"),
+            Some("/repo-a"),
+            None,
+        )
+        .await
+        .unwrap();
+    let s2 = SessionId::from("sess-2");
+    store
+        .insert_spawning_session(
+            &s2,
+            "/repo-a/wt-2",
+            Some("feature/x"),
+            Some("/repo-a"),
+            Some("/repo-a"),
+            None,
+        )
+        .await
+        .unwrap();
+    let s3 = SessionId::from("sess-3");
+    store
+        .insert_spawning_session(
+            &s3,
+            "/repo-a-mirror",
+            Some("main"),
+            Some("/repo-a"),
+            Some("/repo-a-mirror"),
+            None,
+        )
+        .await
+        .unwrap();
+    let s4 = SessionId::from("sess-4");
+    store
+        .insert_spawning_session(&s4, "/scratch", None, None, Some("/scratch"), None)
+        .await
+        .unwrap();
+
+    // Stamp `last_activity_at` for s1 and s2 explicitly so s2 is the latest at
+    // its `(repo_root, requested_workdir)` pair, driving the `last_branch`
+    // pick. The default `created_at` is `now`, which is later than any
+    // hard-coded past timestamp, so without explicit stamps s1 would sort
+    // newer than s2 by `COALESCE(last_activity_at, created_at)`.
+    let mk_msg = |session_id: SessionId, thread_id: ThreadId, uuid: &str, at: &str| Message {
+        uuid: MessageUuid::from(uuid),
+        session_id,
+        thread_id,
+        role: Role::User,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("hi".into()),
+        content: vec![ContentBlock::Text { text: "hi".into() }],
+        created_at: Some(at.into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+    };
+    let s1_thread = store.main_thread_id(&s1).await.unwrap();
+    let s2_thread = store.main_thread_id(&s2).await.unwrap();
+    store
+        .upsert_messages(&[
+            mk_msg(s1.clone(), s1_thread, "m-s1", "2026-01-01T00:00:00Z"),
+            mk_msg(s2.clone(), s2_thread, "m-s2", "2026-02-01T00:00:00Z"),
+        ])
+        .await
+        .unwrap();
+
+    let rows = store
+        .repository_clone_rows("/no/such/worktree-base", 20, 5, 10)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2, "non-git session is excluded; one row per pair");
+
+    // Find each row by its clone path.
+    let a = rows
+        .iter()
+        .find(|r| r.clone_path == "/repo-a")
+        .expect("the bundled /repo-a clone is present");
+    assert_eq!(a.repo_root, "/repo-a");
+    assert_eq!(
+        a.last_branch.as_deref(),
+        Some("feature/x"),
+        "the latest session at this pair (s2) contributes last_branch"
+    );
+    assert_eq!(
+        a.last_opened_at.as_deref(),
+        Some("2026-02-01T00:00:00Z"),
+        "last_opened_at uses the max recency across the pair's sessions"
+    );
+
+    let mirror = rows
+        .iter()
+        .find(|r| r.clone_path == "/repo-a-mirror")
+        .expect("the second clone of /repo-a is its own row");
+    assert_eq!(mirror.repo_root, "/repo-a");
+    assert_eq!(mirror.last_branch.as_deref(), Some("main"));
+}
+
+#[tokio::test]
+async fn repository_scan_roots_round_trip_create_list_delete() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // A fresh store has no registered scan roots.
+    assert!(store.list_repository_scan_roots().await.unwrap().is_empty());
+
+    // Inserts persist verbatim.
+    let alpha = store
+        .insert_repository_scan_root("/home/dev/projects")
+        .await
+        .unwrap();
+    assert_eq!(alpha.path, "/home/dev/projects");
+    assert!(!alpha.created_at.is_empty());
+
+    let beta = store
+        .insert_repository_scan_root("/work/atelier/repos/x7c1")
+        .await
+        .unwrap();
+    assert_eq!(beta.path, "/work/atelier/repos/x7c1");
+
+    // Listed both, newest first. The seeded `now_iso8601` may tie at second
+    // resolution; the secondary sort key (path ASC) keeps the order stable.
+    let listed = store.list_repository_scan_roots().await.unwrap();
+    assert_eq!(listed.len(), 2);
+    let paths: Vec<&str> = listed.iter().map(|r| r.path.as_str()).collect();
+    assert!(paths.contains(&"/home/dev/projects"));
+    assert!(paths.contains(&"/work/atelier/repos/x7c1"));
+
+    // Inserting a duplicate path is a typed conflict, not a silent overwrite —
+    // the PRIMARY KEY constraint is the conflict gate.
+    let dup = store
+        .insert_repository_scan_root("/home/dev/projects")
+        .await;
+    assert!(
+        matches!(
+            dup,
+            Err(delta_usecase::Error::RepositoryScanRootDuplicate(ref p)) if p == "/home/dev/projects",
+        ),
+        "duplicate insert reports `RepositoryScanRootDuplicate`, got {dup:?}",
+    );
+
+    // Delete removes one row without touching the other.
+    store
+        .delete_repository_scan_root("/home/dev/projects")
+        .await
+        .unwrap();
+    let remaining = store.list_repository_scan_roots().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].path, "/work/atelier/repos/x7c1");
+
+    // Deleting an unknown path is a silent no-op (idempotent), not an error.
+    store
+        .delete_repository_scan_root("/does/not/exist")
+        .await
+        .unwrap();
+    assert_eq!(
+        store.list_repository_scan_roots().await.unwrap().len(),
+        1,
+        "unknown delete left the other row untouched"
+    );
 }

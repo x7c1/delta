@@ -1,5 +1,5 @@
 import { useState, type CSSProperties, type Ref } from 'react';
-import type { ThreadId } from '@delta/model';
+import { displayBranch, type ThreadId } from '@delta/model';
 import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
@@ -134,19 +134,24 @@ export function SessionNode({
   // Line 1: the local branch checked out in the launch directory at spawn time,
   // captured once by the backend on `insert_spawning_session`. Falls back to
   // the session label for sessions launched outside a git repo (or that
-  // predate the snapshot — older databases store NULL).
+  // predate the snapshot — older databases store NULL). A delta-managed
+  // `delta-<uuid>` branch shortens for display (the prefix is noise inside
+  // delta and the 36-char UUID is unreadable); any other name passes through
+  // unchanged. The full original name stays on the hover `title`.
   const branchAtLaunch = item.session.branch_at_launch;
+  const branchDisplay =
+    branchAtLaunch === null ? null : displayBranch(branchAtLaunch);
   // Line 2 left: the launch-time repository identity, captured at spawn time.
   // Prefer the backend's short `repository_display_name` label (e.g.
   // `org/repo`, normalised from the launch dir's `origin` URL — stable across
   // worktrees of the same clone). When that is `null` (a session launched
   // outside any git repo, or a legacy row that predates this column), fall
   // back to the cwd basename so the line still identifies the working
-  // directory. `repoFullPath` carries the full path the basename was derived
-  // from, used as the hover tooltip on the fallback path; on the primary
-  // path the tooltip carries `repo_root` (or `cwd` when that is also `null`)
-  // so the user can still see exactly where the session is running. An empty
-  // `repoLabel` means no usable label and the line-2 left span is omitted.
+  // directory. On the primary path the tooltip carries `repo_root` (or `cwd`
+  // when that is also `null`) so the user can still see exactly where the
+  // session is running; on the fallback path the tooltip carries the cwd.
+  // An empty `repoLabel` means no usable label and the line-2 left span is
+  // omitted.
   const repositoryDisplayName = item.session.repository_display_name;
   const repoRoot = item.session.repo_root;
   const cwd = item.session.cwd;
@@ -246,7 +251,7 @@ export function SessionNode({
                 title={branchAtLaunch ?? label}
                 data-testid="session-branch"
               >
-                {branchAtLaunch ?? label}
+                {branchDisplay ?? label}
               </span>
               {running && (
                 // Compact: the rotating circle alone reads as "processing". The

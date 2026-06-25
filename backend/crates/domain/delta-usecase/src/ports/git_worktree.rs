@@ -110,19 +110,22 @@ pub trait GitWorktree: Send + Sync {
     /// (`origin/HEAD` unset) is the `None` signal. Best-effort: no fetch.
     async fn default_branch(&self, repo_root: &str) -> Result<Option<String>>;
 
-    /// The remote `origin` URL configured under `path`, or `None` when the
-    /// path is not in a git repository or no `origin` remote is set.
+    /// The repository's `origin` remote URL (e.g. `git@github.com:x7c1/delta`
+    /// or `https://github.com/x7c1/delta.git`), or `None` when `remote.origin.url`
+    /// is unset (or the path is not inside a git repository).
     ///
     /// Runs `git -C <path> config --get remote.origin.url`: a non-zero exit
-    /// (not a git repo, or `remote.origin.url` unset) is the `None` signal,
-    /// not an error to propagate. The returned URL has any trailing newline
-    /// trimmed. Lightweight: no fetch. Feeds the repository-identity helpers
-    /// ([`crate::identity_key`] / [`crate::display_name`]) used to render a
-    /// short `org/repo` label for the navigator session card.
+    /// (no remote, or not a git repo) is the `None` signal, not an error to
+    /// propagate. The returned URL has any trailing newline trimmed.
+    /// Lightweight: no fetch.
     ///
     /// Because `remote.origin.url` lives in the shared `.git/config`, calling
     /// this from a linked worktree returns the same URL as the main working
-    /// tree — repository identity is stable across worktrees.
+    /// tree — repository identity is stable across worktrees. Feeds the
+    /// repository-identity helpers ([`crate::identity_key`] /
+    /// [`crate::display_name`]) used by the Repository tab to bundle multiple
+    /// local clones of the same upstream under one identity, and by the
+    /// navigator to render a short `org/repo` label on each session card.
     async fn origin_url(&self, path: &str) -> Result<Option<String>>;
 
     /// Fetch the remote and list its branches, recomputing the default branch.

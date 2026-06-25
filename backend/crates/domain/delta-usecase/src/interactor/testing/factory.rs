@@ -1,9 +1,11 @@
 //! Construct the test interactor over the in-memory fakes, plus the accessors
 //! tests use to reach into the fakes the interactor owns.
 
+use std::sync::Arc;
+
 use crate::Interactor;
 
-use super::{FakeGitWorktree, FakeStore, FakeTmux, FakeTranscript, FakeWorkspace};
+use super::{FakeGhCli, FakeGitWorktree, FakeStore, FakeTmux, FakeTranscript, FakeWorkspace};
 
 /// The base working directory the test interactor spawns sessions under.
 pub(crate) const TEST_WORKDIR_BASE: &str = "/work";
@@ -33,6 +35,18 @@ pub(crate) fn interactor() -> TestInteractor {
 /// Build a test interactor with a specific [`FakeGitWorktree`], for the
 /// worktree spawn-wiring tests; everything else is the default fake.
 pub(crate) fn interactor_with_git(git_worktree: FakeGitWorktree) -> TestInteractor {
+    interactor_with_git_and_worktree_base(git_worktree, TEST_WORKTREE_BASE)
+}
+
+/// Like [`interactor_with_git`] but lets the caller override the
+/// `worktree_base` the interactor is wired with. Used by the Repository tab
+/// tests that need real existing paths under `worktree_base` (so the
+/// session-derived clone rows survive the lazy-GC filter) — point this at a
+/// `tempfile::tempdir()` and create the child directories under it.
+pub(crate) fn interactor_with_git_and_worktree_base(
+    git_worktree: FakeGitWorktree,
+    worktree_base: impl Into<String>,
+) -> TestInteractor {
     Interactor::new(
         FakeTmux::default(),
         FakeTranscript::default(),
@@ -40,10 +54,22 @@ pub(crate) fn interactor_with_git(git_worktree: FakeGitWorktree) -> TestInteract
         FakeWorkspace::default(),
         git_worktree,
         TEST_WORKDIR_BASE,
-        TEST_WORKTREE_BASE,
+        worktree_base,
         TEST_SETTINGS_JSON,
         TEST_SETTINGS_PATH,
     )
+}
+
+/// Build a test interactor with both a specific [`FakeGitWorktree`] and a
+/// shared [`FakeGhCli`], for the PR-tab use-case tests that need to
+/// script both the local-clone registry (via the store + gateway-resolved
+/// origin URLs) and the gh CLI's answers — and reach back into the gh
+/// fake afterwards to inspect what the use case shelled out.
+pub(crate) fn interactor_with_git_and_gh(
+    git_worktree: FakeGitWorktree,
+    gh_cli: Arc<FakeGhCli>,
+) -> TestInteractor {
+    interactor_with_git(git_worktree).with_gh_cli(gh_cli as Arc<dyn crate::ports::GhCli>)
 }
 
 /// An interactor whose tmux dispatch always fails.

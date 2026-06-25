@@ -24,10 +24,22 @@ mod new_session_response;
 pub use new_session_response::{WireNewSessionResponse, WireSessionLifecycle};
 mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
+mod pull_requests_response;
+pub use pull_requests_response::{WirePullRequest, WirePullRequestsResponse};
 mod question_answer_request;
 pub use question_answer_request::WireQuestionAnswerRequest;
 mod question_cancel_request;
 pub use question_cancel_request::WireQuestionCancelRequest;
+mod repositories_response;
+pub use repositories_response::{
+    WireRepositoriesResponse, WireRepositoryClone, WireRepositoryEntry,
+};
+mod repository_scan_root_create_request;
+pub use repository_scan_root_create_request::WireCreateRepositoryScanRootRequest;
+mod repository_scan_roots_response;
+pub use repository_scan_roots_response::{
+    WireRepositoryScanRoot, WireRepositoryScanRootsResponse,
+};
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;

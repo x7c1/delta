@@ -20,12 +20,14 @@ async function startNewSessionIn(
   path: string,
 ): Promise<void> {
   await page.getByRole('button', { name: 'New session', exact: true }).click();
-  // The Recent rows are looked up by their stable `title` (full path); the
-  // visible label is abbreviated. Scope to the Recent section so the lookup is
-  // not ambiguous with a Browse entry that shares the same absolute path.
+  // Phase B: the Directory tab is where the Recent + Browse picker lives.
+  // Recent rows are looked up by their stable `title` (full path); the
+  // visible label is abbreviated. Scope to the Recent section so the lookup
+  // is not ambiguous with a Browse entry that shares the same absolute
+  // path. The inline picker commits on row click — no Select button.
+  await page.getByTestId('new-session-tab-directory').click();
   await page.getByTestId('workdir-recent').getByTitle(path).click();
-  await page.getByTestId('workdir-confirm').click();
-  await expect(page.getByTestId('new-session-empty')).toBeVisible();
+  await expect(page.getByTestId('workdir-chip')).toBeVisible();
 }
 
 test('opting into a worktree carries the start-point on the send', async ({
@@ -41,10 +43,14 @@ test('opting into a worktree carries the start-point on the send', async ({
   await expect(toggle).toBeVisible();
   await toggle.check();
 
-  // The start-point selector defaults to Current HEAD; switch to the default
-  // branch preset ("Latest main").
-  await expect(page.getByTestId('start-point-head')).toBeChecked();
+  // The toggle defaults to "Other remote branch" mode (dogfooding showed
+  // the typical case is to start from a specific remote branch). Switch to
+  // the default-branch preset ("Latest main"). The use-vs-new default is
+  // "use this branch", so flip it explicitly here to exercise the
+  // `remote_branch` send path.
+  await expect(page.getByTestId('start-point-other')).toBeChecked();
   await page.getByTestId('start-point-default-branch').check();
+  await page.getByTestId('branch-mode-new').check();
 
   // Capture the outgoing send so we can assert it carried the worktree request.
   const sendRequest = page.waitForRequest(
@@ -67,7 +73,7 @@ test('opting into a worktree carries the start-point on the send', async ({
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
 });
 
-test('choosing "use this branch" carries use_remote_branch on the send', async ({
+test('a branch start-point defaults to use_remote_branch on the send', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -80,12 +86,10 @@ test('choosing "use this branch" carries use_remote_branch on the send', async (
   await toggle.check();
 
   // Pick the default-branch preset ("Latest main"); the use-vs-new choice
-  // appears, defaulting to "New branch from it".
+  // appears, defaulting to "Use this branch" — dogfooding showed the typical
+  // case is to continue work on the selected branch directly.
   await page.getByTestId('start-point-default-branch').check();
-  await expect(page.getByTestId('branch-mode-new')).toBeChecked();
-
-  // Switch to "Use this branch".
-  await page.getByTestId('branch-mode-use').check();
+  await expect(page.getByTestId('branch-mode-use')).toBeChecked();
 
   const sendRequest = page.waitForRequest(
     (request) =>

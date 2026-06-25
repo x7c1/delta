@@ -215,6 +215,12 @@ where
         // below, and is reused as the trust-seeding signal so we never call
         // `repo_root` twice on the same path.
         let mut launch_repo_root: Option<String> = None;
+        // The user-selected workdir as it will be stored in
+        // `session.requested_workdir`: the dir the user picked, before any
+        // worktree resolution. Captured here because the workdir-resolution
+        // match below consumes `requested_workdir` to compute the effective
+        // launch dir.
+        let requested_workdir_recorded = requested_workdir.clone();
         let workdir = match worktree {
             Some(spec) => {
                 let repo_root = worktree_repo_root
@@ -325,6 +331,14 @@ where
         // deliberately NOT removed on a later close — see `close_session` for
         // the no-cleanup-on-close MVP decision; `session.cwd` stored here is the
         // worktree path, so a resume reattaches to the existing worktree.
+        // Record the dir the user picked, before any worktree resolution. For
+        // a worktree spawn `cwd` (= `workdir` above) holds the auto-generated
+        // worktree path under `$DELTA_WORKTREE_BASE`;
+        // `requested_workdir_recorded` holds the canonical user-selected dir
+        // (which is also the worktree's `repo_root`). For a plain spawn with a
+        // user-selected workdir this equals `cwd`. `None` only for the default
+        // per-token scratch dir, so a scratch session contributes nothing to
+        // Recent dirs.
         let (_session, main_thread_id) = self
             .store
             .insert_spawning_session(
@@ -332,6 +346,7 @@ where
                 &workdir,
                 branch_at_launch.as_deref(),
                 launch_repo_root.as_deref(),
+                requested_workdir_recorded.as_deref(),
                 repository_display_name.as_deref(),
             )
             .await?;

@@ -105,6 +105,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             branch_at_launch: Some("main".into()),
             repo_root: Some("/work/delta".into()),
+            requested_workdir: None,
             repository_display_name: Some("x7c1/delta".into()),
         };
         assert_eq!(

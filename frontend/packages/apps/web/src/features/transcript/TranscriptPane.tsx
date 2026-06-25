@@ -23,6 +23,8 @@ import {
   type PendingSurface,
 } from '../composer/usePendingSends';
 import { WorkdirChip, WorkdirDialog } from '../composer/WorkdirDialog';
+import { NewSessionPanel } from '../new-session/NewSessionPanel';
+import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
 import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
@@ -155,6 +157,9 @@ export function TranscriptPane({
   );
   const resetNewSessionLaunchOptions = useComposerStore(
     (state) => state.resetNewSessionLaunchOptions,
+  );
+  const setNewSessionSelectedPrUrl = useComposerStore(
+    (state) => state.setNewSessionSelectedPrUrl,
   );
   // The picker's open state lives in the store (not local component state) so
   // the navigator's "New" button can (re)open it without a focus transition.
@@ -503,29 +508,23 @@ export function TranscriptPane({
     }
   }, [activeThread?.id, newSession]);
 
-  // Entering the new-session state auto-opens the working-directory modal (when
-  // nothing is selected yet), since a directory is mandatory and the user should
-  // be able to confirm the most-recent one immediately. Leaving the state
-  // discards the selection and closes the modal, so a later return starts clean.
-  // The selection is also cleared on a successful new-session send by the
-  // composer. Keyed on `newSession` only: it must fire on the enter/leave
-  // transition, not every time the selection changes (which would re-open the
-  // modal the user just dismissed).
+  // Leaving the new-session state discards the selection and closes any
+  // still-open modal, so a later return starts clean. The selection is also
+  // cleared on a successful new-session send by the composer. Keyed on
+  // `newSession` only: enter is now handled by the Directory tab itself
+  // (no more auto-opened modal), but leave-state cleanup still belongs here.
   useEffect(() => {
-    if (newSession) {
-      if (!useComposerStore.getState().newSessionWorkdir) {
-        openWorkdirDialog();
-      }
-    } else {
+    if (!newSession) {
       setNewSessionWorkdir(null);
       resetNewSessionLaunchOptions();
+      setNewSessionSelectedPrUrl(null);
       closeWorkdirDialog();
     }
   }, [
     newSession,
     setNewSessionWorkdir,
     resetNewSessionLaunchOptions,
-    openWorkdirDialog,
+    setNewSessionSelectedPrUrl,
     closeWorkdirDialog,
   ]);
 
@@ -1312,10 +1311,12 @@ export function TranscriptPane({
           : {}),
       }}
       header={
+        // The new-session screen pins the PR / Repository / Directory tabs to
+        // the Panel's sticky header (Panel header lives outside the scroll
+        // region), so they stay put while the active tab's list scrolls
+        // underneath. The "New session" label is dropped — the tabs convey it.
         newSession ? (
-          <span className="text-sm font-semibold text-slate-700">
-            New session
-          </span>
+          <NewSessionTabBar />
         ) : // `undefined` (not `null`) so Panel drops the header bar entirely.
         // The breadcrumb / timeline / Terminal-toggle are rendered in flow at
         // the top of the body via `topRegion`; on the main thread there is no
@@ -1331,16 +1332,19 @@ export function TranscriptPane({
     >
       {topRegion}
       {newSession && (
-        <>
-          <p
-            className="px-3 py-4 text-sm text-slate-400"
-            data-testid="new-session-empty"
-          >
-            Send the first message below to start a new session.
-          </p>
-          {/* Modal directory picker (portals to the document body). Auto-opens
-              on entering the new-session state; commits the chosen cwd to the
-              composer store on Select. */}
+        <div className="space-y-4 px-3 pt-3 pb-2" data-testid="new-session-empty">
+          {/* The active tab's content (PR / Repository / Directory). The
+              tab strip itself sits in the Panel's sticky header above; this
+              body only renders the chosen tab. The composer card below
+              stays where it was — the tabs only decide HOW the
+              `newSessionWorkdir` etc. get populated, not the send body. */}
+          <NewSessionPanel />
+          {/* The auto-open modal picker is retired (the Directory tab
+              exposes Recent + Browse inline), but the standalone Dialog is
+              still available so the WorkdirChip's pencil button — which
+              calls `openWorkdirDialog` — can reopen a focused picker for a
+              quick change. The composer card writes both the chip and the
+              chip's edit affordance into the bottom overlay. */}
           <WorkdirDialog
             open={workdirDialogOpen}
             dismissable={!workdirMandatory}
@@ -1350,15 +1354,14 @@ export function TranscriptPane({
               // new-session intent and returns to the previously-focused
               // session — but only when there is one to return to. With no
               // sessions, new-session is the mandatory default, so
-              // cancelNewSession() is a no-op and we stay. Read the live store
-              // value to avoid a stale closure (mirrors the auto-open effect
-              // above).
+              // cancelNewSession() is a no-op and we stay. Read the live
+              // store value to avoid a stale closure.
               if (!useComposerStore.getState().newSessionWorkdir) {
                 cancelNewSession();
               }
             }}
           />
-        </>
+        </div>
       )}
 
       {!newSession && messagesQuery.isLoading && (

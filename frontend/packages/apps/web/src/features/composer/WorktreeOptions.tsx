@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useGitBranchesQuery, useGitRepoInfoQuery } from '@delta/api-client';
-import type { WorktreeStartPoint } from '@delta/wire-gen';
 import { Spinner, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import {
-  DEFAULT_WORKTREE_START_POINT,
+  type WorktreeStartPointSelection,
   useComposerStore,
 } from '../../store/composerStore';
 
@@ -17,24 +16,31 @@ import {
  *
  * When present, a toggle opts the new session into starting in an isolated git
  * worktree. With the toggle on, a start-point selector chooses where the
- * worktree starts from:
+ * worktree starts from. The toggle's initial state is **Other remote branch**
+ * with no branch picked yet (a `pending_remote_branch` sentinel in the store);
+ * dogfooding showed the typical case is to start from a specific remote
+ * branch, so the picker opens directly in branch-list mode and Send stays
+ * disabled until a concrete branch is chosen.
  *
- * - **Current HEAD** — `{ kind: "head" }`, the safe default (no fetch); always
- *   a fresh branch (HEAD's branch is checked out in the main tree).
+ * - **Current HEAD** — `{ kind: "head" }`, no fetch; always a fresh branch
+ *   (HEAD's branch is checked out in the main tree).
  * - **Latest `<default_branch>`** — a branch start-point, shown only when the
  *   repo's default branch is known.
  * - **Other remote branch…** — expands a list fetched lazily from
  *   `GET /api/workdir/git/branches` (which performs a `git fetch`), plus a
- *   free-text entry for a brand-new branch not yet in the fetched list.
+ *   free-text entry for a brand-new branch not yet in the fetched list. This
+ *   is the start-point the toggle defaults to.
  *
  * For any branch start-point (the default-branch preset or an explicit branch),
  * a use-vs-new choice picks the worktree's branch mode:
  *
- * - **New branch from it** — `{ kind: "remote_branch", name }`, the default
- *   (safest isolation): cut a fresh per-session branch from it.
- * - **Use this branch** — `{ kind: "use_remote_branch", name }`: work on the
- *   branch directly (the backend reuses the worktree that already has it
- *   checked out, including the main tree, or creates one that checks it out).
+ * - **Use this branch** — `{ kind: "use_remote_branch", name }`, the default:
+ *   work on the branch directly (the backend reuses the worktree that already
+ *   has it checked out, including the main tree, or creates one that checks it
+ *   out). Dogfooding showed the typical case is to continue work on the
+ *   selected branch directly, not to fork a fresh delta-managed branch off it.
+ * - **New branch from it** — `{ kind: "remote_branch", name }`: cut a fresh
+ *   per-session branch from it.
  *
  * The chosen toggle/start-point live in `composerStore`; the composer reads them
  * and attaches `worktree` to the new-session send. The start-point value itself
@@ -96,22 +102,27 @@ export function WorktreeOptions() {
 
 /**
  * Discriminates which of the three start-point choices the current
- * {@link WorktreeStartPoint} represents, so the right radio reads as selected.
- * `head` and the default-branch preset are exact matches; any other branch
- * (including a free-text entry) falls under "other". The use-vs-new *mode*
- * (`remote_branch` vs `use_remote_branch`) is orthogonal to this and read
- * separately, so both branch kinds classify the same way.
+ * {@link WorktreeStartPointSelection} represents, so the right radio reads as
+ * selected. `head` and the default-branch preset are exact matches; any other
+ * branch (including a free-text entry and the `pending_remote_branch`
+ * "picker open but no branch chosen yet" sentinel) falls under "other". The
+ * use-vs-new *mode* (`remote_branch` vs `use_remote_branch`) is orthogonal to
+ * this and read separately, so both branch kinds classify the same way.
  */
 type StartPointChoice = 'head' | 'default-branch' | 'other';
 
 function classifyStartPoint(
-  startPoint: WorktreeStartPoint,
+  startPoint: WorktreeStartPointSelection,
   defaultBranch: string | null,
 ): StartPointChoice {
   if (startPoint.kind === 'head') {
     return 'head';
   }
-  if (defaultBranch !== null && startPoint.name === defaultBranch) {
+  if (
+    startPoint.kind !== 'pending_remote_branch' &&
+    defaultBranch !== null &&
+    startPoint.name === defaultBranch
+  ) {
     return 'default-branch';
   }
   return 'other';
@@ -124,16 +135,23 @@ function classifyStartPoint(
  */
 type BranchMode = 'remote_branch' | 'use_remote_branch';
 
-/** The branch name a non-`head` start-point carries, or `null` for `head`. */
-function branchName(startPoint: WorktreeStartPoint): string | null {
-  return startPoint.kind === 'head' ? null : startPoint.name;
+/**
+ * The branch name a start-point carries, or `null` for `head` and the
+ * `pending_remote_branch` sentinel — neither has committed to a branch name
+ * yet.
+ */
+function branchName(startPoint: WorktreeStartPointSelection): string | null {
+  if (startPoint.kind === 'head' || startPoint.kind === 'pending_remote_branch') {
+    return null;
+  }
+  return startPoint.name;
 }
 
 interface WorktreeStartPointSelectorProps {
   workdir: string;
   defaultBranch: string | null;
-  startPoint: WorktreeStartPoint;
-  onChange: (startPoint: WorktreeStartPoint) => void;
+  startPoint: WorktreeStartPointSelection;
+  onChange: (startPoint: WorktreeStartPointSelection) => void;
 }
 
 function WorktreeStartPointSelector({
@@ -148,15 +166,16 @@ function WorktreeStartPointSelector({
   const [otherOpen, setOtherOpen] = useState(choice === 'other');
 
   // The current use-vs-new mode for a branch start-point, carried so switching
-  // which branch is selected preserves the user's choice. `head` is always a
-  // new branch, so when it is selected the mode reads as `remote_branch`.
+  // which branch is selected preserves the user's choice. When no branch is
+  // picked yet (`head` or `pending_remote_branch`), default to
+  // `use_remote_branch` — dogfooding showed the typical case is to continue
+  // work on the selected branch directly. Once a branch is picked,
+  // `startPoint.kind` reflects the explicit choice.
   const mode: BranchMode =
-    startPoint.kind === 'use_remote_branch'
-      ? 'use_remote_branch'
-      : 'remote_branch';
+    startPoint.kind === 'remote_branch' ? 'remote_branch' : 'use_remote_branch';
 
   // Re-emit the currently-selected branch under `nextMode`. Only meaningful for
-  // a branch start-point (not `head`), so a `null` name is a no-op.
+  // a branch start-point (not `head` or pending), so a `null` name is a no-op.
   const selectMode = (nextMode: BranchMode) => {
     const name = branchName(startPoint);
     if (name !== null) {
@@ -167,19 +186,23 @@ function WorktreeStartPointSelector({
   const selectChoice = (next: StartPointChoice) => {
     if (next === 'head') {
       // HEAD is new-branch-only: its branch is checked out in the main tree, so
-      // it cannot be "used" in another worktree. Reset to the safe default.
+      // it cannot be "used" in another worktree.
       setOtherOpen(false);
-      onChange(DEFAULT_WORKTREE_START_POINT);
+      onChange({ kind: 'head' });
     } else if (next === 'default-branch' && defaultBranch !== null) {
       setOtherOpen(false);
       onChange({ kind: mode, name: defaultBranch });
     } else {
       // "Other": open the lazy branch picker; keep whatever branch is already
-      // chosen (else leave the name blank until one is picked/typed). Preserve
-      // the current use-vs-new mode across the switch.
+      // chosen (else fall into the pending sentinel so Send stays disabled
+      // until a branch is named). Preserve the current use-vs-new mode across
+      // the switch.
       setOtherOpen(true);
-      if (startPoint.kind === 'head') {
-        onChange({ kind: mode, name: '' });
+      if (
+        startPoint.kind === 'head' ||
+        startPoint.kind === 'pending_remote_branch'
+      ) {
+        onChange({ kind: 'pending_remote_branch' });
       }
     }
   };
@@ -272,8 +295,9 @@ interface BranchModeChoiceProps {
 
 /**
  * The "use this branch" vs "new branch from it" choice shown for a branch
- * start-point. Defaults to "new branch from it" (the safest isolation,
- * preserving the original behavior). "Use this branch" works on the branch
+ * start-point. Defaults to "use this branch" — dogfooding showed the typical
+ * case is to continue work on the selected branch directly, not to fork a
+ * fresh delta-managed branch off it. "Use this branch" works on the branch
  * directly in the worktree — the backend reuses the worktree that already has
  * it checked out (including the main working tree), or creates one that checks
  * it out.

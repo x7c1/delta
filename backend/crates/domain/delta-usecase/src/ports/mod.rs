@@ -6,6 +6,8 @@
 
 mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
+mod gh_cli;
+pub use gh_cli::GhCli;
 mod git_worktree;
 pub use git_worktree::{GitRepoInfo, GitWorktree, RemoteBranches, WorktreeStartPoint};
 mod message_display_hook;
@@ -21,7 +23,9 @@ pub use session_event::{RateLimitWindow, SessionEvent, StatusSnapshot};
 mod session_lifecycle;
 pub use session_lifecycle::SessionLifecycle;
 mod session_store;
-pub use session_store::{RecentWorkdir, SessionPageRow, SessionStore};
+pub use session_store::{
+    RecentWorkdir, RepositoryCloneRow, RepositoryScanRoot, SessionPageRow, SessionStore,
+};
 mod stop_hook;
 pub use stop_hook::StopHook;
 mod tmux_driver;

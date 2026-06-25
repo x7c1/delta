@@ -242,6 +242,41 @@ describe('SessionNode repo line', () => {
   });
 });
 
+describe('SessionNode branch display', () => {
+  it('shortens a delta-managed branch and exposes the full name on hover', () => {
+    // Sessions delta spawns get a `delta-<uuid>` branch on disk; the inline
+    // span shows a readable 8-char form while the `title` keeps the full
+    // identifier recoverable.
+    const branch = 'delta-019ef8ff-76aa-7870-a0dd-3a5856d28d79';
+    renderNode({
+      item: {
+        ...item,
+        session: { ...item.session, branch_at_launch: branch },
+      },
+    });
+
+    const span = screen.getByTestId('session-branch');
+    expect(span).toHaveTextContent('019ef8ff');
+    expect(span.textContent).not.toContain('delta-');
+    expect(span.getAttribute('title')).toBe(branch);
+  });
+
+  it('leaves a user-named branch unchanged', () => {
+    // The helper is a no-op for any name that does not match the
+    // `delta-<uuid>` pattern, so plain branches render verbatim.
+    renderNode({
+      item: {
+        ...item,
+        session: { ...item.session, branch_at_launch: 'feat/example' },
+      },
+    });
+
+    const span = screen.getByTestId('session-branch');
+    expect(span).toHaveTextContent('feat/example');
+    expect(span.getAttribute('title')).toBe('feat/example');
+  });
+});
+
 describe('SessionNode kebab menu', () => {
   // jsdom does not implement `navigator.clipboard`, so install a stub holding a
   // `vi.fn()` writeText. `configurable: true` lets afterAll restore the original

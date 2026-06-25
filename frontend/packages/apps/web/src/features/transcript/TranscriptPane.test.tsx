@@ -1018,31 +1018,46 @@ describe('TranscriptPane', () => {
     ).toMatchObject({ requestId: 7, dismissed: true });
   });
 
-  it('auto-opens the workdir dialog on entering the new-session state', async () => {
+  it('lands on the Repository tab in the new-session state', async () => {
+    // Phase B retired the auto-opened modal: the new-session screen shows
+    // the 3-tab picker (PR / Repository / Directory) inline and defaults to
+    // Repository, which is the recency-ordered registered-repo list.
     renderNewSessionPane();
 
-    // The modal opens without any user action, with the most-recent directory
-    // pre-selected so the user can confirm immediately.
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    const firstRow = await screen.findByTitle('/home/dev/projects/delta');
-    await waitFor(() =>
-      expect(firstRow).toHaveAttribute('aria-pressed', 'true'),
-    );
+    expect(
+      await screen.findByTestId('new-session-tab-repository'),
+    ).toHaveAttribute('aria-selected', 'true');
+    // The modal is NOT auto-opened anymore.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('makes the workdir dialog non-dismissable when workdirMandatory', async () => {
-    // First run (no sessions to fall back to): the picker is mandatory, so there
-    // is no Cancel button and Esc/backdrop do not close it.
+  it('hoists the tab strip into the Panel header instead of a "New session" label', async () => {
+    // The tabs are pinned at the top of the pane (the Panel header lives
+    // outside the scrolling body), and the plain "New session" label is
+    // gone — the tabs convey the screen's identity.
+    renderNewSessionPane();
+    const tablist = await screen.findByRole('tablist', {
+      name: 'Start a session from',
+    });
+    // The Panel renders its header inside a <header> element; the tablist
+    // sits inside it, above the scroll viewport.
+    expect(tablist.closest('header')).not.toBeNull();
+    // The old plain "New session" label is removed.
+    expect(screen.queryByText('New session', { exact: true })).toBeNull();
+  });
+
+  it('does not pop a modal even when workdirMandatory is set', async () => {
+    // First run (no sessions to fall back to): in Phase B the tabbed picker
+    // replaces the auto-opened modal entirely, so `workdirMandatory` has no
+    // modal to gate. The new-session intent is preserved, and the Directory
+    // tab is reachable for the inline picker. The modal's own
+    // non-dismissable behaviour is exercised by WorkdirDialog.test.tsx.
     renderNewSessionPane(mockThreads, { workdirMandatory: true });
 
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
-
-    fireEvent.keyDown(document, { key: 'Escape' });
-    fireEvent.click(screen.getByTestId('dialog-backdrop'));
-
-    // The dialog is still open and the new-session intent is intact.
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(
+      await screen.findByTestId('new-session-tab-directory'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 
@@ -1087,39 +1102,51 @@ describe('TranscriptPane', () => {
     );
   });
 
-  it('closes the picker and shows no chip after cancelling without selecting (no session to return to)', async () => {
-    // No previous session is recorded (the empty initial screen), so dismissing
-    // the picker is a no-op: new-session stays as the mandatory default.
+  it('shows no chip and disables Send when no workdir is selected (no session to return to)', async () => {
+    // Phase B: no auto-opened modal. The new-session screen waits for the
+    // user to pick a starting point from the inline tabs. With nothing
+    // picked, no chip shows and Send stays disabled; the new-session intent
+    // is preserved because the empty initial screen has nowhere to return
+    // to.
     useNavStore.setState({
       focusedSessionId: NEW_SESSION_FOCUS,
       preNewSessionFocus: null,
     });
     renderNewSessionPane();
 
-    // Cancel the auto-opened modal without committing a directory.
-    fireEvent.click(await screen.findByTestId('workdir-cancel'));
-
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
-    );
-    // No selection: no chip is shown and Send stays disabled. Reopening the
-    // picker is now done from the navigator's "New" button, not a center button.
+    expect(await screen.findByTestId('new-session-tabs')).toBeInTheDocument();
     expect(screen.queryByTestId('workdir-chip')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
-    // Stays in new-session (nowhere to return to).
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
   });
 
-  it('returns to the previously-focused session when the picker is dismissed without a selection', async () => {
-    // The user was on a real session before clicking "New", so dismissing the
-    // picker without choosing a directory cancels the new-session intent and
-    // restores that session.
+  it('returns to the previously-focused session when the chip-opened modal is dismissed without a selection', async () => {
+    // Phase B: there is no auto-opened modal. The cancel path here is
+    // chip ✎ → modal → Cancel. To exercise it the test seeds a workdir
+    // (so the chip is present), clicks the chip's pencil button to open
+    // the picker, then cancels. With nothing in `newSessionWorkdir` after
+    // the (no-op) cancel, the empty-back-out path restores the previously-
+    // focused session. Strictly: the cancel clears the candidate via the
+    // dialog's onClose, but does NOT clear the already-committed selection,
+    // so the contract here is "previously-focused session restoration
+    // only fires when the workdir is unset at dismiss time". To mirror
+    // that, the test clears the workdir right before clicking Cancel.
     useNavStore.setState({
       focusedSessionId: NEW_SESSION_FOCUS,
       preNewSessionFocus: SESSION_ID,
     });
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev/projects/delta' });
     renderNewSessionPane();
 
+    fireEvent.click(
+      within(screen.getByTestId('workdir-chip')).getByRole('button', {
+        name: 'Change working directory',
+      }),
+    );
+
+    // Clear the seeded workdir so cancellation takes the
+    // "no selection at dismiss time" path that restores the prior focus.
+    useComposerStore.setState({ newSessionWorkdir: null });
     fireEvent.click(await screen.findByTestId('workdir-cancel'));
 
     await waitFor(() =>

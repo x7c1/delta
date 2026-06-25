@@ -137,10 +137,13 @@ export function Composer({ mode }: ComposerProps) {
         // launch options only when at least one is picked, so an unselected
         // session starts with no extra launch flags.
         // Attach the worktree request only when the opt-in toggle is on AND a
-        // directory is selected: the picker only surfaces the toggle once a
-        // git-repo directory is chosen, so this guard mirrors that and keeps the
-        // backend-rejected "worktree without workdir" state unreachable. Omit it
-        // entirely otherwise (the unchanged non-worktree behavior).
+        // directory is selected AND a concrete start-point has been chosen: the
+        // picker only surfaces the toggle once a git-repo directory is chosen,
+        // so the first two guards mirror that and keep the backend-rejected
+        // "worktree without workdir" state unreachable. The pending-branch
+        // sentinel is filtered here too (and gates the Send button below); the
+        // backend rejects worktree requests without a concrete branch, so it
+        // must never reach the wire.
         body = {
           new_session: true,
           text,
@@ -148,7 +151,9 @@ export function Composer({ mode }: ComposerProps) {
           ...(newSessionLaunchOptionIds.length > 0
             ? { launch_option_ids: newSessionLaunchOptionIds }
             : {}),
-          ...(newSessionWorktreeEnabled && newSessionWorkdir
+          ...(newSessionWorktreeEnabled &&
+          newSessionWorkdir &&
+          newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
             ? { worktree: { start_point: newSessionWorktreeStartPoint } }
             : {}),
         };
@@ -304,7 +309,15 @@ export function Composer({ mode }: ComposerProps) {
             sendInFlight ||
             // A new session must start in a chosen directory: selection is
             // mandatory, so Send stays disabled until the picker commits one.
-            (isNew && !newSessionWorkdir)
+            (isNew && !newSessionWorkdir) ||
+            // If the worktree toggle is on, the start-point must be a concrete
+            // value before sending — `pending_remote_branch` means the user
+            // opened the Other-remote-branch picker but has not picked a
+            // branch yet, and the backend rejects worktree requests without
+            // a concrete branch.
+            (isNew &&
+              newSessionWorktreeEnabled &&
+              newSessionWorktreeStartPoint.kind === 'pending_remote_branch')
           }
           // Anchored to the card's bottom-right corner with an equal visual gap
           // to the card's right and bottom borders. The enclosing composer card

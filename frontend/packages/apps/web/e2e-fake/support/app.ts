@@ -15,21 +15,25 @@ import { expect, type Page } from '@playwright/test';
 /**
  * Start a new session whose first prompt is `prompt` (its first word selects
  * the fake scenario): enter the new-session flow, choose a directory in the
- * picker, and send.
+ * inline Directory tab, and send.
  *
  * By default the picker's initial directory (the browse root, `$HOME`) is
  * chosen — fine for the fake, which ignores its working directory. A real
  * `claude` raises a first-run trust prompt in a directory it has never been
- * trusted in, so the real-claude smoke passes an explicit `workdir` (under the
- * repository, whose trust is already established) and the picker is navigated
- * there segment by segment.
+ * trusted in, so the real-claude smoke passes an explicit `workdir` (under
+ * the repository, whose trust is already established) and the picker is
+ * navigated there segment by segment.
  *
- * Two entry states exist. On a cold, empty database the app lands directly in
- * the new-session state with the (mandatory) picker already open — clicking
- * "New" would be blocked by the modal backdrop. With existing sessions, "New"
- * (re)starts the flow and opens the picker. The app's settled state is
- * detected by which signal renders first: an existing session node, or the
- * cold-start new-session placeholder.
+ * Phase B retired the auto-opened modal: the new-session screen shows the
+ * 3-tab picker inline (PR / Repository / Directory) and defaults to
+ * Repository. The helper switches to the Directory tab and uses its inline
+ * Recent + Browse picker, which commits the selection on a row click (no
+ * Select button needed).
+ *
+ * Two entry states exist. On a cold, empty database the app lands directly
+ * in the new-session state; with existing sessions, "New" (re)starts the
+ * flow. The app's settled state is detected by which signal renders first:
+ * an existing session node, or the cold-start new-session placeholder.
  */
 export async function startNewSession(
   page: Page,
@@ -44,14 +48,19 @@ export async function startNewSession(
     await page.getByRole('button', { name: 'New session', exact: true }).click();
   }
 
+  // Switch to the Directory tab so its inline Recent + Browse picker
+  // appears (Repository is the default landing tab in Phase B).
+  await page.getByTestId('new-session-tab-directory').click();
   await expect(page.getByTestId('workdir-picker')).toBeVisible();
   if (workdir !== undefined) {
     await navigateBrowseTo(page, workdir);
   } else {
     await page.getByTestId('workdir-use-current').click();
   }
-  await page.getByTestId('workdir-confirm').click();
-  await expect(newSessionEmpty).toBeVisible();
+  // The inline picker commits on row click — no Select button. Wait for the
+  // chip the composer card draws once `newSessionWorkdir` is set, so the
+  // following Send finds the committed dir.
+  await expect(page.getByTestId('workdir-chip')).toBeVisible();
 
   await page.getByRole('textbox').fill(prompt);
   await page.getByRole('button', { name: 'Send' }).click();

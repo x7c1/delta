@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { MessageUuid, ThreadId } from '@delta/model';
 import type { WorktreeStartPoint } from '@delta/wire-gen';
 
@@ -49,10 +50,19 @@ export interface ComposerState {
    * for a branch start-point whether the worktree cuts a fresh branch
    * (`remote_branch`) or works on the branch itself (`use_remote_branch`). The
    * use-vs-new mode is encoded directly in the value's `kind`, so no separate
-   * field is needed. Defaults to the repo's current `HEAD` (the safe, no-fetch,
-   * always-new-branch choice). Only read when the toggle is on.
+   * field is needed.
+   *
+   * Carries the wire {@link WorktreeStartPoint} union plus an extra
+   * `pending_remote_branch` sentinel that records "the user toggled worktree
+   * on (or picked the Other-remote-branch radio) but has not chosen a concrete
+   * branch yet". Dogfooding showed the typical case is to start from a
+   * specific remote branch, so the toggle's default lands on the picker mode
+   * rather than silently committing to `HEAD`. The sentinel never reaches the
+   * wire — the composer omits `worktree` while it is present and the Send
+   * button stays disabled, so the backend (which rejects worktree requests
+   * without a concrete branch) never sees it. Only read when the toggle is on.
    */
-  newSessionWorktreeStartPoint: WorktreeStartPoint;
+  newSessionWorktreeStartPoint: WorktreeStartPointSelection;
   /**
    * The ids of the registered launch options selected for the next new
    * session, in selection order. Empty means "apply no extra launch flags"
@@ -81,13 +91,31 @@ export interface ComposerState {
    * to drive a component-local auto-open effect). Session-only; not persisted.
    */
   workdirDialogOpen: boolean;
+  /**
+   * URL of the PR currently picked in the PR tab, or `null` when nothing is
+   * picked. Drives the "you picked this" indigo highlight on the matching row
+   * so the PR tab gives the same visual feedback as the Repository / Directory
+   * tabs. Session-only intent (not a remembered preference), so it matches the
+   * other `newSession*` ephemerals: cleared whenever the new-session compose
+   * state is left, and cleared by a Repository / Directory pick so at most one
+   * row is highlighted across the three tabs.
+   */
+  newSessionSelectedPrUrl: string | null;
+  /**
+   * Which tab the new-session screen shows: PR / Repository / Directory.
+   * Persisted to localStorage so a reload restores the user's last choice;
+   * defaults to `'repository'` on first run because the dogfooding insight
+   * behind the redesign is that most sessions start from a known repo.
+   * Restored on rehydration; an unknown value falls back to the default.
+   */
+  newSessionTab: NewSessionTab;
 
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
   setBranchOrigin: (origin: BranchOrigin | null) => void;
   setNewSessionWorkdir: (workdir: string | null) => void;
   setNewSessionWorktreeEnabled: (enabled: boolean) => void;
-  setNewSessionWorktreeStartPoint: (startPoint: WorktreeStartPoint) => void;
+  setNewSessionWorktreeStartPoint: (startPoint: WorktreeStartPointSelection) => void;
   /**
    * Set the selected launch-option ids from a user interaction in the picker.
    * Marks the selection as seeded, so the picker will not later overwrite an
@@ -108,76 +136,139 @@ export interface ComposerState {
   resetNewSessionLaunchOptions: () => void;
   openWorkdirDialog: () => void;
   closeWorkdirDialog: () => void;
+  setNewSessionTab: (tab: NewSessionTab) => void;
+  setNewSessionSelectedPrUrl: (url: string | null) => void;
 }
 
+/** The new-session screen's three tabs. */
+export type NewSessionTab = 'pr' | 'repository' | 'directory';
+
 /**
- * The default worktree start-point: the repository's current `HEAD`. The safe
- * choice — it needs no `git fetch` — so it is both the initial value and what
- * the toggle resets to whenever it is switched off or the directory changes.
+ * The valid `newSessionTab` values, used by the persistence hydration step
+ * to fall back to the default when a foreign value lands in localStorage
+ * (a different build, a typo, an experiment that left a trail behind). The
+ * `as const` tuple narrows to the literal union {@link NewSessionTab}.
  */
-export const DEFAULT_WORKTREE_START_POINT: WorktreeStartPoint = { kind: 'head' };
+const NEW_SESSION_TABS: readonly NewSessionTab[] = ['pr', 'repository', 'directory'];
 
-export const useComposerStore = create<ComposerState>((set) => ({
-  drafts: {},
-  branchOrigin: null,
-  newSessionWorkdir: null,
-  newSessionWorktreeEnabled: false,
-  newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
-  newSessionLaunchOptionIds: [],
-  newSessionLaunchOptionsSeeded: false,
-  workdirDialogOpen: false,
+/**
+ * The initial new-session tab on a fresh install: Repository. Dogfooding
+ * showed most session starts are "go back to the repo I was working on",
+ * so the picker leads with that lens.
+ */
+export const DEFAULT_NEW_SESSION_TAB: NewSessionTab = 'repository';
 
-  setDraft: (threadId, text) =>
-    set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
+/**
+ * Selection state for the worktree start-point: the wire union plus a
+ * `pending_remote_branch` sentinel for the "Other remote branch picker is
+ * open but no branch has been chosen yet" UI state. The sentinel never
+ * reaches the wire (see {@link ComposerState.newSessionWorktreeStartPoint}).
+ */
+export type WorktreeStartPointSelection =
+  | WorktreeStartPoint
+  | { kind: 'pending_remote_branch' };
 
-  clearDraft: (threadId) =>
-    set((state) => {
-      const next = { ...state.drafts };
-      delete next[threadId];
-      return { drafts: next };
-    }),
+/**
+ * The default worktree start-point when the toggle is first flipped on:
+ * "Other remote branch" with no branch picked yet. Dogfooding showed the
+ * typical case is to start from a specific remote branch, so the picker
+ * opens directly in branch-list mode rather than silently committing to
+ * `HEAD`. Send stays disabled until a concrete branch is chosen.
+ *
+ * Used by the store on directory change / toggle off too, so a stale branch
+ * pick can never bleed back into the next worktree session.
+ */
+export const DEFAULT_WORKTREE_START_POINT: WorktreeStartPointSelection = {
+  kind: 'pending_remote_branch',
+};
 
-  setBranchOrigin: (origin) => set({ branchOrigin: origin }),
+/** localStorage key for the persisted composer state slice. */
+export const COMPOSER_STORAGE_KEY = 'delta-composer';
 
-  setNewSessionWorkdir: (workdir) =>
-    // A new directory selection invalidates any previous git/worktree choice
-    // (the new directory may not be a git repo, and its branches differ), so
-    // reset the worktree state back to its defaults alongside the workdir.
-    set({
-      newSessionWorkdir: workdir,
+export const useComposerStore = create<ComposerState>()(
+  persist(
+    (set) => ({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
+      newSessionLaunchOptionIds: [],
+      newSessionLaunchOptionsSeeded: false,
+      workdirDialogOpen: false,
+      newSessionTab: DEFAULT_NEW_SESSION_TAB,
+      newSessionSelectedPrUrl: null,
+
+      setDraft: (threadId, text) =>
+        set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
+
+      clearDraft: (threadId) =>
+        set((state) => {
+          const next = { ...state.drafts };
+          delete next[threadId];
+          return { drafts: next };
+        }),
+
+      setBranchOrigin: (origin) => set({ branchOrigin: origin }),
+
+      setNewSessionWorkdir: (workdir) =>
+        // A new directory selection invalidates any previous git/worktree choice
+        // (the new directory may not be a git repo, and its branches differ), so
+        // reset the worktree state back to its defaults alongside the workdir.
+        set({
+          newSessionWorkdir: workdir,
+          newSessionWorktreeEnabled: false,
+          newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
+        }),
+
+      setNewSessionWorktreeEnabled: (enabled) =>
+        // Switching the toggle off returns the start-point to the safe default so
+        // a later re-enable does not silently reuse a stale remote-branch pick.
+        set(
+          enabled
+            ? { newSessionWorktreeEnabled: true }
+            : {
+                newSessionWorktreeEnabled: false,
+                newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
+              },
+        ),
+
+      setNewSessionWorktreeStartPoint: (startPoint) =>
+        set({ newSessionWorktreeStartPoint: startPoint }),
+
+      setNewSessionLaunchOptionIds: (ids) =>
+        set({ newSessionLaunchOptionIds: ids, newSessionLaunchOptionsSeeded: true }),
+
+      seedNewSessionLaunchOptionIds: (ids) =>
+        set((state) =>
+          state.newSessionLaunchOptionsSeeded
+            ? state
+            : { newSessionLaunchOptionIds: ids, newSessionLaunchOptionsSeeded: true },
+        ),
+
+      resetNewSessionLaunchOptions: () =>
+        set({ newSessionLaunchOptionIds: [], newSessionLaunchOptionsSeeded: false }),
+
+      openWorkdirDialog: () => set({ workdirDialogOpen: true }),
+
+      closeWorkdirDialog: () => set({ workdirDialogOpen: false }),
+
+      setNewSessionTab: (tab) => set({ newSessionTab: tab }),
+
+      setNewSessionSelectedPrUrl: (url) => set({ newSessionSelectedPrUrl: url }),
     }),
-
-  setNewSessionWorktreeEnabled: (enabled) =>
-    // Switching the toggle off returns the start-point to the safe default so a
-    // later re-enable does not silently reuse a stale remote-branch pick.
-    set(
-      enabled
-        ? { newSessionWorktreeEnabled: true }
-        : {
-            newSessionWorktreeEnabled: false,
-            newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
-          },
-    ),
-
-  setNewSessionWorktreeStartPoint: (startPoint) =>
-    set({ newSessionWorktreeStartPoint: startPoint }),
-
-  setNewSessionLaunchOptionIds: (ids) =>
-    set({ newSessionLaunchOptionIds: ids, newSessionLaunchOptionsSeeded: true }),
-
-  seedNewSessionLaunchOptionIds: (ids) =>
-    set((state) =>
-      state.newSessionLaunchOptionsSeeded
-        ? state
-        : { newSessionLaunchOptionIds: ids, newSessionLaunchOptionsSeeded: true },
-    ),
-
-  resetNewSessionLaunchOptions: () =>
-    set({ newSessionLaunchOptionIds: [], newSessionLaunchOptionsSeeded: false }),
-
-  openWorkdirDialog: () => set({ workdirDialogOpen: true }),
-
-  closeWorkdirDialog: () => set({ workdirDialogOpen: false }),
-}));
+    {
+      name: COMPOSER_STORAGE_KEY,
+      storage: createJSONStorage(() => localStorage),
+      // Only the last-used tab is persisted: drafts, branch origin, picker
+      // selections, and the dialog visibility are session-only state that a
+      // reload deliberately starts fresh from.
+      partialize: (state) => ({ newSessionTab: state.newSessionTab }),
+      onRehydrateStorage: () => (state) => {
+        if (state && !NEW_SESSION_TABS.includes(state.newSessionTab)) {
+          state.newSessionTab = DEFAULT_NEW_SESSION_TAB;
+        }
+      },
+    },
+  ),
+);
