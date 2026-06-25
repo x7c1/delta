@@ -46,9 +46,10 @@ where
                 // `insert_spawning_session` and is left untouched here. For
                 // an externally-started `claude` (the fresh-insert side of
                 // `register_session`) Delta likewise has no launch git
-                // context, so both stay `None`.
+                // context, so all three stay `None`.
                 branch_at_launch: None,
                 repo_root: None,
+                repository_display_name: None,
             })
             .await?;
         events.push(SessionEvent::SessionRegistered {

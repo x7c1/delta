@@ -42,6 +42,11 @@ pub(crate) struct FakeGitWorktree {
     /// not a git repo, or detached HEAD). A present entry mirrors the real
     /// gateway's branch-name short form.
     pub(crate) current_branches: Mutex<Vec<(String, String)>>,
+    /// The remote `origin` URL `origin_url` should return for a given
+    /// directory. A directory absent from the map resolves to `None`
+    /// ("origin unset" or "not a git repo"). Mirrors the real gateway's
+    /// behavior, which reads `remote.origin.url` from the shared `.git/config`.
+    pub(crate) origin_urls: Mutex<Vec<(String, String)>>,
     /// The default branch `default_branch`/`fetch_remote_branches` report.
     pub(crate) default_branch: Mutex<Option<String>>,
     /// The remote branches `fetch_remote_branches` reports.
@@ -82,6 +87,15 @@ impl FakeGitWorktree {
         self
     }
 
+    /// Script `origin_url(dir)` to report `url`.
+    pub(crate) fn with_origin_url(self, dir: &str, url: &str) -> Self {
+        self.origin_urls
+            .lock()
+            .unwrap()
+            .push((dir.to_owned(), url.to_owned()));
+        self
+    }
+
     /// Script `worktree_path_for_branch(_, branch)` to report `path` — i.e.
     /// `branch` is already checked out in the worktree at `path` (driving the
     /// `UseRemoteBranch` reuse path).
@@ -118,6 +132,16 @@ impl GitWorktree for FakeGitWorktree {
 
     async fn default_branch(&self, _repo_root: &str) -> Result<Option<String>> {
         Ok(self.default_branch.lock().unwrap().clone())
+    }
+
+    async fn origin_url(&self, path: &str) -> Result<Option<String>> {
+        Ok(self
+            .origin_urls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(dir, _)| dir == path)
+            .map(|(_, url)| url.clone()))
     }
 
     async fn fetch_remote_branches(&self, _repo_root: &str) -> Result<RemoteBranches> {

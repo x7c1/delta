@@ -78,12 +78,18 @@ pub struct RemoteBranches {
 /// [`TmuxDriver`]: crate::ports::TmuxDriver
 #[async_trait]
 pub trait GitWorktree: Send + Sync {
-    /// The repository root containing `path`, or `None` when `path` is not
+    /// The working-tree root containing `path`, or `None` when `path` is not
     /// inside a git repository.
     ///
     /// Runs `git -C <path> rev-parse --show-toplevel`: a non-zero exit (not a
     /// git repo) is the `None` signal, not an error to propagate. The returned
     /// root has any trailing newline trimmed. Lightweight: no fetch.
+    ///
+    /// Note: this returns the **working tree's** top, which is the linked
+    /// worktree path itself when `path` lives inside a linked git worktree —
+    /// not the original clone. For a cross-worktree repository identity,
+    /// pair this with [`Self::origin_url`] and the
+    /// [`crate::identity_key`] / [`crate::display_name`] helpers.
     async fn repo_root(&self, path: &str) -> Result<Option<String>>;
 
     /// The local branch name currently checked out under `path`, or `None`
@@ -103,6 +109,21 @@ pub trait GitWorktree: Send + Sync {
     /// (e.g. `origin/main`) and strips the `origin/` prefix. A non-zero exit
     /// (`origin/HEAD` unset) is the `None` signal. Best-effort: no fetch.
     async fn default_branch(&self, repo_root: &str) -> Result<Option<String>>;
+
+    /// The remote `origin` URL configured under `path`, or `None` when the
+    /// path is not in a git repository or no `origin` remote is set.
+    ///
+    /// Runs `git -C <path> config --get remote.origin.url`: a non-zero exit
+    /// (not a git repo, or `remote.origin.url` unset) is the `None` signal,
+    /// not an error to propagate. The returned URL has any trailing newline
+    /// trimmed. Lightweight: no fetch. Feeds the repository-identity helpers
+    /// ([`crate::identity_key`] / [`crate::display_name`]) used to render a
+    /// short `org/repo` label for the navigator session card.
+    ///
+    /// Because `remote.origin.url` lives in the shared `.git/config`, calling
+    /// this from a linked worktree returns the same URL as the main working
+    /// tree — repository identity is stable across worktrees.
+    async fn origin_url(&self, path: &str) -> Result<Option<String>>;
 
     /// Fetch the remote and list its branches, recomputing the default branch.
     ///
@@ -186,6 +207,10 @@ impl GitWorktree for Box<dyn GitWorktree> {
 
     async fn default_branch(&self, repo_root: &str) -> Result<Option<String>> {
         (**self).default_branch(repo_root).await
+    }
+
+    async fn origin_url(&self, path: &str) -> Result<Option<String>> {
+        (**self).origin_url(path).await
     }
 
     async fn fetch_remote_branches(&self, repo_root: &str) -> Result<RemoteBranches> {

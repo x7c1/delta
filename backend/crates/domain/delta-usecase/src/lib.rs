@@ -13,6 +13,7 @@ mod interactor;
 mod launch_config;
 mod pane_token;
 mod ports;
+mod repository;
 mod send_target;
 mod session_listing;
 mod session_page;
@@ -32,6 +33,7 @@ pub use ports::{
     Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
     WorktreeStartPoint,
 };
+pub use repository::{display_name, identity_key};
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};

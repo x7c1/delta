@@ -175,6 +175,31 @@ impl GitWorktree for Git {
         }
     }
 
+    async fn origin_url(
+        &self,
+        path: &str,
+    ) -> std::result::Result<Option<String>, delta_usecase::Error> {
+        // `config --get remote.origin.url` prints the configured URL and exits
+        // 0; it exits non-zero when the key is unset OR `path` is not a git
+        // repo. Both are the expected `None` signal, not errors to propagate.
+        // `remote.origin.url` lives in the shared `.git/config`, so a linked
+        // worktree returns the same URL as the main tree — repository identity
+        // is stable across worktrees.
+        let output = self
+            .output(path, &["config", "--get", "remote.origin.url"])
+            .await
+            .map_err(delta_usecase::Error::from)?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let url = trimmed_stdout(&output);
+        if url.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(url))
+        }
+    }
+
     async fn default_branch(
         &self,
         repo_root: &str,
@@ -446,6 +471,57 @@ mod tests {
             .to_string_lossy()
             .into_owned();
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn origin_url_reports_the_configured_remote_url() {
+        // A fresh init has no origin remote; setting one makes `origin_url`
+        // report it. The value is returned verbatim, with any trailing newline
+        // trimmed.
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let repo = tmp.path().to_str().unwrap();
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/x7c1/delta.git",
+            ])
+            .output()
+            .await
+            .unwrap();
+        let git = Git::new();
+        let url = git
+            .origin_url(repo)
+            .await
+            .unwrap()
+            .expect("origin url is configured");
+        assert_eq!(url, "https://github.com/x7c1/delta.git");
+    }
+
+    #[tokio::test]
+    async fn origin_url_is_none_when_remote_is_unset() {
+        // A fresh init has no `remote.origin.url`; `git config --get` exits
+        // non-zero, which the gateway translates to `None`.
+        let tmp = tempfile::tempdir().unwrap();
+        init_repo_with_commit(tmp.path()).await;
+        let git = Git::new();
+        let url = git.origin_url(tmp.path().to_str().unwrap()).await.unwrap();
+        assert!(url.is_none(), "no origin remote means no origin url");
+    }
+
+    #[tokio::test]
+    async fn origin_url_is_none_outside_a_git_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let git = Git::new();
+        let url = git.origin_url(tmp.path().to_str().unwrap()).await.unwrap();
+        assert!(
+            url.is_none(),
+            "a non-git directory has no origin url to report"
+        );
     }
 
     #[tokio::test]

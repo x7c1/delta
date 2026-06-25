@@ -94,6 +94,7 @@ impl SessionStore for FakeStore {
             // when this activate path runs.
             branch_at_launch: new.branch_at_launch,
             repo_root: new.repo_root,
+            repository_display_name: new.repository_display_name,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -115,6 +116,7 @@ impl SessionStore for FakeStore {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -130,6 +132,7 @@ impl SessionStore for FakeStore {
             created_at: "2026-01-01T00:00:00Z".into(),
             branch_at_launch: branch_at_launch.map(str::to_owned),
             repo_root: repo_root.map(str::to_owned),
+            repository_display_name: repository_display_name.map(str::to_owned),
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -618,14 +621,12 @@ impl SessionStore for FakeStore {
         // separately-learned task id does not). A brand-new row starts with
         // `task_id: None` until `upgrade_subagent_task_id` runs.
         let key = (session_id.clone(), tool_use_id.to_owned());
-        let task_id = g.subagent_launches.get(&key).and_then(|l| l.task_id.clone());
-        g.subagent_launches.insert(
-            key,
-            SubagentLaunch {
-                thread_id,
-                task_id,
-            },
-        );
+        let task_id = g
+            .subagent_launches
+            .get(&key)
+            .and_then(|l| l.task_id.clone());
+        g.subagent_launches
+            .insert(key, SubagentLaunch { thread_id, task_id });
         Ok(())
     }
 
@@ -645,11 +646,7 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn clear_subagent_launch(
-        &self,
-        session_id: &SessionId,
-        tool_use_id: &str,
-    ) -> Result<()> {
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         g.subagent_launches
             .remove(&(session_id.clone(), tool_use_id.to_owned()));

@@ -8,6 +8,7 @@ use crate::pane_token::PaneToken;
 use crate::ports::{
     pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeStartPoint,
 };
+use crate::repository::{display_name, identity_key};
 use crate::send_target::WorktreeSpec;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
@@ -283,6 +284,28 @@ where
         // detached; the frontend then falls back to the session label.
         let branch_at_launch = self.git_worktree.current_branch(&workdir).await?;
 
+        // Snapshot a short repository identity label for the navigator card's
+        // repo line (line 2 left). Derived from the launch directory's
+        // `origin` URL (normalised to `host/org/repo` and shortened to
+        // `org/repo`), falling back to the working-tree basename when no
+        // origin is configured. `None` when the launch dir is not a git repo
+        // at all; the frontend then falls back to the cwd basename.
+        //
+        // Looked up against the launch `workdir` rather than `launch_repo_root`
+        // so a non-git launch dir cleanly resolves to `None` without an extra
+        // branch (origin lives in the shared `.git/config`, so the answer is
+        // the same from either path inside a repository). Unlike `repo_root`,
+        // which is the worktree path itself when launched from a linked
+        // worktree, this value is stable across worktrees of the same clone.
+        let repository_display_name = match launch_repo_root.as_deref() {
+            Some(root) => {
+                let origin = self.git_worktree.origin_url(&workdir).await?;
+                let key = identity_key(origin, root);
+                Some(display_name(&key, root))
+            }
+            None => None,
+        };
+
         // Pre-accept Claude Code's workspace-trust dialog for git-repo launch
         // directories. A fresh directory containing files otherwise pops a
         // blocking interactive dialog at startup, which means the first
@@ -309,6 +332,7 @@ where
                 &workdir,
                 branch_at_launch.as_deref(),
                 launch_repo_root.as_deref(),
+                repository_display_name.as_deref(),
             )
             .await?;
         let first_send = match first_prompt.as_deref() {

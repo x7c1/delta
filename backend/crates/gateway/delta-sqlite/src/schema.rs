@@ -77,7 +77,16 @@ CREATE TABLE IF NOT EXISTS session (
   -- existing database gains them as NULL on every pre-existing row with no
   -- backfill — the navigator's frontend falls back to the cwd basename then.
   branch_at_launch  TEXT,
-  repo_root         TEXT
+  repo_root         TEXT,
+  -- Spawn-time short repository identity label (e.g. `org/repo`), derived
+  -- from the launch directory's `origin` URL and falling back to the
+  -- working-tree basename when no origin is configured. NULL when the launch
+  -- directory is not a git repo, or for sessions that predate this column —
+  -- the navigator renders the cwd basename instead. Stored separately from
+  -- `repo_root` because `repo_root` is the working-tree path (different per
+  -- linked worktree) while this label is the cross-worktree repository
+  -- identity. Additive; see `ADDITIVE_COLUMNS`.
+  repository_display_name TEXT
 ) STRICT;
 
 -- The transcript-ingestion cursor, split out of `session`: how many lines of
@@ -330,6 +339,18 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "session",
         column: "repo_root",
         add_column_sql: "ALTER TABLE session ADD COLUMN repo_root TEXT",
+    },
+    // Cross-worktree repository identity label, added to `session` after the
+    // table first shipped. Nullable with no default: an existing database
+    // gains it as NULL on every pre-existing row, so a session launched
+    // before this change stays unidentified by this column and the
+    // navigator falls back to the cwd basename. No backfill — we cannot
+    // recover what `git config remote.origin.url` would have reported at
+    // the historical spawn moment.
+    AdditiveColumn {
+        table: "session",
+        column: "repository_display_name",
+        add_column_sql: "ALTER TABLE session ADD COLUMN repository_display_name TEXT",
     },
     // Background-task identifier learned via `PostToolUse(Agent)`, added to
     // `subagent_launch` after it first shipped. Nullable with no default: an

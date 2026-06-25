@@ -53,18 +53,23 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// row via [`Self::register_session`]). The id is freshly minted, so an
     /// existing row with the same id is an error, not an upsert.
     ///
-    /// `branch_at_launch` and `repo_root` are the spawn-time git snapshot of
-    /// `cwd` — the local branch checked out and the repository root containing
-    /// it. Both are `None` when the launch directory is not inside a git
-    /// repository (or HEAD is detached). They are persisted once here and
-    /// never updated later: see [`Session::branch_at_launch`] /
-    /// [`Session::repo_root`] for the spawn-snapshot semantics.
+    /// `branch_at_launch`, `repo_root`, and `repository_display_name` are the
+    /// spawn-time git snapshot of `cwd` — the local branch checked out, the
+    /// working-tree root containing it, and the cross-worktree repository
+    /// identity label (`org/repo` from the `origin` URL, or the working-tree
+    /// basename when no origin is set). All three are `None` when the launch
+    /// directory is not inside a git repository (and the branch may also be
+    /// `None` on a detached HEAD). They are persisted once here and never
+    /// updated later: see [`Session::branch_at_launch`] /
+    /// [`Session::repo_root`] / [`Session::repository_display_name`] for the
+    /// spawn-snapshot semantics.
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> Result<(Session, ThreadId)>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
@@ -358,8 +363,7 @@ pub trait SessionStore: std::marker::Send + Sync {
 
     /// Clear a recorded background-task launch once its `<task-notification>`
     /// has been folded. Clearing an unknown id is a no-op.
-    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str)
-        -> Result<()>;
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()>;
 
     /// The session's outstanding background-task launches as `(tool_use_id ->
     /// SubagentLaunch)`: every background task still awaiting its
@@ -411,9 +415,16 @@ impl SessionStore for Box<dyn SessionStore> {
         cwd: &str,
         branch_at_launch: Option<&str>,
         repo_root: Option<&str>,
+        repository_display_name: Option<&str>,
     ) -> Result<(Session, ThreadId)> {
         (**self)
-            .insert_spawning_session(id, cwd, branch_at_launch, repo_root)
+            .insert_spawning_session(
+                id,
+                cwd,
+                branch_at_launch,
+                repo_root,
+                repository_display_name,
+            )
             .await
     }
 
@@ -583,7 +594,9 @@ impl SessionStore for Box<dyn SessionStore> {
         request_id: i64,
         allowed: bool,
     ) -> Result<Option<PermissionRequest>> {
-        (**self).decide_permission_request(request_id, allowed).await
+        (**self)
+            .decide_permission_request(request_id, allowed)
+            .await
     }
 
     async fn resolve_permission_by_tool_use_id(
@@ -619,11 +632,7 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
-    async fn clear_subagent_launch(
-        &self,
-        session_id: &SessionId,
-        tool_use_id: &str,
-    ) -> Result<()> {
+    async fn clear_subagent_launch(&self, session_id: &SessionId, tool_use_id: &str) -> Result<()> {
         (**self)
             .clear_subagent_launch(session_id, tool_use_id)
             .await

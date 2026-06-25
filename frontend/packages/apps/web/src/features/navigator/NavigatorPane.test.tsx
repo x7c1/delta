@@ -41,6 +41,7 @@ function makeItem(id: string, mainThreadId: number): SessionListItem {
       created_at: '2026-01-01T00:00:00Z',
       branch_at_launch: 'main',
       repo_root: `/home/dev/${id}`,
+      repository_display_name: `dev/${id}`,
     },
     open: true,
     main_thread_id: mainThreadId,
