@@ -12,6 +12,10 @@ pub enum Role {
     /// `isMeta` (e.g. skill bodies, system reminders, local-command output).
     /// Not a human-authored turn.
     Meta,
+    /// The synthetic user line Claude Code writes when `/compact` runs,
+    /// recorded as `type: "user"` but flagged `isCompactSummary`. It carries
+    /// the previous-conversation summary, not a human-authored turn.
+    CompactSummary,
     /// A transcript line whose kind Delta does not classify (e.g. summaries).
     Other,
 }
@@ -30,13 +34,14 @@ impl Role {
         }
     }
 
-    /// The canonical lowercase label stored in the database.
+    /// The canonical snake_case label stored in the database.
     pub fn as_str(self) -> &'static str {
         match self {
             Role::User => "user",
             Role::Assistant => "assistant",
             Role::System => "system",
             Role::Meta => "meta",
+            Role::CompactSummary => "compact_summary",
             Role::Other => "other",
         }
     }
@@ -48,6 +53,7 @@ impl Role {
             "assistant" => Ok(Role::Assistant),
             "system" => Ok(Role::System),
             "meta" => Ok(Role::Meta),
+            "compact_summary" => Ok(Role::CompactSummary),
             "other" => Ok(Role::Other),
             other => Err(Error::InvalidVariant {
                 kind: "Role",
@@ -68,6 +74,7 @@ mod tests {
             Role::Assistant,
             Role::System,
             Role::Meta,
+            Role::CompactSummary,
             Role::Other,
         ] {
             assert_eq!(Role::parse(role.as_str()).unwrap(), role);
