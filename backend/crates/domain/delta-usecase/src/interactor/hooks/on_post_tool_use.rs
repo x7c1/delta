@@ -69,6 +69,22 @@ where
         tool_response_json: &str,
         transcript_path: &str,
     ) -> Result<Vec<SessionEvent>> {
+        // DIAGNOSTIC (to be reverted): mirror of the PreToolUse probe — log the
+        // `transcript_path` carried by a PostToolUse for an `Agent`/`Task`
+        // call. Helps confirm whether Pre and Post agree on the path for a
+        // nested launch, since PostToolUse for a background launch fires
+        // immediately at dispatch time.
+        if is_subagent_tool(tool_name) {
+            tracing::info!(
+                target: "delta_usecase::interactor::hooks::probe",
+                session_id = %self.id,
+                tool_name = %tool_name,
+                tool_use_id = %tool_use_id,
+                transcript_path = %transcript_path,
+                "PostToolUse probe: Agent/Task completion received"
+            );
+        }
+
         // A nested subagent's PostToolUse is dispatched under the parent
         // session's id but its `transcript_path` points at the subagent's
         // own JSONL. Ignore it so a nested completion cannot clear (or
@@ -76,6 +92,16 @@ where
         // same `tool_use_id` by accident, and so the symmetric `PreToolUse`
         // no-op (above) is not contradicted later.
         if self.is_foreign_transcript(transcript_path).await? {
+            if is_subagent_tool(tool_name) {
+                tracing::info!(
+                    target: "delta_usecase::interactor::hooks::probe",
+                    session_id = %self.id,
+                    tool_name = %tool_name,
+                    tool_use_id = %tool_use_id,
+                    transcript_path = %transcript_path,
+                    "PostToolUse probe: filtered as foreign transcript"
+                );
+            }
             return Ok(vec![]);
         }
 

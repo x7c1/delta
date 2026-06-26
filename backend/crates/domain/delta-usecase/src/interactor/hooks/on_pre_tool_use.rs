@@ -53,6 +53,28 @@ where
         tool_use_id: &str,
         transcript_path: &str,
     ) -> Result<Vec<SessionEvent>> {
+        // DIAGNOSTIC (to be reverted): when an `Agent`/`Task` PreToolUse fires,
+        // log the `transcript_path` Claude Code reported alongside the session
+        // id and the launch's `run_in_background` flag. PR #190's foreign-path
+        // filter is observed to miss a depth=2 nested launch; this log lets us
+        // see whether the live hook payload carries the parent's path (filter
+        // defeated by Claude Code) or the nested path (a different bug).
+        if is_subagent_tool(tool_name) {
+            let background = serde_json::from_str::<serde_json::Value>(tool_input_json)
+                .as_ref()
+                .map(claude_format::launches_in_background)
+                .unwrap_or(false);
+            tracing::info!(
+                target: "delta_usecase::interactor::hooks::probe",
+                session_id = %self.id,
+                tool_name = %tool_name,
+                tool_use_id = %tool_use_id,
+                transcript_path = %transcript_path,
+                run_in_background = background,
+                "PreToolUse probe: Agent/Task launch received"
+            );
+        }
+
         // A nested subagent's tool call carries the PARENT session's
         // `session_id` (Claude Code dispatches hooks that way) but its
         // `transcript_path` points at the subagent's own JSONL. Recording the
@@ -62,6 +84,21 @@ where
         // transcript, which Delta does not tail for the parent). Short-circuit
         // so a nested hook is a no-op against the parent's state.
         if self.is_foreign_transcript(transcript_path).await? {
+            if is_subagent_tool(tool_name) {
+                let background = serde_json::from_str::<serde_json::Value>(tool_input_json)
+                    .as_ref()
+                    .map(claude_format::launches_in_background)
+                    .unwrap_or(false);
+                tracing::info!(
+                    target: "delta_usecase::interactor::hooks::probe",
+                    session_id = %self.id,
+                    tool_name = %tool_name,
+                    tool_use_id = %tool_use_id,
+                    transcript_path = %transcript_path,
+                    run_in_background = background,
+                    "PreToolUse probe: filtered as foreign transcript"
+                );
+            }
             return Ok(vec![]);
         }
 

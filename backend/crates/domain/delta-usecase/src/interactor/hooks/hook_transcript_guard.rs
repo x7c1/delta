@@ -53,6 +53,20 @@ where
         let Some(stored) = session.transcript_path else {
             return Ok(false);
         };
-        Ok(stored != hook_transcript_path)
+        let foreign = stored != hook_transcript_path;
+        if foreign {
+            // DIAGNOSTIC (to be reverted): print the exact stored-vs-hook
+            // mismatch that triggered the filter, so we can see whether a
+            // nested-subagent hook really is being detected (different paths)
+            // or whether some other shape of drift is at play.
+            tracing::info!(
+                target: "delta_usecase::interactor::hooks::probe",
+                session_id = %self.id,
+                stored_transcript_path = %stored,
+                hook_transcript_path = %hook_transcript_path,
+                "is_foreign_transcript: filtering — paths differ"
+            );
+        }
+        Ok(foreign)
     }
 }

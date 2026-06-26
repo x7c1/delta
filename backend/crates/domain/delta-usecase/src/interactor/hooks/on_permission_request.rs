@@ -51,6 +51,20 @@ where
         tool_input_json: &str,
         transcript_path: &str,
     ) -> Result<PermissionWait> {
+        // DIAGNOSTIC (to be reverted): permission dialogs are by definition
+        // interesting, so log every PermissionRequest's `transcript_path` to
+        // confirm whether the foreign-transcript filter ever catches a nested
+        // subagent's dialog. (The hook payload carries no `tool_use_id`, so it
+        // is not in the structured fields.) `tool_input_json` deliberately not
+        // logged — content can be large or sensitive.
+        tracing::info!(
+            target: "delta_usecase::interactor::hooks::probe",
+            session_id = %self.id,
+            tool_name = %tool_name,
+            transcript_path = %transcript_path,
+            "PermissionRequest probe: received"
+        );
+
         // A permission dialog raised by a nested subagent's tool call is
         // dispatched under the parent session's id but its `transcript_path`
         // points at the subagent's own JSONL. Short-circuit so the parent
@@ -61,6 +75,13 @@ where
         // the receiver immediately, so the hook answers Claude Code with an
         // empty 200 and the dialog falls through to the TUI as normal.
         if self.is_foreign_transcript(transcript_path).await? {
+            tracing::info!(
+                target: "delta_usecase::interactor::hooks::probe",
+                session_id = %self.id,
+                tool_name = %tool_name,
+                transcript_path = %transcript_path,
+                "PermissionRequest probe: filtered as foreign transcript"
+            );
             let (sender, receiver) = oneshot::channel();
             drop(sender);
             return Ok(PermissionWait {
