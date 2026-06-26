@@ -143,6 +143,27 @@ pub fn display_name(identity_key: &str, fallback_path: &str) -> String {
         .to_owned()
 }
 
+/// Slugify a [`display_name`] result for use as a filesystem path segment.
+///
+/// Replaces `/` with `-` (so `org/repo` becomes `org-repo`) and replaces any
+/// character outside `[A-Za-z0-9._-]` with `_`. Returns the input unchanged
+/// when it already consists only of safe characters.
+///
+/// Used to build the per-session worktree directory name
+/// (`<base>/<slug>-<session-id>`), so a listing of `$DELTA_WORKTREE_BASE`
+/// makes each worktree distinguishable at a glance instead of showing a
+/// wall of UUID-suffixed `delta-<id>` entries.
+pub fn worktree_dir_slug(display_name: &str) -> String {
+    display_name
+        .chars()
+        .map(|c| match c {
+            '/' => '-',
+            c if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') => c,
+            _ => '_',
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +234,30 @@ mod tests {
             display_name("/projects/scratch", "/projects/scratch"),
             "scratch"
         );
+    }
+
+    #[test]
+    fn worktree_dir_slug_rewrites_slash_in_org_repo() {
+        assert_eq!(worktree_dir_slug("x7c1/delta"), "x7c1-delta");
+    }
+
+    #[test]
+    fn worktree_dir_slug_leaves_a_safe_basename_unchanged() {
+        assert_eq!(worktree_dir_slug("delta"), "delta");
+    }
+
+    #[test]
+    fn worktree_dir_slug_rewrites_every_slash() {
+        assert_eq!(worktree_dir_slug("org/sub/repo"), "org-sub-repo");
+    }
+
+    #[test]
+    fn worktree_dir_slug_sanitizes_unsafe_characters() {
+        assert_eq!(worktree_dir_slug("foo bar!baz"), "foo_bar_baz");
+    }
+
+    #[test]
+    fn worktree_dir_slug_passes_empty_through() {
+        assert_eq!(worktree_dir_slug(""), "");
     }
 }

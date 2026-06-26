@@ -10,10 +10,15 @@ use crate::SendTarget;
 #[tokio::test]
 async fn new_session_records_repository_display_name_from_origin_url() {
     let canonical = FakeWorkspace::canonical("/projects/app");
+    let repo_root = "/projects/app";
     let git = FakeGitWorktree::default()
-        .with_repo(&canonical, "/projects/app")
+        .with_repo(&canonical, repo_root)
         .with_current_branch(&canonical, "feat/widget")
-        .with_origin_url(&canonical, "https://github.com/x7c1/delta.git");
+        // The interactor looks `origin_url` up against the repo root (not the
+        // launch dir) so the call survives a worktree-launched session whose
+        // `cwd` differs from the clone path. Mirror that by keying the fake
+        // by the repo root the gateway would see.
+        .with_origin_url(repo_root, "https://github.com/x7c1/delta.git");
     let ix = interactor_with_git(git);
     ix.workspace_fake()
         .existing_dirs

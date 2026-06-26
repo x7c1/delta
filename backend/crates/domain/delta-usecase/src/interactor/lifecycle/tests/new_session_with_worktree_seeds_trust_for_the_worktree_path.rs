@@ -8,7 +8,10 @@ use crate::{SendTarget, WorktreeSpec};
 #[tokio::test]
 async fn new_session_with_worktree_seeds_trust_for_the_worktree_path() {
     let canonical = FakeWorkspace::canonical("/projects/app");
-    let git = FakeGitWorktree::default().with_repo(&canonical, "/projects/app/.git/..");
+    let repo_root = "/projects/app/.git/..";
+    let git = FakeGitWorktree::default()
+        .with_repo(&canonical, repo_root)
+        .with_origin_url(repo_root, "https://github.com/x7c1/delta.git");
     let ix = interactor_with_git(git);
     ix.workspace_fake()
         .existing_dirs
@@ -31,7 +34,7 @@ async fn new_session_with_worktree_seeds_trust_for_the_worktree_path() {
     .unwrap();
 
     let session_id = ix.pending_session_ids().await.remove(0);
-    let expected_path = format!("{TEST_WORKTREE_BASE}/delta-{}", session_id.as_str());
+    let expected_path = format!("{TEST_WORKTREE_BASE}/x7c1-delta-{}", session_id.as_str());
 
     let trusted = ix.git_worktree_fake().trusted.lock().unwrap().clone();
     assert_eq!(

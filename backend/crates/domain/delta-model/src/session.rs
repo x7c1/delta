@@ -39,8 +39,8 @@ pub struct Session {
     /// Note: this is the *working tree* top, not the repository identity.
     /// When the launch directory is a linked git worktree, `--show-toplevel`
     /// returns the worktree path itself (e.g.
-    /// `$HOME/.delta/worktrees/delta-<id>`), not the original clone. Use
-    /// [`Self::repository_display_name`] for the repository-level identity
+    /// `$HOME/.delta/worktrees/<org>-<repo>-<id>`), not the original clone.
+    /// Use [`Self::repository_display_name`] for the repository-level identity
     /// label the navigator renders.
     pub repo_root: Option<String>,
     /// The user-selected launch directory, before any worktree resolution.
