@@ -17,15 +17,17 @@ const PATH_KEY_PREFIX = '/';
 
 /**
  * The Repository tab: registered repositories (origin-deduplicated),
- * recency-ordered. Selecting a repo expands the per-clone picker (with
- * `recently_used_clone_path` pre-selected); selecting a clone writes the
- * picked dir into `composerStore.newSessionWorkdir` so the composer card
- * below the tabs spawns from there on Send.
+ * recency-ordered. Selecting a repo expands the per-clone picker and
+ * auto-picks the repo's `recently_used_clone_path` (falling back to the
+ * first clone) into `composerStore.newSessionWorkdir`, so a user who picks
+ * a repo and presses Send can spawn from a sensible default without having
+ * to click a clone first. Picking a different clone from the same repo
+ * overrides that default; switching to a different repo replaces the
+ * picked clone with the new repo's default.
  *
  * Per-clone state — branch, launch options, worktree opt-in — will pre-fill
- * once Phase C lands the per-session persistence. Phase B always reports
- * empty/false here (see plan), so the existing override UI under the
- * composer card remains the authoritative knobs.
+ * once per-session persistence lands. Today the existing override UI under
+ * the composer card remains the authoritative knobs.
  */
 export function RepositoryTab() {
   const client = useApiClient();
@@ -60,6 +62,30 @@ export function RepositoryTab() {
       repositories.find((repo) => repo.identity_key === selectedRepoKey) ?? null,
     [repositories, selectedRepoKey],
   );
+
+  // Auto-pick a clone for the selected repo so a user who picks a repo and
+  // presses Send (or Cmd/Ctrl+Enter) is never stuck without a workdir.
+  // Preference order: the repo's `recently_used_clone_path`, then the first
+  // clone. Skipped when the current selection already belongs to this repo —
+  // that means the user explicitly picked a different clone of the same
+  // repo and we must not stomp it.
+  useEffect(() => {
+    if (!selectedRepo || selectedRepo.clones.length === 0) {
+      return;
+    }
+    const alreadyPicked = selectedRepo.clones.some(
+      (clone) => clone.path === selectedPath,
+    );
+    if (alreadyPicked) {
+      return;
+    }
+    const recent = selectedRepo.recently_used_clone_path;
+    const recentMatches = selectedRepo.clones.some(
+      (clone) => clone.path === recent,
+    );
+    const next = recentMatches ? recent : selectedRepo.clones[0].path;
+    setSelected(next);
+  }, [selectedRepo, selectedPath, setSelected]);
 
   if (repositoriesQuery.isLoading) {
     return <Spinner label="Loading repositories…" />;

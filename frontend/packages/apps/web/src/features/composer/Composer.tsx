@@ -246,6 +246,24 @@ export function Composer({ mode }: ComposerProps) {
           // than the verb running straight into a bare word.
           `Message ${activeThread?.title ? `#${activeThread.title}` : ''}…`;
 
+  // Single source of truth for "Send is not ready" — used both on the Send
+  // button's `disabled` and as the Cmd/Ctrl+Enter shortcut guard, so the
+  // keyboard path cannot bypass gates the button enforces:
+  //   - empty draft
+  //   - a send is already in-flight
+  //   - a new session must start in a chosen directory (selection mandatory)
+  //   - if the worktree toggle is on, the start-point must be a concrete
+  //     value: `pending_remote_branch` means the Other-remote-branch picker
+  //     was opened but no branch was picked yet, and the backend rejects
+  //     worktree requests without a concrete branch.
+  const submitDisabled =
+    draft.trim().length === 0 ||
+    sendInFlight ||
+    (isNew && !newSessionWorkdir) ||
+    (isNew &&
+      newSessionWorktreeEnabled &&
+      newSessionWorktreeStartPoint.kind === 'pending_remote_branch');
+
   return (
     <form onSubmit={submit} className="space-y-2">
       {branching && (
@@ -296,7 +314,11 @@ export function Composer({ mode }: ComposerProps) {
           // than the lopsided 20px the card-default `pl-2` would stack up to.
           className="min-h-[2.5rem] w-full resize-none bg-transparent py-1.5 pl-0.5 pr-10 text-sm focus:outline-none"
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+            if (
+              event.key === 'Enter' &&
+              (event.metaKey || event.ctrlKey) &&
+              !submitDisabled
+            ) {
               void submit(event);
             }
           }}
@@ -304,21 +326,7 @@ export function Composer({ mode }: ComposerProps) {
         <button
           type="submit"
           aria-label="Send"
-          disabled={
-            draft.trim().length === 0 ||
-            sendInFlight ||
-            // A new session must start in a chosen directory: selection is
-            // mandatory, so Send stays disabled until the picker commits one.
-            (isNew && !newSessionWorkdir) ||
-            // If the worktree toggle is on, the start-point must be a concrete
-            // value before sending — `pending_remote_branch` means the user
-            // opened the Other-remote-branch picker but has not picked a
-            // branch yet, and the backend rejects worktree requests without
-            // a concrete branch.
-            (isNew &&
-              newSessionWorktreeEnabled &&
-              newSessionWorktreeStartPoint.kind === 'pending_remote_branch')
-          }
+          disabled={submitDisabled}
           // Anchored to the card's bottom-right corner with an equal visual gap
           // to the card's right and bottom borders. The enclosing composer card
           // pads `px-3` (12px) but only `py-2` (8px), so the button sits `right-0`
