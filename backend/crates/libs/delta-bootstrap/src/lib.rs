@@ -58,7 +58,10 @@ pub struct Config {
     /// runs in its own `<base>/<token>` subdirectory, so the `cwd ↔ spawn`
     /// mapping is 1:1 and the hook-binding correlation is exact.
     pub session_workdir_base: String,
-    /// Base directory for per-session git worktrees (`<base>/delta-<session-id>`).
+    /// Base directory for per-session git worktrees
+    /// (`<base>/<org>-<repo>-<session-id>`, where `<org>-<repo>` is the
+    /// repository-identity slug; an origin-less local clone falls back to
+    /// `<base>/<repo>-<session-id>`).
     ///
     /// Deliberately a *neutral* location outside any repository tree (default
     /// `$HOME/.delta/worktrees`), not under [`Self::session_workdir_base`]:

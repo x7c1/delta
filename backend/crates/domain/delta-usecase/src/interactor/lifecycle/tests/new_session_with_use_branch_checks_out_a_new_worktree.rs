@@ -5,12 +5,16 @@ use crate::{SendTarget, WorktreeSpec};
 /// A composer-first send that opts into the "use this branch" mode, when the
 /// chosen branch is *not* checked out anywhere, creates a worktree that checks
 /// the branch out (via `add_worktree_checkout`, not a new `delta-<id>` branch)
-/// at `<worktree_base>/delta-<id>`, launches there, and seeds trust for it.
+/// at `<worktree_base>/<org>-<repo>-<id>`, launches there, and seeds trust
+/// for it.
 #[tokio::test]
 async fn new_session_with_use_branch_checks_out_a_new_worktree() {
     let canonical = FakeWorkspace::canonical("/projects/app");
+    let repo_root = "/projects/app/.git/..";
     // `feature` is not checked out anywhere (absent from the scripted map).
-    let git = FakeGitWorktree::default().with_repo(&canonical, "/projects/app/.git/..");
+    let git = FakeGitWorktree::default()
+        .with_repo(&canonical, repo_root)
+        .with_origin_url(repo_root, "https://github.com/x7c1/delta.git");
     let ix = interactor_with_git(git);
     ix.workspace_fake()
         .existing_dirs
@@ -33,7 +37,7 @@ async fn new_session_with_use_branch_checks_out_a_new_worktree() {
     .unwrap();
 
     let session_id = ix.pending_session_ids().await.remove(0);
-    let expected_path = format!("{TEST_WORKTREE_BASE}/delta-{}", session_id.as_str());
+    let expected_path = format!("{TEST_WORKTREE_BASE}/x7c1-delta-{}", session_id.as_str());
 
     // A checkout worktree was added for the branch at the per-session path; no
     // new-branch worktree was created.

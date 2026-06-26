@@ -35,7 +35,7 @@ pub use ports::{
     SessionStartHook, SessionStore, StatusSnapshot, StopHook, TmuxDriver, Transcript,
     TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace, WorktreeStartPoint,
 };
-pub use repository::{display_name, identity_key, Clone, Repository};
+pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;
 pub use session_page::{SessionPage, SessionPageCursor};

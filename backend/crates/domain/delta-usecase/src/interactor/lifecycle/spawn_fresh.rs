@@ -8,7 +8,7 @@ use crate::pane_token::PaneToken;
 use crate::ports::{
     pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace, WorktreeStartPoint,
 };
-use crate::repository::{display_name, identity_key};
+use crate::repository::{display_name, identity_key, worktree_dir_slug};
 use crate::send_target::WorktreeSpec;
 
 use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
@@ -184,14 +184,21 @@ where
         // inherit a surrounding `CLAUDE.md`/settings) instead.
         //
         // For the new-branch start points (`Head`/`RemoteBranch`) the worktree
-        // path and its branch are both `delta-<session-id>` (the Delta-minted
+        // gets its own `delta-<session-id>` branch (the Delta-minted
         // conversation id, not the pane token): the session id is the stable,
-        // human-meaningful name a user can later find and clean up. For
-        // `UseRemoteBranch` the user works on the named branch *itself*: since
-        // git forbids checking one branch out in two worktrees, the worktree
-        // already holding that branch is reused when one exists (including the
-        // main working tree), and otherwise a `delta-<session-id>` worktree that
-        // checks the branch out is created.
+        // human-meaningful name a user can later find and clean up, and the
+        // frontend's `displayBranch()` shortens this shape on the navigator
+        // card. The worktree **directory** name embeds the repository
+        // identity (`<org>-<repo>-<session-id>`) so listing
+        // `$DELTA_WORKTREE_BASE` shows which clone each worktree belongs to
+        // at a glance — see the slug derivation in the match below.
+        //
+        // For `UseRemoteBranch` the user works on the named branch *itself*:
+        // since git forbids checking one branch out in two worktrees, the
+        // worktree already holding that branch is reused when one exists
+        // (including the main working tree), and otherwise a new worktree at
+        // `<base>/<org>-<repo>-<session-id>` that checks the branch out is
+        // created.
         //
         // The git work happens here — after workdir validation but *before* the
         // eager session row — so a git failure leaves no orphan row to roll
@@ -206,26 +213,97 @@ where
         // here; the default `<base>/<token>` scratch dir is empty and never
         // triggers the dialog, so it is never seeded (avoids bloating
         // `~/.claude.json` for ordinary sessions).
-        let mut seed_trust = false;
+        //
         // `launch_repo_root` is the repository root containing the effective
         // launch directory at spawn time — the worktree's repo for a worktree
         // spawn, the user-selected workdir's repo for a plain spawn, `None`
         // for the default `<base>/<token>` scratch dir (always non-git). It
         // feeds the navigator's "repo name" line via `insert_spawning_session`
-        // below, and is reused as the trust-seeding signal so we never call
-        // `repo_root` twice on the same path.
-        let mut launch_repo_root: Option<String> = None;
-        // The user-selected workdir as it will be stored in
-        // `session.requested_workdir`: the dir the user picked, before any
-        // worktree resolution. Captured here because the workdir-resolution
-        // match below consumes `requested_workdir` to compute the effective
-        // launch dir.
+        // below, doubles as the trust-seeding signal (so we never call
+        // `repo_root` twice on the same path), and drives the
+        // `repository_display_name` derivation below — which in turn shapes
+        // the worktree directory name. The user-selected workdir as it will
+        // be stored in `session.requested_workdir` is captured alongside,
+        // because the workdir-resolution match below consumes
+        // `requested_workdir` to compute the effective launch dir.
         let requested_workdir_recorded = requested_workdir.clone();
+        let (launch_repo_root, seed_trust): (Option<String>, bool) = match &worktree {
+            Some(_) => {
+                let root = worktree_repo_root
+                    .clone()
+                    .expect("worktree_repo_root is Some whenever a worktree was requested");
+                // A worktree is by definition a git working tree, so its
+                // trust dialog must be pre-accepted; no extra git call
+                // needed. Trust seeding is idempotent, so reusing an
+                // already-trusted path (e.g. the main tree) is fine.
+                (Some(root), true)
+            }
+            None => match requested_workdir.as_deref() {
+                // A user-selected workdir may be a real git repo (without a
+                // worktree request). Look up `repo_root` once, both to gate
+                // trust-seeding (idem) and to feed the navigator's "repo
+                // name" line — `None` here is "launched outside a repo", and
+                // the frontend then falls back to the cwd basename.
+                Some(dir) => {
+                    let root = self.git_worktree.repo_root(dir).await?;
+                    let trust = root.is_some();
+                    (root, trust)
+                }
+                // The default per-token scratch dir is empty, so `claude`
+                // never shows the trust dialog there; skip the git check on
+                // the hot path.
+                None => (None, false),
+            },
+        };
+
+        // Snapshot a short repository identity label for the navigator card's
+        // repo line (line 2 left). Derived from the launch directory's
+        // `origin` URL (normalised to `host/org/repo` and shortened to
+        // `org/repo`), falling back to the working-tree basename when no
+        // origin is configured. `None` when the launch dir is not a git repo
+        // at all; the frontend then falls back to the cwd basename.
+        //
+        // Looked up against `launch_repo_root` rather than the effective
+        // launch dir: `remote.origin.url` lives in the shared `.git/config`,
+        // so the answer is the same from any path inside the same
+        // repository, and reading against the (already-known) repo root lets
+        // us call `origin_url` exactly once even when the launch dir is
+        // resolved later (a worktree's path is not built until below).
+        // Unlike `repo_root`, which is the worktree path itself when
+        // launched from a linked worktree, this value is stable across
+        // worktrees of the same clone.
+        let repository_display_name = match launch_repo_root.as_deref() {
+            Some(root) => {
+                let origin = self.git_worktree.origin_url(root).await?;
+                let key = identity_key(origin, root);
+                Some(display_name(&key, root))
+            }
+            None => None,
+        };
+
         let workdir = match worktree {
             Some(spec) => {
                 let repo_root = worktree_repo_root
                     .expect("worktree_repo_root is Some whenever a worktree was requested");
-                let default_path = format!("{}/delta-{}", self.worktree_base, session_id.as_str());
+                // Build the per-session worktree directory name from the
+                // repository identity so a listing of `$DELTA_WORKTREE_BASE`
+                // makes each worktree distinguishable at a glance (instead of
+                // a wall of UUID-suffixed `delta-<id>` entries). The slug is
+                // the display name with `/` rewritten to `-` and any unsafe
+                // character replaced — see [`worktree_dir_slug`]. When no
+                // display name is available (the path is somehow non-git, or
+                // slugifies to an empty string) we fall back to the literal
+                // `delta` so the path is never just `<base>/-<id>`. The
+                // **branch** name created for new-branch start points stays
+                // `delta-<session-id>` so the frontend's `displayBranch()`
+                // shortening continues to recognise it.
+                let slug = repository_display_name
+                    .as_deref()
+                    .map(worktree_dir_slug)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "delta".to_owned());
+                let default_path =
+                    format!("{}/{}-{}", self.worktree_base, slug, session_id.as_str());
                 let effective_path = match spec.start_point {
                     // New-branch start points: cut `delta-<id>` at `default_path`.
                     start_point @ (WorktreeStartPoint::Head
@@ -255,27 +333,10 @@ where
                         }
                     }
                 };
-                // A worktree is by definition a git working tree, so its trust
-                // dialog must be pre-accepted; no extra git call needed. Trust
-                // seeding is idempotent, so reusing an already-trusted path
-                // (e.g. the main tree) is fine. The worktree's repository root
-                // is the same `repo_root` checked here, so it doubles as the
-                // navigator's "repo name" source — no extra `git rev-parse`.
-                seed_trust = true;
-                launch_repo_root = Some(repo_root);
                 effective_path
             }
             None => match requested_workdir {
-                // A user-selected workdir may be a real git repo (without a
-                // worktree request). Look up `repo_root` once, both to gate
-                // trust-seeding (idem) and to feed the navigator's "repo name"
-                // line — `None` here is "launched outside a repo", and the
-                // frontend then falls back to the cwd basename.
-                Some(dir) => {
-                    launch_repo_root = self.git_worktree.repo_root(&dir).await?;
-                    seed_trust = launch_repo_root.is_some();
-                    dir
-                }
+                Some(dir) => dir,
                 // The default per-token scratch dir is empty, so `claude` never
                 // shows the trust dialog there; skip the git check on the hot path.
                 None => self.workdir_for(&token),
@@ -289,28 +350,6 @@ where
         // separately). `None` when the launch dir is not a git repo or HEAD is
         // detached; the frontend then falls back to the session label.
         let branch_at_launch = self.git_worktree.current_branch(&workdir).await?;
-
-        // Snapshot a short repository identity label for the navigator card's
-        // repo line (line 2 left). Derived from the launch directory's
-        // `origin` URL (normalised to `host/org/repo` and shortened to
-        // `org/repo`), falling back to the working-tree basename when no
-        // origin is configured. `None` when the launch dir is not a git repo
-        // at all; the frontend then falls back to the cwd basename.
-        //
-        // Looked up against the launch `workdir` rather than `launch_repo_root`
-        // so a non-git launch dir cleanly resolves to `None` without an extra
-        // branch (origin lives in the shared `.git/config`, so the answer is
-        // the same from either path inside a repository). Unlike `repo_root`,
-        // which is the worktree path itself when launched from a linked
-        // worktree, this value is stable across worktrees of the same clone.
-        let repository_display_name = match launch_repo_root.as_deref() {
-            Some(root) => {
-                let origin = self.git_worktree.origin_url(&workdir).await?;
-                let key = identity_key(origin, root);
-                Some(display_name(&key, root))
-            }
-            None => None,
-        };
 
         // Pre-accept Claude Code's workspace-trust dialog for git-repo launch
         // directories. A fresh directory containing files otherwise pops a

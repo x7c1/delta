@@ -88,7 +88,9 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// is free to become a user-selected project path in a later change without
     /// breaking spawn↔session correlation.
     pub(in crate::interactor) session_workdir_base: String,
-    /// Base directory for per-session git worktrees (`<base>/delta-<session-id>`).
+    /// Base directory for per-session git worktrees
+    /// (`<base>/<org>-<repo>-<session-id>`, where `<org>-<repo>` is the
+    /// repository-identity slug).
     ///
     /// Kept separate from [`Self::session_workdir_base`] and pointed at a
     /// neutral location *outside* any repository tree: Claude Code discovers
