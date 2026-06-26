@@ -365,6 +365,37 @@ pub struct SessionRuntime {
     /// the actor alive). Only `Agent`/`Task` flip it — a subagent's nested tool
     /// calls (e.g. its own `Bash`) reach the same hooks but never match.
     running_subagents: Vec<RunningSubagent>,
+    /// The `agentId` values observed on `PostToolUse(Agent)` for background
+    /// launches whose running entry does not yet exist when the hook fires,
+    /// keyed by `tool_use_id`.
+    ///
+    /// Once the running-subagent indicator moved off the `PreToolUse` hook path
+    /// onto the parent-transcript ingest, a top-level background `Agent` launch
+    /// became prone to this race: `PreToolUse(Agent)` force-syncs the parent
+    /// transcript, but the assistant's `tool_use(Agent)` block has not always
+    /// been flushed to the parent's JSONL by the time the hook handler reads
+    /// the file; `PostToolUse(Agent)` then arrives carrying `agentId` while no
+    /// in-memory running entry exists, so the existing best-effort upgrade
+    /// silently drops the id. A later sync eventually folds the launch line
+    /// and creates the entry with `task_id: None`, and a `<task-notification>`
+    /// missing `<tool-use-id>` (Claude Code 2.1.193 sometimes strips it for
+    /// top-level background launches) then has no fallback correlation key —
+    /// the indicator stays lit forever.
+    ///
+    /// This buffer survives the race: `on_post_tool_use` always records the
+    /// `agentId` here (entry-or-insert, so a retried hook cannot overwrite the
+    /// first value); the `Effect::SubagentIndicatorStarted` arm of
+    /// `sync_transcript` drains the buffer when it creates the in-memory entry
+    /// and persists the upgrade through the store. The buffer is NOT part of
+    /// [`Self::is_empty`] — leaked entries are reclaimed by actor retirement.
+    ///
+    /// TODO: clean leaked entries on session lifecycle events. A nested
+    /// `Agent`'s `PostToolUse` lands here too, but its `tool_use_id` will never
+    /// appear in the parent's JSONL (it lives in the subagent's own transcript),
+    /// so the entry is never drained. The leak is bounded by the number of
+    /// nested `Agent` launches per session — small in practice — but a sweep
+    /// keyed off `SubagentCompleted` or session close would tighten the bound.
+    pending_post_tool_use_agent_ids: HashMap<String, String>,
 }
 
 impl SessionRuntime {
@@ -875,6 +906,36 @@ impl SessionRuntime {
             .iter()
             .find(|s| s.tool_use_id == tool_use_id)
             .and_then(|s| s.task_id.as_deref())
+    }
+
+    /// Record the `agentId` a `PostToolUse(Agent)` reported, so the next
+    /// transcript sync can fold it into the running-subagent entry once that
+    /// entry exists. Entry-or-insert: a retried hook delivery for the same
+    /// `tool_use_id` does not overwrite the first observed value.
+    ///
+    /// See [`Self::pending_post_tool_use_agent_ids`] for the race this buffer
+    /// covers.
+    ///
+    /// [`Self::pending_post_tool_use_agent_ids`]: SessionRuntime::pending_post_tool_use_agent_ids
+    pub(in crate::interactor) fn record_pending_post_tool_use_agent_id(
+        &mut self,
+        tool_use_id: &str,
+        agent_id: &str,
+    ) {
+        self.pending_post_tool_use_agent_ids
+            .entry(tool_use_id.to_owned())
+            .or_insert_with(|| agent_id.to_owned());
+    }
+
+    /// Take the buffered `agentId` for this `tool_use_id`, if any. Drained by
+    /// the `Effect::SubagentIndicatorStarted` arm of `sync_transcript` once it
+    /// creates the in-memory running entry — after which the value, if present,
+    /// is applied to the entry and persisted on the launch row.
+    pub(in crate::interactor) fn drain_pending_post_tool_use_agent_id(
+        &mut self,
+        tool_use_id: &str,
+    ) -> Option<String> {
+        self.pending_post_tool_use_agent_ids.remove(tool_use_id)
     }
 
     /// The pending spawn, for the test seams that read launch state back.

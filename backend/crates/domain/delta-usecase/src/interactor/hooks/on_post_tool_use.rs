@@ -58,6 +58,13 @@ where
     /// already bracket the indicator, and the task id is a server-internal
     /// matching detail.
     ///
+    /// The `agentId` is also stashed via
+    /// `SessionRuntime::record_pending_post_tool_use_agent_id` before the direct
+    /// upgrade runs, so a `PostToolUse` that arrives before the parent's
+    /// `tool_use(Agent)` line has been ingested (the race introduced when the
+    /// indicator moved off the hook path) still gets applied when the sync
+    /// later lights the indicator.
+    ///
     /// A `PostToolUse` whose `tool_use_id` is not tracked (an unknown id, one
     /// already cleared when the turn ended, or a still-running background entry
     /// for which the upgrade lookup also misses) is a no-op: nothing is removed
@@ -100,7 +107,22 @@ where
         // or malformed `agentId` simply leaves the entry as-is — and never
         // emits an event (the indicator hasn't changed; only the matching
         // metadata did).
+        //
+        // The `PostToolUse(Agent)` for a top-level background launch can arrive
+        // BEFORE `sync_transcript` has folded the assistant's `tool_use(Agent)`
+        // line and lit the running entry: `PreToolUse(Agent)` force-syncs the
+        // parent transcript but the line is not always flushed to the JSONL by
+        // the time the hook handler reads it. If the in-memory entry does not
+        // yet exist the direct upgrade is a no-op and the `agentId` would be
+        // lost. Stash it in `pending_post_tool_use_agent_ids` first so the
+        // eventual `Effect::SubagentIndicatorStarted` arm of the sync can fold
+        // it onto the freshly-created entry and persist it through the store.
+        // When the in-memory entry IS already present the direct upgrade still
+        // wins; the buffer entry is then harmless dead weight (the sync drain
+        // finds a runtime value already set).
         if let Some(task_id) = agent_id_field(tool_response_json) {
+            self.state
+                .record_pending_post_tool_use_agent_id(tool_use_id, &task_id);
             if self.state.upgrade_subagent_task_id(tool_use_id, &task_id) {
                 self.store
                     .upgrade_subagent_task_id(self.id, tool_use_id, &task_id)

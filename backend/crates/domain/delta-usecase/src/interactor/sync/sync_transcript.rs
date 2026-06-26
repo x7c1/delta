@@ -263,6 +263,24 @@ where
                         description: description.clone(),
                         background,
                     });
+                    // Fold any `agentId` the matching `PostToolUse(Agent)`
+                    // stashed before this entry existed: for a top-level
+                    // background launch the hook can fire before
+                    // `tool_use(Agent)` is flushed to the parent's JSONL, so
+                    // the hook's direct upgrade was a no-op and the value
+                    // would otherwise be lost. Apply it now to the freshly
+                    // created entry and persist it through the launch row,
+                    // which `Effect::SubagentLaunched` (emitted earlier in
+                    // this fold) has already INSERTed.
+                    if let Some(task_id) =
+                        self.state.drain_pending_post_tool_use_agent_id(&tool_use_id)
+                    {
+                        if self.state.upgrade_subagent_task_id(&tool_use_id, &task_id) {
+                            self.store
+                                .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                                .await?;
+                        }
+                    }
                     if newly {
                         events.push(SessionEvent::SubagentStarted {
                             session_id: session.id.clone(),
