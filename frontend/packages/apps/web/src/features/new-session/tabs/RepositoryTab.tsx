@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHomeDirQuery, useRepositoriesQuery } from '@delta/api-client';
 import { displayBranch } from '@delta/model';
 import type { RepositoryEntry } from '@delta/wire-gen';
@@ -17,15 +17,18 @@ const PATH_KEY_PREFIX = '/';
 
 /**
  * The Repository tab: registered repositories (origin-deduplicated),
- * recency-ordered. Selecting a repo expands the per-clone picker (with
- * `recently_used_clone_path` pre-selected); selecting a clone writes the
- * picked dir into `composerStore.newSessionWorkdir` so the composer card
- * below the tabs spawns from there on Send.
+ * recency-ordered. Selecting the tab auto-highlights the first (most-recent)
+ * repo AND auto-picks its `recently_used_clone_path` (falling back to the
+ * first clone) into `composerStore.newSessionWorkdir`, so the panel mounts
+ * in a fully-selected state — both a repo row and a clone row read as
+ * active — and the user can press Send without first clicking a clone.
+ * Clicking a different Repository row replaces the picked clone with that
+ * repo's default; picking a different clone from the same repo overrides
+ * the default.
  *
  * Per-clone state — branch, launch options, worktree opt-in — will pre-fill
- * once Phase C lands the per-session persistence. Phase B always reports
- * empty/false here (see plan), so the existing override UI under the
- * composer card remains the authoritative knobs.
+ * once per-session persistence lands. Today the existing override UI under
+ * the composer card remains the authoritative knobs.
  */
 export function RepositoryTab() {
   const client = useApiClient();
@@ -59,6 +62,57 @@ export function RepositoryTab() {
     () =>
       repositories.find((repo) => repo.identity_key === selectedRepoKey) ?? null,
     [repositories, selectedRepoKey],
+  );
+
+  // Auto-pick a clone path for `repo` into the composer store. Preference:
+  //   1. `recently_used_clone_path` (when it is actually in the clones list)
+  //   2. the first clone
+  // Skipped when the current selection already belongs to this repo — that
+  // means the user explicitly picked a different clone of the same repo and
+  // we must not stomp it (e.g. re-clicking the same Repo row, or the
+  // mount-time effect firing after a clone was already picked).
+  const autoPickClone = useCallback(
+    (repo: RepositoryEntry) => {
+      if (repo.clones.length === 0) {
+        return;
+      }
+      const alreadyPicked = repo.clones.some(
+        (clone) => clone.path === selectedPath,
+      );
+      if (alreadyPicked) {
+        return;
+      }
+      const recent = repo.recently_used_clone_path;
+      const recentMatches = repo.clones.some((clone) => clone.path === recent);
+      const next = recentMatches ? recent : repo.clones[0].path;
+      setSelected(next);
+    },
+    [selectedPath, setSelected],
+  );
+
+  // Mount-time (and selected-repo-change) auto-pick. When the Repository tab
+  // first shows or the selected repo changes, write a sensible default clone
+  // path into the composer store so the clone row also reads as active and
+  // Send is immediately available. The `alreadyPicked` guard inside
+  // `autoPickClone` makes this idempotent — if a user has already clicked a
+  // clone of the selected repo, this effect is a no-op.
+  useEffect(() => {
+    if (!selectedRepo) {
+      return;
+    }
+    autoPickClone(selectedRepo);
+  }, [selectedRepo, autoPickClone]);
+
+  // Clicking a Repository row both highlights it and routes through the same
+  // auto-pick so the picked clone follows the picked repo. Idempotent for a
+  // same-repo reclick — `autoPickClone` short-circuits when the existing
+  // selection already belongs to the clicked repo.
+  const handleRepoClick = useCallback(
+    (repo: RepositoryEntry) => {
+      setSelectedRepoKey(repo.identity_key);
+      autoPickClone(repo);
+    },
+    [autoPickClone],
   );
 
   if (repositoriesQuery.isLoading) {
@@ -103,7 +157,7 @@ export function RepositoryTab() {
               <RepoRow
                 repo={repo}
                 isSelected={selectedRepoKey === repo.identity_key}
-                onSelect={() => setSelectedRepoKey(repo.identity_key)}
+                onSelect={() => handleRepoClick(repo)}
               />
             </li>
           ))}

@@ -383,6 +383,61 @@ describe('Composer', () => {
     });
   });
 
+  it('Cmd+Enter is a no-op for a new session when no workdir is selected', async () => {
+    // Regression: the Send button gates a new session on `newSessionWorkdir`,
+    // but the keyboard shortcut used to bypass that gate. Without a workdir
+    // the backend would spawn in its default scratch dir and the watchdog
+    // would later report "session failed to start", so Cmd+Enter must obey
+    // the same disabled rule as the button.
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    // No spawn or local send was queued — the shortcut silently did nothing,
+    // matching the disabled Send button.
+    expect(useLiveStore.getState().spawns).toHaveLength(0);
+    expect(Object.keys(useLiveStore.getState().localSends)).toHaveLength(0);
+  });
+
+  it('Cmd+Enter submits a new session once a workdir is selected', async () => {
+    // Pair to the guard test above: once the gate is satisfied, the shortcut
+    // must still work (we are guarding, not removing it).
+    useComposerStore.setState({ newSessionWorkdir: '/home/dev' });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start fresh' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+
+    await waitFor(() => {
+      expect(useLiveStore.getState().spawns).toHaveLength(1);
+    });
+    expect(useLiveStore.getState().spawns[0].text).toBe('start fresh');
+  });
+
   it('disables Send for a new session until a workdir is selected', async () => {
     // Default state: no directory chosen. Selection is mandatory for a new
     // session, so Send stays disabled even with text entered.
