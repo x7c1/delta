@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHomeDirQuery, useRepositoriesQuery } from '@delta/api-client';
 import { displayBranch } from '@delta/model';
 import type { RepositoryEntry } from '@delta/wire-gen';
@@ -17,13 +17,17 @@ const PATH_KEY_PREFIX = '/';
 
 /**
  * The Repository tab: registered repositories (origin-deduplicated),
- * recency-ordered. Selecting a repo expands the per-clone picker and
- * auto-picks the repo's `recently_used_clone_path` (falling back to the
- * first clone) into `composerStore.newSessionWorkdir`, so a user who picks
- * a repo and presses Send can spawn from a sensible default without having
- * to click a clone first. Picking a different clone from the same repo
- * overrides that default; switching to a different repo replaces the
- * picked clone with the new repo's default.
+ * recency-ordered. Clicking a Repository row expands the per-clone picker
+ * and auto-picks the repo's `recently_used_clone_path` (falling back to
+ * the first clone) into `composerStore.newSessionWorkdir`, so a user who
+ * picks a repo and presses Send can spawn from a sensible default without
+ * having to click a clone first. Picking a different clone from the same
+ * repo overrides that default; clicking a different Repository row
+ * replaces the picked clone with the new repo's default.
+ *
+ * The initial highlight of the first (most-recent) repo on mount is local
+ * UI state only — it does NOT write to the composer store, so just opening
+ * the New session screen never leaks a workdir into the other tabs.
  *
  * Per-clone state — branch, launch options, worktree opt-in — will pre-fill
  * once per-session persistence lands. Today the existing override UI under
@@ -63,29 +67,40 @@ export function RepositoryTab() {
     [repositories, selectedRepoKey],
   );
 
-  // Auto-pick a clone for the selected repo so a user who picks a repo and
-  // presses Send (or Cmd/Ctrl+Enter) is never stuck without a workdir.
-  // Preference order: the repo's `recently_used_clone_path`, then the first
-  // clone. Skipped when the current selection already belongs to this repo —
-  // that means the user explicitly picked a different clone of the same
-  // repo and we must not stomp it.
-  useEffect(() => {
-    if (!selectedRepo || selectedRepo.clones.length === 0) {
-      return;
-    }
-    const alreadyPicked = selectedRepo.clones.some(
-      (clone) => clone.path === selectedPath,
-    );
-    if (alreadyPicked) {
-      return;
-    }
-    const recent = selectedRepo.recently_used_clone_path;
-    const recentMatches = selectedRepo.clones.some(
-      (clone) => clone.path === recent,
-    );
-    const next = recentMatches ? recent : selectedRepo.clones[0].path;
-    setSelected(next);
-  }, [selectedRepo, selectedPath, setSelected]);
+  // Clicking a Repository row both highlights it and auto-picks a clone path
+  // into the composer store, so the user can press Send (or Cmd/Ctrl+Enter)
+  // without first clicking a clone. Preference order:
+  //   1. `recently_used_clone_path` (when it is actually in the clones list)
+  //   2. the first clone
+  // The auto-pick is skipped when the current selection already belongs to
+  // this repo — that means the user explicitly picked a different clone of
+  // the same repo and we must not stomp it (e.g. re-clicking the same Repo
+  // row, or arriving via a clone click that ran the existing repo-auto-
+  // select effect).
+  //
+  // Crucially the auto-pick lives on the click, not on the mount-time
+  // `selectedRepoKey` defaulting effect: just opening the New session
+  // screen must not write to the store, otherwise the workdir leaks into
+  // the PR / Directory tabs the user later switches to.
+  const handleRepoClick = useCallback(
+    (repo: RepositoryEntry) => {
+      setSelectedRepoKey(repo.identity_key);
+      if (repo.clones.length === 0) {
+        return;
+      }
+      const alreadyPicked = repo.clones.some(
+        (clone) => clone.path === selectedPath,
+      );
+      if (alreadyPicked) {
+        return;
+      }
+      const recent = repo.recently_used_clone_path;
+      const recentMatches = repo.clones.some((clone) => clone.path === recent);
+      const next = recentMatches ? recent : repo.clones[0].path;
+      setSelected(next);
+    },
+    [selectedPath, setSelected],
+  );
 
   if (repositoriesQuery.isLoading) {
     return <Spinner label="Loading repositories…" />;
@@ -129,7 +144,7 @@ export function RepositoryTab() {
               <RepoRow
                 repo={repo}
                 isSelected={selectedRepoKey === repo.identity_key}
-                onSelect={() => setSelectedRepoKey(repo.identity_key)}
+                onSelect={() => handleRepoClick(repo)}
               />
             </li>
           ))}

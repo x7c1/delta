@@ -417,9 +417,9 @@ describe('WorkspaceScreen multi-session', () => {
     // Already in the new-session state with a stale selection — the
     // regression case where focus does not change. Clicking "New session"
     // must still wipe the stale workdir so the user starts from a clean
-    // slate in the tab picker. The Repository tab may then immediately
-    // auto-pick a default clone from the first registered repo; what
-    // matters is that the stale value does not survive.
+    // slate in the tab picker. The Repository tab's mount-time highlight
+    // does not write to the composer store (the auto-pick fires only on
+    // an explicit row click), so the reset value stays null.
     useNavStore.setState({
       focusedSessionId: NEW_SESSION_FOCUS,
       preNewSessionFocus: SESSION_ID,
@@ -434,11 +434,7 @@ describe('WorkspaceScreen multi-session', () => {
     fireEvent.click(newButton);
 
     expect(useNavStore.getState().focusedSessionId).toBe(NEW_SESSION_FOCUS);
-    await waitFor(() => {
-      expect(useComposerStore.getState().newSessionWorkdir).not.toBe(
-        '/stale/dir',
-      );
-    });
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
     // Phase B: no modal is auto-opened — the inline tab picker is the
     // primary entry point. The dialog stays closed.
     expect(useComposerStore.getState().workdirDialogOpen).toBe(false);

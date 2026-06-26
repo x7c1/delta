@@ -46,13 +46,34 @@ describe('RepositoryTab', () => {
     });
   });
 
-  it("auto-picks the first repo's recently_used_clone_path on initial render", async () => {
-    // The first mock repo (x7c1/delta) has recently_used_clone_path
-    // = /home/dev/projects/delta. With no prior selection, the tab should
-    // auto-select that repo (existing behavior) AND auto-pick its default
-    // clone, so the user can press Send without first clicking a clone row.
+  it('mount alone does NOT write to the composer store', async () => {
+    // The initial highlight of the first repo is local UI state only.
+    // If the tab wrote into newSessionWorkdir on mount, that workdir
+    // would leak into the PR / Directory tabs the user later switches
+    // to. Just opening the New session screen must never produce a
+    // workdir.
     renderTab();
-    await screen.findByTestId('repository-tab-repos');
+    await waitFor(() => {
+      expect(
+        screen.getAllByTestId('repository-tab-repo-row').length,
+      ).toBeGreaterThan(0);
+    });
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
+  });
+
+  it('clicking a repo row auto-picks its recently_used_clone_path', async () => {
+    // The first mock repo (x7c1/delta) has recently_used_clone_path =
+    // /home/dev/projects/delta. Clicking its row both highlights it
+    // and writes the default clone into newSessionWorkdir, so the user
+    // can press Send without first clicking a clone row.
+    renderTab();
+    const repoRows = await screen.findAllByTestId('repository-tab-repo-row');
+    const deltaRow = repoRows.find((row) =>
+      row.textContent?.includes('x7c1/delta'),
+    );
+    expect(deltaRow).toBeDefined();
+    fireEvent.click(deltaRow!);
+
     await waitFor(() => {
       expect(useComposerStore.getState().newSessionWorkdir).toBe(
         '/home/dev/projects/delta',
@@ -62,8 +83,12 @@ describe('RepositoryTab', () => {
 
   it('switching to a different repo replaces the picked clone with that repo default', async () => {
     renderTab();
-    await screen.findByTestId('repository-tab-repos');
-    // After the initial auto-pick lands, pick a different repo.
+    const repoRows = await screen.findAllByTestId('repository-tab-repo-row');
+    const deltaRow = repoRows.find((row) =>
+      row.textContent?.includes('x7c1/delta'),
+    );
+    expect(deltaRow).toBeDefined();
+    fireEvent.click(deltaRow!);
     await waitFor(() => {
       expect(useComposerStore.getState().newSessionWorkdir).toBe(
         '/home/dev/projects/delta',
@@ -71,8 +96,8 @@ describe('RepositoryTab', () => {
     });
 
     // The second mock repo (`website`) has a single clone at
-    // /home/dev/projects/website.
-    const repoRows = await screen.findAllByTestId('repository-tab-repo-row');
+    // /home/dev/projects/website. Clicking it must replace the previous
+    // pick — the previous selection does not belong to this repo.
     const websiteRow = repoRows.find((row) =>
       row.textContent?.includes('website'),
     );
@@ -86,41 +111,39 @@ describe('RepositoryTab', () => {
     });
   });
 
-  it('clicking the currently-selected repo does NOT stomp an already-picked clone from that repo', async () => {
+  it('reclicking the same repo does NOT stomp an explicit clone pick from that repo', async () => {
     renderTab();
-    await screen.findByTestId('repository-tab-repos');
-    // Wait for the initial auto-pick.
-    await waitFor(() => {
-      expect(useComposerStore.getState().newSessionWorkdir).toBe(
-        '/home/dev/projects/delta',
-      );
-    });
-
-    // Pick the non-default clone of the same repo (delta has two clones).
-    const cloneRows = await screen.findAllByTestId('repository-tab-clone-row');
-    const forkRow = cloneRows.find((row) =>
-      row.textContent?.includes('delta-fork'),
-    );
-    expect(forkRow).toBeDefined();
-    fireEvent.click(forkRow!);
-
-    await waitFor(() => {
-      expect(useComposerStore.getState().newSessionWorkdir).toBe(
-        '/home/dev/projects/delta-fork',
-      );
-    });
-
-    // Click the (still-selected) x7c1/delta repo row again. The effect
-    // must see the current selection already belongs to this repo and
-    // leave it alone — not snap back to recently_used_clone_path.
+    // First, land on the x7c1/delta repo (two clones) and let its
+    // default clone be auto-picked.
     const repoRows = await screen.findAllByTestId('repository-tab-repo-row');
     const deltaRow = repoRows.find((row) =>
       row.textContent?.includes('x7c1/delta'),
     );
     expect(deltaRow).toBeDefined();
     fireEvent.click(deltaRow!);
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBe(
+        '/home/dev/projects/delta',
+      );
+    });
 
-    // No reversion — the explicit pick wins.
+    // Then pick the non-default clone of the same repo explicitly.
+    const cloneRows = await screen.findAllByTestId('repository-tab-clone-row');
+    const forkRow = cloneRows.find((row) =>
+      row.textContent?.includes('delta-fork'),
+    );
+    expect(forkRow).toBeDefined();
+    fireEvent.click(forkRow!);
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBe(
+        '/home/dev/projects/delta-fork',
+      );
+    });
+
+    // Click the same x7c1/delta repo row again. The handler must see
+    // that the current selection already belongs to this repo and leave
+    // it alone — not snap back to recently_used_clone_path.
+    fireEvent.click(deltaRow!);
     expect(useComposerStore.getState().newSessionWorkdir).toBe(
       '/home/dev/projects/delta-fork',
     );
