@@ -116,6 +116,43 @@ pub(crate) fn background_tool_use_line(uuid: &str, tool_use_id: &str) -> Transcr
     }
 }
 
+/// An assistant line launching a foreground `Agent`/`Task` tool call: a
+/// `ToolUse` with no `run_in_background` flag. The matching `tool_use_id`
+/// becomes the correlation key for the indicator (lit by the parent transcript
+/// ingest, cleared by the matching `PostToolUse(Agent)`).
+pub(crate) fn agent_tool_use_line(
+    uuid: &str,
+    tool_use_id: &str,
+    tool_name: &str,
+    subagent_type: &str,
+    description: &str,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: tool_name.into(),
+            input: serde_json::json!({
+                "subagent_type": subagent_type,
+                "description": description,
+            }),
+        }],
+        ..assistant_line(uuid, "")
+    }
+}
+
+/// An assistant line containing an arbitrary `Bash` tool call. Used to assert
+/// that a non-subagent tool_use does not light the indicator.
+pub(crate) fn bash_tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: "Bash".into(),
+            input: serde_json::json!({ "command": "ls" }),
+        }],
+        ..assistant_line(uuid, "")
+    }
+}
+
 /// The leading `<local-command-caveat>` member of a slash/local-command group
 /// (e.g. when the user runs `/review-pr`). Claude records it as a `type: "user"`
 /// line flagged `isMeta` (so the parser classifies it `Role::Meta`) and stamps

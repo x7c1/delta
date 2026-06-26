@@ -127,6 +127,34 @@ pub fn launches_in_background(tool_use_input: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
+/// The tool names that spawn a subagent.
+///
+/// The current Claude Code build names this tool `Agent`; older builds named it
+/// `Task`. Matched defensively against both so the hook contract / transcript
+/// content can drift without breaking attribution.
+pub const SUBAGENT_TOOL_NAMES: [&str; 2] = ["Agent", "Task"];
+
+/// Whether `tool_name` names a subagent-spawning tool (see
+/// [`SUBAGENT_TOOL_NAMES`]).
+pub fn is_subagent_tool(tool_name: &str) -> bool {
+    SUBAGENT_TOOL_NAMES.contains(&tool_name)
+}
+
+/// Read an optional non-empty string field out of a tool-input value.
+///
+/// Returns `None` when the input is not an object, the key is missing, the
+/// value is not a string, or the string is empty — so a malformed or partial
+/// `Agent` input degrades to "no label" rather than failing.
+pub fn tool_input_string_field<'a>(
+    tool_use_input: &'a serde_json::Value,
+    key: &str,
+) -> Option<&'a str> {
+    tool_use_input
+        .get(key)?
+        .as_str()
+        .filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

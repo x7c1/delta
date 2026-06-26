@@ -19,9 +19,12 @@ async fn background_task_completion_clears_the_running_subagent() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    // The assistant launches a background subagent. The hook starts the running
-    // entry (the live signal); the assistant `tool_use` line, ingested below,
-    // records the launch correlation in the store.
+    // The assistant launches a background subagent. The parent's JSONL carries
+    // the `tool_use(Agent)` block; `PreToolUse(Agent)` force-syncs the parent
+    // transcript so the indicator lights and the launch row is persisted on
+    // the same hook call.
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
     let started = ix
         .on_pre_tool_use(
             &session,
@@ -33,18 +36,15 @@ async fn background_task_completion_clears_the_running_subagent() {
         .await
         .unwrap();
     assert!(
-        matches!(
-            started.as_slice(),
-            [SessionEvent::SubagentStarted { background: true, .. }]
-        ),
+        started.iter().any(|e| matches!(
+            e,
+            SessionEvent::SubagentStarted { background: true, .. }
+        )),
         "the launch started a background running entry, got {started:?}"
     );
 
-    // Window 1: the launch line is ingested (recording the correlation) and the
-    // launching turn stops. A background subagent outlives its turn, so it must
-    // still be running after the Stop.
-    ix.transcript_fake()
-        .push(background_tool_use_line("a-launch", "toolu_bg"));
+    // Window 1: the launching turn stops. A background subagent outlives its
+    // turn, so it must still be running after the Stop.
     let after_launch = ix
         .on_stop(StopHook {
             session_id: session.clone(),

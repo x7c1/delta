@@ -110,13 +110,33 @@ pub struct GoldenAssignment {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GoldenEffect {
-    SendMatched { send_id: i64, matched_uuid: String },
+    SendMatched {
+        send_id: i64,
+        matched_uuid: String,
+    },
     TurnInterrupted,
     TurnAborted,
     LocalCommandTurnEnded,
-    ResolvePermission { tool_use_id: String, allowed: bool },
-    SubagentLaunched { tool_use_id: String, thread_id: i64 },
-    SubagentCompleted { tool_use_id: String },
+    ResolvePermission {
+        tool_use_id: String,
+        allowed: bool,
+    },
+    SubagentLaunched {
+        tool_use_id: String,
+        thread_id: i64,
+    },
+    SubagentCompleted {
+        tool_use_id: String,
+    },
+    SubagentIndicatorStarted {
+        tool_use_id: String,
+        thread_id: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subagent_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        background: bool,
+    },
 }
 
 /// Project a fold outcome onto the golden shape.
@@ -166,6 +186,19 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                 },
                 Effect::SubagentCompleted { tool_use_id } => GoldenEffect::SubagentCompleted {
                     tool_use_id: tool_use_id.clone(),
+                },
+                Effect::SubagentIndicatorStarted {
+                    tool_use_id,
+                    thread_id,
+                    subagent_type,
+                    description,
+                    background,
+                } => GoldenEffect::SubagentIndicatorStarted {
+                    tool_use_id: tool_use_id.clone(),
+                    thread_id: thread_id.value(),
+                    subagent_type: subagent_type.clone(),
+                    description: description.clone(),
+                    background: *background,
                 },
             })
             .collect(),
