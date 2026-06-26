@@ -7,7 +7,8 @@
       "input": {
         "subagent_type": "general-purpose",
         "description": "Probe the codebase",
-        "prompt": "Run ls and count entries"
+        "prompt": "Run ls and count entries",
+        "run_in_background": false
       }
     },
     { "type": "delay", "ms": 3000 },

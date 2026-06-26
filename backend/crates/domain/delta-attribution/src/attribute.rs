@@ -85,14 +85,15 @@ pub struct AttributionState {
     /// transcript in one pass, each echo consuming its send in turn.
     pub outstanding: VecDeque<OutstandingSend>,
     /// The outstanding background task launches, keyed by the launching
-    /// tool_use `id` (the `toolu_...` value). A background subagent or
-    /// background Bash (`run_in_background: true`) returns immediately and its
-    /// completion is injected later as a `<task-notification>` user line
-    /// carrying that same id in its `<tool-use-id>` element. Looking the id up
-    /// here attributes the notification (and the assistant continuation it
-    /// drives) to the thread that LAUNCHED the task, instead of blindly
-    /// inheriting whatever thread is current when it lands — which is wrong
-    /// whenever the user moved threads while the task ran.
+    /// tool_use `id` (the `toolu_...` value). A background subagent (an
+    /// async-by-default `Agent`/`Task`) or a background Bash
+    /// (`run_in_background: true`) returns immediately and its completion is
+    /// injected later as a `<task-notification>` user line carrying that same
+    /// id in its `<tool-use-id>` element. Looking the id up here attributes
+    /// the notification (and the assistant continuation it drives) to the
+    /// thread that LAUNCHED the task, instead of blindly inheriting whatever
+    /// thread is current when it lands — which is wrong whenever the user
+    /// moved threads while the task ran.
     ///
     /// Each entry also carries a `task_id` learned later (via the
     /// `PostToolUse(Agent)` hook reading `agentId` out of the launching tool's
@@ -207,10 +208,11 @@ pub enum Effect {
         send_id: i64,
         matched_uuid: MessageUuid,
     },
-    /// A background task (`run_in_background: true` Agent/Task/Bash) was first
-    /// seen launching on an assistant line: persist `(tool_use_id ->
-    /// thread_id)` so its later `<task-notification>` — which may arrive in a
-    /// different sync window — can be attributed back to the launching thread.
+    /// A background task (an async-by-default `Agent`/`Task`, or a Bash with
+    /// `run_in_background: true`) was first seen launching on an assistant
+    /// line: persist `(tool_use_id -> thread_id)` so its later
+    /// `<task-notification>` — which may arrive in a different sync window —
+    /// can be attributed back to the launching thread.
     SubagentLaunched {
         tool_use_id: String,
         thread_id: ThreadId,
@@ -296,11 +298,13 @@ pub struct Attributed {
 ///   or both elements were stripped) does it fall back to inheriting
 ///   `carry_thread`.
 ///
-/// Whenever an assistant line carries a background `Agent`/`Task`/`Bash`
-/// tool_use (`run_in_background: true`), its `id` is recorded against the
-/// current `carry_thread` (the launching thread) and emitted as
-/// [`Effect::SubagentLaunched`] for the caller to persist; the matching
-/// notification later clears it via [`Effect::SubagentCompleted`].
+/// Whenever an assistant line carries a tool_use that
+/// [`claude_format::launches_in_background`] classifies as background — an
+/// async-by-default `Agent`/`Task`, or a Bash with `run_in_background: true` —
+/// its `id` is recorded against the current `carry_thread` (the launching
+/// thread) and emitted as [`Effect::SubagentLaunched`] for the caller to
+/// persist; the matching notification later clears it via
+/// [`Effect::SubagentCompleted`].
 pub fn attribute_lines(
     session_id: &SessionId,
     main_thread: ThreadId,
@@ -367,16 +371,17 @@ pub fn attribute_lines(
                         allowed: !is_error,
                     });
                 }
-                // A background `Agent`/`Task`/`Bash` (`run_in_background: true`)
-                // returns immediately; its completion is injected later as a
+                // A background `Agent`/`Task`/`Bash` (async-by-default for
+                // Agent/Task, opt-in `run_in_background: true` for Bash) returns
+                // immediately; its completion is injected later as a
                 // `<task-notification>` carrying this same `id`. Record
                 // `(tool_use_id -> launching thread)` so that notification —
                 // possibly in a later sync window — is attributed to the thread
                 // that launched it rather than whatever thread is current then.
                 // The launching thread is `carry_thread`: a tool_use is part of
                 // the in-flight turn, whose thread `carry_thread` already holds.
-                ContentBlock::ToolUse { id, input, .. }
-                    if claude_format::launches_in_background(input) =>
+                ContentBlock::ToolUse { id, name, input }
+                    if claude_format::launches_in_background(name, input) =>
                 {
                     // Re-folding a launch line refreshes the launching thread.
                     // If the same id was already seeded from the persisted
@@ -419,7 +424,7 @@ pub fn attribute_lines(
                         .map(str::to_owned);
                     let description =
                         claude_format::tool_input_string_field(input, "description").map(str::to_owned);
-                    let background = claude_format::launches_in_background(input);
+                    let background = claude_format::launches_in_background(name, input);
                     effects.push(Effect::SubagentIndicatorStarted {
                         tool_use_id: id.clone(),
                         thread_id: state.carry_thread,
