@@ -50,6 +50,13 @@
       "thread_id": 2
     },
     {
+      "kind": "subagent_indicator_started",
+      "tool_use_id": "toolu_bg",
+      "thread_id": 2,
+      "subagent_type": "general-purpose",
+      "background": true
+    },
+    {
       "kind": "subagent_completed",
       "tool_use_id": "toolu_bg"
     }

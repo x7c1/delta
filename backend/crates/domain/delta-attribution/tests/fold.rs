@@ -329,13 +329,21 @@ fn a_background_task_completion_is_attributed_to_its_launching_thread() {
     assert_eq!(message(&outcome, "a-after").thread_id, CHILD);
     assert_eq!(outcome.state.carry_thread, CHILD);
 
-    // The launch is recorded then consumed by its completion.
+    // The launch is recorded, the parent-transcript indicator effect fires for
+    // the `Agent` tool_use, then the completion clears the launch.
     assert_eq!(
         outcome.effects,
         vec![
             Effect::SubagentLaunched {
                 tool_use_id: "toolu-bg".into(),
                 thread_id: CHILD,
+            },
+            Effect::SubagentIndicatorStarted {
+                tool_use_id: "toolu-bg".into(),
+                thread_id: CHILD,
+                subagent_type: Some("general-purpose".into()),
+                description: None,
+                background: true,
             },
             Effect::SubagentCompleted {
                 tool_use_id: "toolu-bg".into(),

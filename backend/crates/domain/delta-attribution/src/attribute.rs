@@ -219,6 +219,27 @@ pub enum Effect {
     /// recorded launch: clear the persisted `(tool_use_id -> thread_id)`
     /// correlation now that it has been consumed.
     SubagentCompleted { tool_use_id: String },
+    /// An `Agent`/`Task` tool_use block was seen in the PARENT session's
+    /// transcript: light up the running-subagent indicator for it. Emitted
+    /// regardless of `run_in_background` — a foreground subagent and a
+    /// background one both need the indicator while they run, and they only
+    /// differ in how the indicator is cleared (the matching `PostToolUse` for a
+    /// foreground entry, the completion `<task-notification>` for a background
+    /// one).
+    ///
+    /// This is the parent-transcript-driven source of truth for the indicator,
+    /// replacing the older PreToolUse-driven mechanism. A nested subagent's own
+    /// `Agent`/`Task` tool_use is written to the SUBAGENT's JSONL (not the
+    /// parent's), so a fold over the parent's transcript naturally excludes
+    /// nested launches — and a nested launch never produces a stuck indicator
+    /// on the parent.
+    SubagentIndicatorStarted {
+        tool_use_id: String,
+        thread_id: ThreadId,
+        subagent_type: Option<String>,
+        description: Option<String>,
+        background: bool,
+    },
 }
 
 /// The outcome of folding one batch of transcript lines.
@@ -381,6 +402,32 @@ pub fn attribute_lines(
                     });
                 }
                 _ => {}
+            }
+
+            // The running-subagent indicator is driven from this parent-side
+            // transcript ingest — NOT from the `PreToolUse` hook. Every
+            // `Agent`/`Task` tool_use written to the parent's JSONL lights the
+            // indicator (foreground OR background), and is cleared later by the
+            // matching `PostToolUse` (foreground) or `<task-notification>`
+            // (background). A NESTED subagent's `Agent`/`Task` tool_use is
+            // written to the SUBAGENT's JSONL, never the parent's, so this
+            // branch is the natural filter: nested launches never produce a
+            // parent indicator and can never get stuck.
+            if let ContentBlock::ToolUse { id, name, input } = block {
+                if claude_format::is_subagent_tool(name) {
+                    let subagent_type = claude_format::tool_input_string_field(input, "subagent_type")
+                        .map(str::to_owned);
+                    let description =
+                        claude_format::tool_input_string_field(input, "description").map(str::to_owned);
+                    let background = claude_format::launches_in_background(input);
+                    effects.push(Effect::SubagentIndicatorStarted {
+                        tool_use_id: id.clone(),
+                        thread_id: state.carry_thread,
+                        subagent_type,
+                        description,
+                        background,
+                    });
+                }
             }
         }
 

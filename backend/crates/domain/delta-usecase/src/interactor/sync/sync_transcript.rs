@@ -3,6 +3,7 @@ use delta_model::{Message, Session};
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
+use crate::interactor::session_actor::runtime::RunningSubagent;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
@@ -229,6 +230,66 @@ where
                         self.store
                             .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
                             .await?;
+                    }
+                }
+                Effect::SubagentIndicatorStarted {
+                    tool_use_id,
+                    thread_id,
+                    subagent_type,
+                    description,
+                    background,
+                } => {
+                    // Parent transcript ingest is the source of truth for the
+                    // running-subagent indicator. The matching `tool_use` block
+                    // only appears in the parent's JSONL when the launch is a
+                    // PARENT launch (a nested subagent's tool_use is written to
+                    // the subagent's own JSONL, not the parent's), so this path
+                    // can never light a parent indicator for a nested launch —
+                    // which is what made the older PreToolUse-driven mechanism
+                    // get stuck for depth>=2 subagent trees.
+                    //
+                    // `start_subagent` de-duplicates by `tool_use_id`, so
+                    // re-ingesting the same line (e.g. after a cursor rewind in
+                    // tests) is a safe no-op. `task_id` is not knowable at this
+                    // point: for a background entry it is learned later via
+                    // `PostToolUse(Agent)` / its subsequent flush. The browser
+                    // event only fires on a newly-added entry, mirroring the
+                    // old hook-driven idempotency contract.
+                    let newly = self.state.start_subagent(RunningSubagent {
+                        thread_id,
+                        tool_use_id: tool_use_id.clone(),
+                        task_id: None,
+                        subagent_type: subagent_type.clone(),
+                        description: description.clone(),
+                        background,
+                    });
+                    // Fold any `agentId` the matching `PostToolUse(Agent)`
+                    // stashed before this entry existed: for a top-level
+                    // background launch the hook can fire before
+                    // `tool_use(Agent)` is flushed to the parent's JSONL, so
+                    // the hook's direct upgrade was a no-op and the value
+                    // would otherwise be lost. Apply it now to the freshly
+                    // created entry and persist it through the launch row,
+                    // which `Effect::SubagentLaunched` (emitted earlier in
+                    // this fold) has already INSERTed.
+                    if let Some(task_id) =
+                        self.state.drain_pending_post_tool_use_agent_id(&tool_use_id)
+                    {
+                        if self.state.upgrade_subagent_task_id(&tool_use_id, &task_id) {
+                            self.store
+                                .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                                .await?;
+                        }
+                    }
+                    if newly {
+                        events.push(SessionEvent::SubagentStarted {
+                            session_id: session.id.clone(),
+                            thread_id,
+                            tool_use_id,
+                            subagent_type,
+                            description,
+                            background,
+                        });
                     }
                 }
                 Effect::SubagentCompleted { tool_use_id } => {

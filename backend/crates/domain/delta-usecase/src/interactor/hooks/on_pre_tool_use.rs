@@ -1,24 +1,8 @@
-use delta_attribution::claude_format;
-
 use crate::error::Result;
 use crate::interactor::hooks::{is_subagent_tool, ASK_USER_QUESTION};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::session_actor::runtime::{PendingQuestion, RunningSubagent};
+use crate::interactor::session_actor::runtime::PendingQuestion;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
-
-/// Read an optional string field out of a tool-input JSON object.
-///
-/// Returns `None` when the input is not an object, the key is missing, the
-/// value is not a string, or the string is empty — so a malformed or partial
-/// `Agent` input degrades to "no label" rather than failing the hook.
-fn string_field(tool_input_json: &str, key: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(tool_input_json)
-        .ok()?
-        .get(key)?
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-}
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -28,16 +12,41 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// Handle a `PreToolUse` hook: only RECORD the permission request. This hook
-    /// fires for every tool call (including auto-approved and long-running ones),
-    /// so it is not a reliable signal that a human answer is pending — recording
-    /// the request here carries the `tool_use_id` needed to resolve it once the
-    /// matching `tool_result` is later ingested. The browser notice is emitted by
-    /// the `PermissionRequest` hook instead, which fires only for genuine
-    /// interactive prompts (and owns its own row plus the Allow/Deny wait —
-    /// see `on_permission_request`). PreToolUse itself never returns
-    /// allow/deny. Routed through the session's mailbox so the record is
-    /// ordered before any ingest that could resolve it.
+    /// Handle a `PreToolUse` hook: RECORD the permission request, and — for an
+    /// `Agent`/`Task` tool — trigger a transcript sync so the running-subagent
+    /// indicator lights up without waiting for the next ambient sync.
+    ///
+    /// This hook fires for every tool call (including auto-approved and
+    /// long-running ones), so it is not a reliable signal that a human answer
+    /// is pending — recording the request here carries the `tool_use_id` needed
+    /// to resolve it once the matching `tool_result` is later ingested. The
+    /// browser notice is emitted by the `PermissionRequest` hook instead, which
+    /// fires only for genuine interactive prompts (and owns its own row plus
+    /// the Allow/Deny wait — see `on_permission_request`). PreToolUse itself
+    /// never returns allow/deny. Routed through the session's mailbox so the
+    /// record is ordered before any ingest that could resolve it.
+    ///
+    /// The running-subagent indicator is NO LONGER driven directly from this
+    /// hook. The parent session's transcript ingest is now the source of truth
+    /// — every `Agent`/`Task` `tool_use` block folded out of the PARENT's JSONL
+    /// emits an `Effect::SubagentIndicatorStarted` (see `attribute_lines` /
+    /// `sync_transcript`), which is what calls `start_subagent` and broadcasts
+    /// `SubagentStarted`. A NESTED subagent's `Agent`/`Task` `tool_use` is
+    /// written to the subagent's own JSONL — never the parent's — so the
+    /// parent's ingest naturally skips it, and a stuck indicator on the parent
+    /// is structurally impossible. The older PreToolUse-driven mechanism could
+    /// not distinguish parent from nested calls on real Claude Code (every
+    /// hook field — `session_id`, `transcript_path`, `cwd`, `caller` — was
+    /// presented as the parent for both), which is what made depth>=2 subagent
+    /// trees leave the parent indicator lit forever.
+    ///
+    /// To keep the indicator latency tight, this hook runs `sync_transcript`
+    /// when the tool is `Agent`/`Task`: the assistant message carrying the
+    /// `tool_use` block has already been flushed to the parent's JSONL before
+    /// `PreToolUse` fires, so the sync sees it immediately. Any events the
+    /// sync returns (notably `SubagentStarted`) are propagated to the caller
+    /// for broadcast. The same sync also pre-populates the in-memory entry for
+    /// a foreground subagent so the matching `PostToolUse` can clear it.
     ///
     /// The one exception is Claude Code's built-in [`ASK_USER_QUESTION`] tool:
     /// it presents a multiple-choice question rather than a gateable action, so
@@ -55,12 +64,15 @@ where
     ) -> Result<Vec<SessionEvent>> {
         // A nested subagent's tool call carries the PARENT session's
         // `session_id` (Claude Code dispatches hooks that way) but its
-        // `transcript_path` points at the subagent's own JSONL. Recording the
-        // request here would attach it to the parent — and for an `Agent`
-        // tool, it would also light a running indicator that can never clear
-        // (the completion `<task-notification>` lands in the subagent's
-        // transcript, which Delta does not tail for the parent). Short-circuit
-        // so a nested hook is a no-op against the parent's state.
+        // `transcript_path` points at the subagent's own JSONL. Empirically
+        // (CC 2.1.193) this is not reliable enough on its own to filter a
+        // nested `Agent`/`Task` launch — a depth=2 nested launch's hook can
+        // carry the PARENT's `transcript_path` — so the running-subagent
+        // indicator is now driven from the parent transcript ingest itself
+        // instead (see attribute_lines / sync_transcript). This guard still
+        // serves to keep stray permission-request rows off the parent when a
+        // nested call IS reliably tagged with its own transcript path (the
+        // older payload shape).
         if self.is_foreign_transcript(transcript_path).await? {
             return Ok(vec![]);
         }
@@ -97,58 +109,21 @@ where
         }
 
         if is_subagent_tool(tool_name) {
-            // A subagent (the `Agent`/`Task` tool) is starting. It runs in its
-            // own transcript that Delta never tails, so the conversation pane
-            // would otherwise show nothing while it works — track it as running
-            // and broadcast the start. Keyed by `tool_use_id`.
+            // Force a transcript sync now. The assistant message carrying the
+            // `Agent`/`Task` `tool_use` block was flushed to the parent's
+            // JSONL before this hook fired, so the sync sees it on this very
+            // call, emits `Effect::SubagentIndicatorStarted`, and produces the
+            // `SessionEvent::SubagentStarted` that lights the indicator — and
+            // adds the in-memory entry the foreground `PostToolUse` clears.
             //
-            // A FOREGROUND subagent is cleared by the matching `PostToolUse`
-            // (which fires when it completes) and swept at turn end. A BACKGROUND
-            // subagent (`run_in_background: true`) returns immediately — its
-            // `PostToolUse` fires at launch, not completion — so it must survive
-            // both the immediate `PostToolUse` and the turn-end sweep, finishing
-            // only when its completion `<task-notification>` is folded. The
-            // `background` flag, read from the same top-level `run_in_background`
-            // key the attribution fold keys on, drives that distinction. The
-            // runtime mirror lets a client that missed the event rebuild its
-            // indicator from the sends envelope.
-            let subagent_type = string_field(tool_input_json, "subagent_type");
-            let description = string_field(tool_input_json, "description");
-            let background = serde_json::from_str::<serde_json::Value>(tool_input_json)
-                .as_ref()
-                .map(claude_format::launches_in_background)
-                .unwrap_or(false);
-            // Resolve the launching thread from the same authoritative in-flight
-            // source `turn_started` and `on_stop` use, so the browser can keep
-            // that thread's running indicator lit (and its unread badge
-            // suppressed) until the subagent finishes — for a background
-            // subagent, past the end of the launching turn.
-            let thread_id = self.store.in_progress_turn_thread(self.id).await?;
-            let newly = self.state.start_subagent(RunningSubagent {
-                thread_id,
-                tool_use_id: tool_use_id.to_owned(),
-                // `task_id` is not knowable at launch time: Claude Code only
-                // returns the subagent's `agentId` in the launching tool's
-                // `tool_result`, which arrives at `PostToolUse(Agent)` time
-                // (immediate for a background subagent, later for a foreground
-                // one). The upgrade happens there via
-                // `SessionRuntime::upgrade_subagent_task_id`.
-                task_id: None,
-                subagent_type: subagent_type.clone(),
-                description: description.clone(),
-                background,
-            });
-            // A duplicate `PreToolUse` for an already-tracked id (a retried hook
-            // delivery) must not double-broadcast, so only emit on a new entry.
-            if newly {
-                return Ok(vec![SessionEvent::SubagentStarted {
-                    session_id: self.id.clone(),
-                    thread_id,
-                    tool_use_id: tool_use_id.to_owned(),
-                    subagent_type,
-                    description,
-                    background,
-                }]);
+            // The sync is gated to subagent tools so an unrelated tool call
+            // does not pay the read-from-disk cost on every `PreToolUse`; the
+            // ambient tail covers the general case. A session row may not yet
+            // be registered (e.g. a hook arriving before `SessionStart`), in
+            // which case the sync is a no-op.
+            if let Some(session) = self.store.session(self.id).await? {
+                let (_messages, sync_events) = self.sync_transcript(&session).await?;
+                return Ok(sync_events);
             }
         }
 

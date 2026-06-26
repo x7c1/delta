@@ -1,11 +1,19 @@
-//! The foreground subagent running window: `PreToolUse(Agent)` starts it,
-//! `PostToolUse(Agent)` ends it, and the running set survives in queryable live
-//! state so a reconnecting client rebuilds the indicator.
+//! The subagent running-indicator window, now driven by the parent's
+//! transcript ingest.
 //!
-//! Only `Agent`/`Task` flip the indicator — a subagent's nested tool calls
-//! (e.g. its own `Bash`) reach the same hooks but must not — multiple
-//! concurrent subagents are tracked independently, an unknown end is a no-op,
-//! and a turn ending clears any still-running entry.
+//! Lighting the indicator is no longer a side effect of `PreToolUse(Agent)`:
+//! the parent's JSONL contains the assistant message whose `tool_use(Agent)`
+//! block is the authoritative signal, and `sync_transcript` emits
+//! `Effect::SubagentIndicatorStarted` for it (see
+//! [`delta_attribution::attribute_lines`]). `PreToolUse(Agent)` then force-syncs
+//! the parent transcript so the indicator lights with the same low latency as
+//! before. The mechanism naturally excludes nested subagents: a nested
+//! `tool_use(Agent)` lands in the SUBAGENT's JSONL, never the parent's, so the
+//! parent's ingest cannot accidentally produce a stuck indicator (the
+//! depth>=2 regression PR #190's `transcript_path` filter could not catch on
+//! Claude Code 2.1.193).
+//!
+//! Foreground vs background and the turn-end sweep are unchanged.
 
 use delta_model::SessionId;
 
@@ -44,6 +52,18 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
     let session = SessionId::from("sess-1");
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
+    // The assistant message containing the `Agent` tool_use block has been
+    // flushed to the parent's JSONL before `PreToolUse(Agent)` fires (this is
+    // Claude Code's real ordering). `on_pre_tool_use` force-syncs the parent
+    // transcript, so the indicator lights on the same hook call.
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_a1",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
+
     let events = ix
         .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
@@ -59,7 +79,7 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
             description: Some("Run ls and count entries".to_owned()),
             background: false,
         }],
-        "starting an Agent broadcasts SubagentStarted carrying its launching thread and labels"
+        "the parent-transcript Agent tool_use lights the indicator with its labels"
     );
 
     let state = ix.live_state_for(&session).await;
@@ -76,6 +96,14 @@ async fn post_tool_use_agent_ends_the_window_and_broadcasts() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    // Parent transcript carries the launch line; PreToolUse syncs it.
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_a1",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -91,7 +119,7 @@ async fn post_tool_use_agent_ends_the_window_and_broadcasts() {
             session_id: session.clone(),
             tool_use_id: "toolu_a1".to_owned(),
         }],
-        "completing the Agent broadcasts SubagentFinished"
+        "completing the foreground Agent broadcasts SubagentFinished"
     );
     assert!(
         ix.live_state_for(&session)
@@ -108,6 +136,13 @@ async fn the_task_alias_drives_the_same_window() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_t1",
+        "Task",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     let started = ix
         .on_pre_tool_use(&session, "Task", AGENT_INPUT, "toolu_t1", SEED_TRANSCRIPT_PATH)
         .await
@@ -134,13 +169,21 @@ async fn a_subagent_internal_tool_call_does_not_flip_the_indicator() {
     let session = SessionId::from("sess-1");
 
     // Subagent running.
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_a1",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
     // A nested Bash call inside the subagent reaches the main session's hooks.
-    // It must neither add a second running entry nor (on its Post) clear the
-    // subagent's window.
+    // The parent's JSONL never carries that Bash tool_use, so even with the
+    // PreToolUse-force-sync nothing new lights up. (`Bash` is not a subagent
+    // tool, so the sync is also skipped at the hook layer.)
     let bash_pre = ix
         .on_pre_tool_use(&session, "Bash", r#"{"command":"ls"}"#, "toolu_b1", SEED_TRANSCRIPT_PATH)
         .await
@@ -171,9 +214,23 @@ async fn multiple_concurrent_subagents_are_tracked_independently() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch-1",
+        "toolu_a1",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch-2",
+        "toolu_a2",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a2", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -200,7 +257,7 @@ async fn post_tool_use_for_an_unknown_subagent_is_a_noop() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    // No matching PreToolUse was ever recorded for this id.
+    // No tool_use line was folded for this id.
     let events = ix
         .on_post_tool_use(&session, "Agent", "toolu_never_started", "null", SEED_TRANSCRIPT_PATH)
         .await
@@ -217,9 +274,18 @@ async fn a_duplicate_pre_tool_use_does_not_double_track_or_double_broadcast() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_a1",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
+    // A retried PreToolUse for the same id: the second sync sees no new lines
+    // (the cursor advanced) so no second event is emitted.
     let again = ix
         .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
@@ -242,6 +308,13 @@ async fn the_turn_ending_clears_a_still_running_subagent() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_a1",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -253,8 +326,8 @@ async fn the_turn_ending_clears_a_still_running_subagent() {
         "the subagent is running before the turn ends"
     );
 
-    // The turn ends (Stop hook) before any PostToolUse arrived: a subagent
-    // cannot outlive its turn, so the running set is swept.
+    // The turn ends (Stop hook) before any PostToolUse arrived: a foreground
+    // subagent cannot outlive its turn, so the running set is swept.
     ix.on_stop(StopHook {
         session_id: session.clone(),
         stop_reason: None,
@@ -278,22 +351,36 @@ async fn a_background_launch_starts_a_background_running_entry() {
     let session = SessionId::from("sess-1");
     let main = ix.store().main_thread_id(&session).await.unwrap();
 
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
+
     let events = ix
         .on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
-    assert_eq!(
-        events,
-        vec![SessionEvent::SubagentStarted {
-            session_id: session.clone(),
-            thread_id: main,
-            tool_use_id: "toolu_bg".to_owned(),
-            subagent_type: Some("general-purpose".to_owned()),
-            description: Some("Long crawl".to_owned()),
-            background: true,
-        }],
-        "a `run_in_background` launch broadcasts SubagentStarted with background:true"
+    // The `background_tool_use_line` builder omits `description`, so only the
+    // `subagent_type` label flows through. (The hook's `tool_input_json` no
+    // longer feeds the indicator; the parent transcript ingest does, and the
+    // ingested tool_use input is what carries the displayable fields.)
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::SubagentStarted {
+                session_id,
+                thread_id,
+                tool_use_id,
+                subagent_type,
+                background,
+                ..
+            }
+                if *session_id == session
+                    && *thread_id == main
+                    && tool_use_id == "toolu_bg"
+                    && subagent_type.as_deref() == Some("general-purpose")
+                    && *background
+        )),
+        "a `run_in_background` launch broadcasts SubagentStarted with background:true, got {events:?}"
     );
 
     let state = ix.live_state_for(&session).await;
@@ -310,6 +397,8 @@ async fn the_immediate_post_tool_use_does_not_finish_a_background_subagent() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -338,6 +427,8 @@ async fn a_background_subagent_survives_the_turn_ending() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -370,9 +461,18 @@ async fn a_foreground_and_a_background_subagent_diverge_at_turn_end() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch-fg",
+        "toolu_fg",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
     ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_fg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch-bg", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -409,24 +509,16 @@ async fn post_tool_use_upgrades_the_background_subagent_with_its_agent_id() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
 
-    // The launch line is folded so the launch row exists in the store before
-    // the immediate `PostToolUse` upgrades it.
-    ix.transcript_fake()
-        .push(background_tool_use_line("a-launch", "toolu_bg"));
-    ix.on_stop(StopHook {
-        session_id: session.clone(),
-        stop_reason: None,
-    })
-    .await
-    .unwrap();
-
     // The background subagent's immediate `PostToolUse` carries the launch's
     // `agentId` in `tool_response`. The handler reads it, upgrades the running
-    // entry, and persists the upgrade on the launch row.
+    // entry, and persists the upgrade on the launch row (created when PreToolUse
+    // force-synced the parent's tool_use line above).
     let events = ix
         .on_post_tool_use(
             &session,
@@ -468,77 +560,16 @@ async fn post_tool_use_upgrades_the_background_subagent_with_its_agent_id() {
 }
 
 #[tokio::test]
-async fn post_tool_use_arriving_before_the_launch_is_folded_flushes_on_the_next_sync() {
-    // The real-world ordering: a background subagent's `PostToolUse(Agent)`
-    // fires immediately after the launch hook, BEFORE the assistant `tool_use`
-    // line lands in the transcript and is folded into a `subagent_launch` row.
-    // The hook records `agentId` on the runtime entry but the launch row does
-    // not exist yet, so the persisted upgrade is "pending". The next sync —
-    // which finally records the launch row via `Effect::SubagentLaunched` —
-    // must flush that pending task_id onto the freshly-created row.
-    let ix = interactor();
-    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
-    let session = SessionId::from("sess-1");
-
-    ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
-
-    // PostToolUse arrives BEFORE the launch line is folded: the runtime
-    // upgrade succeeds, the store upgrade is a no-op (no row yet).
-    ix.on_post_tool_use(
-        &session,
-        "Agent",
-        "toolu_bg",
-        POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
-        SEED_TRANSCRIPT_PATH,
-    )
-    .await
-    .unwrap();
-    assert!(
-        ix.store()
-            .outstanding_subagent_launches(&session)
-            .await
-            .unwrap()
-            .is_empty(),
-        "no launch row exists yet — the assistant tool_use line has not been folded"
-    );
-
-    // Now the launch line is folded by the next sync, which records the row
-    // AND flushes the pending task_id from the runtime entry.
-    ix.transcript_fake()
-        .push(background_tool_use_line("a-launch", "toolu_bg"));
-    ix.on_stop(StopHook {
-        session_id: session.clone(),
-        stop_reason: None,
-    })
-    .await
-    .unwrap();
-
-    let launch_task_id = ix
-        .store()
-        .outstanding_subagent_launches(&session)
-        .await
-        .unwrap()
-        .get("toolu_bg")
-        .and_then(|launch| launch.task_id.clone());
-    assert_eq!(
-        launch_task_id.as_deref(),
-        Some("a31425032172620ed"),
-        "the pending upgrade was flushed onto the freshly-created launch row"
-    );
-}
-
-#[tokio::test]
 async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallback() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    // Launch a background subagent. In production the immediate
-    // `PostToolUse(Agent)` fires BEFORE the assistant tool_use line is folded,
-    // so this test mirrors that ordering: PreToolUse, then PostToolUse, then
-    // the launch sync that flushes the pending task_id onto the new row.
+    // Launch a background subagent. The parent's JSONL carries the tool_use
+    // line; PreToolUse force-syncs it, so the launch row exists; the immediate
+    // PostToolUse then upgrades the launch row with the agentId.
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
@@ -549,14 +580,6 @@ async fn a_task_notification_missing_tool_use_id_finishes_via_the_task_id_fallba
         POST_TOOL_USE_RESPONSE_WITH_AGENT_ID,
         SEED_TRANSCRIPT_PATH,
     )
-    .await
-    .unwrap();
-    ix.transcript_fake()
-        .push(background_tool_use_line("a-launch", "toolu_bg"));
-    ix.on_stop(StopHook {
-        session_id: session.clone(),
-        stop_reason: None,
-    })
     .await
     .unwrap();
 
@@ -643,17 +666,11 @@ async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_wa
     let session = SessionId::from("sess-1");
 
     // Launch a background subagent and persist its launch row.
+    ix.transcript_fake()
+        .push(background_tool_use_line("a-launch", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
         .await
         .unwrap();
-    ix.transcript_fake()
-        .push(background_tool_use_line("a-launch", "toolu_bg"));
-    ix.on_stop(StopHook {
-        session_id: session.clone(),
-        stop_reason: None,
-    })
-    .await
-    .unwrap();
 
     // A notification body without either `<tool-use-id>` or `<task-id>` —
     // a future Claude Code shape — must not silently drop the subagent:
