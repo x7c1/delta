@@ -17,17 +17,14 @@ const PATH_KEY_PREFIX = '/';
 
 /**
  * The Repository tab: registered repositories (origin-deduplicated),
- * recency-ordered. Clicking a Repository row expands the per-clone picker
- * and auto-picks the repo's `recently_used_clone_path` (falling back to
- * the first clone) into `composerStore.newSessionWorkdir`, so a user who
- * picks a repo and presses Send can spawn from a sensible default without
- * having to click a clone first. Picking a different clone from the same
- * repo overrides that default; clicking a different Repository row
- * replaces the picked clone with the new repo's default.
- *
- * The initial highlight of the first (most-recent) repo on mount is local
- * UI state only — it does NOT write to the composer store, so just opening
- * the New session screen never leaks a workdir into the other tabs.
+ * recency-ordered. Selecting the tab auto-highlights the first (most-recent)
+ * repo AND auto-picks its `recently_used_clone_path` (falling back to the
+ * first clone) into `composerStore.newSessionWorkdir`, so the panel mounts
+ * in a fully-selected state — both a repo row and a clone row read as
+ * active — and the user can press Send without first clicking a clone.
+ * Clicking a different Repository row replaces the picked clone with that
+ * repo's default; picking a different clone from the same repo overrides
+ * the default.
  *
  * Per-clone state — branch, launch options, worktree opt-in — will pre-fill
  * once per-session persistence lands. Today the existing override UI under
@@ -67,24 +64,15 @@ export function RepositoryTab() {
     [repositories, selectedRepoKey],
   );
 
-  // Clicking a Repository row both highlights it and auto-picks a clone path
-  // into the composer store, so the user can press Send (or Cmd/Ctrl+Enter)
-  // without first clicking a clone. Preference order:
+  // Auto-pick a clone path for `repo` into the composer store. Preference:
   //   1. `recently_used_clone_path` (when it is actually in the clones list)
   //   2. the first clone
-  // The auto-pick is skipped when the current selection already belongs to
-  // this repo — that means the user explicitly picked a different clone of
-  // the same repo and we must not stomp it (e.g. re-clicking the same Repo
-  // row, or arriving via a clone click that ran the existing repo-auto-
-  // select effect).
-  //
-  // Crucially the auto-pick lives on the click, not on the mount-time
-  // `selectedRepoKey` defaulting effect: just opening the New session
-  // screen must not write to the store, otherwise the workdir leaks into
-  // the PR / Directory tabs the user later switches to.
-  const handleRepoClick = useCallback(
+  // Skipped when the current selection already belongs to this repo — that
+  // means the user explicitly picked a different clone of the same repo and
+  // we must not stomp it (e.g. re-clicking the same Repo row, or the
+  // mount-time effect firing after a clone was already picked).
+  const autoPickClone = useCallback(
     (repo: RepositoryEntry) => {
-      setSelectedRepoKey(repo.identity_key);
       if (repo.clones.length === 0) {
         return;
       }
@@ -100,6 +88,31 @@ export function RepositoryTab() {
       setSelected(next);
     },
     [selectedPath, setSelected],
+  );
+
+  // Mount-time (and selected-repo-change) auto-pick. When the Repository tab
+  // first shows or the selected repo changes, write a sensible default clone
+  // path into the composer store so the clone row also reads as active and
+  // Send is immediately available. The `alreadyPicked` guard inside
+  // `autoPickClone` makes this idempotent — if a user has already clicked a
+  // clone of the selected repo, this effect is a no-op.
+  useEffect(() => {
+    if (!selectedRepo) {
+      return;
+    }
+    autoPickClone(selectedRepo);
+  }, [selectedRepo, autoPickClone]);
+
+  // Clicking a Repository row both highlights it and routes through the same
+  // auto-pick so the picked clone follows the picked repo. Idempotent for a
+  // same-repo reclick — `autoPickClone` short-circuits when the existing
+  // selection already belongs to the clicked repo.
+  const handleRepoClick = useCallback(
+    (repo: RepositoryEntry) => {
+      setSelectedRepoKey(repo.identity_key);
+      autoPickClone(repo);
+    },
+    [autoPickClone],
   );
 
   if (repositoriesQuery.isLoading) {

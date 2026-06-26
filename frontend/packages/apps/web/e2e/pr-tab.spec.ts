@@ -77,12 +77,28 @@ test('a PR whose repo has no local clone is silently un-clickable with an inline
     noCloneRow.getByTestId('pr-tab-row-no-clone-hint'),
   ).toContainText('gh repo clone');
 
+  // Capture the composer's chip text BEFORE the forced click. The
+  // Repository tab's mount-time auto-pick has already written its
+  // default clone (the first registered repo — `delta` in this
+  // fixture) into the composer store, so the chip is visible from
+  // the start.
+  const chipBefore = await page.getByTestId('workdir-chip').textContent();
+  expect(chipBefore).not.toBeNull();
+
   // Clicking does NOT pre-fill the composer. Playwright's normal
   // `.click()` honours `aria-disabled` and would wait it out, but
   // here we deliberately attempt the click to verify the handler is
   // a no-op: a forced click still routes through React's onClick.
   await noCloneRow.click({ force: true });
-  await expect(page.getByTestId('workdir-chip')).not.toBeVisible();
+
+  // Asserting the chip didn't change is the direct contract —
+  // `not.toBeVisible()` was an indirect proxy that became wrong once
+  // mount auto-picks a default. Use `toHaveText`'s built-in polling
+  // so we let any (incorrect) state change settle before checking.
+  await expect(page.getByTestId('workdir-chip')).toHaveText(chipBefore!);
+  // The no-clone fixture is `x7c1/other`; its repo name must not
+  // appear in the chip (the click was a no-op).
+  await expect(page.getByTestId('workdir-chip')).not.toContainText('other');
 });
 
 // The gh-unavailable inline hint behaviour is exercised end-to-end in
