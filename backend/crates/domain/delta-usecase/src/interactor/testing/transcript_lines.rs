@@ -116,10 +116,13 @@ pub(crate) fn background_tool_use_line(uuid: &str, tool_use_id: &str) -> Transcr
     }
 }
 
-/// An assistant line launching a foreground `Agent`/`Task` tool call: a
-/// `ToolUse` with no `run_in_background` flag. The matching `tool_use_id`
-/// becomes the correlation key for the indicator (lit by the parent transcript
-/// ingest, cleared by the matching `PostToolUse(Agent)`).
+/// An assistant line launching an `Agent`/`Task` tool call in the modern shape:
+/// a `ToolUse` with no `run_in_background` key. Modern Claude Code dropped that
+/// key from the schema and made `Agent`/`Task` calls async by default, so this
+/// matches what production now writes to the transcript — the predicate
+/// [`delta_attribution::claude_format::launches_in_background`] classifies it
+/// as background. Use [`foreground_agent_tool_use_line`] for explicit
+/// `run_in_background: false` foreground semantics.
 pub(crate) fn agent_tool_use_line(
     uuid: &str,
     tool_use_id: &str,
@@ -134,6 +137,33 @@ pub(crate) fn agent_tool_use_line(
             input: serde_json::json!({
                 "subagent_type": subagent_type,
                 "description": description,
+            }),
+        }],
+        ..assistant_line(uuid, "")
+    }
+}
+
+/// An assistant line launching a foreground `Agent`/`Task` tool call: a
+/// `ToolUse` whose input pins `run_in_background: false`. The explicit flag is
+/// what keeps the call foreground under the modern async-by-default semantics
+/// of [`delta_attribution::claude_format::launches_in_background`], so the
+/// matching `PostToolUse(Agent)` closes the indicator window (the foreground
+/// subagent lifecycle).
+pub(crate) fn foreground_agent_tool_use_line(
+    uuid: &str,
+    tool_use_id: &str,
+    tool_name: &str,
+    subagent_type: &str,
+    description: &str,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: tool_name.into(),
+            input: serde_json::json!({
+                "subagent_type": subagent_type,
+                "description": description,
+                "run_in_background": false,
             }),
         }],
         ..assistant_line(uuid, "")

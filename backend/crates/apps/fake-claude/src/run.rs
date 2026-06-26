@@ -113,6 +113,30 @@ pub fn run() -> Result<(), String> {
     }
 }
 
+/// Whether a `tool_use` step should be treated as a background launch — i.e.
+/// the launch returns immediately and a `<task-notification>` later reports
+/// completion, so an `agentId` is minted alongside the tool_use id.
+///
+/// Mirrors `delta_attribution::claude_format::launches_in_background`: modern
+/// Claude Code dropped the `run_in_background` parameter from the
+/// `Agent`/`Task` schema and made those calls async by default, so the absence
+/// of the key means background for those tools. An explicit value is still
+/// honoured for any tool (so a Bash invocation still needs the opt-in to mint
+/// an agent id). The fake-claude crate deliberately does not depend on the
+/// domain crate (it speaks only the wire contract), so the predicate is
+/// duplicated here; the unit test in `claude_format` is the authoritative
+/// definition.
+fn launches_in_background(tool_name: &str, tool_input: &Value) -> bool {
+    let explicit = tool_input
+        .get("run_in_background")
+        .and_then(Value::as_bool);
+    match (tool_name, explicit) {
+        (_, Some(b)) => b,
+        ("Agent" | "Task", None) => true,
+        _ => false,
+    }
+}
+
 /// Where this session's transcript lives: `<dir>/<session-id>.jsonl` under
 /// `FAKE_CLAUDE_TRANSCRIPT_DIR` (or a fixed temp-dir fallback). Deterministic
 /// per session id so a resume finds the transcript the fresh run wrote.
@@ -218,12 +242,7 @@ impl Engine {
                 // (PostToolUse) and again in the eventual `<task-notification>`
                 // body. Mint one here for the same kinds so the same id ties
                 // both observations together.
-                let task_id = if (name == "Agent" || name == "Task")
-                    && input
-                        .get("run_in_background")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                {
+                let task_id = if launches_in_background(name, input) {
                     Some(format!("agent_fake_{:04}", self.tool_use_seq))
                 } else {
                     None

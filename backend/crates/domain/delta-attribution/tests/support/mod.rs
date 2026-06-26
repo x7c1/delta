@@ -118,6 +118,30 @@ pub fn background_tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMess
     }
 }
 
+/// An assistant line launching an `Agent`/`Task` tool call in the modern shape:
+/// no `run_in_background` key. Modern Claude Code dropped that parameter from
+/// the schema and made these calls async by default, so the predicate
+/// classifies them as background — matching what `background_tool_use_line`
+/// gets via the explicit flag.
+pub fn modern_agent_tool_use_line(
+    uuid: &str,
+    tool_use_id: &str,
+    tool_name: &str,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolUse {
+            id: tool_use_id.into(),
+            name: tool_name.into(),
+            input: serde_json::json!({
+                "subagent_type": "general-purpose",
+                "description": "Run ls and count entries",
+                "prompt": "…",
+            }),
+        }],
+        ..assistant_line(uuid, "")
+    }
+}
+
 /// An assistant line issuing a tool call (no author text).
 pub fn tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
     TranscriptMessage {

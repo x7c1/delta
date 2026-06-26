@@ -1,0 +1,21 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    {
+      "type": "tool_use",
+      "name": "Agent",
+      "input": {
+        "subagent_type": "general-purpose",
+        "description": "Probe in the implicit background",
+        "prompt": "Run ls and count entries"
+      }
+    },
+    { "type": "post_tool_use" },
+    { "type": "reply", "text": "Launched the implicit-background subagent." },
+    { "type": "stop" },
+    { "type": "await_prompt" },
+    { "type": "task_notification" },
+    { "type": "reply", "text": "The implicit-background subagent finished." },
+    { "type": "stop" }
+  ]
+}

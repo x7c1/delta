@@ -19,9 +19,11 @@ function focusedRowRunning(page: Page) {
  * `PostToolUse(Agent)` window.
  *
  * Scenario `subagent-running`: the fake fires `PreToolUse` for an `Agent` tool
- * call (carrying `subagent_type` and `description`), holds the turn open so the
- * running window is observable, then fires `PostToolUse` for the same
- * `tool_use_id`, writes the tool_result, replies, and stops.
+ * call (carrying `subagent_type`, `description`, and an explicit
+ * `run_in_background: false` — required for foreground semantics now that
+ * modern Claude Code makes `Agent`/`Task` calls async by default), holds the
+ * turn open so the running window is observable, then fires `PostToolUse` for
+ * the same `tool_use_id`, writes the tool_result, replies, and stops.
  *
  * A subagent runs in its own transcript Delta never tails, so nothing else
  * appears in the conversation pane while it works. The spec asserts:

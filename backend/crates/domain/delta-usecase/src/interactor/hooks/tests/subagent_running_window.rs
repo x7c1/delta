@@ -20,6 +20,12 @@ use delta_model::SessionId;
 use crate::interactor::testing::*;
 use crate::ports::{SessionEvent, StopHook};
 
+/// A modern `Agent` tool_use input shape: no `run_in_background` key. Modern
+/// Claude Code dropped the parameter from the schema and made `Agent`/`Task`
+/// calls async by default, so this input is treated as background — the same
+/// path [`BACKGROUND_AGENT_INPUT`] takes via the explicit flag. Use
+/// [`FOREGROUND_AGENT_INPUT`] for the older explicit-foreground shape that
+/// stays foreground.
 const AGENT_INPUT: &str =
     r#"{"subagent_type":"general-purpose","description":"Run ls and count entries","prompt":"…"}"#;
 
@@ -27,6 +33,13 @@ const AGENT_INPUT: &str =
 /// at launch (the call returned, not the subagent), and its completion arrives
 /// later as a `<task-notification>`.
 const BACKGROUND_AGENT_INPUT: &str = r#"{"subagent_type":"general-purpose","description":"Long crawl","prompt":"…","run_in_background":true}"#;
+
+/// An `Agent` launched with an explicit `run_in_background: false`. Modern
+/// Claude Code makes `Agent`/`Task` calls async by default, so the explicit
+/// flag is what keeps the call foreground: its `PostToolUse(Agent)` closes the
+/// indicator window when the subagent itself finishes, and a still-running
+/// foreground subagent is swept at turn end.
+const FOREGROUND_AGENT_INPUT: &str = r#"{"subagent_type":"general-purpose","description":"Run ls and count entries","prompt":"…","run_in_background":false}"#;
 
 fn running_tool_use_ids(state: &crate::SessionLiveState) -> Vec<String> {
     state
@@ -46,7 +59,7 @@ fn is_background(state: &crate::SessionLiveState, tool_use_id: &str) -> bool {
 }
 
 #[tokio::test]
-async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields() {
+async fn pre_tool_use_foreground_agent_starts_the_window_and_broadcasts_with_display_fields() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
@@ -55,8 +68,10 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
     // The assistant message containing the `Agent` tool_use block has been
     // flushed to the parent's JSONL before `PreToolUse(Agent)` fires (this is
     // Claude Code's real ordering). `on_pre_tool_use` force-syncs the parent
-    // transcript, so the indicator lights on the same hook call.
-    ix.transcript_fake().push(agent_tool_use_line(
+    // transcript, so the indicator lights on the same hook call. This case
+    // pins the explicit-foreground shape (the explicit `run_in_background:
+    // false` shape), so the broadcast carries `background: false`.
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch",
         "toolu_a1",
         "Agent",
@@ -65,7 +80,13 @@ async fn pre_tool_use_agent_starts_the_window_and_broadcasts_with_display_fields
     ));
 
     let events = ix
-        .on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
+        .on_pre_tool_use(
+            &session,
+            "Agent",
+            FOREGROUND_AGENT_INPUT,
+            "toolu_a1",
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -96,17 +117,26 @@ async fn post_tool_use_agent_ends_the_window_and_broadcasts() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    // Parent transcript carries the launch line; PreToolUse syncs it.
-    ix.transcript_fake().push(agent_tool_use_line(
+    // Parent transcript carries the foreground launch line; PreToolUse syncs
+    // it. The explicit `run_in_background: false` is what keeps the call
+    // foreground under the modern async-by-default semantics, so the matching
+    // PostToolUse closes the indicator window.
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch",
         "toolu_a1",
         "Agent",
         "general-purpose",
         "Run ls and count entries",
     ));
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
+    ix.on_pre_tool_use(
+        &session,
+        "Agent",
+        FOREGROUND_AGENT_INPUT,
+        "toolu_a1",
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
 
     let events = ix
         .on_post_tool_use(&session, "Agent", "toolu_a1", "null", SEED_TRANSCRIPT_PATH)
@@ -136,7 +166,7 @@ async fn the_task_alias_drives_the_same_window() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.transcript_fake().push(agent_tool_use_line(
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch",
         "toolu_t1",
         "Task",
@@ -144,7 +174,13 @@ async fn the_task_alias_drives_the_same_window() {
         "Run ls and count entries",
     ));
     let started = ix
-        .on_pre_tool_use(&session, "Task", AGENT_INPUT, "toolu_t1", SEED_TRANSCRIPT_PATH)
+        .on_pre_tool_use(
+            &session,
+            "Task",
+            FOREGROUND_AGENT_INPUT,
+            "toolu_t1",
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
     assert!(
@@ -214,26 +250,40 @@ async fn multiple_concurrent_subagents_are_tracked_independently() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.transcript_fake().push(agent_tool_use_line(
+    // Both launches are foreground so PostToolUse closes them: that lets the
+    // test pin "finishing one leaves the other running" via PostToolUse alone.
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch-1",
         "toolu_a1",
         "Agent",
         "general-purpose",
         "Run ls and count entries",
     ));
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
-    ix.transcript_fake().push(agent_tool_use_line(
+    ix.on_pre_tool_use(
+        &session,
+        "Agent",
+        FOREGROUND_AGENT_INPUT,
+        "toolu_a1",
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch-2",
         "toolu_a2",
         "Agent",
         "general-purpose",
         "Run ls and count entries",
     ));
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a2", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
+    ix.on_pre_tool_use(
+        &session,
+        "Agent",
+        FOREGROUND_AGENT_INPUT,
+        "toolu_a2",
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         running_tool_use_ids(&ix.live_state_for(&session).await),
         vec!["toolu_a1".to_owned(), "toolu_a2".to_owned()],
@@ -303,21 +353,32 @@ async fn a_duplicate_pre_tool_use_does_not_double_track_or_double_broadcast() {
 }
 
 #[tokio::test]
-async fn the_turn_ending_clears_a_still_running_subagent() {
+async fn the_turn_ending_clears_a_still_running_foreground_subagent() {
     let ix = interactor();
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.transcript_fake().push(agent_tool_use_line(
+    // Explicit-foreground launch (`run_in_background: false`): the turn-end
+    // sweep is what should clear it, since a foreground subagent cannot outlive
+    // its launching turn. (A modern async-by-default launch would survive the
+    // sweep — see `agent_without_run_in_background_is_background_and_survives_post_tool_use`
+    // below.)
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch",
         "toolu_a1",
         "Agent",
         "general-purpose",
         "Run ls and count entries",
     ));
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_a1", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
+    ix.on_pre_tool_use(
+        &session,
+        "Agent",
+        FOREGROUND_AGENT_INPUT,
+        "toolu_a1",
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
     assert!(
         !ix.live_state_for(&session)
             .await
@@ -340,7 +401,7 @@ async fn the_turn_ending_clears_a_still_running_subagent() {
             .await
             .running_subagents
             .is_empty(),
-        "a running subagent never outlives its turn"
+        "a running foreground subagent never outlives its turn"
     );
 }
 
@@ -461,16 +522,22 @@ async fn a_foreground_and_a_background_subagent_diverge_at_turn_end() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.transcript_fake().push(agent_tool_use_line(
+    ix.transcript_fake().push(foreground_agent_tool_use_line(
         "a-launch-fg",
         "toolu_fg",
         "Agent",
         "general-purpose",
         "Run ls and count entries",
     ));
-    ix.on_pre_tool_use(&session, "Agent", AGENT_INPUT, "toolu_fg", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
+    ix.on_pre_tool_use(
+        &session,
+        "Agent",
+        FOREGROUND_AGENT_INPUT,
+        "toolu_fg",
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
     ix.transcript_fake()
         .push(background_tool_use_line("a-launch-bg", "toolu_bg"));
     ix.on_pre_tool_use(&session, "Agent", BACKGROUND_AGENT_INPUT, "toolu_bg", SEED_TRANSCRIPT_PATH)
@@ -701,5 +768,86 @@ async fn a_task_notification_missing_both_ids_leaves_the_subagent_running_and_wa
     assert!(
         captured.contains("WARN") && captured.contains("<task-notification>"),
         "expected a WARN log for the missing-keys notification, got: {captured}"
+    );
+}
+
+#[tokio::test]
+async fn agent_without_run_in_background_is_background_and_survives_post_tool_use() {
+    // The bug this regression test pins: modern Claude Code (>= v2.1.193)
+    // dropped the `run_in_background` parameter from the `Agent`/`Task` tool
+    // schema and made those calls async by default. Before the predicate fix,
+    // the parent-transcript fold treated the missing flag as foreground, so
+    // the immediate `PostToolUse(Agent)` — which fires when the launch
+    // returned, not when the subagent finished — closed the running window
+    // within milliseconds and the navigator never showed the indicator.
+    //
+    // The end-to-end shape exercised here mirrors the real bug: a `tool_use`
+    // input with no `run_in_background` key, then the immediate `PostToolUse`,
+    // and the running entry must survive — exactly the path a background
+    // subagent takes.
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // The modern-shape Agent tool_use is in the parent transcript before
+    // `PreToolUse(Agent)` fires (Claude Code's real ordering); the hook
+    // force-syncs it.
+    ix.transcript_fake().push(agent_tool_use_line(
+        "a-launch",
+        "toolu_modern",
+        "Agent",
+        "general-purpose",
+        "Run ls and count entries",
+    ));
+
+    let started = ix
+        .on_pre_tool_use(
+            &session,
+            "Agent",
+            AGENT_INPUT,
+            "toolu_modern",
+            SEED_TRANSCRIPT_PATH,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        started,
+        vec![SessionEvent::SubagentStarted {
+            session_id: session.clone(),
+            thread_id: main,
+            tool_use_id: "toolu_modern".to_owned(),
+            subagent_type: Some("general-purpose".to_owned()),
+            description: Some("Run ls and count entries".to_owned()),
+            background: true,
+        }],
+        "an Agent tool_use with no `run_in_background` key is broadcast as background"
+    );
+
+    // The immediate `PostToolUse(Agent)` fires (the launch returned, not the
+    // subagent), and must NOT close the running window — that is the bug.
+    let post = ix
+        .on_post_tool_use(
+            &session,
+            "Agent",
+            "toolu_modern",
+            "null",
+            SEED_TRANSCRIPT_PATH,
+        )
+        .await
+        .unwrap();
+    assert!(
+        post.is_empty(),
+        "the immediate PostToolUse for a modern Agent broadcasts nothing"
+    );
+    let state = ix.live_state_for(&session).await;
+    assert_eq!(
+        running_tool_use_ids(&state),
+        vec!["toolu_modern".to_owned()],
+        "the modern Agent is still running after its immediate PostToolUse"
+    );
+    assert!(
+        is_background(&state, "toolu_modern"),
+        "the running entry is marked background"
     );
 }
