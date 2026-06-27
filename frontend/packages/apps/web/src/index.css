@@ -53,7 +53,7 @@
    */
   --delta-color-surface: theme(colors.white);
   --delta-color-surface-elevated: theme(colors.slate.50);
-  --delta-color-surface-sunken: theme(colors.slate.100);
+  --delta-color-surface-sunken: theme(colors.slate.200);
   --delta-color-surface-sunken-hover: theme(colors.slate.300);
   --delta-color-fg: theme(colors.slate.900);
   --delta-color-fg-muted: theme(colors.slate.600);
@@ -94,7 +94,7 @@
 :root[data-theme='dark'] {
   --delta-color-surface: theme(colors.slate.900);
   --delta-color-surface-elevated: theme(colors.slate.800);
-  --delta-color-surface-sunken: theme(colors.slate.950);
+  --delta-color-surface-sunken: theme(colors.slate.700);
   --delta-color-surface-sunken-hover: theme(colors.slate.600);
   --delta-color-fg: theme(colors.slate.100);
   --delta-color-fg-muted: theme(colors.slate.400);
@@ -115,7 +115,7 @@
 :root[data-theme='light'] {
   --delta-color-surface: theme(colors.white);
   --delta-color-surface-elevated: theme(colors.slate.50);
-  --delta-color-surface-sunken: theme(colors.slate.100);
+  --delta-color-surface-sunken: theme(colors.slate.200);
   --delta-color-surface-sunken-hover: theme(colors.slate.300);
   --delta-color-fg: theme(colors.slate.900);
   --delta-color-fg-muted: theme(colors.slate.600);
