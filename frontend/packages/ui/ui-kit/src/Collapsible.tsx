@@ -22,20 +22,26 @@ export function Collapsible({
 }: CollapsibleProps) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className={cn('rounded border border-slate-200 bg-slate-50', className)}>
+    <div className={cn('rounded border border-border-default bg-surface-elevated', className)}>
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-xs text-slate-600 hover:bg-slate-100"
+        // The trigger's hover background was previously slate-100 — one step
+        // up from the slate-50 base. No semantic token currently expresses
+        // that "hover for an elevated surface" state (see the
+        // `surface-elevated-hover` missing-token candidate). Kept on the
+        // hardcoded shade for now to preserve the original light-mode look;
+        // dark-mode will rely on the surrounding surface contrast.
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-xs text-fg-muted hover:bg-slate-100"
       >
-        <span className="text-slate-400" aria-hidden>
+        <span className="text-fg-subtle" aria-hidden>
           {open ? '▾' : '▸'}
         </span>
         <span className="min-w-0 flex-1 truncate">{summary}</span>
       </button>
       {open && (
-        <div className="border-t border-slate-200 px-2 py-1.5 text-xs">
+        <div className="border-t border-border-default px-2 py-1.5 text-xs">
           {children}
         </div>
       )}
