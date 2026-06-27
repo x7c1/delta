@@ -32,7 +32,12 @@ export function Chip({
       onMouseLeave={onMouseLeave}
       aria-label={ariaLabel}
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700 transition-colors hover:border-indigo-300 hover:bg-indigo-100',
+        // The soft tinted background (indigo-50 / 100) and border (indigo-200 /
+        // 300) have no semantic-token equivalent yet — see the `accent-soft`
+        // missing-token candidate group. Only the foreground gets a token swap
+        // (text-indigo-700 → text-accent; intent matches even though the shade
+        // is one step lighter than the indigo-700 it replaces).
+        'inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs text-accent transition-colors hover:border-indigo-300 hover:bg-indigo-100',
         className,
       )}
     >

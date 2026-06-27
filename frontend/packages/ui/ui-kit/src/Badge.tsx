@@ -10,10 +10,14 @@ export interface BadgeProps {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  neutral: 'bg-slate-200 text-slate-700',
+  // The `info` and `warning` tones use a soft tinted background paired with a
+  // dark same-hue label. No semantic token currently expresses that "soft"
+  // variant of an accent color, so these stay on hardcoded Tailwind shades for
+  // now (see the `info-soft` / `warning-soft` missing-token candidates).
+  neutral: 'bg-surface-sunken text-fg-muted',
   info: 'bg-sky-100 text-sky-800',
   warning: 'bg-amber-100 text-amber-800',
-  count: 'bg-indigo-600 text-white',
+  count: 'bg-accent text-accent-fg',
 };
 
 /** A small inline status/count pill. */

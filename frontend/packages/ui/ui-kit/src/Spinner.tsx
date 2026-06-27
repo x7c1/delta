@@ -21,10 +21,10 @@ export function Spinner({ className, label, 'aria-label': ariaLabel }: SpinnerPr
     <span
       role="status"
       aria-label={ariaLabel}
-      className={cn('inline-flex items-center gap-1 text-xs text-slate-500', className)}
+      className={cn('inline-flex items-center gap-1 text-xs text-fg-muted', className)}
     >
       <span
-        className="inline-block size-3 shrink-0 animate-spin rounded-full border border-slate-300 border-t-slate-500"
+        className="inline-block size-3 shrink-0 animate-spin rounded-full border border-border-default border-t-fg-muted"
         aria-hidden
       />
       {label && <span>{label}</span>}
