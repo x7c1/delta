@@ -105,6 +105,7 @@ export default {
         danger: 'var(--delta-color-danger)',
         warning: 'var(--delta-color-warning)',
         info: 'var(--delta-color-info)',
+        scrim: 'var(--delta-color-scrim)',
       },
       keyframes: {
         // A hard on/off blink for the live-streaming caret. The `steps(1, end)`

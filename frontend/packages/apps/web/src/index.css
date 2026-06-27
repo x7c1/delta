@@ -64,6 +64,11 @@
   --delta-color-danger: theme(colors.rose.600);
   --delta-color-warning: theme(colors.amber.600);
   --delta-color-info: theme(colors.sky.600);
+  /* scrim: dark backdrop for modals/popovers; expected to be used with a
+   * transparency suffix (e.g. `bg-scrim/40`). Theme-dependent, but both
+   * themes resolve to a dark enough value to preserve contrast under the
+   * overlay regardless of the page's resting color. */
+  --delta-color-scrim: theme(colors.slate.900);
 }
 
 /*
@@ -77,7 +82,7 @@
  * styled element follows whichever block matches the current attribute.
  *
  * To add a new theme:
- *   1. Add a `:root[data-theme="<id>"]` block below defining all 13 tokens.
+ *   1. Add a `:root[data-theme="<id>"]` block below defining all 14 tokens.
  *   2. Add a matching entry to THEMES in src/themes/registry.ts.
  * No other code change is required — Tailwind utilities, the runtime readers
  * in src/theme.ts, and the useTheme hook all key off the same names.
@@ -96,6 +101,7 @@
   --delta-color-danger: theme(colors.rose.400);
   --delta-color-warning: theme(colors.amber.400);
   --delta-color-info: theme(colors.sky.400);
+  --delta-color-scrim: theme(colors.slate.950);
 }
 
 :root[data-theme='light'] {
@@ -112,6 +118,7 @@
   --delta-color-danger: theme(colors.rose.600);
   --delta-color-warning: theme(colors.amber.600);
   --delta-color-info: theme(colors.sky.600);
+  --delta-color-scrim: theme(colors.slate.900);
 }
 
 html,
