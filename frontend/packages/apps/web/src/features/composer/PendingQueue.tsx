@@ -25,11 +25,21 @@ export interface PendingQueueProps {
  *   turn-end event lands;
  * - a rejected submit or a reaped spawn renders a distinct error row with
  *   Dismiss (and Retry for a new-session launch) so it is recoverable.
+ *
+ * Both `queued` and `dispatched` rows carry a Cancel control: a queued send
+ * is dropped before it ever touches the pane, and a dispatched send whose
+ * echo has not arrived (the user pressed Escape in the TUI to discard the
+ * composer buffer, leaving the row stuck `dispatched` indefinitely) is
+ * cancelled by the server injecting `Escape` into the pane on the user's
+ * behalf. On a `409` (the dispatched send already echoed, or the queued one
+ * already dispatched into an in-flight turn) the same refetch reconciles
+ * the strip.
  */
 export function PendingQueue({ entries }: PendingQueueProps) {
   const client = useApiClient();
   const removeSending = useLiveStore((state) => state.removeSending);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
+  const forgetLocalSend = useLiveStore((state) => state.forgetLocalSend);
   const retrySpawn = useNewSessionSend();
   const cancelSend = useCancelSendMutation(client);
 
@@ -99,42 +109,60 @@ export function PendingQueue({ entries }: PendingQueueProps) {
       <ul className="space-y-1">
         {entries.map((entry) => {
           switch (entry.kind) {
-            case 'server':
+            case 'server': {
+              // Both queued and dispatched rows carry a Cancel control. A
+              // queued cancel drops the row server-side before it ever
+              // touches the pane; a dispatched cancel is the user-visible
+              // escape hatch for a send whose echo never arrived (Escape
+              // pressed in the TUI to discard the composer buffer leaves
+              // no observable signal — the server injects Escape on the
+              // user's behalf and clears the row). A `409` either way is
+              // benign: the refetch the mutation triggers reconciles the
+              // strip.
+              const cancelButton = (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={cancelSend.isPending}
+                  onClick={() => {
+                    // The tracked local twin is normally drained by the
+                    // turn-end events (`turn_completed` / `turn_interrupted`),
+                    // but a cancel produces neither — the server just flips
+                    // the row to `cancelled` and drops it from the open
+                    // list. Drop the twin alongside the server cancel so the
+                    // strip clears together rather than leaving a stuck
+                    // `local` chip behind.
+                    forgetLocalSend(entry.send.id);
+                    cancelSend.mutate({
+                      sendId: entry.send.id,
+                      sessionId: entry.send.session_id,
+                    });
+                  }}
+                >
+                  Cancel
+                </Button>
+              );
               return entry.send.status === 'queued'
                 ? sendRow(
                     entry.key,
                     entry.send.text,
-                    // Parked on purpose: the server holds it until the
-                    // session's current turn ends, then dispatches it — and
-                    // until then the user can abandon it. Cancelling flips the
-                    // row to `cancelled` server-side, and the refetch the
-                    // mutation triggers drops it from this list. A `409`
-                    // (already dispatched) is benign: the same refetch
-                    // reconciles the strip.
                     <div className="flex shrink-0 items-center gap-1">
                       <Badge tone="neutral">queued — sends when idle</Badge>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={cancelSend.isPending}
-                        onClick={() =>
-                          cancelSend.mutate({
-                            sendId: entry.send.id,
-                            sessionId: entry.send.session_id,
-                          })
-                        }
-                      >
-                        Cancel
-                      </Button>
+                      {cancelButton}
                     </div>,
                   )
                 : sendRow(
                     entry.key,
                     entry.send.text,
-                    // Already sent to the agent; what is pending now is its
-                    // reply (the turn), not the act of sending.
-                    <Spinner className="shrink-0" label="awaiting reply" />,
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Spinner
+                        className="shrink-0"
+                        label="awaiting reply"
+                      />
+                      {cancelButton}
+                    </div>,
                   );
+            }
             case 'local':
               // Accepted and already matched into the transcript; its turn is
               // still running. The header spinner already signals progress, so

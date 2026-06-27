@@ -1,0 +1,11 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "session opened" },
+    { "type": "stop" },
+    { "type": "await_escape" },
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "follow-up answered" },
+    { "type": "stop" }
+  ]
+}

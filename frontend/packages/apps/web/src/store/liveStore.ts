@@ -497,6 +497,15 @@ export interface LiveState {
   /** Track an accepted send until its turn ends (real ids from the POST). */
   recordLocalSend: (send: LocalSend) => void;
   /**
+   * Drop one tracked local send by id (a no-op if no entry exists). Used by
+   * the cancel-send mutation: the server flips the row to `cancelled` and
+   * drops it from the open list, but the turn-end events that normally drain
+   * `localSends` never fire for a cancel — so the tracked twin would linger
+   * as a stuck `local` chip with no per-row indicator. Dropping it here
+   * keeps the strip in sync with the server.
+   */
+  forgetLocalSend: (sendId: number) => void;
+  /**
    * Track a new-session spawn (real ids from the POST response). If the
    * spawn's failure already arrived (see {@link SpawnFailureBufferedNotice}),
    * the spawn is registered as `failed` immediately.
@@ -854,6 +863,16 @@ export const useLiveStore = create<LiveState>((set) => ({
     set((state) => ({
       localSends: { ...state.localSends, [send.sendId]: send },
     })),
+
+  forgetLocalSend: (sendId) =>
+    set((state) => {
+      if (!(sendId in state.localSends)) {
+        return state;
+      }
+      const rest = { ...state.localSends };
+      delete rest[sendId];
+      return { localSends: rest };
+    }),
 
   trackSpawn: (spawn) =>
     set((state) => {

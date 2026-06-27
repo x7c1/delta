@@ -98,6 +98,57 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByText('1 queued')).toBeInTheDocument();
   });
 
+  it('cancels a dispatched send whose echo never arrived, clearing the strip', async () => {
+    // The user pressed Escape in the TUI to discard the composer buffer, so
+    // no `UserPromptSubmit` ever fires and the row would otherwise stay
+    // `dispatched` indefinitely. The Cancel button on the dispatched row is
+    // the escape hatch: the server injects Escape on the user's behalf,
+    // drops the row to `cancelled`, and the refetch the mutation triggers
+    // clears the chip.
+    let cancelled = false;
+    const cancelUrls: string[] = [];
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: cancelled
+            ? []
+            : [serverSend({ id: 99, text: 'stuck', status: 'dispatched' })],
+          turn: cancelled
+            ? { state: 'idle', send_id: null, thread_id: null }
+            : { state: 'awaiting_echo', send_id: 99, thread_id: 1 },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/cancel', ({ request, params }) => {
+        cancelUrls.push(new URL(request.url).pathname);
+        if (params.id === '99') {
+          cancelled = true;
+          return new HttpResponse(null, { status: 204 });
+        }
+        return HttpResponse.json(
+          { error: 'not cancellable', code: 'send_not_cancellable' },
+          { status: 409 },
+        );
+      }),
+    );
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('stuck');
+    // The dispatched row shows the "awaiting reply" spinner alongside the
+    // Cancel control: same gesture as a queued cancel, different server path.
+    expect(screen.getByText('awaiting reply')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('stuck')).not.toBeInTheDocument();
+    });
+    expect(cancelUrls).toEqual(['/api/sends/99/cancel']);
+    expect(screen.queryAllByTestId('pending-item')).toHaveLength(0);
+  });
+
   it('cancels a queued send, removing it from the strip', async () => {
     // Override the open-send + cancel routes for this test so the flow is
     // self-contained: the first sends fetch carries the queued row, Cancel hits

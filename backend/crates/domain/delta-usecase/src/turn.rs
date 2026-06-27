@@ -89,6 +89,13 @@ pub enum TurnInput {
     Close,
     /// The just-dispatched send's keystrokes never reached the pane.
     DispatchFailed,
+    /// An explicit user cancel of the outstanding dispatched send: the browser
+    /// asked to abandon a send whose echo has not arrived, so Delta injected
+    /// `Escape` into the pane (discarding the composer buffer) and the send is
+    /// now cancelled. Exits [`TurnState::AwaitingEcho`] back to
+    /// [`TurnState::Idle`] with [`OrphanedSend::Cancel`], so any queued sends
+    /// behind it promote naturally on the next idle dispatch.
+    Cancel { send_id: i64 },
 }
 
 /// A send abandoned by a transition, with what the caller must do about it.
@@ -166,6 +173,12 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         (S::Idle, I::Interrupt) => Transition::to(S::Idle),
         (S::Idle, I::Close) => Transition::to(S::Idle),
         (S::Idle, I::DispatchFailed) => Transition::to(S::Idle).anomaly(),
+        // A cancel while idle is meaningless: there is no outstanding send to
+        // cancel. The interactor only forwards a cancel after observing an
+        // `AwaitingEcho` whose send id matches, so reaching this arm means a
+        // bug (or a stale message routed past the actor's guard). Converge on
+        // Idle and flag it loudly.
+        (S::Idle, I::Cancel { .. }) => Transition::to(S::Idle).anomaly(),
 
         // ---- AwaitingEcho --------------------------------------------------
         // A second dispatch while one is outstanding violates the
@@ -214,6 +227,26 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         (S::AwaitingEcho { send_id }, I::DispatchFailed) => {
             Transition::orphaning(S::Idle, Cancel(send_id))
         }
+        // An explicit user cancel of the outstanding send. The interactor has
+        // already injected `Escape` into the pane (discarding the composer
+        // buffer) and validated that the request targets THIS outstanding
+        // send, so the table only has to flip back to Idle and orphan the row
+        // as `Cancel` — the row is marked `cancelled` in the store via the
+        // existing orphan dispatch, and the next queued send dispatches on the
+        // following idle-flush. A request targeting a different send id is an
+        // interactor bug (the guard there would have rejected it as
+        // `SendNotCancellable`), so the mismatch arm is flagged anomalous and
+        // converges on a safe no-op rather than orphaning the wrong row.
+        (S::AwaitingEcho { send_id: outstanding }, I::Cancel { send_id }) => {
+            if send_id == outstanding {
+                Transition::orphaning(S::Idle, Cancel(outstanding))
+            } else {
+                Transition::to(S::AwaitingEcho {
+                    send_id: outstanding,
+                })
+                .anomaly()
+            }
+        }
 
         // ---- InFlight ------------------------------------------------------
         // Dispatching mid-turn violates the single-outstanding rule (dispatch
@@ -254,6 +287,15 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
             };
             t.anomaly()
         }
+        // A cancel while a turn is running is meaningless: the dispatched
+        // send (if any) already echoed and is owned by its matching transcript
+        // line — the user-initiated cancel path only ever targets the
+        // outstanding (pre-echo) send. The interactor guards against ever
+        // forwarding the cancel in this state, so reaching this arm is a bug;
+        // converge on the current state and flag it loudly.
+        (S::InFlight { send_id }, I::Cancel { .. }) => {
+            Transition::to(S::InFlight { send_id }).anomaly()
+        }
     }
 }
 
@@ -284,6 +326,7 @@ mod tests {
             I::Interrupt,
             I::Close,
             I::DispatchFailed,
+            I::Cancel { send_id: 9 },
         ]
     }
 
@@ -301,6 +344,7 @@ mod tests {
             (S::Idle, I::Interrupt,                  S::Idle,                           None,                          false),
             (S::Idle, I::Close,                      S::Idle,                           None,                          false),
             (S::Idle, I::DispatchFailed,             S::Idle,                           None,                          true),
+            (S::Idle, I::Cancel { send_id: 9 },      S::Idle,                           None,                          true),
             // AwaitingEcho { 7 }
             (S::AwaitingEcho { send_id: 7 }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   Some(Requeue(7)), true),
             (S::AwaitingEcho { send_id: 7 }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, Some(Requeue(7)), true),
@@ -309,6 +353,7 @@ mod tests {
             (S::AwaitingEcho { send_id: 7 }, I::Interrupt,                  S::Idle,                          Some(Requeue(7)), false),
             (S::AwaitingEcho { send_id: 7 }, I::Close,                      S::Idle,                          Some(Cancel(7)),  false),
             (S::AwaitingEcho { send_id: 7 }, I::DispatchFailed,             S::Idle,                          Some(Cancel(7)),  false),
+            (S::AwaitingEcho { send_id: 7 }, I::Cancel { send_id: 9 },      S::AwaitingEcho { send_id: 7 },   None,             true),
             // InFlight { Some(7) }
             (S::InFlight { send_id: Some(7) }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   None,                        true),
             (S::InFlight { send_id: Some(7) }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, None,                        true),
@@ -317,6 +362,7 @@ mod tests {
             (S::InFlight { send_id: Some(7) }, I::Interrupt,                  S::Idle,                          Some(CancelIfUnmatched(7)),  false),
             (S::InFlight { send_id: Some(7) }, I::Close,                      S::Idle,                          Some(CancelIfUnmatched(7)),  false),
             (S::InFlight { send_id: Some(7) }, I::DispatchFailed,             S::Idle,                          Some(CancelIfUnmatched(7)),  true),
+            (S::InFlight { send_id: Some(7) }, I::Cancel { send_id: 9 },      S::InFlight { send_id: Some(7) }, None,                        true),
             // InFlight { None }
             (S::InFlight { send_id: None }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   None, true),
             (S::InFlight { send_id: None }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, None, true),
@@ -325,6 +371,7 @@ mod tests {
             (S::InFlight { send_id: None }, I::Interrupt,                  S::Idle,                          None, false),
             (S::InFlight { send_id: None }, I::Close,                      S::Idle,                          None, false),
             (S::InFlight { send_id: None }, I::DispatchFailed,             S::Idle,                          None, true),
+            (S::InFlight { send_id: None }, I::Cancel { send_id: 9 },      S::InFlight { send_id: None },    None, true),
         ];
 
         // The table above must cover the whole product space exactly once.
@@ -369,4 +416,21 @@ mod tests {
         );
     }
 
+    /// A matching explicit cancel of the outstanding send exits AwaitingEcho
+    /// back to Idle and orphans the row as Cancel: the only non-anomalous
+    /// cancel, since the interactor guards every other state.
+    #[test]
+    fn matching_cancel_exits_awaiting_echo_to_idle() {
+        assert_eq!(
+            transition(
+                S::AwaitingEcho { send_id: 7 },
+                I::Cancel { send_id: 7 }
+            ),
+            Transition {
+                next: S::Idle,
+                orphaned: Some(Cancel(7)),
+                anomalous: false,
+            }
+        );
+    }
 }
