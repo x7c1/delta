@@ -10,13 +10,16 @@ export interface BadgeProps {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  // The `info` and `warning` tones use a soft tinted background paired with a
-  // dark same-hue label. No semantic token currently expresses that "soft"
-  // variant of an accent color, so these stay on hardcoded Tailwind shades for
-  // now (see the `info-soft` / `warning-soft` missing-token candidates).
+  // `info` and `warning` use a soft tone: a low-alpha wash of the base
+  // semantic token as the background paired with the base token as the
+  // foreground. This collapses the previous bg-{hue}-100 / text-{hue}-800
+  // "color-paired" pattern onto a single hue with transparency, so the
+  // palette only has to define one shade per status and the soft variant
+  // follows from it. The slight visual shift (paired light/dark vs single
+  // hue plus alpha) is intentional.
   neutral: 'bg-surface-sunken text-fg-muted',
-  info: 'bg-sky-100 text-sky-800',
-  warning: 'bg-amber-100 text-amber-800',
+  info: 'bg-info/15 text-info',
+  warning: 'bg-warning/15 text-warning',
   count: 'bg-accent text-accent-fg',
 };
 

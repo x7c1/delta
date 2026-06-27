@@ -15,13 +15,12 @@ export interface StatusDotProps {
 }
 
 const TONE_CLASSES: Record<DotTone, string> = {
-  // `green` has no semantic token yet — emerald is distinct from the existing
-  // accent / danger / warning / info palette (see the `success` missing-token
-  // candidate). `amber` and `red` map onto `warning`/`danger` by intent even
-  // though the shade is one step off (amber-500/rose-500 here vs amber-600/
+  // `amber` and `red` map onto `warning`/`danger` by intent even though the
+  // shade is one step off (amber-500/rose-500 previously vs amber-600/
   // rose-600 in the light token), since a status dot reads its tone
-  // semantically rather than chromatically.
-  green: 'bg-emerald-500',
+  // semantically rather than chromatically. `green` follows the same
+  // intent-mapping onto the `success` token.
+  green: 'bg-success',
   amber: 'bg-warning',
   red: 'bg-danger',
   slate: 'bg-fg-subtle',

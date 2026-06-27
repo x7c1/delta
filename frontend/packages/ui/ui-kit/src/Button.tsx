@@ -10,14 +10,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  // The hover and disabled states on `primary` (indigo-500 / indigo-400) and
-  // the hover on `secondary` (slate-300) have no semantic-token equivalent yet
-  // — see the `accent-hover` / `accent-disabled` / `surface-sunken-hover`
-  // missing-token candidates.
   primary:
-    'bg-accent text-accent-fg hover:bg-indigo-500 disabled:bg-indigo-400',
+    'bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-accent-disabled',
   secondary:
-    'bg-surface-sunken text-fg hover:bg-slate-300 disabled:opacity-60',
+    'bg-surface-sunken text-fg hover:bg-surface-sunken-hover disabled:opacity-60',
   ghost: 'bg-transparent text-fg-muted hover:bg-surface-sunken disabled:opacity-50',
 };
 

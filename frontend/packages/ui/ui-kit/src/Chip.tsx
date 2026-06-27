@@ -32,12 +32,12 @@ export function Chip({
       onMouseLeave={onMouseLeave}
       aria-label={ariaLabel}
       className={cn(
-        // The soft tinted background (indigo-50 / 100) and border (indigo-200 /
-        // 300) have no semantic-token equivalent yet — see the `accent-soft`
-        // missing-token candidate group. Only the foreground gets a token swap
-        // (text-indigo-700 → text-accent; intent matches even though the shade
-        // is one step lighter than the indigo-700 it replaces).
-        'inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs text-accent transition-colors hover:border-indigo-300 hover:bg-indigo-100',
+        // Soft accent variant: the previously hardcoded indigo-50/100/200/300
+        // ramp is replaced with low-alpha washes of the `accent` token, so the
+        // palette only has to define one shade and the soft variant follows
+        // from it. The slight visual shift (paired shades vs single hue plus
+        // alpha) is intentional.
+        'inline-flex items-center gap-1 rounded-full border border-accent/20 bg-accent/10 px-2.5 py-1 text-xs text-accent transition-colors hover:border-accent/30 hover:bg-accent/15',
         className,
       )}
     >
