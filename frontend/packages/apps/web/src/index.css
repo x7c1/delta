@@ -54,6 +54,7 @@
   --delta-color-surface: theme(colors.white);
   --delta-color-surface-elevated: theme(colors.slate.50);
   --delta-color-surface-sunken: theme(colors.slate.100);
+  --delta-color-surface-sunken-hover: theme(colors.slate.300);
   --delta-color-fg: theme(colors.slate.900);
   --delta-color-fg-muted: theme(colors.slate.600);
   --delta-color-fg-subtle: theme(colors.slate.400);
@@ -61,9 +62,12 @@
   --delta-color-border-strong: theme(colors.slate.400);
   --delta-color-accent: theme(colors.indigo.600);
   --delta-color-accent-fg: theme(colors.white);
+  --delta-color-accent-hover: theme(colors.indigo.500);
+  --delta-color-accent-disabled: theme(colors.indigo.400);
   --delta-color-danger: theme(colors.rose.600);
   --delta-color-warning: theme(colors.amber.600);
   --delta-color-info: theme(colors.sky.600);
+  --delta-color-success: theme(colors.emerald.600);
   /* scrim: dark backdrop for modals/popovers; expected to be used with a
    * transparency suffix (e.g. `bg-scrim/40`). Theme-dependent, but both
    * themes resolve to a dark enough value to preserve contrast under the
@@ -82,7 +86,7 @@
  * styled element follows whichever block matches the current attribute.
  *
  * To add a new theme:
- *   1. Add a `:root[data-theme="<id>"]` block below defining all 14 tokens.
+ *   1. Add a `:root[data-theme="<id>"]` block below defining all 18 tokens.
  *   2. Add a matching entry to THEMES in src/themes/registry.ts.
  * No other code change is required — Tailwind utilities, the runtime readers
  * in src/theme.ts, and the useTheme hook all key off the same names.
@@ -91,6 +95,7 @@
   --delta-color-surface: theme(colors.slate.900);
   --delta-color-surface-elevated: theme(colors.slate.800);
   --delta-color-surface-sunken: theme(colors.slate.950);
+  --delta-color-surface-sunken-hover: theme(colors.slate.600);
   --delta-color-fg: theme(colors.slate.100);
   --delta-color-fg-muted: theme(colors.slate.400);
   --delta-color-fg-subtle: theme(colors.slate.500);
@@ -98,9 +103,12 @@
   --delta-color-border-strong: theme(colors.slate.500);
   --delta-color-accent: theme(colors.indigo.400);
   --delta-color-accent-fg: theme(colors.white);
+  --delta-color-accent-hover: theme(colors.indigo.300);
+  --delta-color-accent-disabled: theme(colors.indigo.500);
   --delta-color-danger: theme(colors.rose.400);
   --delta-color-warning: theme(colors.amber.400);
   --delta-color-info: theme(colors.sky.400);
+  --delta-color-success: theme(colors.emerald.400);
   --delta-color-scrim: theme(colors.slate.950);
 }
 
@@ -108,6 +116,7 @@
   --delta-color-surface: theme(colors.white);
   --delta-color-surface-elevated: theme(colors.slate.50);
   --delta-color-surface-sunken: theme(colors.slate.100);
+  --delta-color-surface-sunken-hover: theme(colors.slate.300);
   --delta-color-fg: theme(colors.slate.900);
   --delta-color-fg-muted: theme(colors.slate.600);
   --delta-color-fg-subtle: theme(colors.slate.400);
@@ -115,9 +124,12 @@
   --delta-color-border-strong: theme(colors.slate.400);
   --delta-color-accent: theme(colors.indigo.600);
   --delta-color-accent-fg: theme(colors.white);
+  --delta-color-accent-hover: theme(colors.indigo.500);
+  --delta-color-accent-disabled: theme(colors.indigo.400);
   --delta-color-danger: theme(colors.rose.600);
   --delta-color-warning: theme(colors.amber.600);
   --delta-color-info: theme(colors.sky.600);
+  --delta-color-success: theme(colors.emerald.600);
   --delta-color-scrim: theme(colors.slate.900);
 }
 
