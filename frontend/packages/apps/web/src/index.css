@@ -44,23 +44,26 @@
    * The active theme's values normally come from a `:root[data-theme="..."]`
    * block below (selected via `<html data-theme="...">`; see useTheme.ts and
    * the inline FOUC script in index.html). These defaults are intentionally a
-   * mirror of `:root[data-theme="dark"]` so the UI never renders unstyled if
-   * the attribute is unset for any reason (e.g. JS disabled). KEEP THE TWO
-   * BLOCKS IN SYNC when editing dark values.
+   * mirror of `:root[data-theme="light"]` so the UI never renders unstyled if
+   * the attribute is unset for any reason (e.g. JS disabled). This matches
+   * the project's default visual chrome: the existing UI is light (white /
+   * slate-50 / slate-100 surfaces with slate-700/800/900 text); only the
+   * embedded terminal is dark. KEEP THE TWO BLOCKS IN SYNC when editing
+   * light values.
    */
-  --delta-color-surface: theme(colors.slate.900);
-  --delta-color-surface-elevated: theme(colors.slate.800);
-  --delta-color-surface-sunken: theme(colors.slate.950);
-  --delta-color-fg: theme(colors.slate.100);
-  --delta-color-fg-muted: theme(colors.slate.400);
-  --delta-color-fg-subtle: theme(colors.slate.500);
-  --delta-color-border: theme(colors.slate.700);
-  --delta-color-border-strong: theme(colors.slate.500);
-  --delta-color-accent: theme(colors.indigo.400);
+  --delta-color-surface: theme(colors.white);
+  --delta-color-surface-elevated: theme(colors.slate.50);
+  --delta-color-surface-sunken: theme(colors.slate.100);
+  --delta-color-fg: theme(colors.slate.900);
+  --delta-color-fg-muted: theme(colors.slate.600);
+  --delta-color-fg-subtle: theme(colors.slate.400);
+  --delta-color-border: theme(colors.slate.200);
+  --delta-color-border-strong: theme(colors.slate.400);
+  --delta-color-accent: theme(colors.indigo.600);
   --delta-color-accent-fg: theme(colors.white);
-  --delta-color-danger: theme(colors.rose.400);
-  --delta-color-warning: theme(colors.amber.400);
-  --delta-color-info: theme(colors.sky.400);
+  --delta-color-danger: theme(colors.rose.600);
+  --delta-color-warning: theme(colors.amber.600);
+  --delta-color-info: theme(colors.sky.600);
 }
 
 /*

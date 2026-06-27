@@ -42,9 +42,11 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
 /**
  * The theme used when no preference is stored and the OS does not signal a
  * preference (and as the safe fallback for an unrecognized stored value).
- * Dark, because the existing visual identity is dark.
+ * Light, because the existing UI chrome is light (white / slate-50 /
+ * slate-100 surfaces with slate-700/800/900 text); only the embedded
+ * terminal is dark.
  */
-export const DEFAULT_THEME_ID: ThemeId = 'dark';
+export const DEFAULT_THEME_ID: ThemeId = 'light';
 
 /** Look up a registered theme by id, or `undefined` if not registered. */
 export function findTheme(id: string): ThemeMeta | undefined {
