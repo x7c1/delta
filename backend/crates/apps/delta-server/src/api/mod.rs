@@ -511,18 +511,25 @@ pub(crate) async fn create_send(
     Ok((StatusCode::CREATED, Json(WireSendResponse::from(send))))
 }
 
-/// `POST /api/sends/{id}/cancel` — cancel a still-queued send (204).
+/// `POST /api/sends/{id}/cancel` — cancel a queued or dispatched send (204).
 ///
 /// A send composed while the assistant's turn is in flight is held in the
-/// `queued` state and only dispatched once the session goes idle. This abandons
-/// such a send before that dispatch: the row flips to `cancelled`, so it is
-/// skipped by the idle dispatch path and drops out of the open-send list (the
-/// browser refetches that list to clear the chip — no event is broadcast).
+/// `queued` state until the session goes idle; this abandons such a send
+/// before that dispatch. A `dispatched` send whose echo has not arrived
+/// (typically the user pressed `Escape` in the TUI to discard the composer
+/// buffer, leaving no signal Delta can observe) is cancelled by injecting a
+/// single `Escape` keystroke into the pane and dropping the row to
+/// `cancelled` — any send queued behind the cancelled head then promotes
+/// through the existing idle-flush. The row flips to `cancelled` either way
+/// and drops out of the open-send list (the browser refetches that list to
+/// clear the chip — no event is broadcast).
 ///
 /// Replies `409` with code `send_not_cancellable` when the send no longer
-/// exists or has already left `queued` (dispatched into the pane, matched, or
-/// already cancelled); only `queued` sends are cancellable. The browser drops
-/// its cancel control and reconciles from the refetch on this code.
+/// exists, has already left `queued`/`dispatched` (matched a transcript
+/// line, or already cancelled), or is `dispatched` but the turn has moved
+/// past `AwaitingEcho` (the echo already landed; the user reaches for the
+/// in-flight interrupt instead). The browser drops its cancel control and
+/// reconciles from the refetch on this code.
 pub(crate) async fn cancel_send(
     State(state): State<AppState>,
     Path(id): Path<i64>,

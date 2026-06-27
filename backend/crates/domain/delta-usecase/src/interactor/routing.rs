@@ -533,19 +533,30 @@ where
 
     // ---- Send cancellation -------------------------------------------------
 
-    /// Cancel a still-`queued` send before it is dispatched into the pane.
+    /// Cancel a `queued` send before it is dispatched, or a `dispatched` send
+    /// whose echo has not arrived (typically the user pressed `Escape` in the
+    /// TUI to discard the composer buffer, leaving no signal Delta can
+    /// observe — see the module doc on
+    /// [`cancel_send`](crate::interactor::cancel_send)).
     ///
-    /// The cancel request carries only the send id (in its URL), so the owning
-    /// session is derived from the send row here — mirroring how
-    /// [`enqueue_send`](Self::enqueue_send) derives the session from a thread —
-    /// and the cancel then executes on that session's actor, ordered against its
-    /// dispatch path.
+    /// The cancel request carries only the send id (in its URL), so the
+    /// owning session is derived from the send row here — mirroring how
+    /// [`enqueue_send`](Self::enqueue_send) derives the session from a thread
+    /// — and the cancel then executes on that session's actor, ordered
+    /// against its dispatch path.
+    ///
+    /// A `dispatched` cancel injects a single `Escape` into the pane (the
+    /// same gesture [`cancel_question`](Self::cancel_question) uses) and
+    /// promotes any queued send behind the cancelled head through the
+    /// existing idle-flush path.
     ///
     /// Returns [`Error::SendNotCancellable`] (`409`) when the send no longer
-    /// exists, or when it has already left the `queued` state (dispatched into
-    /// the pane, matched a transcript line, or already cancelled). Only `queued`
-    /// sends — held back and not yet typed — are cancellable; the browser drops
-    /// its cancel control and reconciles from the next refetch on this error.
+    /// exists, has already left `queued`/`dispatched` (matched a transcript
+    /// line, or already cancelled), or is `dispatched` but the turn has moved
+    /// past `AwaitingEcho` — the echo already landed, so the turn is owned
+    /// by the in-flight line and the user reaches for the in-flight
+    /// interrupt instead. The browser drops its cancel control and
+    /// reconciles from the next refetch on this error.
     pub async fn cancel_send(&self, send_id: i64) -> Result<()> {
         let Some(send) = self.store.send(send_id).await? else {
             return Err(Error::SendNotCancellable(send_id));

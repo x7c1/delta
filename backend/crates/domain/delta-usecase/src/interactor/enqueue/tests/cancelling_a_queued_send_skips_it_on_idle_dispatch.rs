@@ -3,9 +3,10 @@
 //!
 //! A send composed while a turn is in flight is held `queued`; the user can
 //! abandon it before it dispatches. These tests assert the happy path (a queued
-//! send cancels and is not dispatched when the turn ends) and the guards (a
-//! dispatched or unknown send is a clean `SendNotCancellable` conflict, leaving
-//! the row untouched).
+//! send cancels and is not dispatched when the turn ends) and the guards (an
+//! unknown send is a clean `SendNotCancellable` conflict). The
+//! `dispatched`-cancel path (Escape injection while `AwaitingEcho`) is covered
+//! in `cancelling_a_dispatched_send_injects_escape_and_clears_turn`.
 
 use delta_model::{SendStatus, SessionId};
 
@@ -64,30 +65,6 @@ async fn cancelling_a_queued_send_drops_it_from_the_idle_dispatch() {
             .unwrap()
             .is_none(),
         "no queued send remains to dispatch"
-    );
-}
-
-#[tokio::test]
-async fn cancelling_a_dispatched_send_is_a_conflict_and_leaves_it_dispatched() {
-    let ix = interactor();
-    let session = SessionId::from("sess-1");
-    ix.seed_session().await;
-    let main = ix.store().main_thread_id(&session).await.unwrap();
-
-    // A send dispatched into an idle session: typed into the pane immediately,
-    // so it is `dispatched`, not `queued`.
-    let (send, _) = ix.enqueue_send(to(main), "go", None).await.unwrap();
-    assert_eq!(send.status, SendStatus::Dispatched);
-
-    let err = ix.cancel_send(send.id).await.unwrap_err();
-    assert!(
-        matches!(err, Error::SendNotCancellable(id) if id == send.id),
-        "a dispatched send is not cancellable, got {err:?}"
-    );
-    assert_eq!(
-        ix.store().send(send.id).await.unwrap().unwrap().status,
-        SendStatus::Dispatched,
-        "the row stays dispatched after a rejected cancel"
     );
 }
 
