@@ -101,14 +101,14 @@ export function Dialog({
         // A click inside the panel must not bubble to the backdrop's close.
         onClick={(event) => event.stopPropagation()}
         className={cn(
-          'flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg bg-white shadow-xl focus:outline-none',
+          'flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-lg bg-surface-elevated shadow-xl focus:outline-none',
           className,
         )}
       >
-        <header className="shrink-0 border-b border-slate-200 px-4 py-3">
+        <header className="shrink-0 border-b border-border-default px-4 py-3">
           <h2
             id={titleId}
-            className="text-sm font-semibold text-slate-800"
+            className="text-sm font-semibold text-fg"
           >
             {title}
           </h2>
@@ -117,7 +117,7 @@ export function Dialog({
           {children}
         </div>
         {footer !== undefined && (
-          <footer className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-4 py-3">
+          <footer className="flex shrink-0 justify-end gap-2 border-t border-border-default px-4 py-3">
             {footer}
           </footer>
         )}
