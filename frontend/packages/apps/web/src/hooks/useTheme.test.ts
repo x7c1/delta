@@ -127,8 +127,7 @@ describe('useTheme', () => {
     expect(document.documentElement.dataset.theme).toBe('light');
   });
 
-  it('falls back to system (then DEFAULT) when the stored value is unknown', () => {
-    // No matchMedia signal available → readSystemTheme returns DEFAULT_THEME_ID.
+  it('falls back to system when the stored value is unknown', () => {
     installMatchMediaStub(false);
     localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, 'mystery-theme');
 
@@ -140,6 +139,17 @@ describe('useTheme', () => {
     // is to prove that a foreign string never lands on `<html>` directly.
     expect(result.current.resolved).toBe('light');
     expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('falls back to DEFAULT_THEME_ID when matchMedia is unavailable under "system"', () => {
+    // No matchMedia at all → readSystemTheme returns DEFAULT_THEME_ID.
+    vi.stubGlobal('matchMedia', undefined);
+    // No stored preference → readStoredPreference returns SYSTEM.
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.preference).toBe(SYSTEM_PREFERENCE);
+    expect(result.current.resolved).toBe(DEFAULT_THEME_ID);
+    expect(document.documentElement.dataset.theme).toBe(DEFAULT_THEME_ID);
   });
 
   it('setPreference("light") persists to localStorage and updates resolved', () => {
