@@ -107,6 +107,8 @@ export default {
         surface: 'rgb(var(--delta-color-surface) / <alpha-value>)',
         'surface-elevated':
           'rgb(var(--delta-color-surface-elevated) / <alpha-value>)',
+        'surface-elevated-hover':
+          'rgb(var(--delta-color-surface-elevated-hover) / <alpha-value>)',
         'surface-sunken':
           'rgb(var(--delta-color-surface-sunken) / <alpha-value>)',
         'surface-sunken-hover':

@@ -39,13 +39,13 @@ const ITEM_TONE_CLASSES: Record<MenuItemTone, string> = {
   // The default item text uses `text-fg`: slate-700 (the original literal)
   // sat between fg-muted (slate-600) and fg (slate-900); fg matches the
   // "interactive content" convention used by Button. The hover background
-  // (slate-100) has no semantic-token equivalent — see the
-  // `surface-elevated-hover` missing-token candidate — and is kept on the
-  // hardcoded shade for now. The danger row uses `text-danger` (rose-600 vs
-  // the original red-600 — one hue step but the same intent) with a
-  // low-alpha wash of the same token for the hover, matching the
-  // Chip/Badge soft-tone pattern.
-  default: 'text-fg hover:bg-slate-100',
+  // uses `surface-elevated-hover` (light = slate-100, dark = slate-700),
+  // one step darker than the panel's `surface-elevated` base — the
+  // dropdown-on-elevated-surface mirror of `surface-sunken-hover`. The
+  // danger row uses `text-danger` (rose-600 vs the original red-600 — one
+  // hue step but the same intent) with a low-alpha wash of the same token
+  // for the hover, matching the Chip/Badge soft-tone pattern.
+  default: 'text-fg hover:bg-surface-elevated-hover',
   danger: 'text-danger hover:bg-danger/10',
 };
 

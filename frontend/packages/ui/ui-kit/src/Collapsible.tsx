@@ -27,13 +27,7 @@ export function Collapsible({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        // The trigger's hover background was previously slate-100 — one step
-        // up from the slate-50 base. No semantic token currently expresses
-        // that "hover for an elevated surface" state (see the
-        // `surface-elevated-hover` missing-token candidate). Kept on the
-        // hardcoded shade for now to preserve the original light-mode look;
-        // dark-mode will rely on the surrounding surface contrast.
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-xs text-fg-muted hover:bg-slate-100"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-xs text-fg-muted hover:bg-surface-elevated-hover"
       >
         <span className="text-fg-subtle" aria-hidden>
           {open ? '▾' : '▸'}

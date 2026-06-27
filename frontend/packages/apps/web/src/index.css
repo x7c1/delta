@@ -61,6 +61,7 @@
    */
   --delta-color-surface: 255 255 255;
   --delta-color-surface-elevated: 248 250 252;
+  --delta-color-surface-elevated-hover: 241 245 249;
   --delta-color-surface-sunken: 226 232 240;
   --delta-color-surface-sunken-hover: 203 213 225;
   --delta-color-fg: 15 23 42;
@@ -94,7 +95,7 @@
  * styled element follows whichever block matches the current attribute.
  *
  * To add a new theme:
- *   1. Add a `:root[data-theme="<id>"]` block below defining all 18 tokens.
+ *   1. Add a `:root[data-theme="<id>"]` block below defining all 19 tokens.
  *   2. Add a matching entry to THEMES in src/themes/registry.ts.
  * No other code change is required — Tailwind utilities, the runtime readers
  * in src/theme.ts, and the useTheme hook all key off the same names.
@@ -102,6 +103,7 @@
 :root[data-theme='dark'] {
   --delta-color-surface: 15 23 42;
   --delta-color-surface-elevated: 30 41 59;
+  --delta-color-surface-elevated-hover: 51 65 85;
   --delta-color-surface-sunken: 51 65 85;
   --delta-color-surface-sunken-hover: 71 85 105;
   --delta-color-fg: 241 245 249;
@@ -123,6 +125,7 @@
 :root[data-theme='light'] {
   --delta-color-surface: 255 255 255;
   --delta-color-surface-elevated: 248 250 252;
+  --delta-color-surface-elevated-hover: 241 245 249;
   --delta-color-surface-sunken: 226 232 240;
   --delta-color-surface-sunken-hover: 203 213 225;
   --delta-color-fg: 15 23 42;
