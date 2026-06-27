@@ -5,9 +5,12 @@ import defaultTheme from 'tailwindcss/defaultTheme';
 //
 // This config is the single definition of the app's font stacks, and it names
 // the layout/color tokens whose *values* live as CSS custom properties in
-// `src/index.css` (the `:root` block). Utilities defined here resolve through
-// those variables, so a later user-facing stylesheet can override a token in
-// one place and every consumer — Tailwind utilities and the runtime readers in
+// `src/index.css`. The plain `:root` block carries default fallback values;
+// `:root[data-theme="..."]` blocks redefine the same names per theme so
+// swapping the attribute on `<html>` swaps every utility's resolved color
+// atomically (see useTheme.ts). Utilities defined here resolve through those
+// variables, so a later user-facing stylesheet can override a token in one
+// place and every consumer — Tailwind utilities and the runtime readers in
 // `src/theme.ts` (xterm) alike — follows. See `src/theme.ts` for the token
 // overview.
 // ---------------------------------------------------------------------------
@@ -82,6 +85,26 @@ export default {
         // The embedded terminal's background (xterm reads the same variable,
         // so the panel chrome and the canvas can never disagree).
         'terminal-bg': 'var(--delta-terminal-bg)',
+        // Semantic color tokens. Values come from the active
+        // `:root[data-theme="..."]` block in src/index.css; the same names
+        // resolve through every theme, so swapping `data-theme` swaps all of
+        // these atomically. `border-default` (not `border`) and `accent-fg` /
+        // similar dashed names avoid clashing with Tailwind's built-in
+        // single-token utilities (`border`, `text-fg` already lands cleanly
+        // because `fg` is not a built-in palette).
+        surface: 'var(--delta-color-surface)',
+        'surface-elevated': 'var(--delta-color-surface-elevated)',
+        'surface-sunken': 'var(--delta-color-surface-sunken)',
+        fg: 'var(--delta-color-fg)',
+        'fg-muted': 'var(--delta-color-fg-muted)',
+        'fg-subtle': 'var(--delta-color-fg-subtle)',
+        'border-default': 'var(--delta-color-border)',
+        'border-strong': 'var(--delta-color-border-strong)',
+        accent: 'var(--delta-color-accent)',
+        'accent-fg': 'var(--delta-color-accent-fg)',
+        danger: 'var(--delta-color-danger)',
+        warning: 'var(--delta-color-warning)',
+        info: 'var(--delta-color-info)',
       },
       keyframes: {
         // A hard on/off blink for the live-streaming caret. The `steps(1, end)`
