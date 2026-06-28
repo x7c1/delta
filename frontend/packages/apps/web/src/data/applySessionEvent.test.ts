@@ -63,6 +63,85 @@ describe('applySessionEvent', () => {
     });
   });
 
+  it('invalidates the named thread on turn_started even before the freshly-spawned session has bound focus + active thread', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    // The WS frame arrives while the freshly-spawned session's focus +
+    // active-thread binding has not settled: `focusedSessionId` is still the
+    // new-session sentinel (mapped to null at the router boundary) and
+    // `activeThreadId` is still null. Every `turn_started` carries its
+    // `thread_id`, so the router routes the refetch by that — not by the
+    // (still-null) focused client state — and a TranscriptPane that mounts
+    // shortly after for this thread reuses the now-stale-marked cache entry
+    // instead of relying on its first fetch to race the backend's writes.
+    applySessionEvent(
+      {
+        kind: 'turn_started',
+        session_id: 'sess-spawned',
+        thread_id: 7,
+        send_id: 1,
+        matched_uuid: 'uuid-1',
+      },
+      queryClient,
+      null,
+      null,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 7] });
+    // The pending strip refetches regardless of focus (already covered by
+    // earlier tests) — assert it here too so a future refactor that drops
+    // either invalidate is caught.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['session-sends', 'sess-spawned'],
+    });
+  });
+
+  it('invalidates both the named thread and the focused active thread when a sibling thread completes', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    // The focused session's branch thread (6) completes while the user is
+    // viewing the session's main thread (5). The branch is what grew, so its
+    // messages refetch; the active thread also refetches so its tree
+    // (`session-threads`) and any session-wide signal stay current.
+    applySessionEvent(
+      {
+        kind: 'turn_completed',
+        session_id: FOCUSED,
+        thread_id: 6,
+        stop_reason: null,
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 6] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 5] });
+  });
+
+  it('falls back to the focused active thread when a turn end carries no thread_id', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    // A session-wide turn end (e.g. an interrupt that landed without a bound
+    // thread). The transcript may still have grown via the session-level
+    // signal, so the focused active thread refetches.
+    applySessionEvent(
+      {
+        kind: 'turn_interrupted',
+        session_id: FOCUSED,
+        thread_id: null,
+      },
+      queryClient,
+      5,
+      FOCUSED,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 5] });
+  });
+
   it('refetches the open sends on send_dispatched and touches nothing else', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
@@ -107,9 +186,13 @@ describe('applySessionEvent', () => {
       FOCUSED,
     );
 
-    // No transcript invalidation for a session the user is not viewing — but
-    // its open-send list still refetches so its strip is right when viewed.
+    // No invalidation of the FOCUSED session's active thread — but the event
+    // names its own thread (8), so that thread's messages still refetch (a
+    // no-op when no observer for it is mounted, which is the common case for
+    // a background session). The session's open-send list also refetches so
+    // its pending strip is right when the user views it.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['messages', 5] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 8] });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', 'other-session'],
     });

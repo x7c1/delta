@@ -82,10 +82,34 @@ export function applySessionEvent(
       ) {
         store.bumpUnread(event.thread_id);
       }
-      // Transcript grew on the focused session: refetch the active thread. An
-      // interrupt also appends the `[Request interrupted by user]` marker line,
-      // so it refetches the same way a completed turn does.
-      if (isFocused && activeThreadId !== null) {
+      // Refetch the thread the event names — unconditionally, not gated on
+      // focus or `activeThreadId`. Under slow scheduling a `turn_started` WS
+      // frame for a freshly-spawned session can arrive BEFORE `setFocusedSession`
+      // + `setActiveThread` settle: with the previous gate the invalidate was
+      // skipped, and the next refetch trigger became the next turn event seconds
+      // later — by which point the user prompt, streamed reply, and tool_use
+      // lines had all landed together on the same refetch, surfacing as 3
+      // message-items in the streaming-window of `streaming.spec.ts` where the
+      // assertion expects 1. Routing by `event.thread_id` (always carried by
+      // `turn_started`; carried by turn completion/interruption when the turn
+      // was thread-bound) targets exactly the thread the server says grew,
+      // independent of client focus state — and invalidate on a not-yet-mounted
+      // observer is a safe no-op, so a refetch only fires where one is needed.
+      // An interrupt also appends the `[Request interrupted by user]` marker
+      // line, so it refetches the same way a completed turn does.
+      if (event.thread_id !== null) {
+        invalidateThreadMessages(queryClient, event.thread_id);
+      }
+      // A session-wide turn end (`thread_id: null`, e.g. a turn that has no
+      // bound thread) still needs the focused active thread to refetch — its
+      // transcript may have grown via that session-level signal even though no
+      // specific thread was named. Skip the duplicate when the event already
+      // named the active thread above.
+      if (
+        isFocused &&
+        activeThreadId !== null &&
+        activeThreadId !== event.thread_id
+      ) {
         invalidateThreadMessages(queryClient, activeThreadId);
       }
       // A branch send may have created a new thread; keep the tree fresh.
