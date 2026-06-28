@@ -152,10 +152,10 @@ function RateLimitRow({
       : null;
   return (
     <div
-      className="flex items-center gap-1.5 font-mono text-xs text-slate-500"
+      className="flex items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid={testId}
     >
-      <span className="w-5 shrink-0 text-slate-400">{label}</span>
+      <span className="w-5 shrink-0 text-fg-subtle">{label}</span>
       <Meter
         value={percentage}
         fillClassName={fillClassName}
@@ -168,7 +168,7 @@ function RateLimitRow({
       </span>
       {reset !== null && (
         <span
-          className="shrink-0 text-slate-400"
+          className="shrink-0 text-fg-subtle"
           data-testid={`${testId}-reset`}
         >
           {`↻ ${reset}`}
@@ -282,7 +282,7 @@ export function NavigatorPane({
   );
   return (
     <Panel
-      className="border-r border-slate-200"
+      className="border-r border-border-default"
       headerClassName="px-2"
       bodyRef={scrollBodyRef}
       // The session list is a side panel; hide its scrollbar entirely (no bar,
@@ -304,7 +304,7 @@ export function NavigatorPane({
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start border border-slate-300 text-slate-700"
+          className="w-full justify-start border border-border-strong text-fg"
           onClick={() => {
             startNewSession();
             setNewSessionWorkdir(null);
@@ -332,7 +332,7 @@ export function NavigatorPane({
                   label="5h"
                   window={rateLimits.fiveHour}
                   // Shared neutral accent — the rows are told apart by the label.
-                  fillClassName="bg-slate-500"
+                  fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
                   // inner fill div to the right edge, so the bar grows leftward
                   // from the reset side without modifying the Meter primitive.
@@ -345,7 +345,7 @@ export function NavigatorPane({
                   label="7d"
                   window={rateLimits.sevenDay}
                   // Shared neutral accent — the rows are told apart by the label.
-                  fillClassName="bg-slate-500"
+                  fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
                   // inner fill div to the right edge, so the bar grows leftward
                   // from the reset side without modifying the Meter primitive.
@@ -372,7 +372,7 @@ export function NavigatorPane({
                   title={CONNECTION_TITLE[connection]}
                 />
               </span>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs text-fg-muted">
                 {CONNECTION_LABEL[connection]}
               </span>
             </span>
@@ -386,7 +386,7 @@ export function NavigatorPane({
               size="sm"
               className={cn(
                 'px-1.5 -mr-2.5',
-                settingsOpen && 'bg-slate-100 text-slate-900',
+                settingsOpen && 'bg-surface-elevated-hover text-fg',
               )}
               data-testid="settings-entry"
               aria-label="Settings"
@@ -401,7 +401,7 @@ export function NavigatorPane({
     >
       {focusedSessionId === NEW_SESSION_FOCUS && (
         <div
-          className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-indigo-300 bg-indigo-50/70 px-2 py-2 text-xs text-indigo-700 shadow-sm ring-1 ring-indigo-200"
+          className="mx-2 mb-1.5 mt-1.5 rounded-lg border border-accent-disabled bg-accent/10 px-2 py-2 text-xs text-accent shadow-sm ring-1 ring-accent-disabled"
           data-testid="new-session-node"
         >
           New session — send the first message to start it.
@@ -460,7 +460,7 @@ export function NavigatorPane({
       {hasMoreSessions && isLoadingMoreSessions && (
         <div
           data-testid="sessions-load-more"
-          className="flex justify-center px-3 pb-3 pt-1 text-xs text-slate-400"
+          className="flex justify-center px-3 pb-3 pt-1 text-xs text-fg-subtle"
         >
           <Spinner label="loading more" />
         </div>

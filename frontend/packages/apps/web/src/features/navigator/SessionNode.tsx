@@ -216,10 +216,10 @@ export function SessionNode({
     >
       <div
         className={cn(
-          'rounded-md border bg-white shadow-md transition-colors',
+          'rounded-md border bg-surface shadow-md transition-colors',
           isFocused
-            ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200'
-            : 'border-slate-300 hover:border-slate-400',
+            ? 'border-accent-disabled bg-accent/10 ring-1 ring-accent-disabled'
+            : 'border-border-default hover:border-border-strong',
         )}
       >
         <div className="flex items-center gap-2 px-2 py-2">
@@ -246,7 +246,7 @@ export function SessionNode({
               <span
                 className={cn(
                   'min-w-0 truncate text-left',
-                  isFocused && 'font-medium text-indigo-800',
+                  isFocused && 'font-medium text-accent',
                 )}
                 title={branchAtLaunch ?? label}
                 data-testid="session-branch"
@@ -274,7 +274,7 @@ export function SessionNode({
                   title="Finished while you were away"
                 >
                   <span
-                    className="block h-2 w-2 rounded-full bg-indigo-500"
+                    className="block h-2 w-2 rounded-full bg-accent"
                     aria-hidden
                   />
                   <span className="sr-only">unread</span>
@@ -293,7 +293,7 @@ export function SessionNode({
                 long local path keeps its meaningful tail (e.g.
                 `…/projects/delta`). The repo span is omitted entirely when
                 neither yields a usable label. */}
-            <span className="flex items-baseline gap-2 text-xs text-slate-400">
+            <span className="flex items-baseline gap-2 text-xs text-fg-subtle">
               {repoLabel && (
                 <span
                   className={cn(
@@ -345,7 +345,7 @@ export function SessionNode({
           <div
             className={cn(
               'border-t px-2 py-1.5',
-              isFocused ? 'border-indigo-200' : 'border-slate-200',
+              isFocused ? 'border-accent-disabled' : 'border-border-default',
             )}
           >
             <ThreadTree
