@@ -152,6 +152,8 @@ body,
 
 body {
   margin: 0;
+  /* Inherit the theme's foreground so text without an explicit color follows light/dark. */
+  color: rgb(var(--delta-color-fg));
 }
 
 /*
