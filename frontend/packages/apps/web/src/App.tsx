@@ -21,9 +21,9 @@ const queryClient = createQueryClient();
 /** Full-screen fallback for the app-wide error boundary. */
 function AppCrash() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 bg-slate-50 text-sm text-slate-500">
+    <div className="flex h-full flex-col items-center justify-center gap-2 bg-surface-elevated text-sm text-fg-muted">
       <p>Something went wrong.</p>
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-fg-subtle">
         The app hit an unexpected error. Reload the page to recover.
       </p>
       <Button
@@ -45,7 +45,7 @@ export function App() {
             recoverable notice instead of a blank page. Region-level boundaries
             (e.g. the terminal) handle their own failures before reaching here. */}
         <ErrorBoundary label="app" fallback={() => <AppCrash />}>
-          <div className="h-full bg-slate-50 text-slate-900">
+          <div className="h-full bg-surface-elevated text-fg">
             <WorkspaceScreen />
           </div>
         </ErrorBoundary>
