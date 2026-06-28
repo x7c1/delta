@@ -259,7 +259,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             placeholder="My plugins"
-            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg focus:border-accent-hover focus:outline-none"
+            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -273,7 +273,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             onChange={(event) => setName(event.target.value)}
             placeholder="--permission-mode"
             required
-            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg focus:border-accent-hover focus:outline-none"
+            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
         <div className="flex flex-col gap-1">
@@ -286,7 +286,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder="auto"
-            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg focus:border-accent-hover focus:outline-none"
+            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
         <label className="flex items-center gap-2 text-xs font-medium text-fg-muted">
