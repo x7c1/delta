@@ -74,12 +74,12 @@ const BODY_BOTTOM_READING_GAP_PX = 192;
  * Shared chrome for the transcript pane's cards: the floating bottom notices
  * card and composer card that hover over the conversation, plus the in-flow
  * breadcrumb card that sits in the top region above it. A full border,
- * rounded corners, an opaque white fill that occludes the conversation
+ * rounded corners, an opaque surface fill that occludes the conversation
  * beneath, and a shadow so the card reads as lifted above its surroundings
  * rather than fused to them. Per-card padding is applied at each use site.
  */
 const FLOATING_CARD_CLASS =
-  'rounded-md border border-slate-300 bg-white shadow-md';
+  'rounded-md border border-border-default bg-surface shadow-md';
 
 /**
  * The overlay inset in pixels: the gap the floating cards leave from the body

@@ -73,7 +73,7 @@ export function WorktreeOptions() {
 
   return (
     <section
-      className="space-y-1.5 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+      className="space-y-1.5 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-xs"
       data-testid="worktree-options"
     >
       <label className="flex cursor-pointer items-center gap-2">
@@ -83,7 +83,7 @@ export function WorktreeOptions() {
           onChange={(event) => setEnabled(event.target.checked)}
           data-testid="worktree-toggle"
         />
-        <span className="font-medium text-slate-700">
+        <span className="font-medium text-fg">
           Start in an isolated git worktree
         </span>
       </label>
@@ -209,7 +209,7 @@ function WorktreeStartPointSelector({
 
   return (
     <fieldset className="space-y-1" data-testid="worktree-start-point">
-      <legend className="font-semibold uppercase tracking-wide text-slate-500">
+      <legend className="font-semibold uppercase tracking-wide text-fg-muted">
         Branch from
       </legend>
 
@@ -223,8 +223,8 @@ function WorktreeStartPointSelector({
           className="mt-0.5"
         />
         <span className="flex flex-col">
-          <span className="font-medium text-slate-700">Current HEAD</span>
-          <span className="text-slate-500">
+          <span className="font-medium text-fg">Current HEAD</span>
+          <span className="text-fg-muted">
             Branch from the repository&rsquo;s current state.
           </span>
         </span>
@@ -241,11 +241,11 @@ function WorktreeStartPointSelector({
             className="mt-0.5"
           />
           <span className="flex flex-col">
-            <span className="font-medium text-slate-700">
+            <span className="font-medium text-fg">
               Latest{' '}
-              <span className="font-mono text-slate-600">{defaultBranch}</span>
+              <span className="font-mono text-fg-muted">{defaultBranch}</span>
             </span>
-            <span className="text-slate-500">
+            <span className="text-fg-muted">
               Fetch and branch from the default branch.
             </span>
           </span>
@@ -262,10 +262,10 @@ function WorktreeStartPointSelector({
           className="mt-0.5"
         />
         <span className="flex flex-col">
-          <span className="font-medium text-slate-700">
+          <span className="font-medium text-fg">
             Other remote branch&hellip;
           </span>
-          <span className="text-slate-500">
+          <span className="text-fg-muted">
             Fetch and branch from a specific remote branch.
           </span>
         </span>
@@ -315,8 +315,8 @@ function BranchModeChoice({ mode, onChange }: BranchModeChoiceProps) {
           className="mt-0.5"
         />
         <span className="flex flex-col">
-          <span className="font-medium text-slate-700">New branch from it</span>
-          <span className="text-slate-500">
+          <span className="font-medium text-fg">New branch from it</span>
+          <span className="text-fg-muted">
             Cut a fresh per-session branch starting from it.
           </span>
         </span>
@@ -332,8 +332,8 @@ function BranchModeChoice({ mode, onChange }: BranchModeChoiceProps) {
           className="mt-0.5"
         />
         <span className="flex flex-col">
-          <span className="font-medium text-slate-700">Use this branch</span>
-          <span className="text-slate-500">
+          <span className="font-medium text-fg">Use this branch</span>
+          <span className="text-fg-muted">
             Work on the branch directly in the worktree.
           </span>
         </span>
@@ -368,13 +368,13 @@ function RemoteBranchPicker({
   return (
     <div className="ml-6 space-y-1.5" data-testid="remote-branch-picker">
       <label className="flex flex-col gap-0.5">
-        <span className="text-slate-500">Branch name</span>
+        <span className="text-fg-muted">Branch name</span>
         <input
           type="text"
           value={selectedName}
           onChange={(event) => onSelect(event.target.value)}
           placeholder="origin branch (e.g. feature/x)"
-          className="rounded border border-slate-300 px-2 py-1 font-mono text-xs focus:border-indigo-400 focus:outline-none"
+          className="rounded border border-border-default px-2 py-1 font-mono text-xs focus:border-accent-hover focus:outline-none"
           data-testid="remote-branch-input"
         />
       </label>
@@ -383,7 +383,7 @@ function RemoteBranchPicker({
 
       {!query.isLoading && query.isError && (
         <p
-          className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700"
+          className="rounded border border-danger/30 bg-danger/10 px-2 py-1 text-danger"
           role="alert"
           data-testid="remote-branch-error"
         >
@@ -400,10 +400,10 @@ function RemoteBranchPicker({
                 onClick={() => onSelect(name)}
                 aria-pressed={selectedName === name}
                 className={cn(
-                  'w-full truncate rounded px-2 py-1 text-left font-mono text-xs hover:bg-slate-100',
+                  'w-full truncate rounded px-2 py-1 text-left font-mono text-xs hover:bg-surface-elevated-hover',
                   selectedName === name
-                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-                    : 'text-slate-700',
+                    ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
+                    : 'text-fg',
                 )}
                 title={name}
                 data-testid={`remote-branch-${name}`}
@@ -416,7 +416,7 @@ function RemoteBranchPicker({
       )}
 
       {!query.isLoading && !query.isError && branches.length === 0 && (
-        <p className="px-2 py-1 italic text-slate-400">
+        <p className="px-2 py-1 italic text-fg-subtle">
           No remote branches found. Type a branch name above.
         </p>
       )}
