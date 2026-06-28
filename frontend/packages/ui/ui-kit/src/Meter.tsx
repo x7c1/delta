@@ -41,8 +41,14 @@ function clampPercentage(value: number): number {
  */
 export function Meter({
   value,
-  fillClassName = 'bg-slate-500',
-  trackClassName = 'bg-slate-200',
+  // The default fill maps to `bg-fg-muted` (slate-600 light) — one step
+  // darker than the previous slate-500. The token expresses the right
+  // semantic intent (a neutral "filled" indicator that follows the
+  // foreground ramp); the slight darkening is acceptable since callers can
+  // override `fillClassName` whenever a specific accent/state colour is
+  // wanted. The track maps to `bg-surface-sunken` exactly (slate-200).
+  fillClassName = 'bg-fg-muted',
+  trackClassName = 'bg-surface-sunken',
   className,
   title,
 }: MeterProps) {

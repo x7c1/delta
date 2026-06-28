@@ -11,10 +11,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
-    'bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-400',
+    'bg-accent text-accent-fg hover:bg-accent-hover disabled:bg-accent-disabled',
   secondary:
-    'bg-slate-200 text-slate-900 hover:bg-slate-300 disabled:opacity-60',
-  ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 disabled:opacity-50',
+    'bg-surface-sunken text-fg hover:bg-surface-sunken-hover disabled:opacity-60',
+  ghost: 'bg-transparent text-fg-muted hover:bg-surface-sunken disabled:opacity-50',
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {

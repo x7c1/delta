@@ -83,7 +83,10 @@ export default {
       },
       colors: {
         // The embedded terminal's background (xterm reads the same variable,
-        // so the panel chrome and the canvas can never disagree).
+        // so the panel chrome and the canvas can never disagree). Kept as a
+        // raw variable reference (not the `rgb(.../<alpha-value>)` form used
+        // below) because xterm consumes the resolved string directly via
+        // `getComputedStyle` and expects a parseable hex color.
         'terminal-bg': 'var(--delta-terminal-bg)',
         // Semantic color tokens. Values come from the active
         // `:root[data-theme="..."]` block in src/index.css; the same names
@@ -92,19 +95,40 @@ export default {
         // similar dashed names avoid clashing with Tailwind's built-in
         // single-token utilities (`border`, `text-fg` already lands cleanly
         // because `fg` is not a built-in palette).
-        surface: 'var(--delta-color-surface)',
-        'surface-elevated': 'var(--delta-color-surface-elevated)',
-        'surface-sunken': 'var(--delta-color-surface-sunken)',
-        fg: 'var(--delta-color-fg)',
-        'fg-muted': 'var(--delta-color-fg-muted)',
-        'fg-subtle': 'var(--delta-color-fg-subtle)',
-        'border-default': 'var(--delta-color-border)',
-        'border-strong': 'var(--delta-color-border-strong)',
-        accent: 'var(--delta-color-accent)',
-        'accent-fg': 'var(--delta-color-accent-fg)',
-        danger: 'var(--delta-color-danger)',
-        warning: 'var(--delta-color-warning)',
-        info: 'var(--delta-color-info)',
+        //
+        // Each variable stores its color as a space-separated `R G B` triple
+        // and is wrapped here as `rgb(var(--X) / <alpha-value>)`. The
+        // `<alpha-value>` placeholder is what Tailwind substitutes when a
+        // slash-opacity utility is requested (`bg-scrim/40`, `bg-info/15`,
+        // `bg-accent/10`, …); without it, Tailwind v3 cannot apply opacity
+        // modifiers to CSS-variable-based colors and the utility silently
+        // emits no CSS. See:
+        // https://tailwindcss.com/docs/customizing-colors#using-css-variables
+        surface: 'rgb(var(--delta-color-surface) / <alpha-value>)',
+        'surface-elevated':
+          'rgb(var(--delta-color-surface-elevated) / <alpha-value>)',
+        'surface-elevated-hover':
+          'rgb(var(--delta-color-surface-elevated-hover) / <alpha-value>)',
+        'surface-sunken':
+          'rgb(var(--delta-color-surface-sunken) / <alpha-value>)',
+        'surface-sunken-hover':
+          'rgb(var(--delta-color-surface-sunken-hover) / <alpha-value>)',
+        fg: 'rgb(var(--delta-color-fg) / <alpha-value>)',
+        'fg-muted': 'rgb(var(--delta-color-fg-muted) / <alpha-value>)',
+        'fg-subtle': 'rgb(var(--delta-color-fg-subtle) / <alpha-value>)',
+        'border-default': 'rgb(var(--delta-color-border) / <alpha-value>)',
+        'border-strong':
+          'rgb(var(--delta-color-border-strong) / <alpha-value>)',
+        accent: 'rgb(var(--delta-color-accent) / <alpha-value>)',
+        'accent-fg': 'rgb(var(--delta-color-accent-fg) / <alpha-value>)',
+        'accent-hover': 'rgb(var(--delta-color-accent-hover) / <alpha-value>)',
+        'accent-disabled':
+          'rgb(var(--delta-color-accent-disabled) / <alpha-value>)',
+        danger: 'rgb(var(--delta-color-danger) / <alpha-value>)',
+        warning: 'rgb(var(--delta-color-warning) / <alpha-value>)',
+        info: 'rgb(var(--delta-color-info) / <alpha-value>)',
+        success: 'rgb(var(--delta-color-success) / <alpha-value>)',
+        scrim: 'rgb(var(--delta-color-scrim) / <alpha-value>)',
       },
       keyframes: {
         // A hard on/off blink for the live-streaming caret. The `steps(1, end)`

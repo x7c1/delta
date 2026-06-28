@@ -47,23 +47,41 @@
    * mirror of `:root[data-theme="light"]` so the UI never renders unstyled if
    * the attribute is unset for any reason (e.g. JS disabled). This matches
    * the project's default visual chrome: the existing UI is light (white /
-   * slate-50 / slate-100 surfaces with slate-700/800/900 text); only the
+   * slate-50 / slate-200 surfaces with slate-700/800/900 text); only the
    * embedded terminal is dark. KEEP THE TWO BLOCKS IN SYNC when editing
    * light values.
+   *
+   * Values are stored as space-separated `R G B` triples (not `rgb(...)` or
+   * hex), so the matching `tailwind.config.js` entries can wrap them as
+   * `rgb(var(--delta-color-X) / <alpha-value>)` and Tailwind's slash-opacity
+   * utilities (`bg-scrim/40`, `bg-info/15`, …) resolve. Tailwind v3 requires
+   * the `<alpha-value>` placeholder for any color whose value lives in a CSS
+   * variable; see
+   * https://tailwindcss.com/docs/customizing-colors#using-css-variables.
    */
-  --delta-color-surface: theme(colors.white);
-  --delta-color-surface-elevated: theme(colors.slate.50);
-  --delta-color-surface-sunken: theme(colors.slate.100);
-  --delta-color-fg: theme(colors.slate.900);
-  --delta-color-fg-muted: theme(colors.slate.600);
-  --delta-color-fg-subtle: theme(colors.slate.400);
-  --delta-color-border: theme(colors.slate.200);
-  --delta-color-border-strong: theme(colors.slate.400);
-  --delta-color-accent: theme(colors.indigo.600);
-  --delta-color-accent-fg: theme(colors.white);
-  --delta-color-danger: theme(colors.rose.600);
-  --delta-color-warning: theme(colors.amber.600);
-  --delta-color-info: theme(colors.sky.600);
+  --delta-color-surface: 255 255 255;
+  --delta-color-surface-elevated: 248 250 252;
+  --delta-color-surface-elevated-hover: 241 245 249;
+  --delta-color-surface-sunken: 226 232 240;
+  --delta-color-surface-sunken-hover: 203 213 225;
+  --delta-color-fg: 15 23 42;
+  --delta-color-fg-muted: 71 85 105;
+  --delta-color-fg-subtle: 148 163 184;
+  --delta-color-border: 226 232 240;
+  --delta-color-border-strong: 148 163 184;
+  --delta-color-accent: 99 102 241;
+  --delta-color-accent-fg: 255 255 255;
+  --delta-color-accent-hover: 129 140 248;
+  --delta-color-accent-disabled: 165 180 252;
+  --delta-color-danger: 225 29 72;
+  --delta-color-warning: 217 119 6;
+  --delta-color-info: 2 132 199;
+  --delta-color-success: 5 150 105;
+  /* scrim: dark backdrop for modals/popovers; expected to be used with a
+   * transparency suffix (e.g. `bg-scrim/40`). Theme-dependent, but both
+   * themes resolve to a dark enough value to preserve contrast under the
+   * overlay regardless of the page's resting color. */
+  --delta-color-scrim: 15 23 42;
 }
 
 /*
@@ -77,41 +95,53 @@
  * styled element follows whichever block matches the current attribute.
  *
  * To add a new theme:
- *   1. Add a `:root[data-theme="<id>"]` block below defining all 13 tokens.
+ *   1. Add a `:root[data-theme="<id>"]` block below defining all 19 tokens.
  *   2. Add a matching entry to THEMES in src/themes/registry.ts.
  * No other code change is required — Tailwind utilities, the runtime readers
  * in src/theme.ts, and the useTheme hook all key off the same names.
  */
 :root[data-theme='dark'] {
-  --delta-color-surface: theme(colors.slate.900);
-  --delta-color-surface-elevated: theme(colors.slate.800);
-  --delta-color-surface-sunken: theme(colors.slate.950);
-  --delta-color-fg: theme(colors.slate.100);
-  --delta-color-fg-muted: theme(colors.slate.400);
-  --delta-color-fg-subtle: theme(colors.slate.500);
-  --delta-color-border: theme(colors.slate.700);
-  --delta-color-border-strong: theme(colors.slate.500);
-  --delta-color-accent: theme(colors.indigo.400);
-  --delta-color-accent-fg: theme(colors.white);
-  --delta-color-danger: theme(colors.rose.400);
-  --delta-color-warning: theme(colors.amber.400);
-  --delta-color-info: theme(colors.sky.400);
+  --delta-color-surface: 15 23 42;
+  --delta-color-surface-elevated: 30 41 59;
+  --delta-color-surface-elevated-hover: 51 65 85;
+  --delta-color-surface-sunken: 51 65 85;
+  --delta-color-surface-sunken-hover: 71 85 105;
+  --delta-color-fg: 241 245 249;
+  --delta-color-fg-muted: 148 163 184;
+  --delta-color-fg-subtle: 100 116 139;
+  --delta-color-border: 51 65 85;
+  --delta-color-border-strong: 100 116 139;
+  --delta-color-accent: 165 180 252;
+  --delta-color-accent-fg: 255 255 255;
+  --delta-color-accent-hover: 199 210 254;
+  --delta-color-accent-disabled: 129 140 248;
+  --delta-color-danger: 251 113 133;
+  --delta-color-warning: 251 191 36;
+  --delta-color-info: 56 189 248;
+  --delta-color-success: 52 211 153;
+  --delta-color-scrim: 2 6 23;
 }
 
 :root[data-theme='light'] {
-  --delta-color-surface: theme(colors.white);
-  --delta-color-surface-elevated: theme(colors.slate.50);
-  --delta-color-surface-sunken: theme(colors.slate.100);
-  --delta-color-fg: theme(colors.slate.900);
-  --delta-color-fg-muted: theme(colors.slate.600);
-  --delta-color-fg-subtle: theme(colors.slate.400);
-  --delta-color-border: theme(colors.slate.200);
-  --delta-color-border-strong: theme(colors.slate.400);
-  --delta-color-accent: theme(colors.indigo.600);
-  --delta-color-accent-fg: theme(colors.white);
-  --delta-color-danger: theme(colors.rose.600);
-  --delta-color-warning: theme(colors.amber.600);
-  --delta-color-info: theme(colors.sky.600);
+  --delta-color-surface: 255 255 255;
+  --delta-color-surface-elevated: 248 250 252;
+  --delta-color-surface-elevated-hover: 241 245 249;
+  --delta-color-surface-sunken: 226 232 240;
+  --delta-color-surface-sunken-hover: 203 213 225;
+  --delta-color-fg: 15 23 42;
+  --delta-color-fg-muted: 71 85 105;
+  --delta-color-fg-subtle: 148 163 184;
+  --delta-color-border: 226 232 240;
+  --delta-color-border-strong: 148 163 184;
+  --delta-color-accent: 99 102 241;
+  --delta-color-accent-fg: 255 255 255;
+  --delta-color-accent-hover: 129 140 248;
+  --delta-color-accent-disabled: 165 180 252;
+  --delta-color-danger: 225 29 72;
+  --delta-color-warning: 217 119 6;
+  --delta-color-info: 2 132 199;
+  --delta-color-success: 5 150 105;
+  --delta-color-scrim: 15 23 42;
 }
 
 html,
