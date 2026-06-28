@@ -64,17 +64,17 @@ export function LaunchOptionsPicker() {
 
   return (
     <section
-      className="space-y-1 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs"
+      className="space-y-1 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-xs"
       data-testid="launch-options-picker"
     >
-      <h3 className="font-semibold uppercase tracking-wide text-slate-500">
+      <h3 className="font-semibold uppercase tracking-wide text-fg-muted">
         Launch options
       </h3>
       <ul className="space-y-0.5">
         {options.map((option) => (
           <li key={option.id}>
             <label
-              className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-100"
+              className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-surface-elevated-hover"
               title={
                 option.value === null
                   ? option.name
@@ -88,14 +88,14 @@ export function LaunchOptionsPicker() {
                 data-testid={`launch-option-${option.id}`}
               />
               {option.label && (
-                <span className="font-medium text-slate-700">
+                <span className="font-medium text-fg">
                   {option.label}
                 </span>
               )}
-              <span className="min-w-0 truncate font-mono text-slate-600">
+              <span className="min-w-0 truncate font-mono text-fg-muted">
                 {option.name}
                 {option.value !== null && (
-                  <span className="text-slate-400"> {option.value}</span>
+                  <span className="text-fg-subtle"> {option.value}</span>
                 )}
               </span>
             </label>

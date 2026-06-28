@@ -56,7 +56,7 @@ function TerminalIcon({ className }: { className?: string }) {
  * keeps each side reviewable on its own.
  */
 const TERMINAL_TOGGLE_BUTTON_CLASS =
-  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50';
+  'inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-3 py-1.5 text-xs font-medium text-fg shadow-md transition-colors hover:bg-surface-elevated';
 
 /**
  * Pick the session to focus on cold load from the session list: prefer the
@@ -255,7 +255,7 @@ export function WorkspaceScreen() {
 
   if (sessionsQuery.isPending) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
         Loading sessions…
       </div>
     );
@@ -263,9 +263,9 @@ export function WorkspaceScreen() {
 
   if (sessionsQuery.isError) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-slate-500">
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-fg-muted">
         <p>Could not load sessions.</p>
-        <p className="text-xs text-slate-400">
+        <p className="text-xs text-fg-subtle">
           Make sure the Delta server is running, then reload.
         </p>
         <Button size="sm" variant="secondary" onClick={() => sessionsQuery.refetch()}>
@@ -345,7 +345,7 @@ export function WorkspaceScreen() {
             terminalButton={terminalToggleButton}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">
+          <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
             Select a session to view its conversation.
           </div>
         )}
