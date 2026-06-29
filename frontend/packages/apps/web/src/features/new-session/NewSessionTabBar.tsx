@@ -47,8 +47,8 @@ export function NewSessionTabBar() {
           className={cn(
             'rounded px-3 py-1.5 text-xs font-medium transition',
             activeTab === tab.id
-              ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800',
+              ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
+              : 'text-fg-muted hover:bg-surface-elevated hover:text-fg',
           )}
           data-testid={`new-session-tab-${tab.id}`}
         >

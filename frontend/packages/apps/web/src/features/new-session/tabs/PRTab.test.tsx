@@ -200,8 +200,8 @@ describe('PRTab', () => {
     let rows = await screen.findAllByTestId('pr-tab-row');
     for (const row of rows) {
       expect(row).toHaveAttribute('data-selected', 'false');
-      expect(row.className).not.toMatch(/bg-indigo-50/);
-      expect(row.className).not.toMatch(/ring-indigo-200/);
+      expect(row.className).not.toMatch(/bg-accent\/10/);
+      expect(row.className).not.toMatch(/ring-accent-disabled/);
     }
 
     const clickable = rows.find(
@@ -226,8 +226,8 @@ describe('PRTab', () => {
     )!;
     const others = rows.filter((row) => row !== picked);
     expect(picked).toHaveAttribute('data-selected', 'true');
-    expect(picked.className).toMatch(/bg-indigo-50/);
-    expect(picked.className).toMatch(/ring-indigo-200/);
+    expect(picked.className).toMatch(/bg-accent\/10/);
+    expect(picked.className).toMatch(/ring-accent-disabled/);
     for (const row of others) {
       expect(row).toHaveAttribute('data-selected', 'false');
     }
@@ -250,7 +250,7 @@ describe('PRTab', () => {
     expect(rows.length).toBeGreaterThanOrEqual(2);
     // The repo label is the row's first inner `<span>` carrying the
     // `font-mono` class. All such labels must share an identical class
-    // string — the prior `font-semibold text-slate-700` first-row bump
+    // string — the prior `font-semibold text-fg` first-row bump
     // would surface as a class divergence here.
     const labelClasses = rows.map((row) => {
       const label = row.querySelector('span.font-mono');
@@ -258,11 +258,11 @@ describe('PRTab', () => {
     });
     expect(new Set(labelClasses).size).toBe(1);
     // And the surviving class must NOT contain `font-semibold` — the
-    // single uniform style is the same `text-slate-700` weight the
+    // single uniform style is the same `text-fg` weight the
     // Repository tab's clickable rows use, so the two tabs read
     // consistently. The divider supplies the grouping structure.
     expect(labelClasses[0]).not.toMatch(/font-semibold/);
-    expect(labelClasses[0]).toMatch(/text-slate-700/);
+    expect(labelClasses[0]).toMatch(/text-fg/);
   });
 });
 
