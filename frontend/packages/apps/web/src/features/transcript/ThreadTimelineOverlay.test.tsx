@@ -1667,13 +1667,13 @@ describe('ThreadTimelineOverlay playhead', () => {
     }
   });
 
-  // The playhead's bar colour reuses the dark-gray Tailwind token used by the
-  // navigator's rate-limit meter and the composer's context-usage progress
-  // bar (both `bg-slate-500`), so all three progress-style indicators read as
-  // one visual family. An earlier indigo accent (`bg-indigo-500`) clashed with
-  // the surrounding UI; this test pins the chosen token so a future style
-  // refactor cannot silently regress the unification.
-  it('uses the shared dark-gray progress-bar token, not the indigo accent', async () => {
+  // The playhead's bar colour reuses the muted foreground semantic token used
+  // by the navigator's rate-limit meter and the composer's context-usage
+  // progress bar (all `bg-fg-muted`), so all three progress-style indicators
+  // read as one visual family. An earlier indigo accent (`bg-accent`) clashed
+  // with the surrounding UI; this test pins the chosen token so a future
+  // style refactor cannot silently regress the unification.
+  it('uses the shared muted-foreground progress-bar token, not the accent', async () => {
     const threads = [
       makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
       makeThread(2, {
@@ -1686,8 +1686,8 @@ describe('ThreadTimelineOverlay playhead', () => {
     const playheads = await screen.findAllByTestId('thread-timeline-playhead');
     expect(playheads.length).toBeGreaterThanOrEqual(1);
     for (const ph of playheads) {
-      expect(ph.className).toContain('bg-slate-500');
-      expect(ph.className).not.toContain('bg-indigo-500');
+      expect(ph.className).toContain('bg-fg-muted');
+      expect(ph.className).not.toContain('bg-accent');
     }
   });
 });
@@ -1791,12 +1791,12 @@ describe('ThreadTimelineOverlay mark rendering', () => {
     // Solid fill on both — overlap is prevented by the global x map, not by
     // alpha stacking, so the classes carry no alpha suffix or ring outline.
     expect(userMark).toHaveAttribute('data-message-kind', 'user');
-    expect(userMark.className).toContain('bg-blue-500');
-    expect(userMark.className).not.toContain('bg-blue-500/');
+    expect(userMark.className).toContain('bg-info');
+    expect(userMark.className).not.toContain('bg-info/');
     expect(userMark.className).not.toContain('ring-');
     expect(otherMark).toHaveAttribute('data-message-kind', 'other');
-    expect(otherMark.className).toContain('bg-slate-400');
-    expect(otherMark.className).not.toContain('bg-slate-400/');
+    expect(otherMark.className).toContain('bg-fg-subtle');
+    expect(otherMark.className).not.toContain('bg-fg-subtle/');
     expect(otherMark.className).not.toContain('ring-');
   });
 
@@ -2601,23 +2601,23 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(label.style.left).toBe('0px');
   });
 
-  it('paints the sticky label with an opaque background via className (bg-white resting, bg-slate-50 active) so axis dots cannot peek through during a horizontal pan and the active highlight remains visible', async () => {
+  it('paints the sticky label with an opaque background via className (bg-surface resting, bg-surface-elevated active) so axis dots cannot peek through during a horizontal pan and the active highlight remains visible', async () => {
     // The sticky label slides over the axis cell horizontally as the
     // wrapper pans. Without an opaque background the axis line and dots
     // would read through the label glyphs, which is illegible. The
     // background MUST come from the className (not from an inline
     // `style.background`): an inline background has higher specificity
-    // than a Tailwind class, so an inline `background: white` would win
-    // over an active-state `bg-slate-50` class and leave the sticky
-    // label white while the axis cell paints `bg-slate-50` — breaking
-    // the row's visual continuity, which is precisely what
+    // than a Tailwind class, so an inline `background: surface` would win
+    // over an active-state `bg-surface-elevated` class and leave the
+    // sticky label white while the axis cell paints `bg-surface-elevated`
+    // — breaking the row's visual continuity, which is precisely what
     // {@link applies the active highlight to both grid cells of the
     // active lane} pins on the axis side.
     //
-    // The contract is therefore: inactive sticky label paints `bg-white`
+    // The contract is therefore: inactive sticky label paints `bg-surface`
     // (matching the body so axis dots never read through it), active
-    // sticky label paints `bg-slate-50` (matching the axis cell so the
-    // active band reads as one continuous row), and no inline
+    // sticky label paints `bg-surface-elevated` (matching the axis cell so
+    // the active band reads as one continuous row), and no inline
     // `background` style is set that would override either.
     const threads = [
       makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
@@ -2639,15 +2639,16 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     const activeLabel = within(lanes[1]).getByTestId(
       'thread-timeline-lane-label',
     );
-    // Inactive sticky label is opaque white through the className.
-    expect(inactiveLabel.className).toMatch(/\bbg-white\b/);
-    expect(inactiveLabel.className).not.toMatch(/\bbg-slate-50\b/);
-    // Active sticky label is opaque slate-50 (matching the axis cell's
-    // highlight) and does NOT carry the resting bg-white token — so
-    // there is exactly one background class active per cell and the
+    // Inactive sticky label is opaque surface through the className.
+    // `bg-surface(?!-)` matches the resting class but not `bg-surface-elevated`.
+    expect(inactiveLabel.className).toMatch(/\bbg-surface(?!-)/);
+    expect(inactiveLabel.className).not.toMatch(/\bbg-surface-elevated\b/);
+    // Active sticky label is opaque surface-elevated (matching the axis
+    // cell's highlight) and does NOT carry the resting bg-surface token
+    // — so there is exactly one background class active per cell and the
     // class set unambiguously identifies the visual state.
-    expect(activeLabel.className).toMatch(/\bbg-slate-50\b/);
-    expect(activeLabel.className).not.toMatch(/\bbg-white\b/);
+    expect(activeLabel.className).toMatch(/\bbg-surface-elevated\b/);
+    expect(activeLabel.className).not.toMatch(/\bbg-surface(?!-)/);
     // No inline background on either label — the background lives on
     // className alone so the active class always wins. (Reading the
     // style property directly catches both `background` and
@@ -2710,7 +2711,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     // `border-y border-transparent` (the prior inactive placeholder)
     // reserved 1 px on top and 1 px on bottom of every row and produced
     // a ~2 px transparent stripe between adjacent rows under
-    // `align-items: stretch`. The `bg-slate-50` background remains the
+    // `align-items: stretch`. The `bg-surface-elevated` background remains the
     // active band's surface; the inset shadow draws its boundary.
     const threads = [
       makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
@@ -2739,8 +2740,8 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     expect(activeAxis).toHaveAttribute('data-active', 'true');
     // Both cells carry the identical highlight token set so the band
     // reads as continuous across the row.
-    expect(activeLabel.className).toMatch(/bg-slate-50/);
-    expect(activeAxis.className).toMatch(/bg-slate-50/);
+    expect(activeLabel.className).toMatch(/bg-surface-elevated/);
+    expect(activeAxis.className).toMatch(/bg-surface-elevated/);
     // v30: the hairline is an inset box-shadow (non-layout), not a
     // border-y placeholder (which used to reserve a 2 px gap between
     // adjacent rows).
@@ -2754,8 +2755,8 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     const inactiveAxis = lanes[0].querySelector(
       '[data-timeline-axis]',
     ) as HTMLElement;
-    expect(inactiveLabel.className).not.toMatch(/bg-slate-50/);
-    expect(inactiveAxis.className).not.toMatch(/bg-slate-50/);
+    expect(inactiveLabel.className).not.toMatch(/bg-surface-elevated/);
+    expect(inactiveAxis.className).not.toMatch(/bg-surface-elevated/);
     // Inactive rows must not carry the inset shadow either — otherwise
     // the active state stops reading as distinct.
     expect(inactiveLabel.className).not.toMatch(/shadow-\[inset_/);
@@ -2769,7 +2770,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     // container's `align-items: stretch`, this is the necessary and
     // sufficient condition for the two cells of a single row to share
     // the same painted height — so the active-highlight band
-    // (`bg-slate-50` + `border-y`) appears as one continuous block
+    // (`bg-surface-elevated` + `border-y`) appears as one continuous block
     // across the row rather than two stripes of mismatched height. A
     // regression that dropped `h-full` from either side or pinned the
     // axis to a fixed `height` would defeat the stretch and reintroduce
@@ -2825,8 +2826,8 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
     const activeAxis = activeLane.querySelector(
       '[data-timeline-axis]',
     ) as HTMLElement;
-    expect(activeLabel.className).toMatch(/bg-slate-50/);
-    expect(activeAxis.className).toMatch(/bg-slate-50/);
+    expect(activeLabel.className).toMatch(/bg-surface-elevated/);
+    expect(activeAxis.className).toMatch(/bg-surface-elevated/);
   });
 
   it('keeps row alignment stretched regardless of how many lanes accumulate', async () => {
@@ -3106,7 +3107,7 @@ describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
     expect(cluster.className).not.toMatch(/\bshadow(?:-|\b)/);
     // Pin the fill colour explicitly: a cluster reads as a normal small
     // assistant dot (same fill, same size, no halo).
-    expect(cluster.className).toMatch(/\bbg-slate-400\b/);
+    expect(cluster.className).toMatch(/\bbg-fg-subtle\b/);
     // No transform-scale either: a 4 px disc * scale-150 would also
     // recreate the "looks 6 px" regression at a different code path.
     expect(cluster.className).not.toMatch(/\bscale-/);

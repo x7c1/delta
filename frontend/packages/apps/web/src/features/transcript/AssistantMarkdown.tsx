@@ -13,7 +13,7 @@ import remarkGfm from 'remark-gfm';
  */
 export function AssistantMarkdown({ text }: { text: string }) {
   return (
-    <div className="markdown-body text-slate-800">
+    <div className="markdown-body text-fg">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   );

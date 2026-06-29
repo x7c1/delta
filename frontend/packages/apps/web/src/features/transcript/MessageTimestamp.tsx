@@ -8,7 +8,7 @@ import type { HTMLAttributes } from 'react';
  * component so a typographic change (font, size, colour) happens here once
  * instead of being duplicated — and forgotten — at each call site.
  */
-const TIMESTAMP_CLASS = 'font-mono text-xs tabular-nums text-slate-400';
+const TIMESTAMP_CLASS = 'font-mono text-xs tabular-nums text-fg-subtle';
 
 interface MessageTimestampProps extends HTMLAttributes<HTMLSpanElement> {
   /** The already-formatted local timestamp string. */
