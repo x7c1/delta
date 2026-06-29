@@ -167,6 +167,70 @@ pub fn tool_result_line(uuid: &str, tool_use_id: &str, is_error: bool) -> Transc
     }
 }
 
+/// A `tool_result` carrier whose `content` carries the launch ack text that a
+/// background `Agent`/`Task` writes — including the `agentId: <id>` substring
+/// the fold-time recovery is supposed to capture. Mirrors the real Claude
+/// shape (array of `{ "type": "text", "text": ... }` blocks).
+pub fn tool_result_with_agent_id_line(
+    uuid: &str,
+    tool_use_id: &str,
+    agent_id: &str,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_use_id.into(),
+            content: serde_json::json!([{
+                "type": "text",
+                "text": format!(
+                    "Async agent launched successfully.\n\
+                     agentId: {agent_id} (internal ID - do not mention to user.)\n\
+                     The agent is working in the background."
+                ),
+            }]),
+            is_error: false,
+        }],
+        ..user_line(uuid, "")
+    }
+}
+
+/// A `<task-notification>` whose body carries only `<task-id>` — no
+/// `<tool-use-id>`. Recent Claude Code versions strip the element from the
+/// user-message body while keeping the sibling `<task-id>` element, so the
+/// completion must still correlate via the task-id fallback.
+pub fn task_notification_line_with_task_id_only(uuid: &str, task_id: &str) -> TranscriptMessage {
+    user_line(
+        uuid,
+        &format!(
+            "<task-notification>\n\
+             <task-id>{task_id}</task-id>\n\
+             <output-file>/tmp/x.output</output-file>\n\
+             <status>completed</status>\n\
+             <summary>Agent completed</summary>\n\
+             </task-notification>"
+        ),
+    )
+}
+
+/// A `<task-notification>` whose body carries only `<tool-use-id>` — no
+/// `<task-id>`. Used to regression-test the existing tool-use-id-keyed
+/// correlation path after the fold-time `task_id` upgrade.
+pub fn task_notification_line_with_tool_use_id_only(
+    uuid: &str,
+    tool_use_id: &str,
+) -> TranscriptMessage {
+    user_line(
+        uuid,
+        &format!(
+            "<task-notification>\n\
+             <tool-use-id>{tool_use_id}</tool-use-id>\n\
+             <output-file>/tmp/x.output</output-file>\n\
+             <status>completed</status>\n\
+             <summary>Agent completed</summary>\n\
+             </task-notification>"
+        ),
+    )
+}
+
 /// A harness-injected `isMeta` line (skill bodies, system reminders, ...).
 pub fn meta_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {

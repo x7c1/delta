@@ -364,12 +364,31 @@ pub fn attribute_lines(
                 ContentBlock::ToolResult {
                     tool_use_id,
                     is_error,
-                    ..
+                    content,
                 } => {
                     effects.push(Effect::ResolvePermission {
                         tool_use_id: tool_use_id.clone(),
                         allowed: !is_error,
                     });
+                    // In-memory state recovery only — no `Effect` is emitted.
+                    // The live `PostToolUse(Agent)` hook is responsible for
+                    // persisting the `agentId` on the launch row; this branch
+                    // mirrors that upgrade against the in-memory launch entry
+                    // so a fold without the hook (cold-start replay / re-fold)
+                    // can still match a `<task-notification>` body that ships
+                    // only `<task-id>`. The structural sibling
+                    // `toolUseResult.agentId` is not preserved in
+                    // `ContentBlock::ToolResult`, so the id is rescued from the
+                    // human-readable `tool_result` text instead.
+                    if let Some(launch) = state.launched_threads.get_mut(tool_use_id) {
+                        if launch.task_id.is_none() {
+                            if let Some(id) =
+                                claude_format::agent_id_from_tool_result_content(content)
+                            {
+                                launch.task_id = Some(id.to_owned());
+                            }
+                        }
+                    }
                 }
                 // A background `Agent`/`Task`/`Bash` (async-by-default for
                 // Agent/Task, opt-in `run_in_background: true` for Bash) returns

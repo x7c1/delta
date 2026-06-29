@@ -114,6 +114,61 @@ fn task_notification_element<'a>(prompt: &'a str, name: &str) -> Option<&'a str>
     Some(rest[..end].trim())
 }
 
+/// Fallback used during fold to capture the `agentId: <id>` substring from
+/// the launch tool_result text, because the JSONL sibling
+/// `toolUseResult.agentId` is not preserved in `ContentBlock::ToolResult`.
+///
+/// Claude Code writes the background-task identifier into the human-readable
+/// `tool_result` text (`Async agent launched successfully.\nagentId: <id> ...`)
+/// alongside a sibling `toolUseResult.agentId` field on the same JSONL line.
+/// The sibling carries the same value, but the structural parser only keeps
+/// the `content` blocks, so the in-memory `tool_result` Delta sees has only
+/// the text. Recovering the id from that text gives the fold path the same
+/// `task_id` upgrade the live `PostToolUse(Agent)` hook records — needed when
+/// a `<task-notification>` body ships only `<task-id>`.
+///
+/// Accepts the three shapes `content` realistically takes: an array of
+/// `{ "type": "text", "text": "..." }` blocks (the typical Claude shape), a
+/// single such object, or a plain JSON string. Anything else degrades to
+/// `None`. The id token is `[A-Za-z0-9_-]+`; the first `agentId: ` occurrence
+/// wins.
+pub fn agent_id_from_tool_result_content(content: &serde_json::Value) -> Option<&str> {
+    if let Some(s) = content.as_str() {
+        return extract_agent_id_from_text(s);
+    }
+    if let Some(arr) = content.as_array() {
+        for block in arr {
+            if let Some(text) = block.get("text").and_then(serde_json::Value::as_str) {
+                if let Some(id) = extract_agent_id_from_text(text) {
+                    return Some(id);
+                }
+            }
+        }
+        return None;
+    }
+    content
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .and_then(extract_agent_id_from_text)
+}
+
+/// Scan a plain text string for the first `agentId: <id>` token and return
+/// the id (`[A-Za-z0-9_-]+`). Returns `None` if the marker is absent or no id
+/// characters follow it.
+fn extract_agent_id_from_text(text: &str) -> Option<&str> {
+    const MARKER: &str = "agentId: ";
+    let start = text.find(MARKER)? + MARKER.len();
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        .unwrap_or(rest.len());
+    if end == 0 {
+        None
+    } else {
+        Some(&rest[..end])
+    }
+}
+
 /// Whether a tool_use launches the tool in the background — i.e. returns
 /// immediately while the actual work continues, with a later
 /// `<task-notification>` user line reporting its completion. The launching
@@ -258,6 +313,44 @@ mod tests {
             task_notification_task_id(
                 "<task-notification><status>completed</status></task-notification>"
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn agent_id_is_extracted_from_an_array_of_text_blocks() {
+        let content = serde_json::json!([
+            {
+                "type": "text",
+                "text": "Async agent launched successfully.\n\
+                         agentId: a6a7d31c908cdfa24 (internal ID - do not mention to user.)\n\
+                         The agent is working in the background.",
+            }
+        ]);
+        assert_eq!(
+            agent_id_from_tool_result_content(&content),
+            Some("a6a7d31c908cdfa24")
+        );
+    }
+
+    #[test]
+    fn agent_id_extraction_returns_none_when_marker_is_absent() {
+        let content = serde_json::json!([
+            { "type": "text", "text": "no marker here, just regular tool output." }
+        ]);
+        assert_eq!(agent_id_from_tool_result_content(&content), None);
+    }
+
+    #[test]
+    fn agent_id_extraction_degrades_for_non_string_and_malformed_content() {
+        // Not an array, object, or string — a bare number is unknown shape.
+        assert_eq!(
+            agent_id_from_tool_result_content(&serde_json::json!(42)),
+            None
+        );
+        // Object missing the `text` field.
+        assert_eq!(
+            agent_id_from_tool_result_content(&serde_json::json!({ "type": "text" })),
             None
         );
     }
