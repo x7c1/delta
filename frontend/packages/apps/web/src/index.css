@@ -177,6 +177,48 @@
   --delta-color-highlight-wash: 254 243 199;
 }
 
+/*
+ * Sepia theme — warm beige surfaces, dark brown foreground, copper accent.
+ * The block follows the same recipe as a third-party theme would: add this
+ * `:root[data-theme="<id>"]` block plus a matching entry in
+ * src/themes/registry.ts and the Appearance picker enumerates it
+ * automatically with no picker-code edits.
+ *
+ * The block deliberately overrides only theme-flipping tokens — `terminal-*`
+ * and `highlight-wash` are theme-fixed (see the contract at the top of this
+ * file) and stay on their light-theme values, just as the dark block leaves
+ * the values it does not flip on the defaults. Token values are
+ * space-separated `R G B` triples to match the contract Tailwind utilities
+ * rely on (`rgb(var(--…) / <alpha-value>)`).
+ */
+:root[data-theme='sepia'] {
+  --delta-color-surface: 247 235 207;
+  --delta-color-surface-elevated: 240 224 184;
+  --delta-color-surface-elevated-hover: 226 204 154;
+  --delta-color-surface-sunken: 219 196 144;
+  --delta-color-surface-sunken-hover: 203 175 118;
+  --delta-color-fg: 67 41 11;
+  --delta-color-fg-muted: 109 76 35;
+  --delta-color-fg-subtle: 158 122 78;
+  --delta-color-border: 203 175 118;
+  --delta-color-border-strong: 158 122 78;
+  --delta-color-accent: 153 76 32;
+  --delta-color-accent-fg: 247 235 207;
+  --delta-color-accent-hover: 184 102 51;
+  --delta-color-accent-disabled: 209 167 130;
+  --delta-color-danger: 178 34 52;
+  --delta-color-warning: 161 84 8;
+  --delta-color-info: 25 110 142;
+  --delta-color-success: 75 124 65;
+  --delta-color-scrim: 67 41 11;
+  --delta-color-terminal-bg: 15 23 42;
+  --delta-color-terminal-fg: 203 213 225;
+  --delta-color-terminal-fg-strong: 241 245 249;
+  --delta-color-terminal-overlay: 30 41 59;
+  --delta-color-terminal-overlay-hover: 51 65 85;
+  --delta-color-highlight-wash: 254 243 199;
+}
+
 html,
 body,
 #root {

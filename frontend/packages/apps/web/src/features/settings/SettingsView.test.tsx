@@ -274,17 +274,20 @@ describe('SettingsView', () => {
       renderSettings();
       switchToAppearance();
       const group = screen.getByTestId('appearance-theme-options');
-      // The registry currently registers Dark and Light; the picker adds
-      // System on top. Assert on the visible labels so adding a new theme
-      // to the registry (without touching this file) surfaces naturally.
+      // The picker enumerates the THEMES registry and appends System; this
+      // assertion mirrors the registry order so a registry edit (the only
+      // intended way to add a theme) is the single thing this expectation
+      // needs to follow.
       const radios = within(group).getAllByRole('radio');
       expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
         'dark',
         'light',
+        'sepia',
         SYSTEM_PREFERENCE,
       ]);
       expect(within(group).getByText('Dark')).toBeInTheDocument();
       expect(within(group).getByText('Light')).toBeInTheDocument();
+      expect(within(group).getByText('Sepia')).toBeInTheDocument();
       expect(within(group).getByText('System')).toBeInTheDocument();
     });
 
