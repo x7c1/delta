@@ -1,5 +1,7 @@
 import { useEffect, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
+  invalidateThreadMessages,
   useSessionsQuery,
   useSessionThreadsQuery,
 } from '@delta/api-client';
@@ -249,6 +251,26 @@ export function WorkspaceScreen() {
       clearUnread(activeThreadId);
     }
   }, [activeThreadId, clearUnread]);
+
+  // Refetch the bound thread's messages on every active-thread transition.
+  // The session-event router (`applySessionEvent`) invalidates the messages
+  // cache only for queries that have already been observed; turn lifecycle
+  // and transcript-update events that arrive BEFORE the TranscriptPane mounts
+  // for a freshly-spawned session are therefore no-ops on the not-yet-existing
+  // cache entry. Without a binding-side flush the first mount's fetch is the
+  // ONLY chance to capture pre-bind growth, which under slow scheduling can
+  // race the backend's user-line write: the fetch returns empty, no
+  // subsequent event re-invalidates that key (the user-line `transcript_updated`
+  // already fired), and the messages stay at 0 until the next persisted line
+  // 3 s later — at which point everything lands at once. Invalidating on bind
+  // forces an extra refetch right after the mount's initial fetch resolves, so
+  // any DB state that caught up in the interim is picked up immediately.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (activeThreadId !== null) {
+      invalidateThreadMessages(queryClient, activeThreadId);
+    }
+  }, [activeThreadId, queryClient]);
 
   const activeThread =
     threads.find((thread) => thread.id === activeThreadId) ?? null;
