@@ -2,10 +2,18 @@
  * Theme registry — the single source of truth for the list of selectable
  * themes.
  *
- * Adding a new theme is a two-step change with no other code modifications:
+ * How to add a new theme (it is a 2-file change, no picker-code edits):
  *   1. Add a `:root[data-theme="<id>"]` block in `src/index.css` defining
  *      every semantic color CSS variable the theme contract specifies.
+ *      Theme-fixed tokens (`terminal-*`, `highlight-wash`) must keep their
+ *      existing values; see the contract at the top of `src/index.css`.
  *   2. Add a {@link ThemeMeta} entry to {@link THEMES} below.
+ *   3. The Appearance picker (see `AppearanceSection` in
+ *      `src/features/settings/SettingsView.tsx`) enumerates `THEMES`, so the
+ *      new option appears in the UI automatically.
+ *
+ * The `sepia-demo` entry below is a working example of the recipe; remove it
+ * once a real second theme ships and the recipe has additional in-tree proof.
  *
  * {@link ThemeId} is intentionally an open string shape (`string & {}`) so
  * call sites can accept future theme ids without forcing this file's union to
@@ -37,6 +45,9 @@ export interface ThemeMeta {
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'dark', displayName: 'Dark', isDark: true },
   { id: 'light', displayName: 'Light', isDark: false },
+  // Demonstration theme that proves the registry + CSS-block extension
+  // recipe; safe to remove once a real second theme ships.
+  { id: 'sepia-demo', displayName: 'Sepia (demo)', isDark: false },
 ];
 
 /**
