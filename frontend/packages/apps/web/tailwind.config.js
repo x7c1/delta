@@ -82,12 +82,21 @@ export default {
         terminal,
       },
       colors: {
-        // Terminal-pane chrome tokens. These are theme-fixed (the RGB triple
-        // is identical in light and dark themes) because they overlay the
-        // embedded xterm canvas, which is itself theme-fixed dark — flipping
-        // them per theme would render the chrome illegible in light mode.
-        // `terminal-bg` is also read at runtime by src/theme.ts and handed to
-        // xterm, so the panel chrome and the canvas can never disagree.
+        // Theme-fixed semantic color tokens. The RGB triple is identical in
+        // light and dark themes (declared three times in src/index.css all
+        // the same so the contract stays uniform).
+        //
+        // `terminal-*` overlay the embedded xterm canvas, which is itself
+        // theme-fixed dark — flipping them per theme would render the chrome
+        // illegible in light mode. `terminal-bg` is also read at runtime by
+        // src/theme.ts and handed to xterm, so the panel chrome and the
+        // canvas can never disagree.
+        //
+        // `highlight-wash` is the landing-flash color used by the
+        // thread-timeline jump animation (`@keyframes
+        // delta-timeline-jump-highlight-fade` in src/index.css). Held at
+        // amber-100 in both themes for now; the dark value can be retuned
+        // later in one place if dogfooding asks for it.
         'terminal-bg': 'rgb(var(--delta-color-terminal-bg) / <alpha-value>)',
         'terminal-fg': 'rgb(var(--delta-color-terminal-fg) / <alpha-value>)',
         'terminal-fg-strong':
@@ -96,6 +105,8 @@ export default {
           'rgb(var(--delta-color-terminal-overlay) / <alpha-value>)',
         'terminal-overlay-hover':
           'rgb(var(--delta-color-terminal-overlay-hover) / <alpha-value>)',
+        'highlight-wash':
+          'rgb(var(--delta-color-highlight-wash) / <alpha-value>)',
         // Semantic color tokens. Values come from the active
         // `:root[data-theme="..."]` block in src/index.css; the same names
         // resolve through every theme, so swapping `data-theme` swaps all of

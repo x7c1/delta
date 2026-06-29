@@ -31,18 +31,29 @@
   );
 
   /*
-   * Terminal-pane chrome tokens. These are intentionally identical in light
-   * and dark themes — they overlay an embedded xterm canvas that is itself
-   * theme-fixed dark, so flipping them per theme would render the chrome
-   * illegible in light mode. `terminal-bg` is also read at runtime by
-   * src/theme.ts and handed to xterm so the panel body and the canvas can
-   * never disagree.
+   * Theme-fixed semantic color tokens. The RGB triple is intentionally
+   * identical in light and dark themes; the values appear in each
+   * `:root[data-theme="..."]` block below as well so the rest of the chain
+   * (Tailwind utilities + xterm runtime readers) keeps a single contract,
+   * but theme switching does not actually move these values.
+   *
+   * `terminal-*` overlay an embedded xterm canvas that is itself theme-fixed
+   * dark, so flipping them per theme would render the chrome illegible in
+   * light mode. `terminal-bg` is also read at runtime by src/theme.ts and
+   * handed to xterm so the panel body and the canvas can never disagree.
+   *
+   * `highlight-wash` is the single landing-flash color used by the
+   * thread-timeline jump animation (see the `@keyframes
+   * delta-timeline-jump-highlight-fade` block below). Held at amber-100 in
+   * both themes so the warm-tint design intent carries through dark mode
+   * unchanged until dogfooding shows a different value is wanted.
    */
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;
   --delta-color-terminal-fg-strong: 241 245 249;
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
+  --delta-color-highlight-wash: 254 243 199;
 
   /* The terminal font stack, defined once in tailwind.config.js
    * (fontFamily.terminal) and exposed here for xterm (src/theme.ts). */
@@ -135,6 +146,7 @@
   --delta-color-terminal-fg-strong: 241 245 249;
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
+  --delta-color-highlight-wash: 254 243 199;
 }
 
 :root[data-theme='light'] {
@@ -162,6 +174,7 @@
   --delta-color-terminal-fg-strong: 241 245 249;
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
+  --delta-color-highlight-wash: 254 243 199;
 }
 
 html,
@@ -273,11 +286,17 @@ body {
  * a visible halo. Modern browsers (Chrome 105+, Safari 15.4+, Firefox 121+)
  * all support `:has()` natively.
  *
- * The wash uses Tailwind's `amber-100` (rgb(254 243 199), `#fef3c7`) at low
- * alpha. It is the palest amber Tailwind ships and reads as a subtle warm
- * tint on top of the bubble's resting blue-50 / slate-50 — enough to notice
- * the landing, not enough to dominate the message. `prefers-reduced-motion:
- * reduce` disables the animation entirely for users who opt out of motion.
+ * The wash color is sourced from `--delta-color-highlight-wash` (a
+ * theme-fixed semantic token, defined alongside `--delta-color-terminal-*`
+ * at the top of this file). The token currently carries Tailwind's
+ * `amber-100` (`#fef3c7`) in both themes, preserving the original design
+ * intent: at low alpha it reads as a subtle warm tint on top of the
+ * bubble's resting blue-50 / slate-50 — enough to notice the landing, not
+ * enough to dominate the message. Keeping the token in both themes is the
+ * lowest-risk starting point; the dark value can be retuned later in one
+ * place without touching this keyframe or any call sites.
+ * `prefers-reduced-motion: reduce` disables the animation entirely for
+ * users who opt out of motion.
  */
 .delta-timeline-jump-highlight > .rounded-lg,
 .delta-timeline-jump-highlight > .max-w-\[85\%\] {
@@ -289,10 +308,10 @@ body {
 }
 @keyframes delta-timeline-jump-highlight-fade {
   0% {
-    background-color: rgb(254 243 199 / 0.7);
+    background-color: rgb(var(--delta-color-highlight-wash) / 0.7);
   }
   100% {
-    background-color: rgb(254 243 199 / 0);
+    background-color: rgb(var(--delta-color-highlight-wash) / 0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
