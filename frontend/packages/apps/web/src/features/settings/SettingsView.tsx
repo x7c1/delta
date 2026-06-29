@@ -129,7 +129,7 @@ export function SettingsView() {
           role="tablist"
           aria-label="Settings categories"
           aria-orientation="vertical"
-          className="flex w-44 shrink-0 flex-col gap-1 border-r border-slate-200 pr-3"
+          className="flex w-44 shrink-0 flex-col gap-1 border-r border-border-default pr-3"
           data-testid="settings-categories"
           onKeyDown={onRailKeyDown}
         >
@@ -151,8 +151,8 @@ export function SettingsView() {
                 className={cn(
                   'rounded px-3 py-1.5 text-left text-xs font-medium transition',
                   selected
-                    ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-800',
+                    ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
+                    : 'text-fg-muted hover:bg-surface-elevated hover:text-fg',
                 )}
                 data-testid={`settings-category-${category.id}`}
               >
@@ -234,8 +234,8 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
 
   return (
     <section className="w-full" data-testid="launch-options-section">
-      <h3 className="mb-1 text-sm font-semibold text-slate-700">Launch options</h3>
-      <p className="mb-4 text-xs text-slate-500">
+      <h3 className="mb-1 text-sm font-semibold text-fg">Launch options</h3>
+      <p className="mb-4 text-xs text-fg-muted">
         Register custom <code>claude</code> CLI flags to apply when starting a
         session. <span className="font-medium">Name</span> is the flag (e.g.{' '}
         <code>--permission-mode</code>); <span className="font-medium">value</span>{' '}
@@ -246,11 +246,11 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
       {/* Add form */}
       <form
         onSubmit={onSubmit}
-        className="mb-6 flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
+        className="mb-6 flex flex-col gap-3 rounded-lg border border-border-default bg-surface-elevated p-3"
         aria-label="Add launch option"
       >
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600" htmlFor="lo-label">
+          <label className="text-xs font-medium text-fg-muted" htmlFor="lo-label">
             Label (optional)
           </label>
           <input
@@ -259,11 +259,11 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             value={label}
             onChange={(event) => setLabel(event.target.value)}
             placeholder="My plugins"
-            className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-indigo-400 focus:outline-none"
+            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600" htmlFor="lo-name">
+          <label className="text-xs font-medium text-fg-muted" htmlFor="lo-name">
             Name (the flag)
           </label>
           <input
@@ -273,11 +273,11 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             onChange={(event) => setName(event.target.value)}
             placeholder="--permission-mode"
             required
-            className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-indigo-400 focus:outline-none"
+            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-slate-600" htmlFor="lo-value">
+          <label className="text-xs font-medium text-fg-muted" htmlFor="lo-value">
             Value (optional)
           </label>
           <input
@@ -286,10 +286,10 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder="auto"
-            className="rounded border border-slate-300 px-2 py-1 text-sm focus:border-indigo-400 focus:outline-none"
+            className="rounded border border-border-default bg-surface px-2 py-1 text-sm text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
-        <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+        <label className="flex items-center gap-2 text-xs font-medium text-fg-muted">
           <input
             type="checkbox"
             checked={defaultEnabled}
@@ -299,7 +299,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           Enabled by default (pre-checked when starting a session)
         </label>
         {createLaunchOption.isError && (
-          <p className="text-xs text-red-600" role="alert">
+          <p className="text-xs text-danger" role="alert">
             Could not add the launch option. Please try again.
           </p>
         )}
@@ -316,7 +316,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           <Spinner label="loading launch options" />
         </div>
       ) : launchOptionsQuery.isError ? (
-        <div className="flex flex-col items-center gap-2 py-6 text-sm text-slate-500">
+        <div className="flex flex-col items-center gap-2 py-6 text-sm text-fg-muted">
           <p>Could not load launch options.</p>
           <Button
             size="sm"
@@ -327,7 +327,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           </Button>
         </div>
       ) : options.length === 0 ? (
-        <p className="py-6 text-center text-sm text-slate-400">
+        <p className="py-6 text-center text-sm text-fg-subtle">
           No launch options registered yet.
         </p>
       ) : (
@@ -418,10 +418,10 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
   return (
     <section className="space-y-3" data-testid="scan-roots-section">
       <div>
-        <h3 className="mb-1 text-sm font-semibold text-slate-700">
+        <h3 className="mb-1 text-sm font-semibold text-fg">
           Repository scan roots
         </h3>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-fg-muted">
           Delta scans the direct children of each path below for git
           repositories so you can pick them from the Repository tab without
           having to start a session there first.
@@ -433,7 +433,7 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
           <Spinner label="loading scan roots" />
         </div>
       ) : scanRootsQuery.isError ? (
-        <div className="flex flex-col items-center gap-2 py-4 text-sm text-slate-500">
+        <div className="flex flex-col items-center gap-2 py-4 text-sm text-fg-muted">
           <p>Could not load scan roots.</p>
           <Button
             size="sm"
@@ -444,7 +444,7 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
           </Button>
         </div>
       ) : scanRoots.length === 0 ? (
-        <p className="py-3 text-center text-sm text-slate-400">
+        <p className="py-3 text-center text-sm text-fg-subtle">
           No scan roots registered yet.
         </p>
       ) : (
@@ -495,7 +495,7 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
         }
       >
         <div className="space-y-3">
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-fg-muted">
             Pick the parent of one or more git clones. The Repository tab will
             then probe its direct children for <code>.git</code> on every
             refetch.
@@ -509,7 +509,7 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
           />
           {duplicate && (
             <p
-              className="text-xs text-amber-600"
+              className="text-xs text-warning"
               role="alert"
               data-testid="scan-root-duplicate"
             >
@@ -517,7 +517,7 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
             </p>
           )}
           {addScanRoot.isError && !duplicate && (
-            <p className="text-xs text-red-600" role="alert">
+            <p className="text-xs text-danger" role="alert">
               Could not add the scan root. Please try again.
             </p>
           )}
@@ -536,9 +536,9 @@ interface ScanRootRowProps {
 
 function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+    <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
       <span
-        className="truncate font-mono text-sm text-slate-800"
+        className="truncate font-mono text-sm text-fg"
         title={root.path}
       >
         {displayPath(root.path, home)}
@@ -572,22 +572,22 @@ function LaunchOptionRow({
   deleting,
 }: LaunchOptionRowProps) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+    <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
       <div className="min-w-0">
         {option.label && (
-          <div className="truncate text-xs font-medium text-slate-500">
+          <div className="truncate text-xs font-medium text-fg-muted">
             {option.label}
           </div>
         )}
-        <div className="truncate font-mono text-sm text-slate-800">
+        <div className="truncate font-mono text-sm text-fg">
           <span>{option.name}</span>
           {option.value !== null && (
-            <span className="text-slate-500"> {option.value}</span>
+            <span className="text-fg-muted"> {option.value}</span>
           )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">
-        <label className="flex items-center gap-1.5 text-xs text-slate-600">
+        <label className="flex items-center gap-1.5 text-xs text-fg-muted">
           <input
             type="checkbox"
             checked={option.default_enabled}

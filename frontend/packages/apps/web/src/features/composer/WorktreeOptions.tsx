@@ -374,7 +374,7 @@ function RemoteBranchPicker({
           value={selectedName}
           onChange={(event) => onSelect(event.target.value)}
           placeholder="origin branch (e.g. feature/x)"
-          className="rounded border border-border-default px-2 py-1 font-mono text-xs focus:border-accent-hover focus:outline-none"
+          className="rounded border border-border-default bg-surface px-2 py-1 font-mono text-xs text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           data-testid="remote-branch-input"
         />
       </label>
