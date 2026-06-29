@@ -12,8 +12,8 @@
  *      `src/features/settings/SettingsView.tsx`) enumerates `THEMES`, so the
  *      new option appears in the UI automatically.
  *
- * The `sepia-demo` entry below is a working example of the recipe; remove it
- * once a real second theme ships and the recipe has additional in-tree proof.
+ * The `sepia` entry below is a working example of the recipe, showing both
+ * how to register a new theme and what a non-built-in entry looks like.
  *
  * {@link ThemeId} is intentionally an open string shape (`string & {}`) so
  * call sites can accept future theme ids without forcing this file's union to
@@ -45,9 +45,7 @@ export interface ThemeMeta {
 export const THEMES: ReadonlyArray<ThemeMeta> = [
   { id: 'dark', displayName: 'Dark', isDark: true },
   { id: 'light', displayName: 'Light', isDark: false },
-  // Demonstration theme that proves the registry + CSS-block extension
-  // recipe; safe to remove once a real second theme ships.
-  { id: 'sepia-demo', displayName: 'Sepia (demo)', isDark: false },
+  { id: 'sepia', displayName: 'Sepia', isDark: false },
 ];
 
 /**

@@ -4,13 +4,13 @@ import { test, expect, type Page } from '@playwright/test';
  * End-to-end verification that the Settings appearance picker drives the
  * whole theme pipeline live — `<html data-theme="…">` flips, the downstream
  * CSS-variable token (`--delta-color-surface`) resolves to the new theme
- * block on the same tick, and the registry-driven picker discovers a
- * brand-new theme (`sepia-demo`) without any picker-code change.
+ * block on the same tick, and the registry-driven picker discovers the
+ * non-built-in `sepia` theme without any picker-code change.
  *
  * The spec hits each preference the picker exposes (Dark / Light /
- * Sepia (demo) / System), so it is the smoke proof both for the
- * already-shipped Dark/Light pair and for the recipe ("add a CSS block +
- * registry entry, the picker handles the rest").
+ * Sepia / System), so it is the smoke proof both for the already-shipped
+ * Dark/Light pair and for the recipe ("add a CSS block + registry entry,
+ * the picker handles the rest").
  *
  * No backend scripting is needed: Settings is reachable from the cold-start
  * placeholder, same as `settings-categories.spec.ts`, so no fake scenario
@@ -96,12 +96,12 @@ test('Settings appearance picker flips data-theme and CSS variables live', async
   await expect.poll(() => readDataTheme(page)).toBe('dark');
   await expect.poll(() => readRootVar(page, SURFACE_VAR)).toBe(DARK_SURFACE_RGB);
 
-  // Sepia (demo): proves that adding a `:root[data-theme="<id>"]` block
-  // plus a registry entry is enough — the picker enumerates the registry,
-  // so this option exists without any picker-code change, and the CSS
-  // variable resolves to the new block.
-  await pickAppearance(page, 'sepia-demo');
-  await expect.poll(() => readDataTheme(page)).toBe('sepia-demo');
+  // Sepia: proves that adding a `:root[data-theme="<id>"]` block plus a
+  // registry entry is enough — the picker enumerates the registry, so this
+  // option exists without any picker-code change, and the CSS variable
+  // resolves to the new block.
+  await pickAppearance(page, 'sepia');
+  await expect.poll(() => readDataTheme(page)).toBe('sepia');
   await expect.poll(() => readRootVar(page, SURFACE_VAR)).toBe(SEPIA_SURFACE_RGB);
 
   // Light: round-trip back so the reverse direction is asserted too.

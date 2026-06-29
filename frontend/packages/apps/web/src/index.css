@@ -178,10 +178,11 @@
 }
 
 /*
- * Demonstration theme — `sepia-demo`. Exists to prove that adding a new theme
- * is a 2-file change: this block plus a matching entry in
- * src/themes/registry.ts. The Appearance picker enumerates the registry, so
- * the new option appears automatically with no picker-code edits.
+ * Sepia theme — warm beige surfaces, dark brown foreground, copper accent.
+ * The block follows the same recipe as a third-party theme would: add this
+ * `:root[data-theme="<id>"]` block plus a matching entry in
+ * src/themes/registry.ts and the Appearance picker enumerates it
+ * automatically with no picker-code edits.
  *
  * The block deliberately overrides only theme-flipping tokens — `terminal-*`
  * and `highlight-wash` are theme-fixed (see the contract at the top of this
@@ -189,10 +190,8 @@
  * the values it does not flip on the defaults. Token values are
  * space-separated `R G B` triples to match the contract Tailwind utilities
  * rely on (`rgb(var(--…) / <alpha-value>)`).
- *
- * Safe to remove once a real second theme ships.
  */
-:root[data-theme='sepia-demo'] {
+:root[data-theme='sepia'] {
   --delta-color-surface: 247 235 207;
   --delta-color-surface-elevated: 240 224 184;
   --delta-color-surface-elevated-hover: 226 204 154;

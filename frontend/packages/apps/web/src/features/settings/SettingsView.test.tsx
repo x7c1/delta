@@ -282,12 +282,12 @@ describe('SettingsView', () => {
       expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
         'dark',
         'light',
-        'sepia-demo',
+        'sepia',
         SYSTEM_PREFERENCE,
       ]);
       expect(within(group).getByText('Dark')).toBeInTheDocument();
       expect(within(group).getByText('Light')).toBeInTheDocument();
-      expect(within(group).getByText('Sepia (demo)')).toBeInTheDocument();
+      expect(within(group).getByText('Sepia')).toBeInTheDocument();
       expect(within(group).getByText('System')).toBeInTheDocument();
     });
 
