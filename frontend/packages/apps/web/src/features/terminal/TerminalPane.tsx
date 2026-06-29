@@ -142,7 +142,7 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
 
   return (
     <Panel
-      className="border-l border-slate-200"
+      className="border-l border-border-default"
       bodyClassName="bg-terminal-bg"
     >
       {/* The per-session xterm elements are appended into this container; the

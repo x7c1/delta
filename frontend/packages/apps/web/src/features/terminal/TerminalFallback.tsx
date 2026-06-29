@@ -14,10 +14,10 @@ export interface TerminalFallbackProps {
 export function TerminalFallback({ onClose }: TerminalFallbackProps) {
   return (
     <Panel
-      className="border-l border-slate-200"
+      className="border-l border-border-default"
       header={
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-slate-700">Terminal</span>
+          <span className="text-sm font-semibold text-fg">Terminal</span>
           <Button
             size="sm"
             variant="ghost"
