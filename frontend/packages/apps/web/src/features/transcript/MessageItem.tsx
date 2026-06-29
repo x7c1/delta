@@ -103,11 +103,11 @@ export const MessageItem = memo(function MessageItem({
           summary={
             <span className="flex min-w-0 items-center gap-1.5">
               <Badge tone="neutral" className="shrink-0">meta</Badge>
-              <span className="truncate text-slate-500">{firstLine}</span>
+              <span className="truncate text-fg-subtle">{firstLine}</span>
             </span>
           }
         >
-          <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
+          <pre className="whitespace-pre-wrap text-fg-muted">{text}</pre>
         </Collapsible>
         {timestamp && (
           <MessageTimestamp
@@ -148,7 +148,7 @@ export const MessageItem = memo(function MessageItem({
             </span>
           }
         >
-          <pre className="whitespace-pre-wrap text-slate-600">{text}</pre>
+          <pre className="whitespace-pre-wrap text-fg-muted">{text}</pre>
         </Collapsible>
         {timestamp && (
           <MessageTimestamp
@@ -167,7 +167,7 @@ export const MessageItem = memo(function MessageItem({
         // Render it verbatim with preserved whitespace so single
         // newlines survive and characters like `*` stay literal.
         return message.role === 'user' ? (
-          <div key={index} className="whitespace-pre-wrap text-slate-800">
+          <div key={index} className="whitespace-pre-wrap text-fg">
             {block.text}
           </div>
         ) : (
@@ -183,7 +183,7 @@ export const MessageItem = memo(function MessageItem({
         }
         return (
           <Collapsible key={index} summary={blockSummary(block)}>
-            <pre className="whitespace-pre-wrap text-slate-600">
+            <pre className="whitespace-pre-wrap text-fg-muted">
               {block.thinking}
             </pre>
           </Collapsible>
@@ -198,38 +198,38 @@ export const MessageItem = memo(function MessageItem({
             key={index}
             summary={
               <span className="flex items-center gap-1.5">
-                <span className="font-medium text-slate-500">
+                <span className="font-medium text-fg-muted">
                   {block.name}
                 </span>
                 {result ? (
                   result.is_error ? (
                     <Badge tone="warning">error</Badge>
                   ) : (
-                    <span className="text-emerald-600" aria-label="ok">
+                    <span className="text-success" aria-label="ok">
                       ✓
                     </span>
                   )
                 ) : (
-                  <span className="text-slate-400">running…</span>
+                  <span className="text-fg-subtle">running…</span>
                 )}
               </span>
             }
           >
             <div className="space-y-2">
               <div>
-                <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
+                <div className="text-[0.65rem] uppercase tracking-wide text-fg-subtle">
                   input
                 </div>
-                <pre className="whitespace-pre-wrap text-slate-700">
+                <pre className="whitespace-pre-wrap text-fg-muted">
                   {stringifyContent(block.input)}
                 </pre>
               </div>
               {result && (
                 <div>
-                  <div className="text-[0.65rem] uppercase tracking-wide text-slate-400">
+                  <div className="text-[0.65rem] uppercase tracking-wide text-fg-subtle">
                     result
                   </div>
-                  <pre className="whitespace-pre-wrap text-slate-700">
+                  <pre className="whitespace-pre-wrap text-fg-muted">
                     {stringifyContent(result.content)}
                   </pre>
                 </div>
@@ -256,7 +256,7 @@ export const MessageItem = memo(function MessageItem({
               </span>
             }
           >
-            <pre className="whitespace-pre-wrap text-slate-700">
+            <pre className="whitespace-pre-wrap text-fg-muted">
               {stringifyContent(block.content)}
             </pre>
           </Collapsible>
@@ -264,7 +264,7 @@ export const MessageItem = memo(function MessageItem({
       case 'other':
         return (
           <Collapsible key={index} summary={blockSummary(block)}>
-            <span className="text-slate-500">
+            <span className="text-fg-subtle">
               Unsupported content block.
             </span>
           </Collapsible>
@@ -295,7 +295,7 @@ export const MessageItem = memo(function MessageItem({
         data-message-uuid={message.uuid}
         data-testid="message-item"
       >
-        <div className="max-w-[85%] rounded-lg bg-blue-50 px-3 py-2 text-slate-800">
+        <div className="max-w-[85%] rounded-lg bg-info/10 px-3 py-2 text-fg">
           {blocks}
         </div>
         {timestamp && (
@@ -320,7 +320,7 @@ export const MessageItem = memo(function MessageItem({
       data-testid="message-item"
     >
       {inBubble ? (
-        <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+        <div className="rounded-lg bg-surface-elevated px-3 py-2 text-fg">
           {blocks}
         </div>
       ) : (

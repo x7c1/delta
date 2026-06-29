@@ -1479,10 +1479,12 @@ describe('TranscriptPane', () => {
         // The collapsed wrapper itself is layout-less (`display: contents`)
         // — there is no full-width white bar with a background, padding,
         // and stretched left/right insets the v17 layout used. A
-        // regression that re-introduced that bar would put `bg-white`
+        // regression that re-introduced that bar would put `bg-surface`
         // back on the wrapper or some ancestor.
         expect(topRegion.getAttribute('data-expanded')).toBe('false');
-        expect(topRegion.className).not.toContain('bg-white');
+        // Negative lookahead excludes `bg-surface-elevated` (a different
+        // semantic token used elsewhere) from the substring match.
+        expect(topRegion.className).not.toMatch(/\bbg-surface(?!-)/);
         expect(topRegion.className).not.toContain('left-0');
         expect(topRegion.className).not.toContain('right-0');
 
@@ -1502,12 +1504,14 @@ describe('TranscriptPane', () => {
         expect(rightCluster.className).toContain('top-overlay-inset');
         expect(rightCluster.className).toContain('right-overlay-inset');
         expect(rightCluster.className).toContain('z-20');
-        // The right cluster carries NO shared white-bar background or
+        // The right cluster carries NO shared surface-bar background or
         // border on purpose: each pill inside already has its own card
         // chrome (TIMELINE_TOGGLE_BUTTON_CLASS / TERMINAL_TOGGLE_BUTTON_CLASS).
         // A regression that re-introduced the v17 single-bar look would
-        // put `bg-white` back on this cluster wrapper.
-        expect(rightCluster.className).not.toContain('bg-white');
+        // put `bg-surface` back on this cluster wrapper.
+        // Negative lookahead excludes `bg-surface-elevated` (a different
+        // semantic token used elsewhere) from the substring match.
+        expect(rightCluster.className).not.toMatch(/\bbg-surface(?!-)/);
 
         // The breadcrumb and the right cluster are siblings under the
         // top-region wrapper, NOT nested inside one shared white-bar

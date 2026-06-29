@@ -233,17 +233,17 @@ export function QuestionCard({
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm"
+      className="flex flex-col gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm"
       data-testid="question-card"
       role="group"
       aria-label="Question from Claude Code"
     >
-      <p className="text-xs font-medium text-indigo-900">
+      <p className="text-xs font-medium text-accent">
         Claude is asking a question
       </p>
 
       {!answerable ? (
-        <p className="text-slate-600">
+        <p className="text-fg-muted">
           Claude is asking a multiple-choice question. Answer it in the terminal.
         </p>
       ) : (
@@ -251,11 +251,11 @@ export function QuestionCard({
           {questions.map((q, qi) => (
             <li key={qi} className="space-y-1">
               {q.header && (
-                <p className="font-semibold text-indigo-800">{q.header}</p>
+                <p className="font-semibold text-accent">{q.header}</p>
               )}
-              {q.question && <p className="text-slate-700">{q.question}</p>}
+              {q.question && <p className="text-fg-muted">{q.question}</p>}
               {q.multiSelect && (
-                <p className="text-slate-500">Select all that apply.</p>
+                <p className="text-fg-subtle">Select all that apply.</p>
               )}
               <ul className="space-y-1">
                 {q.options.map((opt, oi) => {
@@ -276,24 +276,24 @@ export function QuestionCard({
                           opt.preview ? 'w-80 shrink-0' : 'w-full'
                         } ${
                           selected
-                            ? 'border-indigo-400 bg-indigo-100'
-                            : 'border-indigo-100 bg-white hover:border-indigo-300'
+                            ? 'border-accent bg-accent/20'
+                            : 'border-accent/20 bg-surface hover:border-accent-disabled'
                         }`}
                       >
                         {q.multiSelect && (
                           <span
                             aria-hidden="true"
-                            className="mt-0.5 font-mono text-indigo-700"
+                            className="mt-0.5 font-mono text-accent"
                           >
                             {selected ? '[x]' : '[ ]'}
                           </span>
                         )}
                         <span className="min-w-0">
-                          <span className="font-semibold text-slate-800">
+                          <span className="font-semibold text-fg">
                             {opt.label}
                           </span>
                           {opt.description && (
-                            <span className="block text-xs text-slate-600">
+                            <span className="block text-xs text-fg-muted">
                               {opt.description}
                             </span>
                           )}
@@ -314,7 +314,7 @@ export function QuestionCard({
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
-                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700"
+                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-border-default bg-surface-elevated px-2 py-1 font-mono text-xs text-fg-muted"
                         >
                           {opt.preview}
                         </pre>
@@ -329,7 +329,7 @@ export function QuestionCard({
       )}
 
       {failed && (
-        <p className="text-red-700" role="alert" data-testid="question-error">
+        <p className="text-danger" role="alert" data-testid="question-error">
           {failedAction === 'cancel'
             ? "Couldn't cancel the question — cancel it in the terminal, or try again."
             : "Couldn't submit your answer — answer in the terminal, or try again."}

@@ -735,7 +735,7 @@ const LANE_RIGHT_PAD_PX = 16;
  * sync via `TERMINAL_TOGGLE_BUTTON_CLASS` over there.
  */
 export const TIMELINE_TOGGLE_BUTTON_CLASS =
-  'inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-md transition-colors hover:bg-slate-50';
+  'inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-3 py-1.5 text-xs font-medium text-fg shadow-md transition-colors hover:bg-surface-elevated';
 
 /**
  * Tailwind class string for the expanded-state jump-to-edge buttons (skip-back
@@ -756,7 +756,7 @@ export const TIMELINE_TOGGLE_BUTTON_CLASS =
  * affordance.
  */
 export const TIMELINE_JUMP_BUTTON_CLASS =
-  'inline-flex items-center justify-center rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed';
+  'inline-flex items-center justify-center rounded p-1 text-fg-subtle transition-colors hover:bg-surface-elevated-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed';
 
 /**
  * Glyph for the collapsed "Thread" toggle button: a stylised activity / signal
@@ -2010,7 +2010,7 @@ export function ThreadTimelineOverlay({
     <section
       data-testid="thread-timeline-overlay"
       data-expanded="true"
-      className="select-none rounded-md border border-slate-300 bg-white text-xs text-slate-600 shadow-md"
+      className="select-none rounded-md border border-border-default bg-surface text-xs text-fg-muted shadow-md"
       aria-label="Subthread timeline"
     >
       {/* The expanded header is a two-region row:
@@ -2018,7 +2018,7 @@ export function ThreadTimelineOverlay({
                   The toggle is the primary control and sits in the first
                   child position so the eye lands on it first when the
                   header row enters view. No visible chevron — the
-                  button's `hover:bg-slate-50` carries the click
+                  button's `hover:bg-surface-elevated` carries the click
                   affordance, and `aria-expanded` carries the
                   open/collapsed state semantically for assistive tech.
                   The toggle's own `px-3` provides the only left inset
@@ -2043,9 +2043,9 @@ export function ThreadTimelineOverlay({
           onClick={toggle}
           data-testid="thread-timeline-toggle"
           aria-expanded={expanded}
-          className="flex flex-1 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+          className="flex flex-1 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:bg-surface-elevated"
         >
-          <span aria-hidden="true" className="text-slate-400">▾</span>
+          <span aria-hidden="true" className="text-fg-subtle">▾</span>
           Timeline
         </button>
         <div className="flex items-center">
@@ -2081,7 +2081,7 @@ export function ThreadTimelineOverlay({
           className="max-h-64 overflow-y-auto px-2 pb-1"
         >
           {lanes.length === 0 ? (
-            <p className="px-1 py-1 text-[0.7rem] text-slate-400">
+            <p className="px-1 py-1 text-[0.7rem] text-fg-subtle">
               No threads to show yet.
             </p>
           ) : (
@@ -2141,7 +2141,7 @@ export function ThreadTimelineOverlay({
                   // render shorter than the label cell whose intrinsic
                   // height is governed by font metrics + padding, producing
                   // a vertically mismatched active-highlight band (the
-                  // axis-side bg-slate-50 painted a thinner stripe than the
+                  // axis-side bg-surface-elevated painted a thinner stripe than the
                   // label-side stripe) and a per-lane playhead that looked
                   // disconnected between rows because its `h-full` only
                   // filled the shorter axis cell. Stretching guarantees the
@@ -2155,7 +2155,7 @@ export function ThreadTimelineOverlay({
               >
                 {lanes.map((lane) => {
                   const isHighlighted = lane.threadId === highlightedThreadId;
-                  // The active-lane highlight (border-y + bg-slate-50) is
+                  // The active-lane highlight (border-y + bg-surface-elevated) is
                   // applied identically to BOTH cells of the active lane so
                   // the visual band spans the full grid row. With
                   // `display: contents` on the `<li>` the element itself
@@ -2171,12 +2171,12 @@ export function ThreadTimelineOverlay({
                   // stay transparent in the inactive state (the body's
                   // white background reads through it just fine), so the
                   // resting background only needs to be added to the label
-                  // class set. Doing it via className — `bg-white` resting,
-                  // `bg-slate-50` active — keeps className as the single
+                  // class set. Doing it via className — `bg-surface` resting,
+                  // `bg-surface-elevated` active — keeps className as the single
                   // source of truth for the cell's visual state: an active
-                  // sticky label paints `bg-slate-50` (matching the active
+                  // sticky label paints `bg-surface-elevated` (matching the active
                   // axis cell so the band reads as one row), and an
-                  // inactive sticky label paints `bg-white` (matching the
+                  // inactive sticky label paints `bg-surface` (matching the
                   // body so axis dots cannot peek through).
                   // The active-row visual treatment is a thin slate-200
                   // hairline above and below the row. We render that hairline
@@ -2196,11 +2196,11 @@ export function ThreadTimelineOverlay({
                   const ACTIVE_HAIRLINE_SHADOW =
                     'shadow-[inset_0_1px_0_0_rgb(226_232_240),inset_0_-1px_0_0_rgb(226_232_240)]';
                   const highlightClasses = isHighlighted
-                    ? `${ACTIVE_HAIRLINE_SHADOW} bg-slate-50`
+                    ? `${ACTIVE_HAIRLINE_SHADOW} bg-surface-elevated`
                     : '';
                   const labelHighlightClasses = isHighlighted
-                    ? `${ACTIVE_HAIRLINE_SHADOW} bg-slate-50`
-                    : 'bg-white';
+                    ? `${ACTIVE_HAIRLINE_SHADOW} bg-surface-elevated`
+                    : 'bg-surface';
                   // Collapse runs of 2+ consecutive small dots within
                   // this lane into one cluster mark so a long stretch of
                   // tool calls / meta lines no longer floods the
@@ -2229,12 +2229,12 @@ export function ThreadTimelineOverlay({
                         // wrapper as the axis pans, so labels stay
                         // readable while the user scrubs a wide session.
                         // The opaque background (from `labelHighlightClasses`
-                        // — `bg-white` resting, `bg-slate-50` active)
+                        // — `bg-surface` resting, `bg-surface-elevated` active)
                         // prevents axis dots from peeking through during
                         // the pan; the z-index keeps the label above the
                         // axis line and dots. The background lives on the
                         // className (not inline) so the active highlight's
-                        // `bg-slate-50` is the one that paints — an inline
+                        // `bg-surface-elevated` is the one that paints — an inline
                         // background would win over the class and would
                         // leave the sticky label white in the active state,
                         // breaking the visual continuity with the axis
@@ -2250,7 +2250,7 @@ export function ThreadTimelineOverlay({
                         // at exactly that height and would leave the glyph
                         // pinned to the top of a taller stretched cell.
                         className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
-                          lane.isMain ? 'text-slate-700' : 'text-slate-500'
+                          lane.isMain ? 'text-fg' : 'text-fg-muted'
                         } ${labelHighlightClasses}`}
                         style={{
                           position: 'sticky',
@@ -2284,7 +2284,7 @@ export function ThreadTimelineOverlay({
                       >
                         <span
                           aria-hidden="true"
-                          className="absolute top-1/2 h-px -translate-y-1/2 bg-slate-200"
+                          className="absolute top-1/2 h-px -translate-y-1/2 bg-border-default"
                           style={{
                             left: LANE_LEFT_PAD_PX,
                             width: laneAxisWidth,
@@ -2336,7 +2336,7 @@ export function ThreadTimelineOverlay({
                           // GPU-composited on the existing 2 px box so the
                           // sprite keeps a stable 2 px footprint regardless
                           // of where it lands on the subpixel grid.
-                          className="pointer-events-none absolute left-0 top-0 h-full w-px bg-slate-500"
+                          className="pointer-events-none absolute left-0 top-0 h-full w-px bg-fg-muted"
                           style={{
                             transform: `translateX(${playheadX + LANE_LEFT_PAD_PX}px)`,
                             transition: `transform ${PLAYHEAD_TRANSITION_MS}ms ease-out`,
@@ -2385,9 +2385,10 @@ interface TimelineDotMarkProps {
  */
 function TimelineDotMark({ dot, xPx }: TimelineDotMarkProps) {
   // Two-color scheme: user vs everything else. Mirrors `MessageItem`'s
-  // bubble palette family — blue for user, slate for the assistant side.
+  // bubble palette family — the `info` accent for user, a muted foreground
+  // tone for the assistant side.
   const colorClasses =
-    dot.kind === 'user' ? 'bg-blue-500' : 'bg-slate-400';
+    dot.kind === 'user' ? 'bg-info' : 'bg-fg-subtle';
   const diameter = dot.size === 'large' ? MARK_LARGE_PX : MARK_SMALL_PX;
   return (
     <span
@@ -2446,10 +2447,10 @@ function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
       data-thread-id={cluster.threadId}
       data-cluster-member-count={cluster.memberCount}
       aria-hidden="true"
-      // No outline, no ring, no border — just the slate-400 fill a lone
+      // No outline, no ring, no border — just the `fg-subtle` fill a lone
       // small assistant dot uses. The cluster's footprint equals a small
       // dot's exactly, never larger.
-      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-400"
+      className="pointer-events-none absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-fg-subtle"
       style={{
         left: xPx,
         width: MARK_CLUSTER_PX,
