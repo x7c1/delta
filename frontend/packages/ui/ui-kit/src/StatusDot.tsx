@@ -15,10 +15,15 @@ export interface StatusDotProps {
 }
 
 const TONE_CLASSES: Record<DotTone, string> = {
-  green: 'bg-emerald-500',
-  amber: 'bg-amber-500',
-  red: 'bg-rose-500',
-  slate: 'bg-slate-400',
+  // `amber` and `red` map onto `warning`/`danger` by intent even though the
+  // shade is one step off (amber-500/rose-500 previously vs amber-600/
+  // rose-600 in the light token), since a status dot reads its tone
+  // semantically rather than chromatically. `green` follows the same
+  // intent-mapping onto the `success` token.
+  green: 'bg-success',
+  amber: 'bg-warning',
+  red: 'bg-danger',
+  slate: 'bg-fg-subtle',
 };
 
 /** A small coloured dot with an optional label, e.g. connection status. */
@@ -34,7 +39,7 @@ export function StatusDot({ tone, label, title, className }: StatusDotProps) {
       aria-label={ariaLabel}
     >
       <span className={cn('h-2 w-2 rounded-full', TONE_CLASSES[tone])} aria-hidden />
-      {label && <span className="text-slate-500">{label}</span>}
+      {label && <span className="text-fg-muted">{label}</span>}
     </span>
   );
 }

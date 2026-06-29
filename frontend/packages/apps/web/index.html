@@ -1,9 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Delta</title>
+    <script>
+      // Set the active theme synchronously, before the module bundle loads, so
+      // CSS sees the right `:root[data-theme="..."]` block on the very first
+      // paint and the UI does not flash the default while React mounts. This
+      // intentionally mirrors the resolution logic in src/hooks/useTheme.ts;
+      // keep the two in sync. Wrapped in try/catch because Safari private mode
+      // throws on storage access.
+      (function () {
+        try {
+          var stored = localStorage.getItem('delta.preferences.theme');
+          var resolved;
+          if (stored === 'dark' || stored === 'light') {
+            resolved = stored;
+          } else {
+            // No stored preference, or an unrecognized value → follow the OS.
+            var prefersDark =
+              typeof window.matchMedia === 'function' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches;
+            resolved = prefersDark ? 'dark' : 'light';
+          }
+          document.documentElement.dataset.theme = resolved;
+        } catch (_) {
+          // Storage or matchMedia unavailable; the default `data-theme="light"`
+          // attribute on <html> already covers this case.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

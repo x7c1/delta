@@ -7,6 +7,7 @@ import type { SessionId } from '@delta/model';
 import { Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
+import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
 import { terminalBackground, terminalFontFamily } from '../../theme';
 
@@ -55,6 +56,9 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
   const pendingTeardownRef = useRef<number | null>(null);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+  // Subscribe to the resolved theme so a picker change repaints every live
+  // xterm instance below without requiring a session detach + reattach.
+  const { resolved: resolvedTheme } = useThemeContext();
 
   const canAttach = !isMockMode() && attachable && sessionId !== null;
 
@@ -103,6 +107,27 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
     entry.fit.fit();
   }, [canAttach, sessionId]);
 
+  // When the active theme changes, repaint every live xterm: each Terminal
+  // reads its background once at construction (see `createEntry`), so a
+  // picker flip would otherwise leave the canvas on the previous color until
+  // the session is detached and reattached. Reassigning `options.theme`
+  // pushes the new value into xterm's renderer, which clears and redraws the
+  // visible buffer in place. `resolvedTheme` is the dep — the live id from
+  // `useThemeContext`, which already reacts to both an explicit pick and a
+  // `prefers-color-scheme` flip under the 'system' preference. Reading
+  // `terminalBackground()` inside the effect (rather than passing it in)
+  // ensures the freshly applied `:root[data-theme="…"]` block is observed,
+  // since the bridging `<html>` attribute is written by ThemeProvider before
+  // this effect runs.
+  useEffect(() => {
+    for (const entry of entriesRef.current.values()) {
+      entry.term.options.theme = {
+        ...entry.term.options.theme,
+        background: terminalBackground(),
+      };
+    }
+  }, [resolvedTheme]);
+
   // Detach everything only when the terminal itself closes (this unmounts).
   //
   // The teardown is deferred to a macrotask so React StrictMode's dev-only
@@ -142,7 +167,7 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
 
   return (
     <Panel
-      className="border-l border-slate-200"
+      className="border-l border-border-default"
       bodyClassName="bg-terminal-bg"
     >
       {/* The per-session xterm elements are appended into this container; the
@@ -153,12 +178,12 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
           onClick={() => setTerminalOpen(false)}
           aria-label="Close terminal"
           title="Close terminal"
-          className="absolute right-2 top-2 z-10 rounded bg-slate-800/60 px-1.5 py-0.5 text-sm leading-none text-slate-300 opacity-60 transition hover:bg-slate-700 hover:text-slate-100 hover:opacity-100 focus-visible:opacity-100"
+          className="absolute right-2 top-2 z-10 rounded bg-terminal-overlay/60 px-1.5 py-0.5 text-sm leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
         >
           »
         </button>
         {unavailableNote && (
-          <p className="p-3 text-xs text-slate-300">{unavailableNote}</p>
+          <p className="p-3 text-xs text-terminal-fg">{unavailableNote}</p>
         )}
       </div>
     </Panel>
@@ -174,9 +199,9 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
   const term = new Terminal({
     convertEol: true,
     // The design tokens own the stack and the background (tailwind.config.js
-    // `fontFamily.terminal` / `--delta-terminal-bg`); xterm takes them as
-    // JavaScript options, so they are read off the document here instead of
-    // being restated. See the config for the per-OS font reasoning.
+    // `fontFamily.terminal` / `--delta-color-terminal-bg`); xterm takes them
+    // as JavaScript options, so they are read off the document here instead
+    // of being restated. See the config for the per-OS font reasoning.
     fontFamily: terminalFontFamily(),
     fontSize: 13,
     theme: { background: terminalBackground() },

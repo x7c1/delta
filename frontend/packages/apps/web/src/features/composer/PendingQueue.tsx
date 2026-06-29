@@ -70,16 +70,16 @@ export function PendingQueue({ entries }: PendingQueueProps) {
   ) => (
     <li
       key={key}
-      className="space-y-1 rounded border border-rose-200 bg-rose-50 px-2 py-1.5"
+      className="space-y-1 rounded border border-danger/30 bg-danger/10 px-2 py-1.5"
       data-testid="pending-item"
     >
       <div className="flex items-start gap-2">
         <Badge className="shrink-0" tone="warning">
           failed
         </Badge>
-        <span className="min-w-0 flex-1 truncate text-slate-700">{text}</span>
+        <span className="min-w-0 flex-1 truncate text-fg">{text}</span>
       </div>
-      <p className="text-rose-700">{message}</p>
+      <p className="text-danger">{message}</p>
       <div className="flex justify-end gap-2">{actions}</div>
     </li>
   );
@@ -90,14 +90,14 @@ export function PendingQueue({ entries }: PendingQueueProps) {
       className="flex items-center justify-between gap-2"
       data-testid="pending-item"
     >
-      <span className="min-w-0 flex-1 truncate text-slate-700">{text}</span>
+      <span className="min-w-0 flex-1 truncate text-fg">{text}</span>
       {status}
     </li>
   );
 
   return (
-    <div className="space-y-1 rounded border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-xs">
-      <div className="flex items-center gap-2 font-medium text-amber-800">
+    <div className="space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1.5 text-xs">
+      <div className="flex items-center gap-2 font-medium text-warning">
         <span>In progress</span>
         {hasActiveWork && (
           <Spinner className="shrink-0" aria-label="in progress" />

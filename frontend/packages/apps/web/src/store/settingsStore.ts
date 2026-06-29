@@ -7,7 +7,7 @@ import { createJSONStorage, persist } from 'zustand/middleware';
  * new top-level category is a single entry in both this union and the
  * registry that drives the rail (see {@link SettingsView}).
  */
-export type SettingsCategoryId = 'launch-options' | 'scan-roots';
+export type SettingsCategoryId = 'launch-options' | 'scan-roots' | 'appearance';
 
 /**
  * The default category on a fresh install: Launch options. It is the older,
@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS_CATEGORY: SettingsCategoryId = 'launch-options';
 const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'launch-options',
   'scan-roots',
+  'appearance',
 ];
 
 export interface SettingsState {

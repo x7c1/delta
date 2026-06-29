@@ -87,19 +87,19 @@ export function PermissionNoticeCard({
 
   return (
     <div
-      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset max-w-xs space-y-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs shadow-md"
+      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset max-w-xs space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs shadow-md"
       data-testid="permission-notice"
       role="alert"
     >
-      <p className="font-medium text-amber-800">
+      <p className="font-medium text-warning">
         Permission requested: {notice.toolName}
       </p>
-      <p className="break-all font-mono text-slate-600">
+      <p className="break-all font-mono text-fg-muted">
         {toolInputSummary(notice.toolInput)}
       </p>
       {fallback ? (
         <>
-          <p className="text-slate-600">Answer the prompt in the terminal.</p>
+          <p className="text-fg-muted">Answer the prompt in the terminal.</p>
           <div className="flex gap-2">
             <Button size="sm" onClick={onOpenTerminal}>
               Open terminal

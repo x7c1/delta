@@ -110,8 +110,8 @@ function ThreadTreeNode({
         onClick={() => onSelectThread(node.thread.id)}
         style={{ paddingLeft: `${0.5 + depth * 0.85}rem` }}
         className={cn(
-          'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-[13px] leading-5 hover:bg-slate-100',
-          isActive && 'bg-indigo-50 font-medium text-indigo-800',
+          'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-[13px] leading-5 hover:bg-surface-elevated-hover',
+          isActive && 'bg-accent/10 font-medium text-accent',
         )}
         aria-current={isActive ? 'true' : undefined}
       >
@@ -119,7 +119,7 @@ function ThreadTreeNode({
           {/* Every node rendered here is a sub-thread (main is not listed), so
               all levels get the branch marker — including the first level, now
               lifted to depth 0. Indentation still grows with depth. */}
-          <span className="text-slate-400">⤷ </span>
+          <span className="text-fg-subtle">⤷ </span>
           {threadDisplayName(node.thread)}
         </span>
         <span className="flex shrink-0 items-center gap-1.5">

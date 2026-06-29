@@ -25,7 +25,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
         return (
           <Fragment key={item.key}>
             {index > 0 && (
-              <span className="text-slate-400" aria-hidden>
+              <span className="text-fg-subtle" aria-hidden>
                 ›
               </span>
             )}
@@ -33,7 +33,13 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
               <button
                 type="button"
                 onClick={item.onClick}
-                className="rounded px-1 text-indigo-600 hover:bg-indigo-50 hover:underline"
+                // The hover background uses a low-alpha wash of `accent`
+                // (previously the hardcoded indigo-50 soft tint), matching the
+                // Chip/Badge soft-tone pattern. `text-accent` is one step
+                // lighter than the old indigo-600 (the accent token is
+                // indigo-500 in light), which is acceptable since navigation
+                // links read by hue rather than exact shade.
+                className="rounded px-1 text-accent hover:bg-accent/10 hover:underline"
               >
                 {item.label}
               </button>
@@ -42,7 +48,14 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
                 aria-current={isLast ? 'page' : undefined}
                 className={cn(
                   'px-1',
-                  isLast ? 'font-semibold text-slate-800' : 'text-slate-500',
+                  // The current-page label uses `text-fg` (slate-900 light,
+                  // one step darker than the old slate-800). Non-current
+                  // crumbs use `text-fg-muted` (slate-600 light), shifting
+                  // from the previous slate-500 by one step toward muted —
+                  // slate-500 sits exactly between fg-muted and fg-subtle and
+                  // the muted token reads as the correct "secondary trail"
+                  // intent.
+                  isLast ? 'font-semibold text-fg' : 'text-fg-muted',
                 )}
               >
                 {item.label}

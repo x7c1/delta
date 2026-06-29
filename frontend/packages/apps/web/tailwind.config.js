@@ -5,9 +5,12 @@ import defaultTheme from 'tailwindcss/defaultTheme';
 //
 // This config is the single definition of the app's font stacks, and it names
 // the layout/color tokens whose *values* live as CSS custom properties in
-// `src/index.css` (the `:root` block). Utilities defined here resolve through
-// those variables, so a later user-facing stylesheet can override a token in
-// one place and every consumer — Tailwind utilities and the runtime readers in
+// `src/index.css`. The plain `:root` block carries default fallback values;
+// `:root[data-theme="..."]` blocks redefine the same names per theme so
+// swapping the attribute on `<html>` swaps every utility's resolved color
+// atomically (see useTheme.ts). Utilities defined here resolve through those
+// variables, so a later user-facing stylesheet can override a token in one
+// place and every consumer — Tailwind utilities and the runtime readers in
 // `src/theme.ts` (xterm) alike — follows. See `src/theme.ts` for the token
 // overview.
 // ---------------------------------------------------------------------------
@@ -79,9 +82,72 @@ export default {
         terminal,
       },
       colors: {
-        // The embedded terminal's background (xterm reads the same variable,
-        // so the panel chrome and the canvas can never disagree).
-        'terminal-bg': 'var(--delta-terminal-bg)',
+        // Theme-fixed semantic color tokens. The RGB triple is identical in
+        // light and dark themes (declared three times in src/index.css all
+        // the same so the contract stays uniform).
+        //
+        // `terminal-*` overlay the embedded xterm canvas, which is itself
+        // theme-fixed dark — flipping them per theme would render the chrome
+        // illegible in light mode. `terminal-bg` is also read at runtime by
+        // src/theme.ts and handed to xterm, so the panel chrome and the
+        // canvas can never disagree.
+        //
+        // `highlight-wash` is the landing-flash color used by the
+        // thread-timeline jump animation (`@keyframes
+        // delta-timeline-jump-highlight-fade` in src/index.css). Held at
+        // amber-100 in both themes for now; the dark value can be retuned
+        // later in one place if dogfooding asks for it.
+        'terminal-bg': 'rgb(var(--delta-color-terminal-bg) / <alpha-value>)',
+        'terminal-fg': 'rgb(var(--delta-color-terminal-fg) / <alpha-value>)',
+        'terminal-fg-strong':
+          'rgb(var(--delta-color-terminal-fg-strong) / <alpha-value>)',
+        'terminal-overlay':
+          'rgb(var(--delta-color-terminal-overlay) / <alpha-value>)',
+        'terminal-overlay-hover':
+          'rgb(var(--delta-color-terminal-overlay-hover) / <alpha-value>)',
+        'highlight-wash':
+          'rgb(var(--delta-color-highlight-wash) / <alpha-value>)',
+        // Semantic color tokens. Values come from the active
+        // `:root[data-theme="..."]` block in src/index.css; the same names
+        // resolve through every theme, so swapping `data-theme` swaps all of
+        // these atomically. `border-default` (not `border`) and `accent-fg` /
+        // similar dashed names avoid clashing with Tailwind's built-in
+        // single-token utilities (`border`, `text-fg` already lands cleanly
+        // because `fg` is not a built-in palette).
+        //
+        // Each variable stores its color as a space-separated `R G B` triple
+        // and is wrapped here as `rgb(var(--X) / <alpha-value>)`. The
+        // `<alpha-value>` placeholder is what Tailwind substitutes when a
+        // slash-opacity utility is requested (`bg-scrim/40`, `bg-info/15`,
+        // `bg-accent/10`, …); without it, Tailwind v3 cannot apply opacity
+        // modifiers to CSS-variable-based colors and the utility silently
+        // emits no CSS. See:
+        // https://tailwindcss.com/docs/customizing-colors#using-css-variables
+        surface: 'rgb(var(--delta-color-surface) / <alpha-value>)',
+        'surface-elevated':
+          'rgb(var(--delta-color-surface-elevated) / <alpha-value>)',
+        'surface-elevated-hover':
+          'rgb(var(--delta-color-surface-elevated-hover) / <alpha-value>)',
+        'surface-sunken':
+          'rgb(var(--delta-color-surface-sunken) / <alpha-value>)',
+        'surface-sunken-hover':
+          'rgb(var(--delta-color-surface-sunken-hover) / <alpha-value>)',
+        fg: 'rgb(var(--delta-color-fg) / <alpha-value>)',
+        'fg-muted': 'rgb(var(--delta-color-fg-muted) / <alpha-value>)',
+        'fg-subtle': 'rgb(var(--delta-color-fg-subtle) / <alpha-value>)',
+        'border-default': 'rgb(var(--delta-color-border) / <alpha-value>)',
+        'border-strong':
+          'rgb(var(--delta-color-border-strong) / <alpha-value>)',
+        accent: 'rgb(var(--delta-color-accent) / <alpha-value>)',
+        'accent-fg': 'rgb(var(--delta-color-accent-fg) / <alpha-value>)',
+        'accent-hover': 'rgb(var(--delta-color-accent-hover) / <alpha-value>)',
+        'accent-disabled':
+          'rgb(var(--delta-color-accent-disabled) / <alpha-value>)',
+        danger: 'rgb(var(--delta-color-danger) / <alpha-value>)',
+        warning: 'rgb(var(--delta-color-warning) / <alpha-value>)',
+        info: 'rgb(var(--delta-color-info) / <alpha-value>)',
+        success: 'rgb(var(--delta-color-success) / <alpha-value>)',
+        scrim: 'rgb(var(--delta-color-scrim) / <alpha-value>)',
       },
       keyframes: {
         // A hard on/off blink for the live-streaming caret. The `steps(1, end)`

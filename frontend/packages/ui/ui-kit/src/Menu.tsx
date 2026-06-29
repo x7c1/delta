@@ -36,8 +36,17 @@ export interface MenuProps {
 }
 
 const ITEM_TONE_CLASSES: Record<MenuItemTone, string> = {
-  default: 'text-slate-700 hover:bg-slate-100',
-  danger: 'text-red-600 hover:bg-red-50',
+  // The default item text uses `text-fg`: slate-700 (the original literal)
+  // sat between fg-muted (slate-600) and fg (slate-900); fg matches the
+  // "interactive content" convention used by Button. The hover background
+  // uses `surface-elevated-hover` (light = slate-100, dark = slate-700),
+  // one step darker than the panel's `surface-elevated` base — the
+  // dropdown-on-elevated-surface mirror of `surface-sunken-hover`. The
+  // danger row uses `text-danger` (rose-600 vs the original red-600 — one
+  // hue step but the same intent) with a low-alpha wash of the same token
+  // for the hover, matching the Chip/Badge soft-tone pattern.
+  default: 'text-fg hover:bg-surface-elevated-hover',
+  danger: 'text-danger hover:bg-danger/10',
 };
 
 /** A vertical three-dot ("kebab") glyph drawn as an inline SVG. */
@@ -159,9 +168,14 @@ export function Menu({
         disabled={isDisabled}
         onClick={handleTriggerClick}
         className={cn(
-          'inline-flex h-6 w-6 items-center justify-center rounded text-slate-400 transition-colors',
-          'hover:bg-slate-200 hover:text-slate-700',
-          'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-400',
+          // The trigger's resting and disabled-hover text use `text-fg-subtle`
+          // (slate-400 exact). The hover background uses `bg-surface-sunken`
+          // (slate-200 exact). The hover text shifts to `text-fg`: slate-700
+          // sat between fg-muted (slate-600) and fg (slate-900); fg matches
+          // the interactive-content convention.
+          'inline-flex h-6 w-6 items-center justify-center rounded text-fg-subtle transition-colors',
+          'hover:bg-surface-sunken hover:text-fg',
+          'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-subtle',
         )}
       >
         <KebabIcon />
@@ -171,7 +185,13 @@ export function Menu({
         <div
           role="menu"
           aria-label={label}
-          className="absolute right-0 top-full z-10 mt-1 min-w-[8rem] overflow-hidden rounded border border-slate-200 bg-white py-1 shadow-md"
+          // The popover panel uses `bg-surface-elevated` (light = slate-50)
+          // rather than `bg-surface` (light = white) to follow the Dialog
+          // convention: a dropdown is by definition an elevated surface and
+          // should read as raised over the page in every theme. The light
+          // shift from white to slate-50 is imperceptible at the panel's
+          // actual size.
+          className="absolute right-0 top-full z-10 mt-1 min-w-[8rem] overflow-hidden rounded border border-border-default bg-surface-elevated py-1 shadow-md"
         >
           {items.map((item, index) => (
             <button

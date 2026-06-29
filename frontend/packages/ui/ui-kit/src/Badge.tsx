@@ -10,10 +10,17 @@ export interface BadgeProps {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  neutral: 'bg-slate-200 text-slate-700',
-  info: 'bg-sky-100 text-sky-800',
-  warning: 'bg-amber-100 text-amber-800',
-  count: 'bg-indigo-600 text-white',
+  // `info` and `warning` use a soft tone: a low-alpha wash of the base
+  // semantic token as the background paired with the base token as the
+  // foreground. This collapses the previous bg-{hue}-100 / text-{hue}-800
+  // "color-paired" pattern onto a single hue with transparency, so the
+  // palette only has to define one shade per status and the soft variant
+  // follows from it. The slight visual shift (paired light/dark vs single
+  // hue plus alpha) is intentional.
+  neutral: 'bg-surface-sunken text-fg-muted',
+  info: 'bg-info/15 text-info',
+  warning: 'bg-warning/15 text-warning',
+  count: 'bg-accent text-accent-fg',
 };
 
 /** A small inline status/count pill. */

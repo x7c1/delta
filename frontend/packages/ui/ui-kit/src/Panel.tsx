@@ -60,12 +60,12 @@ export function Panel({
 }: PanelProps) {
   return (
     <section
-      className={cn('flex h-full min-h-0 flex-col bg-white', className)}
+      className={cn('flex h-full min-h-0 flex-col bg-surface', className)}
     >
       {header !== undefined && (
         <header
           className={cn(
-            'flex h-10 shrink-0 items-center border-b border-slate-200',
+            'flex h-10 shrink-0 items-center border-b border-border-default',
             headerClassName ?? 'px-3',
           )}
         >
@@ -85,7 +85,7 @@ export function Panel({
         )}
       </div>
       {footer !== undefined && (
-        <footer className="shrink-0 border-t border-slate-200 px-3 py-2">
+        <footer className="shrink-0 border-t border-border-default px-3 py-2">
           {footer}
         </footer>
       )}

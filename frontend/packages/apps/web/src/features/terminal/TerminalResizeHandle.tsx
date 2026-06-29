@@ -51,7 +51,7 @@ export function TerminalResizeHandle() {
       className="absolute inset-y-0 left-0 z-30 flex w-1.5 -translate-x-1/2 cursor-col-resize touch-none items-stretch"
     >
       {/* Visible hairline centered in the wider hit area. */}
-      <div className="mx-auto w-px bg-slate-200 transition-colors hover:bg-slate-400" />
+      <div className="mx-auto w-px bg-border-default transition-colors hover:bg-border-strong" />
     </div>
   );
 }

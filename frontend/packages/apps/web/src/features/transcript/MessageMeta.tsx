@@ -48,7 +48,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
     <span className="group/info relative">
       <MessageTimestamp
         timestamp={timestamp}
-        className="cursor-help hover:text-slate-600"
+        className="cursor-help hover:text-fg-muted"
         data-testid="meta-time"
         aria-label="message details"
         tabIndex={0}
@@ -57,17 +57,17 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
       <span
         role="note"
         data-testid="message-meta-popover"
-        className="pointer-events-none absolute right-0 top-full z-10 mt-1 hidden w-80 max-w-[90vw] grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-xs text-slate-600 shadow-lg group-hover/info:grid group-focus-within/info:grid"
+        className="pointer-events-none absolute right-0 top-full z-10 mt-1 hidden w-80 max-w-[90vw] grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-left text-xs text-fg-muted shadow-lg group-hover/info:grid group-focus-within/info:grid"
       >
-        <span className="text-slate-400">model</span>
+        <span className="text-fg-subtle">model</span>
         <span className="min-w-0 break-all" data-testid="popover-model">
           {model ?? '—'}
         </span>
-        <span className="text-slate-400">cwd</span>
+        <span className="text-fg-subtle">cwd</span>
         <span className="min-w-0 break-all" data-testid="popover-cwd">
           {cwd ? formatDir(cwd) : '—'}
         </span>
-        <span className="text-slate-400">branch</span>
+        <span className="text-fg-subtle">branch</span>
         <span className="min-w-0 break-all" data-testid="popover-branch">
           {branch ?? '—'}
         </span>
@@ -78,7 +78,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
   if (!isLatest) {
     return (
       <div
-        className="mt-1 flex flex-col items-end font-mono text-xs text-slate-400"
+        className="mt-1 flex flex-col items-end font-mono text-xs text-fg-subtle"
         data-testid="message-meta"
       >
         {timestampWithPopover}
@@ -88,7 +88,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
 
   return (
     <div
-      className="mt-1 flex w-full items-start justify-between gap-4 font-mono text-xs text-slate-400"
+      className="mt-1 flex w-full items-start justify-between gap-4 font-mono text-xs text-fg-subtle"
       data-testid="message-meta"
       data-latest="true"
     >

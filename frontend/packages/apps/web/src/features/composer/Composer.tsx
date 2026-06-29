@@ -267,12 +267,12 @@ export function Composer({ mode }: ComposerProps) {
   return (
     <form onSubmit={submit} className="space-y-2">
       {branching && (
-        <div className="flex items-start justify-between gap-2 rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs">
+        <div className="flex items-start justify-between gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-xs">
           <span className="flex flex-col gap-0.5">
-            <span className="font-medium text-indigo-700">
+            <span className="font-medium text-accent">
               Branch from selected text
             </span>
-            <span className="line-clamp-2 italic text-slate-600">
+            <span className="line-clamp-2 italic text-fg-muted">
               “{branchOrigin?.locatorQuote}”
             </span>
           </span>
@@ -334,7 +334,7 @@ export function Composer({ mode }: ComposerProps) {
           // above the textarea + the card's 8px bottom padding = a matching 12px
           // bottom gap). Staying pinned to the bottom keeps it in the corner as
           // the textarea auto-grows.
-          className="absolute bottom-1 right-0 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-400 bg-transparent text-indigo-500 shadow-md transition-all hover:bg-slate-200 hover:text-indigo-600 hover:shadow-lg disabled:cursor-not-allowed disabled:text-slate-400 disabled:shadow-md"
+          className="absolute bottom-1 right-0 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-transparent text-accent shadow-md transition-all hover:bg-surface-sunken hover:text-accent-hover hover:shadow-lg disabled:cursor-not-allowed disabled:text-fg-subtle disabled:shadow-md"
         >
           {/* The paper-plane's visual weight sits top-right, so nudge the glyph a
               hair toward the bottom-left to center it within the round button. */}

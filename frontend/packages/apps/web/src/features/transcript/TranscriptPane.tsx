@@ -74,12 +74,12 @@ const BODY_BOTTOM_READING_GAP_PX = 192;
  * Shared chrome for the transcript pane's cards: the floating bottom notices
  * card and composer card that hover over the conversation, plus the in-flow
  * breadcrumb card that sits in the top region above it. A full border,
- * rounded corners, an opaque white fill that occludes the conversation
+ * rounded corners, an opaque surface fill that occludes the conversation
  * beneath, and a shadow so the card reads as lifted above its surroundings
  * rather than fused to them. Per-card padding is applied at each use site.
  */
 const FLOATING_CARD_CLASS =
-  'rounded-md border border-slate-300 bg-white shadow-md';
+  'rounded-md border border-border-default bg-surface shadow-md';
 
 /**
  * The overlay inset in pixels: the gap the floating cards leave from the body
@@ -802,7 +802,7 @@ export function TranscriptPane({
   if (resumeUnavailable && !newSession) {
     bottomContent = (
       <div
-        className="flex items-center gap-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700"
+        className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-xs text-danger"
         data-testid="resume-unavailable-notice"
         role="alert"
       >
@@ -839,7 +839,7 @@ export function TranscriptPane({
           >
             {readOnly && !newSession && (
               <div
-                className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-500"
+                className="flex items-center gap-2 rounded border border-border-default bg-surface-elevated px-2 py-1 text-xs text-fg-subtle"
                 data-testid="readonly-notice"
               >
                 <Badge tone="neutral">closed</Badge>
@@ -851,13 +851,13 @@ export function TranscriptPane({
 
             {showExternalInput && activeThread && (
               <div
-                className="flex items-start gap-2 rounded border border-sky-200 bg-sky-50 px-2 py-1 text-xs"
+                className="flex items-start gap-2 rounded border border-info/30 bg-info/10 px-2 py-1 text-xs"
                 data-testid="external-input-notice"
               >
                 <Badge className="shrink-0" tone="info">
                   external input
                 </Badge>
-                <span className="min-w-0 flex-1 line-clamp-2 break-words text-slate-700">
+                <span className="min-w-0 flex-1 line-clamp-2 break-words text-fg-muted">
                   {externalInput.prompt}
                 </span>
                 <Button
@@ -895,7 +895,7 @@ export function TranscriptPane({
                   the RIGHT edge leftward to the usage percentage, so the bar's
                   growing tip stays next to the `%` readout. A real DOM bar. */}
               <div
-                className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-slate-500"
+                className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-fg-muted"
                 style={{ width: `${Math.min(100, Math.max(0, contextUsage))}%` }}
                 data-testid="composer-context-fill"
                 role="meter"
@@ -908,7 +908,7 @@ export function TranscriptPane({
               />
               <span className="group/ctx pointer-events-auto absolute right-0.5 top-0.5 z-10">
                 <span
-                  className="cursor-help px-1 py-1 text-xs leading-none tabular-nums text-slate-400"
+                  className="cursor-help px-1 py-1 text-xs leading-none tabular-nums text-fg-subtle"
                   data-testid="composer-context-label"
                   tabIndex={0}
                   aria-label="Context window usage"
@@ -920,7 +920,7 @@ export function TranscriptPane({
                 <span
                   role="note"
                   data-testid="composer-context-popover"
-                  className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
+                  className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-xs text-fg-muted shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
                 >
                   Context window usage
                 </span>
@@ -1110,7 +1110,7 @@ export function TranscriptPane({
   //      two boxes, and the conversation shows through the gap between
   //      them — there is NO full-width white bar. Each piece keeps its
   //      own card chrome (a breadcrumb card; the Thread/Terminal pills
-  //      already carry `bg-white shadow-md` via
+  //      already carry `bg-surface shadow-md` via
   //      `TIMELINE_TOGGLE_BUTTON_CLASS` / `TERMINAL_TOGGLE_BUTTON_CLASS`)
   //      so the floating elements stay legible against any conversation
   //      content scrolling underneath. The body reserves
@@ -1365,14 +1365,14 @@ export function TranscriptPane({
       )}
 
       {!newSession && messagesQuery.isLoading && (
-        <p className="px-3 py-4 text-sm text-slate-400">Loading transcript…</p>
+        <p className="px-3 py-4 text-sm text-fg-subtle">Loading transcript…</p>
       )}
 
       {!newSession &&
         !messagesQuery.isLoading &&
         messages.length === 0 &&
         pendingCount === 0 && (
-          <p className="px-3 py-4 text-sm text-slate-400">
+          <p className="px-3 py-4 text-sm text-fg-subtle">
             No messages yet. Send the first message below.
           </p>
         )}
@@ -1439,7 +1439,7 @@ export function TranscriptPane({
                       // it into view, so the eye catches where the branch began.
                       className={
                         flashChildId === child.id
-                          ? 'ring-2 ring-indigo-400 ring-offset-1'
+                          ? 'ring-2 ring-accent-hover ring-offset-1'
                           : undefined
                       }
                       // Clear the hover highlight on click: entering the branch
@@ -1483,7 +1483,7 @@ export function TranscriptPane({
             data-role="assistant"
             data-testid="streaming-message"
           >
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-800">
+            <div className="rounded-lg bg-surface-elevated px-3 py-2 text-fg">
               <div className="flex items-end">
                 <AssistantMarkdown text={streaming.text} />
                 {/* The blinking caret signals "still generating", so it shows
@@ -1494,7 +1494,7 @@ export function TranscriptPane({
                     during the handoff. */}
                 {!streaming.done && (
                   <span
-                    className="ml-0.5 inline-block animate-caret-blink text-slate-600"
+                    className="ml-0.5 inline-block animate-caret-blink text-fg-muted"
                     aria-hidden="true"
                   >
                     ▌

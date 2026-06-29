@@ -6,6 +6,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from 'vitest';
 import {
   fireEvent,
@@ -19,6 +20,11 @@ import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
+import { ThemeProvider } from '../../hooks/themeContext';
+import {
+  SYSTEM_PREFERENCE,
+  THEME_PREFERENCE_STORAGE_KEY,
+} from '../../hooks/useTheme';
 import { useNavStore } from '../../store/navStore';
 import {
   DEFAULT_SETTINGS_CATEGORY,
@@ -41,10 +47,31 @@ function renderSettings() {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <SettingsView />
+        {/* The real app mounts ThemeProvider at the root (see App.tsx) so the
+            settings picker and other consumers read the same theme state. */}
+        <ThemeProvider>
+          <SettingsView />
+        </ThemeProvider>
       </ApiProvider>
     </QueryClientProvider>,
   );
+}
+
+/** Stub `matchMedia` so the ThemeProvider can resolve its initial state in
+ * jsdom (which does not implement the API). Tests can pass `true` to simulate
+ * an OS that prefers dark mode. */
+function installMatchMediaStub(prefersDark: boolean) {
+  const mql = {
+    matches: prefersDark,
+    media: '(prefers-color-scheme: dark)',
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  };
+  vi.stubGlobal('matchMedia', () => mql);
 }
 
 /** The registered-options list once it has loaded its rows. */
@@ -65,6 +92,15 @@ describe('SettingsView', () => {
     useNavStore.setState({ settingsOpen: true });
     useSettingsStore.setState({ activeCategory: DEFAULT_SETTINGS_CATEGORY });
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    // The ThemeProvider reads matchMedia + localStorage at mount; default to
+    // light-OS + cleared preference so each test starts on the SYSTEM default.
+    localStorage.removeItem(THEME_PREFERENCE_STORAGE_KEY);
+    delete document.documentElement.dataset.theme;
+    installMatchMediaStub(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('renders nothing while the settings overlay is closed', () => {
@@ -214,6 +250,7 @@ describe('SettingsView', () => {
       expect(tabs.map((t) => t.textContent)).toEqual([
         'Launch options',
         'Repository scan roots',
+        'Appearance',
       ]);
       expect(
         screen.getByTestId('settings-category-launch-options'),
@@ -221,8 +258,96 @@ describe('SettingsView', () => {
       expect(
         screen.getByTestId('settings-category-scan-roots'),
       ).toHaveAttribute('aria-selected', 'false');
+      expect(
+        screen.getByTestId('settings-category-appearance'),
+      ).toHaveAttribute('aria-selected', 'false');
     });
 
+  });
+
+  describe('Appearance section', () => {
+    function switchToAppearance() {
+      fireEvent.click(screen.getByTestId('settings-category-appearance'));
+    }
+
+    it('lists every registered theme plus a System option', () => {
+      renderSettings();
+      switchToAppearance();
+      const group = screen.getByTestId('appearance-theme-options');
+      // The picker enumerates the THEMES registry and appends System; this
+      // assertion mirrors the registry order so a registry edit (the only
+      // intended way to add a theme) is the single thing this expectation
+      // needs to follow.
+      const radios = within(group).getAllByRole('radio');
+      expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
+        'dark',
+        'light',
+        'sepia',
+        SYSTEM_PREFERENCE,
+      ]);
+      expect(within(group).getByText('Dark')).toBeInTheDocument();
+      expect(within(group).getByText('Light')).toBeInTheDocument();
+      expect(within(group).getByText('Sepia')).toBeInTheDocument();
+      expect(within(group).getByText('System')).toBeInTheDocument();
+    });
+
+    it('highlights the current preference (defaults to System on a fresh install)', () => {
+      renderSettings();
+      switchToAppearance();
+      const systemRadio = screen.getByTestId(
+        `appearance-option-${SYSTEM_PREFERENCE}`,
+      );
+      expect(within(systemRadio).getByRole('radio')).toBeChecked();
+      const darkRadio = screen.getByTestId('appearance-option-dark');
+      expect(within(darkRadio).getByRole('radio')).not.toBeChecked();
+    });
+
+    it('highlights the stored preference rather than the resolved id', () => {
+      // Under SYSTEM + prefers-dark = true, the resolved id is 'dark' but the
+      // picker must still show System as the user's stated choice.
+      installMatchMediaStub(true);
+      localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, SYSTEM_PREFERENCE);
+      renderSettings();
+      switchToAppearance();
+      const systemRadio = screen.getByTestId(
+        `appearance-option-${SYSTEM_PREFERENCE}`,
+      );
+      expect(within(systemRadio).getByRole('radio')).toBeChecked();
+    });
+
+    it('writes data-theme + persists the pick when a theme is selected', () => {
+      renderSettings();
+      switchToAppearance();
+      const darkRadio = within(
+        screen.getByTestId('appearance-option-dark'),
+      ).getByRole('radio');
+      fireEvent.click(darkRadio);
+
+      expect(darkRadio).toBeChecked();
+      expect(document.documentElement.dataset.theme).toBe('dark');
+      expect(localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe('dark');
+    });
+
+    it('switching back to System restores the OS-driven resolution', () => {
+      // Pick light explicitly, then flip back to System; data-theme should
+      // follow the matchMedia stub (light here) rather than stick on 'light'.
+      renderSettings();
+      switchToAppearance();
+      fireEvent.click(
+        within(screen.getByTestId('appearance-option-light')).getByRole('radio'),
+      );
+      expect(localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe('light');
+
+      fireEvent.click(
+        within(
+          screen.getByTestId(`appearance-option-${SYSTEM_PREFERENCE}`),
+        ).getByRole('radio'),
+      );
+      expect(localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY)).toBe(
+        SYSTEM_PREFERENCE,
+      );
+      expect(document.documentElement.dataset.theme).toBe('light');
+    });
   });
 
   describe('Repository scan roots section', () => {
