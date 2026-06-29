@@ -2193,8 +2193,15 @@ export function ThreadTimelineOverlay({
                   // paint without forcing every other row to reserve the
                   // same vertical space, and adjacent rows now sit truly
                   // edge-to-edge.
+                  // Hairline color is sourced from the semantic
+                  // `--delta-color-border` token so it follows the active
+                  // theme (replaces the previously hardcoded slate-200
+                  // literal that happened to match the light value exactly).
+                  // The arbitrary-value shadow has no slash-opacity, so the
+                  // bare `rgb(var(...))` is enough — no `<alpha-value>`
+                  // placeholder needed here.
                   const ACTIVE_HAIRLINE_SHADOW =
-                    'shadow-[inset_0_1px_0_0_rgb(226_232_240),inset_0_-1px_0_0_rgb(226_232_240)]';
+                    'shadow-[inset_0_1px_0_0_rgb(var(--delta-color-border)),inset_0_-1px_0_0_rgb(var(--delta-color-border))]';
                   const highlightClasses = isHighlighted
                     ? `${ACTIVE_HAIRLINE_SHADOW} bg-surface-elevated`
                     : '';
