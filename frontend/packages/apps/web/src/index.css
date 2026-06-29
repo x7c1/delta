@@ -30,9 +30,19 @@
     var(--delta-overlay-inset) + var(--delta-composer-card-reserve)
   );
 
-  /* The embedded terminal's background — slate-900, shared by the panel body
-   * (bg-terminal-bg) and the xterm canvas (src/theme.ts). */
-  --delta-terminal-bg: theme(colors.slate.900);
+  /*
+   * Terminal-pane chrome tokens. These are intentionally identical in light
+   * and dark themes — they overlay an embedded xterm canvas that is itself
+   * theme-fixed dark, so flipping them per theme would render the chrome
+   * illegible in light mode. `terminal-bg` is also read at runtime by
+   * src/theme.ts and handed to xterm so the panel body and the canvas can
+   * never disagree.
+   */
+  --delta-color-terminal-bg: 15 23 42;
+  --delta-color-terminal-fg: 203 213 225;
+  --delta-color-terminal-fg-strong: 241 245 249;
+  --delta-color-terminal-overlay: 30 41 59;
+  --delta-color-terminal-overlay-hover: 51 65 85;
 
   /* The terminal font stack, defined once in tailwind.config.js
    * (fontFamily.terminal) and exposed here for xterm (src/theme.ts). */
@@ -120,6 +130,11 @@
   --delta-color-info: 56 189 248;
   --delta-color-success: 52 211 153;
   --delta-color-scrim: 2 6 23;
+  --delta-color-terminal-bg: 15 23 42;
+  --delta-color-terminal-fg: 203 213 225;
+  --delta-color-terminal-fg-strong: 241 245 249;
+  --delta-color-terminal-overlay: 30 41 59;
+  --delta-color-terminal-overlay-hover: 51 65 85;
 }
 
 :root[data-theme='light'] {
@@ -142,6 +157,11 @@
   --delta-color-info: 2 132 199;
   --delta-color-success: 5 150 105;
   --delta-color-scrim: 15 23 42;
+  --delta-color-terminal-bg: 15 23 42;
+  --delta-color-terminal-fg: 203 213 225;
+  --delta-color-terminal-fg-strong: 241 245 249;
+  --delta-color-terminal-overlay: 30 41 59;
+  --delta-color-terminal-overlay-hover: 51 65 85;
 }
 
 html,

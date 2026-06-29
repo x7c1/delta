@@ -142,7 +142,7 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
 
   return (
     <Panel
-      className="border-l border-slate-200"
+      className="border-l border-border-default"
       bodyClassName="bg-terminal-bg"
     >
       {/* The per-session xterm elements are appended into this container; the
@@ -153,12 +153,12 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
           onClick={() => setTerminalOpen(false)}
           aria-label="Close terminal"
           title="Close terminal"
-          className="absolute right-2 top-2 z-10 rounded bg-slate-800/60 px-1.5 py-0.5 text-sm leading-none text-slate-300 opacity-60 transition hover:bg-slate-700 hover:text-slate-100 hover:opacity-100 focus-visible:opacity-100"
+          className="absolute right-2 top-2 z-10 rounded bg-terminal-overlay/60 px-1.5 py-0.5 text-sm leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
         >
           »
         </button>
         {unavailableNote && (
-          <p className="p-3 text-xs text-slate-300">{unavailableNote}</p>
+          <p className="p-3 text-xs text-terminal-fg">{unavailableNote}</p>
         )}
       </div>
     </Panel>
@@ -174,9 +174,9 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
   const term = new Terminal({
     convertEol: true,
     // The design tokens own the stack and the background (tailwind.config.js
-    // `fontFamily.terminal` / `--delta-terminal-bg`); xterm takes them as
-    // JavaScript options, so they are read off the document here instead of
-    // being restated. See the config for the per-OS font reasoning.
+    // `fontFamily.terminal` / `--delta-color-terminal-bg`); xterm takes them
+    // as JavaScript options, so they are read off the document here instead
+    // of being restated. See the config for the per-OS font reasoning.
     fontFamily: terminalFontFamily(),
     fontSize: 13,
     theme: { background: terminalBackground() },
