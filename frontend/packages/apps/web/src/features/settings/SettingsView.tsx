@@ -20,11 +20,14 @@ import {
 import type { LaunchOption, RepositoryScanRoot } from '@delta/wire-gen';
 import { Button, cn, Dialog, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
+import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
 import {
   type SettingsCategoryId,
   useSettingsStore,
 } from '../../store/settingsStore';
+import { SYSTEM_PREFERENCE, type ThemePreference } from '../../hooks/useTheme';
+import { THEMES } from '../../themes/registry';
 import { displayPath } from '../../utils/displayPath';
 import { WorkdirPickerBody } from '../composer/WorkdirPickerBody';
 
@@ -69,6 +72,13 @@ export function SettingsView() {
       id: 'scan-roots',
       label: 'Repository scan roots',
       render: (active) => <RepositoryScanRootsSection active={active} />,
+    },
+    {
+      id: 'appearance',
+      label: 'Appearance',
+      // The Appearance section has no data fetch of its own; the `active`
+      // prop is ignored.
+      render: () => <AppearanceSection />,
     },
   ];
 
@@ -553,6 +563,87 @@ function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
         Remove
       </Button>
     </li>
+  );
+}
+
+/**
+ * Appearance category content: pick which theme drives the UI. Options are
+ * sourced from the theme registry (every registered `:root[data-theme="…"]`
+ * block in src/index.css) plus a `System` option that follows
+ * `prefers-color-scheme`. Selection writes through {@link useThemeContext}'s
+ * setter, which persists to localStorage and updates `<html data-theme="…">`
+ * — the surrounding UI (and the embedded xterm canvas) re-resolves its
+ * design tokens in the same tick.
+ *
+ * The control is a radio group so each option is independently focusable for
+ * keyboard navigation and screen readers announce the role correctly. The
+ * highlight reflects the user's stated preference (including `system`)
+ * rather than the resolved id, so picking `System` stays visibly checked
+ * regardless of which concrete theme the OS currently signals.
+ */
+function AppearanceSection() {
+  const { preference, setPreference } = useThemeContext();
+
+  const options: { value: ThemePreference; label: string; hint: string }[] = [
+    ...THEMES.map((theme) => ({
+      value: theme.id as ThemePreference,
+      label: theme.displayName,
+      hint: theme.isDark ? 'Dark surfaces' : 'Light surfaces',
+    })),
+    {
+      value: SYSTEM_PREFERENCE,
+      label: 'System',
+      hint: 'Follow the OS preference',
+    },
+  ];
+
+  return (
+    <section className="w-full" data-testid="appearance-section">
+      <h3 className="mb-1 text-sm font-semibold text-fg">Appearance</h3>
+      <p className="mb-4 text-xs text-fg-muted">
+        Choose the theme used across the app. <span className="font-medium">System</span>{' '}
+        follows your operating system&apos;s color-scheme preference and updates
+        live when it changes.
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby="appearance-section-heading"
+        className="flex flex-col gap-2 rounded-lg border border-border-default bg-surface-elevated p-3"
+        data-testid="appearance-theme-options"
+      >
+        <span id="appearance-section-heading" className="sr-only">
+          Theme preference
+        </span>
+        {options.map((option) => {
+          const selected = preference === option.value;
+          return (
+            <label
+              key={option.value}
+              className={cn(
+                'flex cursor-pointer items-center gap-3 rounded border px-3 py-2 text-sm transition',
+                selected
+                  ? 'border-accent bg-accent/10 text-fg ring-1 ring-accent/30'
+                  : 'border-border-default text-fg hover:bg-surface',
+              )}
+              data-testid={`appearance-option-${option.value}`}
+            >
+              <input
+                type="radio"
+                name="appearance-theme"
+                value={option.value}
+                checked={selected}
+                onChange={() => setPreference(option.value)}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              <span className="flex flex-1 flex-col">
+                <span className="font-medium">{option.label}</span>
+                <span className="text-xs text-fg-muted">{option.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 

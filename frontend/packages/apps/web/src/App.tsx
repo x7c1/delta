@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { ApiProvider } from './data/apiContext';
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
+import { ThemeProvider } from './hooks/themeContext';
 
 export function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -41,14 +42,20 @@ export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApiProvider>
-        {/* App-wide catch-all: a crash anywhere in the tree degrades to a
-            recoverable notice instead of a blank page. Region-level boundaries
-            (e.g. the terminal) handle their own failures before reaching here. */}
-        <ErrorBoundary label="app" fallback={() => <AppCrash />}>
-          <div className="h-full bg-surface-elevated text-fg">
-            <WorkspaceScreen />
-          </div>
-        </ErrorBoundary>
+        {/* ThemeProvider owns the singleton subscription to the active theme:
+            it drives <html data-theme="...">, the matchMedia listener for the
+            'system' preference, and the localStorage write — so any consumer
+            (settings picker, xterm bridge) reads the same shared state. */}
+        <ThemeProvider>
+          {/* App-wide catch-all: a crash anywhere in the tree degrades to a
+              recoverable notice instead of a blank page. Region-level boundaries
+              (e.g. the terminal) handle their own failures before reaching here. */}
+          <ErrorBoundary label="app" fallback={() => <AppCrash />}>
+            <div className="h-full bg-surface-elevated text-fg">
+              <WorkspaceScreen />
+            </div>
+          </ErrorBoundary>
+        </ThemeProvider>
       </ApiProvider>
     </QueryClientProvider>
   );

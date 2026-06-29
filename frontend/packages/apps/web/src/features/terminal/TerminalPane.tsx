@@ -7,6 +7,7 @@ import type { SessionId } from '@delta/model';
 import { Panel } from '@delta/ui-kit';
 import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
+import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
 import { terminalBackground, terminalFontFamily } from '../../theme';
 
@@ -55,6 +56,9 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
   const pendingTeardownRef = useRef<number | null>(null);
   const setTerminalOpen = useNavStore((state) => state.setTerminalOpen);
+  // Subscribe to the resolved theme so a picker change repaints every live
+  // xterm instance below without requiring a session detach + reattach.
+  const { resolved: resolvedTheme } = useThemeContext();
 
   const canAttach = !isMockMode() && attachable && sessionId !== null;
 
@@ -102,6 +106,27 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
     }
     entry.fit.fit();
   }, [canAttach, sessionId]);
+
+  // When the active theme changes, repaint every live xterm: each Terminal
+  // reads its background once at construction (see `createEntry`), so a
+  // picker flip would otherwise leave the canvas on the previous color until
+  // the session is detached and reattached. Reassigning `options.theme`
+  // pushes the new value into xterm's renderer, which clears and redraws the
+  // visible buffer in place. `resolvedTheme` is the dep — the live id from
+  // `useThemeContext`, which already reacts to both an explicit pick and a
+  // `prefers-color-scheme` flip under the 'system' preference. Reading
+  // `terminalBackground()` inside the effect (rather than passing it in)
+  // ensures the freshly applied `:root[data-theme="…"]` block is observed,
+  // since the bridging `<html>` attribute is written by ThemeProvider before
+  // this effect runs.
+  useEffect(() => {
+    for (const entry of entriesRef.current.values()) {
+      entry.term.options.theme = {
+        ...entry.term.options.theme,
+        background: terminalBackground(),
+      };
+    }
+  }, [resolvedTheme]);
 
   // Detach everything only when the terminal itself closes (this unmounts).
   //
