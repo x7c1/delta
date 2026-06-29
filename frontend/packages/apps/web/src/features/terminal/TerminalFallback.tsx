@@ -30,7 +30,7 @@ export function TerminalFallback({ onClose }: TerminalFallbackProps) {
       }
       bodyClassName="bg-terminal-bg"
     >
-      <p className="p-3 text-xs text-slate-300">
+      <p className="p-3 text-xs text-terminal-fg">
         The terminal could not be displayed. It was isolated so it would not
         affect the rest of the app — reload the page to try again.
       </p>

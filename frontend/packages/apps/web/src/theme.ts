@@ -38,10 +38,35 @@ export function terminalFontFamily(): string {
 }
 
 /**
- * The embedded terminal's background color (`--delta-terminal-bg`), shared
- * with the `bg-terminal-bg` utility so the panel chrome and the xterm canvas
- * can never disagree.
+ * The embedded terminal's background color (`--delta-color-terminal-bg`),
+ * shared with the `bg-terminal-bg` utility so the panel chrome and the xterm
+ * canvas can never disagree.
+ *
+ * The custom property stores a space-separated `R G B` triple (so Tailwind
+ * can wrap it as `rgb(var(--…) / <alpha-value>)`), but xterm expects a CSS
+ * color string for `theme.background`. Parse the three components and emit
+ * a `#RRGGBB` hex literal. If the property is unset, malformed, or the
+ * stylesheet has not loaded yet, fall back to slate-900 (`#0f172a`, the
+ * canonical value defined in src/index.css) so xterm never sees an empty
+ * string.
  */
 export function terminalBackground(): string {
-  return readToken('--delta-terminal-bg');
+  const FALLBACK = '#0f172a';
+  const raw = readToken('--delta-color-terminal-bg');
+  if (raw === '') {
+    return FALLBACK;
+  }
+  const parts = raw.split(/\s+/);
+  if (parts.length < 3) {
+    return FALLBACK;
+  }
+  const components: number[] = [];
+  for (let i = 0; i < 3; i++) {
+    const n = Number.parseInt(parts[i], 10);
+    if (!Number.isFinite(n) || n < 0 || n > 255) {
+      return FALLBACK;
+    }
+    components.push(n);
+  }
+  return `#${components.map((n) => n.toString(16).padStart(2, '0')).join('')}`;
 }

@@ -82,12 +82,20 @@ export default {
         terminal,
       },
       colors: {
-        // The embedded terminal's background (xterm reads the same variable,
-        // so the panel chrome and the canvas can never disagree). Kept as a
-        // raw variable reference (not the `rgb(.../<alpha-value>)` form used
-        // below) because xterm consumes the resolved string directly via
-        // `getComputedStyle` and expects a parseable hex color.
-        'terminal-bg': 'var(--delta-terminal-bg)',
+        // Terminal-pane chrome tokens. These are theme-fixed (the RGB triple
+        // is identical in light and dark themes) because they overlay the
+        // embedded xterm canvas, which is itself theme-fixed dark — flipping
+        // them per theme would render the chrome illegible in light mode.
+        // `terminal-bg` is also read at runtime by src/theme.ts and handed to
+        // xterm, so the panel chrome and the canvas can never disagree.
+        'terminal-bg': 'rgb(var(--delta-color-terminal-bg) / <alpha-value>)',
+        'terminal-fg': 'rgb(var(--delta-color-terminal-fg) / <alpha-value>)',
+        'terminal-fg-strong':
+          'rgb(var(--delta-color-terminal-fg-strong) / <alpha-value>)',
+        'terminal-overlay':
+          'rgb(var(--delta-color-terminal-overlay) / <alpha-value>)',
+        'terminal-overlay-hover':
+          'rgb(var(--delta-color-terminal-overlay-hover) / <alpha-value>)',
         // Semantic color tokens. Values come from the active
         // `:root[data-theme="..."]` block in src/index.css; the same names
         // resolve through every theme, so swapping `data-theme` swaps all of
