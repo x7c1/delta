@@ -122,7 +122,7 @@ export function RepositoryTab() {
   if (repositoriesQuery.isError) {
     return (
       <div
-        className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
         data-testid="repository-tab-error"
         role="alert"
       >
@@ -134,11 +134,11 @@ export function RepositoryTab() {
   if (repositories.length === 0) {
     return (
       <div
-        className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-600"
+        className="rounded-md border border-dashed border-border-default bg-surface-elevated px-4 py-6 text-sm text-fg-muted"
         data-testid="repository-tab-empty"
       >
-        <p className="font-medium text-slate-700">No repositories yet.</p>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="font-medium text-fg">No repositories yet.</p>
+        <p className="mt-1 text-xs text-fg-subtle">
           Start a session via the Directory tab to register your first repo.
         </p>
       </div>
@@ -148,7 +148,7 @@ export function RepositoryTab() {
   return (
     <div className="space-y-3" data-testid="repository-tab">
       <section className="space-y-1" data-testid="repository-tab-repos">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
           Repositories
         </h3>
         <ul className="space-y-0.5">
@@ -166,7 +166,7 @@ export function RepositoryTab() {
 
       {selectedRepo && (
         <section className="space-y-1" data-testid="repository-tab-clones">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
             Clones
           </h3>
           <ul className="space-y-0.5">
@@ -185,10 +185,10 @@ export function RepositoryTab() {
                     }}
                     aria-pressed={isPicked}
                     className={cn(
-                      'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-slate-100',
+                      'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-elevated-hover',
                       isPicked
-                        ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-                        : 'text-slate-700',
+                        ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
+                        : 'text-fg',
                     )}
                     title={clone.path}
                     data-testid="repository-tab-clone-row"
@@ -203,7 +203,7 @@ export function RepositoryTab() {
                     </span>
                     {clone.last_branch && (
                       <span
-                        className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.7rem] text-slate-500"
+                        className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-[0.7rem] text-fg-subtle"
                         title={clone.last_branch}
                       >
                         {displayBranch(clone.last_branch)}
@@ -237,26 +237,26 @@ function RepoRow({ repo, isSelected, onSelect }: RepoRowProps) {
       onClick={onSelect}
       aria-pressed={isSelected}
       className={cn(
-        'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-slate-100',
+        'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left hover:bg-surface-elevated-hover',
         isSelected
-          ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200'
-          : 'text-slate-700',
+          ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
+          : 'text-fg',
       )}
       data-testid="repository-tab-repo-row"
     >
       <div className="min-w-0 flex-1">
         <div className="truncate text-xs font-medium">{repo.display_name}</div>
-        <div className="truncate font-mono text-[0.7rem] text-slate-500">
+        <div className="truncate font-mono text-[0.7rem] text-fg-subtle">
           {repo.identity_key}
         </div>
       </div>
       {isPathKey && (
-        <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[0.65rem] uppercase tracking-wide text-slate-500">
+        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-[0.65rem] uppercase tracking-wide text-fg-subtle">
           local
         </span>
       )}
       {repo.clones.length > 1 && (
-        <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[0.65rem] text-slate-600">
+        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-[0.65rem] text-fg-muted">
           {repo.clones.length} clones
         </span>
       )}
