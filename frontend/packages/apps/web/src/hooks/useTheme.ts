@@ -81,6 +81,22 @@ function resolvePreference(preference: ThemePreference): ThemeId {
   return preference === SYSTEM_PREFERENCE ? readSystemTheme() : preference;
 }
 
+/**
+ * Write the active resolved id onto `<html data-theme="…">`. Done eagerly
+ * from {@link useTheme}'s setter and matchMedia handler — _not_ left to a
+ * subsequent useEffect — so descendants whose own effects read the document
+ * attribute (e.g. the xterm bridge in TerminalPane, which calls
+ * `terminalBackground()`) see the freshly applied value on the same tick the
+ * theme changes. Otherwise React's child-before-parent effect ordering would
+ * have them read the stale attribute first and miss the update.
+ */
+function writeDocumentTheme(resolved: ThemeId): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  document.documentElement.dataset.theme = resolved;
+}
+
 export interface UseThemeResult {
   preference: ThemePreference;
   resolved: ThemeId;
@@ -97,34 +113,50 @@ export function useTheme(): UseThemeResult {
 
   // When the user picks an explicit theme, `resolved` follows directly. When
   // the user picks `'system'`, also subscribe to the media query so a later
-  // OS toggle re-renders without requiring a reload.
+  // OS toggle re-renders without requiring a reload. The matchMedia handler
+  // writes `<html data-theme="…">` eagerly so descendants that read the
+  // document attribute in their own effects observe the update on the same
+  // tick (see {@link writeDocumentTheme} for why this is not deferred to a
+  // post-render effect).
   useEffect(() => {
     if (preference !== SYSTEM_PREFERENCE) {
       setResolved(preference);
+      writeDocumentTheme(preference);
       return;
     }
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
       setResolved(DEFAULT_THEME_ID);
+      writeDocumentTheme(DEFAULT_THEME_ID);
       return;
     }
     const mql = window.matchMedia(PREFERS_DARK_QUERY);
-    const sync = () => setResolved(mql.matches ? 'dark' : 'light');
+    const sync = () => {
+      const next = mql.matches ? 'dark' : 'light';
+      setResolved(next);
+      writeDocumentTheme(next);
+    };
     sync();
     mql.addEventListener('change', sync);
     return () => mql.removeEventListener('change', sync);
   }, [preference]);
 
-  // Push the resolved id onto `<html data-theme="...">` so the matching
-  // `:root[data-theme="..."]` block in src/index.css takes effect.
+  // Defense-in-depth: if `resolved` somehow lands on the document via another
+  // path (e.g. on the first mount before the preference effect has fired),
+  // make sure the attribute matches the React state. This is idempotent with
+  // the eager writes inside the preference effect.
   useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.documentElement.dataset.theme = resolved;
+    writeDocumentTheme(resolved);
   }, [resolved]);
 
   const setPreference = useCallback((next: ThemePreference) => {
     setPreferenceState(next);
+    // Resolve + write `data-theme` synchronously so a consumer that reacts
+    // to the new preference (e.g. xterm's background bridge) reads the
+    // freshly applied attribute on the same tick. React effects alone would
+    // run child-before-parent and observe the stale value.
+    const nextResolved = resolvePreference(next);
+    setResolved(nextResolved);
+    writeDocumentTheme(nextResolved);
     if (typeof window === 'undefined') {
       return;
     }
