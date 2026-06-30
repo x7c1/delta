@@ -67,10 +67,11 @@ function basename(path: string): string {
  * session label when the launch directory was not in a git repo); line 2 shows
  * the launch-time repository identity on the left (preferring the backend's
  * short `repository_display_name` label, e.g. `org/repo`, and falling back to
- * the cwd basename — RTL-truncated only on the fallback so a long local path's
- * tail stays visible; omitted entirely when both yield no name) and the
- * last-activity time on the right) plus the kebab actions menu in a
- * fixed-width slot at the right end. The menu always offers `Copy session ID`
+ * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
+ * `org/repo` keeps its repo name and a long local path keeps its meaningful
+ * tail; omitted entirely when both yield no name) and the last-activity time
+ * on the right) plus the kebab actions menu in a fixed-width slot at the
+ * right end. The menu always offers `Copy session ID`
  * (useful even for a closed session — copying its id, e.g. to feed
  * `claude --resume`, does not require the session to be running) and
  * additionally exposes `Close` while the session is open. The focused card is
@@ -97,13 +98,20 @@ export function SessionNode({
   const client = useApiClient();
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
-  // Running and unread are THREAD-keyed in the store. The collapsed session row
-  // OR-aggregates them over the session's threads (main + every sub-thread): the
-  // spinner shows if ANY thread is running, the dot if ANY thread is unread.
-  // This preserves the previous session-level row behaviour while keeping the
-  // thread-keyed state the single source of truth (the tree below shows the
-  // per-thread breakdown). The main thread is included so a turn on main — the
-  // thread reached from this card's header — is not invisible.
+  // Running and unread are THREAD-keyed in the store, but the collapsed row
+  // surfaces them differently:
+  //
+  // * `running` is scoped to the SESSION'S MAIN THREAD only. Sub-threads have
+  //   their own spinners in the {@link ThreadTree} below, so OR-aggregating
+  //   into the header lit the row spinner for sub-thread work that is already
+  //   visibly running one row down — a duplicate signal. The main thread is
+  //   the one reached from this card's header, so the header spinner answers
+  //   "is the thing this card points at running?" and the tree answers the
+  //   per-thread breakdown.
+  // * `unread` is still OR-aggregated over every thread of the session (main
+  //   + every sub-thread). The unread dot is the "finished while you were
+  //   away" hint for the WHOLE session, so missing it on a sub-thread would
+  //   silently hide a completed turn on a non-focused row.
   const sessionRunningThreads = useLiveStore(
     (state) => state.runningThreads[item.session.id],
   );
@@ -152,15 +160,19 @@ export function SessionNode({
   // session is running; on the fallback path the tooltip carries the cwd.
   // An empty `repoLabel` means no usable label and the line-2 left span is
   // omitted.
+  //
+  // Both the primary and the fallback path RTL-truncate ("left-end truncate"):
+  // for a long `org/repo` we want the repo name preserved and the org clipped
+  // (`…/repo` reads more usefully than `org/r…`), and the fallback path keeps
+  // the meaningful tail of a long local path (e.g. `…/projects/delta`). One
+  // truncation direction across both paths also keeps the visual presentation
+  // consistent as a session transitions between the two (e.g. once a backend
+  // adds `repository_display_name` for a previously fallback session).
   const repositoryDisplayName = item.session.repository_display_name;
   const repoRoot = item.session.repo_root;
   const cwd = item.session.cwd;
   const repoLabel = repositoryDisplayName ?? basename(cwd);
   const repoTooltip = repositoryDisplayName ? (repoRoot ?? cwd) : cwd;
-  // Only the fallback path needs RTL truncation: a long local path is more
-  // meaningful from the tail (e.g. `…/projects/delta`), but the primary
-  // `org/repo` label is short and reads more naturally left-aligned.
-  const repoUsesFallback = repositoryDisplayName === null;
   // Show the sub-thread list only once the session has branched. The main
   // thread itself is never listed (it is reached by clicking this card's
   // header — see NavigatorPane); a session with no sub-threads shows no tree at
@@ -168,14 +180,21 @@ export function SessionNode({
   const hasSubThreads =
     threads?.some((t) => t.parent_thread_id !== null) ?? false;
 
-  // OR-aggregate running/unread over the session's threads for the collapsed
-  // row. The thread ids are main plus every fetched thread; until the tree
-  // loads, fall back to main alone so a running/unread main thread still shows.
+  // `unread` OR-aggregates over the session's threads for the collapsed row.
+  // The thread ids are main plus every fetched thread; until the tree loads,
+  // fall back to main alone so an unread main thread still shows.
+  //
+  // `running` deliberately only considers the main thread — sub-thread
+  // spinners are rendered by the {@link ThreadTree} below, so the header
+  // spinner answers "is the main thread running?" and avoids duplicating a
+  // signal that is already visible one row down.
   const sessionThreadIds: ThreadId[] = threads
     ? threads.map((t) => t.id)
     : [item.main_thread_id];
-  const running = sessionThreadIds.some((id) =>
-    threadIsRunning(sessionRunningThreads, sessionRunningSubagents, id),
+  const running = threadIsRunning(
+    sessionRunningThreads,
+    sessionRunningSubagents,
+    item.main_thread_id,
   );
   // The dot is gated off the focused row: while a session is focused the user is
   // viewing it, and activating its threads clears their unread — but a just-
@@ -256,7 +275,11 @@ export function SessionNode({
               {running && (
                 // Compact: the rotating circle alone reads as "processing". The
                 // Spinner's glyph is aria-hidden, so pair it with a
-                // visually-hidden label for assistive tech.
+                // visually-hidden label for assistive tech. The header spinner
+                // tracks the SESSION'S MAIN THREAD only — a sub-thread that is
+                // running shows its own spinner inside {@link ThreadTree}, and
+                // OR-aggregating both surfaces here would render two spinners
+                // for the same activity.
                 <span className="shrink-0" data-testid="session-running">
                   <Spinner />
                   <span className="sr-only">running</span>
@@ -287,19 +310,17 @@ export function SessionNode({
               )}
             </span>
             {/* Line 2: the launch-time repository identity on the left and
-                the last-activity time on the right. Primary path renders the
-                backend's short `repository_display_name` label left-aligned;
-                fallback path renders the cwd basename RTL-truncated so a
-                long local path keeps its meaningful tail (e.g.
-                `…/projects/delta`). The repo span is omitted entirely when
-                neither yields a usable label. */}
+                the last-activity time on the right. Both the primary (the
+                backend's short `repository_display_name`) and the fallback
+                (cwd basename) paths RTL-truncate ("left-end truncate") so the
+                meaningful tail is preserved — `org/repo` clips the org and
+                keeps the repo, a long local path keeps `…/projects/delta`.
+                The repo span is omitted entirely when neither yields a usable
+                label. */}
             <span className="flex items-baseline gap-2 text-xs text-fg-subtle">
               {repoLabel && (
                 <span
-                  className={cn(
-                    'min-w-0 flex-1 truncate text-left',
-                    repoUsesFallback && '[direction:rtl]',
-                  )}
+                  className="min-w-0 flex-1 truncate text-left [direction:rtl]"
                   title={repoTooltip}
                   data-testid="session-repo"
                 >
@@ -307,7 +328,10 @@ export function SessionNode({
                 </span>
               )}
               {lastActivity && (
-                <span className="ml-auto shrink-0 tabular-nums">
+                <span
+                  className="ml-auto shrink-0 tabular-nums [font-stretch:condensed]"
+                  data-testid="session-last-activity"
+                >
                   {lastActivity}
                 </span>
               )}
