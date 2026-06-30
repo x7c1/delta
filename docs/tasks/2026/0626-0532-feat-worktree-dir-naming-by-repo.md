@@ -115,18 +115,18 @@ can consume it, and ensures `origin_url` is called only once.
 
 ### Automated (pipeline-verified)
 
-- [ ] `worktree_dir_slug` exists in `delta-usecase` / `repository.rs`, is
+- [x] `worktree_dir_slug` exists in `delta-usecase` / `repository.rs`, is
       `pub` re-exported from `lib.rs`, and its unit tests cover the cases
       listed above.
-- [ ] A new lifecycle test asserts that the worktree path passed to
+- [x] A new lifecycle test asserts that the worktree path passed to
       `git_worktree.create_worktree` for a session whose fake `origin_url`
       returns `Some("https://github.com/x7c1/delta")` is
       `<TEST_WORKTREE_BASE>/x7c1-delta-<session-id>`, AND that the branch
       argument is `delta-<session-id>` (unchanged shape).
-- [ ] The three existing worktree-path tests are updated and pass.
-- [ ] `self.git_worktree.origin_url(` is called at most once per spawn in
+- [x] The three existing worktree-path tests are updated and pass.
+- [x] `self.git_worktree.origin_url(` is called at most once per spawn in
       `spawn_fresh.rs` (verified by grep during code review).
-- [ ] `cd backend && cargo build && cargo test && cargo clippy --all-targets -- -D warnings` passes.
+- [x] `cd backend && cargo build && cargo test && cargo clippy --all-targets -- -D warnings` passes.
 
 ### Manual / on-hardware (verified by a human before merge)
 
