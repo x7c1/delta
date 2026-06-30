@@ -32,7 +32,7 @@ import { test, expect, type Page } from '@playwright/test';
 const SURFACE_VAR = '--delta-color-surface';
 
 const LIGHT_SURFACE_RGB = '255 255 255';
-const DARK_SURFACE_RGB = '15 23 42';
+const DARK_SURFACE_RGB = '29 29 32';
 const SEPIA_SURFACE_RGB = '247 235 207';
 
 /** Read a CSS variable resolved on the document root inside the page. */

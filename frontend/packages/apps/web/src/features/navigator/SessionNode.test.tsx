@@ -35,6 +35,15 @@ function setRunning() {
   useLiveStore.setState({ runningThreads: { [SESSION_ID]: { 1: true } } });
 }
 
+/**
+ * Flag a sub-thread (id 2, i.e. NOT the main thread) running in the store.
+ * The header spinner is keyed off the main thread alone, so this lets a test
+ * assert that sub-thread activity does not light the header.
+ */
+function setSubThreadRunning() {
+  useLiveStore.setState({ runningThreads: { [SESSION_ID]: { 2: true } } });
+}
+
 /** Flag the session's main thread (id 1) unread in the store. */
 function setUnread() {
   useLiveStore.setState({ unread: { 1: 1 } });
@@ -95,7 +104,9 @@ function renderNode(props: Partial<ComponentProps<typeof SessionNode>>) {
 }
 
 describe('SessionNode running indicator', () => {
-  it('renders the running indicator when a thread of the session is running', () => {
+  it('renders the running indicator when the main thread of the session is running', () => {
+    // `setRunning` flags the main thread (id 1) running; the header spinner is
+    // scoped to the main thread, so this is the trigger case for the spinner.
     setRunning();
     renderNode({});
 
@@ -112,6 +123,16 @@ describe('SessionNode running indicator', () => {
     expect(screen.queryByTestId('session-running')).not.toBeInTheDocument();
   });
 
+  it('does not light the header when only a sub-thread is running', () => {
+    // Sub-thread activity has its own spinner inside the ThreadTree below; the
+    // header spinner is keyed off the main thread alone to avoid double-marking
+    // the same activity.
+    setSubThreadRunning();
+    renderNode({});
+
+    expect(screen.queryByTestId('session-running')).not.toBeInTheDocument();
+  });
+
   it('shows the running indicator and the permission badge together', () => {
     setRunning();
     renderNode({ needsPermission: true });
@@ -122,9 +143,10 @@ describe('SessionNode running indicator', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the running indicator when only a subagent is running (turn idle)', () => {
+  it('shows the running indicator when only a subagent is running on the main thread', () => {
     // The launching turn has ended but its background subagent keeps working;
-    // the thread still reads as running so the row shows the spinner.
+    // the main thread still reads as running (`setRunningSubagent` records its
+    // subagent against thread id 1), so the row shows the spinner.
     setRunningSubagent();
     renderNode({});
 
@@ -197,16 +219,18 @@ describe('SessionNode repo line', () => {
     // working-tree path so the user can still see exactly where the
     // session is running.
     expect(repo).toHaveAttribute('title', '/home/dev/project');
-    // The primary path does NOT use RTL truncation — the label is short and
-    // reads naturally left-aligned.
-    expect(repo.className).not.toContain('[direction:rtl]');
+    // Both the primary and the fallback path RTL-truncate: a long `org/repo`
+    // should clip the org and keep the repo name (`…/repo`), not the other
+    // way around.
+    expect(repo.className).toContain('[direction:rtl]');
   });
 
   it('falls back to the cwd basename and RTL-truncates when repository_display_name is null', () => {
     // A legacy row (predates the column) OR a session launched outside any
     // git repo: backend sends `repository_display_name: null`, frontend
-    // renders the cwd basename instead. The fallback path uses RTL
-    // truncation so a long local path keeps its meaningful tail.
+    // renders the cwd basename instead. RTL truncation is shared with the
+    // primary path so the fallback also keeps the meaningful tail of a long
+    // local path.
     const legacy: SessionListItem = {
       ...item,
       session: {
@@ -239,6 +263,17 @@ describe('SessionNode repo line', () => {
     renderNode({ item: empty });
 
     expect(screen.queryByTestId('session-repo')).not.toBeInTheDocument();
+  });
+
+  it('renders the last-activity time with condensed font-stretch', () => {
+    // The timestamp is shown in tabular-nums plus a `font-stretch: condensed`
+    // hint so timestamps stay compact next to the repo label on a narrow row.
+    // The class is honoured only by variable fonts that ship a condensed axis;
+    // it is a no-op fallback otherwise, but the explicit hint stays.
+    renderNode({});
+
+    const lastActivity = screen.getByTestId('session-last-activity');
+    expect(lastActivity.className).toContain('[font-stretch:condensed]');
   });
 });
 

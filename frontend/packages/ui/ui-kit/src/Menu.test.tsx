@@ -118,4 +118,20 @@ describe('Menu', () => {
 
     expect(screen.getByRole('button', { name: 'Session actions' })).toBeDisabled();
   });
+
+  it('keeps each item label on a single line', () => {
+    // `Copy session ID` is wider than the panel's `min-w-[8rem]`, so without
+    // `whitespace-nowrap` it wraps to a second line. The class is the contract.
+    render(
+      <Menu
+        label="Session actions"
+        items={[{ label: 'Copy session ID', onSelect: vi.fn() }]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Session actions' }));
+
+    const item = screen.getByRole('menuitem', { name: 'Copy session ID' });
+    expect(item.className).toContain('whitespace-nowrap');
+  });
 });
