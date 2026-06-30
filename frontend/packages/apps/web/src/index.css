@@ -213,11 +213,11 @@
  * utilities rely on (`rgb(var(--…) / <alpha-value>)`).
  */
 :root[data-theme='sepia'] {
-  --delta-color-surface: 247 235 207;
-  --delta-color-surface-elevated: 240 224 184;
-  --delta-color-surface-elevated-hover: 226 204 154;
-  --delta-color-surface-sunken: 219 196 144;
-  --delta-color-surface-sunken-hover: 203 175 118;
+  --delta-color-surface: 243 233 211;
+  --delta-color-surface-elevated: 234 221 190;
+  --delta-color-surface-elevated-hover: 216 200 164;
+  --delta-color-surface-sunken: 208 192 155;
+  --delta-color-surface-sunken-hover: 189 170 132;
   --delta-color-fg: 67 41 11;
   --delta-color-fg-muted: 109 76 35;
   --delta-color-fg-subtle: 158 122 78;

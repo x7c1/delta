@@ -160,7 +160,7 @@ describe('NavigatorPane rate-limit meters', () => {
       'aria-valuenow',
       '37',
     );
-    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('037%');
+    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('37%');
     expect(screen.getByTestId('rate-limit-5h-reset')).toHaveTextContent(
       '↻ 02h13m',
     );
@@ -170,10 +170,68 @@ describe('NavigatorPane rate-limit meters', () => {
       'aria-valuenow',
       '8',
     );
-    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('008%');
+    expect(screen.getByTestId('rate-limit-7d-pct')).toHaveTextContent('8%');
     expect(screen.getByTestId('rate-limit-7d-reset')).toHaveTextContent(
       '↻ 05d04h',
     );
+  });
+
+  it('renders the elapsed-time marker on each row when resets_at is present', () => {
+    // Pick resets that leave a clean fraction of the window remaining so the
+    // expected marker position is easy to verify: 5h window with 1h left = 80%
+    // elapsed; 7d window with 1d left = 6/7 ≈ 85.71…% elapsed.
+    const FIVE_HOURS = 5 * 60 * 60;
+    const SEVEN_DAYS = 7 * 24 * 60 * 60;
+    const now = Date.now() / 1000;
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: {
+          used_percentage: 40,
+          resets_at: now + 1 * 60 * 60,
+        },
+        sevenDay: {
+          used_percentage: 50,
+          resets_at: now + 1 * 86400,
+        },
+      },
+    });
+
+    renderPane();
+
+    const fiveHourMarker = screen.getByTestId('rate-limit-5h-elapsed-marker');
+    expect(fiveHourMarker).toBeInTheDocument();
+    const fiveHourRight = parseFloat(
+      (fiveHourMarker as HTMLElement).style.right,
+    );
+    // 4h elapsed out of 5h = 80%. Tolerance covers the few ms between the
+    // test's Date.now() snapshot and the component's own read.
+    const fiveHourExpected = ((FIVE_HOURS - 1 * 60 * 60) / FIVE_HOURS) * 100;
+    expect(fiveHourRight).toBeGreaterThan(fiveHourExpected - 0.5);
+    expect(fiveHourRight).toBeLessThan(fiveHourExpected + 0.5);
+
+    const sevenDayMarker = screen.getByTestId('rate-limit-7d-elapsed-marker');
+    expect(sevenDayMarker).toBeInTheDocument();
+    const sevenDayRight = parseFloat(
+      (sevenDayMarker as HTMLElement).style.right,
+    );
+    const sevenDayExpected = ((SEVEN_DAYS - 1 * 86400) / SEVEN_DAYS) * 100;
+    expect(sevenDayRight).toBeGreaterThan(sevenDayExpected - 0.5);
+    expect(sevenDayRight).toBeLessThan(sevenDayExpected + 0.5);
+  });
+
+  it('omits the elapsed-time marker when resets_at is null', () => {
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: { used_percentage: 25, resets_at: null },
+        sevenDay: null,
+      },
+    });
+
+    renderPane();
+
+    expect(
+      screen.queryByTestId('rate-limit-5h-elapsed-marker'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders neither row (no empty bars) when the snapshot has no rate limits', () => {
@@ -236,7 +294,7 @@ describe('NavigatorPane rate-limit meters', () => {
       'aria-valuenow',
       '0',
     );
-    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('000%');
+    expect(screen.getByTestId('rate-limit-5h-pct')).toHaveTextContent('0%');
     expect(screen.queryByTestId('rate-limit-5h-reset')).not.toBeInTheDocument();
   });
 });
