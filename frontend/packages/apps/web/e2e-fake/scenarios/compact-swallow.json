@@ -1,0 +1,14 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "first turn ack" },
+    { "type": "stop" },
+
+    { "type": "swallow_prompt" },
+    { "type": "compact_group" },
+
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "second turn ack after compaction" },
+    { "type": "stop" }
+  ]
+}

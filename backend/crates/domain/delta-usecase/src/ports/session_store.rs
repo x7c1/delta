@@ -304,6 +304,17 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// picks the earliest.
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
+    /// All `dispatched` sends for a session, oldest first (ascending `id`).
+    ///
+    /// The single-outstanding rule normally caps this list at one element, so
+    /// callers that want the head should still prefer
+    /// [`Self::head_dispatched_send`]. This is the recovery accessor used when
+    /// a re-dispatch routine needs to re-type the *entire* FIFO of currently
+    /// `Dispatched` sends — e.g. after Claude Code's auto- or manual `/compact`
+    /// swallowed each typed prompt without echoing, leaving any dispatched
+    /// row stuck behind a missing echo.
+    async fn dispatched_sends(&self, session_id: &SessionId) -> Result<Vec<Send>>;
+
     /// Mark a dispatched send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
 
@@ -668,6 +679,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         (**self).head_dispatched_send(session_id).await
+    }
+
+    async fn dispatched_sends(&self, session_id: &SessionId) -> Result<Vec<Send>> {
+        (**self).dispatched_sends(session_id).await
     }
 
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {

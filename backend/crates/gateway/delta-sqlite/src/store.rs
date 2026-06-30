@@ -973,6 +973,28 @@ impl SessionStore for SqliteStore {
         }
     }
 
+    async fn dispatched_sends(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Vec<Send>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {SEND_COLS} FROM send
+                 WHERE session_id = ?1 AND status = 'dispatched'
+                 ORDER BY id"
+            ))
+            .map_err(Error::from)?;
+        let rows = stmt
+            .query_map(params![session_id.as_str()], |r| Ok(send_from_row(r)))
+            .map_err(Error::from)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(Error::from)??);
+        }
+        Ok(out)
+    }
+
     async fn mark_send_matched(
         &self,
         id: i64,

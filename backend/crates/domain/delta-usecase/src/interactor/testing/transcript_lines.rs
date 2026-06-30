@@ -183,6 +183,18 @@ pub(crate) fn bash_tool_use_line(uuid: &str, tool_use_id: &str) -> TranscriptMes
     }
 }
 
+/// The synthetic user line Claude Code writes when `/compact` runs, carrying
+/// the previous-conversation summary. Flagged `isCompactSummary`, so the
+/// parser classifies it `Role::CompactSummary`; attribution emits
+/// `Effect::AutoCompactFinished` so the sync layer can re-type any send
+/// stuck behind the compaction.
+pub(crate) fn compact_summary_line(uuid: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        role: Role::CompactSummary,
+        ..user_line(uuid, text)
+    }
+}
+
 /// The leading `<local-command-caveat>` member of a slash/local-command group
 /// (e.g. when the user runs `/review-pr`). Claude records it as a `type: "user"`
 /// line flagged `isMeta` (so the parser classifies it `Role::Meta`) and stamps

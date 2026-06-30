@@ -32,10 +32,17 @@ where
     ///   the resume tick, after the hook has returned and `claude` is
     ///   input-ready (see [`Self::open_session`]). A no-op when the session is
     ///   not resuming (already dispatched, or never resumed under Delta).
-    /// - **`clear` / `compact`** — fire mid-session on an already-live session
-    ///   (the user cleared the context, or it was auto/manually compacted). These
-    ///   are not launches, so they must not be treated as a new launch: handled
-    ///   as explicit, safe no-ops.
+    /// - **`compact`** — fires mid-session on an already-live session once
+    ///   Claude Code finishes auto- or manually compacting it. Not a launch
+    ///   (so binding/readiness stays out of it), but the compaction routine
+    ///   may have swallowed a prompt the user keyed in at the same moment:
+    ///   re-type any `Dispatched` `OutstandingSend` so the user's intent is
+    ///   preserved. Idempotent with the ingestion-time
+    ///   `Effect::AutoCompactFinished` path via the
+    ///   `try_claim_auto_compact_redispatch` debounce on `SessionRuntime`.
+    /// - **`clear`** — fires mid-session when the user deliberately wipes the
+    ///   context. A clear is an intentional reset, so outstanding sends are
+    ///   left alone: resurrecting them would invert intent.
     ///
     /// [`PendingSpawn`]: crate::interactor::session_actor::runtime::PendingSpawn
     pub(in crate::interactor) async fn on_session_start(
@@ -84,14 +91,30 @@ where
                     );
                 }
             }
+            SessionStartHook::SOURCE_COMPACT => {
+                // Auto/manual `/compact` finished — re-type any send stuck
+                // behind the swallowed echo. The debounce inside the
+                // helper deduplicates against the ingestion-time
+                // `Effect::AutoCompactFinished` path.
+                self.try_redispatch_after_compact("SessionStart(compact)")
+                    .await?;
+            }
+            SessionStartHook::SOURCE_CLEAR => {
+                // A clear is a deliberate context wipe; resurrecting prior
+                // sends would invert intent. Treat as a safe no-op.
+                tracing::debug!(
+                    session_id = %hook.session_id,
+                    "SessionStart(clear): mid-session reset; no re-dispatch"
+                );
+            }
             other => {
-                // clear/compact (and any unknown future source) fire on an
-                // already-live session; they are not a launch, so binding and
-                // readiness handling stay out of it.
+                // Any unknown future source: not a launch, not a known
+                // mid-session reset. Logged so a new shape surfaces in the
+                // logs instead of silently doing nothing surprising.
                 tracing::debug!(
                     session_id = %hook.session_id,
                     source = %other,
-                    "SessionStart for a mid-session source; no launch/readiness handling"
+                    "SessionStart for an unrecognized source; no launch/readiness handling"
                 );
             }
         }
