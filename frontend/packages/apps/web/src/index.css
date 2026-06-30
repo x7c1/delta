@@ -44,9 +44,14 @@
    *
    * `highlight-wash` is the single landing-flash color used by the
    * thread-timeline jump animation (see the `@keyframes
-   * delta-timeline-jump-highlight-fade` block below). Held at amber-100 in
-   * both themes so the warm-tint design intent carries through dark mode
-   * unchanged until dogfooding shows a different value is wanted.
+   * delta-timeline-jump-highlight-fade` block below). The default carries
+   * Tailwind's amber-100 (the original warm-tint design intent), which
+   * `data-theme='light'` keeps verbatim; dark and sepia each override the
+   * value in their own block below — dark moves to a desaturated indigo
+   * so the flash aligns with the focus-tint hue family, sepia to a muted
+   * copper that survives against its warm beige surface (the original
+   * amber-100 was visually identical to the sepia surface and disappeared
+   * entirely).
    */
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;
@@ -155,7 +160,13 @@
   --delta-color-terminal-fg-strong: 241 245 249;
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
-  --delta-color-highlight-wash: 254 243 199;
+  /* Desaturated indigo aligned on the focus-tint hue family (the focused
+   * session card uses `bg-accent/10`, which is the indigo accent at low
+   * alpha). The original amber-100 read as a bright orange flash against
+   * the neutral dark chrome and clashed with the indigo focus tint; this
+   * value keeps the same hue family while staying calm enough not to
+   * dominate the landing message. */
+  --delta-color-highlight-wash: 148 156 222;
 }
 
 :root[data-theme='light'] {
@@ -193,12 +204,13 @@
  * src/themes/registry.ts and the Appearance picker enumerates it
  * automatically with no picker-code edits.
  *
- * The block deliberately overrides only theme-flipping tokens — `terminal-*`
- * and `highlight-wash` are theme-fixed (see the contract at the top of this
- * file) and stay on their light-theme values, just as the dark block leaves
- * the values it does not flip on the defaults. Token values are
- * space-separated `R G B` triples to match the contract Tailwind utilities
- * rely on (`rgb(var(--…) / <alpha-value>)`).
+ * The block overrides every theme-flipping token plus `highlight-wash`
+ * (originally theme-fixed, but the default amber-100 wash was visually
+ * identical to the sepia surface and disappeared, so each non-light theme
+ * now overrides it — see the contract at the top of this file). The
+ * embedded `terminal-*` overlay stays on its theme-fixed dark values. Token
+ * values are space-separated `R G B` triples to match the contract Tailwind
+ * utilities rely on (`rgb(var(--…) / <alpha-value>)`).
  */
 :root[data-theme='sepia'] {
   --delta-color-surface: 247 235 207;
@@ -225,7 +237,12 @@
   --delta-color-terminal-fg-strong: 241 245 249;
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
-  --delta-color-highlight-wash: 254 243 199;
+  /* Desaturated copper instead of amber-100: the original amber-100 wash
+   * sat on top of the surface beige (247 235 207) at near-identical RGB
+   * and disappeared entirely. This value stays in the sepia hue family
+   * (close to the copper accent at lower saturation) so it reads as a
+   * calm landing flash against the beige surface, not a coloured stamp. */
+  --delta-color-highlight-wash: 128 83 55;
 }
 
 html,
@@ -306,23 +323,25 @@ body {
 }
 
 /*
- * Brief background-color highlight on a transcript message that the
- * thread-timeline overlay just jumped to (see ThreadTimelineOverlay's
- * highlightMessageJump). After scrollIntoView aligns the destination at the
- * top of the body, the message bubble's background fades from a faint
- * amber wash back to the bubble's resting color over
+ * Brief highlight on a transcript message that the thread-timeline overlay
+ * just jumped to (see ThreadTimelineOverlay's highlightMessageJump). After
+ * scrollIntoView aligns the destination at the top of the body, the bubble
+ * is washed in `--delta-color-highlight-wash` and then fades out over
  * TIMELINE_JUMP_HIGHLIGHT_MS so the eye notices where the navigation landed
  * without being shouted at.
  *
- * Implemented as a one-shot animation (rather than a transition) because the
- * resting background lives on the bubble element MessageItem paints — a CSS
- * transition would need a two-step class swap to drive the property change,
- * while a keyframe with `forwards` runs cleanly from the wash at 0% to
- * "transparent at 100%" once and stops. Since the bubble's own background
- * paints behind the keyframe (the rule sets background-color on the same
- * element, the keyframe overrides it during the animation), the final
- * `forwards` state is `transparent` so the bubble's resting color is
- * visible the instant the highlight ends.
+ * The wash is applied as an `inset` `box-shadow` overlay rather than by
+ * animating the bubble's own `background-color`. Animating background-color
+ * directly forces the keyframe to end at `transparent`, which overrides the
+ * bubble's resting color for the lifetime of the `forwards` fill — the
+ * resting color only re-appears the instant the class is removed, producing
+ * a visible "show through to the page surface, then snap back" flicker at
+ * the end of the fade. With a transparent box-shadow overlay the bubble's
+ * own background paints throughout, and the wash simply alpha-fades to zero
+ * on top of it, so the animation lands naturally on the resting color with
+ * no snap. The `9999px` spread is the standard trick for filling an element
+ * of unknown size with an inset shadow; `border-radius` is honoured by the
+ * shadow, so the wash hugs the bubble's rounded corners.
  *
  * The first selector targets the inner bubble divs MessageItem paints for a
  * user turn (`max-w-[85%]`) and an assistant prose turn (the article's
@@ -331,23 +350,17 @@ body {
  *
  * Articles without an inner bubble (tool / meta / task-notification cards)
  * fall through to the article-level rule via `:not(:has(...))`, so the
- * effect is still visible on those. The `:has()` guard is what kept v7's
- * jump from doubling the highlight: previously the article rule fired
- * unconditionally, painting amber behind the bubble's own amber, producing
- * a visible halo. Modern browsers (Chrome 105+, Safari 15.4+, Firefox 121+)
- * all support `:has()` natively.
+ * effect is still visible on those. The `:has()` guard prevents the article
+ * rule from doubling onto a bubble that already has its own wash, which
+ * would otherwise paint amber behind the bubble's own amber. Modern
+ * browsers (Chrome 105+, Safari 15.4+, Firefox 121+) all support `:has()`
+ * natively.
  *
- * The wash color is sourced from `--delta-color-highlight-wash` (a
- * theme-fixed semantic token, defined alongside `--delta-color-terminal-*`
- * at the top of this file). The token currently carries Tailwind's
- * `amber-100` (`#fef3c7`) in both themes, preserving the original design
- * intent: at low alpha it reads as a subtle warm tint on top of the
- * bubble's resting blue-50 / slate-50 — enough to notice the landing, not
- * enough to dominate the message. Keeping the token in both themes is the
- * lowest-risk starting point; the dark value can be retuned later in one
- * place without touching this keyframe or any call sites.
- * `prefers-reduced-motion: reduce` disables the animation entirely for
- * users who opt out of motion.
+ * The wash color is sourced from `--delta-color-highlight-wash`. Light
+ * holds the original amber-100; dark uses a desaturated indigo aligned on
+ * the accent hue family, and sepia uses a muted copper that survives
+ * against the beige surface. `prefers-reduced-motion: reduce` disables the
+ * animation entirely for users who opt out of motion.
  */
 .delta-timeline-jump-highlight > .rounded-lg,
 .delta-timeline-jump-highlight > .max-w-\[85\%\] {
@@ -359,10 +372,10 @@ body {
 }
 @keyframes delta-timeline-jump-highlight-fade {
   0% {
-    background-color: rgb(var(--delta-color-highlight-wash) / 0.7);
+    box-shadow: inset 0 0 0 9999px rgb(var(--delta-color-highlight-wash) / 0.7);
   }
   100% {
-    background-color: rgb(var(--delta-color-highlight-wash) / 0);
+    box-shadow: inset 0 0 0 9999px rgb(var(--delta-color-highlight-wash) / 0);
   }
 }
 @media (prefers-reduced-motion: reduce) {
