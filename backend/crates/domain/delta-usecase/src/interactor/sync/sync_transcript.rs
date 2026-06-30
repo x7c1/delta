@@ -292,6 +292,14 @@ where
                         });
                     }
                 }
+                Effect::AutoCompactFinished => {
+                    // A compaction summary just landed — re-type any send
+                    // stuck behind the swallowed echo. The debounce inside
+                    // the helper deduplicates against the live
+                    // `SessionStart(source=compact)` hook path.
+                    self.try_redispatch_after_compact("AutoCompactFinished")
+                        .await?;
+                }
                 Effect::SubagentCompleted { tool_use_id } => {
                     // The notification was folded and matched its launch: the
                     // correlation is consumed, so clear the persisted row.

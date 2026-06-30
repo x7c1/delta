@@ -137,6 +137,7 @@ pub enum GoldenEffect {
         description: Option<String>,
         background: bool,
     },
+    AutoCompactFinished,
 }
 
 /// Project a fold outcome onto the golden shape.
@@ -200,6 +201,7 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                     description: description.clone(),
                     background: *background,
                 },
+                Effect::AutoCompactFinished => GoldenEffect::AutoCompactFinished,
             })
             .collect(),
     }

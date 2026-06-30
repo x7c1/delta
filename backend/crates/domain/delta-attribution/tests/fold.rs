@@ -234,6 +234,10 @@ fn a_compact_summary_line_inherits_carry_and_does_not_consume_the_outstanding_se
     // outstanding `dispatched` send by text. The tail `assistant_line` pins
     // downstream propagation — the symptom of a missed inherit is that the
     // next message drifts to `main`.
+    //
+    // It DOES emit `Effect::AutoCompactFinished` so the caller can re-type
+    // any send stuck behind the compaction (a `Dispatched` send whose echo
+    // was swallowed by the compaction routine).
     let pending = send(9, MAIN, "the user's actual prompt");
     let outcome = attribute_lines(
         &session(),
@@ -248,15 +252,47 @@ fn a_compact_summary_line_inherits_carry_and_does_not_consume_the_outstanding_se
     assert_eq!(message(&outcome, "cs-1").thread_id, CHILD);
     assert_eq!(message(&outcome, "a-after").thread_id, CHILD);
     assert_eq!(outcome.state.carry_thread, CHILD);
-    assert!(
-        outcome.effects.is_empty(),
-        "a compact-summary line neither matches a send nor emits any effect"
+    assert_eq!(
+        outcome.effects,
+        vec![Effect::AutoCompactFinished],
+        "the compact-summary line emits exactly one AutoCompactFinished and \
+         no SendMatched (it must not consume the pending send by text)"
     );
     assert_eq!(
         outcome.state.outstanding,
         vec![pending].into_iter().collect::<std::collections::VecDeque<_>>(),
         "the compact-summary line must not match or consume the pending send"
     );
+}
+
+#[test]
+fn auto_compact_finished_is_not_emitted_for_non_compact_summary_lines() {
+    // Plain user / meta / assistant / other lines must not emit
+    // `Effect::AutoCompactFinished` — only `Role::CompactSummary` is the
+    // signal. Asserted on each non-compact-summary line individually so a
+    // regression that fires the effect spuriously on any of them is caught.
+    for line in [
+        user_line("u-plain", "hello"),
+        meta_line("m-1", "<system-reminder>noop</system-reminder>"),
+        assistant_line("a-1", "ok"),
+        other_line("o-1"),
+    ] {
+        let outcome = attribute_lines(
+            &session(),
+            MAIN,
+            AttributionState::new(MAIN, None),
+            vec![line],
+        );
+        assert!(
+            !outcome
+                .effects
+                .iter()
+                .any(|e| matches!(e, Effect::AutoCompactFinished)),
+            "AutoCompactFinished must not fire for a non-compact-summary line: \
+             got effects {:?}",
+            outcome.effects
+        );
+    }
 }
 
 #[test]

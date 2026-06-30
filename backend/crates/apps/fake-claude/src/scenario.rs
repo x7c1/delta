@@ -42,6 +42,8 @@
 //! | `dequeue_prompt` | Replay the oldest enqueued prompt now that the turn has freed: fire its own `UserPromptSubmit`, then write it as a plain user line (`promptSource: "queued"`) — the same path a TUI-typed prompt takes. |
 //! | `delay { ms }` | Sleep. Only for delays the scenario itself is about (e.g. holding a turn open); synchronization belongs to the `await_*` steps. |
 //! | `hang` | Block forever (a launch or turn that never progresses). |
+//! | `swallow_prompt` | Consume one prompt from the pane input without firing `UserPromptSubmit` and without writing the transcript — models Claude Code's TUI swallowing the keystroke into the auto-`/compact` routine. The dispatched send stays `Dispatched` behind a missing echo until something re-types it. |
+//! | `compact_group` | Write the four-line `/compact` group (caveat + bare command-name + summary + stdout) sharing one `promptId`. The summary line is the `isCompactSummary:true` record that drives `Effect::AutoCompactFinished` on the server. |
 //!
 //! How the file is found, in priority order:
 //!
@@ -126,6 +128,20 @@ pub enum Step {
         ms: u64,
     },
     Hang,
+    /// Consume one prompt from the pane input without firing
+    /// `UserPromptSubmit` and without writing anything to the transcript.
+    ///
+    /// Models the auto-`/compact` race: the user's keystroke reaches Claude
+    /// Code's TUI just as the compaction routine starts, so the prompt is
+    /// swallowed and no echo ever fires. The send Delta dispatched stays
+    /// `Dispatched` behind a missing echo until something re-types it.
+    SwallowPrompt,
+    /// Write the four-line group Claude Code produces for an auto- or
+    /// manually-triggered `/compact` (a caveat / command-name / summary /
+    /// stdout sequence sharing one `promptId`). The summary line is the
+    /// `isCompactSummary:true` record that drives the
+    /// `Effect::AutoCompactFinished` re-dispatch.
+    CompactGroup,
 }
 
 /// A parsed scenario file.
@@ -211,7 +227,9 @@ mod tests {
                     { "type": "enqueue_prompt", "text": "queued" },
                     { "type": "dequeue_prompt" },
                     { "type": "delay", "ms": 10 },
-                    { "type": "hang" }
+                    { "type": "hang" },
+                    { "type": "swallow_prompt" },
+                    { "type": "compact_group" }
                 ]
             }"#,
         )
@@ -221,7 +239,7 @@ mod tests {
             SessionStartMode::Delayed { delay_ms: 250 }
         );
         assert!(scenario.looped);
-        assert_eq!(scenario.steps.len(), 14);
+        assert_eq!(scenario.steps.len(), 16);
         assert_eq!(scenario.steps[0], Step::AwaitPrompt);
         assert_eq!(
             scenario.steps[1],
@@ -242,6 +260,8 @@ mod tests {
                 stop_reason: Some("end_turn".to_owned())
             }
         );
+        assert_eq!(scenario.steps[14], Step::SwallowPrompt);
+        assert_eq!(scenario.steps[15], Step::CompactGroup);
     }
 
     #[test]
