@@ -122,23 +122,25 @@
  * in src/theme.ts, and the useTheme hook all key off the same names.
  */
 /*
- * Dark theme: surfaces use Tailwind's `gray` scale (smaller R-B deviation)
- * to take the blue cast off the background — feedback from dogfooding was
- * that the page read as faintly blue. fg/border/accent stay on `slate` so
- * text and dividers keep their existing contrast and tone; only the six
- * surface tokens (and the matching scrim) are warmed to gray.
+ * Dark theme: surfaces, foreground, and borders are aligned on Tailwind's
+ * `zinc` scale (essentially zero R-B deviation) — dogfooding feedback was
+ * that the previous slate-based palette read as faintly blue, and a
+ * "surfaces only" pass left the page mixed (zinc backgrounds with slate
+ * text reading as a chilly white). Accent (indigo) and the status colors
+ * stay on their own hue families so they remain distinct against the
+ * now-neutral chrome.
  */
 :root[data-theme='dark'] {
-  --delta-color-surface: 17 24 39;
-  --delta-color-surface-elevated: 31 41 55;
-  --delta-color-surface-elevated-hover: 55 65 81;
-  --delta-color-surface-sunken: 55 65 81;
-  --delta-color-surface-sunken-hover: 75 85 99;
-  --delta-color-fg: 203 213 225;
-  --delta-color-fg-muted: 148 163 184;
-  --delta-color-fg-subtle: 100 116 139;
-  --delta-color-border: 51 65 85;
-  --delta-color-border-strong: 100 116 139;
+  --delta-color-surface: 29 29 32;
+  --delta-color-surface-elevated: 45 45 48;
+  --delta-color-surface-elevated-hover: 63 63 70;
+  --delta-color-surface-sunken: 63 63 70;
+  --delta-color-surface-sunken-hover: 82 82 91;
+  --delta-color-fg: 212 212 216;
+  --delta-color-fg-muted: 161 161 170;
+  --delta-color-fg-subtle: 113 113 122;
+  --delta-color-border: 63 63 70;
+  --delta-color-border-strong: 113 113 122;
   --delta-color-accent: 165 180 252;
   --delta-color-accent-fg: 15 23 42;
   --delta-color-accent-hover: 199 210 254;
@@ -147,7 +149,7 @@
   --delta-color-warning: 251 191 36;
   --delta-color-info: 56 189 248;
   --delta-color-success: 52 211 153;
-  --delta-color-scrim: 3 7 18;
+  --delta-color-scrim: 9 9 11;
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;
   --delta-color-terminal-fg-strong: 241 245 249;
