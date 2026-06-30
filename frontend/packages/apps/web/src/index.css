@@ -364,11 +364,11 @@ body {
  */
 .delta-timeline-jump-highlight > .rounded-lg,
 .delta-timeline-jump-highlight > .max-w-\[85\%\] {
-  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+  animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
 }
 .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])) {
   border-radius: 0.375rem;
-  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+  animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
 }
 @keyframes delta-timeline-jump-highlight-fade {
   0% {
