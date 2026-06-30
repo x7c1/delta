@@ -1,5 +1,5 @@
 ---
-status: pending
+status: completed
 pipeline_phase: null
 plan: null
 base_ref: null
@@ -10,7 +10,7 @@ check_command: "cd backend && cargo build && cargo test && cargo clippy --all-ta
 assignee: null
 branch: task/0626-0532-feat-worktree-dir-naming-by-repo
 created_at: 2026-06-26T05:32:51Z
-updated_at: 2026-06-26T05:32:51Z
+updated_at: 2026-06-30T04:39:30Z
 ---
 
 # feat(worktree): name per-session worktree dirs by repository identity
