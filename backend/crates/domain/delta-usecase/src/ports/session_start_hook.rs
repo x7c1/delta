@@ -14,9 +14,17 @@ use delta_model::SessionId;
 /// - `source=resume` — `claude --resume <id>` finished replaying and is ready.
 ///   Delta releases the held first prompt for that session, dispatching it on
 ///   the normal `send_line` path now that the cold pane can accept it.
-/// - `source=clear` / `source=compact` — fire mid-session on an already-live
-///   session (the user cleared the context or it was auto-compacted). These are
-///   not launches, so binding/readiness handling treats them as safe no-ops.
+/// - `source=compact` — fires mid-session on an already-live session once
+///   Claude Code finishes auto- or manually compacting it. Not a launch (so
+///   binding/readiness handling stays out of it), but the compaction routine
+///   may have swallowed a prompt the user keyed in at the same moment, so
+///   Delta re-types any `Dispatched` `OutstandingSend` for the session —
+///   debounced against the ingestion-time `Effect::AutoCompactFinished` path
+///   so the live and replay signals do not double-submit.
+/// - `source=clear` — fires mid-session on an already-live session when the
+///   user deliberately wipes the context. Not a launch and not a recovery
+///   point either: outstanding sends are left alone (resurrecting them would
+///   invert the wipe's intent), so this stays a safe no-op.
 #[derive(Debug, Clone)]
 pub struct SessionStartHook {
     /// The Claude `session_id` the session runs under. For a Delta spawn this is
@@ -25,7 +33,8 @@ pub struct SessionStartHook {
     pub session_id: SessionId,
     /// Why the session started: `startup`, `resume`, `clear`, or `compact`.
     /// Carried verbatim from the hook; the usecase gates on it to tell a real
-    /// launch (startup/resume) apart from a mid-session reset (clear/compact).
+    /// launch (startup/resume) apart from a mid-session event (compact, which
+    /// triggers the stuck-send re-dispatch; clear, which is a safe no-op).
     pub source: String,
     /// The session's working directory, carried like every hook payload. Used to
     /// register the session row on a `source=startup` bind, so a prompt-less
@@ -43,4 +52,15 @@ impl SessionStartHook {
     pub const SOURCE_STARTUP: &'static str = "startup";
     /// `source` value for a `claude --resume` that finished replaying.
     pub const SOURCE_RESUME: &'static str = "resume";
+    /// `source` value for a mid-session auto/manual `/compact`. The session is
+    /// already live; the hook fires once Claude Code has finished writing the
+    /// compaction group (caveat / command-name / summary / stdout) and is back
+    /// at its prompt. Delta uses this signal to re-type any `Dispatched`
+    /// `OutstandingSend` whose echo was swallowed by the compaction routine —
+    /// without re-dispatch the chip stays "in progress" forever.
+    pub const SOURCE_COMPACT: &'static str = "compact";
+    /// `source` value for a mid-session `/clear`. The session is already live
+    /// but the user deliberately wiped its context; Delta leaves outstanding
+    /// sends alone here — resurrecting them would invert intent.
+    pub const SOURCE_CLEAR: &'static str = "clear";
 }

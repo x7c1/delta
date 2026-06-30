@@ -592,6 +592,18 @@ impl SessionStore for FakeStore {
             .cloned())
     }
 
+    async fn dispatched_sends(&self, session_id: &SessionId) -> Result<Vec<Send>> {
+        let g = self.inner.lock().unwrap();
+        let mut out: Vec<Send> = g
+            .sends
+            .iter()
+            .filter(|s| &s.session_id == session_id && s.status == SendStatus::Dispatched)
+            .cloned()
+            .collect();
+        out.sort_by_key(|s| s.id);
+        Ok(out)
+    }
+
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         if let Some(s) = g.sends.iter_mut().find(|s| s.id == id) {

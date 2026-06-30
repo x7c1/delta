@@ -242,6 +242,17 @@ pub enum Effect {
         description: Option<String>,
         background: bool,
     },
+    /// A `Role::CompactSummary` line was folded: Claude Code finished
+    /// compacting the session (either via auto-`/compact` on resume of a
+    /// near-full-context session, or a manual `/compact`). The user's prompt
+    /// — if one had been keyed in at the same moment — was swallowed by the
+    /// compaction routine and never echoed, so any `Dispatched`
+    /// `OutstandingSend` is stuck behind a missing echo. The caller re-types
+    /// each such send to the TUI so the user's intent is preserved. The hook
+    /// path emits the same signal via `SessionStart(source=compact)`; both
+    /// flow through one helper, debounced so a live session that observes
+    /// the summary line on the same tick does not fire twice.
+    AutoCompactFinished,
 }
 
 /// The outcome of folding one batch of transcript lines.
@@ -502,6 +513,19 @@ pub fn attribute_lines(
         // change thread attribution).
         if line.is_api_error {
             effects.push(Effect::TurnAborted);
+        }
+
+        // A `Role::CompactSummary` line marks the end of a Claude Code
+        // compaction group (auto-`/compact` on resume of a near-full-context
+        // session, or a manual `/compact`). The compaction routine swallows any
+        // prompt the user keyed in at the same moment, so a `Dispatched`
+        // `OutstandingSend` is stuck behind a missing echo: emit
+        // `AutoCompactFinished` so the caller re-types it. The line itself
+        // keeps its existing role-based handling (inherits `carry_thread`,
+        // emits no `SendMatched`) — see the regression covered by
+        // `a_compact_summary_line_inherits_carry_and_does_not_consume_the_outstanding_send`.
+        if matches!(role, Role::CompactSummary) {
+            effects.push(Effect::AutoCompactFinished);
         }
 
         // Compare against the head outstanding send; a match consumes it.
