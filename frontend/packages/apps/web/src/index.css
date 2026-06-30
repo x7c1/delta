@@ -238,7 +238,7 @@
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
   /* Desaturated copper instead of amber-100: the original amber-100 wash
-   * sat on top of the surface beige (247 235 207) at near-identical RGB
+   * sat on top of the surface beige (243 233 211) at near-identical RGB
    * and disappeared entirely. This value stays in the sepia hue family
    * (close to the copper accent at lower saturation) so it reads as a
    * calm landing flash against the beige surface, not a coloured stamp. */
