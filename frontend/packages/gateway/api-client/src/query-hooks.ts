@@ -18,6 +18,7 @@ import type {
   LaunchOptionsResponse,
   MessagesResponse,
   NewSessionResponse,
+  OpenCwdRequest,
   PullRequestsResponse,
   RepositoriesResponse,
   RepositoryScanRoot,
@@ -558,6 +559,24 @@ export function useCancelSendMutation(
         queryKey: queryKeys.sessionSends(sessionId),
       });
     },
+  });
+}
+
+/**
+ * Launch an external tool (VS Code today) at a session's cwd
+ * (`POST /api/open-cwd`). Success is `204` with no toast — the editor
+ * opening is the feedback. Errors surface via {@link ApiError} carrying
+ * one of the `open_cwd_*` codes so the caller can render the specific
+ * message (missing binary, unknown path, generic failure).
+ *
+ * No cache invalidation: opening the editor does not change any server
+ * state Delta tracks.
+ */
+export function useOpenCwdMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, OpenCwdRequest> {
+  return useMutation({
+    mutationFn: (body: OpenCwdRequest) => client.openCwd(body),
   });
 }
 

@@ -1,8 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import {
+  fireEvent,
+  render as rtlRender,
+  screen,
+  within,
+} from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiClient } from '@delta/api-client';
 import type { ContentBlock, Message, MessageRole } from '@delta/wire-gen';
+import { ApiProvider } from '../../data/apiContext';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { MessageItem } from './MessageItem';
+
+// The MessageMeta the meta line renders inside MessageItem now spins up an
+// API-client-backed mutation for the clickable cwd. Wrap every render in an
+// ApiProvider + QueryClientProvider so the hook has the context it needs;
+// nothing here actually fires the mutation.
+function render(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const client = new ApiClient({ baseUrl: 'http://localhost' });
+  return rtlRender(
+    <QueryClientProvider client={queryClient}>
+      <ApiProvider client={client}>{ui}</ApiProvider>
+    </QueryClientProvider>,
+  );
+}
 
 function makeMessage(role: MessageRole, text: string): Message {
   return makeMessageWithContent(role, [{ type: 'text', text }], text);
@@ -81,9 +106,10 @@ describe('MessageItem', () => {
   });
 
   it('distinguishes the sender by shape, not a role label', () => {
-    const { rerender } = render(
-      <MessageItem message={makeMessage('user', 'hi')} />,
-    );
+    // No shared providers here: each render call sets up its own. Unmount
+    // the first render before the second so the two do not collide in the
+    // same DOM.
+    const first = render(<MessageItem message={makeMessage('user', 'hi')} />);
     // No "You"/"Assistant" labels — the sender is conveyed by layout alone.
     expect(screen.queryByText('You')).toBeNull();
     expect(screen.queryByText('Assistant')).toBeNull();
@@ -92,8 +118,9 @@ describe('MessageItem', () => {
       'data-role',
       'user',
     );
+    first.unmount();
 
-    rerender(<MessageItem message={makeMessage('assistant', 'hi')} />);
+    render(<MessageItem message={makeMessage('assistant', 'hi')} />);
     expect(screen.queryByText('Assistant')).toBeNull();
     expect(screen.getByTestId('message-item')).toHaveAttribute(
       'data-role',

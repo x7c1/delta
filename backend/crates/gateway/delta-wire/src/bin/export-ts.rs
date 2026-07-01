@@ -19,11 +19,11 @@ use std::path::Path;
 use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
     WireErrorBody, WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WirePermissionDecisionRequest,
-    WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
-    WireRepositoriesResponse, WireRepositoryScanRootsResponse, WireSendResponse,
-    WireSendsResponse, WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
+    WirePermissionDecisionRequest, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRepositoriesResponse, WireRepositoryScanRootsResponse,
+    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireThreadsResponse,
+    WireUpdateLaunchOptionRequest, WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireSessionEvent};
 use ts_rs::TS;
@@ -50,6 +50,7 @@ fn main() {
     WireCreateSendRequest::export_all(&config).expect("export CreateSendRequest.ts");
     WireSendResponse::export_all(&config).expect("export SendResponse.ts");
     WireSendsResponse::export_all(&config).expect("export SendsResponse.ts");
+    WireOpenCwdRequest::export_all(&config).expect("export OpenCwdRequest.ts");
     WirePermissionDecisionRequest::export_all(&config)
         .expect("export PermissionDecisionRequest.ts");
     WireQuestionAnswerRequest::export_all(&config).expect("export QuestionAnswerRequest.ts");

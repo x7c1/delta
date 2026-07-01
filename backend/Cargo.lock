@@ -234,6 +234,7 @@ dependencies = [
  "delta-sqlite",
  "delta-transcript",
  "delta-usecase",
+ "external-opener",
  "gh-cli",
  "git-worktree",
  "serde_json",
@@ -362,6 +363,16 @@ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
  "windows-sys",
+]
+
+[[package]]
+name = "external-opener"
+version = "0.2.1"
+dependencies = [
+ "async-trait",
+ "delta-usecase",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

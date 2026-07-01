@@ -166,6 +166,20 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// recency timestamp for display.
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>>;
 
+    /// Whether `path` is a known working directory of some session or message.
+    ///
+    /// Backs the `open cwd` allowlist: the REST endpoint only spawns an
+    /// external tool against a path Delta has actually shown the browser, so
+    /// a hand-crafted request cannot point the editor at an arbitrary path on
+    /// disk. The check is a set membership over `session.cwd`,
+    /// `session.requested_workdir`, and `message.cwd` — the same three columns
+    /// the UI surfaces cwd values from.
+    ///
+    /// The path is compared verbatim; canonicalisation is the caller's job
+    /// (the browser always sends the same string the server sent it, so no
+    /// normalisation is needed at this layer).
+    async fn cwd_exists(&self, path: &str) -> Result<bool>;
+
     /// One row per `(repo_root, clone_path)` pair in the session history, for
     /// the Repository tab.
     ///
@@ -569,6 +583,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn recent_workdirs(&self, limit: u32) -> Result<Vec<RecentWorkdir>> {
         (**self).recent_workdirs(limit).await
+    }
+
+    async fn cwd_exists(&self, path: &str) -> Result<bool> {
+        (**self).cwd_exists(path).await
     }
 
     async fn repository_clone_rows(

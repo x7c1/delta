@@ -1,5 +1,9 @@
 import { displayBranch } from '@delta/model';
 import type { Message } from '@delta/wire-gen';
+import {
+  DEFAULT_OPEN_CWD_HANDLER_LABEL,
+  useOpenCwd,
+} from '../open-cwd/useOpenCwd';
 import { formatResponseTime } from '../../utils/formatResponseTime';
 import { formatDir } from '../../utils/formatDir';
 import { MessageTimestamp } from './MessageTimestamp';
@@ -37,6 +41,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
   const responseTime = formatResponseTime(message.response_time_ms);
   const model = message.model;
   const cwd = message.cwd;
+  const openCwd = useOpenCwd();
   // The wire `git_branch` is preserved as-is; only the inline display path
   // shortens a delta-managed `delta-<uuid>` to a readable 8-char prefix. The
   // popover keeps the full original name so the identifier is recoverable on
@@ -93,7 +98,31 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
       data-latest="true"
     >
       <div className="flex flex-col items-start">
-        {cwd && <span data-testid="meta-cwd">{formatDir(cwd)}</span>}
+        {cwd && (
+          // Clickable trigger that spawns the current external tool (VS
+          // Code today) at `cwd`. Rendered as a `<button>` so it is
+          // keyboard-reachable with real button semantics, and styled to
+          // be visually identical to the previous plain `<span>` in its
+          // resting state — cwd is shown very frequently and must stay
+          // unobtrusive. Only on hover/focus does it hint that it is
+          // interactive: a `cursor: pointer` and a very subtle sunken
+          // background wash. No color, weight, or underline change.
+          //
+          // `type="button"` prevents any surrounding `<form>` from
+          // treating this as a submit trigger; the reset button class
+          // (`text-inherit font-inherit ...`) inherits typography from
+          // the parent flex container.
+          <button
+            type="button"
+            data-testid="meta-cwd"
+            onClick={() => openCwd(cwd)}
+            title={`Open in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`}
+            aria-label={`Open ${cwd} in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`}
+            className="cursor-pointer rounded-sm text-inherit hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
+          >
+            {formatDir(cwd)}
+          </button>
+        )}
         {branch && (
           <span data-testid="meta-branch" title={branch}>
             {branchDisplay}

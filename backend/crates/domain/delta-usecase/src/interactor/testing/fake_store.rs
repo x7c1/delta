@@ -301,6 +301,23 @@ impl SessionStore for FakeStore {
         Ok(rows)
     }
 
+    async fn cwd_exists(&self, path: &str) -> Result<bool> {
+        // Mirror the SQLite UNION: match any session.cwd, session.requested_workdir,
+        // or message.cwd equal to `path` (byte-for-byte).
+        let g = self.inner.lock().unwrap();
+        let hit_in_sessions = g.sessions.iter().any(|s| {
+            s.cwd == path || s.requested_workdir.as_deref() == Some(path)
+        });
+        if hit_in_sessions {
+            return Ok(true);
+        }
+        let hit_in_messages = g
+            .messages
+            .iter()
+            .any(|m| m.cwd.as_deref() == Some(path));
+        Ok(hit_in_messages)
+    }
+
     async fn repository_clone_rows(
         &self,
         worktree_base: &str,

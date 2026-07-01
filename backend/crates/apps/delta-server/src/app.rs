@@ -69,6 +69,10 @@ pub fn router(state: AppState) -> Router {
         // Working-directory picker: browse and recents (read-only).
         .route("/api/workdir/list", get(api::list_workdir))
         .route("/api/workdir/recent", get(api::recent_workdir))
+        // Open a known cwd in an external tool (initially VS Code only).
+        // The registry lives in the interactor; the endpoint accepts an
+        // optional `handler` id for future disambiguation.
+        .route("/api/open-cwd", post(api::open_cwd))
         // Registered repositories for the new-session Repository tab: every
         // distinct repo Delta has launched a session under, with its known
         // clones bundled by origin URL and ordered by recency.
@@ -1041,6 +1045,96 @@ mod tests {
             rx.try_recv().is_err(),
             "a session-less status line carries nothing to broadcast"
         );
+    }
+
+    #[tokio::test]
+    async fn open_cwd_rejects_a_path_not_in_the_allowlist_with_400() {
+        // No sessions registered yet → no known cwds. A `POST /api/open-cwd`
+        // for any path must be rejected with the stable code, and the router
+        // must not have to reach the (unwired) opener stub either — the
+        // allowlist check runs first.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/open-cwd")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"/etc/passwd"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("code").and_then(serde_json::Value::as_str),
+            Some("open_cwd_path_not_allowed"),
+        );
+    }
+
+    #[tokio::test]
+    async fn open_cwd_rejects_an_unknown_handler_with_400() {
+        // Register a session so the path is in the allowlist and the check
+        // moves on to the handler resolution.
+        let state = test_state();
+        let app = router(state.clone());
+        let submit = serde_json::json!({
+            "prompt": "seed",
+            "session_id": "sess-1",
+            "transcript_path": "/tmp/none.jsonl",
+            "cwd": "/projects/known"
+        })
+        .to_string();
+        let _ = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/hooks/user-prompt-submit")
+                    .header("content-type", "application/json")
+                    .body(Body::from(submit))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/open-cwd")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"path":"/projects/known","handler":"emacs"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("code").and_then(serde_json::Value::as_str),
+            Some("open_cwd_unknown_handler"),
+        );
+    }
+
+    #[tokio::test]
+    async fn open_cwd_rejects_a_blank_path_with_400() {
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/open-cwd")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"   "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

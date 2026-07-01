@@ -4,6 +4,10 @@ import type { SessionListItem } from '@delta/wire-gen';
 import { useSessionThreadsQuery } from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
+import {
+  DEFAULT_OPEN_CWD_HANDLER_LABEL,
+  useOpenCwd,
+} from '../open-cwd/useOpenCwd';
 import { threadIsRunning, useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
@@ -96,6 +100,7 @@ export function SessionNode({
   style,
 }: SessionNodeProps) {
   const client = useApiClient();
+  const openCwd = useOpenCwd();
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   // Running and unread are THREAD-keyed in the store, but the collapsed row
@@ -351,6 +356,15 @@ export function SessionNode({
                   // on failure, add it in a follow-up.
                   void navigator.clipboard.writeText(item.session.id);
                 },
+              },
+              // Open the session's launch-time cwd in an external tool. Uses
+              // the SESSION-LEVEL cwd (spawn-time fixed value), not any
+              // per-turn cwd, so the menu answers "open the folder this
+              // session runs in". A failure surfaces through the shared
+              // {@link useOpenCwd} error toast — no local UI here.
+              {
+                label: `Open in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`,
+                onSelect: () => openCwd(item.session.cwd),
               },
               ...(item.open
                 ? [

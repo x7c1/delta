@@ -100,6 +100,34 @@ pub enum Error {
     #[error("gh error: {0}")]
     Gh(String),
 
+    /// The `open cwd` request named a path the server does not recognise as a
+    /// working directory of any known session/message — the allowlist reject.
+    /// Surfaced as `400` with a stable code so the browser can distinguish it
+    /// from a generic failure; the click site never sends a path the server
+    /// hasn't shown it, so this only fires against a hand-crafted request.
+    #[error("path is not in the known-cwd allowlist: {0}")]
+    OpenCwdPathNotAllowed(String),
+
+    /// The `open cwd` request named a handler id that is not registered.
+    /// Surfaced as `400`: the initial impl only exposes one handler
+    /// (`vscode`), so anything else is a client-side bug rather than a server
+    /// misconfiguration.
+    #[error("unknown open-cwd handler: {0}")]
+    OpenCwdUnknownHandler(String),
+
+    /// The external-tool command (e.g. `code`) is not on `PATH`. Surfaced as
+    /// `500` with a stable code so the browser can show a specific "VS Code
+    /// is not installed" message instead of a generic failure — the user has
+    /// an actionable fix (install the shell `code` command).
+    #[error("external tool command not found on PATH: {0}")]
+    ExternalOpenerCommandNotFound(String),
+
+    /// Spawning the external-tool subprocess failed for a reason other than
+    /// missing binary (fork failure, permission denied, etc.). Surfaced as
+    /// `500`.
+    #[error("external tool spawn failed: {0}")]
+    ExternalOpenerSpawnFailed(String),
+
     /// A transcript read/parse failure.
     #[error("transcript error: {0}")]
     Transcript(String),
