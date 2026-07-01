@@ -213,11 +213,11 @@
  * utilities rely on (`rgb(var(--…) / <alpha-value>)`).
  */
 :root[data-theme='sepia'] {
-  --delta-color-surface: 247 235 207;
-  --delta-color-surface-elevated: 240 224 184;
-  --delta-color-surface-elevated-hover: 226 204 154;
-  --delta-color-surface-sunken: 219 196 144;
-  --delta-color-surface-sunken-hover: 203 175 118;
+  --delta-color-surface: 243 233 211;
+  --delta-color-surface-elevated: 234 221 190;
+  --delta-color-surface-elevated-hover: 216 200 164;
+  --delta-color-surface-sunken: 208 192 155;
+  --delta-color-surface-sunken-hover: 189 170 132;
   --delta-color-fg: 67 41 11;
   --delta-color-fg-muted: 109 76 35;
   --delta-color-fg-subtle: 158 122 78;
@@ -238,7 +238,7 @@
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
   /* Desaturated copper instead of amber-100: the original amber-100 wash
-   * sat on top of the surface beige (247 235 207) at near-identical RGB
+   * sat on top of the surface beige (243 233 211) at near-identical RGB
    * and disappeared entirely. This value stays in the sepia hue family
    * (close to the copper accent at lower saturation) so it reads as a
    * calm landing flash against the beige surface, not a coloured stamp. */
@@ -364,11 +364,11 @@ body {
  */
 .delta-timeline-jump-highlight > .rounded-lg,
 .delta-timeline-jump-highlight > .max-w-\[85\%\] {
-  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+  animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
 }
 .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])) {
   border-radius: 0.375rem;
-  animation: delta-timeline-jump-highlight-fade 1500ms ease-out forwards;
+  animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
 }
 @keyframes delta-timeline-jump-highlight-fade {
   0% {

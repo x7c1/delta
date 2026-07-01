@@ -41,3 +41,29 @@ export function formatResetCountdown(
 function pad(value: number): string {
   return value.toString().padStart(2, '0');
 }
+
+/**
+ * The share of the rolling window that has already elapsed, as a 0–100
+ * percentage. Computed from `resetsAt` (Unix epoch seconds, the right
+ * edge of the window) and the window's total length: the moment of reset
+ * sits at 0, the moment of the previous reset at 100, and anywhere in
+ * between is a linear time fraction.
+ *
+ * Callers anchor a marker on the rate-limit bar at this position to show
+ * "where we are in the window right now" — overlaying the marker on the
+ * usage fill makes whether consumption is running ahead of or behind a
+ * straight-line burn obvious without any numbers.
+ */
+export function computeElapsedPercentage(
+  resetsAt: number,
+  windowDurationSeconds: number,
+  now: number = Date.now(),
+): number {
+  // `resetsAt` is epoch seconds but `now` is milliseconds; convert before
+  // the subtraction so both operands share the same unit.
+  const nowSeconds = now / 1000;
+  const remainingSeconds = resetsAt - nowSeconds;
+  const elapsedSeconds = windowDurationSeconds - remainingSeconds;
+  const fraction = elapsedSeconds / windowDurationSeconds;
+  return Math.min(100, Math.max(0, fraction * 100));
+}

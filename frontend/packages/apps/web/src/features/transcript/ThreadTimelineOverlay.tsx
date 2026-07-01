@@ -215,10 +215,13 @@ export const TIMELINE_JUMP_HIGHLIGHT_CLASS = 'delta-timeline-jump-highlight';
  * to fully transparent over this window, exposing the bubble's resting
  * color; once the class is removed the bubble is at its normal color and a
  * subsequent jump to the same message can re-apply the highlight cleanly.
- * Tuned slightly longer than the v6 flash (~1.5 s) so the fade reads as a
- * smooth transition, not a quick blink.
+ * Tuned to be brief but still legible: long enough to register as a fade
+ * rather than a blink, short enough not to linger after the jump has landed.
+ * MUST stay in lock-step with the matching CSS `animation` duration in
+ * index.css — a shorter constant snaps the bubble back mid-fade, a longer
+ * one leaves the class on stale.
  */
-export const TIMELINE_JUMP_HIGHLIGHT_MS = 1500;
+export const TIMELINE_JUMP_HIGHLIGHT_MS = 800;
 
 /**
  * Debounce window (ms) for pane-scroll → playhead-follow updates. The

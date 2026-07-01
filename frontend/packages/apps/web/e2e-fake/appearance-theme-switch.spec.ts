@@ -33,7 +33,7 @@ const SURFACE_VAR = '--delta-color-surface';
 
 const LIGHT_SURFACE_RGB = '255 255 255';
 const DARK_SURFACE_RGB = '29 29 32';
-const SEPIA_SURFACE_RGB = '247 235 207';
+const SEPIA_SURFACE_RGB = '243 233 211';
 
 /** Read a CSS variable resolved on the document root inside the page. */
 async function readRootVar(page: Page, name: string): Promise<string> {

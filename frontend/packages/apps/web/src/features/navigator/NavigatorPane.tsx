@@ -19,7 +19,10 @@ import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
-import { formatResetCountdown } from './rateLimitReset';
+import {
+  computeElapsedPercentage,
+  formatResetCountdown,
+} from './rateLimitReset';
 
 /**
  * Estimated height of a collapsed session card, in pixels. Only a seed for the
@@ -122,25 +125,42 @@ function SettingsIcon({ className }: { className?: string }) {
  * a {@link Meter} bar, the percentage, and a compact relative reset countdown.
  * The two rows share the same neutral dark accent; they are told apart by the
  * `5h` / `7d` label, not colour. The fill is anchored to the right edge of the
- * track and grows leftward (see the `className` passed at the call site). The
- * caller hides the row entirely when its window is absent, so this only renders
- * a present window; a `null` percentage within a present window reads as 0%.
+ * track and grows leftward (see the `className` passed at the call site), so
+ * the bar's right edge represents the moment of reset. The caller hides the row
+ * entirely when its window is absent, so this only renders a present window; a
+ * `null` percentage within a present window reads as 0%.
+ *
+ * A 1px elapsed-time marker is overlaid on the bar at the
+ * window-elapsed-fraction position (computed from `resets_at` and the row's
+ * `windowDurationSeconds`). Like the fill, the marker is anchored to the right
+ * edge: it sits at distance `elapsedPercentage` from the right, growing
+ * leftward as time passes. When the leftward fill overtakes the leftward
+ * marker, token consumption is running ahead of a straight-line burn for the
+ * window; when the marker is to the left of the fill's edge, consumption is
+ * behind the linear pace. This lets you read pace at a glance — no numbers.
+ *
+ * The numeric percentage cell reserves a `min-width` and right-aligns its
+ * text so the trailing `↻` reset countdown column lines up across the 5h /
+ * 7d rows without needing to zero-pad shorter numbers into a `021%` form.
  *
  * The row uses a monospace family on purpose so EVERY character — digits, `%`,
- * the `↻` reset glyph, the letters in `5d04h` / `02h13m`, and any spaces — sits
- * in a fixed-width cell, which is what keeps the two rows' columns aligned.
- * Tabular-figures (`tabular-nums`) alone equalises digit glyphs only, leaving
- * symbols and letters at proportional widths — so it is not sufficient here.
+ * the `↻` reset glyph, the letters in `5d04h` / `02h13m`, and any spaces —
+ * sits in a fixed-width cell, which is what keeps the two rows' columns
+ * aligned. Tabular-figures (`tabular-nums`) alone equalises digit glyphs only,
+ * leaving symbols and letters at proportional widths — so it is not sufficient
+ * here.
  */
 function RateLimitRow({
   label,
   window: rateWindow,
+  windowDurationSeconds,
   fillClassName,
   meterClassName,
   testId,
 }: {
   label: string;
   window: RateLimitWindow;
+  windowDurationSeconds: number;
   fillClassName: string;
   meterClassName?: string;
   testId: string;
@@ -150,21 +170,37 @@ function RateLimitRow({
     rateWindow.resets_at !== null
       ? formatResetCountdown(rateWindow.resets_at)
       : null;
+  const elapsedPercentage =
+    rateWindow.resets_at !== null
+      ? computeElapsedPercentage(rateWindow.resets_at, windowDurationSeconds)
+      : null;
   return (
     <div
       className="flex items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid={testId}
     >
       <span className="w-5 shrink-0 text-fg-subtle">{label}</span>
-      <Meter
-        value={percentage}
-        fillClassName={fillClassName}
-        className={meterClassName}
-        title={`${label} rate limit: ${Math.round(percentage)}% used`}
-      />
-      <span className="shrink-0" data-testid={`${testId}-pct`}>
-        {/* Zero-pad to 3 digits so the percentage column lines up across rows. */}
-        {Math.round(percentage).toString().padStart(3, '0')}%
+      <div className="relative flex-1 min-w-0">
+        <Meter
+          value={percentage}
+          fillClassName={fillClassName}
+          className={meterClassName}
+          title={`${label} rate limit: ${Math.round(percentage)}% used`}
+        />
+        {elapsedPercentage !== null && (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 w-px bg-fg"
+            style={{ right: `${elapsedPercentage}%` }}
+            data-testid={`${testId}-elapsed-marker`}
+          />
+        )}
+      </div>
+      <span
+        className="inline-block min-w-[2.5em] shrink-0 text-right"
+        data-testid={`${testId}-pct`}
+      >
+        {Math.round(percentage)}%
       </span>
       {reset !== null && (
         <span
@@ -331,6 +367,7 @@ export function NavigatorPane({
                 <RateLimitRow
                   label="5h"
                   window={rateLimits.fiveHour}
+                  windowDurationSeconds={5 * 60 * 60}
                   // Shared neutral accent — the rows are told apart by the label.
                   fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
@@ -344,6 +381,7 @@ export function NavigatorPane({
                 <RateLimitRow
                   label="7d"
                   window={rateLimits.sevenDay}
+                  windowDurationSeconds={7 * 24 * 60 * 60}
                   // Shared neutral accent — the rows are told apart by the label.
                   fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
