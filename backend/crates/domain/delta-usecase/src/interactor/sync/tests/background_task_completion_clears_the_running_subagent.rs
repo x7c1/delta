@@ -38,7 +38,10 @@ async fn background_task_completion_clears_the_running_subagent() {
     assert!(
         started.iter().any(|e| matches!(
             e,
-            SessionEvent::SubagentStarted { background: true, .. }
+            SessionEvent::SubagentStarted {
+                background: true,
+                ..
+            }
         )),
         "the launch started a background running entry, got {started:?}"
     );

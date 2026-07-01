@@ -177,7 +177,9 @@ async fn start_capture(capture: Arc<Capture>) -> (u16, tokio::task::JoinHandle<(
         .expect("bind hook capture listener");
     let port = listener.local_addr().expect("local addr").port();
     let server = tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("serve hook capture");
+        axum::serve(listener, app)
+            .await
+            .expect("serve hook capture");
     });
     (port, server)
 }
@@ -212,8 +214,7 @@ impl ClaudeSession {
             .expect("write rendered settings");
 
         let session_id = uuid::Uuid::now_v7().to_string();
-        let claude_bin =
-            std::env::var("DELTA_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned());
+        let claude_bin = std::env::var("DELTA_CLAUDE_BIN").unwrap_or_else(|_| "claude".to_owned());
 
         // `env -u <marker> … <claude>` — see NESTED_CLAUDE_ENV.
         let mut command: Vec<String> = vec!["env".into()];
@@ -507,12 +508,10 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
         wait_for(&session, "user and assistant transcript lines", || {
             let messages = parsed_messages(&transcript_path);
             let user = messages.iter().position(|m| {
-                m.role == Role::User
-                    && m.flatten_text().is_some_and(|t| t.contains(prompt))
+                m.role == Role::User && m.flatten_text().is_some_and(|t| t.contains(prompt))
             })?;
             let assistant = messages.iter().position(|m| {
-                m.role == Role::Assistant
-                    && m.flatten_text().is_some_and(|t| !t.trim().is_empty())
+                m.role == Role::Assistant && m.flatten_text().is_some_and(|t| !t.trim().is_empty())
             })?;
             (user < assistant).then_some(())
         })
@@ -523,12 +522,16 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
         // `hook_additional_context` attachment line on current versions — the
         // exact carrier is claude's business; that the marker text reached the
         // transcript at all is what proves the envelope shape still works).
-        wait_for(&session, "injected additionalContext in the transcript", || {
-            std::fs::read_to_string(&transcript_path)
-                .unwrap_or_default()
-                .contains("CANARY-INJECTED-CONTEXT")
-                .then_some(())
-        })
+        wait_for(
+            &session,
+            "injected additionalContext in the transcript",
+            || {
+                std::fs::read_to_string(&transcript_path)
+                    .unwrap_or_default()
+                    .contains("CANARY-INJECTED-CONTEXT")
+                    .then_some(())
+            },
+        )
         .await?;
 
         // A turn with no permission dialog fires no PermissionRequest: the
@@ -552,12 +555,16 @@ async fn prompt_turn_fires_hooks_and_streams_the_transcript() {
                 .map(|_| ())
                 .map_err(|e| format!("SessionEnd payload: {e}"))
         })?;
-        wait_for(&session, "an isMeta caveat line parsed as Role::Meta", || {
-            parsed_messages(&transcript_path)
-                .iter()
-                .any(|m| m.role == Role::Meta)
-                .then_some(())
-        })
+        wait_for(
+            &session,
+            "an isMeta caveat line parsed as Role::Meta",
+            || {
+                parsed_messages(&transcript_path)
+                    .iter()
+                    .any(|m| m.role == Role::Meta)
+                    .then_some(())
+            },
+        )
         .await?;
 
         Ok(())
@@ -670,8 +677,7 @@ async fn interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue() {
             parsed_messages(&transcript_path)
                 .iter()
                 .any(|m| {
-                    m.role == Role::User
-                        && m.flatten_text().is_some_and(|t| t.contains(queued))
+                    m.role == Role::User && m.flatten_text().is_some_and(|t| t.contains(queued))
                 })
                 .then_some(())
         })
@@ -763,15 +769,13 @@ async fn permission_dialog_fires_the_hook_and_the_allow_decision_is_honored() {
                 .iter()
                 .any(|v| {
                     v["type"] == "user"
-                        && v["message"]["content"]
-                            .as_array()
-                            .is_some_and(|blocks| {
-                                blocks.iter().any(|b| {
-                                    b["type"] == "tool_result"
-                                        && b["tool_use_id"] == pre.tool_use_id.as_str()
-                                        && b["is_error"] == false
-                                })
+                        && v["message"]["content"].as_array().is_some_and(|blocks| {
+                            blocks.iter().any(|b| {
+                                b["type"] == "tool_result"
+                                    && b["tool_use_id"] == pre.tool_use_id.as_str()
+                                    && b["is_error"] == false
                             })
+                        })
                 })
                 .then_some(())
         })

@@ -36,7 +36,11 @@ async fn send_to_closed_session_with_missing_transcript_writes_no_send_row() {
     // The key assertion: no optimistic send row sits at the FIFO head waiting
     // for a hook that will never fire.
     assert!(
-        ix.store().head_dispatched_send(&id).await.unwrap().is_none(),
+        ix.store()
+            .head_dispatched_send(&id)
+            .await
+            .unwrap()
+            .is_none(),
         "no send row was enqueued"
     );
     assert!(

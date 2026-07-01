@@ -305,16 +305,14 @@ impl SessionStore for FakeStore {
         // Mirror the SQLite UNION: match any session.cwd, session.requested_workdir,
         // or message.cwd equal to `path` (byte-for-byte).
         let g = self.inner.lock().unwrap();
-        let hit_in_sessions = g.sessions.iter().any(|s| {
-            s.cwd == path || s.requested_workdir.as_deref() == Some(path)
-        });
+        let hit_in_sessions = g
+            .sessions
+            .iter()
+            .any(|s| s.cwd == path || s.requested_workdir.as_deref() == Some(path));
         if hit_in_sessions {
             return Ok(true);
         }
-        let hit_in_messages = g
-            .messages
-            .iter()
-            .any(|m| m.cwd.as_deref() == Some(path));
+        let hit_in_messages = g.messages.iter().any(|m| m.cwd.as_deref() == Some(path));
         Ok(hit_in_messages)
     }
 
@@ -350,11 +348,10 @@ impl SessionStore for FakeStore {
             std::collections::HashMap::new();
         for (index, s) in g.sessions.iter().enumerate() {
             let index = index as i64;
-            let Some(repo_root) = &s.repo_root else { continue };
-            let clone_path = s
-                .requested_workdir
-                .clone()
-                .unwrap_or_else(|| s.cwd.clone());
+            let Some(repo_root) = &s.repo_root else {
+                continue;
+            };
+            let clone_path = s.requested_workdir.clone().unwrap_or_else(|| s.cwd.clone());
             let recency = g
                 .messages
                 .iter()
@@ -898,7 +895,11 @@ impl SessionStore for FakeStore {
         // Newest first (descending created_at), mirroring the SQL store. Ties
         // on the seeded timestamp fall back to path ASC for a deterministic order.
         let mut out = g.repository_scan_roots.clone();
-        out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then_with(|| a.path.cmp(&b.path)));
+        out.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.path.cmp(&b.path))
+        });
         Ok(out)
     }
 

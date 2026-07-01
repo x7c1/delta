@@ -40,10 +40,8 @@ mod tests {
 
     #[test]
     fn deserializes_with_explicit_handler() {
-        let req: WireOpenCwdRequest = serde_json::from_str(
-            r#"{"path":"/projects/known","handler":"vscode"}"#,
-        )
-        .unwrap();
+        let req: WireOpenCwdRequest =
+            serde_json::from_str(r#"{"path":"/projects/known","handler":"vscode"}"#).unwrap();
         assert_eq!(req.path, "/projects/known");
         assert_eq!(req.handler.as_deref(), Some("vscode"));
     }

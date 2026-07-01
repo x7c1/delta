@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, HashSet};
 
 use crate::error::Result;
-use crate::interactor::InteractorCore;
 use crate::interactor::repository::scan::scan_one_root;
+use crate::interactor::InteractorCore;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::repository::{display_name, identity_key, Clone as RepoClone, Repository};
 

@@ -28,7 +28,6 @@ pub use interactor::{
 };
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
-pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use ports::{
     pane_for, DirEntry, DirListing, ExternalOpener, GhCli, GitRepoInfo, GitWorktree,
     MessageDisplayHook, NewSession, RateLimitWindow, RecentWorkdir, RemoteBranches,
@@ -37,6 +36,7 @@ pub use ports::{
     Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
     WorktreeStartPoint,
 };
+pub use pull_request::{PullRequest, PullRequestLens, PullRequestList};
 pub use repository::{display_name, identity_key, worktree_dir_slug, Clone, Repository};
 pub use send_target::{SendTarget, WorktreeSpec};
 pub use session_listing::SessionListing;

@@ -108,8 +108,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/launch-options/{id}",
-            axum::routing::patch(api::update_launch_option)
-                .delete(api::delete_launch_option),
+            axum::routing::patch(api::update_launch_option).delete(api::delete_launch_option),
         )
         // Delta workspace version for the browser footer. Pre-formatted
         // server-side so the browser never has to know how to render `+dev.<sha>`.

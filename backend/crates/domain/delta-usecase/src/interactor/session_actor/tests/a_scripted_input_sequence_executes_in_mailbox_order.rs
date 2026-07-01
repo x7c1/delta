@@ -30,7 +30,8 @@ async fn a_scripted_input_sequence_executes_in_mailbox_order() {
         },
     );
     let (mid_tx, mid_rx) = oneshot::channel();
-    ix.sessions.post(&id, SessionInput::QueryLiveState { reply: mid_tx });
+    ix.sessions
+        .post(&id, SessionInput::QueryLiveState { reply: mid_tx });
     let (stop_tx, stop_rx) = oneshot::channel();
     ix.sessions.post(
         &id,
@@ -43,7 +44,8 @@ async fn a_scripted_input_sequence_executes_in_mailbox_order() {
         },
     );
     let (end_tx, end_rx) = oneshot::channel();
-    ix.sessions.post(&id, SessionInput::QueryLiveState { reply: end_tx });
+    ix.sessions
+        .post(&id, SessionInput::QueryLiveState { reply: end_tx });
 
     let (_events, _context) = prompt_rx.await.unwrap().unwrap();
     assert_eq!(

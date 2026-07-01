@@ -166,11 +166,11 @@ impl Scenario {
         if let Ok(dir) = std::env::var("FAKE_CLAUDE_SCENARIO_DIR") {
             let token = first_prompt
                 .and_then(|p| p.split_whitespace().next())
-                .ok_or_else(
-                    || "FAKE_CLAUDE_SCENARIO_DIR is set but the launch carries no positional \
+                .ok_or_else(|| {
+                    "FAKE_CLAUDE_SCENARIO_DIR is set but the launch carries no positional \
                         prompt to select a scenario with"
-                        .to_owned(),
-                )?;
+                        .to_owned()
+                })?;
             let path = std::path::Path::new(&dir).join(format!("{token}.json"));
             return Self::load(&path.to_string_lossy());
         }
@@ -179,8 +179,8 @@ impl Scenario {
 
     /// Load and parse a scenario file.
     pub fn load(path: &str) -> Result<Self, String> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| format!("read scenario {path}: {e}"))?;
+        let content =
+            std::fs::read_to_string(path).map_err(|e| format!("read scenario {path}: {e}"))?;
         serde_json::from_str(&content).map_err(|e| format!("parse scenario {path}: {e}"))
     }
 

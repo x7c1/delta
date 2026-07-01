@@ -16,7 +16,10 @@ async fn session_start_unknown_session_is_a_safe_noop() {
             .await
             .unwrap();
 
-        assert!(events.is_empty(), "{source} for an unknown id emits nothing");
+        assert!(
+            events.is_empty(),
+            "{source} for an unknown id emits nothing"
+        );
         assert!(
             ix.store().session(&unknown).await.unwrap().is_none(),
             "{source} for an unknown id registers nothing"

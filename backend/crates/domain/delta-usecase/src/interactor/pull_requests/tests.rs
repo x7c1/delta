@@ -42,7 +42,10 @@ async fn gh_unavailable_returns_empty_with_the_flag_off() {
         FakeGitWorktree::default(),
         Arc::new(FakeGhCli::unauthenticated()),
     );
-    let list = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
+    let list = ix
+        .list_pull_requests(PullRequestLens::Reviewer)
+        .await
+        .unwrap();
     assert!(!list.gh_available, "gh is reported as unavailable");
     assert!(
         list.pull_requests.is_empty(),
@@ -79,7 +82,10 @@ async fn has_local_clone_is_set_only_for_registered_repos() {
         .await
         .unwrap();
 
-    let list = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
+    let list = ix
+        .list_pull_requests(PullRequestLens::Reviewer)
+        .await
+        .unwrap();
     assert!(list.gh_available);
     assert_eq!(list.pull_requests.len(), 2);
 
@@ -139,9 +145,18 @@ async fn search_results_are_memoised_per_lens() {
     ));
     let ix = interactor_with_git_and_gh(FakeGitWorktree::default(), gh.clone());
 
-    let _ = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
-    let _ = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
-    let _ = ix.list_pull_requests(PullRequestLens::Author).await.unwrap();
+    let _ = ix
+        .list_pull_requests(PullRequestLens::Reviewer)
+        .await
+        .unwrap();
+    let _ = ix
+        .list_pull_requests(PullRequestLens::Reviewer)
+        .await
+        .unwrap();
+    let _ = ix
+        .list_pull_requests(PullRequestLens::Author)
+        .await
+        .unwrap();
     // Reviewer (1 miss + 1 hit) + author (1 miss) = 2 shell-outs.
     assert_eq!(
         gh.search_calls(),
@@ -163,10 +178,13 @@ async fn scan_only_repos_satisfy_the_local_clone_check() {
         let dir = tmp.path().join("zatto");
         std::fs::create_dir(&dir).unwrap();
         std::fs::create_dir(dir.join(".git")).unwrap();
-        tokio::fs::canonicalize(&dir).await.unwrap().to_string_lossy().into_owned()
+        tokio::fs::canonicalize(&dir)
+            .await
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
     };
-    let git = FakeGitWorktree::default()
-        .with_origin_url(&zatto_path, "git@github.com:x7c1/zatto");
+    let git = FakeGitWorktree::default().with_origin_url(&zatto_path, "git@github.com:x7c1/zatto");
     let prs = vec![fixture_pr("x7c1", "zatto", "feat/x")];
     let gh = Arc::new(FakeGhCli::authenticated(prs, Vec::new()));
     let ix = interactor_with_git_and_gh(git, gh);
@@ -175,7 +193,10 @@ async fn scan_only_repos_satisfy_the_local_clone_check() {
         .await
         .unwrap();
 
-    let list = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
+    let list = ix
+        .list_pull_requests(PullRequestLens::Reviewer)
+        .await
+        .unwrap();
     assert_eq!(list.pull_requests.len(), 1);
     assert!(
         list.pull_requests[0].has_local_clone,
@@ -207,7 +228,10 @@ async fn path_keyed_repos_do_not_satisfy_the_local_clone_check() {
         .await
         .unwrap();
 
-    let list = ix.list_pull_requests(PullRequestLens::Reviewer).await.unwrap();
+    let list = ix
+        .list_pull_requests(PullRequestLens::Reviewer)
+        .await
+        .unwrap();
     assert_eq!(list.pull_requests.len(), 1);
     assert!(
         !list.pull_requests[0].has_local_clone,

@@ -51,11 +51,7 @@ async fn cancelling_a_dispatched_send_injects_escape_and_returns_to_idle() {
     );
     assert_eq!(ix.live_state_for(&session).await.turn, TurnState::Idle);
     assert!(
-        ix.store()
-            .open_sends(&session)
-            .await
-            .unwrap()
-            .is_empty(),
+        ix.store().open_sends(&session).await.unwrap().is_empty(),
         "the cancelled send drops out of the open-send list"
     );
 }

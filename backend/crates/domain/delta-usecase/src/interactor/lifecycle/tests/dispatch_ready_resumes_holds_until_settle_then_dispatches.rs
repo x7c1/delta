@@ -2,8 +2,8 @@ use std::time::{Duration, Instant};
 
 use delta_model::SessionId;
 
-use crate::interactor::testing::*;
 use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
+use crate::interactor::testing::*;
 
 /// The dispatch tick honours `RESUME_DISPATCH_SETTLE`: a resume marked ready is
 /// NOT dispatched before the settle elapses, and IS dispatched (and removed from

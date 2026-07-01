@@ -111,9 +111,7 @@ where
                 }
             }
             SendStatus::Dispatched => self.cancel_dispatched_send(send_id).await,
-            SendStatus::Matched | SendStatus::Cancelled => {
-                Err(Error::SendNotCancellable(send_id))
-            }
+            SendStatus::Matched | SendStatus::Cancelled => Err(Error::SendNotCancellable(send_id)),
         }
     }
 
@@ -125,7 +123,9 @@ where
     /// which case the cancel is rejected and the browser reconciles.
     async fn cancel_dispatched_send(&mut self, send_id: i64) -> Result<()> {
         match self.state.turn() {
-            TurnState::AwaitingEcho { send_id: outstanding } if outstanding == send_id => {}
+            TurnState::AwaitingEcho {
+                send_id: outstanding,
+            } if outstanding == send_id => {}
             _ => return Err(Error::SendNotCancellable(send_id)),
         }
         // The pane must be live to receive the Escape. A `dispatched` send

@@ -27,9 +27,15 @@ async fn pending_question_id(
     session: &SessionId,
     tool_input: &str,
 ) -> i64 {
-    ix.on_pre_tool_use(session, "AskUserQuestion", tool_input, "toolu_q1", SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
+    ix.on_pre_tool_use(
+        session,
+        "AskUserQuestion",
+        tool_input,
+        "toolu_q1",
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
     ix.live_state_for(session)
         .await
         .pending_question

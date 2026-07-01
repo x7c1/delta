@@ -450,10 +450,11 @@ pub fn attribute_lines(
             // parent indicator and can never get stuck.
             if let ContentBlock::ToolUse { id, name, input } = block {
                 if claude_format::is_subagent_tool(name) {
-                    let subagent_type = claude_format::tool_input_string_field(input, "subagent_type")
+                    let subagent_type =
+                        claude_format::tool_input_string_field(input, "subagent_type")
+                            .map(str::to_owned);
+                    let description = claude_format::tool_input_string_field(input, "description")
                         .map(str::to_owned);
-                    let description =
-                        claude_format::tool_input_string_field(input, "description").map(str::to_owned);
                     let background = claude_format::launches_in_background(name, input);
                     effects.push(Effect::SubagentIndicatorStarted {
                         tool_use_id: id.clone(),
@@ -546,7 +547,10 @@ pub fn attribute_lines(
                 .outstanding
                 .front()
                 .is_some_and(|send| send.text.trim() == trimmed);
-            if let Some(pending) = head_matches.then(|| state.outstanding.pop_front()).flatten() {
+            if let Some(pending) = head_matches
+                .then(|| state.outstanding.pop_front())
+                .flatten()
+            {
                 effects.push(Effect::SendMatched {
                     send_id: pending.id,
                     matched_uuid: line.uuid.clone(),
@@ -559,7 +563,10 @@ pub fn attribute_lines(
                 .outstanding
                 .front()
                 .is_some_and(|send| send.text.trim() == trimmed);
-            match head_matches.then(|| state.outstanding.pop_front()).flatten() {
+            match head_matches
+                .then(|| state.outstanding.pop_front())
+                .flatten()
+            {
                 Some(pending) => {
                     effects.push(Effect::SendMatched {
                         send_id: pending.id,

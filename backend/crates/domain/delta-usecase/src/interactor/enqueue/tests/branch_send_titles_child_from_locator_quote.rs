@@ -31,11 +31,6 @@ async fn branch_send_titles_child_from_locator_quote() {
         .enqueue_send(branch_off(main, &parent), "branch text 2", None)
         .await
         .unwrap();
-    let child2 = ix
-        .store()
-        .thread(send2.thread_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let child2 = ix.store().thread(send2.thread_id).await.unwrap().unwrap();
     assert_eq!(child2.title, "untitled");
 }

@@ -27,7 +27,12 @@ async fn the_dialog_is_reported_from_the_hook_and_survives_an_abandoned_wait() {
     );
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"rm -i x"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"rm -i x"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -60,7 +65,12 @@ async fn a_browser_decision_clears_the_queryable_dialog() {
     let session = SessionId::from("sess-1");
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"ls"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"ls"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
     ix.decide_permission(wait.request_id, PermissionDecision::Allow)
@@ -80,9 +90,14 @@ async fn the_turn_ending_clears_the_queryable_dialog() {
     ix.on_user_prompt_submit(submit("seed")).await.unwrap();
     let session = SessionId::from("sess-1");
 
-    ix.on_permission_request(&session, "Bash", r#"{"command":"ls"}"#, SEED_TRANSCRIPT_PATH)
-        .await
-        .unwrap();
+    ix.on_permission_request(
+        &session,
+        "Bash",
+        r#"{"command":"ls"}"#,
+        SEED_TRANSCRIPT_PATH,
+    )
+    .await
+    .unwrap();
     // The turn ends (Stop hook): the dialog blocked that turn, so however the
     // question went away, it cannot outlive the turn — exactly the browser
     // notice's lifecycle.

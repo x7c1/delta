@@ -59,7 +59,13 @@ async fn ask_user_question_in_a_just_dispatched_branch_turn_lands_on_the_branch_
     // branch user line appears in the JSONL. The question must be attributed to
     // the branch thread (the in-flight send's thread), not main.
     let events = ix
-        .on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1", SEED_TRANSCRIPT_PATH)
+        .on_pre_tool_use(
+            &session,
+            "AskUserQuestion",
+            QUESTION_INPUT,
+            "toolu_q1",
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 

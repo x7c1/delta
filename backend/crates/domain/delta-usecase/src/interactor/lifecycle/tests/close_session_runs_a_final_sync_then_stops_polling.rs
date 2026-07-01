@@ -27,8 +27,10 @@ async fn close_session_runs_a_final_sync_then_stops_polling() {
 
     // A final assistant line is flushed to the JSONL after the turn's `Stop`,
     // before close — and has not been ingested yet.
-    ix.transcript_fake()
-        .push_to("/work/delta-1/t.jsonl", assistant_line("a-last", "last reply"));
+    ix.transcript_fake().push_to(
+        "/work/delta-1/t.jsonl",
+        assistant_line("a-last", "last reply"),
+    );
     let before_close = ix.thread_view(main).await.unwrap();
     assert!(
         before_close.iter().all(|m| m.uuid.as_str() != "a-last"),

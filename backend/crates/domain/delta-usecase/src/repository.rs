@@ -84,7 +84,10 @@ pub fn identity_key(origin: Option<String>, fallback_path: &str) -> String {
         if let Some(rest) = trimmed.strip_prefix(scheme) {
             // Drop any embedded `user[:token]@` credentials so the same URL
             // with and without a token collapses to one key.
-            let rest = rest.rsplit_once('@').map(|(_, after)| after).unwrap_or(rest);
+            let rest = rest
+                .rsplit_once('@')
+                .map(|(_, after)| after)
+                .unwrap_or(rest);
             let (host, path) = match rest.split_once('/') {
                 Some((host, path)) => (host, path),
                 None => (rest, ""),
@@ -124,11 +127,8 @@ pub fn display_name(identity_key: &str, fallback_path: &str) -> String {
     // (the leading `/`), so split-on-`/` is enough to tell them apart
     // without baking host-shape heuristics in.
     let segments: Vec<&str> = identity_key.split('/').collect();
-    let is_origin_shaped = segments
-        .first()
-        .map(|s| !s.is_empty())
-        .unwrap_or(false)
-        && segments.len() >= 3;
+    let is_origin_shaped =
+        segments.first().map(|s| !s.is_empty()).unwrap_or(false) && segments.len() >= 3;
     if is_origin_shaped {
         // `host/org/repo` or deeper: take the last two segments as `org/repo`.
         let n = segments.len();

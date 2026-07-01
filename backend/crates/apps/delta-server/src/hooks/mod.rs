@@ -360,7 +360,9 @@ fn status_snapshot_from(payload: StatusLinePayload) -> StatusSnapshot {
         five_hour: rate_limits.five_hour.map(rate_limit_window_from),
         seven_day: rate_limits.seven_day.map(rate_limit_window_from),
         total_cost_usd: payload.cost.and_then(|cost| cost.total_cost_usd),
-        current_dir: payload.workspace.and_then(|workspace| workspace.current_dir),
+        current_dir: payload
+            .workspace
+            .and_then(|workspace| workspace.current_dir),
     }
 }
 

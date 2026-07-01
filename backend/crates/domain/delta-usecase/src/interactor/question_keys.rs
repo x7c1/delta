@@ -449,13 +449,7 @@ mod tests {
         // Right advances to review; trailing Enter submits.
         assert_eq!(
             answer_keys(&[single(2), multi(2)], &[vec![0], vec![1]]).unwrap(),
-            vec![
-                Key::Enter,
-                Key::Down,
-                Key::Space,
-                Key::Right,
-                Key::Enter,
-            ],
+            vec![Key::Enter, Key::Down, Key::Space, Key::Right, Key::Enter,],
         );
     }
 
@@ -502,10 +496,7 @@ mod tests {
                 { "header": "B", "options": [{"label":"z"}] }
             ]
         }"#;
-        assert_eq!(
-            parse_question_shapes(json),
-            Some(vec![multi(2), single(1)]),
-        );
+        assert_eq!(parse_question_shapes(json), Some(vec![multi(2), single(1)]),);
     }
 
     #[test]

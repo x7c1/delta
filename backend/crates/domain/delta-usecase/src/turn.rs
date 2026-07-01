@@ -221,9 +221,7 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // this pane. Cancel (not requeue): the close/failure surfaces in the
         // UI and owns recovery; silently re-typing into a future resume would
         // be surprising.
-        (S::AwaitingEcho { send_id }, I::Close) => {
-            Transition::orphaning(S::Idle, Cancel(send_id))
-        }
+        (S::AwaitingEcho { send_id }, I::Close) => Transition::orphaning(S::Idle, Cancel(send_id)),
         (S::AwaitingEcho { send_id }, I::DispatchFailed) => {
             Transition::orphaning(S::Idle, Cancel(send_id))
         }
@@ -237,7 +235,12 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // interactor bug (the guard there would have rejected it as
         // `SendNotCancellable`), so the mismatch arm is flagged anomalous and
         // converges on a safe no-op rather than orphaning the wrong row.
-        (S::AwaitingEcho { send_id: outstanding }, I::Cancel { send_id }) => {
+        (
+            S::AwaitingEcho {
+                send_id: outstanding,
+            },
+            I::Cancel { send_id },
+        ) => {
             if send_id == outstanding {
                 Transition::orphaning(S::Idle, Cancel(outstanding))
             } else {
@@ -422,10 +425,7 @@ mod tests {
     #[test]
     fn matching_cancel_exits_awaiting_echo_to_idle() {
         assert_eq!(
-            transition(
-                S::AwaitingEcho { send_id: 7 },
-                I::Cancel { send_id: 7 }
-            ),
+            transition(S::AwaitingEcho { send_id: 7 }, I::Cancel { send_id: 7 }),
             Transition {
                 next: S::Idle,
                 orphaned: Some(Cancel(7)),

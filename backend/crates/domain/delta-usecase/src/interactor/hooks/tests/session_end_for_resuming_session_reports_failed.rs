@@ -45,7 +45,11 @@ async fn session_end_for_resuming_session_reports_failed() {
         Instant::now(),
     )
     .await;
-    ix.tmux_fake().live.lock().unwrap().push("delta-3".to_owned());
+    ix.tmux_fake()
+        .live
+        .lock()
+        .unwrap()
+        .push("delta-3".to_owned());
 
     let events = ix
         .on_session_end(SessionEndHook {

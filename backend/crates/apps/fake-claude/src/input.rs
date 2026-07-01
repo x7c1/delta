@@ -440,9 +440,7 @@ mod tests {
         // are stored verbatim, then the outer paste closes on `201~`.
         assert_eq!(
             decode(b"\x1b[200~outer\x1b[200~still outer\x1b[201~\r"),
-            vec![InputEvent::Prompt(
-                "outer\x1b[200~still outer".to_owned()
-            )]
+            vec![InputEvent::Prompt("outer\x1b[200~still outer".to_owned())]
         );
     }
 
@@ -520,9 +518,7 @@ mod tests {
         assert_eq!(event, InputEvent::Prompt("hi".to_owned()));
         // No further events: the BPM markers were consumed and no
         // spurious Interrupt was emitted along the way.
-        assert!(events
-            .recv_timeout(TEST_ESCAPE_TIMEOUT * 2)
-            .is_err());
+        assert!(events.recv_timeout(TEST_ESCAPE_TIMEOUT * 2).is_err());
     }
 
     #[test]

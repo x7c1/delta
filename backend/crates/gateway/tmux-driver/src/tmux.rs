@@ -557,8 +557,12 @@ mod tests {
     fn conf_path_is_derived_per_socket() {
         // The config path is namespaced by socket so concurrent Delta servers on
         // different sockets never write over each other's config.
-        assert!(Tmux::new("delta").conf_path.ends_with("delta-tmux-delta.conf"));
-        assert!(Tmux::new("other").conf_path.ends_with("delta-tmux-other.conf"));
+        assert!(Tmux::new("delta")
+            .conf_path
+            .ends_with("delta-tmux-delta.conf"));
+        assert!(Tmux::new("other")
+            .conf_path
+            .ends_with("delta-tmux-other.conf"));
     }
 
     #[test]

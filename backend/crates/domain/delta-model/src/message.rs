@@ -103,7 +103,10 @@ mod tests {
                 input: serde_json::json!({"command": "ls"}),
             },
         ];
-        assert_eq!(Message::flatten_text(&blocks).as_deref(), Some("hmm\nhello"));
+        assert_eq!(
+            Message::flatten_text(&blocks).as_deref(),
+            Some("hmm\nhello")
+        );
         assert_eq!(Message::flatten_text(&[]), None);
     }
 }

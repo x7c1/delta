@@ -15,9 +15,9 @@ fn every_corpus_case_replays_to_its_golden_assignments() {
     for case in load_cases() {
         // Run every case even when an earlier one fails, so one corpus run
         // reports all divergences (and UPDATE_GOLDEN blesses everything).
-        if let Err(panic) =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| assert_matches_golden(&case)))
-        {
+        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_matches_golden(&case)
+        })) {
             let message = panic
                 .downcast_ref::<String>()
                 .cloned()

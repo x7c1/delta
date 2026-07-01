@@ -26,11 +26,7 @@ pub trait Workspace: Send + Sync {
     /// Write `settings_json` to `settings_path`, creating parent directories if
     /// absent and overwriting any existing file so the hook URLs always reflect
     /// the current port.
-    async fn write_session_settings(
-        &self,
-        settings_path: &str,
-        settings_json: &str,
-    ) -> Result<()>;
+    async fn write_session_settings(&self, settings_path: &str, settings_json: &str) -> Result<()>;
 
     /// Canonicalize `path` and confirm it is an existing directory, returning
     /// the canonical absolute path.
@@ -53,11 +49,7 @@ pub trait Workspace: Send + Sync {
 
 #[async_trait]
 impl Workspace for Box<dyn Workspace> {
-    async fn write_session_settings(
-        &self,
-        settings_path: &str,
-        settings_json: &str,
-    ) -> Result<()> {
+    async fn write_session_settings(&self, settings_path: &str, settings_json: &str) -> Result<()> {
         (**self)
             .write_session_settings(settings_path, settings_json)
             .await

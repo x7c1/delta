@@ -167,9 +167,6 @@ mod tests {
 
         let found = scan_one_root(tmp.path().to_str().unwrap()).await;
         assert_eq!(found.len(), 1, "the self-loop child is skipped");
-        assert_eq!(
-            found[0].path,
-            canonical_root.join("real").to_string_lossy()
-        );
+        assert_eq!(found[0].path, canonical_root.join("real").to_string_lossy());
     }
 }

@@ -158,7 +158,10 @@ mod tests {
     #[tokio::test]
     async fn missing_file_is_empty_not_error() {
         let t = JsonlTranscript::new();
-        let out = t.read_from("/nonexistent/transcript.jsonl", 0).await.unwrap();
+        let out = t
+            .read_from("/nonexistent/transcript.jsonl", 0)
+            .await
+            .unwrap();
         assert!(out.messages.is_empty());
         assert_eq!(out.total_lines, 0);
     }
@@ -169,7 +172,10 @@ mod tests {
         let path = file.path().to_str().unwrap().to_owned();
 
         let t = JsonlTranscript::new();
-        assert!(t.exists(&path).await.unwrap(), "an existing file is present");
+        assert!(
+            t.exists(&path).await.unwrap(),
+            "an existing file is present"
+        );
         assert!(
             !t.exists("/nonexistent/transcript.jsonl").await.unwrap(),
             "a missing file is absent, not an error"
@@ -209,7 +215,11 @@ mod tests {
             r#"{{"uuid":"u1","type":"user","message":{{"content":"q","role":"user"}}}}"#
         )
         .unwrap();
-        writeln!(file, r#"{{"type":"file-history-snapshot","messageId":"x"}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"file-history-snapshot","messageId":"x"}}"#
+        )
+        .unwrap();
         writeln!(
             file,
             r#"{{"uuid":"a1","type":"assistant","message":{{"content":"r","role":"assistant"}}}}"#
@@ -219,10 +229,17 @@ mod tests {
         let path = file.path().to_str().unwrap().to_owned();
 
         let out = JsonlTranscript::new().read_from(&path, 0).await.unwrap();
-        assert_eq!(out.messages.len(), 2, "only the two uuid-bearing lines parse");
+        assert_eq!(
+            out.messages.len(),
+            2,
+            "only the two uuid-bearing lines parse"
+        );
         assert_eq!(out.total_lines, 3, "the no-uuid line still counts");
         assert_eq!(out.messages[0].seq, 0);
-        assert_eq!(out.messages[1].seq, 2, "assistant sits after the skipped line");
+        assert_eq!(
+            out.messages[1].seq, 2,
+            "assistant sits after the skipped line"
+        );
     }
 
     /// A line still mid-append (no trailing `\n` yet, possibly truncated JSON)
@@ -249,7 +266,11 @@ mod tests {
 
         let t = JsonlTranscript::new();
         let out = t.read_from(&path, 0).await.unwrap();
-        assert_eq!(out.messages.len(), 1, "only the terminated line is consumed");
+        assert_eq!(
+            out.messages.len(),
+            1,
+            "only the terminated line is consumed"
+        );
         assert_eq!(
             out.total_lines, 1,
             "the unterminated final line does not count"

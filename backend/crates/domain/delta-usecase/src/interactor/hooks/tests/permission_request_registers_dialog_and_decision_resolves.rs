@@ -1,8 +1,8 @@
 use delta_model::{PermissionStatus, SessionId};
 
 use crate::error::Error;
-use crate::interactor::PermissionDecision;
 use crate::interactor::testing::*;
+use crate::interactor::PermissionDecision;
 use crate::ports::SessionEvent;
 
 #[tokio::test]
@@ -12,7 +12,12 @@ async fn permission_request_records_its_own_row_and_notifies() {
     let session = SessionId::from("sess-1");
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"rm -i x"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"rm -i x"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -53,7 +58,12 @@ async fn a_browser_decision_wakes_the_hook_and_resolves_the_row() {
     let session = SessionId::from("sess-1");
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"ls"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"ls"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -92,7 +102,12 @@ async fn a_deny_decision_marks_the_row_denied() {
     let session = SessionId::from("sess-1");
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"rm -rf /"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"rm -rf /"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
     ix.decide_permission(wait.request_id, PermissionDecision::Deny)
@@ -116,7 +131,12 @@ async fn deciding_after_the_wait_was_abandoned_is_a_conflict() {
     let session = SessionId::from("sess-1");
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"ls"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"ls"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
     // The transport's deadline fired: the waiter is abandoned and the hook
@@ -159,7 +179,12 @@ async fn a_second_decision_for_the_same_request_is_a_conflict() {
     let session = SessionId::from("sess-1");
 
     let wait = ix
-        .on_permission_request(&session, "Bash", r#"{"command":"ls"}"#, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"ls"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
     ix.decide_permission(wait.request_id, PermissionDecision::Allow)

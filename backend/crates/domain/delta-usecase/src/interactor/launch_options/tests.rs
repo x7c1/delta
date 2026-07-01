@@ -39,16 +39,16 @@ fn expand_leading_tilde_leaves_plain_value_unchanged() {
 /// `~user` (tilde-user, not a leading `~/`) is not expanded.
 #[test]
 fn expand_leading_tilde_leaves_tilde_user_unchanged() {
-    assert_eq!(
-        expand_leading_tilde("~user/x", Some("/home/u")),
-        "~user/x"
-    );
+    assert_eq!(expand_leading_tilde("~user/x", Some("/home/u")), "~user/x");
 }
 
 /// An embedded (non-leading) `~` is not expanded.
 #[test]
 fn expand_leading_tilde_leaves_embedded_tilde_unchanged() {
-    assert_eq!(expand_leading_tilde("/opt/~/x", Some("/home/u")), "/opt/~/x");
+    assert_eq!(
+        expand_leading_tilde("/opt/~/x", Some("/home/u")),
+        "/opt/~/x"
+    );
 }
 
 /// With no home (HOME unset) the value is left as-is rather than failing.
@@ -103,7 +103,13 @@ async fn set_default_enabled_toggles_in_place() {
     assert!(updated.default_enabled);
 
     let listed = ix.list_launch_options().await.unwrap();
-    assert!(listed.iter().find(|o| o.id == option.id).unwrap().default_enabled);
+    assert!(
+        listed
+            .iter()
+            .find(|o| o.id == option.id)
+            .unwrap()
+            .default_enabled
+    );
 
     assert!(ix
         .set_launch_option_default_enabled(9999, true)
