@@ -66,8 +66,12 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
   closed: 'Server connection: disconnected',
 };
 
-// Short status word shown beside the dot in the footer, so the indicator reads
-// as the live connection state rather than a static brand label.
+// Short status word shown beside the dot in the footer when either the
+// connection is not open or the workspace version has not yet loaded. When
+// the socket is open AND the version has resolved, the label swaps to
+// `Delta <version>` (see the render site) — the dot itself still carries the
+// live connection state, so the label doubles as a build-identity readout in
+// the steady state without losing the disconnect/reconnect feedback.
 const CONNECTION_LABEL: Record<ConnectionStatus, string> = {
   connecting: 'Connecting…',
   open: 'Connected',
@@ -271,13 +275,16 @@ export function NavigatorPane({
 }: NavigatorPaneProps) {
   const client = useApiClient();
   const closeSession = useCloseSessionMutation(client);
-  // Delta workspace version for the footer: `v0.2.1` on release builds,
-  // `v0.2.1+dev.<sha>` on debug builds. Pre-formatted server-side (see
-  // `crate::version::display_version`), so the browser renders it verbatim.
-  // Held in-memory only (no localStorage) — the query is cached for the page
-  // lifetime and re-fetched on reload, which is the only path that can change
-  // the running server's version. The footer row hides itself while the query
-  // is pending or has failed, rather than showing a `?`/placeholder.
+  // Delta workspace version. Pre-formatted server-side (`v0.2.1` on release,
+  // `v0.2.1+dev.<sha>` on debug — see `crate::version::display_version`), held
+  // in-memory only (no localStorage) — the query is cached for the page
+  // lifetime and only re-fetched on reload, which is the only path that can
+  // change the running server's version.
+  //
+  // The `Delta ` prefix is UI copy, prepended at render time. Not baked into
+  // the backend so the version identifier itself stays free of a marketing
+  // string — a future non-navigator surface (e.g. a settings-panel readout)
+  // can render it without stripping the prefix back off.
   const versionQuery = useVersionQuery(client);
   const version = versionQuery.data?.version ?? null;
 
@@ -463,8 +470,27 @@ export function NavigatorPane({
                   title={CONNECTION_TITLE[connection]}
                 />
               </span>
-              <span className="text-xs text-fg-muted">
-                {CONNECTION_LABEL[connection]}
+              {/*
+                Label semantics: in the steady state (connection is `open` AND
+                the version has resolved) the label reads `Delta <version>`,
+                turning the always-visible connection row into a passive
+                build-identity readout. The status dot on its left still
+                encodes the live connection state, so a disconnect is not
+                silenced by the label swap. Non-`open` states (`connecting` /
+                `closed`) keep the previous connection wording so a dropped
+                socket still surfaces the "Disconnected" text; `open` with a
+                pending or failed version query also falls back to the
+                previous `Connected` copy so the row never renders blank or
+                broken. `data-testid="connection-label"` gates the unit test
+                without depending on the text.
+              */}
+              <span
+                className="text-xs text-fg-muted"
+                data-testid="connection-label"
+              >
+                {connection === 'open' && version !== null
+                  ? `Delta ${version}`
+                  : CONNECTION_LABEL[connection]}
               </span>
             </span>
             {/*
@@ -487,24 +513,6 @@ export function NavigatorPane({
               <SettingsIcon className="h-4 w-4" />
             </Button>
           </div>
-          {/*
-            Workspace version. Rendered as a subtle right-aligned line under the
-            connection/settings row so it never competes with the primary
-            controls. Hidden while the query is pending or has failed — we would
-            rather show nothing than a `?` placeholder for a purely informational
-            field. `data-testid` gates the mount-and-fetch unit test.
-          */}
-          {version !== null && (
-            <div className="flex justify-end">
-              <span
-                className="text-[10px] leading-none text-fg-subtle"
-                data-testid="workspace-version"
-                title="Delta workspace version"
-              >
-                {version}
-              </span>
-            </div>
-          )}
         </div>
       }
     >

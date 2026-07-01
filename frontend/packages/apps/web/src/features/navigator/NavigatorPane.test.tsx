@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import {
@@ -390,13 +390,41 @@ describe('NavigatorPane workspace version', () => {
     });
   });
 
-  it('fetches the version on mount and shows it in the footer', async () => {
-    // The version row is hidden while the query is pending — the pane never
-    // shows a placeholder — so a `findBy*` awaits the fetch settling and
-    // proves both the mount-and-fetch pipeline and the rendered substring.
+  it('replaces the connection label with `Delta <version>` once the fetch resolves', async () => {
+    // The label element itself always exists (it starts as the previous
+    // `Connected` fallback), so `findByTestId` would return immediately
+    // without proving the fetch pipeline resolved. Poll the text content
+    // with `waitFor` instead — that ties the assertion to the query
+    // settling. The `Delta ` prefix is UI copy prepended on the frontend;
+    // the backend contract returns the bare version string.
     renderPane();
 
-    const version = await screen.findByTestId('workspace-version');
-    expect(version).toHaveTextContent(MOCK_VERSION);
+    await waitFor(() => {
+      expect(screen.getByTestId('connection-label')).toHaveTextContent(
+        `Delta ${MOCK_VERSION}`,
+      );
+    });
+    // The standalone version row this feature originally shipped with has
+    // been folded into the connection label; nothing else should carry the
+    // version string.
+    expect(screen.queryByTestId('workspace-version')).not.toBeInTheDocument();
+  });
+
+  it('keeps the previous `Disconnected` label while the socket is closed, even after the version resolves', async () => {
+    // The dot encodes the live connection state; the label mirrors it in
+    // non-`open` states so a dropped socket is never silenced by the
+    // version swap. The label element itself is always rendered, so a
+    // static assertion would pass before the fetch settles too — poll
+    // with `waitFor` to give the query time to resolve and re-render, and
+    // then confirm the closed state still pins the connection wording.
+    useLiveStore.setState({ connection: 'closed' });
+
+    renderPane();
+
+    await waitFor(() => {
+      const label = screen.getByTestId('connection-label');
+      expect(label).toHaveTextContent('Disconnected');
+      expect(label).not.toHaveTextContent(MOCK_VERSION);
+    });
   });
 });
