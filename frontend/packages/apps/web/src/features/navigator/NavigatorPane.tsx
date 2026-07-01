@@ -12,6 +12,7 @@ import {
 } from '@delta/ui-kit';
 import {
   useCloseSessionMutation,
+  useVersionQuery,
   type ConnectionStatus,
 } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
@@ -65,8 +66,12 @@ const CONNECTION_TITLE: Record<ConnectionStatus, string> = {
   closed: 'Server connection: disconnected',
 };
 
-// Short status word shown beside the dot in the footer, so the indicator reads
-// as the live connection state rather than a static brand label.
+// Short status word shown beside the dot in the footer when either the
+// connection is not open or the workspace version has not yet loaded. When
+// the socket is open AND the version has resolved, the label swaps to
+// `Delta <version>` (see the render site) — the dot itself still carries the
+// live connection state, so the label doubles as a build-identity readout in
+// the steady state without losing the disconnect/reconnect feedback.
 const CONNECTION_LABEL: Record<ConnectionStatus, string> = {
   connecting: 'Connecting…',
   open: 'Connected',
@@ -270,6 +275,18 @@ export function NavigatorPane({
 }: NavigatorPaneProps) {
   const client = useApiClient();
   const closeSession = useCloseSessionMutation(client);
+  // Delta workspace version. Pre-formatted server-side (`v0.2.1` on release,
+  // `v0.2.1+dev.<sha>` on debug — see `crate::version::display_version`), held
+  // in-memory only (no localStorage) — the query is cached for the page
+  // lifetime and only re-fetched on reload, which is the only path that can
+  // change the running server's version.
+  //
+  // The `Delta ` prefix is UI copy, prepended at render time. Not baked into
+  // the backend so the version identifier itself stays free of a marketing
+  // string — a future non-navigator surface (e.g. a settings-panel readout)
+  // can render it without stripping the prefix back off.
+  const versionQuery = useVersionQuery(client);
+  const version = versionQuery.data?.version ?? null;
 
   // The Panel body is the scroll container; the virtualizer reads its scroll
   // position and viewport height to decide which rows to render.
@@ -453,8 +470,40 @@ export function NavigatorPane({
                   title={CONNECTION_TITLE[connection]}
                 />
               </span>
-              <span className="text-xs text-fg-muted">
-                {CONNECTION_LABEL[connection]}
+              {/*
+                Label semantics: in the steady state (connection is `open` AND
+                the version has resolved) the label reads `Delta <version>`,
+                turning the always-visible connection row into a passive
+                build-identity readout. The status dot on its left still
+                encodes the live connection state, so a disconnect is not
+                silenced by the label swap. Non-`open` states (`connecting` /
+                `closed`) keep the previous connection wording so a dropped
+                socket still surfaces the "Disconnected" text; `open` with a
+                pending or failed version query also falls back to the
+                previous `Connected` copy so the row never renders blank or
+                broken. `data-testid="connection-label"` gates the unit test
+                without depending on the text.
+
+                `font-mono` is applied only in the version-showing branch —
+                the version string is a code-like identifier (sha suffix,
+                dot-separated build metadata) and the rest of the codebase
+                renders such values in mono (paths, sha short refs, PR head
+                refs — grep `font-mono` under `packages/apps/web/src`), so
+                the steady-state label matches that convention. The connection
+                fallback copy stays in the ambient sans typography.
+              */}
+              <span
+                className={cn(
+                  'text-xs text-fg-muted',
+                  connection === 'open' &&
+                    version !== null &&
+                    'font-mono',
+                )}
+                data-testid="connection-label"
+              >
+                {connection === 'open' && version !== null
+                  ? `Delta ${version}`
+                  : CONNECTION_LABEL[connection]}
               </span>
             </span>
             {/*

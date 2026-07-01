@@ -24,6 +24,7 @@ import type {
   SessionsResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
+  VersionResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
@@ -518,6 +519,15 @@ export class ApiClient {
       `/api/repository-scan-roots/${encodeBase64Url(path)}`,
       { method: 'DELETE' },
     );
+  }
+
+  /**
+   * `GET /api/version` — the Delta workspace version string for the navigator
+   * footer. Pre-formatted server-side (`v0.2.1` or, on debug builds,
+   * `v0.2.1+dev.<sha>`), so the browser renders it verbatim.
+   */
+  getVersion(): Promise<VersionResponse> {
+    return this.request<VersionResponse>('/api/version');
   }
 }
 

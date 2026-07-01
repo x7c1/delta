@@ -111,6 +111,9 @@ pub fn router(state: AppState) -> Router {
             axum::routing::patch(api::update_launch_option)
                 .delete(api::delete_launch_option),
         )
+        // Delta workspace version for the browser footer. Pre-formatted
+        // server-side so the browser never has to know how to render `+dev.<sha>`.
+        .route("/api/version", get(api::get_version))
         // Browser event stream.
         .route("/ws", get(ws::ws_handler))
         // Terminal bridge to the tmux pane.
@@ -145,6 +148,31 @@ mod tests {
             },
         })
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn get_version_returns_a_version_string_shaped_like_v_prefixed() {
+        // Smoke test the endpoint shape: the response is `{ version: "v..." }`
+        // where the string starts with `v` followed by the workspace version.
+        // The debug/release suffix branch is compile-time (unit-tested in
+        // `crate::version`); here we just pin the JSON envelope.
+        let response = router(test_state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/version")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let version = body["version"].as_str().expect("version is a string");
+        assert!(
+            version.starts_with(&format!("v{}", env!("CARGO_PKG_VERSION"))),
+            "expected the response to start with v<CARGO_PKG_VERSION>, got {version}",
+        );
     }
 
     #[tokio::test]

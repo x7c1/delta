@@ -58,6 +58,7 @@ export type { LaunchOptionsResponse } from './generated/LaunchOptionsResponse';
 export type { CreateLaunchOptionRequest } from './generated/CreateLaunchOptionRequest';
 export type { UpdateLaunchOptionRequest } from './generated/UpdateLaunchOptionRequest';
 export type { ErrorBody } from './generated/ErrorBody';
+export type { VersionResponse } from './generated/VersionResponse';
 
 export type {
   TextBlock,

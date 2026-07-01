@@ -37,7 +37,8 @@ use delta_wire::rest::{
     WireQuestionCancelRequest, WireRecentWorkdirItem, WireRepositoriesResponse,
     WireRepositoryEntry, WireRepositoryScanRoot, WireRepositoryScanRootsResponse, WireSendResponse,
     WireSendsResponse, WireSessionListItem, WireSessionsResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireUpdateLaunchOptionRequest, WireVersionResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -634,6 +635,19 @@ pub(crate) async fn open_cwd(
         .open_cwd(path, req.handler.as_deref())
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /api/version` — the Delta workspace version, pre-formatted for the
+/// browser footer.
+///
+/// Owned by the server (not the browser) so the format contract lives in one
+/// place: release builds return `v<version>`, debug builds return
+/// `v<version>+dev.<short-sha>`. See `crate::version::display_version` for the
+/// rationale on `+dev` (SemVer build metadata) vs `-dev` (pre-release).
+pub(crate) async fn get_version() -> Json<WireVersionResponse> {
+    Json(WireVersionResponse {
+        version: crate::version::display_version(),
+    })
 }
 
 /// `POST /api/sessions/{id}/questions/cancel` — cancel a pending

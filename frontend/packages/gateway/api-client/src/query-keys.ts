@@ -51,4 +51,6 @@ export const queryKeys = {
   launchOptions: ['launch-options'] as const,
   /** The registered repository scan roots (`GET /api/repository-scan-roots`). */
   repositoryScanRoots: ['repository-scan-roots'] as const,
+  /** The Delta workspace version (`GET /api/version`) for the navigator footer. */
+  version: ['version'] as const,
 };
