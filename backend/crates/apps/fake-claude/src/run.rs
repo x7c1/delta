@@ -127,9 +127,7 @@ pub fn run() -> Result<(), String> {
 /// duplicated here; the unit test in `claude_format` is the authoritative
 /// definition.
 fn launches_in_background(tool_name: &str, tool_input: &Value) -> bool {
-    let explicit = tool_input
-        .get("run_in_background")
-        .and_then(Value::as_bool);
+    let explicit = tool_input.get("run_in_background").and_then(Value::as_bool);
     match (tool_name, explicit) {
         (_, Some(b)) => b,
         ("Agent" | "Task", None) => true,

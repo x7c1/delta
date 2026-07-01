@@ -2,7 +2,9 @@
 
 use crate::error::Result;
 use crate::interactor::InteractorCore;
-use crate::ports::{GitWorktree, RepositoryScanRoot, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    GitWorktree, RepositoryScanRoot, SessionStore, TmuxDriver, Transcript, Workspace,
+};
 
 impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where

@@ -322,7 +322,10 @@ impl StreamingMessage {
     pub fn text(&self) -> String {
         let mut ordered: Vec<&(u32, String)> = self.chunks.iter().collect();
         ordered.sort_by_key(|(index, _)| *index);
-        ordered.into_iter().map(|(_, chunk)| chunk.as_str()).collect()
+        ordered
+            .into_iter()
+            .map(|(_, chunk)| chunk.as_str())
+            .collect()
     }
 }
 
@@ -516,7 +519,11 @@ impl SessionRuntime {
     /// Used to roll back a spawn whose launch failed, so a half-spawned pane
     /// is not left pending where a later hook could mis-bind to it.
     pub fn remove_pending_for_token(&mut self, token: &PaneToken) {
-        if self.pending_spawn.as_ref().is_some_and(|p| &p.token == token) {
+        if self
+            .pending_spawn
+            .as_ref()
+            .is_some_and(|p| &p.token == token)
+        {
             self.pending_spawn = None;
         }
     }
@@ -835,7 +842,6 @@ impl SessionRuntime {
             self.pending_question = None;
         }
     }
-
 
     /// Record a subagent (`Agent`/`Task` tool call) as started, returning
     /// whether it was newly added.

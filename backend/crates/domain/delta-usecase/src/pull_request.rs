@@ -120,7 +120,10 @@ mod tests {
             PullRequestLens::parse("reviewer"),
             Some(PullRequestLens::Reviewer),
         );
-        assert_eq!(PullRequestLens::parse("author"), Some(PullRequestLens::Author));
+        assert_eq!(
+            PullRequestLens::parse("author"),
+            Some(PullRequestLens::Author)
+        );
         assert!(PullRequestLens::parse("everyone").is_none());
         assert!(PullRequestLens::parse("").is_none());
     }

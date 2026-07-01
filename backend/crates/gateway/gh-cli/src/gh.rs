@@ -91,10 +91,7 @@ impl GhCli for Gh {
         self.check_auth().await
     }
 
-    async fn search_prs(
-        &self,
-        lens: PullRequestLens,
-    ) -> delta_usecase::Result<Vec<PullRequest>> {
+    async fn search_prs(&self, lens: PullRequestLens) -> delta_usecase::Result<Vec<PullRequest>> {
         // `gh search prs --json` does not expose `headRefName` or
         // `headRepository` — fields the PR tab needs to pre-fill the
         // composer. Drive the GitHub search API directly via
@@ -111,14 +108,7 @@ impl GhCli for Gh {
         let doc_arg = format!("query={SEARCH_GRAPHQL}");
         let output = Command::new("gh")
             .args([
-                "api",
-                "graphql",
-                "-F",
-                &first_arg,
-                "-f",
-                &q_arg,
-                "-f",
-                &doc_arg,
+                "api", "graphql", "-F", &first_arg, "-f", &q_arg, "-f", &doc_arg,
             ])
             .output()
             .await
@@ -149,9 +139,9 @@ fn search_query_for(lens: PullRequestLens, cutoff_date: NaiveDate) -> String {
     let updated = format!("updated:>={cutoff_date}");
     match lens {
         // Open PRs that requested my review and are NOT drafts.
-        PullRequestLens::Reviewer => format!(
-            "is:pr is:open review-requested:@me -draft:true {updated} sort:updated-desc"
-        ),
+        PullRequestLens::Reviewer => {
+            format!("is:pr is:open review-requested:@me -draft:true {updated} sort:updated-desc")
+        }
         // Open PRs I authored (drafts included).
         PullRequestLens::Author => {
             format!("is:pr is:open author:@me {updated} sort:updated-desc")

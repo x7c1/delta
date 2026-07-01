@@ -66,11 +66,9 @@ impl ExternalOpener for SystemOpener {
                 );
                 Ok(())
             }
-            Err(err) if err.kind() == ErrorKind::NotFound => {
-                Err(Error::ExternalOpenerCommandNotFound(format!(
-                    "{command}: {err}"
-                )))
-            }
+            Err(err) if err.kind() == ErrorKind::NotFound => Err(
+                Error::ExternalOpenerCommandNotFound(format!("{command}: {err}")),
+            ),
             Err(err) => Err(Error::ExternalOpenerSpawnFailed(format!(
                 "{command}: {err}"
             ))),

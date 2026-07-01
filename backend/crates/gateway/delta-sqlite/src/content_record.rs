@@ -155,7 +155,10 @@ mod tests {
         let json = r#"[{"type":"video","src":"x"},{"type":"text","text":"hi"}]"#;
         assert_eq!(
             decode_content(json),
-            vec![ContentBlock::Other, ContentBlock::Text { text: "hi".into() }],
+            vec![
+                ContentBlock::Other,
+                ContentBlock::Text { text: "hi".into() }
+            ],
         );
     }
 

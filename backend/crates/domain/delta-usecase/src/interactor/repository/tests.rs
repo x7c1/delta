@@ -189,7 +189,11 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
 
     let repos = ix.list_repositories().await.unwrap();
 
-    assert_eq!(repos.len(), 1, "a repo whose every clone is gone disappears");
+    assert_eq!(
+        repos.len(),
+        1,
+        "a repo whose every clone is gone disappears"
+    );
     assert_eq!(repos[0].identity_key, "github.com/x7c1/delta");
     assert_eq!(repos[0].clones.len(), 1);
     assert_eq!(repos[0].clones[0].path, EXISTING_DIR);
@@ -226,8 +230,7 @@ async fn deferred_per_clone_fields_are_empty_by_default() {
     // state, so every clone reports the deferred fields as empty/false.
     // This test pins that contract so a future PR adding the persistence
     // also flips the assertion intentionally.
-    let git =
-        FakeGitWorktree::default().with_origin_url(EXISTING_DIR, "git@github.com:x7c1/delta");
+    let git = FakeGitWorktree::default().with_origin_url(EXISTING_DIR, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
         .insert_spawning_session(
@@ -332,8 +335,7 @@ async fn scan_only_repo_surfaces_without_a_session() {
     // motivation behind Phase D's umbrella-session fix).
     let tmp = tempfile::tempdir().unwrap();
     let clone_path = make_git_child(tmp.path(), "delta").await;
-    let git = FakeGitWorktree::default()
-        .with_origin_url(&clone_path, "git@github.com:x7c1/delta");
+    let git = FakeGitWorktree::default().with_origin_url(&clone_path, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
         .insert_repository_scan_root(tmp.path().to_str().unwrap())
@@ -415,8 +417,7 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
     // and the scan-derived hit is dropped by the de-dup guard.
     let tmp = tempfile::tempdir().unwrap();
     let clone_path = make_git_child(tmp.path(), "delta").await;
-    let git = FakeGitWorktree::default()
-        .with_origin_url(&clone_path, "git@github.com:x7c1/delta");
+    let git = FakeGitWorktree::default().with_origin_url(&clone_path, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
         .insert_spawning_session(
@@ -478,7 +479,10 @@ async fn missing_scan_root_path_is_skipped_silently() {
         .unwrap();
 
     let repos = ix.list_repositories().await.unwrap();
-    assert!(repos.is_empty(), "a missing root simply contributes nothing");
+    assert!(
+        repos.is_empty(),
+        "a missing root simply contributes nothing"
+    );
 }
 
 #[tokio::test]
@@ -508,7 +512,11 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
         )
         .await
         .unwrap();
-    let s_old_thread = ix.store().main_thread_id(&SessionId::from("s_old")).await.unwrap();
+    let s_old_thread = ix
+        .store()
+        .main_thread_id(&SessionId::from("s_old"))
+        .await
+        .unwrap();
     ix.store()
         .upsert_messages(&[mk_msg(
             &SessionId::from("s_old"),
@@ -531,7 +539,11 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
         )
         .await
         .unwrap();
-    let s_new_thread = ix.store().main_thread_id(&SessionId::from("s_new")).await.unwrap();
+    let s_new_thread = ix
+        .store()
+        .main_thread_id(&SessionId::from("s_new"))
+        .await
+        .unwrap();
     ix.store()
         .upsert_messages(&[mk_msg(
             &SessionId::from("s_new"),
@@ -543,9 +555,17 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
         .unwrap();
 
     let repos = ix.list_repositories().await.unwrap();
-    assert_eq!(repos.len(), 1, "both repo_roots collapse to one identity_key");
+    assert_eq!(
+        repos.len(),
+        1,
+        "both repo_roots collapse to one identity_key"
+    );
     let repo = &repos[0];
-    let matches: Vec<_> = repo.clones.iter().filter(|c| c.path == EXISTING_DIR).collect();
+    let matches: Vec<_> = repo
+        .clones
+        .iter()
+        .filter(|c| c.path == EXISTING_DIR)
+        .collect();
     assert_eq!(
         matches.len(),
         1,
@@ -650,10 +670,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
         .iter()
         .filter(|c| generated_paths.iter().any(|p| p == &c.path))
         .count();
-    assert_eq!(
-        kept_generated, 10,
-        "the generated cap clips 12 → 10",
-    );
+    assert_eq!(kept_generated, 10, "the generated cap clips 12 → 10",);
 }
 
 #[tokio::test]
@@ -713,6 +730,9 @@ async fn active_repo_limit_drops_oldest_repositories() {
     assert!(
         repos.iter().all(|r| r.identity_key != oldest_key),
         "the oldest repository ({oldest_key}) must be absent, got {:?}",
-        repos.iter().map(|r| r.identity_key.as_str()).collect::<Vec<_>>(),
+        repos
+            .iter()
+            .map(|r| r.identity_key.as_str())
+            .collect::<Vec<_>>(),
     );
 }

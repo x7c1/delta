@@ -81,8 +81,9 @@ mod tests {
 
     #[test]
     fn tool_result_parses_with_explicit_fields() {
-        match parse(r#"{"type":"tool_result","tool_use_id":"abc","content":"done","is_error":false}"#)
-        {
+        match parse(
+            r#"{"type":"tool_result","tool_use_id":"abc","content":"done","is_error":false}"#,
+        ) {
             ContentBlock::ToolResult { tool_use_id, .. } => assert_eq!(tool_use_id, "abc"),
             other => panic!("unexpected: {other:?}"),
         }

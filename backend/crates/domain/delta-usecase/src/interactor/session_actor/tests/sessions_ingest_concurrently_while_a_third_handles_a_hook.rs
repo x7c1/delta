@@ -38,8 +38,10 @@ async fn sessions_ingest_concurrently_while_a_third_handles_a_hook() {
     // can only complete if (a) the two ingests overlap and (b) an unrelated
     // session's actor kept serving while they were parked.
     let gate = Arc::new(Barrier::new(3));
-    ix.transcript_fake().gate_reads("/tmp/s1.jsonl", gate.clone());
-    ix.transcript_fake().gate_reads("/tmp/s2.jsonl", gate.clone());
+    ix.transcript_fake()
+        .gate_reads("/tmp/s1.jsonl", gate.clone());
+    ix.transcript_fake()
+        .gate_reads("/tmp/s2.jsonl", gate.clone());
 
     let poll = ix.poll_transcript();
     let hook_then_release = async {
@@ -57,10 +59,9 @@ async fn sessions_ingest_concurrently_while_a_third_handles_a_hook() {
         gate.wait().await;
     };
 
-    let (poll_result, ()) = tokio::time::timeout(
-        Duration::from_secs(5),
-        async { tokio::join!(poll, hook_then_release) },
-    )
+    let (poll_result, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(poll, hook_then_release)
+    })
     .await
     .expect("ingests must overlap; serialization would deadlock this barrier");
 

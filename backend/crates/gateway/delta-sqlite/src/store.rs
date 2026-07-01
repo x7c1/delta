@@ -628,10 +628,7 @@ impl SessionStore for SqliteStore {
         Ok(out)
     }
 
-    async fn cwd_exists(
-        &self,
-        path: &str,
-    ) -> std::result::Result<bool, delta_usecase::Error> {
+    async fn cwd_exists(&self, path: &str) -> std::result::Result<bool, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         // Match `path` verbatim against any of the three columns the browser
         // ever sees a cwd from: `session.cwd`, `session.requested_workdir`

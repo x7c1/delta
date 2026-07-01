@@ -39,5 +39,8 @@ async fn failed_dispatch_rolls_back_send_and_returns_error() {
         head.is_none(),
         "the cancelled row must not remain outstanding"
     );
-    assert_eq!(ix.live_state_for(&session).await.turn, crate::turn::TurnState::Idle);
+    assert_eq!(
+        ix.live_state_for(&session).await.turn,
+        crate::turn::TurnState::Idle
+    );
 }

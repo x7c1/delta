@@ -69,8 +69,7 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // A `system`/`turn_duration` line carries the turn's latency but no message.
     // Surface it as its own outcome so the reader can correlate the duration
     // onto the turn's assistant message (it itself never becomes a message).
-    if raw.line_type.as_deref() == Some("system")
-        && raw.subtype.as_deref() == Some("turn_duration")
+    if raw.line_type.as_deref() == Some("system") && raw.subtype.as_deref() == Some("turn_duration")
     {
         return Ok(match raw.duration_ms {
             Some(duration_ms) => ParsedLine::TurnDuration { duration_ms },
@@ -493,8 +492,10 @@ mod tests {
             r#"{"uuid":"s1","type":"system","subtype":"stop_hook_summary","message":{"role":"system","content":"x"}}"#,
             r#"{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":10167}"#,
         ];
-        let mut outcomes: Vec<ParsedLine> =
-            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        let mut outcomes: Vec<ParsedLine> = lines
+            .iter()
+            .map(|l| parse_line_outcome(l).unwrap())
+            .collect();
         correlate_turn_durations(&mut outcomes);
 
         let messages: Vec<&TranscriptMessage> = outcomes
@@ -504,8 +505,14 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let user = messages.iter().find(|m| m.uuid == MessageUuid::from("u1")).unwrap();
-        let assistant = messages.iter().find(|m| m.uuid == MessageUuid::from("a1")).unwrap();
+        let user = messages
+            .iter()
+            .find(|m| m.uuid == MessageUuid::from("u1"))
+            .unwrap();
+        let assistant = messages
+            .iter()
+            .find(|m| m.uuid == MessageUuid::from("a1"))
+            .unwrap();
         assert_eq!(
             assistant.response_time_ms,
             Some(10167.0),
@@ -530,8 +537,10 @@ mod tests {
             r#"{"uuid":"a2","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"r2"}]}}"#,
             r#"{"uuid":"d2","type":"system","subtype":"turn_duration","durationMs":2000}"#,
         ];
-        let mut outcomes: Vec<ParsedLine> =
-            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        let mut outcomes: Vec<ParsedLine> = lines
+            .iter()
+            .map(|l| parse_line_outcome(l).unwrap())
+            .collect();
         correlate_turn_durations(&mut outcomes);
 
         let by_uuid = |uuid: &str| {
@@ -557,8 +566,10 @@ mod tests {
             r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"q"}}"#,
             r#"{"uuid":"d1","type":"system","subtype":"turn_duration","durationMs":4221}"#,
         ];
-        let mut outcomes: Vec<ParsedLine> =
-            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        let mut outcomes: Vec<ParsedLine> = lines
+            .iter()
+            .map(|l| parse_line_outcome(l).unwrap())
+            .collect();
         correlate_turn_durations(&mut outcomes);
 
         let user = outcomes
@@ -583,8 +594,10 @@ mod tests {
             r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"q"}}"#,
             r#"{"uuid":"a1","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"r"}]}}"#,
         ];
-        let mut outcomes: Vec<ParsedLine> =
-            lines.iter().map(|l| parse_line_outcome(l).unwrap()).collect();
+        let mut outcomes: Vec<ParsedLine> = lines
+            .iter()
+            .map(|l| parse_line_outcome(l).unwrap())
+            .collect();
         correlate_turn_durations(&mut outcomes);
 
         let assistant = outcomes

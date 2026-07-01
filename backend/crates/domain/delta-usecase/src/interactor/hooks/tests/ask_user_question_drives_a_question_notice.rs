@@ -26,7 +26,13 @@ async fn pre_tool_use_for_ask_user_question_emits_question_asked_and_records_it(
     let main_thread = ix.store().main_thread_id(&session).await.unwrap();
 
     let events = ix
-        .on_pre_tool_use(&session, "AskUserQuestion", QUESTION_INPUT, "toolu_q1", SEED_TRANSCRIPT_PATH)
+        .on_pre_tool_use(
+            &session,
+            "AskUserQuestion",
+            QUESTION_INPUT,
+            "toolu_q1",
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -74,7 +80,13 @@ async fn pre_tool_use_for_a_normal_tool_emits_no_question() {
     let session = SessionId::from("sess-1");
 
     let events = ix
-        .on_pre_tool_use(&session, "Bash", r#"{"command":"ls"}"#, "toolu_b1", SEED_TRANSCRIPT_PATH)
+        .on_pre_tool_use(
+            &session,
+            "Bash",
+            r#"{"command":"ls"}"#,
+            "toolu_b1",
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -101,7 +113,12 @@ async fn permission_request_for_ask_user_question_passes_through() {
     };
 
     let wait = ix
-        .on_permission_request(&session, "AskUserQuestion", QUESTION_INPUT, SEED_TRANSCRIPT_PATH)
+        .on_permission_request(
+            &session,
+            "AskUserQuestion",
+            QUESTION_INPUT,
+            SEED_TRANSCRIPT_PATH,
+        )
         .await
         .unwrap();
 
@@ -116,7 +133,10 @@ async fn permission_request_for_ask_user_question_passes_through() {
         let g = ix.store().inner.lock().unwrap();
         g.permissions.len()
     };
-    assert_eq!(after, before, "no permission row is recorded for the passthrough");
+    assert_eq!(
+        after, before,
+        "no permission row is recorded for the passthrough"
+    );
 
     // No pending_permission is mirrored (only the PreToolUse question is).
     assert_eq!(

@@ -134,10 +134,7 @@ impl Workspace for FsWorkspace {
         Ok(dir.to_string_lossy().into_owned())
     }
 
-    async fn list_dirs(
-        &self,
-        path: &str,
-    ) -> std::result::Result<DirListing, delta_usecase::Error> {
+    async fn list_dirs(&self, path: &str) -> std::result::Result<DirListing, delta_usecase::Error> {
         Ok(self.list(path).await?)
     }
 }
@@ -177,7 +174,10 @@ mod tests {
             .unwrap();
 
         let written = tokio::fs::read_to_string(&settings_path).await.unwrap();
-        assert_eq!(written, "new", "settings are rewritten so hook URLs stay current");
+        assert_eq!(
+            written, "new",
+            "settings are rewritten so hook URLs stay current"
+        );
     }
 
     #[tokio::test]
@@ -273,10 +273,7 @@ mod tests {
         let missing = dir.path().join("nope");
         let ws = FsWorkspace::new();
 
-        let err = ws
-            .list_dirs(missing.to_str().unwrap())
-            .await
-            .unwrap_err();
+        let err = ws.list_dirs(missing.to_str().unwrap()).await.unwrap_err();
         assert!(
             matches!(err, delta_usecase::Error::InvalidWorkdir(_)),
             "a missing path is an InvalidWorkdir, got {err:?}"

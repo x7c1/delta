@@ -271,9 +271,8 @@ mod tests {
     /// variant carrying the requested dimensions.
     #[test]
     fn resize_control_message_deserializes() {
-        let msg: ControlMessage =
-            serde_json::from_str(r#"{"type":"resize","rows":40,"cols":120}"#)
-                .expect("a well-formed resize message deserializes");
+        let msg: ControlMessage = serde_json::from_str(r#"{"type":"resize","rows":40,"cols":120}"#)
+            .expect("a well-formed resize message deserializes");
         assert!(matches!(
             msg,
             ControlMessage::Resize {

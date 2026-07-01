@@ -11,8 +11,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use tracing_subscriber::EnvFilter;
 
-use delta_server::{router, AppState};
 use delta_bootstrap::Config;
+use delta_server::{router, AppState};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

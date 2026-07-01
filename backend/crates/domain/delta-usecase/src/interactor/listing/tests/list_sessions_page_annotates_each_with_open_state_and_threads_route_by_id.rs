@@ -15,7 +15,12 @@ async fn list_sessions_page_annotates_each_with_open_state_and_threads_route_by_
     let ix = interactor();
 
     // No session yet: the page is empty.
-    assert!(ix.list_sessions_page(None, 30).await.unwrap().listings.is_empty());
+    assert!(ix
+        .list_sessions_page(None, 30)
+        .await
+        .unwrap()
+        .listings
+        .is_empty());
 
     // Register two sessions in order. Their hooks arrive in a cwd with no
     // matching pending spawn, so they register as external, closed data sessions

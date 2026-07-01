@@ -33,7 +33,10 @@ fn a_plain_send_echo_lands_on_its_thread_and_marks_the_send_matched() {
             matched_uuid: MessageUuid::from("u-1"),
         }]
     );
-    assert!(outcome.state.outstanding.is_empty(), "the match consumed the send");
+    assert!(
+        outcome.state.outstanding.is_empty(),
+        "the match consumed the send"
+    );
 }
 
 #[test]
@@ -41,7 +44,10 @@ fn a_branch_send_echo_attributes_user_and_assistant_to_the_child() {
     let outcome = attribute_lines(
         &session(),
         MAIN,
-        AttributionState::new(MAIN, Some(branch_send(7, CHILD, "uuid-parent", "branch text"))),
+        AttributionState::new(
+            MAIN,
+            Some(branch_send(7, CHILD, "uuid-parent", "branch text")),
+        ),
         vec![
             user_line("u-b", "branch text"),
             assistant_line("a-b", "branch reply"),
@@ -69,7 +75,10 @@ fn a_queued_command_matching_a_send_attributes_prompt_and_reply_to_the_child() {
     let outcome = attribute_lines(
         &session(),
         MAIN,
-        AttributionState::new(MAIN, Some(branch_send(7, CHILD, "uuid-parent", "branch text"))),
+        AttributionState::new(
+            MAIN,
+            Some(branch_send(7, CHILD, "uuid-parent", "branch text")),
+        ),
         vec![
             queued_command_line("u-b", "branch text"),
             assistant_line("a-b", "branch reply"),
@@ -181,7 +190,9 @@ fn the_interrupt_marker_inherits_carry_and_does_not_consume_the_outstanding_send
     assert_eq!(outcome.effects, vec![Effect::TurnInterrupted]);
     assert_eq!(
         outcome.state.outstanding,
-        vec![unrelated].into_iter().collect::<std::collections::VecDeque<_>>(),
+        vec![unrelated]
+            .into_iter()
+            .collect::<std::collections::VecDeque<_>>(),
         "the marker must not match or consume the pending send"
     );
 }
@@ -222,7 +233,9 @@ fn an_api_error_line_inherits_carry_and_emits_turn_aborted_without_consuming_the
     assert_eq!(outcome.effects, vec![Effect::TurnAborted]);
     assert_eq!(
         outcome.state.outstanding,
-        vec![unrelated].into_iter().collect::<std::collections::VecDeque<_>>(),
+        vec![unrelated]
+            .into_iter()
+            .collect::<std::collections::VecDeque<_>>(),
         "the api-error line must not match or consume the pending send"
     );
 }
@@ -260,7 +273,9 @@ fn a_compact_summary_line_inherits_carry_and_does_not_consume_the_outstanding_se
     );
     assert_eq!(
         outcome.state.outstanding,
-        vec![pending].into_iter().collect::<std::collections::VecDeque<_>>(),
+        vec![pending]
+            .into_iter()
+            .collect::<std::collections::VecDeque<_>>(),
         "the compact-summary line must not match or consume the pending send"
     );
 }
@@ -326,7 +341,9 @@ fn a_task_notification_mid_branch_inherits_carry_and_does_not_reset_to_main() {
     );
     assert_eq!(
         outcome.state.outstanding,
-        vec![unrelated].into_iter().collect::<std::collections::VecDeque<_>>(),
+        vec![unrelated]
+            .into_iter()
+            .collect::<std::collections::VecDeque<_>>(),
         "the notification must not match or consume the pending send"
     );
 }
@@ -435,7 +452,11 @@ fn a_modern_agent_tool_use_with_no_run_in_background_flag_is_treated_as_backgrou
         &session(),
         MAIN,
         AttributionState::new(CHILD, None),
-        vec![modern_agent_tool_use_line("a-launch", "toolu-modern", "Agent")],
+        vec![modern_agent_tool_use_line(
+            "a-launch",
+            "toolu-modern",
+            "Agent",
+        )],
     );
 
     assert_eq!(message(&outcome, "a-launch").thread_id, CHILD);
@@ -457,10 +478,7 @@ fn a_modern_agent_tool_use_with_no_run_in_background_flag_is_treated_as_backgrou
         "modern Agent shape (no flag) must launch as background and light a background indicator"
     );
     // The launch is recorded for a later `<task-notification>` to consume.
-    assert!(outcome
-        .state
-        .launched_threads
-        .contains_key("toolu-modern"));
+    assert!(outcome.state.launched_threads.contains_key("toolu-modern"));
 }
 
 #[test]
@@ -743,7 +761,10 @@ fn a_local_command_with_no_outstanding_send_just_folds_to_meta() {
 
     assert_eq!(message(&outcome, "cmdname").role, delta_model::Role::Meta);
     assert_eq!(message(&outcome, "stdout").role, delta_model::Role::Meta);
-    assert!(outcome.effects.is_empty(), "nothing to resolve, nothing to end");
+    assert!(
+        outcome.effects.is_empty(),
+        "nothing to resolve, nothing to end"
+    );
     assert_eq!(
         outcome.state.carry_thread, CHILD,
         "local-command machinery inherits the current thread, never resets to main"
@@ -760,8 +781,7 @@ fn a_real_prompt_after_a_local_command_is_an_ordinary_user_turn() {
         &session(),
         MAIN,
         AttributionState {
-            outstanding: vec![send(7, MAIN, "/review-pr"), send(8, MAIN, "now review it")]
-                .into(),
+            outstanding: vec![send(7, MAIN, "/review-pr"), send(8, MAIN, "now review it")].into(),
             ..AttributionState::new(MAIN, None)
         },
         vec![

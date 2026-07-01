@@ -214,10 +214,7 @@ pub fn tool_input_string_field<'a>(
     tool_use_input: &'a serde_json::Value,
     key: &str,
 ) -> Option<&'a str> {
-    tool_use_input
-        .get(key)?
-        .as_str()
-        .filter(|s| !s.is_empty())
+    tool_use_input.get(key)?.as_str().filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
@@ -236,7 +233,9 @@ mod tests {
 
     #[test]
     fn task_notification_is_detected_with_leading_whitespace() {
-        assert!(is_task_notification("<task-notification>done</task-notification>"));
+        assert!(is_task_notification(
+            "<task-notification>done</task-notification>"
+        ));
         assert!(is_task_notification("  <task-notification>done"));
         assert!(!is_task_notification("a normal prompt"));
     }
@@ -264,7 +263,9 @@ mod tests {
         );
         // A notification with no `<tool-use-id>` element (e.g. malformed).
         assert_eq!(
-            task_notification_tool_use_id("<task-notification><status>completed</status></task-notification>"),
+            task_notification_tool_use_id(
+                "<task-notification><status>completed</status></task-notification>"
+            ),
             None
         );
     }
@@ -277,10 +278,7 @@ mod tests {
                     <output-file>/tmp/x.output</output-file>\n\
                     <status>completed</status>\n\
                     </task-notification>";
-        assert_eq!(
-            task_notification_task_id(body),
-            Some("a31425032172620ed")
-        );
+        assert_eq!(task_notification_task_id(body), Some("a31425032172620ed"));
     }
 
     #[test]
@@ -297,10 +295,7 @@ mod tests {
             None,
             "the tool-use-id element really is absent"
         );
-        assert_eq!(
-            task_notification_task_id(body),
-            Some("a31425032172620ed")
-        );
+        assert_eq!(task_notification_task_id(body), Some("a31425032172620ed"));
     }
 
     #[test]

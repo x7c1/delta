@@ -181,13 +181,8 @@ where
             reply,
         } => {
             let _ = reply.send(
-                ctx.on_pre_tool_use(
-                    &tool_name,
-                    &tool_input_json,
-                    &tool_use_id,
-                    &transcript_path,
-                )
-                .await,
+                ctx.on_pre_tool_use(&tool_name, &tool_input_json, &tool_use_id, &transcript_path)
+                    .await,
             );
         }
         SessionInput::PostToolUse {

@@ -321,10 +321,7 @@ impl GhCli for UnavailableGhCli {
         false
     }
 
-    async fn search_prs(
-        &self,
-        _lens: PullRequestLens,
-    ) -> crate::error::Result<Vec<PullRequest>> {
+    async fn search_prs(&self, _lens: PullRequestLens) -> crate::error::Result<Vec<PullRequest>> {
         Ok(Vec::new())
     }
 }
@@ -341,14 +338,9 @@ struct UnwiredExternalOpener;
 
 #[async_trait::async_trait]
 impl ExternalOpener for UnwiredExternalOpener {
-    async fn open(
-        &self,
-        _command: &str,
-        _args: Vec<String>,
-    ) -> crate::error::Result<()> {
+    async fn open(&self, _command: &str, _args: Vec<String>) -> crate::error::Result<()> {
         Err(crate::error::Error::ExternalOpenerSpawnFailed(
-            "no ExternalOpener driver has been injected into the interactor"
-                .to_owned(),
+            "no ExternalOpener driver has been injected into the interactor".to_owned(),
         ))
     }
 }

@@ -102,11 +102,7 @@ mod tests {
             "/very/deep/nested/parent/dir",
         ] {
             let token = encode(path);
-            assert_eq!(
-                decode(&token).as_deref(),
-                Some(path),
-                "failed for {path:?}"
-            );
+            assert_eq!(decode(&token).as_deref(), Some(path), "failed for {path:?}");
         }
     }
 

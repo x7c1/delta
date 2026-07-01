@@ -24,8 +24,8 @@
 mod args;
 mod hooks;
 mod input;
-mod scenario;
 mod run;
+mod scenario;
 mod settings;
 mod transcript;
 

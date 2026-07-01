@@ -88,14 +88,11 @@ where
     /// is [`Error::OpenCwdPathNotAllowed`], not silently spawned: the click
     /// site never sends a path the server hasn't shown it, so this only
     /// fires against a hand-crafted request.
-    pub async fn open_cwd(
-        &self,
-        path: &str,
-        handler_id: Option<&str>,
-    ) -> Result<()> {
+    pub async fn open_cwd(&self, path: &str, handler_id: Option<&str>) -> Result<()> {
         let handler = match handler_id {
-            Some(id) => find_handler(id)
-                .ok_or_else(|| Error::OpenCwdUnknownHandler(id.to_owned()))?,
+            Some(id) => {
+                find_handler(id).ok_or_else(|| Error::OpenCwdUnknownHandler(id.to_owned()))?
+            }
             None => find_handler(VSCODE_HANDLER_ID)
                 .expect("the default VS Code handler is always registered"),
         };

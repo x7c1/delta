@@ -16,7 +16,11 @@ async fn reap_stale_spawns_leaves_a_fresh_spawn_alone() {
     // Seed a spawn stamped just one second ago — far inside its deadline.
     ix.push_pending_spawn_at("delta-1", &session_id, now - Duration::from_secs(1))
         .await;
-    ix.tmux_fake().live.lock().unwrap().push("delta-1".to_owned());
+    ix.tmux_fake()
+        .live
+        .lock()
+        .unwrap()
+        .push("delta-1".to_owned());
 
     let events = ix.reap_stale_spawns(now).await.unwrap();
 

@@ -257,7 +257,10 @@ pub(crate) async fn list_repository_scan_roots(
 ) -> Result<Json<WireRepositoryScanRootsResponse>, ApiError> {
     let roots = state.interactor().list_repository_scan_roots().await?;
     Ok(Json(WireRepositoryScanRootsResponse {
-        scan_roots: roots.into_iter().map(WireRepositoryScanRoot::from).collect(),
+        scan_roots: roots
+            .into_iter()
+            .map(WireRepositoryScanRoot::from)
+            .collect(),
     }))
 }
 
@@ -278,7 +281,11 @@ pub(crate) async fn create_repository_scan_root(
     // is canonicalised before the PRIMARY KEY check sees it.
     let canonical = {
         let stripped = trimmed.trim_end_matches('/');
-        if stripped.is_empty() { "/" } else { stripped }
+        if stripped.is_empty() {
+            "/"
+        } else {
+            stripped
+        }
     };
     if canonical.is_empty() {
         return Err(ApiError::BadRequest(
@@ -294,7 +301,10 @@ pub(crate) async fn create_repository_scan_root(
         .interactor()
         .add_repository_scan_root(canonical)
         .await?;
-    Ok((StatusCode::CREATED, Json(WireRepositoryScanRoot::from(root))))
+    Ok((
+        StatusCode::CREATED,
+        Json(WireRepositoryScanRoot::from(root)),
+    ))
 }
 
 /// `DELETE /api/repository-scan-roots/{path_b64}` — unregister a scan root.
@@ -308,9 +318,8 @@ pub(crate) async fn delete_repository_scan_root(
     State(state): State<AppState>,
     Path(path_b64): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let path = repository_scan_root_path::decode(&path_b64).ok_or_else(|| {
-        ApiError::BadRequest("malformed scan-root path token".to_owned())
-    })?;
+    let path = repository_scan_root_path::decode(&path_b64)
+        .ok_or_else(|| ApiError::BadRequest("malformed scan-root path token".to_owned()))?;
     state
         .interactor()
         .remove_repository_scan_root(&path)
@@ -470,9 +479,7 @@ pub(crate) async fn update_launch_option(
         .await?;
     match option {
         Some(option) => Ok(Json(WireLaunchOption::from(option))),
-        None => Err(ApiError::NotFound(format!(
-            "no launch option with id {id}"
-        ))),
+        None => Err(ApiError::NotFound(format!("no launch option with id {id}"))),
     }
 }
 

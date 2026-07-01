@@ -182,7 +182,9 @@ async fn wait_for<T>(
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
-    Err(format!("timed out waiting on {path}; last body: {last_body}"))
+    Err(format!(
+        "timed out waiting on {path}; last body: {last_body}"
+    ))
 }
 
 /// Whether a usable `tmux` is on `PATH`.

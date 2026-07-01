@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use delta_model::SessionId;
 
-use crate::interactor::testing::*;
 use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
+use crate::interactor::testing::*;
 
 /// `enqueue_send` against a known-but-*closed* session resumes it as part of the
 /// send (the documented "Closed" branch): `ensure_open` finds no live pane, so

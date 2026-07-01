@@ -147,9 +147,10 @@ impl IntoResponse for ApiError {
                     // client error (the click site never sends one), but it is
                     // surfaced with a stable code so the browser can
                     // distinguish it from a generic 400.
-                    Error::OpenCwdPathNotAllowed(_) => {
-                        (StatusCode::BAD_REQUEST, Some(OPEN_CWD_PATH_NOT_ALLOWED_CODE))
-                    }
+                    Error::OpenCwdPathNotAllowed(_) => (
+                        StatusCode::BAD_REQUEST,
+                        Some(OPEN_CWD_PATH_NOT_ALLOWED_CODE),
+                    ),
                     // An unknown handler id is also a client-side bug:
                     // the initial impl only registers `vscode`.
                     Error::OpenCwdUnknownHandler(_) => {

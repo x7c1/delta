@@ -30,7 +30,10 @@ async fn session_end_for_bound_session_is_a_normal_end() {
         .unwrap();
 
     // Normal end: no failure event, no teardown.
-    assert!(events.is_empty(), "a bound session's end emits no SpawnFailed");
+    assert!(
+        events.is_empty(),
+        "a bound session's end emits no SpawnFailed"
+    );
     assert!(
         ix.tmux_fake().killed.lock().unwrap().is_empty(),
         "SessionEnd must not kill a bound session's pane"

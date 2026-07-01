@@ -270,7 +270,10 @@ mod tests {
             .get(PROJECTS_KEY)
             .and_then(|p| p.get("/home/u/repos/existing"))
             .unwrap();
-        assert_eq!(existing.get("history"), Some(&serde_json::json!(["a", "b"])));
+        assert_eq!(
+            existing.get("history"),
+            Some(&serde_json::json!(["a", "b"]))
+        );
         assert!(trusted(&value, "/home/u/repos/existing"));
     }
 
@@ -284,12 +287,20 @@ mod tests {
         // Capture mtime + bytes, then re-run: an idempotent no-op must not
         // rewrite the file.
         let before_bytes = tokio::fs::read(&config).await.unwrap();
-        let before_mtime = tokio::fs::metadata(&config).await.unwrap().modified().unwrap();
+        let before_mtime = tokio::fs::metadata(&config)
+            .await
+            .unwrap()
+            .modified()
+            .unwrap();
 
         ensure_dir_trusted(&config, dir).await.unwrap();
 
         let after_bytes = tokio::fs::read(&config).await.unwrap();
-        let after_mtime = tokio::fs::metadata(&config).await.unwrap().modified().unwrap();
+        let after_mtime = tokio::fs::metadata(&config)
+            .await
+            .unwrap()
+            .modified()
+            .unwrap();
         assert_eq!(before_bytes, after_bytes, "content unchanged");
         assert_eq!(before_mtime, after_mtime, "file was not rewritten");
         assert!(fully_seeded(&read_json(&config).await, dir));

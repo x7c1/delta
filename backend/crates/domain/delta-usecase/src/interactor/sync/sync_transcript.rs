@@ -272,8 +272,9 @@ where
                     // created entry and persist it through the launch row,
                     // which `Effect::SubagentLaunched` (emitted earlier in
                     // this fold) has already INSERTed.
-                    if let Some(task_id) =
-                        self.state.drain_pending_post_tool_use_agent_id(&tool_use_id)
+                    if let Some(task_id) = self
+                        .state
+                        .drain_pending_post_tool_use_agent_id(&tool_use_id)
                     {
                         if self.state.upgrade_subagent_task_id(&tool_use_id, &task_id) {
                             self.store

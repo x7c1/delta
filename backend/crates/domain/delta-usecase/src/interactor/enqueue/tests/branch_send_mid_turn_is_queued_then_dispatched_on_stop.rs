@@ -18,7 +18,10 @@ async fn branch_send_mid_turn_is_queued_then_dispatched_on_stop() {
     // its echo arrives (the realistic ordering: the hook fires within
     // milliseconds of the keystrokes landing).
     ix.enqueue_send(to(main), "first", None).await.unwrap();
-    assert_ne!(ix.live_state_for(&session).await.turn, crate::turn::TurnState::Idle);
+    assert_ne!(
+        ix.live_state_for(&session).await.turn,
+        crate::turn::TurnState::Idle
+    );
     assert_eq!(ix.tmux_fake().sent.lock().unwrap().len(), 1);
     ix.transcript_fake().push(user_line("u-first", "first"));
     ix.on_user_prompt_submit(submit("first")).await.unwrap();
@@ -54,7 +57,11 @@ async fn branch_send_mid_turn_is_queued_then_dispatched_on_stop() {
     assert_eq!(count, 2, "the queued send is dispatched at turn end");
     assert_eq!(second.as_deref(), Some("branch text"));
     assert!(
-        ix.store().next_queued_send(&session).await.unwrap().is_none(),
+        ix.store()
+            .next_queued_send(&session)
+            .await
+            .unwrap()
+            .is_none(),
         "the queued send was promoted and dispatched"
     );
 }

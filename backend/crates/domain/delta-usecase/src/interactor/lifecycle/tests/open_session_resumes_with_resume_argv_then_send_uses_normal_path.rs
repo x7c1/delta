@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use delta_model::SessionId;
 
-use crate::interactor::testing::*;
 use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
+use crate::interactor::testing::*;
 
 /// `open_session` resumes a closed known session: it spawns `claude --resume
 /// <id>` (asserted via the recorded argv) and binds it, but does NOT dispatch
@@ -106,7 +106,9 @@ async fn open_session_resumes_with_resume_argv_then_send_uses_normal_path() {
 
     // The session is ready and idle, so a second send dispatches immediately
     // (no resume gate, no turn to defer behind).
-    ix.enqueue_send(to(main), "second send", None).await.unwrap();
+    ix.enqueue_send(to(main), "second send", None)
+        .await
+        .unwrap();
     let sent = ix.tmux_fake().sent.lock().unwrap().clone();
     assert!(
         sent.iter().any(|(p, t)| p == &pane && t == "second send"),

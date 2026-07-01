@@ -56,7 +56,11 @@ async fn local_command_unsticks_turn_and_folds_to_meta() {
 
     // (a) The command-name and stdout lines fold to `meta` — not user bubbles.
     let view = ix.thread_view(main).await.unwrap();
-    let role_of = |uuid: &str| view.iter().find(|m| m.uuid.as_str() == uuid).map(|m| m.role);
+    let role_of = |uuid: &str| {
+        view.iter()
+            .find(|m| m.uuid.as_str() == uuid)
+            .map(|m| m.role)
+    };
     assert_eq!(role_of("caveat"), Some(Role::Meta));
     assert_eq!(
         role_of("cmdname"),

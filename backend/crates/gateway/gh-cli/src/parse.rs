@@ -98,7 +98,9 @@ pub(crate) fn parse_search_response(stdout: &[u8]) -> Result<Vec<PullRequest>> {
 }
 
 fn into_pr(raw: SearchNode) -> Result<PullRequest> {
-    let number = raw.number.ok_or_else(|| Error::Parse("missing `number`".to_owned()))?;
+    let number = raw
+        .number
+        .ok_or_else(|| Error::Parse("missing `number`".to_owned()))?;
     let title = raw
         .title
         .ok_or_else(|| Error::Parse(format!("PR {number} missing `title`")))?;
@@ -213,7 +215,10 @@ mod tests {
 
         let pr = &rows[0];
         assert_eq!(pr.number, 174);
-        assert_eq!(pr.title, "feat: add Repository tab to the new-session screen");
+        assert_eq!(
+            pr.title,
+            "feat: add Repository tab to the new-session screen"
+        );
         assert_eq!(pr.repo_owner, "x7c1");
         assert_eq!(pr.repo_name, "delta");
         assert_eq!(pr.head_ref, "feat/repo-tab");
@@ -225,7 +230,10 @@ mod tests {
 
         let cross = &rows[1];
         assert!(cross.draft);
-        assert_eq!(cross.head_repo_owner, "forky", "cross-fork head is preserved");
+        assert_eq!(
+            cross.head_repo_owner, "forky",
+            "cross-fork head is preserved"
+        );
         assert_eq!(cross.head_repo_name, "delta");
         assert_eq!(cross.repo_owner, "x7c1", "base repo owner stays the same");
     }

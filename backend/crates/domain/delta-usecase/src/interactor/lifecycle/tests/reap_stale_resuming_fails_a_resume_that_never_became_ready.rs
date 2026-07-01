@@ -2,8 +2,8 @@ use std::time::Instant;
 
 use delta_model::SessionId;
 
-use crate::interactor::testing::*;
 use crate::interactor::session_actor::runtime::RESUME_READY_DEADLINE;
+use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
 
 /// A resumed session that never became ready before its deadline is failed by
@@ -48,7 +48,11 @@ async fn reap_stale_resuming_fails_a_resume_that_never_became_ready() {
         now - RESUME_READY_DEADLINE - std::time::Duration::from_secs(1),
     )
     .await;
-    ix.tmux_fake().live.lock().unwrap().push("delta-7".to_owned());
+    ix.tmux_fake()
+        .live
+        .lock()
+        .unwrap()
+        .push("delta-7".to_owned());
 
     let events = ix.reap_stale_spawns(now).await.unwrap();
 

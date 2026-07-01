@@ -63,14 +63,9 @@ async fn deltas_accumulate_into_the_live_preview_and_emit_assistant_streaming() 
     // in-flight thread, marked final.
     let preview = ix
         .with_runtime(&session, |state| {
-            state.streaming_message().map(|s| {
-                (
-                    s.message_id.clone(),
-                    s.thread_id,
-                    s.text(),
-                    s.final_,
-                )
-            })
+            state
+                .streaming_message()
+                .map(|s| (s.message_id.clone(), s.thread_id, s.text(), s.final_))
         })
         .await
         .expect("a message is streaming");
