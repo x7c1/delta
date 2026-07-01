@@ -125,7 +125,22 @@ describe('NavigatorPane per-session running indicator', () => {
 });
 
 describe('NavigatorPane rate-limit meters', () => {
+  // jsdom performs no layout, so `clientWidth` defaults to 0. The rate-limit
+  // row now measures its meter track width to translate the budget-line marker
+  // by an integer pixel offset (avoiding the sub-pixel shimmer that a
+  // percentage-based `right` value causes), and gates rendering the marker on
+  // `trackWidth > 0`. Stub `clientWidth` to a non-zero value across this
+  // describe block so the marker mounts; restore after each case.
+  let originalClientWidth: PropertyDescriptor | undefined;
   beforeEach(() => {
+    originalClientWidth = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'clientWidth',
+    );
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      value: 200,
+    });
     useLiveStore.setState({
       connection: 'open',
       notices: {},
@@ -133,6 +148,18 @@ describe('NavigatorPane rate-limit meters', () => {
       rateLimits: null,
     });
     useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
+  });
+  afterEach(() => {
+    if (originalClientWidth) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'clientWidth',
+        originalClientWidth,
+      );
+    } else {
+      delete (HTMLElement.prototype as unknown as { clientWidth?: number })
+        .clientWidth;
+    }
   });
 
   it('renders both meter rows with percentages and reset labels', () => {
@@ -176,50 +203,64 @@ describe('NavigatorPane rate-limit meters', () => {
     );
   });
 
-  it('renders the elapsed-time marker on each row when resets_at is present', () => {
-    // Pick resets that leave a clean fraction of the window remaining so the
-    // expected marker position is easy to verify: 5h window with 1h left = 80%
-    // elapsed; 7d window with 1d left = 6/7 ≈ 85.71…% elapsed.
-    const FIVE_HOURS = 5 * 60 * 60;
-    const SEVEN_DAYS = 7 * 24 * 60 * 60;
+  it('renders the budget-line marker on each row when resets_at is present', () => {
+    // Both fixtures keep the fill strictly inside the current bucket's share
+    // so the marker's color assertion is covered by a dedicated test below;
+    // here we just care that the marker mounts on each row.
     const now = Date.now() / 1000;
     useLiveStore.setState({
       rateLimits: {
         fiveHour: {
           used_percentage: 40,
-          resets_at: now + 1 * 60 * 60,
+          resets_at: now + 3 * 60 * 60,
         },
         sevenDay: {
-          used_percentage: 50,
-          resets_at: now + 1 * 86400,
+          used_percentage: 30,
+          resets_at: now + 5 * 86400,
         },
       },
     });
 
     renderPane();
 
-    const fiveHourMarker = screen.getByTestId('rate-limit-5h-elapsed-marker');
-    expect(fiveHourMarker).toBeInTheDocument();
-    const fiveHourRight = parseFloat(
-      (fiveHourMarker as HTMLElement).style.right,
-    );
-    // 4h elapsed out of 5h = 80%. Tolerance covers the few ms between the
-    // test's Date.now() snapshot and the component's own read.
-    const fiveHourExpected = ((FIVE_HOURS - 1 * 60 * 60) / FIVE_HOURS) * 100;
-    expect(fiveHourRight).toBeGreaterThan(fiveHourExpected - 0.5);
-    expect(fiveHourRight).toBeLessThan(fiveHourExpected + 0.5);
-
-    const sevenDayMarker = screen.getByTestId('rate-limit-7d-elapsed-marker');
-    expect(sevenDayMarker).toBeInTheDocument();
-    const sevenDayRight = parseFloat(
-      (sevenDayMarker as HTMLElement).style.right,
-    );
-    const sevenDayExpected = ((SEVEN_DAYS - 1 * 86400) / SEVEN_DAYS) * 100;
-    expect(sevenDayRight).toBeGreaterThan(sevenDayExpected - 0.5);
-    expect(sevenDayRight).toBeLessThan(sevenDayExpected + 0.5);
+    expect(
+      screen.getByTestId('rate-limit-5h-budget-line'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId('rate-limit-7d-budget-line'),
+    ).toBeInTheDocument();
   });
 
-  it('omits the elapsed-time marker when resets_at is null', () => {
+  it('switches the budget-line marker to the panel background color when the fill overtakes it', () => {
+    // 5h row: fresh reset (5h remaining) → budget line at 1/5 = 20% from the
+    // right; fill at 90% overtakes → marker should carry `bg-surface`.
+    // 7d row: 5d remaining → budget line at 3/7 ≈ 42.86% from the right;
+    // fill at 5% is well within the bucket → marker keeps the neutral `bg-fg`.
+    const now = Date.now() / 1000;
+    useLiveStore.setState({
+      rateLimits: {
+        fiveHour: {
+          used_percentage: 90,
+          resets_at: now + 5 * 60 * 60,
+        },
+        sevenDay: {
+          used_percentage: 5,
+          resets_at: now + 5 * 86400,
+        },
+      },
+    });
+
+    renderPane();
+
+    expect(screen.getByTestId('rate-limit-5h-budget-line')).toHaveClass(
+      'bg-surface',
+    );
+    expect(screen.getByTestId('rate-limit-7d-budget-line')).toHaveClass(
+      'bg-fg',
+    );
+  });
+
+  it('omits the budget-line marker when resets_at is null', () => {
     useLiveStore.setState({
       rateLimits: {
         fiveHour: { used_percentage: 25, resets_at: null },
@@ -230,7 +271,7 @@ describe('NavigatorPane rate-limit meters', () => {
     renderPane();
 
     expect(
-      screen.queryByTestId('rate-limit-5h-elapsed-marker'),
+      screen.queryByTestId('rate-limit-5h-budget-line'),
     ).not.toBeInTheDocument();
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { RateLimitWindow, SessionListItem } from '@delta/wire-gen';
 import {
@@ -20,7 +20,7 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
 import {
-  computeElapsedPercentage,
+  computeBudgetLinePercentage,
   formatResetCountdown,
 } from './rateLimitReset';
 
@@ -130,18 +130,31 @@ function SettingsIcon({ className }: { className?: string }) {
  * entirely when its window is absent, so this only renders a present window; a
  * `null` percentage within a present window reads as 0%.
  *
- * A 1px elapsed-time marker is overlaid on the bar at the
- * window-elapsed-fraction position (computed from `resets_at` and the row's
- * `windowDurationSeconds`). Like the fill, the marker is anchored to the right
- * edge: it sits at distance `elapsedPercentage` from the right, growing
- * leftward as time passes. When the leftward fill overtakes the leftward
- * marker, token consumption is running ahead of a straight-line burn for the
- * window; when the marker is to the left of the fill's edge, consumption is
- * behind the linear pace. This lets you read pace at a glance — no numbers.
+ * A 1px budget-line marker is overlaid on the bar at the right edge of the
+ * current bucket (the window split into `bucketCount` equal parts — 7 days for
+ * `7d`, 5 hours for `5h`). It steps one bucket to the left each time the
+ * clock crosses a boundary: right after a reset the line is at `1 /
+ * bucketCount` from the right (the first bucket's share is fair game); on the
+ * final bucket the line reaches the left edge (the whole window is fair
+ * game). To keep the hairline crisp regardless of zoom and device-pixel-ratio,
+ * the marker is pinned to `left: 0` and driven by `transform: translateX(<integer
+ * px>)` — the same trick the thread-timeline playhead uses to avoid the
+ * sub-pixel shimmer that fractional `right: NN.NN%` values cause. Its color
+ * switches from `bg-fg` to `bg-surface` (the panel background token — the
+ * color-negative of the fill's `bg-fg-muted` in every theme) as soon as the
+ * fill overtakes it. Overlaying the surface color on the fill maxes out
+ * contrast in dark / light / sepia alike, so the over-pace case reads at a
+ * glance even where fill and line overlap. The invariant remains: fill INSIDE
+ * (right of) the line = within this bucket's share; fill CROSSING (left of)
+ * the line = over-pace.
  *
- * The numeric percentage cell reserves a `min-width` and right-aligns its
- * text so the trailing `↻` reset countdown column lines up across the 5h /
- * 7d rows without needing to zero-pad shorter numbers into a `021%` form.
+ * The numeric percentage cell is sized to `3ch` — a snug `99%` fit in the
+ * monospace tabular column — and right-aligns its text so the trailing `↻`
+ * reset countdown column lines up across the 5h / 7d rows for the common
+ * 0–99% case without needing to zero-pad shorter numbers into a `021%` form.
+ * A `100%` reading lets the cell grow to its natural width, which nudges that
+ * row's reset column a few pixels right; that is acceptable given how rare a
+ * full-window 100% reading is in practice.
  *
  * The row uses a monospace family on purpose so EVERY character — digits, `%`,
  * the `↻` reset glyph, the letters in `5d04h` / `02h13m`, and any spaces —
@@ -154,6 +167,7 @@ function RateLimitRow({
   label,
   window: rateWindow,
   windowDurationSeconds,
+  bucketCount,
   fillClassName,
   meterClassName,
   testId,
@@ -161,6 +175,7 @@ function RateLimitRow({
   label: string;
   window: RateLimitWindow;
   windowDurationSeconds: number;
+  bucketCount: number;
   fillClassName: string;
   meterClassName?: string;
   testId: string;
@@ -170,34 +185,58 @@ function RateLimitRow({
     rateWindow.resets_at !== null
       ? formatResetCountdown(rateWindow.resets_at)
       : null;
-  const elapsedPercentage =
+  const budgetLinePercentage =
     rateWindow.resets_at !== null
-      ? computeElapsedPercentage(rateWindow.resets_at, windowDurationSeconds)
+      ? computeBudgetLinePercentage(
+          rateWindow.resets_at,
+          windowDurationSeconds,
+          bucketCount,
+        )
       : null;
+  // Track the meter container's live pixel width so the marker's translateX
+  // offset can be rounded to an integer — see the docstring above for why the
+  // percentage-based `right` positioning was replaced with translateX.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [trackWidth, setTrackWidth] = useState(0);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const set = () => setTrackWidth(el.clientWidth);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <div
       className="flex items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid={testId}
     >
       <span className="w-5 shrink-0 text-fg-subtle">{label}</span>
-      <div className="relative flex-1 min-w-0">
+      <div ref={trackRef} className="relative flex-1 min-w-0">
         <Meter
           value={percentage}
           fillClassName={fillClassName}
           className={meterClassName}
           title={`${label} rate limit: ${Math.round(percentage)}% used`}
         />
-        {elapsedPercentage !== null && (
+        {budgetLinePercentage !== null && trackWidth > 0 && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 w-px bg-fg"
-            style={{ right: `${elapsedPercentage}%` }}
-            data-testid={`${testId}-elapsed-marker`}
+            className={`pointer-events-none absolute inset-y-0 left-0 w-px ${
+              percentage > budgetLinePercentage ? 'bg-surface' : 'bg-fg'
+            }`}
+            style={{
+              transform: `translateX(${Math.round(
+                trackWidth * (1 - budgetLinePercentage / 100),
+              )}px)`,
+            }}
+            data-testid={`${testId}-budget-line`}
           />
         )}
       </div>
       <span
-        className="inline-block min-w-[2.5em] shrink-0 text-right"
+        className="inline-block min-w-[3ch] shrink-0 text-right"
         data-testid={`${testId}-pct`}
       >
         {Math.round(percentage)}%
@@ -368,6 +407,9 @@ export function NavigatorPane({
                   label="5h"
                   window={rateLimits.fiveHour}
                   windowDurationSeconds={5 * 60 * 60}
+                  // The 5h window's budget line steps hourly; the 7d window's
+                  // steps daily — so bucketCount matches the row's natural unit.
+                  bucketCount={5}
                   // Shared neutral accent — the rows are told apart by the label.
                   fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
@@ -382,6 +424,7 @@ export function NavigatorPane({
                   label="7d"
                   window={rateLimits.sevenDay}
                   windowDurationSeconds={7 * 24 * 60 * 60}
+                  bucketCount={7}
                   // Shared neutral accent — the rows are told apart by the label.
                   fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
