@@ -483,9 +483,22 @@ export function NavigatorPane({
                 previous `Connected` copy so the row never renders blank or
                 broken. `data-testid="connection-label"` gates the unit test
                 without depending on the text.
+
+                `font-mono` is applied only in the version-showing branch —
+                the version string is a code-like identifier (sha suffix,
+                dot-separated build metadata) and the rest of the codebase
+                renders such values in mono (paths, sha short refs, PR head
+                refs — grep `font-mono` under `packages/apps/web/src`), so
+                the steady-state label matches that convention. The connection
+                fallback copy stays in the ambient sans typography.
               */}
               <span
-                className="text-xs text-fg-muted"
+                className={cn(
+                  'text-xs text-fg-muted',
+                  connection === 'open' &&
+                    version !== null &&
+                    'font-mono',
+                )}
                 data-testid="connection-label"
               >
                 {connection === 'open' && version !== null
