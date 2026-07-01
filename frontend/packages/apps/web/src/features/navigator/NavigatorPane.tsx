@@ -20,7 +20,7 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
 import {
-  computeElapsedPercentage,
+  computeBudgetLinePercentage,
   formatResetCountdown,
 } from './rateLimitReset';
 
@@ -130,14 +130,17 @@ function SettingsIcon({ className }: { className?: string }) {
  * entirely when its window is absent, so this only renders a present window; a
  * `null` percentage within a present window reads as 0%.
  *
- * A 1px elapsed-time marker is overlaid on the bar at the
- * window-elapsed-fraction position (computed from `resets_at` and the row's
- * `windowDurationSeconds`). Like the fill, the marker is anchored to the right
- * edge: it sits at distance `elapsedPercentage` from the right, growing
- * leftward as time passes. When the leftward fill overtakes the leftward
- * marker, token consumption is running ahead of a straight-line burn for the
- * window; when the marker is to the left of the fill's edge, consumption is
- * behind the linear pace. This lets you read pace at a glance — no numbers.
+ * A 1px budget-line marker is overlaid on the bar at the right edge of the
+ * current bucket (the window split into `bucketCount` equal parts — 7 days for
+ * `7d`, 5 hours for `5h`). It sits at distance `budgetLinePercentage` from the
+ * right and steps one bucket to the left each time the clock crosses a
+ * boundary: right after a reset the line is at `1 / bucketCount` from the
+ * right (the first bucket's share of the window is fair game); on the final
+ * bucket the line reaches the left edge (the whole window is fair game). The
+ * invariant is intuitive: fill INSIDE (right of) the line means consumption is
+ * within this bucket's share; fill CROSSING (left of) the line means
+ * consumption is running ahead of the per-bucket pace. This lets you read
+ * "how much can I still spend today" at a glance — no numbers.
  *
  * The numeric percentage cell reserves a `min-width` and right-aligns its
  * text so the trailing `↻` reset countdown column lines up across the 5h /
@@ -154,6 +157,7 @@ function RateLimitRow({
   label,
   window: rateWindow,
   windowDurationSeconds,
+  bucketCount,
   fillClassName,
   meterClassName,
   testId,
@@ -161,6 +165,7 @@ function RateLimitRow({
   label: string;
   window: RateLimitWindow;
   windowDurationSeconds: number;
+  bucketCount: number;
   fillClassName: string;
   meterClassName?: string;
   testId: string;
@@ -170,9 +175,13 @@ function RateLimitRow({
     rateWindow.resets_at !== null
       ? formatResetCountdown(rateWindow.resets_at)
       : null;
-  const elapsedPercentage =
+  const budgetLinePercentage =
     rateWindow.resets_at !== null
-      ? computeElapsedPercentage(rateWindow.resets_at, windowDurationSeconds)
+      ? computeBudgetLinePercentage(
+          rateWindow.resets_at,
+          windowDurationSeconds,
+          bucketCount,
+        )
       : null;
   return (
     <div
@@ -187,12 +196,12 @@ function RateLimitRow({
           className={meterClassName}
           title={`${label} rate limit: ${Math.round(percentage)}% used`}
         />
-        {elapsedPercentage !== null && (
+        {budgetLinePercentage !== null && (
           <span
             aria-hidden
             className="pointer-events-none absolute inset-y-0 w-px bg-fg"
-            style={{ right: `${elapsedPercentage}%` }}
-            data-testid={`${testId}-elapsed-marker`}
+            style={{ right: `${budgetLinePercentage}%` }}
+            data-testid={`${testId}-budget-line`}
           />
         )}
       </div>
@@ -368,6 +377,9 @@ export function NavigatorPane({
                   label="5h"
                   window={rateLimits.fiveHour}
                   windowDurationSeconds={5 * 60 * 60}
+                  // The 5h window's budget line steps hourly; the 7d window's
+                  // steps daily — so bucketCount matches the row's natural unit.
+                  bucketCount={5}
                   // Shared neutral accent — the rows are told apart by the label.
                   fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its
@@ -382,6 +394,7 @@ export function NavigatorPane({
                   label="7d"
                   window={rateLimits.sevenDay}
                   windowDurationSeconds={7 * 24 * 60 * 60}
+                  bucketCount={7}
                   // Shared neutral accent — the rows are told apart by the label.
                   fillClassName="bg-fg-muted"
                   // `flex justify-end` on the Meter's outer track pushes its

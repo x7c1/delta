@@ -43,20 +43,26 @@ function pad(value: number): string {
 }
 
 /**
- * The share of the rolling window that has already elapsed, as a 0–100
- * percentage. Computed from `resetsAt` (Unix epoch seconds, the right
- * edge of the window) and the window's total length: the moment of reset
- * sits at 0, the moment of the previous reset at 100, and anywhere in
- * between is a linear time fraction.
+ * Position of the "budget line" — how much of the window the user may spend
+ * up to and including the current bucket, as a 0–100 percentage anchored to
+ * the right edge of the bar (i.e. distance from the reset edge, leftward).
  *
- * Callers anchor a marker on the rate-limit bar at this position to show
- * "where we are in the window right now" — overlaying the marker on the
- * usage fill makes whether consumption is running ahead of or behind a
- * straight-line burn obvious without any numbers.
+ * The window is split into `bucketCount` equal buckets (7 days for the 7d
+ * window, 5 hours for the 5h window) and the line steps one bucket to the
+ * left each time the clock crosses a boundary. Right after a reset the line
+ * sits at `1 / bucketCount` from the right — the first bucket's worth of
+ * budget is fair game today; on the final bucket the line reaches the left
+ * edge (100%) — the entire window is fair game.
+ *
+ * Callers overlay this marker on the usage fill. Since the fill also grows
+ * leftward from the reset edge, the invariant is intuitive: fill INSIDE
+ * (right of) the line = spending within this bucket's share; fill CROSSING
+ * (left of) the line = spending ahead of the per-bucket pace.
  */
-export function computeElapsedPercentage(
+export function computeBudgetLinePercentage(
   resetsAt: number,
   windowDurationSeconds: number,
+  bucketCount: number,
   now: number = Date.now(),
 ): number {
   // `resetsAt` is epoch seconds but `now` is milliseconds; convert before
@@ -64,6 +70,11 @@ export function computeElapsedPercentage(
   const nowSeconds = now / 1000;
   const remainingSeconds = resetsAt - nowSeconds;
   const elapsedSeconds = windowDurationSeconds - remainingSeconds;
-  const fraction = elapsedSeconds / windowDurationSeconds;
-  return Math.min(100, Math.max(0, fraction * 100));
+  const bucketSize = windowDurationSeconds / bucketCount;
+  // Clamp to a valid bucket index even for pathological inputs (past reset,
+  // or `resetsAt` further out than the window) so the caller never sees a
+  // negative or over-100 marker position.
+  const rawIndex = Math.floor(elapsedSeconds / bucketSize);
+  const bucketIndex = Math.min(bucketCount - 1, Math.max(0, rawIndex));
+  return ((bucketIndex + 1) / bucketCount) * 100;
 }

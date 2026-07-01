@@ -176,50 +176,52 @@ describe('NavigatorPane rate-limit meters', () => {
     );
   });
 
-  it('renders the elapsed-time marker on each row when resets_at is present', () => {
-    // Pick resets that leave a clean fraction of the window remaining so the
-    // expected marker position is easy to verify: 5h window with 1h left = 80%
-    // elapsed; 7d window with 1d left = 6/7 ≈ 85.71…% elapsed.
-    const FIVE_HOURS = 5 * 60 * 60;
-    const SEVEN_DAYS = 7 * 24 * 60 * 60;
+  it('renders the budget-line marker on each row when resets_at is present', () => {
+    // Pick resets that land squarely inside a bucket so the expected line
+    // position is easy to verify: 5h window with 3h remaining → 2h elapsed →
+    // bucket index 2 → 3/5 = 60%; 7d window with 5d remaining → 2d elapsed →
+    // bucket index 2 → 3/7 ≈ 42.857…%.
     const now = Date.now() / 1000;
     useLiveStore.setState({
       rateLimits: {
         fiveHour: {
           used_percentage: 40,
-          resets_at: now + 1 * 60 * 60,
+          resets_at: now + 3 * 60 * 60,
         },
         sevenDay: {
           used_percentage: 50,
-          resets_at: now + 1 * 86400,
+          resets_at: now + 5 * 86400,
         },
       },
     });
 
     renderPane();
 
-    const fiveHourMarker = screen.getByTestId('rate-limit-5h-elapsed-marker');
-    expect(fiveHourMarker).toBeInTheDocument();
+    const fiveHourLine = screen.getByTestId('rate-limit-5h-budget-line');
+    expect(fiveHourLine).toBeInTheDocument();
     const fiveHourRight = parseFloat(
-      (fiveHourMarker as HTMLElement).style.right,
+      (fiveHourLine as HTMLElement).style.right,
     );
-    // 4h elapsed out of 5h = 80%. Tolerance covers the few ms between the
-    // test's Date.now() snapshot and the component's own read.
-    const fiveHourExpected = ((FIVE_HOURS - 1 * 60 * 60) / FIVE_HOURS) * 100;
+    // Bucket index 2 out of 5 buckets → right edge of the third bucket = 60%.
+    // Tolerance covers the few ms between the test's Date.now() snapshot and
+    // the component's own read (step-wise output is exact, but a boundary
+    // crossing during the render would move it by one bucket).
+    const fiveHourExpected = 60;
     expect(fiveHourRight).toBeGreaterThan(fiveHourExpected - 0.5);
     expect(fiveHourRight).toBeLessThan(fiveHourExpected + 0.5);
 
-    const sevenDayMarker = screen.getByTestId('rate-limit-7d-elapsed-marker');
-    expect(sevenDayMarker).toBeInTheDocument();
+    const sevenDayLine = screen.getByTestId('rate-limit-7d-budget-line');
+    expect(sevenDayLine).toBeInTheDocument();
     const sevenDayRight = parseFloat(
-      (sevenDayMarker as HTMLElement).style.right,
+      (sevenDayLine as HTMLElement).style.right,
     );
-    const sevenDayExpected = ((SEVEN_DAYS - 1 * 86400) / SEVEN_DAYS) * 100;
+    // Bucket index 2 out of 7 buckets → right edge of the third day = 3/7.
+    const sevenDayExpected = (3 / 7) * 100;
     expect(sevenDayRight).toBeGreaterThan(sevenDayExpected - 0.5);
     expect(sevenDayRight).toBeLessThan(sevenDayExpected + 0.5);
   });
 
-  it('omits the elapsed-time marker when resets_at is null', () => {
+  it('omits the budget-line marker when resets_at is null', () => {
     useLiveStore.setState({
       rateLimits: {
         fiveHour: { used_percentage: 25, resets_at: null },
@@ -230,7 +232,7 @@ describe('NavigatorPane rate-limit meters', () => {
     renderPane();
 
     expect(
-      screen.queryByTestId('rate-limit-5h-elapsed-marker'),
+      screen.queryByTestId('rate-limit-5h-budget-line'),
     ).not.toBeInTheDocument();
   });
 
