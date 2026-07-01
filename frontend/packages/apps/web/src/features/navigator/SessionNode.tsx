@@ -346,7 +346,24 @@ export function SessionNode({
           <Menu
             label={`Session actions for ${label}`}
             onOpenChange={setMenuOpen}
+            // Item order is fixed top-to-bottom:
+            //   1. Open in VS Code — the primary "act on this session"
+            //      affordance, so it takes the top slot the user's eye
+            //      lands on first.
+            //   2. Copy session ID — a passive, always-available utility.
+            //   3. Close — destructive, so it sits at the bottom and only
+            //      appears while the session is open (Close on an already-
+            //      closed session is a no-op).
             items={[
+              // Open the session's launch-time cwd in an external tool. Uses
+              // the SESSION-LEVEL cwd (spawn-time fixed value), not any
+              // per-turn cwd, so the menu answers "open the folder this
+              // session runs in". A failure surfaces through the shared
+              // {@link useOpenCwd} error toast — no local UI here.
+              {
+                label: `Open in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`,
+                onSelect: () => openCwd(item.session.cwd),
+              },
               {
                 label: 'Copy session ID',
                 onSelect: () => {
@@ -356,15 +373,6 @@ export function SessionNode({
                   // on failure, add it in a follow-up.
                   void navigator.clipboard.writeText(item.session.id);
                 },
-              },
-              // Open the session's launch-time cwd in an external tool. Uses
-              // the SESSION-LEVEL cwd (spawn-time fixed value), not any
-              // per-turn cwd, so the menu answers "open the folder this
-              // session runs in". A failure surfaces through the shared
-              // {@link useOpenCwd} error toast — no local UI here.
-              {
-                label: `Open in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`,
-                onSelect: () => openCwd(item.session.cwd),
               },
               ...(item.open
                 ? [
