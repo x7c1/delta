@@ -29,6 +29,7 @@ import type {
   SessionsResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
+  VersionResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
 } from '@delta/wire-gen';
@@ -577,6 +578,25 @@ export function useOpenCwdMutation(
 ): UseMutationResult<void, Error, OpenCwdRequest> {
   return useMutation({
     mutationFn: (body: OpenCwdRequest) => client.openCwd(body),
+  });
+}
+
+/**
+ * The Delta workspace version (`GET /api/version`) for the navigator footer.
+ * Cached for the page lifetime — the running server's version can only change
+ * across a full restart, which itself terminates the browser session, so a
+ * reload is the only path that can invalidate this. Retries are off (a failure
+ * here just hides the footer version; it must not cascade to a retry burst).
+ */
+export function useVersionQuery(
+  client: ApiClient,
+): UseQueryResult<VersionResponse> {
+  return useQuery({
+    queryKey: queryKeys.version,
+    queryFn: () => client.getVersion(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
   });
 }
 

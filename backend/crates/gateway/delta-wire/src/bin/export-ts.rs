@@ -23,7 +23,8 @@ use delta_wire::rest::{
     WirePermissionDecisionRequest, WirePullRequestsResponse, WireQuestionAnswerRequest,
     WireQuestionCancelRequest, WireRepositoriesResponse, WireRepositoryScanRootsResponse,
     WireSendResponse, WireSendsResponse, WireSessionsResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireUpdateLaunchOptionRequest, WireVersionResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireSessionEvent};
 use ts_rs::TS;
@@ -71,6 +72,7 @@ fn main() {
     WireUpdateLaunchOptionRequest::export_all(&config)
         .expect("export UpdateLaunchOptionRequest.ts");
     WireErrorBody::export_all(&config).expect("export ErrorBody.ts");
+    WireVersionResponse::export_all(&config).expect("export VersionResponse.ts");
 
     let event_kinds_path = out_dir.join("event-kinds.ts");
     std::fs::write(&event_kinds_path, render_event_kinds())

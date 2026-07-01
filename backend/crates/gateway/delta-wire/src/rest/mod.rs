@@ -54,6 +54,8 @@ mod sessions_response;
 pub use sessions_response::{WireSessionListItem, WireSessionsResponse};
 mod threads_response;
 pub use threads_response::WireThreadsResponse;
+mod version_response;
+pub use version_response::WireVersionResponse;
 mod workdir_list_response;
 pub use workdir_list_response::{WireWorkdirEntry, WireWorkdirListResponse};
 mod workdir_recent_response;

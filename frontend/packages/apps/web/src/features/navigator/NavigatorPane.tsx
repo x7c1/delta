@@ -12,6 +12,7 @@ import {
 } from '@delta/ui-kit';
 import {
   useCloseSessionMutation,
+  useVersionQuery,
   type ConnectionStatus,
 } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
@@ -270,6 +271,15 @@ export function NavigatorPane({
 }: NavigatorPaneProps) {
   const client = useApiClient();
   const closeSession = useCloseSessionMutation(client);
+  // Delta workspace version for the footer: `v0.2.1` on release builds,
+  // `v0.2.1+dev.<sha>` on debug builds. Pre-formatted server-side (see
+  // `crate::version::display_version`), so the browser renders it verbatim.
+  // Held in-memory only (no localStorage) — the query is cached for the page
+  // lifetime and re-fetched on reload, which is the only path that can change
+  // the running server's version. The footer row hides itself while the query
+  // is pending or has failed, rather than showing a `?`/placeholder.
+  const versionQuery = useVersionQuery(client);
+  const version = versionQuery.data?.version ?? null;
 
   // The Panel body is the scroll container; the virtualizer reads its scroll
   // position and viewport height to decide which rows to render.
@@ -477,6 +487,24 @@ export function NavigatorPane({
               <SettingsIcon className="h-4 w-4" />
             </Button>
           </div>
+          {/*
+            Workspace version. Rendered as a subtle right-aligned line under the
+            connection/settings row so it never competes with the primary
+            controls. Hidden while the query is pending or has failed — we would
+            rather show nothing than a `?` placeholder for a purely informational
+            field. `data-testid` gates the mount-and-fetch unit test.
+          */}
+          {version !== null && (
+            <div className="flex justify-end">
+              <span
+                className="text-[10px] leading-none text-fg-subtle"
+                data-testid="workspace-version"
+                title="Delta workspace version"
+              >
+                {version}
+              </span>
+            </div>
+          )}
         </div>
       }
     >

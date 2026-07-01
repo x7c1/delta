@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
 import {
   createHandlers,
+  MOCK_VERSION,
   SESSION_ID,
   SESSION_ID_2,
   SESSION_2_MAIN_THREAD_ID,
@@ -371,5 +372,31 @@ describe('NavigatorPane settings entry', () => {
       'aria-pressed',
       'true',
     );
+  });
+});
+
+describe('NavigatorPane workspace version', () => {
+  beforeEach(() => {
+    useLiveStore.setState({
+      connection: 'open',
+      notices: {},
+      runningThreads: {},
+      rateLimits: null,
+    });
+    useNavStore.setState({
+      focusedSessionId: null,
+      activeThreadId: null,
+      settingsOpen: false,
+    });
+  });
+
+  it('fetches the version on mount and shows it in the footer', async () => {
+    // The version row is hidden while the query is pending — the pane never
+    // shows a placeholder — so a `findBy*` awaits the fetch settling and
+    // proves both the mount-and-fetch pipeline and the rendered substring.
+    renderPane();
+
+    const version = await screen.findByTestId('workspace-version');
+    expect(version).toHaveTextContent(MOCK_VERSION);
   });
 });

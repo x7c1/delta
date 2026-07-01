@@ -11,7 +11,9 @@ mod app;
 mod hooks;
 mod pty;
 mod state;
+mod version;
 mod ws;
 
 pub use app::router;
 pub use state::AppState;
+pub use version::display_version;

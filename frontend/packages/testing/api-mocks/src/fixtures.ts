@@ -579,6 +579,13 @@ export function seedData(): MockStore {
 export const MOCK_WORKDIR_HOME = '/home/dev';
 
 /**
+ * The version string the mock `GET /api/version` returns. Fixed rather than
+ * derived from the workspace `package.json` so mock-mode e2e can assert on it
+ * verbatim without importing build metadata into the mock package.
+ */
+export const MOCK_VERSION = 'v0.0.0-mock';
+
+/**
  * A tiny static directory tree backing the workdir-picker mock. Each key is a
  * canonical directory; the value lists its immediate subdirectory names. A path
  * absent from this map is treated as "not a directory" (400).

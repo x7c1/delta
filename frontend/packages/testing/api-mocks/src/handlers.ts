@@ -33,6 +33,7 @@ import type {
 import {
   gitBranches,
   gitRepoInfo,
+  MOCK_VERSION,
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
   recentWorkdirs,
@@ -714,6 +715,12 @@ export function createMockApi(): MockApi {
       );
       return new HttpResponse(null, { status: 204 });
     }),
+
+    // Delta workspace version for the navigator footer. The real server owns
+    // the format contract (`v<version>` on release, `v<version>+dev.<sha>` on
+    // debug); the mock returns a fixed dev-shaped string so mock-mode e2e can
+    // assert on it without depending on the host's git sha.
+    http.get('*/api/version', () => HttpResponse.json({ version: MOCK_VERSION })),
   ];
 
   /** Resolve every open (queued/dispatched) send of a session to `status`. */
