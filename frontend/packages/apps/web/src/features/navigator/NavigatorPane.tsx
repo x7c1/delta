@@ -140,12 +140,13 @@ function SettingsIcon({ className }: { className?: string }) {
  * the marker is pinned to `left: 0` and driven by `transform: translateX(<integer
  * px>)` — the same trick the thread-timeline playhead uses to avoid the
  * sub-pixel shimmer that fractional `right: NN.NN%` values cause. Its color
- * switches from `bg-fg` to `bg-danger` (attention red — the same token the app
- * uses for error / over-limit states) as soon as the fill overtakes it, so the
- * "you're spending ahead of the per-bucket pace" case reads at a glance even
- * when the two overlap. The invariant remains: fill INSIDE (right of) the
- * line = within this bucket's share; fill CROSSING (left of) the line =
- * over-pace.
+ * switches from `bg-fg` to `bg-surface` (the panel background token — the
+ * color-negative of the fill's `bg-fg-muted` in every theme) as soon as the
+ * fill overtakes it. Overlaying the surface color on the fill maxes out
+ * contrast in dark / light / sepia alike, so the over-pace case reads at a
+ * glance even where fill and line overlap. The invariant remains: fill INSIDE
+ * (right of) the line = within this bucket's share; fill CROSSING (left of)
+ * the line = over-pace.
  *
  * The numeric percentage cell is sized to `3ch` — a snug `99%` fit in the
  * monospace tabular column — and right-aligns its text so the trailing `↻`
@@ -223,7 +224,7 @@ function RateLimitRow({
           <span
             aria-hidden
             className={`pointer-events-none absolute inset-y-0 left-0 w-px ${
-              percentage > budgetLinePercentage ? 'bg-danger' : 'bg-fg'
+              percentage > budgetLinePercentage ? 'bg-surface' : 'bg-fg'
             }`}
             style={{
               transform: `translateX(${Math.round(

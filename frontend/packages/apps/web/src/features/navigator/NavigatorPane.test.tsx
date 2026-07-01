@@ -231,9 +231,9 @@ describe('NavigatorPane rate-limit meters', () => {
     ).toBeInTheDocument();
   });
 
-  it('switches the budget-line marker to the danger color when the fill overtakes it', () => {
+  it('switches the budget-line marker to the panel background color when the fill overtakes it', () => {
     // 5h row: fresh reset (5h remaining) → budget line at 1/5 = 20% from the
-    // right; fill at 90% overtakes → marker should carry `bg-danger`.
+    // right; fill at 90% overtakes → marker should carry `bg-surface`.
     // 7d row: 5d remaining → budget line at 3/7 ≈ 42.86% from the right;
     // fill at 5% is well within the bucket → marker keeps the neutral `bg-fg`.
     const now = Date.now() / 1000;
@@ -253,7 +253,7 @@ describe('NavigatorPane rate-limit meters', () => {
     renderPane();
 
     expect(screen.getByTestId('rate-limit-5h-budget-line')).toHaveClass(
-      'bg-danger',
+      'bg-surface',
     );
     expect(screen.getByTestId('rate-limit-7d-budget-line')).toHaveClass(
       'bg-fg',
