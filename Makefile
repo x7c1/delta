@@ -67,16 +67,16 @@ test:
 	cd backend && cargo test
 	cd frontend && pnpm -r test
 
-## lint: clippy (backend) + eslint & dependency-cruiser (frontend)
+## lint: rustfmt + clippy (backend) + eslint & dependency-cruiser (frontend)
 .PHONY: lint
 lint:
-	cd backend && cargo clippy --all-targets -- -D warnings
+	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — backend build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint
+## check: full pre-PR gate — backend fmt/build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint
 .PHONY: check
 check:
-	cd backend && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
+	cd backend && cargo fmt --all -- --check && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
 	$(MAKE) gen-check
 	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
 
