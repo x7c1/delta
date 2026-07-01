@@ -142,9 +142,13 @@ function SettingsIcon({ className }: { className?: string }) {
  * consumption is running ahead of the per-bucket pace. This lets you read
  * "how much can I still spend today" at a glance — no numbers.
  *
- * The numeric percentage cell reserves a `min-width` and right-aligns its
- * text so the trailing `↻` reset countdown column lines up across the 5h /
- * 7d rows without needing to zero-pad shorter numbers into a `021%` form.
+ * The numeric percentage cell is sized to `3ch` — a snug `99%` fit in the
+ * monospace tabular column — and right-aligns its text so the trailing `↻`
+ * reset countdown column lines up across the 5h / 7d rows for the common
+ * 0–99% case without needing to zero-pad shorter numbers into a `021%` form.
+ * A `100%` reading lets the cell grow to its natural width, which nudges that
+ * row's reset column a few pixels right; that is acceptable given how rare a
+ * full-window 100% reading is in practice.
  *
  * The row uses a monospace family on purpose so EVERY character — digits, `%`,
  * the `↻` reset glyph, the letters in `5d04h` / `02h13m`, and any spaces —
@@ -206,7 +210,7 @@ function RateLimitRow({
         )}
       </div>
       <span
-        className="inline-block min-w-[2.5em] shrink-0 text-right"
+        className="inline-block min-w-[3ch] shrink-0 text-right"
         data-testid={`${testId}-pct`}
       >
         {Math.round(percentage)}%
