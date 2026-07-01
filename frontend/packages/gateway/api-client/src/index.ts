@@ -47,6 +47,7 @@ export {
   useRepositoryScanRootsQuery,
   useAddRepositoryScanRootMutation,
   useRemoveRepositoryScanRootMutation,
+  useOpenCwdMutation,
 } from './query-hooks';
 export {
   appendMessage,

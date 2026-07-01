@@ -9,6 +9,7 @@ import type {
   LaunchOptionsResponse,
   MessagesResponse,
   NewSessionResponse,
+  OpenCwdRequest,
   PermissionDecision,
   PermissionDecisionRequest,
   PullRequestsResponse,
@@ -74,7 +75,11 @@ export type ApiErrorCode =
   | 'permission_not_pending'
   | 'question_not_pending'
   | 'send_not_cancellable'
-  | 'scan_root_duplicate';
+  | 'scan_root_duplicate'
+  | 'open_cwd_path_not_allowed'
+  | 'open_cwd_unknown_handler'
+  | 'open_cwd_command_not_found'
+  | 'open_cwd_spawn_failed';
 
 /** An error raised when the server responds with a non-2xx status. */
 export class ApiError extends Error {
@@ -247,6 +252,26 @@ export class ApiClient {
   cancelSend(sendId: number): Promise<void> {
     return this.requestNoContent(`/api/sends/${sendId}/cancel`, {
       method: 'POST',
+    });
+  }
+
+  /**
+   * `POST /api/open-cwd` — launch an external tool (currently only VS Code)
+   * against a session's cwd. The request `path` must be a path Delta has
+   * already surfaced (a `session.cwd`, `session.requested_workdir`, or
+   * `message.cwd`); the server rejects anything else with a `400`
+   * (`open_cwd_path_not_allowed`) so a hand-crafted request cannot point the
+   * editor at an arbitrary directory. `handler` selects which tool to
+   * launch; omit for the default (`vscode`). A `500` may report a stable
+   * code — `open_cwd_command_not_found` when the tool binary is missing
+   * from `PATH`, or `open_cwd_spawn_failed` for any other spawn error.
+   * Success is `204 No Content`; the browser shows no toast on success.
+   */
+  openCwd(body: OpenCwdRequest): Promise<void> {
+    return this.requestNoContent('/api/open-cwd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
   }
 

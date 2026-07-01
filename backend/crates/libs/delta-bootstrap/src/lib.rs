@@ -28,7 +28,8 @@ use std::sync::Arc;
 
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{BoxedInteractor, GhCli, Interactor};
+use delta_usecase::{BoxedInteractor, ExternalOpener, GhCli, Interactor};
+use external_opener::SystemOpener;
 use gh_cli::Gh;
 use git_worktree::Git;
 use tmux_driver::Tmux;
@@ -116,6 +117,7 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
     let workspace = FsWorkspace::new();
     let git_worktree = Git::new();
     let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
+    let external_opener: Arc<dyn ExternalOpener> = Arc::new(SystemOpener::new());
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -128,7 +130,8 @@ pub fn build(config: &Config) -> Result<AppInteractor> {
         config.session_settings_path(),
     )
     .with_launch_config(config.launch.clone())
-    .with_gh_cli(gh_cli))
+    .with_gh_cli(gh_cli)
+    .with_external_opener(external_opener))
 }
 
 #[cfg(test)]

@@ -320,6 +320,58 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    // Open the given path in an external tool (VS Code today). The mock has
+    // no real subprocess to spawn, so it just answers `204` on any allowlist
+    // hit — a path that appears in a session's cwd or in any stored message's
+    // cwd. Anything else answers `400` with the stable code, mirroring the
+    // real server's allowlist check.
+    http.post('*/api/open-cwd', async ({ request }) => {
+      const payload = (await request.json()) as {
+        path?: string;
+        handler?: string | null;
+      };
+      const path = typeof payload?.path === 'string' ? payload.path.trim() : '';
+      if (path === '') {
+        return HttpResponse.json(
+          { error: '`path` must be a non-blank string' },
+          { status: 400 },
+        );
+      }
+      if (
+        typeof payload.handler === 'string' &&
+        payload.handler !== 'vscode'
+      ) {
+        return HttpResponse.json(
+          {
+            error: `unknown open-cwd handler: ${payload.handler}`,
+            code: 'open_cwd_unknown_handler',
+          },
+          { status: 400 },
+        );
+      }
+      const known = new Set<string>();
+      for (const entry of store.sessions) {
+        known.add(entry.session.cwd);
+      }
+      for (const msgs of Object.values(store.messagesByThread)) {
+        for (const m of msgs) {
+          if (typeof m.cwd === 'string') {
+            known.add(m.cwd);
+          }
+        }
+      }
+      if (!known.has(path)) {
+        return HttpResponse.json(
+          {
+            error: `path is not in the known-cwd allowlist: ${path}`,
+            code: 'open_cwd_path_not_allowed',
+          },
+          { status: 400 },
+        );
+      }
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     // Cancel a still-queued send. Mirrors the server's guarded transition: only
     // a `queued` row cancels (it drops out of the open-send list on the next
     // `GET .../sends`); anything else is a `409` with the stable

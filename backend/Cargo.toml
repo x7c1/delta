@@ -15,6 +15,7 @@ delta-model = { path = "crates/domain/delta-model" }
 delta-usecase = { path = "crates/domain/delta-usecase" }
 delta-sqlite = { path = "crates/gateway/delta-sqlite" }
 delta-transcript = { path = "crates/gateway/delta-transcript" }
+external-opener = { path = "crates/gateway/external-opener" }
 tmux-driver = { path = "crates/gateway/tmux-driver" }
 workspace-fs = { path = "crates/gateway/workspace-fs" }
 git-worktree = { path = "crates/gateway/git-worktree" }

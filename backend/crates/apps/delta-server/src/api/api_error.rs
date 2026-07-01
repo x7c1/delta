@@ -32,6 +32,30 @@ const SEND_NOT_CANCELLABLE_CODE: &str = "send_not_cancellable";
 /// hint instead of a generic failure toast on this code.
 const SCAN_ROOT_DUPLICATE_CODE: &str = "scan_root_duplicate";
 
+/// Stable machine-readable code for a `POST /api/open-cwd` request whose
+/// `path` is not in the known-cwd allowlist. The frontend surfaces the
+/// generic "opening failed" message on this code — the click site should
+/// never send an unknown path, so this only fires against a hand-crafted
+/// request that the user should not see.
+const OPEN_CWD_PATH_NOT_ALLOWED_CODE: &str = "open_cwd_path_not_allowed";
+
+/// Stable machine-readable code for an unknown `handler` id in
+/// `POST /api/open-cwd`. Same UX as
+/// [`OPEN_CWD_PATH_NOT_ALLOWED_CODE`] — it should never fire on the happy
+/// path.
+const OPEN_CWD_UNKNOWN_HANDLER_CODE: &str = "open_cwd_unknown_handler";
+
+/// Stable machine-readable code for `code` (or a future handler's command)
+/// missing on `PATH`. The frontend renders a specific "VS Code is not
+/// installed" message on this code so the user has a clear next step
+/// (install the shell `code` command) instead of a generic failure.
+const OPEN_CWD_COMMAND_NOT_FOUND_CODE: &str = "open_cwd_command_not_found";
+
+/// Stable machine-readable code for a spawn failure that is *not* a missing
+/// binary (fork failure, permission denied, etc.). The frontend renders the
+/// generic error message on this code.
+const OPEN_CWD_SPAWN_FAILED_CODE: &str = "open_cwd_spawn_failed";
+
 /// An error rendered as an HTTP response.
 ///
 /// This is the single place that maps failures onto status codes, keeping the
@@ -119,6 +143,33 @@ impl IntoResponse for ApiError {
                     Error::WorktreeNotAGitRepo(_) | Error::WorktreeRequiresWorkdir => {
                         (StatusCode::BAD_REQUEST, None)
                     }
+                    // A path the server has never shown the browser is a
+                    // client error (the click site never sends one), but it is
+                    // surfaced with a stable code so the browser can
+                    // distinguish it from a generic 400.
+                    Error::OpenCwdPathNotAllowed(_) => {
+                        (StatusCode::BAD_REQUEST, Some(OPEN_CWD_PATH_NOT_ALLOWED_CODE))
+                    }
+                    // An unknown handler id is also a client-side bug:
+                    // the initial impl only registers `vscode`.
+                    Error::OpenCwdUnknownHandler(_) => {
+                        (StatusCode::BAD_REQUEST, Some(OPEN_CWD_UNKNOWN_HANDLER_CODE))
+                    }
+                    // The external tool is not installed: a configuration issue
+                    // on the user's machine (fix: install VS Code's shell
+                    // `code` command). 500 + a stable code so the browser
+                    // shows the specific "not installed" message.
+                    Error::ExternalOpenerCommandNotFound(_) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Some(OPEN_CWD_COMMAND_NOT_FOUND_CODE),
+                    ),
+                    // Any other spawn failure (fork, permission denied):
+                    // 500 with a stable code so the browser can pick a
+                    // less specific message.
+                    Error::ExternalOpenerSpawnFailed(_) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Some(OPEN_CWD_SPAWN_FAILED_CODE),
+                    ),
                     // Everything else is an internal failure.
                     Error::Tmux(_)
                     | Error::Git(_)

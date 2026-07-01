@@ -22,6 +22,8 @@ mod messages_response;
 pub use messages_response::WireMessagesResponse;
 mod new_session_response;
 pub use new_session_response::{WireNewSessionResponse, WireSessionLifecycle};
+mod open_cwd_request;
+pub use open_cwd_request::WireOpenCwdRequest;
 mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
 mod pull_requests_response;

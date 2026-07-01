@@ -27,6 +27,7 @@ export type { MessagesResponse } from './generated/MessagesResponse';
 export type { CreateSendRequest } from './generated/CreateSendRequest';
 export type { SendResponse } from './generated/SendResponse';
 export type { SendsResponse } from './generated/SendsResponse';
+export type { OpenCwdRequest } from './generated/OpenCwdRequest';
 export type { PermissionDecision } from './generated/PermissionDecision';
 export type { PermissionDecisionRequest } from './generated/PermissionDecisionRequest';
 export type { QuestionAnswerRequest } from './generated/QuestionAnswerRequest';

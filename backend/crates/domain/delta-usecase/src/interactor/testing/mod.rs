@@ -5,6 +5,7 @@
 //! targets, and the interactor factory grouped by purpose.
 
 mod factory;
+mod fake_external_opener;
 mod fake_gh_cli;
 mod fake_git_worktree;
 mod fake_store;
@@ -21,6 +22,7 @@ pub(crate) use factory::{
     SEED_TRANSCRIPT_PATH, TEST_SETTINGS_JSON, TEST_SETTINGS_PATH, TEST_WORKDIR_BASE,
     TEST_WORKTREE_BASE,
 };
+pub(crate) use fake_external_opener::FakeExternalOpener;
 pub(crate) use fake_gh_cli::FakeGhCli;
 pub(crate) use fake_git_worktree::FakeGitWorktree;
 pub(crate) use fake_store::FakeStore;

@@ -6,6 +6,8 @@
 
 mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
+mod external_opener;
+pub use external_opener::ExternalOpener;
 mod gh_cli;
 pub use gh_cli::GhCli;
 mod git_worktree;

@@ -628,6 +628,36 @@ impl SessionStore for SqliteStore {
         Ok(out)
     }
 
+    async fn cwd_exists(
+        &self,
+        path: &str,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        // Match `path` verbatim against any of the three columns the browser
+        // ever sees a cwd from: `session.cwd`, `session.requested_workdir`
+        // (both surfaced on the session card), and `message.cwd` (the
+        // per-turn cwd on the message meta line). The path comparison is
+        // byte-for-byte — the browser echoes back the same string the server
+        // sent, so no normalisation is needed here.
+        //
+        // `SELECT EXISTS` short-circuits on the first match and both scans
+        // use existing indexes on their session_id foreign keys, so the
+        // query stays cheap even on a large history.
+        let hit: i64 = conn
+            .query_row(
+                "SELECT EXISTS ( \
+                     SELECT 1 FROM session \
+                       WHERE cwd = ?1 OR requested_workdir = ?1 \
+                     UNION ALL \
+                     SELECT 1 FROM message WHERE cwd = ?1 \
+                 )",
+                params![path],
+                |row| row.get(0),
+            )
+            .map_err(Error::from)?;
+        Ok(hit != 0)
+    }
+
     async fn repository_clone_rows(
         &self,
         worktree_base: &str,

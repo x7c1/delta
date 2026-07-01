@@ -17,6 +17,7 @@ mod hooks;
 mod launch_options;
 mod lifecycle;
 mod listing;
+mod open_cwd;
 mod permission_decision;
 mod pull_requests;
 mod question_keys;
@@ -29,6 +30,7 @@ mod turn_input;
 mod workdir;
 
 pub use hooks::PermissionWait;
+pub use open_cwd::{ExternalHandler, ExternalHandlerId, VSCODE_HANDLER_ID};
 pub use permission_decision::PermissionDecision;
 pub use session_actor::runtime::{
     PendingPermission, PendingQuestion, RunningSubagent, SessionLiveState,
@@ -45,7 +47,9 @@ use delta_model::SessionId;
 
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
-use crate::ports::{GhCli, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    ExternalOpener, GhCli, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace,
+};
 use crate::pull_request::{PullRequest, PullRequestLens};
 
 use session_actor::registry::SessionRegistry;
@@ -131,6 +135,12 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// actors — keeping it non-generic avoids threading a sixth type
     /// parameter through every interactor impl block.
     pub(in crate::interactor) gh_cli: Arc<dyn GhCli>,
+    /// The external-tool opener used by `open cwd` (currently only VS Code
+    /// via `code <path>`). Held as a trait object for the same reason as
+    /// [`Self::gh_cli`]: it is not routed through the session actors, so a
+    /// non-generic field keeps the interactor's five type parameters
+    /// untouched.
+    pub(in crate::interactor) external_opener: Arc<dyn ExternalOpener>,
     /// Per-lens memo of the latest `gh search prs` result, keeping a focus
     /// flip between the two lenses cheap. Bounded by
     /// [`PR_SEARCH_CACHE_TTL`] so the picker still picks up newly-opened
@@ -218,6 +228,7 @@ where
             minter: PaneTokenMinter::new(),
             repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             gh_cli: Arc::new(UnavailableGhCli),
+            external_opener: Arc::new(UnwiredExternalOpener),
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
@@ -271,6 +282,29 @@ where
             permission_index: self.permission_index,
         }
     }
+
+    /// Inject the [`ExternalOpener`] driver for the `open cwd` endpoint.
+    ///
+    /// The default constructor wires an unwired stub that fails every open
+    /// call, so a configuration that has not wired the real opener (existing
+    /// tests, dev harnesses) is safe by default — the failure is loud and
+    /// clearly attributed to missing wiring rather than silently succeeding
+    /// or crashing on an unrelated path. Same constraint as
+    /// [`Self::with_launch_config`]: must run before any session actor is
+    /// spawned.
+    pub fn with_external_opener(self, opener: Arc<dyn ExternalOpener>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_external_opener must be called before any session actor is spawned");
+        };
+        core.external_opener = opener;
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self {
+            core,
+            sessions,
+            permission_index: self.permission_index,
+        }
+    }
 }
 
 /// Stub `gh` driver wired by [`Interactor::new`] when no real driver has
@@ -292,6 +326,30 @@ impl GhCli for UnavailableGhCli {
         _lens: PullRequestLens,
     ) -> crate::error::Result<Vec<PullRequest>> {
         Ok(Vec::new())
+    }
+}
+
+/// Stub [`ExternalOpener`] wired by [`Interactor::new`] when no real driver
+/// has been injected yet.
+///
+/// Every open call reports [`crate::Error::ExternalOpenerSpawnFailed`] with
+/// a message that names the missing wiring, so a `POST /api/open-cwd` request
+/// against a mis-configured server surfaces the mistake immediately instead
+/// of appearing to succeed. Production wiring replaces this through
+/// [`Interactor::with_external_opener`].
+struct UnwiredExternalOpener;
+
+#[async_trait::async_trait]
+impl ExternalOpener for UnwiredExternalOpener {
+    async fn open(
+        &self,
+        _command: &str,
+        _args: Vec<String>,
+    ) -> crate::error::Result<()> {
+        Err(crate::error::Error::ExternalOpenerSpawnFailed(
+            "no ExternalOpener driver has been injected into the interactor"
+                .to_owned(),
+        ))
     }
 }
 
