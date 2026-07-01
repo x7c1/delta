@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { RateLimitWindow, SessionListItem } from '@delta/wire-gen';
 import {
@@ -132,15 +132,20 @@ function SettingsIcon({ className }: { className?: string }) {
  *
  * A 1px budget-line marker is overlaid on the bar at the right edge of the
  * current bucket (the window split into `bucketCount` equal parts — 7 days for
- * `7d`, 5 hours for `5h`). It sits at distance `budgetLinePercentage` from the
- * right and steps one bucket to the left each time the clock crosses a
- * boundary: right after a reset the line is at `1 / bucketCount` from the
- * right (the first bucket's share of the window is fair game); on the final
- * bucket the line reaches the left edge (the whole window is fair game). The
- * invariant is intuitive: fill INSIDE (right of) the line means consumption is
- * within this bucket's share; fill CROSSING (left of) the line means
- * consumption is running ahead of the per-bucket pace. This lets you read
- * "how much can I still spend today" at a glance — no numbers.
+ * `7d`, 5 hours for `5h`). It steps one bucket to the left each time the
+ * clock crosses a boundary: right after a reset the line is at `1 /
+ * bucketCount` from the right (the first bucket's share is fair game); on the
+ * final bucket the line reaches the left edge (the whole window is fair
+ * game). To keep the hairline crisp regardless of zoom and device-pixel-ratio,
+ * the marker is pinned to `left: 0` and driven by `transform: translateX(<integer
+ * px>)` — the same trick the thread-timeline playhead uses to avoid the
+ * sub-pixel shimmer that fractional `right: NN.NN%` values cause. Its color
+ * switches from `bg-fg` to `bg-danger` (attention red — the same token the app
+ * uses for error / over-limit states) as soon as the fill overtakes it, so the
+ * "you're spending ahead of the per-bucket pace" case reads at a glance even
+ * when the two overlap. The invariant remains: fill INSIDE (right of) the
+ * line = within this bucket's share; fill CROSSING (left of) the line =
+ * over-pace.
  *
  * The numeric percentage cell is sized to `3ch` — a snug `99%` fit in the
  * monospace tabular column — and right-aligns its text so the trailing `↻`
@@ -187,24 +192,44 @@ function RateLimitRow({
           bucketCount,
         )
       : null;
+  // Track the meter container's live pixel width so the marker's translateX
+  // offset can be rounded to an integer — see the docstring above for why the
+  // percentage-based `right` positioning was replaced with translateX.
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [trackWidth, setTrackWidth] = useState(0);
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
+    const set = () => setTrackWidth(el.clientWidth);
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <div
       className="flex items-center gap-1.5 font-mono text-xs text-fg-muted"
       data-testid={testId}
     >
       <span className="w-5 shrink-0 text-fg-subtle">{label}</span>
-      <div className="relative flex-1 min-w-0">
+      <div ref={trackRef} className="relative flex-1 min-w-0">
         <Meter
           value={percentage}
           fillClassName={fillClassName}
           className={meterClassName}
           title={`${label} rate limit: ${Math.round(percentage)}% used`}
         />
-        {budgetLinePercentage !== null && (
+        {budgetLinePercentage !== null && trackWidth > 0 && (
           <span
             aria-hidden
-            className="pointer-events-none absolute inset-y-0 w-px bg-fg"
-            style={{ right: `${budgetLinePercentage}%` }}
+            className={`pointer-events-none absolute inset-y-0 left-0 w-px ${
+              percentage > budgetLinePercentage ? 'bg-danger' : 'bg-fg'
+            }`}
+            style={{
+              transform: `translateX(${Math.round(
+                trackWidth * (1 - budgetLinePercentage / 100),
+              )}px)`,
+            }}
             data-testid={`${testId}-budget-line`}
           />
         )}
