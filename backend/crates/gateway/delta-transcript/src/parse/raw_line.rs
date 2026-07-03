@@ -3,6 +3,7 @@
 use serde::Deserialize;
 
 use super::raw_attachment::RawAttachment;
+use super::raw_content::RawContent;
 use super::raw_message::RawMessage;
 
 /// The subset of a transcript line Delta reads. Unknown fields are ignored.
@@ -20,6 +21,12 @@ pub(super) struct RawLine {
     pub prompt_id: Option<String>,
     pub timestamp: Option<String>,
     pub message: Option<RawMessage>,
+    /// Top-level `content` present on a `type: "system"` / `subtype: "local_command"`
+    /// line — a slash/local command's captured `<local-command-stdout>` /
+    /// `<local-command-stderr>` output. The legacy shape put this in
+    /// `message.content` on a `type: "user"` line instead; this is the current
+    /// Claude Code shape, which carries no embedded `message`.
+    pub content: Option<RawContent>,
     /// Top-level working directory at this turn. Effectively fixed per session.
     pub cwd: Option<String>,
     /// Top-level git branch at this turn. Can change mid-session.
@@ -31,9 +38,14 @@ pub(super) struct RawLine {
     pub duration_ms: Option<f64>,
     /// Present on `type: "attachment"` lines; carries a queued command's prompt.
     pub attachment: Option<RawAttachment>,
-    /// Set on harness-injected lines (skill bodies, system reminders,
-    /// local-command output) that Claude records as `type: "user"` but are not
-    /// human-authored turns. Drives [`Role::Meta`] classification.
+    /// Set on harness-injected lines (skill bodies, system reminders) that
+    /// Claude records as `type: "user"` but are not human-authored turns.
+    /// Drives [`Role::Meta`] classification. Note: the current Claude Code
+    /// shape records local-command output as a `type: "system"` /
+    /// `subtype: "local_command"` line carrying a top-level [`content`] instead
+    /// (see that field); the legacy shape recorded it as `type: "user"`.
+    ///
+    /// [`content`]: RawLine::content
     #[serde(rename = "isMeta")]
     pub is_meta: Option<bool>,
     /// Set on a synthetic assistant line Claude Code writes when a turn ends on
