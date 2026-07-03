@@ -49,11 +49,15 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
   const branch = message.git_branch;
   const branchDisplay = branch === null ? null : displayBranch(branch);
 
+  // `text-right` on the timestamp (and on the model line below) keeps
+  // wrapped continuation lines flush right when a narrow pane forces a
+  // line break — same rationale as the cwd button, which documents the
+  // wrapping behavior. The popover keeps its own explicit `text-left`.
   const timestampWithPopover = timestamp && (
     <span className="group/info relative">
       <MessageTimestamp
         timestamp={timestamp}
-        className="cursor-help hover:text-fg-muted"
+        className="cursor-help text-right hover:text-fg-muted"
         data-testid="meta-time"
         aria-label="message details"
         tabIndex={0}
@@ -111,14 +115,17 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
           // `type="button"` prevents any surrounding `<form>` from
           // treating this as a submit trigger; the reset button class
           // (`text-inherit font-inherit ...`) inherits typography from
-          // the parent flex container.
+          // the parent flex container. `text-right` overrides the
+          // browser's centered button default so a long path that wraps
+          // keeps its continuation lines flush right under the break
+          // point instead of floating centered.
           <button
             type="button"
             data-testid="meta-cwd"
             onClick={() => openCwd(cwd)}
             title={`Open in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`}
             aria-label={`Open ${cwd} in ${DEFAULT_OPEN_CWD_HANDLER_LABEL}`}
-            className="cursor-pointer rounded-sm text-inherit hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
+            className="cursor-pointer rounded-sm text-right text-inherit hover:bg-surface-sunken focus-visible:bg-surface-sunken focus-visible:outline-none"
           >
             {formatDir(cwd)}
           </button>
@@ -132,7 +139,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
       <div className="flex flex-col items-end">
         {timestampWithPopover}
         {model && (
-          <span data-testid="meta-model">
+          <span className="text-right" data-testid="meta-model">
             {model}
             {responseTime && (
               <>
