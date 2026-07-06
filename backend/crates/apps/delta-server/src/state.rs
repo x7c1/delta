@@ -33,8 +33,12 @@ pub struct AppState {
 
 impl AppState {
     /// Build the shared state from configuration, wiring the Interactor.
-    pub fn build(config: &Config) -> anyhow::Result<Self> {
-        let interactor = delta_bootstrap::build(config)?;
+    ///
+    /// Async because the composition root's boot-time send reconcile (the
+    /// sweep returning restart-orphaned `dispatched` rows to `queued`) runs
+    /// against the freshly-opened store before the state is handed out.
+    pub async fn build(config: &Config) -> anyhow::Result<Self> {
+        let interactor = delta_bootstrap::build(config).await?;
         Ok(Self::from_interactor(interactor, &config.tmux_socket))
     }
 

@@ -1,5 +1,6 @@
 //! Enqueue use-case tests.
 
+mod boot_reconcile_requeues_restart_orphaned_dispatched_sends;
 mod branch_send_creates_child_thread;
 mod branch_send_during_external_turn_is_queued;
 mod branch_send_mid_turn_is_queued_then_dispatched_on_stop;

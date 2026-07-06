@@ -546,7 +546,10 @@ export function useRemoveRepositoryScanRootMutation(
  * The mutation carries the owning `sessionId` alongside the `sendId` so the
  * exact open-send query can be invalidated. A `409` (`send_not_cancellable`)
  * still invalidates: the send already left the queue, so the refetch reconciles
- * the strip either way.
+ * the strip either way. Error *presentation* is the call site's job: this
+ * gateway hook does not know about the app's notification store, so callers
+ * pass an `onError` to `mutate` (see `PendingQueue`) — a refused cancel must
+ * surface as an explained refusal, not a dead button.
  */
 export function useCancelSendMutation(
   client: ApiClient,

@@ -23,14 +23,28 @@
 //!
 //! Turn state lives on each session actor's runtime state
 //! (`SessionRuntime::turn`), alongside that session's pane binding, and is
-//! rebuilt [`TurnState::Idle`] on boot. That is correct by construction: the
-//! pane bindings are also rebuilt empty on boot, so after a server restart
-//! every session is *closed* (its pane, if any, is no longer driven by this
-//! process) — and a closed session cannot have a turn in flight from Delta's
-//! point of view. A session with no actor therefore reads as
-//! [`TurnState::Idle`], which is exactly the state a freshly-(re)opened
-//! session must start in. Persisting the old boolean was in fact a liability: a
-//! stale `turn_active = 1` surviving a restart could defer sends forever.
+//! rebuilt [`TurnState::Idle`] on boot: the pane bindings are also rebuilt
+//! empty on boot, so after a server restart every session is *closed* (its
+//! pane, if any, is no longer driven by this process) — and a closed session
+//! cannot have a turn in flight from Delta's point of view. A session with no
+//! actor therefore reads as [`TurnState::Idle`], which is exactly the state a
+//! freshly-(re)opened session must start in. Persisting the old boolean was
+//! in fact a liability: a stale `turn_active = 1` surviving a restart could
+//! defer sends forever.
+//!
+//! The rebuild is **not** sound in isolation, though: the *send rows* half of
+//! the single-outstanding invariant is persistent. A row that was
+//! `dispatched` when the previous process died would survive into a world
+//! where no turn machine awaits its echo, and — being the oldest `dispatched`
+//! row — would shadow `UserPromptSubmit` correlation for every later send
+//! (each one mismatching against it and requeueing in a loop). The other half
+//! of the invariant is therefore restored at boot: the composition root
+//! sweeps every persisted `dispatched` row back to `queued`
+//! ([`SessionStore::requeue_all_dispatched`]) before any session actor
+//! exists, so rebuilt-Idle turn state and the store agree that nothing is
+//! outstanding.
+//!
+//! [`SessionStore::requeue_all_dispatched`]: crate::ports::SessionStore::requeue_all_dispatched
 //!
 //! ## Orphaned sends
 //!
@@ -232,8 +246,10 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // as `Cancel` — the row is marked `cancelled` in the store via the
         // existing orphan dispatch, and the next queued send dispatches on the
         // following idle-flush. A request targeting a different send id is an
-        // interactor bug (the guard there would have rejected it as
-        // `SendNotCancellable`), so the mismatch arm is flagged anomalous and
+        // interactor bug (the guard there only feeds `Cancel` to the turn
+        // machine for the send `AwaitingEcho` is tracking; every other cancel
+        // outcome — queued flip, ownerless pure transition, conflict — never
+        // emits a turn input), so the mismatch arm is flagged anomalous and
         // converges on a safe no-op rather than orphaning the wrong row.
         (
             S::AwaitingEcho {

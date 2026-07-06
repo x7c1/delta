@@ -597,6 +597,20 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
+    async fn requeue_all_dispatched(&self) -> Result<usize> {
+        let mut g = self.inner.lock().unwrap();
+        let mut requeued = 0;
+        for s in g
+            .sends
+            .iter_mut()
+            .filter(|s| s.status == SendStatus::Dispatched)
+        {
+            s.status = SendStatus::Queued;
+            requeued += 1;
+        }
+        Ok(requeued)
+    }
+
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {
         let g = self.inner.lock().unwrap();
         Ok(g.sends

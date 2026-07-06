@@ -81,7 +81,7 @@ async fn a_new_session_send_round_trips_through_tmux_and_the_fake_binary() {
             ..LaunchConfig::default()
         },
     };
-    let state = AppState::build(&config).expect("build app state");
+    let state = AppState::build(&config).await.expect("build app state");
     // The tail is what ingests the assistant lines the fake writes after the
     // Stop hook — without it only hook-triggered syncs would run.
     let tail = state.spawn_transcript_tail();

@@ -141,6 +141,131 @@ async fn late_echo_after_cancel_is_treated_as_external_input() {
     );
 }
 
+/// Cancelling a `dispatched` row the turn machine holds no claim on (here:
+/// the turn is `Idle` — the ownerless-zombie state a dead process could
+/// leave, normally cleared by the boot reconcile) is a pure state
+/// transition: the row flips to `cancelled`, no keystroke is injected (there
+/// is no composer buffer Delta knows about), and the turn state is
+/// untouched.
+#[tokio::test]
+async fn cancelling_an_ownerless_dispatched_send_is_a_pure_state_transition() {
+    let ix = interactor();
+    let session = SessionId::from("sess-1");
+    ix.seed_session().await;
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // Seed the zombie straight into the store: a `dispatched` row with no
+    // turn machine awaiting its echo (the turn stays Idle).
+    let zombie = ix
+        .store()
+        .enqueue_send(&session, main, None, "zombie", None)
+        .await
+        .unwrap();
+    assert_eq!(zombie.status, SendStatus::Dispatched);
+    assert_eq!(ix.live_state_for(&session).await.turn, TurnState::Idle);
+
+    ix.cancel_send(zombie.id).await.unwrap();
+
+    assert_eq!(
+        ix.store().send(zombie.id).await.unwrap().unwrap().status,
+        SendStatus::Cancelled,
+    );
+    assert!(
+        ix.tmux_fake().keyed.lock().unwrap().is_empty(),
+        "no keystrokes are injected for an ownerless cancel"
+    );
+    assert_eq!(
+        ix.live_state_for(&session).await.turn,
+        TurnState::Idle,
+        "the turn machine is untouched"
+    );
+}
+
+/// Same escape hatch while the turn machine is busy with a DIFFERENT send:
+/// the ownerless row cancels as a pure state transition and the outstanding
+/// dispatch (and its pending keystroke count) is unaffected.
+#[tokio::test]
+async fn ownerless_cancel_leaves_an_unrelated_outstanding_dispatch_alone() {
+    let ix = interactor();
+    let session = SessionId::from("sess-1");
+    ix.seed_session().await;
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // A real outstanding dispatch owns the turn...
+    let (owned, _) = ix.enqueue_send(to(main), "owned", None).await.unwrap();
+    assert_eq!(
+        ix.live_state_for(&session).await.turn,
+        TurnState::AwaitingEcho { send_id: owned.id }
+    );
+    // ...and a zombie `dispatched` row exists beside it (an invariant
+    // violation, seeded store-side).
+    let zombie = ix
+        .store()
+        .enqueue_send(&session, main, None, "zombie", None)
+        .await
+        .unwrap();
+
+    ix.cancel_send(zombie.id).await.unwrap();
+
+    assert_eq!(
+        ix.store().send(zombie.id).await.unwrap().unwrap().status,
+        SendStatus::Cancelled,
+    );
+    assert_eq!(
+        ix.store().send(owned.id).await.unwrap().unwrap().status,
+        SendStatus::Dispatched,
+        "the owned outstanding send is untouched"
+    );
+    assert!(
+        ix.tmux_fake().keyed.lock().unwrap().is_empty(),
+        "no Escape reaches the pane"
+    );
+    assert_eq!(
+        ix.live_state_for(&session).await.turn,
+        TurnState::AwaitingEcho { send_id: owned.id },
+        "the turn machine still awaits the owned send's echo"
+    );
+}
+
+/// The `InFlight` rejection is keyed on the turn *carrying this send's id*,
+/// not on the row's status alone: an echoed send whose user line has not
+/// been ingested yet is still `dispatched` in the store, but its turn is in
+/// flight and owns it — the cancel is a conflict, not an ownerless sweep.
+#[tokio::test]
+async fn cancelling_a_still_dispatched_send_owned_by_an_in_flight_turn_is_a_conflict() {
+    let ix = interactor();
+    let session = SessionId::from("sess-1");
+    ix.seed_session().await;
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    let (send, _) = ix.enqueue_send(to(main), "go", None).await.unwrap();
+    // The echo arrives but its transcript line has NOT been written yet (the
+    // common timing case), so the row stays `dispatched` while the turn
+    // moves to InFlight{Some(send)}.
+    ix.on_user_prompt_submit(submit("go")).await.unwrap();
+    assert_eq!(
+        ix.live_state_for(&session).await.turn,
+        TurnState::InFlight {
+            send_id: Some(send.id)
+        }
+    );
+    assert_eq!(
+        ix.store().send(send.id).await.unwrap().unwrap().status,
+        SendStatus::Dispatched,
+    );
+
+    let err = ix.cancel_send(send.id).await.unwrap_err();
+    assert!(
+        matches!(err, Error::SendNotCancellable(id) if id == send.id),
+        "an in-flight-owned dispatched row is a conflict, got {err:?}"
+    );
+    assert_eq!(
+        ix.store().send(send.id).await.unwrap().unwrap().status,
+        SendStatus::Dispatched,
+        "the row is not swept by the ownerless path"
+    );
+}
+
 /// Cancelling once the turn has moved past `AwaitingEcho` is a conflict:
 /// the echo already arrived, so the turn is owned by its transcript line
 /// and the user reaches for the in-flight interrupt instead.

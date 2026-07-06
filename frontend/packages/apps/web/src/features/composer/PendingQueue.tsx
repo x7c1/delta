@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
-import { useCancelSendMutation } from '@delta/api-client';
+import { ApiError, useCancelSendMutation } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { useNewSessionSend } from './useNewSessionSend';
 import type { PendingEntry } from './usePendingSends';
 
@@ -40,6 +41,7 @@ export function PendingQueue({ entries }: PendingQueueProps) {
   const removeSending = useLiveStore((state) => state.removeSending);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
   const forgetLocalSend = useLiveStore((state) => state.forgetLocalSend);
+  const showError = useNotificationStore((state) => state.showError);
   const retrySpawn = useNewSessionSend();
   const cancelSend = useCancelSendMutation(client);
 
@@ -116,9 +118,11 @@ export function PendingQueue({ entries }: PendingQueueProps) {
               // escape hatch for a send whose echo never arrived (Escape
               // pressed in the TUI to discard the composer buffer leaves
               // no observable signal — the server injects Escape on the
-              // user's behalf and clears the row). A `409` either way is
-              // benign: the refetch the mutation triggers reconciles the
-              // strip.
+              // user's behalf and clears the row). When the server refuses
+              // the cancel, the mutation's refetch reconciles the strip, but
+              // a row that survives the refetch shows a Cancel button that
+              // looks dead unless the refusal is explained — so a failed
+              // cancel also surfaces through the app-wide error snackbar.
               const cancelButton = (
                 <Button
                   size="sm"
@@ -133,10 +137,36 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                     // strip clears together rather than leaving a stuck
                     // `local` chip behind.
                     forgetLocalSend(entry.send.id);
-                    cancelSend.mutate({
-                      sendId: entry.send.id,
-                      sessionId: entry.send.session_id,
-                    });
+                    cancelSend.mutate(
+                      {
+                        sendId: entry.send.id,
+                        sessionId: entry.send.session_id,
+                      },
+                      {
+                        onError: (err: unknown) => {
+                          const title = 'Could not cancel the send';
+                          if (
+                            err instanceof ApiError &&
+                            err.code === 'send_not_cancellable'
+                          ) {
+                            // The server refused: the send already left the
+                            // cancellable window (its prompt submitted or
+                            // its turn is running).
+                            showError(
+                              title,
+                              'The send is no longer cancellable — its prompt has already been submitted.',
+                            );
+                            return;
+                          }
+                          showError(
+                            title,
+                            err instanceof Error
+                              ? err.message
+                              : 'The request failed.',
+                          );
+                        },
+                      },
+                    );
                   }}
                 >
                   Cancel

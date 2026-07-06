@@ -16,6 +16,7 @@ import { ApiClient, queryKeys } from '@delta/api-client';
 import type { Send } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore, type SpawnItem } from '../../store/liveStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { PendingQueue } from './PendingQueue';
 import { usePendingSends, type PendingSurface } from './usePendingSends';
 
@@ -56,6 +57,7 @@ function reset() {
     spawns: [],
     activeTurns: {},
   });
+  useNotificationStore.setState({ errors: [] });
 }
 
 function serverSend(overrides: Partial<Send> = {}): Send {
@@ -191,6 +193,47 @@ describe('PendingQueue server sends', () => {
     });
     expect(cancelUrls).toEqual(['/api/sends/42/cancel']);
     expect(screen.queryAllByTestId('pending-item')).toHaveLength(0);
+  });
+
+  it('surfaces a refused cancel through the notification store instead of failing silently', async () => {
+    // The server refuses the cancel (`409 send_not_cancellable`) — e.g. the
+    // echo already arrived so the turn owns the send. Before this test's
+    // feature, the mutation only invalidated the open-send list, so the
+    // refusal produced no user-visible feedback and the Cancel button read
+    // as dead. Now the failure pushes an explanation onto the app-wide
+    // notification store (rendered by `ErrorSnackbar`).
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [serverSend({ id: 7, text: 'unyielding', status: 'dispatched' })],
+          turn: { state: 'in_flight', send_id: 7, thread_id: 1 },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/cancel', () =>
+        HttpResponse.json(
+          { error: 'send 7 is not cancellable', code: 'send_not_cancellable' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('unyielding');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(useNotificationStore.getState().errors).toHaveLength(1);
+    });
+    const [notice] = useNotificationStore.getState().errors;
+    expect(notice.title).toBe('Could not cancel the send');
+    expect(notice.detail).toMatch(/no longer cancellable/);
+    // The chip stays (the refetch still reports the row): the refusal is
+    // explained rather than looking like a silently dead button.
+    expect(screen.getByText('unyielding')).toBeInTheDocument();
   });
 
   it('shows only the active thread’s sends', () => {

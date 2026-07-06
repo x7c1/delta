@@ -58,10 +58,10 @@ pub enum Error {
     InvalidQuestionAnswer(String),
 
     /// A cancel arrived for a send that can no longer be cancelled: the id is
-    /// unknown, or the send has already left the `queued` state (it was
-    /// dispatched into the pane, matched a transcript line, or was already
-    /// cancelled). Surfaced as `409` so the browser drops the cancel control
-    /// and reconciles its pending strip from the next refetch.
+    /// unknown, the send is already terminal (matched a transcript line, or
+    /// was already cancelled), or its echo has already arrived (the turn
+    /// carries it in flight). Surfaced as `409` so the browser drops the
+    /// cancel control and reconciles its pending strip from the next refetch.
     #[error("send {0} is not cancellable")]
     SendNotCancellable(i64),
 

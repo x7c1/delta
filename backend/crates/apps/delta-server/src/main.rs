@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
     // generic anyhow trace. Print the inner store error to stderr verbatim
     // (its `Display` already names `make reset`) and exit non-zero; every
     // other failure keeps the default `anyhow` propagation.
-    let state = match AppState::build(&config) {
+    let state = match AppState::build(&config).await {
         Ok(state) => state,
         Err(err) => {
             if let Some(delta_bootstrap::Error::Store(

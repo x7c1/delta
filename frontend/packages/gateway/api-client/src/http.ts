@@ -62,10 +62,12 @@ export interface ApiClientOptions {
  * from the UI (already answered, its turn ended, or no live pane). Callers
  * branch on this to keep the answer-in-the-terminal fallback.
  *
- * `send_not_cancellable` means a queued send can no longer be cancelled (it has
- * already been dispatched into the pane, matched a transcript line, or was
- * already cancelled, or never existed). Callers treat it as benign and let the
- * pending strip reconcile from the next refetch.
+ * `send_not_cancellable` means a send can no longer be cancelled: it never
+ * existed, is already terminal (matched a transcript line, or already
+ * cancelled), or is dispatched but its echo already arrived so the in-flight
+ * turn owns it. Callers may surface the refusal to the user (e.g.
+ * `PendingQueue` routes it through `onError` to the notification store) and
+ * let the pending strip reconcile from the next refetch.
  *
  * `scan_root_duplicate` means a repository scan root was registered twice with
  * the same path. The Settings dialog shows an inline "already registered" hint
@@ -243,12 +245,14 @@ export class ApiClient {
   }
 
   /**
-   * `POST /api/sends/{id}/cancel` — cancel a still-queued send (204) before it
-   * is dispatched into the pane. The row flips to `cancelled`, so it is skipped
-   * by the idle dispatch path and drops out of the open-send list. A `409`
-   * (`send_not_cancellable`) means the send has already left the `queued` state
-   * (dispatched, matched, already cancelled, or unknown) — surfaced as
-   * {@link ApiError}; the caller lets the pending strip reconcile from a refetch.
+   * `POST /api/sends/{id}/cancel` — cancel a `queued` or `dispatched` send
+   * (204). The row flips to `cancelled` and drops out of the open-send list;
+   * a dispatched send the turn machine is awaiting is discarded with an
+   * `Escape` injection into the pane. A `409` (`send_not_cancellable`) fires
+   * only when the send never existed, is already terminal (matched or
+   * cancelled), or its echo already arrived (the in-flight turn owns it) —
+   * surfaced as {@link ApiError} for the caller to show before the pending
+   * strip reconciles from a refetch.
    */
   cancelSend(sendId: number): Promise<void> {
     return this.requestNoContent(`/api/sends/${sendId}/cancel`, {

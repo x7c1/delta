@@ -977,6 +977,17 @@ impl SessionStore for SqliteStore {
         Ok(())
     }
 
+    async fn requeue_all_dispatched(&self) -> std::result::Result<usize, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE send SET status = 'queued' WHERE status = 'dispatched'",
+                [],
+            )
+            .map_err(Error::from)?;
+        Ok(affected)
+    }
+
     async fn head_dispatched_send(
         &self,
         session_id: &SessionId,

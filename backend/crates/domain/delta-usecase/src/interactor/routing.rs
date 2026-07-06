@@ -545,18 +545,21 @@ where
     /// — and the cancel then executes on that session's actor, ordered
     /// against its dispatch path.
     ///
-    /// A `dispatched` cancel injects a single `Escape` into the pane (the
-    /// same gesture [`cancel_question`](Self::cancel_question) uses) and
-    /// promotes any queued send behind the cancelled head through the
-    /// existing idle-flush path.
+    /// Cancelling a `dispatched` send the turn machine is awaiting injects a
+    /// single `Escape` into the pane (the same gesture
+    /// [`cancel_question`](Self::cancel_question) uses) and promotes any
+    /// queued send behind the cancelled head through the existing idle-flush
+    /// path. A `dispatched` row the turn machine holds no claim on is
+    /// cancelled as a pure state transition — no keystrokes, no turn input
+    /// (see the module doc on ownerless rows).
     ///
     /// Returns [`Error::SendNotCancellable`] (`409`) when the send no longer
-    /// exists, has already left `queued`/`dispatched` (matched a transcript
-    /// line, or already cancelled), or is `dispatched` but the turn has moved
-    /// past `AwaitingEcho` — the echo already landed, so the turn is owned
-    /// by the in-flight line and the user reaches for the in-flight
-    /// interrupt instead. The browser drops its cancel control and
-    /// reconciles from the next refetch on this error.
+    /// exists, is already terminal (matched a transcript line, or already
+    /// cancelled), or is `dispatched` but its echo has already arrived — the
+    /// turn carries it `InFlight`, owned by its transcript line, and the
+    /// user reaches for the in-flight interrupt instead. The browser drops
+    /// its cancel control and reconciles from the next refetch on this
+    /// error.
     pub async fn cancel_send(&self, send_id: i64) -> Result<()> {
         let Some(send) = self.store.send(send_id).await? else {
             return Err(Error::SendNotCancellable(send_id));

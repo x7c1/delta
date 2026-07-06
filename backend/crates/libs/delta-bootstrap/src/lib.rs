@@ -110,8 +110,22 @@ impl Config {
 /// needed here — it is learned from the first `UserPromptSubmit` hook. The
 /// stateless [`Tmux`] driver mints a fresh tmux session per spawn, so no fixed
 /// session name is configured.
-pub fn build(config: &Config) -> Result<AppInteractor> {
+///
+/// Boot-time send reconcile: every `dispatched` row surviving from the
+/// previous process is returned to `queued` here, before any session actor
+/// exists. See [`SessionStore::requeue_all_dispatched`] for why the sweep is
+/// exact at that moment and why the rows are requeued rather than cancelled.
+///
+/// [`SessionStore::requeue_all_dispatched`]: delta_usecase::SessionStore::requeue_all_dispatched
+pub async fn build(config: &Config) -> Result<AppInteractor> {
     let store = SqliteStore::open(&config.database_path)?;
+    let requeued = delta_usecase::SessionStore::requeue_all_dispatched(&store).await?;
+    if requeued > 0 {
+        tracing::info!(
+            requeued,
+            "requeued dispatched sends orphaned by the previous process"
+        );
+    }
     let transcript = JsonlTranscript::new();
     let tmux = Tmux::new(config.tmux_socket.clone());
     let workspace = FsWorkspace::new();
@@ -149,8 +163,67 @@ mod tests {
         }
     }
 
-    #[test]
-    fn build_wires_an_interactor_with_in_memory_store() {
-        assert!(build(&test_config()).is_ok());
+    #[tokio::test]
+    async fn build_wires_an_interactor_with_in_memory_store() {
+        assert!(build(&test_config()).await.is_ok());
+    }
+
+    /// The boot-time send reconcile is wired into [`build`] itself, not just
+    /// available on the store: a row a previous process left `dispatched` is
+    /// `queued` again once `build` has run against the same database file.
+    /// (The store-level sweep semantics are pinned in `delta-sqlite`; this
+    /// pins the composition root actually invoking it at startup — the sweep
+    /// being skipped would reintroduce the restart zombie while every
+    /// store-level test stayed green.)
+    #[tokio::test]
+    async fn build_requeues_dispatched_sends_left_by_a_previous_process() {
+        use delta_model::SendStatus;
+        use delta_usecase::{NewSession, SessionStore};
+
+        let dir = std::env::temp_dir().join(format!("delta-bootstrap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("boot-reconcile.sqlite");
+        let _ = std::fs::remove_file(&path);
+        let path_str = path.to_str().unwrap().to_owned();
+
+        // The "previous process": register a session, leave one send
+        // `dispatched` (what `enqueue_send` writes), and drop the connection.
+        let stale_id = {
+            let store = SqliteStore::open(&path_str).unwrap();
+            let (session, main) = store
+                .register_session(NewSession {
+                    id: "sess-1".into(),
+                    cwd: "/work".into(),
+                    transcript_path: "/tmp/t.jsonl".into(),
+                    branch_at_launch: None,
+                    repo_root: None,
+                    repository_display_name: None,
+                })
+                .await
+                .unwrap();
+            let stale = store
+                .enqueue_send(&session.id, main, None, "stale prompt", None)
+                .await
+                .unwrap();
+            assert_eq!(stale.status, SendStatus::Dispatched);
+            stale.id
+        };
+
+        // The next process boots against the same file. The returned
+        // interactor is dropped at the end of the statement, releasing its
+        // connection before the verification re-open below.
+        let config = Config {
+            database_path: path_str.clone(),
+            ..test_config()
+        };
+        build(&config).await.unwrap();
+
+        let store = SqliteStore::open(&path_str).unwrap();
+        let stale = store.send(stale_id).await.unwrap().unwrap();
+        assert_eq!(
+            stale.status,
+            SendStatus::Queued,
+            "boot returns the orphaned dispatched row to queued"
+        );
     }
 }

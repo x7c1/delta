@@ -523,21 +523,24 @@ pub(crate) async fn create_send(
 ///
 /// A send composed while the assistant's turn is in flight is held in the
 /// `queued` state until the session goes idle; this abandons such a send
-/// before that dispatch. A `dispatched` send whose echo has not arrived
-/// (typically the user pressed `Escape` in the TUI to discard the composer
-/// buffer, leaving no signal Delta can observe) is cancelled by injecting a
-/// single `Escape` keystroke into the pane and dropping the row to
-/// `cancelled` — any send queued behind the cancelled head then promotes
-/// through the existing idle-flush. The row flips to `cancelled` either way
-/// and drops out of the open-send list (the browser refetches that list to
-/// clear the chip — no event is broadcast).
+/// before that dispatch. A `dispatched` send the turn machine is awaiting
+/// (its echo has not arrived — typically the user pressed `Escape` in the
+/// TUI to discard the composer buffer, leaving no signal Delta can observe)
+/// is cancelled by injecting a single `Escape` keystroke into the pane and
+/// dropping the row to `cancelled` — any send queued behind the cancelled
+/// head then promotes through the existing idle-flush. A `dispatched` row
+/// the turn machine holds no claim on is cancelled as a pure state
+/// transition — no keystroke is injected and the turn machine is untouched.
+/// The row flips to `cancelled` in every success case and drops out of the
+/// open-send list (the browser refetches that list to clear the chip — no
+/// event is broadcast).
 ///
 /// Replies `409` with code `send_not_cancellable` when the send no longer
-/// exists, has already left `queued`/`dispatched` (matched a transcript
-/// line, or already cancelled), or is `dispatched` but the turn has moved
-/// past `AwaitingEcho` (the echo already landed; the user reaches for the
-/// in-flight interrupt instead). The browser drops its cancel control and
-/// reconciles from the refetch on this code.
+/// exists, is already terminal (matched a transcript line, or already
+/// cancelled), or is `dispatched` but its echo has already arrived (the
+/// turn carries it in flight; the user reaches for the in-flight interrupt
+/// instead). The browser drops its cancel control and reconciles from the
+/// refetch on this code.
 pub(crate) async fn cancel_send(
     State(state): State<AppState>,
     Path(id): Path<i64>,

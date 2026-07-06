@@ -143,6 +143,68 @@ async fn requeue_send_returns_a_dispatched_send_to_queued() {
 }
 
 #[tokio::test]
+async fn requeue_all_dispatched_sweeps_every_session_and_spares_terminal_rows() {
+    // The boot-time reconcile: turn state is rebuilt Idle on boot, so every
+    // persisted `dispatched` row is an orphan — the sweep returns each of
+    // them to `queued` across ALL sessions, while terminal (`matched` /
+    // `cancelled`) rows stay untouched.
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (first, first_main) = store
+        .register_session(new_session_with("sess-1"))
+        .await
+        .unwrap();
+    let (second, second_main) = store
+        .register_session(new_session_with("sess-2"))
+        .await
+        .unwrap();
+
+    // One dispatched orphan per session (`enqueue_send` writes `dispatched`).
+    let orphan_a = store
+        .enqueue_send(&first.id, first_main, None, "orphan a", None)
+        .await
+        .unwrap();
+    let orphan_b = store
+        .enqueue_send(&second.id, second_main, None, "orphan b", None)
+        .await
+        .unwrap();
+
+    // Terminal rows the sweep must not touch.
+    let matched = store
+        .enqueue_send(&first.id, first_main, None, "matched", None)
+        .await
+        .unwrap();
+    store
+        .mark_send_matched(matched.id, &MessageUuid::from("u-m"))
+        .await
+        .unwrap();
+    let cancelled = store
+        .enqueue_send(&second.id, second_main, None, "cancelled", None)
+        .await
+        .unwrap();
+    store.cancel_send(cancelled.id).await.unwrap();
+
+    let requeued = store.requeue_all_dispatched().await.unwrap();
+    assert_eq!(requeued, 2, "exactly the two dispatched orphans transition");
+
+    for (id, session) in [(orphan_a.id, &first.id), (orphan_b.id, &second.id)] {
+        let send = store.send(id).await.unwrap().unwrap();
+        assert_eq!(send.status, SendStatus::Queued);
+        assert!(
+            store.head_dispatched_send(session).await.unwrap().is_none(),
+            "no dispatched row survives the sweep"
+        );
+    }
+    assert_eq!(
+        store.send(matched.id).await.unwrap().unwrap().status,
+        SendStatus::Matched,
+    );
+    assert_eq!(
+        store.send(cancelled.id).await.unwrap().unwrap().status,
+        SendStatus::Cancelled,
+    );
+}
+
+#[tokio::test]
 async fn message_upsert_and_thread_view() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

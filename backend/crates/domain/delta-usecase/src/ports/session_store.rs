@@ -308,6 +308,23 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// next idle, so a composed message is never silently lost.
     async fn requeue_send(&self, id: i64) -> Result<()>;
 
+    /// Return **every** `dispatched` send — across all sessions — to `queued`,
+    /// returning how many rows transitioned. Rows in any other status are
+    /// untouched.
+    ///
+    /// The boot-time half of the single-outstanding invariant: turn state is
+    /// runtime-only and rebuilt `Idle` when the server starts, but `send` rows
+    /// are persistent — so a row that was `dispatched` when the previous
+    /// process died has no turn machine awaiting its echo and would shadow
+    /// [`Self::head_dispatched_send`] correlation forever. The composition
+    /// root calls this exactly once at startup, before any session actor
+    /// exists (which is what makes the blanket sweep exact: at that moment
+    /// every `dispatched` row is an orphan by definition). Requeued rather
+    /// than cancelled for the same reason as [`Self::requeue_send`]: a
+    /// composed message is never silently lost — it re-dispatches intact when
+    /// its session is next open and idle.
+    async fn requeue_all_dispatched(&self) -> Result<usize>;
+
     /// The outstanding dispatched send for a session, if any.
     ///
     /// Under the single-outstanding dispatch rule at most one `dispatched` row
@@ -693,6 +710,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn requeue_send(&self, id: i64) -> Result<()> {
         (**self).requeue_send(id).await
+    }
+
+    async fn requeue_all_dispatched(&self) -> Result<usize> {
+        (**self).requeue_all_dispatched().await
     }
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {

@@ -373,10 +373,13 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
-    // Cancel a still-queued send. Mirrors the server's guarded transition: only
-    // a `queued` row cancels (it drops out of the open-send list on the next
-    // `GET .../sends`); anything else is a `409` with the stable
-    // `send_not_cancellable` code.
+    // Cancel a send. The real server cancels `queued` and `dispatched` rows
+    // (the row drops out of the open-send list on the next `GET .../sends`)
+    // and replies `409` with the stable `send_not_cancellable` code only for
+    // an unknown id, an already-terminal row, or a dispatched row whose echo
+    // already arrived. The mock has no turn machine to distinguish those
+    // `dispatched` sub-cases, so it models only the queued path and 409s
+    // everything else.
     http.post('*/api/sends/:id/cancel', ({ params }) => {
       const id = Number(params.id);
       const send = store.sends.find((s) => s.id === id);
