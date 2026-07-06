@@ -116,24 +116,48 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // field docstring on [`RawLine`] for why it must classify away from `User`.
     let is_compact_summary = raw.is_compact_summary == Some(true);
 
-    // A slash/local command (e.g. `/review-pr`) records its captured output as
-    // a `type: "user"` line WITHOUT `isMeta` — only the leading caveat line of
-    // the group is flagged. So content-detect the `<local-command-stdout>` /
-    // `<local-command-stderr>` markers and fold that output to `Role::Meta` too,
-    // matching the caveat, instead of rendering it as a human user turn. (The
-    // bare command-name line of the same group carries no marker; it is folded
-    // by the attribution layer, which groups it by the caveat's `promptId`.)
-    // Detected here, at line-classification time, so the fold is robust even in
-    // a sync window that did not include the caveat line.
-    let is_local_command_output = raw
-        .message
-        .as_ref()
-        .and_then(|m| m.content.as_ref())
-        .and_then(|c| match c {
-            RawContent::Text(text) => Some(text.as_str()),
-            RawContent::Blocks(_) => None,
-        })
-        .is_some_and(|text| is_local_command_output_marker(text.trim_start()));
+    // The current Claude Code shape records a slash/local command's captured
+    // output as a `type: "system"` / `subtype: "local_command"` line whose
+    // payload is a TOP-LEVEL `content` string (no embedded `message`, no
+    // `promptId`). The legacy shape recorded it as a `type: "user"` line with
+    // the payload in `message.content`. Detect the current shape by subtype.
+    let is_local_command_subtype = raw.line_type.as_deref() == Some("system")
+        && raw.subtype.as_deref() == Some("local_command");
+
+    // The model that produced this line lives on the embedded message
+    // (`message.model`), present on assistant lines only. Take it before the
+    // message is moved out for content below.
+    let model = raw.message.as_ref().and_then(|m| m.model.clone());
+
+    // Resolve the line's effective content: prefer the embedded
+    // `message.content`, and fall back to the top-level `content` ONLY for the
+    // local_command subtype. Other `type: "system"` subtypes (`away_summary`,
+    // `informational`, `scheduled_task_fire`, …) carry a top-level `content`
+    // Delta does not render, so they keep producing empty content, as today.
+    let message_content = raw.message.and_then(|m| m.content);
+    let effective_content = message_content.or(if is_local_command_subtype {
+        raw.content
+    } else {
+        None
+    });
+
+    // A slash/local command (e.g. `/review-pr`) records its captured output
+    // WITHOUT `isMeta` — only the leading caveat line of the group is flagged.
+    // So fold to `Role::Meta` when either the current-shape subtype matches or
+    // the content's leading token is a `<local-command-stdout>` /
+    // `<local-command-stderr>` marker (the legacy shape), matching the caveat
+    // instead of rendering it as a human user turn. (The bare command-name line
+    // of the same group carries no marker; it is folded by the attribution
+    // layer, which groups it by the caveat's `promptId`.) Detected here, at
+    // line-classification time, so the fold is robust even in a sync window that
+    // did not include the caveat line.
+    let effective_leading_text = match &effective_content {
+        Some(RawContent::Text(text)) => Some(text.as_str()),
+        Some(RawContent::Blocks(_)) | None => None,
+    };
+    let is_local_command_output = is_local_command_subtype
+        || effective_leading_text
+            .is_some_and(|text| is_local_command_output_marker(text.trim_start()));
 
     // `isApiErrorMessage` marks a synthetic assistant line Claude writes when a
     // turn ends on an API error (usage/session limit, rate limit, any API
@@ -155,15 +179,10 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
             .unwrap_or(Role::Other)
     };
 
-    // The model that produced this line lives on the embedded message
-    // (`message.model`), present on assistant lines only. Take it before the
-    // message is moved out for content below.
-    let model = raw.message.as_ref().and_then(|m| m.model.clone());
-
     let content = if let Some(prompt) = queued_prompt {
         vec![ContentBlock::Text { text: prompt }]
     } else {
-        match raw.message.and_then(|m| m.content) {
+        match effective_content {
             Some(RawContent::Text(text)) => vec![ContentBlock::Text { text }],
             Some(RawContent::Blocks(blocks)) => {
                 blocks.into_iter().map(ContentBlock::from).collect()
@@ -364,6 +383,40 @@ mod tests {
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::Meta);
         assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn current_shape_local_command_system_line_folds_to_meta_and_surfaces_content() {
+        // CURRENT SHAPE (Claude Code ~v2.1.199): a slash/local command records
+        // its captured output as a single `type: "system"` /
+        // `subtype: "local_command"` line whose payload is a TOP-LEVEL `content`
+        // string — no embedded `message`, no `promptId`. It must fold to
+        // `Role::Meta` AND surface that content (the dropped-content bug: the
+        // parser previously only read `message.content`, so this rendered as
+        // nothing).
+        let line = r#"{"uuid":"s1","type":"system","subtype":"local_command","content":"<local-command-stdout>\nPENDING review created.\n</local-command-stdout>","level":"info","isMeta":false}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Meta);
+        assert!(
+            msg.flatten_text()
+                .as_deref()
+                .is_some_and(|text| text.contains("PENDING review created.")),
+            "the local_command line's top-level content must be surfaced, not dropped"
+        );
+    }
+
+    #[test]
+    fn non_local_command_system_subtype_with_top_level_content_stays_contentless() {
+        // Guard against surfacing noise: a `type: "system"` line of some OTHER
+        // subtype (e.g. `away_summary`) also carries a top-level `content`, but
+        // Delta does not render it. Only the `local_command` subtype falls back
+        // to the top-level `content`; every other system subtype keeps producing
+        // empty content and rendering nothing, exactly as before.
+        let line = r#"{"uuid":"s2","type":"system","subtype":"away_summary","content":"you were away","level":"info"}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::System);
+        assert!(msg.content.is_empty());
+        assert_eq!(msg.flatten_text(), None);
     }
 
     #[test]
