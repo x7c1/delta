@@ -173,8 +173,14 @@ pub(in crate::interactor) enum SessionInput {
         reply: Reply<(Vec<Message>, Vec<SessionEvent>)>,
     },
     /// Dispatch the held first prompt if this session's resume is ready and
-    /// has settled as of `now`.
-    ResumeTick { now: Instant, reply: Reply<()> },
+    /// has settled as of `now` — or, when the settled resume held no prompt,
+    /// flush the session's oldest `queued` send (deferred by the resume
+    /// window). Replies with the [`SessionEvent::SendDispatched`] to
+    /// broadcast when that flush promoted a send.
+    ResumeTick {
+        now: Instant,
+        reply: Reply<Option<SessionEvent>>,
+    },
     /// Reap this session's launch (fresh spawn or resume) if it never became
     /// ready before its deadline as of `now`.
     ReapTick {

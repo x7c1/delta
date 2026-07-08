@@ -129,7 +129,9 @@ impl AppState {
     ///   prompt itself, because that hook blocks `claude` until it returns and a
     ///   keystroke sent then is lost to a still-blocked TUI. Dispatching here, a
     ///   beat after the hook returned, lands the keystroke once `claude` is
-    ///   input-ready.
+    ///   input-ready. A settled resume with no held prompt flushes the session's
+    ///   oldest `queued` send instead, broadcasting the resulting
+    ///   [`SessionEvent::SendDispatched`].
     /// - **Launch watchdog**: reaps any fresh spawn that never bound, and any
     ///   resumed session that never became ready, before its deadline —
     ///   broadcasting the resulting [`SessionEvent::SpawnFailed`]s, so a launch
@@ -158,11 +160,22 @@ impl AppState {
                 // settled. This runs outside the (blocking) SessionStart hook
                 // handler, so by now `claude` has returned from the hook and is
                 // input-ready — the keystroke that would have been lost if typed
-                // inside the handler submits here. `Instant::now()` is the live
-                // clock; tests drive `dispatch_ready_resumes` directly with an
-                // injected `now`.
-                if let Err(err) = interactor.dispatch_ready_resumes(now).await {
-                    tracing::warn!(error = %err, "resume dispatch failed");
+                // inside the handler submits here. A settled resume with no held
+                // prompt flushes its session's oldest `queued` send instead
+                // (queued dispatch is deferred while the resume window is open);
+                // broadcast the resulting `SendDispatched` events so the browser
+                // sees each queued→dispatched transition. `Instant::now()` is the
+                // live clock; tests drive `dispatch_ready_resumes` directly with
+                // an injected `now`.
+                match interactor.dispatch_ready_resumes(now).await {
+                    Ok(dispatched_events) => {
+                        for event in dispatched_events {
+                            let _ = events.send(event);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "resume dispatch failed");
+                    }
                 }
                 // Watchdog: reap fresh spawns that never bound and resumes that
                 // never became ready before their deadlines. `Instant::now()` is

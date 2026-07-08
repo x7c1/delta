@@ -18,4 +18,5 @@ mod outstanding_send_matches_and_marks_send;
 mod plain_send_mid_turn_is_queued;
 mod queued_branch_send_dispatches_after_interrupt;
 mod queued_send_dispatches_after_api_error;
+mod resume_window_defers_queued_send_until_settle;
 mod send_to_closed_session_with_missing_transcript_writes_no_send_row;

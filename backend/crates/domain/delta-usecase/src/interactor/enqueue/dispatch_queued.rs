@@ -29,13 +29,16 @@ where
     /// the state returns to `Idle` (via the `Stop`/interrupt triggers calling
     /// back in here).
     ///
-    /// A no-op (returning `None`) when the turn is not idle, there is no
-    /// queued send, or the session has no live pane (closed) — in which case
-    /// the send stays `queued` and is dispatched the next time the session is
-    /// open and idle (see `enqueue_into_open`'s idle-flush). Promotes before
-    /// dispatch so the outstanding row is in place when the hook fires; on a
-    /// dispatch failure the `DispatchFailed` turn input cancels the row so a
-    /// failed send cannot wedge the queue.
+    /// A no-op (returning `None`) when the turn is not idle, the session is
+    /// still inside its resume-readiness window, there is no queued send, or
+    /// the session has no live pane (closed) — in which case the send stays
+    /// `queued` and is dispatched by the next trigger that reaches this
+    /// method: a turn end (`Stop`), an interrupt ingest, a resume settle
+    /// (`dispatch_ready_resume`), a dispatched-send cancellation, or
+    /// `enqueue_into_open`'s idle-flush. Promotes before dispatch so the
+    /// outstanding row is in place when the hook fires; on a dispatch failure
+    /// the `DispatchFailed` turn input cancels the row so a failed send
+    /// cannot wedge the queue.
     ///
     /// Returns the [`SessionEvent::SendDispatched`] to broadcast when a send
     /// was promoted, so the browser sees the queued→dispatched transition
@@ -44,6 +47,15 @@ where
         &mut self,
     ) -> Result<Option<SessionEvent>> {
         if self.state.turn() != TurnState::Idle {
+            return Ok(None);
+        }
+        // Resume-readiness guard: while the session is inside its resume
+        // window the pane is bound but `claude` is not yet accepting input, so
+        // a keystroke typed now would be silently lost (no `UserPromptSubmit`
+        // fires and the promoted row would be stuck awaiting an echo that
+        // never comes). Defer instead — a row deferred here is picked up at
+        // resume settle, when `dispatch_ready_resume` calls back in.
+        if self.state.is_resuming() {
             return Ok(None);
         }
         let Some(send) = self.store.next_queued_send(self.id).await? else {

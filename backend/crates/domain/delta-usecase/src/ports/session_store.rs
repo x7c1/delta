@@ -304,8 +304,11 @@ pub trait SessionStore: std::marker::Send + Sync {
     ///
     /// Used when the turn state machine orphans an outstanding send whose echo
     /// never arrived (see `OrphanedSend::Requeue`): the row keeps its
-    /// thread/branch/quote semantics and re-dispatches when the session is
-    /// next idle, so a composed message is never silently lost.
+    /// thread/branch/quote semantics and re-dispatches on the next trigger
+    /// that finds the session open and idle — a turn end, an interrupt
+    /// ingest, a resume settle, or the enqueue idle-flush (see the use case's
+    /// `dispatch_queued_send`) — so a composed message is never silently
+    /// lost.
     async fn requeue_send(&self, id: i64) -> Result<()>;
 
     /// Return **every** `dispatched` send — across all sessions — to `queued`,
@@ -321,8 +324,9 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// exists (which is what makes the blanket sweep exact: at that moment
     /// every `dispatched` row is an orphan by definition). Requeued rather
     /// than cancelled for the same reason as [`Self::requeue_send`]: a
-    /// composed message is never silently lost — it re-dispatches intact when
-    /// its session is next open and idle.
+    /// composed message is never silently lost — it re-dispatches intact via
+    /// the same triggers, the first of which after a restart is typically the
+    /// settle of the session's next resume.
     async fn requeue_all_dispatched(&self) -> Result<usize>;
 
     /// The outstanding dispatched send for a session, if any.

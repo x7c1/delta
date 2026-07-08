@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -41,6 +41,17 @@ where
     /// failure is logged rather than propagated, so one pane's send failure
     /// cannot strand the other sessions' ticks.
     ///
+    /// Settling is also what releases any send deferred by the resume window:
+    /// `dispatch_queued_send` is a no-op while the resuming entry exists (a
+    /// keystroke typed into the not-yet-input-ready pane would be lost), so a
+    /// `queued` row present at settle — e.g. one requeued by the boot-time
+    /// send reconcile — is flushed here. With a held first prompt the turn
+    /// machine is already `AwaitingEcho` for that prompt, so the queued row
+    /// waits its turn and follows via the turn-end trigger instead; without
+    /// one the session is idle and the row dispatches now. The returned
+    /// [`SessionEvent::SendDispatched`], if any, is broadcast by the tick's
+    /// caller so the browser sees the queued→dispatched transition.
+    ///
     /// `now` is injected (rather than read here) so the dispatch is deterministic
     /// under test, mirroring the watchdog reap: the server loop passes
     /// `Instant::now()`, while tests advance a controlled instant.
@@ -49,17 +60,34 @@ where
     pub(in crate::interactor) async fn dispatch_ready_resume(
         &mut self,
         now: Instant,
-    ) -> Result<()> {
+    ) -> Result<Option<SessionEvent>> {
         let Some(resuming) = self.state.take_ready_for_dispatch(now) else {
-            return Ok(());
+            return Ok(None);
         };
 
         let Some(text) = resuming.held_prompt else {
             tracing::info!(
                 session_id = %self.id,
-                "resume settled with no held first prompt; nothing to dispatch"
+                "resume settled with no held first prompt; flushing any queued send"
             );
-            return Ok(());
+            // The resuming entry is gone and the turn is idle, so a send that
+            // was deferred by the resume window (or left `queued` by the
+            // boot-time reconcile) dispatches now. A dispatch failure is
+            // logged rather than propagated, mirroring the held-prompt path
+            // below: one pane's send failure must not strand the other
+            // sessions' ticks (the failed row was already cancelled inside
+            // `dispatch_queued_send`).
+            return match self.dispatch_queued_send().await {
+                Ok(event) => Ok(event),
+                Err(err) => {
+                    tracing::warn!(
+                        session_id = %self.id,
+                        error = %err,
+                        "failed to flush a queued send at resume settle"
+                    );
+                    Ok(None)
+                }
+            };
         };
 
         tracing::info!(
@@ -83,6 +111,11 @@ where
                 .apply_turn_input(crate::turn::TurnInput::DispatchFailed)
                 .await;
         }
-        Ok(())
+        // No queued-send flush here: on success the held prompt's turn
+        // machine is `AwaitingEcho`, so a pre-existing `queued` row stays
+        // queued and follows via the turn-end trigger once this prompt's turn
+        // completes; on failure the pane just proved undeliverable, so the
+        // row waits for a later trigger rather than failing right behind it.
+        Ok(None)
     }
 }

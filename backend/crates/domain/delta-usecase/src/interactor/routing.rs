@@ -616,12 +616,19 @@ where
     }
 
     /// Dispatch the held first prompt of every resume that is ready *and* has
-    /// settled, on the background tick (see the `ResumeTick` input docs).
+    /// settled, on the background tick (see the `ResumeTick` input docs). A
+    /// settled resume with no held prompt instead flushes its session's
+    /// oldest `queued` send — the resume window defers queued dispatch, and
+    /// this settle is what releases it.
+    ///
+    /// Returns the [`SessionEvent::SendDispatched`]s those flushes produced,
+    /// for the caller to broadcast so the browser sees each
+    /// queued→dispatched transition.
     ///
     /// `now` is injected (rather than read here) so the dispatch is
     /// deterministic under test: the server loop passes `Instant::now()`,
     /// while tests advance a controlled instant.
-    pub async fn dispatch_ready_resumes(&self, now: Instant) -> Result<()> {
+    pub async fn dispatch_ready_resumes(&self, now: Instant) -> Result<Vec<SessionEvent>> {
         let mut pending = Vec::new();
         for id in self.sessions.ids() {
             let (tx, rx) = oneshot::channel();
@@ -632,11 +639,12 @@ where
                 pending.push(rx);
             }
         }
+        let mut events = Vec::new();
         for rx in pending {
             let Ok(result) = rx.await else { continue };
-            result?;
+            events.extend(result?);
         }
-        Ok(())
+        Ok(events)
     }
 
     /// Reap launches that never became ready before their deadline (the
