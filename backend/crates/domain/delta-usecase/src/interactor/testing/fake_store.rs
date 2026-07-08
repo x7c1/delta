@@ -518,6 +518,7 @@ impl SessionStore for FakeStore {
             status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
+            restored_at: None,
         };
         g.sends.push(send.clone());
         Ok(send)
@@ -543,6 +544,7 @@ impl SessionStore for FakeStore {
             status: SendStatus::Queued,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
+            restored_at: None,
         };
         g.sends.push(send.clone());
         Ok(send)
@@ -557,7 +559,13 @@ impl SessionStore for FakeStore {
         let g = self.inner.lock().unwrap();
         Ok(g.sends
             .iter()
-            .filter(|s| &s.session_id == session_id && s.status == SendStatus::Queued)
+            .filter(|s| {
+                &s.session_id == session_id
+                    && s.status == SendStatus::Queued
+                    // Restored rows never dispatch automatically; they wait
+                    // for an explicit release, mirroring the SQL filter.
+                    && s.restored_at.is_none()
+            })
             .min_by_key(|s| s.id)
             .cloned())
     }
@@ -597,18 +605,33 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn requeue_all_dispatched(&self) -> Result<usize> {
+    async fn restore_all_dispatched(&self) -> Result<usize> {
         let mut g = self.inner.lock().unwrap();
-        let mut requeued = 0;
+        let mut restored = 0;
         for s in g
             .sends
             .iter_mut()
             .filter(|s| s.status == SendStatus::Dispatched)
         {
             s.status = SendStatus::Queued;
-            requeued += 1;
+            s.restored_at = Some("2026-01-01T00:00:00Z".into());
+            restored += 1;
         }
-        Ok(requeued)
+        Ok(restored)
+    }
+
+    async fn release_restored_send(&self, id: i64) -> Result<bool> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(s) = g
+            .sends
+            .iter_mut()
+            .find(|s| s.id == id && s.status == SendStatus::Queued && s.restored_at.is_some())
+        {
+            s.restored_at = None;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {

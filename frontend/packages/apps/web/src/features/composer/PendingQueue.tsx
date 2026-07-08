@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
-import { ApiError, useCancelSendMutation } from '@delta/api-client';
+import {
+  ApiError,
+  useCancelSendMutation,
+  useReleaseSendMutation,
+} from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
 import { useNotificationStore } from '../../store/notificationStore';
@@ -35,6 +39,13 @@ export interface PendingQueueProps {
  * behalf. On a `409` (the dispatched send already echoed, or the queued one
  * already dispatched into an in-flight turn) the same refetch reconciles
  * the strip.
+ *
+ * A queued row with a non-null `restored_at` is a *restored* send: it was
+ * composed before a server restart (possibly long ago) and recovered at
+ * boot, and the server never auto-sends it — silently re-submitting stale
+ * text into a conversation that has moved on was rejected in review. Such a
+ * row renders with a distinct "Restored after restart" label and an explicit
+ * Send action (the release endpoint) alongside the usual Cancel.
  */
 export function PendingQueue({ entries }: PendingQueueProps) {
   const client = useApiClient();
@@ -44,6 +55,7 @@ export function PendingQueue({ entries }: PendingQueueProps) {
   const showError = useNotificationStore((state) => state.showError);
   const retrySpawn = useNewSessionSend();
   const cancelSend = useCancelSendMutation(client);
+  const releaseSend = useReleaseSendMutation(client);
 
   if (entries.length === 0) {
     return null;
@@ -172,6 +184,63 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                   Cancel
                 </Button>
               );
+              // A restored send never auto-dispatches: the user decides.
+              // Alongside the shared Cancel, the row offers an explicit Send
+              // that releases it into the normal queued flow. A refused
+              // release surfaces through the same snackbar path as a refused
+              // cancel, so the button never reads as silently dead.
+              if (
+                entry.send.status === 'queued' &&
+                entry.send.restored_at !== null
+              ) {
+                return sendRow(
+                  entry.key,
+                  entry.send.text,
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Badge tone="neutral">Restored after restart</Badge>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={releaseSend.isPending}
+                      onClick={() => {
+                        releaseSend.mutate(
+                          {
+                            sendId: entry.send.id,
+                            sessionId: entry.send.session_id,
+                          },
+                          {
+                            onError: (err: unknown) => {
+                              const title = 'Could not send the message';
+                              if (
+                                err instanceof ApiError &&
+                                err.code === 'send_not_releasable'
+                              ) {
+                                // The server refused: the row already left
+                                // the releasable window (released elsewhere,
+                                // or cancelled). The refetch reconciles.
+                                showError(
+                                  title,
+                                  'The message is no longer awaiting a release — it was already sent or cancelled.',
+                                );
+                                return;
+                              }
+                              showError(
+                                title,
+                                err instanceof Error
+                                  ? err.message
+                                  : 'The request failed.',
+                              );
+                            },
+                          },
+                        );
+                      }}
+                    >
+                      Send
+                    </Button>
+                    {cancelButton}
+                  </div>,
+                );
+              }
               return entry.send.status === 'queued'
                 ? sendRow(
                     entry.key,

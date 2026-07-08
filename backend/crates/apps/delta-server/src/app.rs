@@ -48,6 +48,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sends", post(api::create_send))
         // Cancel a still-queued send before it is dispatched into the pane.
         .route("/api/sends/{id}/cancel", post(api::cancel_send))
+        // Release a restored send (recovered at boot from a dead process's
+        // dispatched state) into the normal queued flow.
+        .route("/api/sends/{id}/release", post(api::release_send))
         // Answer a pending tool-permission request from the browser.
         .route(
             "/api/permissions/{id}/decision",
@@ -172,6 +175,33 @@ mod tests {
         assert!(
             version.starts_with(&format!("v{}", env!("CARGO_PKG_VERSION"))),
             "expected the response to start with v<CARGO_PKG_VERSION>, got {version}",
+        );
+    }
+
+    #[tokio::test]
+    async fn release_send_replies_conflict_with_the_stable_code_when_not_releasable() {
+        // The route exists and the SendNotReleasable error surfaces as a 409
+        // carrying the stable `send_not_releasable` code the frontend
+        // branches on. With a fresh store no send exists, which is one of the
+        // conflict cases (unknown / never-restored / already-released rows
+        // all take the same guarded-UPDATE path, pinned at the store and
+        // interactor levels).
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/sends/9999/release")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("code").and_then(serde_json::Value::as_str),
+            Some("send_not_releasable"),
         );
     }
 

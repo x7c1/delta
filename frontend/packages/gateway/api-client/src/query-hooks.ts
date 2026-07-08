@@ -567,6 +567,36 @@ export function useCancelSendMutation(
 }
 
 /**
+ * Release a restored send into the normal queued flow
+ * (`POST /api/sends/{id}/release`); refresh the session's open-send list so
+ * the chip's restored label gives way to the row's next truthful state
+ * (dispatched, or plain queued when the session is closed or busy).
+ *
+ * The mutation carries the owning `sessionId` alongside the `sendId` so the
+ * exact open-send query can be invalidated. A `409` (`send_not_releasable`)
+ * still invalidates: the send already left the releasable window (released,
+ * cancelled), so the refetch reconciles the strip either way. Error
+ * *presentation* is the call site's job, exactly as with
+ * {@link useCancelSendMutation}: callers pass an `onError` to `mutate` (see
+ * `PendingQueue`) — a refused release must surface as an explained refusal,
+ * not a dead button.
+ */
+export function useReleaseSendMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, { sendId: number; sessionId: SessionId }> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sendId }: { sendId: number; sessionId: SessionId }) =>
+      client.releaseSend(sendId),
+    onSettled: (_data, _error, { sessionId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.sessionSends(sessionId),
+      });
+    },
+  });
+}
+
+/**
  * Launch an external tool (VS Code today) at a session's cwd
  * (`POST /api/open-cwd`). Success is `204` with no toast — the editor
  * opening is the feedback. Errors surface via {@link ApiError} carrying

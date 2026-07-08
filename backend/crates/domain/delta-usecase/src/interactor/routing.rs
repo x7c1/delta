@@ -572,6 +572,37 @@ where
         .await
     }
 
+    /// Release a *restored* send — one the boot-time reconcile recovered from
+    /// a dead process's `dispatched` state — back into the normal queued
+    /// flow (see the module doc on
+    /// [`release_send`](crate::interactor::release_send)).
+    ///
+    /// Like a cancel, the release request carries only the send id (in its
+    /// URL), so the owning session is derived from the send row here and the
+    /// release then executes on that session's actor, ordered against its
+    /// dispatch path. When the session is open and idle the released row
+    /// dispatches immediately through the normal queued path; the returned
+    /// [`SessionEvent`]s (a `SendDispatched`, when that happened) are
+    /// broadcast by the transport so the browser sees the transition.
+    ///
+    /// Returns [`Error::SendNotReleasable`] (`409`) when the send is
+    /// unknown, was never restored, is already released, or has since been
+    /// cancelled. The browser drops its Send control and reconciles from the
+    /// next refetch on this error.
+    pub async fn release_send(&self, send_id: i64) -> Result<Vec<SessionEvent>> {
+        let Some(send) = self.store.send(send_id).await? else {
+            return Err(Error::SendNotReleasable(send_id));
+        };
+        let session_id = send.session_id;
+        let dispatched = self
+            .request(&session_id, move |reply| SessionInput::ReleaseSend {
+                send_id,
+                reply,
+            })
+            .await?;
+        Ok(dispatched.into_iter().collect())
+    }
+
     // ---- Background ticks --------------------------------------------------------
 
     /// Poll the transcript of every currently-open (live-pane) session for
@@ -618,8 +649,10 @@ where
     /// Dispatch the held first prompt of every resume that is ready *and* has
     /// settled, on the background tick (see the `ResumeTick` input docs). A
     /// settled resume with no held prompt instead flushes its session's
-    /// oldest `queued` send — the resume window defers queued dispatch, and
-    /// this settle is what releases it.
+    /// oldest genuinely `queued` send — the resume window defers queued
+    /// dispatch, and this settle is what flushes it. Boot-restored sends are
+    /// not flushed here; they wait for an explicit release
+    /// ([`Self::release_send`]).
     ///
     /// Returns the [`SessionEvent::SendDispatched`]s those flushes produced,
     /// for the caller to broadcast so the browser sees each

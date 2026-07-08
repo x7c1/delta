@@ -32,4 +32,13 @@ pub struct Send {
     pub matched_uuid: Option<MessageUuid>,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// ISO-8601 timestamp of the boot-time restore, when this `queued` row was
+    /// recovered from a `dispatched` state a dead server process left behind.
+    ///
+    /// A restored send is never dispatched automatically: the queued-dispatch
+    /// selection skips rows carrying this marker, so the row stays visible in
+    /// the open-send list until the user explicitly releases it (clearing the
+    /// marker, returning it to the normal queued flow) or cancels it. `None`
+    /// for every row on the normal queued/dispatched path.
+    pub restored_at: Option<String>,
 }

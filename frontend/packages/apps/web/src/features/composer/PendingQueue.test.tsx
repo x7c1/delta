@@ -71,6 +71,7 @@ function serverSend(overrides: Partial<Send> = {}): Send {
     status: 'dispatched',
     matched_uuid: null,
     created_at: '2026-01-01T00:00:00Z',
+    restored_at: null,
     ...overrides,
   };
 }
@@ -234,6 +235,142 @@ describe('PendingQueue server sends', () => {
     // The chip stays (the refetch still reports the row): the refusal is
     // explained rather than looking like a silently dead button.
     expect(screen.getByText('unyielding')).toBeInTheDocument();
+  });
+
+  it('renders a restored send with its label plus explicit Send and Cancel', () => {
+    // A queued row with a non-null restored_at was recovered at the server's
+    // boot from a dead process's dispatched state. It must NOT read as
+    // "sends when idle" (the server never auto-sends it); instead it carries
+    // the restored label and an explicit Send alongside the usual Cancel.
+    renderStrip(
+      { kind: 'thread', sessionId: SESSION_ID, threadId: 1 },
+      (queryClient) => {
+        queryClient.setQueryData(queryKeys.sessionSends(SESSION_ID), {
+          sends: [
+            serverSend({
+              id: 5,
+              text: 'composed before the restart',
+              status: 'queued',
+              restored_at: '2026-01-02T00:00:00Z',
+            }),
+          ],
+        });
+      },
+    );
+
+    expect(screen.getByText('Restored after restart')).toBeInTheDocument();
+    expect(
+      screen.queryByText('queued — sends when idle'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+  });
+
+  it('Send releases a restored send and the refetch clears its restored state', async () => {
+    // The explicit release: Send hits the release endpoint; the refetch the
+    // mutation triggers then reports the row dispatched (the server released
+    // it into the normal queued flow and it typed immediately), so the
+    // restored chip gives way to the ordinary awaiting-reply row.
+    let released = false;
+    const releaseUrls: string[] = [];
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [
+            released
+              ? serverSend({ id: 5, text: 'held over', status: 'dispatched' })
+              : serverSend({
+                  id: 5,
+                  text: 'held over',
+                  status: 'queued',
+                  restored_at: '2026-01-02T00:00:00Z',
+                }),
+          ],
+          turn: released
+            ? { state: 'awaiting_echo', send_id: 5, thread_id: 1 }
+            : { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/release', ({ request, params }) => {
+        releaseUrls.push(new URL(request.url).pathname);
+        if (params.id === '5') {
+          released = true;
+          return new HttpResponse(null, { status: 204 });
+        }
+        return HttpResponse.json(
+          { error: 'not releasable', code: 'send_not_releasable' },
+          { status: 409 },
+        );
+      }),
+    );
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('Restored after restart');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('Restored after restart'),
+      ).not.toBeInTheDocument();
+    });
+    expect(releaseUrls).toEqual(['/api/sends/5/release']);
+    // The row is still pending (dispatched now), not gone.
+    expect(screen.getByText('held over')).toBeInTheDocument();
+    expect(screen.getByText('awaiting reply')).toBeInTheDocument();
+    expect(useNotificationStore.getState().errors).toHaveLength(0);
+  });
+
+  it('surfaces a refused release through the notification store instead of failing silently', async () => {
+    // The server refuses the release (409 send_not_releasable) — e.g. the
+    // row was cancelled from another tab. The failure pushes an explanation
+    // onto the app-wide notification store, mirroring the refused-cancel
+    // path, so the Send button never reads as dead.
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [
+            serverSend({
+              id: 6,
+              text: 'contested',
+              status: 'queued',
+              restored_at: '2026-01-02T00:00:00Z',
+            }),
+          ],
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/release', () =>
+        HttpResponse.json(
+          {
+            error: 'send 6 is not awaiting a release',
+            code: 'send_not_releasable',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('contested');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(useNotificationStore.getState().errors).toHaveLength(1);
+    });
+    const [notice] = useNotificationStore.getState().errors;
+    expect(notice.title).toBe('Could not send the message');
+    expect(notice.detail).toMatch(/no longer awaiting a release/);
+    // The chip stays (the refetch still reports the row): the refusal is
+    // explained rather than looking like a silently dead button.
+    expect(screen.getByText('contested')).toBeInTheDocument();
   });
 
   it('shows only the active thread’s sends', () => {

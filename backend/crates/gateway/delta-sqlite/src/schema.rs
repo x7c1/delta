@@ -162,6 +162,14 @@ CREATE INDEX IF NOT EXISTS ix_message_semantic_parent ON message(semantic_parent
 --   dispatched typed into the pane, awaiting the matching `UserPromptSubmit`
 --   matched    correlated to its transcript message uuid
 --   cancelled  abandoned (rolled back, superseded, or timed out)
+--
+-- `restored_at` marks a `queued` row recovered at boot from a `dispatched`
+-- state a dead server process left behind. A restored row is never dispatched
+-- automatically (the queued-selection queries filter `restored_at IS NULL`);
+-- it stays visible in the open-send list until the user explicitly releases
+-- it (clearing the marker) or cancels it. NULL on the normal send path.
+-- Additive (see `ADDITIVE_COLUMNS`): an existing database gains it as NULL on
+-- every pre-existing row, which is exactly the "not restored" meaning.
 CREATE TABLE IF NOT EXISTS send (
   id                   INTEGER PRIMARY KEY,
   session_id           TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
@@ -172,7 +180,8 @@ CREATE TABLE IF NOT EXISTS send (
   status               TEXT NOT NULL
                          CHECK (status IN ('queued','dispatched','matched','cancelled')),
   matched_uuid         TEXT,
-  created_at           TEXT NOT NULL
+  created_at           TEXT NOT NULL,
+  restored_at          TEXT
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS ix_send_session_status ON send(session_id, status);
@@ -397,6 +406,15 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "subagent_launch",
         column: "task_id",
         add_column_sql: "ALTER TABLE subagent_launch ADD COLUMN task_id TEXT",
+    },
+    // Boot-restore marker, added to `send` after the table first shipped.
+    // Nullable with no default: an existing database gains it as NULL on
+    // every pre-existing row — the "not restored" meaning — so pre-upgrade
+    // queued rows keep dispatching normally.
+    AdditiveColumn {
+        table: "send",
+        column: "restored_at",
+        add_column_sql: "ALTER TABLE send ADD COLUMN restored_at TEXT",
     },
 ];
 

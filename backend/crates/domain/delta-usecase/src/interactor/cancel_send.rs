@@ -14,7 +14,12 @@
 //! browser's open-send list. The store guards the transition with
 //! `WHERE status = 'queued'` ([`cancel_queued_send`](crate::ports::SessionStore::cancel_queued_send)),
 //! so a send that left `queued` the instant between the browser's click and
-//! this handler is a clean conflict rather than a clobber.
+//! this handler is a clean conflict rather than a clobber. A *restored* send
+//! (recovered at boot from a dead process's `dispatched` state, see
+//! [`SessionStore::restore_all_dispatched`]) is covered by this same queued
+//! path — its status is still `queued`, only its restore marker differs — so
+//! the UI keeps the cancel affordance on restored rows with no extra case
+//! here.
 //!
 //! ## Dispatched
 //!
@@ -47,7 +52,7 @@
 //! A `dispatched` row that no turn state claims at all — the turn is `Idle`,
 //! mid an *external* turn, or tracking a *different* send — is an invariant
 //! violation: the boot-time reconcile (see
-//! [`SessionStore::requeue_all_dispatched`]) requeues every `dispatched` row
+//! [`SessionStore::restore_all_dispatched`]) restores every `dispatched` row
 //! a dead process left behind precisely so this state never arises. Should it
 //! arise anyway, cancelling such a row is a pure state transition: flip it to
 //! `cancelled`, inject **no** keystrokes (there is no composer buffer Delta

@@ -286,6 +286,11 @@ pub trait SessionStore: std::marker::Send + Sync {
 
     /// The oldest still-`queued` send for a session (FIFO), if any. This is
     /// the next held-back send to dispatch when the session becomes idle.
+    ///
+    /// Rows carrying the boot-restore marker (`restored_at`) are skipped:
+    /// a restored send must never dispatch automatically — not at resume
+    /// settle, not at turn end, not on the enqueue idle-flush — until the
+    /// user explicitly releases it via [`Self::release_restored_send`].
     async fn next_queued_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
     /// A session's open (non-terminal) sends — status `queued` or
@@ -293,7 +298,10 @@ pub trait SessionStore: std::marker::Send + Sync {
     ///
     /// This is the server-side truth behind the browser's send strip:
     /// every send accepted for the session that has neither matched a
-    /// transcript line nor been cancelled yet.
+    /// transcript line nor been cancelled yet. Restored rows (see
+    /// [`Self::restore_all_dispatched`]) are included — they are `queued` —
+    /// and carry their `restored_at` marker so the UI can render them with
+    /// the explicit Send/Cancel affordances instead of a waiting label.
     async fn open_sends(&self, session_id: &SessionId) -> Result<Vec<Send>>;
 
     /// Promote a `queued` send to `dispatched`, marking it typed so the
@@ -311,9 +319,9 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// lost.
     async fn requeue_send(&self, id: i64) -> Result<()>;
 
-    /// Return **every** `dispatched` send — across all sessions — to `queued`,
-    /// returning how many rows transitioned. Rows in any other status are
-    /// untouched.
+    /// Restore **every** `dispatched` send — across all sessions — to
+    /// `queued` with the `restored_at` marker set, returning how many rows
+    /// transitioned. Rows in any other status are untouched.
     ///
     /// The boot-time half of the single-outstanding invariant: turn state is
     /// runtime-only and rebuilt `Idle` when the server starts, but `send` rows
@@ -322,12 +330,29 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// [`Self::head_dispatched_send`] correlation forever. The composition
     /// root calls this exactly once at startup, before any session actor
     /// exists (which is what makes the blanket sweep exact: at that moment
-    /// every `dispatched` row is an orphan by definition). Requeued rather
-    /// than cancelled for the same reason as [`Self::requeue_send`]: a
-    /// composed message is never silently lost — it re-dispatches intact via
-    /// the same triggers, the first of which after a restart is typically the
-    /// settle of the session's next resume.
-    async fn requeue_all_dispatched(&self) -> Result<usize>;
+    /// every `dispatched` row is an orphan by definition). Restored rather
+    /// than cancelled so a composed message is never silently lost — but,
+    /// unlike [`Self::requeue_send`]'s plain requeue, a restored row is never
+    /// re-dispatched automatically: the message may be days old and the
+    /// conversation has moved on, so auto-resending it on the next reopen
+    /// would silently re-submit stale text (possibly *after* a newer message
+    /// the user just sent). The `restored_at` marker keeps the row out of
+    /// [`Self::next_queued_send`] until the user explicitly releases it
+    /// ([`Self::release_restored_send`]) or cancels it.
+    async fn restore_all_dispatched(&self) -> Result<usize>;
+
+    /// Clear the boot-restore marker of a send, returning it to the normal
+    /// queued flow — but **only while it is still `queued` and restored** —
+    /// returning whether a row actually transitioned.
+    ///
+    /// The guarded release half of [`Self::restore_all_dispatched`]: the
+    /// `WHERE status = 'queued' AND restored_at IS NOT NULL` clause makes the
+    /// transition a no-op (returning `false`) for an unknown id, a row that
+    /// was never restored, an already-released row, or one that has since
+    /// been cancelled — a clean conflict rather than a clobber. After a
+    /// successful release the row is an ordinary `queued` send again and
+    /// dispatches through the usual idle triggers.
+    async fn release_restored_send(&self, id: i64) -> Result<bool>;
 
     /// The outstanding dispatched send for a session, if any.
     ///
@@ -716,8 +741,12 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).requeue_send(id).await
     }
 
-    async fn requeue_all_dispatched(&self) -> Result<usize> {
-        (**self).requeue_all_dispatched().await
+    async fn restore_all_dispatched(&self) -> Result<usize> {
+        (**self).restore_all_dispatched().await
+    }
+
+    async fn release_restored_send(&self, id: i64) -> Result<bool> {
+        (**self).release_restored_send(id).await
     }
 
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>> {

@@ -1,8 +1,9 @@
 //! The resume window's interplay with queued sends, pinning two gaps observed
 //! after the boot-time send reconcile landed (dogfooding, 2026-07-06):
 //!
-//! - **No flush at resume settle**: a row left `queued` by the boot reconcile
-//!   never re-dispatched when its session was merely reopened — none of the
+//! - **No flush at resume settle**: a genuinely `queued` row (e.g. one
+//!   composed mid-turn that survived a restart as `queued`) never
+//!   re-dispatched when its session was merely reopened — none of the
 //!   queued-dispatch triggers (turn end, interrupt ingest, enqueue idle-flush)
 //!   fire on a plain resume, so the row sat pinned until the user happened to
 //!   send another message. `dispatch_ready_resume` now flushes the queued
@@ -12,7 +13,12 @@
 //!   into the freshly-bound pane before `claude` accepted input — the
 //!   keystrokes were silently lost and the row stuck in `dispatched` awaiting
 //!   an echo that could never arrive. `dispatch_queued_send` is now a no-op
-//!   while the resume window is open; the deferred row is released at settle.
+//!   while the resume window is open; the deferred row is flushed at settle.
+//!
+//! *Restored* rows — recovered at boot from a dead process's `dispatched`
+//! state — are deliberately NOT part of this flush: they never dispatch
+//! automatically (see `boot_restored_send_awaits_explicit_release`); the
+//! companion test at the bottom pins the settle flush skipping them.
 
 use std::time::Instant;
 
@@ -22,10 +28,10 @@ use crate::interactor::session_actor::runtime::RESUME_DISPATCH_SETTLE;
 use crate::interactor::testing::*;
 use crate::ports::{NewSession, SessionEvent, StopHook};
 
-/// Seed the store as a restart leaves it: `sess-1` known but closed (no
-/// actor, no pane, turn implicitly idle) with one `queued` send — the state
-/// the boot reconcile produces by requeueing a restart-orphaned `dispatched`
-/// row.
+/// Seed the store as a restart leaves a *genuinely queued* send: `sess-1`
+/// known but closed (no actor, no pane, turn implicitly idle) with one
+/// `queued`, unrestored row — e.g. a message composed while a turn was in
+/// flight that the dead process never got to dispatch.
 async fn seed_closed_session_with_queued_send(ix: &TestInteractor) -> delta_model::Send {
     let (session, main) = ix
         .store()
@@ -41,12 +47,11 @@ async fn seed_closed_session_with_queued_send(ix: &TestInteractor) -> delta_mode
         .unwrap();
     let stale = ix
         .store()
-        .enqueue_send(&session.id, main, None, "stale prompt", None)
+        .enqueue_queued_send(&session.id, main, None, "stale prompt", None)
         .await
         .unwrap();
-    assert_eq!(ix.store().requeue_all_dispatched().await.unwrap(), 1);
-    let stale = ix.store().send(stale.id).await.unwrap().unwrap();
     assert_eq!(stale.status, SendStatus::Queued);
+    assert_eq!(stale.restored_at, None, "genuinely queued, not restored");
     stale
 }
 
@@ -86,10 +91,10 @@ async fn queued_send_stays_queued_while_the_resume_window_is_open() {
     assert_eq!(held.status, SendStatus::Dispatched);
 }
 
-/// The re-dispatch the boot reconcile promises: reopening the session flushes
-/// the requeued row at resume settle. Nothing types during the window; once
-/// `SessionStart(resume)` has marked the resume ready and the settle elapses,
-/// the row is promoted to `dispatched`, typed exactly once, and the
+/// The flush the settle promises for a genuinely queued row: reopening the
+/// session dispatches it at resume settle. Nothing types during the window;
+/// once `SessionStart(resume)` has marked the resume ready and the settle
+/// elapses, the row is promoted to `dispatched`, typed exactly once, and the
 /// `SendDispatched` event is returned for broadcast. Its echo then resolves
 /// it `matched` through the normal correlation.
 #[tokio::test]
@@ -208,5 +213,69 @@ async fn resume_settle_with_held_prompt_types_it_first_queued_row_follows_on_tur
     assert_eq!(
         ix.store().send(stale.id).await.unwrap().unwrap().status,
         SendStatus::Dispatched,
+    );
+}
+
+/// The settle flush is selective: with a *restored* row (boot-recovered from
+/// a dead process's `dispatched` state) queued ahead of a genuinely queued
+/// row, the settle types only the genuinely queued one. The restored row —
+/// even though it is older and would win FIFO if it were eligible — stays
+/// queued and marked, awaiting its explicit release.
+#[tokio::test]
+async fn resume_settle_flushes_the_queued_row_but_never_a_restored_one() {
+    let ix = interactor();
+    let session = SessionId::from("sess-1");
+
+    // The restored row first (older), the genuinely queued row behind it.
+    let (registered, main) = ix
+        .store()
+        .register_session(NewSession {
+            id: "sess-1".into(),
+            cwd: "/work".into(),
+            transcript_path: SEED_TRANSCRIPT_PATH.into(),
+            branch_at_launch: None,
+            repo_root: None,
+            repository_display_name: None,
+        })
+        .await
+        .unwrap();
+    let restored = ix
+        .store()
+        .enqueue_send(&registered.id, main, None, "restored prompt", None)
+        .await
+        .unwrap();
+    assert_eq!(ix.store().restore_all_dispatched().await.unwrap(), 1);
+    let queued = ix
+        .store()
+        .enqueue_queued_send(&registered.id, main, None, "queued prompt", None)
+        .await
+        .unwrap();
+
+    ix.open_session(&session).await.unwrap();
+    ix.on_session_start(session_start("sess-1", "resume"))
+        .await
+        .unwrap();
+    let events = ix
+        .dispatch_ready_resumes(Instant::now() + RESUME_DISPATCH_SETTLE)
+        .await
+        .unwrap();
+
+    // Only the genuinely queued row flushes; the older restored row is
+    // skipped, not typed, and keeps its marker.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::SendDispatched { send_id, .. } if *send_id == queued.id
+        )),
+        "the settle flush promotes the genuinely queued row"
+    );
+    let sent = ix.tmux_fake().sent.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, "queued prompt");
+    let restored = ix.store().send(restored.id).await.unwrap().unwrap();
+    assert_eq!(restored.status, SendStatus::Queued);
+    assert!(
+        restored.restored_at.is_some(),
+        "the restored row survives the settle untouched"
     );
 }

@@ -65,6 +65,14 @@ pub enum Error {
     #[error("send {0} is not cancellable")]
     SendNotCancellable(i64),
 
+    /// A release arrived for a send that is not awaiting one: the id is
+    /// unknown, the row was never restored by the boot-time reconcile, it was
+    /// already released, or it has since been cancelled. Surfaced as `409` so
+    /// the browser drops the Send control and reconciles its pending strip
+    /// from the next refetch.
+    #[error("send {0} is not awaiting a release")]
+    SendNotReleasable(i64),
+
     /// A repository scan root was registered twice with the same path. Surfaced
     /// as `409` so the Settings dialog can show an inline "already registered"
     /// hint without a generic failure toast.

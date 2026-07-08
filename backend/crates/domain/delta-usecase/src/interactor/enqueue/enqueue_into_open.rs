@@ -33,12 +33,14 @@ where
 
         // Idle-flush safety net: if the turn is idle but a send is still
         // `queued` (a dispatch trigger was missed, e.g. an interrupt the tail
-        // had not tailed yet), release it now so it keeps its place ahead of
+        // had not tailed yet), flush it now so it keeps its place ahead of
         // this new send in FIFO order. Dispatching it moves the turn machine
         // to `AwaitingEcho`, which the defer check below then observes. While
         // the session is still inside its resume-readiness window this flush
         // is a no-op (typing into the not-yet-input-ready pane would lose the
-        // keystrokes); the queued row is released at resume settle instead.
+        // keystrokes); the queued row is flushed at resume settle instead.
+        // Boot-restored rows are excluded by the queued selection — they wait
+        // for an explicit release, never for this flush.
         if self.state.turn() == TurnState::Idle {
             if let Some(event) = self.dispatch_queued_send().await? {
                 events.push(event);

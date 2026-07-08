@@ -112,18 +112,23 @@ impl Config {
 /// session name is configured.
 ///
 /// Boot-time send reconcile: every `dispatched` row surviving from the
-/// previous process is returned to `queued` here, before any session actor
-/// exists. See [`SessionStore::requeue_all_dispatched`] for why the sweep is
-/// exact at that moment and why the rows are requeued rather than cancelled.
+/// previous process is restored here — returned to `queued` with the
+/// `restored_at` marker set — before any session actor exists. A restored
+/// row stays visible in the open-send list but never auto-dispatches; the
+/// user explicitly releases (or cancels) it from the UI. See
+/// [`SessionStore::restore_all_dispatched`] for why the sweep is exact at
+/// that moment and why the rows are restored rather than requeued or
+/// cancelled.
 ///
-/// [`SessionStore::requeue_all_dispatched`]: delta_usecase::SessionStore::requeue_all_dispatched
+/// [`SessionStore::restore_all_dispatched`]: delta_usecase::SessionStore::restore_all_dispatched
 pub async fn build(config: &Config) -> Result<AppInteractor> {
     let store = SqliteStore::open(&config.database_path)?;
-    let requeued = delta_usecase::SessionStore::requeue_all_dispatched(&store).await?;
-    if requeued > 0 {
+    let restored = delta_usecase::SessionStore::restore_all_dispatched(&store).await?;
+    if restored > 0 {
         tracing::info!(
-            requeued,
-            "requeued dispatched sends orphaned by the previous process"
+            restored,
+            "restored dispatched sends orphaned by the previous process; \
+             they await an explicit release or cancel from the UI"
         );
     }
     let transcript = JsonlTranscript::new();
@@ -170,13 +175,13 @@ mod tests {
 
     /// The boot-time send reconcile is wired into [`build`] itself, not just
     /// available on the store: a row a previous process left `dispatched` is
-    /// `queued` again once `build` has run against the same database file.
-    /// (The store-level sweep semantics are pinned in `delta-sqlite`; this
-    /// pins the composition root actually invoking it at startup — the sweep
-    /// being skipped would reintroduce the restart zombie while every
-    /// store-level test stayed green.)
+    /// `queued` **and marked restored** once `build` has run against the same
+    /// database file. (The store-level sweep semantics are pinned in
+    /// `delta-sqlite`; this pins the composition root actually invoking it at
+    /// startup — the sweep being skipped would reintroduce the restart zombie
+    /// while every store-level test stayed green.)
     #[tokio::test]
-    async fn build_requeues_dispatched_sends_left_by_a_previous_process() {
+    async fn build_restores_dispatched_sends_left_by_a_previous_process() {
         use delta_model::SendStatus;
         use delta_usecase::{NewSession, SessionStore};
 
@@ -224,6 +229,10 @@ mod tests {
             stale.status,
             SendStatus::Queued,
             "boot returns the orphaned dispatched row to queued"
+        );
+        assert!(
+            stale.restored_at.is_some(),
+            "the restored marker is set, so the row awaits an explicit release"
         );
     }
 }

@@ -236,6 +236,9 @@ where
         SessionInput::CancelSend { send_id, reply } => {
             let _ = reply.send(ctx.cancel_send(send_id).await);
         }
+        SessionInput::ReleaseSend { send_id, reply } => {
+            let _ = reply.send(ctx.release_send(send_id).await);
+        }
         SessionInput::SyncTick { reply } => {
             let _ = reply.send(ctx.sync_tick().await);
         }

@@ -41,16 +41,20 @@ where
     /// failure is logged rather than propagated, so one pane's send failure
     /// cannot strand the other sessions' ticks.
     ///
-    /// Settling is also what releases any send deferred by the resume window:
+    /// Settling is also what flushes any send deferred by the resume window:
     /// `dispatch_queued_send` is a no-op while the resuming entry exists (a
     /// keystroke typed into the not-yet-input-ready pane would be lost), so a
-    /// `queued` row present at settle — e.g. one requeued by the boot-time
-    /// send reconcile — is flushed here. With a held first prompt the turn
-    /// machine is already `AwaitingEcho` for that prompt, so the queued row
-    /// waits its turn and follows via the turn-end trigger instead; without
-    /// one the session is idle and the row dispatches now. The returned
-    /// [`SessionEvent::SendDispatched`], if any, is broadcast by the tick's
-    /// caller so the browser sees the queued→dispatched transition.
+    /// genuinely `queued` row present at settle — e.g. one composed mid-turn
+    /// before the restart, or one requeued by a mismatched echo — is flushed
+    /// here. A *restored* row (recovered at boot from a dead process's
+    /// `dispatched` state) is NOT flushed: the queued selection skips it, so
+    /// it stays visible until the user explicitly releases or cancels it.
+    /// With a held first prompt the turn machine is already `AwaitingEcho`
+    /// for that prompt, so the queued row waits its turn and follows via the
+    /// turn-end trigger instead; without one the session is idle and the row
+    /// dispatches now. The returned [`SessionEvent::SendDispatched`], if any,
+    /// is broadcast by the tick's caller so the browser sees the
+    /// queued→dispatched transition.
     ///
     /// `now` is injected (rather than read here) so the dispatch is deterministic
     /// under test, mirroring the watchdog reap: the server loop passes
@@ -71,12 +75,13 @@ where
                 "resume settled with no held first prompt; flushing any queued send"
             );
             // The resuming entry is gone and the turn is idle, so a send that
-            // was deferred by the resume window (or left `queued` by the
-            // boot-time reconcile) dispatches now. A dispatch failure is
-            // logged rather than propagated, mirroring the held-prompt path
-            // below: one pane's send failure must not strand the other
-            // sessions' ticks (the failed row was already cancelled inside
-            // `dispatch_queued_send`).
+            // was deferred by the resume window dispatches now. Restored rows
+            // are excluded by the queued selection — a boot-restored send
+            // waits for its explicit release instead of auto-resending here.
+            // A dispatch failure is logged rather than propagated, mirroring
+            // the held-prompt path below: one pane's send failure must not
+            // strand the other sessions' ticks (the failed row was already
+            // cancelled inside `dispatch_queued_send`).
             return match self.dispatch_queued_send().await {
                 Ok(event) => Ok(event),
                 Err(err) => {

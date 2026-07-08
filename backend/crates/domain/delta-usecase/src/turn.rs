@@ -39,12 +39,17 @@
 //! row — would shadow `UserPromptSubmit` correlation for every later send
 //! (each one mismatching against it and requeueing in a loop). The other half
 //! of the invariant is therefore restored at boot: the composition root
-//! sweeps every persisted `dispatched` row back to `queued`
-//! ([`SessionStore::requeue_all_dispatched`]) before any session actor
-//! exists, so rebuilt-Idle turn state and the store agree that nothing is
-//! outstanding.
+//! sweeps every persisted `dispatched` row back to `queued` **with the
+//! restored marker set** ([`SessionStore::restore_all_dispatched`]) before
+//! any session actor exists, so rebuilt-Idle turn state and the store agree
+//! that nothing is outstanding. The restored row does not re-dispatch on its
+//! own — the message may be stale by the time the session reopens — it stays
+//! visible in the open-send list until the user explicitly releases it into
+//! the normal queued flow ([`SessionStore::release_restored_send`]) or
+//! cancels it.
 //!
-//! [`SessionStore::requeue_all_dispatched`]: crate::ports::SessionStore::requeue_all_dispatched
+//! [`SessionStore::restore_all_dispatched`]: crate::ports::SessionStore::restore_all_dispatched
+//! [`SessionStore::release_restored_send`]: crate::ports::SessionStore::release_restored_send
 //!
 //! ## Orphaned sends
 //!

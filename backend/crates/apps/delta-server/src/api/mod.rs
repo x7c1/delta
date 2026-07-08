@@ -153,9 +153,13 @@ pub(crate) async fn list_threads(
 ///
 /// Returns the sends still in flight for the session — status `queued`
 /// (held back until the session goes idle) or `dispatched` (typed into the
-/// pane, awaiting transcript correlation) — oldest first. This is the source
-/// of truth for the browser's send strip. An unknown session id is a
-/// `404`, so a reaped spawn is distinguishable from "nothing pending".
+/// pane, awaiting transcript correlation) — oldest first. A queued row may
+/// carry `restored_at`: it was recovered at boot from a dead process's
+/// `dispatched` state and never auto-dispatches — the browser renders it
+/// with explicit Send ([`release_send`]) and Cancel actions instead of the
+/// waiting label. This is the source of truth for the browser's send strip.
+/// An unknown session id is a `404`, so a reaped spawn is distinguishable
+/// from "nothing pending".
 pub(crate) async fn list_sends(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -546,6 +550,37 @@ pub(crate) async fn cancel_send(
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
     state.interactor().cancel_send(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/sends/{id}/release` — release a *restored* send into the
+/// normal queued flow (204).
+///
+/// The boot-time reconcile recovers every send a dead server process left
+/// `dispatched` as `queued` with a `restored_at` marker: visible in the
+/// open-send list, but never auto-dispatched — the message may be days old
+/// and re-submitting it silently was rejected on review. This endpoint is
+/// the explicit "Send" action on such a row: it clears the marker (a
+/// guarded UPDATE, so a race with a cancel is a clean conflict) and then
+/// runs the session's normal queued dispatch — if the session is open and
+/// idle the row types immediately (the `send_dispatched` event is
+/// broadcast); otherwise it waits as an ordinary queued send for the next
+/// dispatch trigger. The sibling Cancel action is the existing
+/// [`cancel_send`] — a restored row's status is still `queued`, so the
+/// guarded queued cancel already covers it.
+///
+/// Replies `409` with code `send_not_releasable` when the send is unknown,
+/// was never restored, is already released, or has since been cancelled.
+/// The browser drops its Send control and reconciles from the refetch on
+/// this code.
+pub(crate) async fn release_send(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, ApiError> {
+    let events = state.interactor().release_send(id).await?;
+    // The release may have dispatched the released (or an older queued) send;
+    // broadcast so the browser sees the queued→dispatched transition.
+    state.broadcast(events);
     Ok(StatusCode::NO_CONTENT)
 }
 

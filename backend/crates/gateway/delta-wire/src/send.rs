@@ -54,6 +54,12 @@ pub struct WireSend {
     pub matched_uuid: Option<String>,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// ISO-8601 timestamp of the boot-time restore, when this `queued` row
+    /// was recovered from a `dispatched` state a dead server process left
+    /// behind. A restored send never auto-dispatches: the browser renders it
+    /// with explicit Send (`POST /api/sends/{id}/release`) and Cancel
+    /// actions. `null` on the normal send path.
+    pub restored_at: Option<String>,
 }
 
 impl From<Send> for WireSend {
@@ -68,6 +74,7 @@ impl From<Send> for WireSend {
             status: send.status.into(),
             matched_uuid: send.matched_uuid.map(|uuid| uuid.0),
             created_at: send.created_at,
+            restored_at: send.restored_at,
         }
     }
 }
@@ -90,6 +97,7 @@ mod tests {
             status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: "2026-01-01T00:00:00Z".into(),
+            restored_at: None,
         };
         assert_eq!(
             serde_json::to_value(WireSend::from(send)).unwrap(),
@@ -103,6 +111,7 @@ mod tests {
                 "status": "dispatched",
                 "matched_uuid": null,
                 "created_at": "2026-01-01T00:00:00Z",
+                "restored_at": null,
             }),
         );
     }

@@ -165,6 +165,18 @@ pub(in crate::interactor) enum SessionInput {
     /// dispatched: transition the row to `cancelled` so the idle dispatch path
     /// skips it. A no-op conflict if the send already left `queued`.
     CancelSend { send_id: i64, reply: Reply<()> },
+    /// The browser released a *restored* send of this session (recovered at
+    /// boot from a dead process's `dispatched` state): clear its restore
+    /// marker so it re-enters the normal queued flow, then run the idle
+    /// dispatch. Replies with the [`SessionEvent::SendDispatched`] to
+    /// broadcast when that dispatch promoted a send. A conflict if the send
+    /// is not a still-queued restored row.
+    ///
+    /// [`SessionEvent::SendDispatched`]: crate::ports::SessionEvent::SendDispatched
+    ReleaseSend {
+        send_id: i64,
+        reply: Reply<Option<SessionEvent>>,
+    },
 
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous

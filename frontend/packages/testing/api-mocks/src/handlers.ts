@@ -393,6 +393,27 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
+    // Release a restored send into the normal queued flow. The real server
+    // clears the restore marker only for a still-queued restored row (a
+    // guarded UPDATE) and 409s everything else with the stable
+    // `send_not_releasable` code; the mock mirrors that guard. It performs
+    // no dispatch — mock turn progress is driven by scripted events.
+    http.post('*/api/sends/:id/release', ({ params }) => {
+      const id = Number(params.id);
+      const send = store.sends.find((s) => s.id === id);
+      if (!send || send.status !== 'queued' || send.restored_at === null) {
+        return HttpResponse.json(
+          {
+            error: `send ${id} is not awaiting a release`,
+            code: 'send_not_releasable',
+          },
+          { status: 409 },
+        );
+      }
+      send.restored_at = null;
+      return new HttpResponse(null, { status: 204 });
+    }),
+
     http.post('*/api/sends', async ({ request }) => {
       const payload = (await request.json()) as SendRequest;
       if (typeof payload?.text !== 'string' || payload.text.length === 0) {
@@ -454,6 +475,7 @@ export function createMockApi(): MockApi {
           status: 'dispatched',
           matched_uuid: null,
           created_at: createdAt,
+          restored_at: null,
         };
         store.sends.push(send);
         const body: SendResponse = { send };
@@ -499,6 +521,7 @@ export function createMockApi(): MockApi {
         status: 'dispatched',
         matched_uuid: null,
         created_at: new Date().toISOString(),
+        restored_at: null,
       };
       store.sends.push(send);
       const body: SendResponse = { send };
