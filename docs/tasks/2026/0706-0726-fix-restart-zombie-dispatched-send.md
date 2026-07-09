@@ -10,7 +10,7 @@ check_command: "make check"
 assignee: null
 branch: task/0706-0726-fix-restart-zombie-dispatched-send
 created_at: 2026-07-06T07:26:51Z
-updated_at: 2026-07-09T00:35:00Z
+updated_at: 2026-07-09T00:48:00Z
 ---
 
 # fix(usecase): reconcile dispatched sends orphaned by a server restart
@@ -188,6 +188,9 @@ Three fixes, one backend invariant restore plus two UX hardenings:
 - [ ] Pressing cancel on a pending chip that the backend refuses to
       cancel produces visible feedback (snackbar) instead of doing
       nothing.
+      *Not reproduced on hardware: the refusal is a sub-second race
+      (cancel arriving after the echo). Covered by a component test;
+      accepted by the owner at merge time.*
 
 ## Out of scope
 
