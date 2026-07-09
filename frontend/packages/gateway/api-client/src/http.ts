@@ -275,14 +275,19 @@ export class ApiClient {
    * normal queued flow (204). A restored send (its `restored_at` is
    * non-null) was recovered at the server's boot from a `dispatched` state a
    * dead process left behind, and never auto-dispatches; this is the
-   * explicit Send action on such a row. On success the marker clears and,
-   * when the session is open and idle, the send dispatches immediately
-   * through the normal queued path (a `send_dispatched` event follows);
-   * otherwise it waits as an ordinary queued send. A `409`
-   * (`send_not_releasable`) fires when the send never existed, was never
-   * restored, is already released, or has since been cancelled — surfaced
-   * as {@link ApiError} for the caller to show before the pending strip
-   * reconciles from a refetch.
+   * explicit Send action on such a row. The server first ensures the owning
+   * session is open — resuming it when it is closed, the normal state right
+   * after the restart that created the row — so a release never strands the
+   * send in a session nothing reopens. On success the marker clears and the
+   * send dispatches through the normal queued path: immediately when the
+   * session was already open and idle, or once the just-resumed session
+   * settles (a `send_dispatched` event follows either way); mid-turn it
+   * waits for the turn end. A `409` (`send_not_releasable`) fires when the
+   * send never existed, was never restored, is already released, or has
+   * since been cancelled; a failed resume surfaces its own error (e.g.
+   * `409` `resume_unavailable`) with the marker untouched, so the release
+   * can be retried — each surfaced as {@link ApiError} for the caller to
+   * show before the pending strip reconciles from a refetch.
    */
   releaseSend(sendId: number): Promise<void> {
     return this.requestNoContent(`/api/sends/${sendId}/release`, {

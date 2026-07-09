@@ -560,19 +560,25 @@ pub(crate) async fn cancel_send(
 /// `dispatched` as `queued` with a `restored_at` marker: visible in the
 /// open-send list, but never auto-dispatched — the message may be days old
 /// and re-submitting it silently was rejected on review. This endpoint is
-/// the explicit "Send" action on such a row: it clears the marker (a
-/// guarded UPDATE, so a race with a cancel is a clean conflict) and then
-/// runs the session's normal queued dispatch — if the session is open and
-/// idle the row types immediately (the `send_dispatched` event is
-/// broadcast); otherwise it waits as an ordinary queued send for the next
-/// dispatch trigger. The sibling Cancel action is the existing
+/// the explicit "Send" action on such a row: it first ensures the owning
+/// session is open (resuming `claude --resume <id>` when it is closed, the
+/// normal state right after the restart that created the row), then clears
+/// the marker (a guarded UPDATE, so a race with a cancel is a clean
+/// conflict) and runs the session's normal queued dispatch — if the session
+/// was already open and idle the row types immediately (the
+/// `send_dispatched` event is broadcast); if the release resumed the
+/// session the row is typed by the resume-settle flush once the resumed
+/// pane accepts input; otherwise (mid-turn) it waits as an ordinary queued
+/// send for the turn-end trigger. The sibling Cancel action is the existing
 /// [`cancel_send`] — a restored row's status is still `queued`, so the
 /// guarded queued cancel already covers it.
 ///
 /// Replies `409` with code `send_not_releasable` when the send is unknown,
 /// was never restored, is already released, or has since been cancelled.
 /// The browser drops its Send control and reconciles from the refetch on
-/// this code.
+/// this code. An ensure-open failure surfaces on its own path — e.g. `409`
+/// `resume_unavailable` when the session's transcript is gone — before the
+/// marker is touched, so the release can be retried.
 pub(crate) async fn release_send(
     State(state): State<AppState>,
     Path(id): Path<i64>,

@@ -580,15 +580,24 @@ where
     /// Like a cancel, the release request carries only the send id (in its
     /// URL), so the owning session is derived from the send row here and the
     /// release then executes on that session's actor, ordered against its
-    /// dispatch path. When the session is open and idle the released row
-    /// dispatches immediately through the normal queued path; the returned
-    /// [`SessionEvent`]s (a `SendDispatched`, when that happened) are
-    /// broadcast by the transport so the browser sees the transition.
+    /// dispatch path. The actor first ensures the session is open — resuming
+    /// it via `claude --resume <id>` when it is closed, the normal state
+    /// right after the restart that created the restored row — exactly as an
+    /// enqueue would. When the session was already open and idle the
+    /// released row dispatches immediately through the normal queued path;
+    /// the returned [`SessionEvent`]s (a `SendDispatched`, when that
+    /// happened) are broadcast by the transport so the browser sees the
+    /// transition. When the release itself resumed the session the row waits
+    /// out the resume-readiness window and is typed by the resume-settle
+    /// flush ([`Self::dispatch_ready_resumes`]).
     ///
     /// Returns [`Error::SendNotReleasable`] (`409`) when the send is
     /// unknown, was never restored, is already released, or has since been
     /// cancelled. The browser drops its Send control and reconciles from the
-    /// next refetch on this error.
+    /// next refetch on this error. An ensure-open failure — e.g.
+    /// [`Error::ResumeUnavailable`] when the session's transcript is gone —
+    /// surfaces as-is, before the restored marker is touched, so the release
+    /// can be retried.
     pub async fn release_send(&self, send_id: i64) -> Result<Vec<SessionEvent>> {
         let Some(send) = self.store.send(send_id).await? else {
             return Err(Error::SendNotReleasable(send_id));
