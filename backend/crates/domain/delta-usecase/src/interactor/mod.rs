@@ -21,6 +21,7 @@ mod open_cwd;
 mod permission_decision;
 mod pull_requests;
 mod question_keys;
+mod release_send;
 mod repository;
 mod routing;
 mod runtime;

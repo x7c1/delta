@@ -14,7 +14,12 @@
 //! browser's open-send list. The store guards the transition with
 //! `WHERE status = 'queued'` ([`cancel_queued_send`](crate::ports::SessionStore::cancel_queued_send)),
 //! so a send that left `queued` the instant between the browser's click and
-//! this handler is a clean conflict rather than a clobber.
+//! this handler is a clean conflict rather than a clobber. A *restored* send
+//! (recovered at boot from a dead process's `dispatched` state, see
+//! [`SessionStore::restore_all_dispatched`]) is covered by this same queued
+//! path — its status is still `queued`, only its restore marker differs — so
+//! the UI keeps the cancel affordance on restored rows with no extra case
+//! here.
 //!
 //! ## Dispatched
 //!
@@ -32,14 +37,28 @@
 //! head dispatch naturally on the next idle-flush (the existing
 //! [`dispatch_queued_send`](super::enqueue) path).
 //!
-//! Cancel of a `dispatched` send is only honoured while the turn is in
-//! `AwaitingEcho{send_id}` matching this send: once the echo arrives the turn
-//! moves to [`TurnState::InFlight`] and is owned by its transcript line, so a
+//! A `dispatched` cancel takes the Escape-injection path only while the turn
+//! is in `AwaitingEcho{send_id}` matching this send — the state that says the
+//! keystrokes are sitting in the pane's composer. Once the echo arrives the
+//! turn moves to [`TurnState::InFlight`] owned by its transcript line, so a
 //! cancel there is rejected as [`Error::SendNotCancellable`] (the browser
 //! reconciles from the refetch, and the user reaches for the existing
 //! in-flight interrupt). The actor's mailbox serializes these checks against
 //! the `UserPromptSubmit` hook that would move the state, so the test is
 //! race-free.
+//!
+//! ## Ownerless dispatched rows
+//!
+//! A `dispatched` row that no turn state claims at all — the turn is `Idle`,
+//! mid an *external* turn, or tracking a *different* send — is an invariant
+//! violation: the boot-time reconcile (see
+//! [`SessionStore::restore_all_dispatched`]) restores every `dispatched` row
+//! a dead process left behind precisely so this state never arises. Should it
+//! arise anyway, cancelling such a row is a pure state transition: flip it to
+//! `cancelled`, inject **no** keystrokes (there is no composer buffer Delta
+//! knows about to discard), and leave the turn machine untouched. Without
+//! this escape hatch the row would be unrecoverable from the UI — the
+//! `AwaitingEcho`-only guard would reject every cancel forever.
 //!
 //! ## Late echo race
 //!
@@ -83,17 +102,18 @@ where
     ///
     /// Returns [`Error::SendNotCancellable`] when no row transitioned: the
     /// send is unknown, has already left `queued`/`dispatched`, or is
-    /// `dispatched` but the turn is no longer in `AwaitingEcho{send_id}`
-    /// matching it (the echo already arrived, so the turn is owned by the
-    /// in-flight line). The browser drops its cancel control and reconciles
-    /// from the next refetch on this error.
+    /// `dispatched` but its echo has already arrived (the turn carries it
+    /// `InFlight`, owned by its transcript line). The browser drops its
+    /// cancel control and reconciles from the next refetch on this error.
     ///
-    /// Cancelling a `dispatched` send injects a single `Escape` keystroke
-    /// into the pane (discarding the TUI composer's typed-but-not-yet-
-    /// submitted buffer) and then promotes any queued send behind the
-    /// cancelled one through the existing idle-flush path — so a queue
-    /// stacked behind the cancelled head proceeds naturally without any
-    /// separate broadcast.
+    /// Cancelling a `dispatched` send the turn machine is awaiting injects a
+    /// single `Escape` keystroke into the pane (discarding the TUI composer's
+    /// typed-but-not-yet-submitted buffer) and then promotes any queued send
+    /// behind the cancelled one through the existing idle-flush path — so a
+    /// queue stacked behind the cancelled head proceeds naturally without
+    /// any separate broadcast. A `dispatched` row the turn machine holds no
+    /// claim on (see the module docs on ownerless rows) is cancelled as a
+    /// pure state transition instead.
     pub(in crate::interactor) async fn cancel_send(&mut self, send_id: i64) -> Result<()> {
         let Some(send) = self.store.send(send_id).await? else {
             return Err(Error::SendNotCancellable(send_id));
@@ -117,16 +137,32 @@ where
 
     /// Cancel a `dispatched` send whose echo has not arrived.
     ///
-    /// The turn must be in [`TurnState::AwaitingEcho`] with `send_id`
-    /// matching: any other state means the echo already landed (the turn is
-    /// in flight) or the send was already orphaned by another transition, in
-    /// which case the cancel is rejected and the browser reconciles.
+    /// Three cases, keyed on what the turn machine says about this row:
+    ///
+    /// - [`TurnState::AwaitingEcho`] matching `send_id` — the owned case: the
+    ///   keystrokes are in the pane's composer, so inject `Escape` and drive
+    ///   the turn machine back to `Idle` (the path below).
+    /// - [`TurnState::InFlight`] carrying `send_id` — the echo already landed
+    ///   and the turn is owned by its transcript line; the cancel is rejected
+    ///   and the browser reconciles (the user reaches for the in-flight
+    ///   interrupt instead).
+    /// - anything else — the row is *ownerless* (see the module docs): cancel
+    ///   it as a pure state transition, no keystrokes, no turn input.
     async fn cancel_dispatched_send(&mut self, send_id: i64) -> Result<()> {
         match self.state.turn() {
             TurnState::AwaitingEcho {
                 send_id: outstanding,
             } if outstanding == send_id => {}
-            _ => return Err(Error::SendNotCancellable(send_id)),
+            TurnState::InFlight {
+                send_id: Some(in_flight),
+            } if in_flight == send_id => return Err(Error::SendNotCancellable(send_id)),
+            _ => {
+                // Ownerless: no turn machine is awaiting this row's echo, so
+                // there is nothing to Escape out of and no state to unwind —
+                // flipping the row to `cancelled` is the whole cancel.
+                self.store.cancel_send(send_id).await?;
+                return Ok(());
+            }
         }
         // The pane must be live to receive the Escape. A `dispatched` send
         // without a live pane would be a corrupted invariant (dispatch typed

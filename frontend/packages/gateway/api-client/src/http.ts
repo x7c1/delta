@@ -62,10 +62,18 @@ export interface ApiClientOptions {
  * from the UI (already answered, its turn ended, or no live pane). Callers
  * branch on this to keep the answer-in-the-terminal fallback.
  *
- * `send_not_cancellable` means a queued send can no longer be cancelled (it has
- * already been dispatched into the pane, matched a transcript line, or was
- * already cancelled, or never existed). Callers treat it as benign and let the
- * pending strip reconcile from the next refetch.
+ * `send_not_cancellable` means a send can no longer be cancelled: it never
+ * existed, is already terminal (matched a transcript line, or already
+ * cancelled), or is dispatched but its echo already arrived so the in-flight
+ * turn owns it. Callers may surface the refusal to the user (e.g.
+ * `PendingQueue` routes it through `onError` to the notification store) and
+ * let the pending strip reconcile from the next refetch.
+ *
+ * `send_not_releasable` means a send is not awaiting a release: it never
+ * existed, was never restored by the server's boot-time reconcile, was
+ * already released, or has since been cancelled. Callers surface the refusal
+ * like a refused cancel and let the pending strip reconcile from the next
+ * refetch.
  *
  * `scan_root_duplicate` means a repository scan root was registered twice with
  * the same path. The Settings dialog shows an inline "already registered" hint
@@ -76,6 +84,7 @@ export type ApiErrorCode =
   | 'permission_not_pending'
   | 'question_not_pending'
   | 'send_not_cancellable'
+  | 'send_not_releasable'
   | 'scan_root_duplicate'
   | 'open_cwd_path_not_allowed'
   | 'open_cwd_unknown_handler'
@@ -209,9 +218,12 @@ export class ApiClient {
   /**
    * `GET /api/sessions/{id}/sends` — a session's open (non-terminal) sends,
    * oldest first: status `queued` (held until the session goes idle) or
-   * `dispatched` (typed into the pane, awaiting transcript correlation). The
-   * server-side truth behind the pending-send strip. An unknown id is a `404`
-   * (e.g. a reaped spawn), surfaced as {@link ApiError}.
+   * `dispatched` (typed into the pane, awaiting transcript correlation). A
+   * queued row with a non-null `restored_at` was recovered at the server's
+   * boot from a dead process's `dispatched` state and never auto-dispatches
+   * — it waits for an explicit {@link releaseSend} or {@link cancelSend}.
+   * The server-side truth behind the pending-send strip. An unknown id is a
+   * `404` (e.g. a reaped spawn), surfaced as {@link ApiError}.
    */
   getSessionSends(sessionId: SessionId): Promise<SendsResponse> {
     return this.request<SendsResponse>(
@@ -243,15 +255,42 @@ export class ApiClient {
   }
 
   /**
-   * `POST /api/sends/{id}/cancel` — cancel a still-queued send (204) before it
-   * is dispatched into the pane. The row flips to `cancelled`, so it is skipped
-   * by the idle dispatch path and drops out of the open-send list. A `409`
-   * (`send_not_cancellable`) means the send has already left the `queued` state
-   * (dispatched, matched, already cancelled, or unknown) — surfaced as
-   * {@link ApiError}; the caller lets the pending strip reconcile from a refetch.
+   * `POST /api/sends/{id}/cancel` — cancel a `queued` or `dispatched` send
+   * (204). The row flips to `cancelled` and drops out of the open-send list;
+   * a dispatched send the turn machine is awaiting is discarded with an
+   * `Escape` injection into the pane. A `409` (`send_not_cancellable`) fires
+   * only when the send never existed, is already terminal (matched or
+   * cancelled), or its echo already arrived (the in-flight turn owns it) —
+   * surfaced as {@link ApiError} for the caller to show before the pending
+   * strip reconciles from a refetch.
    */
   cancelSend(sendId: number): Promise<void> {
     return this.requestNoContent(`/api/sends/${sendId}/cancel`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * `POST /api/sends/{id}/release` — release a *restored* send into the
+   * normal queued flow (204). A restored send (its `restored_at` is
+   * non-null) was recovered at the server's boot from a `dispatched` state a
+   * dead process left behind, and never auto-dispatches; this is the
+   * explicit Send action on such a row. The server first ensures the owning
+   * session is open — resuming it when it is closed, the normal state right
+   * after the restart that created the row — so a release never strands the
+   * send in a session nothing reopens. On success the marker clears and the
+   * send dispatches through the normal queued path: immediately when the
+   * session was already open and idle, or once the just-resumed session
+   * settles (a `send_dispatched` event follows either way); mid-turn it
+   * waits for the turn end. A `409` (`send_not_releasable`) fires when the
+   * send never existed, was never restored, is already released, or has
+   * since been cancelled; a failed resume surfaces its own error (e.g.
+   * `409` `resume_unavailable`) with the marker untouched, so the release
+   * can be retried — each surfaced as {@link ApiError} for the caller to
+   * show before the pending strip reconciles from a refetch.
+   */
+  releaseSend(sendId: number): Promise<void> {
+    return this.requestNoContent(`/api/sends/${sendId}/release`, {
       method: 'POST',
     });
   }

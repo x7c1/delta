@@ -48,6 +48,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sends", post(api::create_send))
         // Cancel a still-queued send before it is dispatched into the pane.
         .route("/api/sends/{id}/cancel", post(api::cancel_send))
+        // Release a restored send (recovered at boot from a dead process's
+        // dispatched state) into the normal queued flow.
+        .route("/api/sends/{id}/release", post(api::release_send))
         // Answer a pending tool-permission request from the browser.
         .route(
             "/api/permissions/{id}/decision",
@@ -132,7 +135,7 @@ mod tests {
     use delta_bootstrap::Config;
     use tower::ServiceExt;
 
-    fn test_state() -> AppState {
+    async fn test_state() -> AppState {
         AppState::build(&Config {
             database_path: ":memory:".into(),
             session_workdir_base: "/tmp/delta-test-session".into(),
@@ -146,6 +149,7 @@ mod tests {
                 ..delta_usecase::LaunchConfig::default()
             },
         })
+        .await
         .unwrap()
     }
 
@@ -155,7 +159,7 @@ mod tests {
         // where the string starts with `v` followed by the workspace version.
         // The debug/release suffix branch is compile-time (unit-tested in
         // `crate::version`); here we just pin the JSON envelope.
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/version")
@@ -175,8 +179,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn release_send_replies_conflict_with_the_stable_code_when_not_releasable() {
+        // The route exists and the SendNotReleasable error surfaces as a 409
+        // carrying the stable `send_not_releasable` code the frontend
+        // branches on. With a fresh store no send exists, which is one of the
+        // conflict cases (unknown / never-restored / already-released rows
+        // all take the same guarded-UPDATE path, pinned at the store and
+        // interactor levels).
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/sends/9999/release")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            body.get("code").and_then(serde_json::Value::as_str),
+            Some("send_not_releasable"),
+        );
+    }
+
+    #[tokio::test]
     async fn health_returns_ok() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/health")
@@ -192,7 +223,7 @@ mod tests {
     async fn list_sessions_rejects_a_malformed_cursor() {
         // A non-decodable cursor is a client error, surfaced as 400 rather than
         // silently ignored or treated as the first page.
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/sessions?cursor=not-a-valid-cursor%21")
@@ -214,7 +245,7 @@ mod tests {
         })
         .to_string();
 
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -244,7 +275,7 @@ mod tests {
         // tempdir paths contain no query-reserved characters, so they need no
         // percent-encoding for this test.
         let uri = format!("/api/workdir/list?path={}", dir.path().to_str().unwrap());
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
             .await
             .unwrap();
@@ -260,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     async fn workdir_list_rejects_a_missing_path_with_400() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/workdir/list?path=/no/such/path/here")
@@ -275,7 +306,7 @@ mod tests {
     /// Build a `test_state()` whose gh CLI is stubbed to report
     /// "unavailable", so the PR-route smoke tests are independent of
     /// whether `gh` happens to be installed on the test host.
-    fn test_state_with_unavailable_gh() -> AppState {
+    async fn test_state_with_unavailable_gh() -> AppState {
         // Mirror `test_state()`'s config exactly, then override the
         // wired Interactor's gh driver with a deterministic stub.
         use std::sync::Arc;
@@ -302,6 +333,7 @@ mod tests {
             launch: delta_usecase::LaunchConfig::default(),
         };
         let interactor = delta_bootstrap::build(&config)
+            .await
             .unwrap()
             .with_gh_cli(Arc::new(UnavailableGh) as Arc<dyn delta_usecase::GhCli>);
         AppState::from_interactor(interactor, &config.tmux_socket)
@@ -312,7 +344,7 @@ mod tests {
         // With the gh stub answering "unavailable", the route must
         // return 200 + `{gh_available: false, pull_requests: []}` —
         // the PR tab degrades gracefully on a host with no gh.
-        let response = router(test_state_with_unavailable_gh())
+        let response = router(test_state_with_unavailable_gh().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/prs?lens=reviewer")
@@ -333,7 +365,7 @@ mod tests {
     async fn prs_accepts_the_author_lens_too() {
         // Same fallback path, exercised through the author lens, so a
         // typo in the per-lens dispatch fails this test loudly.
-        let response = router(test_state_with_unavailable_gh())
+        let response = router(test_state_with_unavailable_gh().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/prs?lens=author")
@@ -354,7 +386,7 @@ mod tests {
         // happy path deterministic here without coupling to the host's
         // installed gh. Lens validation, however, fails before the use
         // case runs and is a pure router check — assert that.
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/prs?lens=everyone")
@@ -370,7 +402,7 @@ mod tests {
     async fn prs_rejects_a_missing_lens_with_400() {
         // axum's query extractor rejects a missing required field with
         // 400, so the handler does not have to special-case it.
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/prs")
@@ -386,7 +418,7 @@ mod tests {
     async fn repositories_returns_an_empty_list_when_no_sessions() {
         // No sessions registered yet → no repositories. The endpoint
         // replies with `{ repositories: [] }`, not 404.
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/repositories")
@@ -408,7 +440,7 @@ mod tests {
 
     #[tokio::test]
     async fn workdir_recent_returns_an_empty_list_when_no_sessions() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/workdir/recent")
@@ -430,7 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn launch_options_list_is_empty_on_a_fresh_store() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .uri("/api/launch-options")
@@ -452,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_then_list_and_delete_launch_option() {
-        let state = test_state();
+        let state = test_state().await;
         let app = router(state);
 
         // Create one option.
@@ -522,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_launch_option_rejects_a_blank_name() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -538,7 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn repository_scan_roots_round_trip_create_list_delete() {
-        let state = test_state();
+        let state = test_state().await;
         let app = router(state);
 
         // Empty on a fresh store.
@@ -642,7 +674,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_repository_scan_root_rejects_a_non_absolute_path() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -662,7 +694,7 @@ mod tests {
         // dialog click on an unknown path is the user's intent ("ensure gone"),
         // not a precondition.
         let token = crate::api::repository_scan_root_path::encode("/never/registered");
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("DELETE")
@@ -687,7 +719,7 @@ mod tests {
         .to_string();
 
         // Register the session first so the foreign key is satisfied.
-        let state = test_state();
+        let state = test_state().await;
         let app = router(state);
         let _ = app
             .clone()
@@ -737,7 +769,7 @@ mod tests {
         })
         .to_string();
 
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -761,7 +793,7 @@ mod tests {
         })
         .to_string();
 
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -806,7 +838,7 @@ mod tests {
         // decision before the (test-shortened) deadline it must answer an
         // empty 200 — the deliberate passthrough that falls back to the
         // interactive TUI prompt.
-        let state = test_state();
+        let state = test_state().await;
         register_session(&state).await;
         let body = serde_json::json!({
             "session_id": "sess-1",
@@ -840,7 +872,7 @@ mod tests {
     async fn permission_decision_resolves_the_blocked_hook() {
         // One state shared by both requests: the hook blocks on it, the
         // decision endpoint resolves it.
-        let state = test_state();
+        let state = test_state().await;
         register_session(&state).await;
         let hook_router = router(state.clone());
         let api_router = router(state);
@@ -900,7 +932,7 @@ mod tests {
         // context_window.used_percentage populated. The handler must broadcast
         // a `StatusUpdated` carrying the session id, the forwarded
         // used_percentage, and both rate-limit windows.
-        let state = test_state();
+        let state = test_state().await;
         let mut rx = state.subscribe();
         let app = router(state);
 
@@ -969,7 +1001,7 @@ mod tests {
         // `context_window.current_usage` / `used_percentage` are null. The
         // payload must deserialize (every field optional) and still broadcast a
         // snapshot with those fields as `None`.
-        let state = test_state();
+        let state = test_state().await;
         let mut rx = state.subscribe();
         let app = router(state);
 
@@ -1016,7 +1048,7 @@ mod tests {
     async fn status_line_tolerates_an_unknown_top_level_field() {
         // Claude Code adds fields across versions; an unknown extra top-level
         // field must not break deserialization (forward compatibility).
-        let state = test_state();
+        let state = test_state().await;
         let app = router(state);
 
         let body = serde_json::json!({
@@ -1046,7 +1078,7 @@ mod tests {
         // keyed by it: a payload missing it carries nothing to broadcast on, so
         // the handler drops it (empty 200) rather than emitting a `StatusUpdated`
         // with no session to attach to.
-        let state = test_state();
+        let state = test_state().await;
         let mut rx = state.subscribe();
         let app = router(state);
 
@@ -1080,7 +1112,7 @@ mod tests {
         // for any path must be rejected with the stable code, and the router
         // must not have to reach the (unwired) opener stub either — the
         // allowlist check runs first.
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -1104,7 +1136,7 @@ mod tests {
     async fn open_cwd_rejects_an_unknown_handler_with_400() {
         // Register a session so the path is in the allowlist and the check
         // moves on to the handler resolution.
-        let state = test_state();
+        let state = test_state().await;
         let app = router(state.clone());
         let submit = serde_json::json!({
             "prompt": "seed",
@@ -1150,7 +1182,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_cwd_rejects_a_blank_path_with_400() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -1166,7 +1198,7 @@ mod tests {
 
     #[tokio::test]
     async fn permission_decision_for_an_unknown_request_is_a_conflict() {
-        let response = router(test_state())
+        let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")

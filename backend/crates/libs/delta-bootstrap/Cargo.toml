@@ -17,3 +17,7 @@ git-worktree = { workspace = true }
 gh-cli = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

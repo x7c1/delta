@@ -1,8 +1,13 @@
 import type { ReactNode } from 'react';
 import { Badge, Button, Spinner } from '@delta/ui-kit';
-import { useCancelSendMutation } from '@delta/api-client';
+import {
+  ApiError,
+  useCancelSendMutation,
+  useReleaseSendMutation,
+} from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
+import { useNotificationStore } from '../../store/notificationStore';
 import { useNewSessionSend } from './useNewSessionSend';
 import type { PendingEntry } from './usePendingSends';
 
@@ -34,14 +39,23 @@ export interface PendingQueueProps {
  * behalf. On a `409` (the dispatched send already echoed, or the queued one
  * already dispatched into an in-flight turn) the same refetch reconciles
  * the strip.
+ *
+ * A queued row with a non-null `restored_at` is a *restored* send: it was
+ * composed before a server restart (possibly long ago) and recovered at
+ * boot, and the server never auto-sends it — silently re-submitting stale
+ * text into a conversation that has moved on was rejected in review. Such a
+ * row renders with a distinct "Restored after restart" label and an explicit
+ * Send action (the release endpoint) alongside the usual Cancel.
  */
 export function PendingQueue({ entries }: PendingQueueProps) {
   const client = useApiClient();
   const removeSending = useLiveStore((state) => state.removeSending);
   const clearSpawn = useLiveStore((state) => state.clearSpawn);
   const forgetLocalSend = useLiveStore((state) => state.forgetLocalSend);
+  const showError = useNotificationStore((state) => state.showError);
   const retrySpawn = useNewSessionSend();
   const cancelSend = useCancelSendMutation(client);
+  const releaseSend = useReleaseSendMutation(client);
 
   if (entries.length === 0) {
     return null;
@@ -116,9 +130,11 @@ export function PendingQueue({ entries }: PendingQueueProps) {
               // escape hatch for a send whose echo never arrived (Escape
               // pressed in the TUI to discard the composer buffer leaves
               // no observable signal — the server injects Escape on the
-              // user's behalf and clears the row). A `409` either way is
-              // benign: the refetch the mutation triggers reconciles the
-              // strip.
+              // user's behalf and clears the row). When the server refuses
+              // the cancel, the mutation's refetch reconciles the strip, but
+              // a row that survives the refetch shows a Cancel button that
+              // looks dead unless the refusal is explained — so a failed
+              // cancel also surfaces through the app-wide error snackbar.
               const cancelButton = (
                 <Button
                   size="sm"
@@ -133,15 +149,98 @@ export function PendingQueue({ entries }: PendingQueueProps) {
                     // strip clears together rather than leaving a stuck
                     // `local` chip behind.
                     forgetLocalSend(entry.send.id);
-                    cancelSend.mutate({
-                      sendId: entry.send.id,
-                      sessionId: entry.send.session_id,
-                    });
+                    cancelSend.mutate(
+                      {
+                        sendId: entry.send.id,
+                        sessionId: entry.send.session_id,
+                      },
+                      {
+                        onError: (err: unknown) => {
+                          const title = 'Could not cancel the send';
+                          if (
+                            err instanceof ApiError &&
+                            err.code === 'send_not_cancellable'
+                          ) {
+                            // The server refused: the send already left the
+                            // cancellable window (its prompt submitted or
+                            // its turn is running).
+                            showError(
+                              title,
+                              'The send is no longer cancellable — its prompt has already been submitted.',
+                            );
+                            return;
+                          }
+                          showError(
+                            title,
+                            err instanceof Error
+                              ? err.message
+                              : 'The request failed.',
+                          );
+                        },
+                      },
+                    );
                   }}
                 >
                   Cancel
                 </Button>
               );
+              // A restored send never auto-dispatches: the user decides.
+              // Alongside the shared Cancel, the row offers an explicit Send
+              // that releases it into the normal queued flow. A refused
+              // release surfaces through the same snackbar path as a refused
+              // cancel, so the button never reads as silently dead.
+              if (
+                entry.send.status === 'queued' &&
+                entry.send.restored_at !== null
+              ) {
+                return sendRow(
+                  entry.key,
+                  entry.send.text,
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Badge tone="neutral">Restored after restart</Badge>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={releaseSend.isPending}
+                      onClick={() => {
+                        releaseSend.mutate(
+                          {
+                            sendId: entry.send.id,
+                            sessionId: entry.send.session_id,
+                          },
+                          {
+                            onError: (err: unknown) => {
+                              const title = 'Could not send the message';
+                              if (
+                                err instanceof ApiError &&
+                                err.code === 'send_not_releasable'
+                              ) {
+                                // The server refused: the row already left
+                                // the releasable window (released elsewhere,
+                                // or cancelled). The refetch reconciles.
+                                showError(
+                                  title,
+                                  'The message is no longer awaiting a release — it was already sent or cancelled.',
+                                );
+                                return;
+                              }
+                              showError(
+                                title,
+                                err instanceof Error
+                                  ? err.message
+                                  : 'The request failed.',
+                              );
+                            },
+                          },
+                        );
+                      }}
+                    >
+                      Send
+                    </Button>
+                    {cancelButton}
+                  </div>,
+                );
+              }
               return entry.send.status === 'queued'
                 ? sendRow(
                     entry.key,

@@ -373,10 +373,13 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
-    // Cancel a still-queued send. Mirrors the server's guarded transition: only
-    // a `queued` row cancels (it drops out of the open-send list on the next
-    // `GET .../sends`); anything else is a `409` with the stable
-    // `send_not_cancellable` code.
+    // Cancel a send. The real server cancels `queued` and `dispatched` rows
+    // (the row drops out of the open-send list on the next `GET .../sends`)
+    // and replies `409` with the stable `send_not_cancellable` code only for
+    // an unknown id, an already-terminal row, or a dispatched row whose echo
+    // already arrived. The mock has no turn machine to distinguish those
+    // `dispatched` sub-cases, so it models only the queued path and 409s
+    // everything else.
     http.post('*/api/sends/:id/cancel', ({ params }) => {
       const id = Number(params.id);
       const send = store.sends.find((s) => s.id === id);
@@ -387,6 +390,27 @@ export function createMockApi(): MockApi {
         );
       }
       send.status = 'cancelled';
+      return new HttpResponse(null, { status: 204 });
+    }),
+
+    // Release a restored send into the normal queued flow. The real server
+    // clears the restore marker only for a still-queued restored row (a
+    // guarded UPDATE) and 409s everything else with the stable
+    // `send_not_releasable` code; the mock mirrors that guard. It performs
+    // no dispatch — mock turn progress is driven by scripted events.
+    http.post('*/api/sends/:id/release', ({ params }) => {
+      const id = Number(params.id);
+      const send = store.sends.find((s) => s.id === id);
+      if (!send || send.status !== 'queued' || send.restored_at === null) {
+        return HttpResponse.json(
+          {
+            error: `send ${id} is not awaiting a release`,
+            code: 'send_not_releasable',
+          },
+          { status: 409 },
+        );
+      }
+      send.restored_at = null;
       return new HttpResponse(null, { status: 204 });
     }),
 
@@ -451,6 +475,7 @@ export function createMockApi(): MockApi {
           status: 'dispatched',
           matched_uuid: null,
           created_at: createdAt,
+          restored_at: null,
         };
         store.sends.push(send);
         const body: SendResponse = { send };
@@ -496,6 +521,7 @@ export function createMockApi(): MockApi {
         status: 'dispatched',
         matched_uuid: null,
         created_at: new Date().toISOString(),
+        restored_at: null,
       };
       store.sends.push(send);
       const body: SendResponse = { send };

@@ -570,6 +570,17 @@ impl SessionRuntime {
         }
     }
 
+    /// Whether a not-yet-dispatched resume entry exists — the session is
+    /// inside its resume-readiness window, from `open_session` until the
+    /// settle tick dispatches (or the resume fails). While this is true the
+    /// pane is bound but `claude` may not yet accept input, so no keystroke
+    /// may be typed: new first prompts are held via
+    /// [`Self::hold_first_prompt`], and the queued-send dispatch defers until
+    /// resume settle.
+    pub fn is_resuming(&self) -> bool {
+        self.resuming.is_some()
+    }
+
     /// Take the resuming entry out, if present.
     ///
     /// This is the *removing* variant, used by the failure paths — `SessionEnd`

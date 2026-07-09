@@ -545,18 +545,21 @@ where
     /// — and the cancel then executes on that session's actor, ordered
     /// against its dispatch path.
     ///
-    /// A `dispatched` cancel injects a single `Escape` into the pane (the
-    /// same gesture [`cancel_question`](Self::cancel_question) uses) and
-    /// promotes any queued send behind the cancelled head through the
-    /// existing idle-flush path.
+    /// Cancelling a `dispatched` send the turn machine is awaiting injects a
+    /// single `Escape` into the pane (the same gesture
+    /// [`cancel_question`](Self::cancel_question) uses) and promotes any
+    /// queued send behind the cancelled head through the existing idle-flush
+    /// path. A `dispatched` row the turn machine holds no claim on is
+    /// cancelled as a pure state transition — no keystrokes, no turn input
+    /// (see the module doc on ownerless rows).
     ///
     /// Returns [`Error::SendNotCancellable`] (`409`) when the send no longer
-    /// exists, has already left `queued`/`dispatched` (matched a transcript
-    /// line, or already cancelled), or is `dispatched` but the turn has moved
-    /// past `AwaitingEcho` — the echo already landed, so the turn is owned
-    /// by the in-flight line and the user reaches for the in-flight
-    /// interrupt instead. The browser drops its cancel control and
-    /// reconciles from the next refetch on this error.
+    /// exists, is already terminal (matched a transcript line, or already
+    /// cancelled), or is `dispatched` but its echo has already arrived — the
+    /// turn carries it `InFlight`, owned by its transcript line, and the
+    /// user reaches for the in-flight interrupt instead. The browser drops
+    /// its cancel control and reconciles from the next refetch on this
+    /// error.
     pub async fn cancel_send(&self, send_id: i64) -> Result<()> {
         let Some(send) = self.store.send(send_id).await? else {
             return Err(Error::SendNotCancellable(send_id));
@@ -567,6 +570,46 @@ where
             reply,
         })
         .await
+    }
+
+    /// Release a *restored* send — one the boot-time reconcile recovered from
+    /// a dead process's `dispatched` state — back into the normal queued
+    /// flow (see the module doc on
+    /// [`release_send`](crate::interactor::release_send)).
+    ///
+    /// Like a cancel, the release request carries only the send id (in its
+    /// URL), so the owning session is derived from the send row here and the
+    /// release then executes on that session's actor, ordered against its
+    /// dispatch path. The actor first ensures the session is open — resuming
+    /// it via `claude --resume <id>` when it is closed, the normal state
+    /// right after the restart that created the restored row — exactly as an
+    /// enqueue would. When the session was already open and idle the
+    /// released row dispatches immediately through the normal queued path;
+    /// the returned [`SessionEvent`]s (a `SendDispatched`, when that
+    /// happened) are broadcast by the transport so the browser sees the
+    /// transition. When the release itself resumed the session the row waits
+    /// out the resume-readiness window and is typed by the resume-settle
+    /// flush ([`Self::dispatch_ready_resumes`]).
+    ///
+    /// Returns [`Error::SendNotReleasable`] (`409`) when the send is
+    /// unknown, was never restored, is already released, or has since been
+    /// cancelled. The browser drops its Send control and reconciles from the
+    /// next refetch on this error. An ensure-open failure — e.g.
+    /// [`Error::ResumeUnavailable`] when the session's transcript is gone —
+    /// surfaces as-is, before the restored marker is touched, so the release
+    /// can be retried.
+    pub async fn release_send(&self, send_id: i64) -> Result<Vec<SessionEvent>> {
+        let Some(send) = self.store.send(send_id).await? else {
+            return Err(Error::SendNotReleasable(send_id));
+        };
+        let session_id = send.session_id;
+        let dispatched = self
+            .request(&session_id, move |reply| SessionInput::ReleaseSend {
+                send_id,
+                reply,
+            })
+            .await?;
+        Ok(dispatched.into_iter().collect())
     }
 
     // ---- Background ticks --------------------------------------------------------
@@ -613,12 +656,21 @@ where
     }
 
     /// Dispatch the held first prompt of every resume that is ready *and* has
-    /// settled, on the background tick (see the `ResumeTick` input docs).
+    /// settled, on the background tick (see the `ResumeTick` input docs). A
+    /// settled resume with no held prompt instead flushes its session's
+    /// oldest genuinely `queued` send — the resume window defers queued
+    /// dispatch, and this settle is what flushes it. Boot-restored sends are
+    /// not flushed here; they wait for an explicit release
+    /// ([`Self::release_send`]).
+    ///
+    /// Returns the [`SessionEvent::SendDispatched`]s those flushes produced,
+    /// for the caller to broadcast so the browser sees each
+    /// queued→dispatched transition.
     ///
     /// `now` is injected (rather than read here) so the dispatch is
     /// deterministic under test: the server loop passes `Instant::now()`,
     /// while tests advance a controlled instant.
-    pub async fn dispatch_ready_resumes(&self, now: Instant) -> Result<()> {
+    pub async fn dispatch_ready_resumes(&self, now: Instant) -> Result<Vec<SessionEvent>> {
         let mut pending = Vec::new();
         for id in self.sessions.ids() {
             let (tx, rx) = oneshot::channel();
@@ -629,11 +681,12 @@ where
                 pending.push(rx);
             }
         }
+        let mut events = Vec::new();
         for rx in pending {
             let Ok(result) = rx.await else { continue };
-            result?;
+            events.extend(result?);
         }
-        Ok(())
+        Ok(events)
     }
 
     /// Reap launches that never became ready before their deadline (the

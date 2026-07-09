@@ -165,6 +165,18 @@ pub(in crate::interactor) enum SessionInput {
     /// dispatched: transition the row to `cancelled` so the idle dispatch path
     /// skips it. A no-op conflict if the send already left `queued`.
     CancelSend { send_id: i64, reply: Reply<()> },
+    /// The browser released a *restored* send of this session (recovered at
+    /// boot from a dead process's `dispatched` state): clear its restore
+    /// marker so it re-enters the normal queued flow, then run the idle
+    /// dispatch. Replies with the [`SessionEvent::SendDispatched`] to
+    /// broadcast when that dispatch promoted a send. A conflict if the send
+    /// is not a still-queued restored row.
+    ///
+    /// [`SessionEvent::SendDispatched`]: crate::ports::SessionEvent::SendDispatched
+    ReleaseSend {
+        send_id: i64,
+        reply: Reply<Option<SessionEvent>>,
+    },
 
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous
@@ -173,8 +185,14 @@ pub(in crate::interactor) enum SessionInput {
         reply: Reply<(Vec<Message>, Vec<SessionEvent>)>,
     },
     /// Dispatch the held first prompt if this session's resume is ready and
-    /// has settled as of `now`.
-    ResumeTick { now: Instant, reply: Reply<()> },
+    /// has settled as of `now` — or, when the settled resume held no prompt,
+    /// flush the session's oldest `queued` send (deferred by the resume
+    /// window). Replies with the [`SessionEvent::SendDispatched`] to
+    /// broadcast when that flush promoted a send.
+    ResumeTick {
+        now: Instant,
+        reply: Reply<Option<SessionEvent>>,
+    },
     /// Reap this session's launch (fresh spawn or resume) if it never became
     /// ready before its deadline as of `now`.
     ReapTick {

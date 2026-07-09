@@ -30,6 +30,7 @@ export {
   useCloseSessionMutation,
   useCreateSendMutation,
   useCancelSendMutation,
+  useReleaseSendMutation,
   useThreadMessagesQuery,
   useThreadsMessagesQueries,
   type ThreadMessagesQueryEntry,

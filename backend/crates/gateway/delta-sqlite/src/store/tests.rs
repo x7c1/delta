@@ -143,6 +143,224 @@ async fn requeue_send_returns_a_dispatched_send_to_queued() {
 }
 
 #[tokio::test]
+async fn restore_all_dispatched_sweeps_every_session_and_spares_other_rows() {
+    // The boot-time reconcile: turn state is rebuilt Idle on boot, so every
+    // persisted `dispatched` row is an orphan — the sweep returns each of
+    // them to `queued` **with the restored marker set** across ALL sessions,
+    // while terminal (`matched` / `cancelled`) rows and genuinely `queued`
+    // rows stay untouched (the queued row must keep dispatching normally, so
+    // it must not gain the marker).
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (first, first_main) = store
+        .register_session(new_session_with("sess-1"))
+        .await
+        .unwrap();
+    let (second, second_main) = store
+        .register_session(new_session_with("sess-2"))
+        .await
+        .unwrap();
+
+    // One dispatched orphan per session (`enqueue_send` writes `dispatched`).
+    let orphan_a = store
+        .enqueue_send(&first.id, first_main, None, "orphan a", None)
+        .await
+        .unwrap();
+    let orphan_b = store
+        .enqueue_send(&second.id, second_main, None, "orphan b", None)
+        .await
+        .unwrap();
+
+    // Rows the sweep must not touch: terminal ones and a genuinely queued one.
+    let matched = store
+        .enqueue_send(&first.id, first_main, None, "matched", None)
+        .await
+        .unwrap();
+    store
+        .mark_send_matched(matched.id, &MessageUuid::from("u-m"))
+        .await
+        .unwrap();
+    let cancelled = store
+        .enqueue_send(&second.id, second_main, None, "cancelled", None)
+        .await
+        .unwrap();
+    store.cancel_send(cancelled.id).await.unwrap();
+    let queued = store
+        .enqueue_queued_send(&first.id, first_main, None, "still queued", None)
+        .await
+        .unwrap();
+
+    let restored = store.restore_all_dispatched().await.unwrap();
+    assert_eq!(restored, 2, "exactly the two dispatched orphans transition");
+
+    for (id, session) in [(orphan_a.id, &first.id), (orphan_b.id, &second.id)] {
+        let send = store.send(id).await.unwrap().unwrap();
+        assert_eq!(send.status, SendStatus::Queued);
+        assert!(
+            send.restored_at.is_some(),
+            "a restored row carries the marker so it awaits an explicit release"
+        );
+        assert!(
+            store.head_dispatched_send(session).await.unwrap().is_none(),
+            "no dispatched row survives the sweep"
+        );
+    }
+    assert_eq!(
+        store.send(matched.id).await.unwrap().unwrap().status,
+        SendStatus::Matched,
+    );
+    assert_eq!(
+        store.send(cancelled.id).await.unwrap().unwrap().status,
+        SendStatus::Cancelled,
+    );
+    let queued = store.send(queued.id).await.unwrap().unwrap();
+    assert_eq!(queued.status, SendStatus::Queued);
+    assert_eq!(
+        queued.restored_at, None,
+        "a genuinely queued row is untouched — it keeps dispatching normally"
+    );
+}
+
+#[tokio::test]
+async fn next_queued_send_skips_restored_rows() {
+    // A restored row must never dispatch automatically: `next_queued_send`
+    // (the only selection every idle-dispatch trigger goes through) skips it
+    // even when it is the oldest queued row, and picks a younger genuinely
+    // queued row instead.
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let restored = store
+        .enqueue_send(&session.id, main, None, "restored", None)
+        .await
+        .unwrap();
+    assert_eq!(store.restore_all_dispatched().await.unwrap(), 1);
+
+    // Only the restored row exists: nothing is selectable.
+    assert!(
+        store.next_queued_send(&session.id).await.unwrap().is_none(),
+        "a restored row is not auto-dispatched"
+    );
+    // The restored row still shows in the open-send list (the UI needs it).
+    let open = store.open_sends(&session.id).await.unwrap();
+    assert_eq!(open.len(), 1);
+    assert!(open[0].restored_at.is_some());
+
+    // A younger genuinely queued row is selected past the older restored one.
+    let fresh = store
+        .enqueue_queued_send(&session.id, main, None, "fresh", None)
+        .await
+        .unwrap();
+    let next = store
+        .next_queued_send(&session.id)
+        .await
+        .unwrap()
+        .expect("the unrestored queued row dispatches");
+    assert_eq!(next.id, fresh.id);
+    let _ = restored;
+}
+
+#[tokio::test]
+async fn release_restored_send_clears_the_marker_only_for_queued_restored_rows() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let restored = store
+        .enqueue_send(&session.id, main, None, "restored", None)
+        .await
+        .unwrap();
+    assert_eq!(store.restore_all_dispatched().await.unwrap(), 1);
+
+    // The release clears the marker; the row re-enters the normal queued flow.
+    assert!(
+        store.release_restored_send(restored.id).await.unwrap(),
+        "a queued restored row releases"
+    );
+    let released = store.send(restored.id).await.unwrap().unwrap();
+    assert_eq!(released.status, SendStatus::Queued);
+    assert_eq!(released.restored_at, None);
+    assert_eq!(
+        store
+            .next_queued_send(&session.id)
+            .await
+            .unwrap()
+            .expect("a released row is selectable again")
+            .id,
+        restored.id,
+    );
+
+    // A second release is a no-op conflict: the row is already released.
+    assert!(!store.release_restored_send(restored.id).await.unwrap());
+
+    // A never-restored queued row is not releasable.
+    let plain = store
+        .enqueue_queued_send(&session.id, main, None, "plain", None)
+        .await
+        .unwrap();
+    assert!(!store.release_restored_send(plain.id).await.unwrap());
+
+    // A cancelled restored row is not releasable (the cancel won the race).
+    let cancelled = store
+        .enqueue_send(&session.id, main, None, "cancelled", None)
+        .await
+        .unwrap();
+    assert_eq!(store.restore_all_dispatched().await.unwrap(), 1);
+    assert!(store.cancel_queued_send(cancelled.id).await.unwrap());
+    assert!(!store.release_restored_send(cancelled.id).await.unwrap());
+
+    // An unknown id reports no transition rather than erroring.
+    assert!(!store.release_restored_send(9999).await.unwrap());
+}
+
+/// A database created before `send.restored_at` existed must gain the column
+/// on open and load its pre-existing rows with the field as NULL — never
+/// crashing on the now-wider `send_from_row` and never losing the row's other
+/// data. NULL is exactly the "not restored" meaning, so pre-upgrade queued
+/// rows keep dispatching normally.
+#[tokio::test]
+async fn opening_a_pre_restored_at_database_migrates_and_loads_old_rows_as_null() {
+    let dir = std::env::temp_dir().join(format!("delta-migrate-restored-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    let (session_id, queued_id) = {
+        // Build the database, record a queued send, then physically drop the
+        // column so the file is a faithful pre-`restored_at` snapshot.
+        let legacy = SqliteStore::open(path_str).unwrap();
+        let (session, main) = legacy.register_session(new_session()).await.unwrap();
+        let queued = legacy
+            .enqueue_queued_send(&session.id, main, None, "held", None)
+            .await
+            .unwrap();
+        let conn = legacy.conn.lock().await;
+        conn.execute_batch("ALTER TABLE send DROP COLUMN restored_at")
+            .unwrap();
+        (session.id, queued.id)
+    };
+
+    // Re-opening applies the guarded ALTER; the old row loads as unrestored
+    // and stays on the normal queued path.
+    let store = SqliteStore::open(path_str).unwrap();
+    let queued = store.send(queued_id).await.unwrap().unwrap();
+    assert_eq!(queued.status, SendStatus::Queued);
+    assert_eq!(
+        queued.restored_at, None,
+        "a pre-migration row is unrestored"
+    );
+    assert_eq!(
+        store
+            .next_queued_send(&session_id)
+            .await
+            .unwrap()
+            .expect("a pre-migration queued row still dispatches normally")
+            .id,
+        queued_id,
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[tokio::test]
 async fn message_upsert_and_thread_view() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();

@@ -250,6 +250,7 @@ fn send_from_row(row: &Row<'_>) -> Result<Send> {
         status: SendStatus::parse(&row.get::<_, String>(6)?)?,
         matched_uuid: row.get::<_, Option<String>>(7)?.map(MessageUuid::from),
         created_at: row.get(8)?,
+        restored_at: row.get(9)?,
     })
 }
 
@@ -341,7 +342,7 @@ const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
          ORDER BY s.id LIMIT 1) \
      ) AS root_message_uuid, created_at";
 const SEND_COLS: &str =
-    "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at";
+    "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at, restored_at";
 const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at, model, git_branch, cwd, response_time_ms";
 const LAUNCH_OPTION_COLS: &str = "id, label, name, value, default_enabled, created_at";
 
@@ -861,6 +862,7 @@ impl SessionStore for SqliteStore {
             status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: now,
+            restored_at: None,
         })
     }
 
@@ -899,6 +901,7 @@ impl SessionStore for SqliteStore {
             status: SendStatus::Queued,
             matched_uuid: None,
             created_at: now,
+            restored_at: None,
         })
     }
 
@@ -925,6 +928,7 @@ impl SessionStore for SqliteStore {
                 &format!(
                     "SELECT {SEND_COLS} FROM send
                      WHERE session_id = ?1 AND status = 'queued'
+                       AND restored_at IS NULL
                      ORDER BY id LIMIT 1"
                 ),
                 params![session_id.as_str()],
@@ -975,6 +979,34 @@ impl SessionStore for SqliteStore {
         )
         .map_err(Error::from)?;
         Ok(())
+    }
+
+    async fn restore_all_dispatched(&self) -> std::result::Result<usize, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        let affected = conn
+            .execute(
+                "UPDATE send SET status = 'queued', restored_at = ?1
+                 WHERE status = 'dispatched'",
+                params![now],
+            )
+            .map_err(Error::from)?;
+        Ok(affected)
+    }
+
+    async fn release_restored_send(
+        &self,
+        id: i64,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE send SET restored_at = NULL
+                 WHERE id = ?1 AND status = 'queued' AND restored_at IS NOT NULL",
+                params![id],
+            )
+            .map_err(Error::from)?;
+        Ok(affected > 0)
     }
 
     async fn head_dispatched_send(

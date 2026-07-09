@@ -22,10 +22,16 @@ const PERMISSION_NOT_PENDING_CODE: &str = "permission_not_pending";
 const QUESTION_NOT_PENDING_CODE: &str = "question_not_pending";
 
 /// Stable machine-readable code for a send that can no longer be cancelled (it
-/// already left the `queued` state, or never existed). The frontend drops its
-/// cancel control and reconciles its pending strip from the next refetch on this
-/// code.
+/// never existed, is already terminal, or its echo has already arrived). The
+/// frontend drops its cancel control and reconciles its pending strip from the
+/// next refetch on this code.
 const SEND_NOT_CANCELLABLE_CODE: &str = "send_not_cancellable";
+
+/// Stable machine-readable code for a send that is not awaiting a release (it
+/// never existed, was never restored by the boot-time reconcile, was already
+/// released, or has since been cancelled). The frontend drops its Send control
+/// and reconciles its pending strip from the next refetch on this code.
+const SEND_NOT_RELEASABLE_CODE: &str = "send_not_releasable";
 
 /// Stable machine-readable code for a repository scan root registered twice
 /// with the same path. The Settings dialog shows an inline "already registered"
@@ -113,13 +119,20 @@ impl IntoResponse for ApiError {
                     Error::QuestionNotPending(_) => {
                         (StatusCode::CONFLICT, Some(QUESTION_NOT_PENDING_CODE))
                     }
-                    // The send exists (or existed) but has already left the
-                    // `queued` state, so a cancel can no longer take effect: a
+                    // The send is unknown, already terminal, or its echo has
+                    // already arrived, so a cancel can no longer take effect: a
                     // conflict with current state, with a stable code so the
                     // frontend drops the cancel control and reconciles from the
                     // next refetch.
                     Error::SendNotCancellable(_) => {
                         (StatusCode::CONFLICT, Some(SEND_NOT_CANCELLABLE_CODE))
+                    }
+                    // The send is not a still-queued restored row, so a
+                    // release can no longer take effect: a conflict with
+                    // current state, with a stable code so the frontend drops
+                    // the Send control and reconciles from the next refetch.
+                    Error::SendNotReleasable(_) => {
+                        (StatusCode::CONFLICT, Some(SEND_NOT_RELEASABLE_CODE))
                     }
                     // A repository scan root registered twice: a conflict with
                     // current state, with a stable code so the Settings dialog

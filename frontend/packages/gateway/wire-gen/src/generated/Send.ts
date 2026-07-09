@@ -26,4 +26,12 @@ matched_uuid: string | null,
 /**
  * ISO-8601 timestamp.
  */
-created_at: string, };
+created_at: string, 
+/**
+ * ISO-8601 timestamp of the boot-time restore, when this `queued` row
+ * was recovered from a `dispatched` state a dead server process left
+ * behind. A restored send never auto-dispatches: the browser renders it
+ * with explicit Send (`POST /api/sends/{id}/release`) and Cancel
+ * actions. `null` on the normal send path.
+ */
+restored_at: string | null, };

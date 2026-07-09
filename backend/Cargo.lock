@@ -240,6 +240,8 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tmux-driver",
+ "tokio",
+ "tracing",
  "workspace-fs",
 ]
 
