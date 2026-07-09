@@ -10,7 +10,7 @@ check_command: "make check"
 assignee: null
 branch: task/0706-0726-fix-restart-zombie-dispatched-send
 created_at: 2026-07-06T07:26:51Z
-updated_at: 2026-07-08T14:26:03Z
+updated_at: 2026-07-09T00:35:00Z
 ---
 
 # fix(usecase): reconcile dispatched sends orphaned by a server restart
@@ -179,7 +179,7 @@ Three fixes, one backend invariant restore plus two UX hardenings:
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real `make dev` loop: leave a `dispatched` row behind (e.g.
+- [x] On a real `make dev` loop: leave a `dispatched` row behind (e.g.
       a send typed into a TUI that never accepted it, or a row flipped
       by hand while the server is down), restart the server, reopen the
       session — the row appears as "Restored after restart" with Send /
