@@ -10,7 +10,7 @@ check_command: "make check"
 assignee: null
 branch: task/0710-0717-feat-thread-timeline-keyboard-nav
 created_at: 2026-07-10T07:17:00Z
-updated_at: 2026-07-10T10:05:00Z
+updated_at: 2026-07-10T14:46:35Z
 ---
 
 # feat(web): keyboard navigation for the thread timeline playhead
