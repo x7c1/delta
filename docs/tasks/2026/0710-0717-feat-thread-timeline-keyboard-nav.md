@@ -10,7 +10,7 @@ check_command: "make check"
 assignee: null
 branch: task/0710-0717-feat-thread-timeline-keyboard-nav
 created_at: 2026-07-10T07:17:00Z
-updated_at: 2026-07-10T08:57:00Z
+updated_at: 2026-07-10T10:05:00Z
 ---
 
 # feat(web): keyboard navigation for the thread timeline playhead
@@ -104,11 +104,11 @@ listener is attached.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a MacBook trackpad setup: with the timeline expanded,
+- [x] On a MacBook trackpad setup: with the timeline expanded,
       ArrowLeft/ArrowRight reliably move the playhead exactly one
       message per press — the precision that wheel scrubbing lacks —
       and holding the key traverses at the OS repeat rate.
-- [ ] Typing in the composer (including arrow-key caret movement) and
+- [x] Typing in the composer (including arrow-key caret movement) and
       arrow-key input into the terminal pane are unaffected while the
       timeline is expanded.
 
