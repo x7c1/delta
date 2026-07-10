@@ -880,7 +880,11 @@ function markDiameterPx(size: TimelineDotSize): number {
  * vigorous spin within the window trips higher staircase buckets so a long
  * session can be traversed in a handful of turns instead of dozens. Per-event
  * |delta| is clamped before accumulating so a trackpad's inertial burst
- * stays under control. Clicking anywhere on the timeline jumps the active index
+ * stays under control. While expanded, ArrowLeft / ArrowRight step the same
+ * large-message subset one message per keydown (left = older, right = newer)
+ * with none of the wheel's cooldown or staircase machinery — the
+ * deterministic alternative when trackpad inertia makes precise wheel
+ * stops unreliable. Clicking anywhere on the timeline jumps the active index
  * to the message whose x is closest to the click — small auxiliary marks are
  * directly tappable, so the user can still reach a specific tool call when
  * they want it. Whichever message is active becomes the lane highlight,
@@ -1630,6 +1634,85 @@ export function ThreadTimelineOverlay({
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
+  }, [expanded, setActiveMessageIndex]);
+
+  // ArrowLeft / ArrowRight step the playhead one large message per keydown
+  // while the timeline is expanded. The keyboard is the deterministic
+  // counterpart to the wheel: on a trackpad the inertial event stream keeps
+  // feeding steps after the fingers lift (even with the output-side
+  // cooldown bounding throughput), so stopping on an intended message is a
+  // matter of luck — whereas one keypress is exactly one step, and holding
+  // the key traverses at the OS key-repeat rate. The step semantics are
+  // identical to a single wheel step: walk the large-message subset via
+  // {@link pickNeighbourLargeMessage} and commit through
+  // {@link setActiveMessageIndex}, so the {@link scrubTick} bump, the
+  // conversation-pane jump, and cross-lane active-thread switching all
+  // behave exactly as they do for wheel scrubs. Deliberately NO
+  // {@link WHEEL_STEP_COOLDOWN_MS} and no velocity-window / staircase
+  // machinery: keys are a deterministic input whose cadence the OS
+  // key-repeat already sets, so `event.repeat` events step like any other
+  // keydown.
+  //
+  // The listener is window-level but active only while `expanded` (the
+  // keyboard analogue of scoping the wheel listener to the expanded axis
+  // container): a collapsed timeline attaches nothing, so arrow keys fall
+  // through to the page untouched. There is no global keyboard-shortcut
+  // registry in the web app today — existing keydown handling is all
+  // element-local React `onKeyDown` — so this effect attaches its own
+  // listener directly, the same way the wheel effect manages its own,
+  // rather than plugging into a shared shortcut layer.
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Only plain ArrowLeft / ArrowRight are ours. A Ctrl / Meta / Alt
+      // chord belongs to the browser or OS (Alt+Arrow word-jump, Cmd+Arrow
+      // line-edge, ...), and a key some earlier handler already claimed
+      // (`defaultPrevented`) stays claimed.
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      if (event.defaultPrevented) {
+        return;
+      }
+      // Never hijack text entry or the terminal — see
+      // {@link isEditableEventTarget} for what counts as editable.
+      if (isEditableEventTarget(event.target)) {
+        return;
+      }
+      // Past the guards the keypress belongs to the timeline: suppress the
+      // page-level default (horizontal scrolling) even when the step below
+      // clamps into a no-op at either end.
+      event.preventDefault();
+      const total = sortedMessagesRef.current.length;
+      const large = largeSortedMessagesRef.current;
+      if (total === 0 || large.length === 0) {
+        return;
+      }
+      // ArrowRight → newer (timeline right), ArrowLeft → older — mirroring
+      // the visual axis (left = past, right = latest) and the wheel's
+      // positive-delta = newer convention. Clamped at the ends — no wrap.
+      const direction: 1 | -1 = event.key === 'ArrowRight' ? 1 : -1;
+      const currentIndex = activeMessageIndexRef.current ?? total - 1;
+      const currentMessage = sortedMessagesRef.current[currentIndex];
+      const next = pickNeighbourLargeMessage(large, currentMessage, direction);
+      if (next === null) {
+        return;
+      }
+      const nextGlobalIndex = sortedMessagesRef.current.findIndex(
+        (m) => m.uuid === next.uuid,
+      );
+      if (nextGlobalIndex < 0 || nextGlobalIndex === currentIndex) {
+        return;
+      }
+      setActiveMessageIndex(nextGlobalIndex);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [expanded, setActiveMessageIndex]);
 
   // Click anywhere on an axis cell jumps the active index to the message
@@ -2468,6 +2551,31 @@ function TimelineClusterMark({ cluster, xPx }: TimelineClusterMarkProps) {
       }}
     />
   );
+}
+
+/**
+ * Whether a keydown targeting this element is text entry the timeline's
+ * keyboard navigation must never hijack: form controls (`input`,
+ * `textarea`, `select`) and anything inside a contentEditable region.
+ * `isContentEditable` is inherited — an element inside an editable
+ * ancestor reports `true` — so the single property read covers "anything
+ * inside" without walking ancestors. Non-element targets (`window`,
+ * `document`) are trivially not editable.
+ *
+ * The `textarea` case covers both the composer AND xterm's hidden helper
+ * textarea (`.xterm-helper-textarea` in TerminalPane), which is how all
+ * keyboard input reaches the terminal — so arrow keys typed into the
+ * terminal are never swallowed by the timeline.
+ */
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  const tag = target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    return true;
+  }
+  return target instanceof HTMLElement && target.isContentEditable;
 }
 
 /**
