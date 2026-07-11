@@ -1,0 +1,9 @@
+{
+  "steps": [
+    { "type": "await_prompt" },
+    { "type": "reply", "text": "session opened" },
+    { "type": "stop" },
+    { "type": "swallow_prompt" },
+    { "type": "hang" }
+  ]
+}

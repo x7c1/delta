@@ -2,31 +2,26 @@
 #
 # e2e-fake.sh — run the fake-mode Playwright suite against a real backend.
 #
-# Boots a real `delta-server` (temp database, dedicated port, per-run tmux
-# socket) whose spawned "claude" is the scripted `fake-claude` binary, then
-# runs the Playwright suite in frontend/packages/apps/web/e2e-fake against it.
-# Everything between the browser and the scripted model is real: REST, the
-# WebSocket event channel, the PTY bridge, tmux panes, hooks, and the JSONL
-# transcript tail.
+# This script is a thin wrapper: it builds the two binaries the suite needs
+# and invokes Playwright. The `delta-server` lifecycle itself — the temp
+# database, the per-run tmux socket, the scripted-claude wrapper, the spawn,
+# the `/health` readiness poll, and teardown — is owned by a worker-scoped
+# Playwright fixture (frontend/packages/apps/web/e2e-fake/support/server.ts),
+# NOT by this script. That single Node boot implementation is what lets a spec
+# kill the server and relaunch it (the server-restart coverage) and keeps the
+# two entry points from drifting.
 #
-# Per-run isolation:
-#   - the SQLite database, spawn workdirs, and fake transcripts live in a
-#     fresh temp directory, deleted on exit;
-#   - tmux runs on a unique per-run socket (delta-e2e-<pid>), killed on exit,
-#     so parallel or leftover runs never collide;
-#   - dedicated ports (backend 7899, web 5198 by default) so a live
-#     `make dev` (7878/5173) or the mock e2e suite (5199) is never touched.
-#
-# Scenario routing: the server's spawn command is fixed, so the wrapper script
-# this run generates pins FAKE_CLAUDE_SCENARIO_DIR at the suite's scenarios/
-# directory; each spec picks its scenario via the first word of the first
-# prompt it sends (see fake-claude's scenario module).
+# The suite drives the real frontend against a real `delta-server` whose
+# spawned "claude" is the scripted `fake-claude` binary. Everything between the
+# browser and the scripted model is real: REST, the WebSocket event channel,
+# the PTY bridge, tmux panes, hooks, and the JSONL transcript tail.
 #
 # Usage: scripts/e2e-fake.sh [playwright args...]
 #   Any trailing arguments are forwarded to `playwright test`, so a single
 #   spec or filter can be run against the same real harness, e.g.
-#     scripts/e2e-fake.sh reload-restore.spec.ts
-#   E2E_FAKE_BACKEND_PORT / E2E_FAKE_PORT override the ports.
+#     scripts/e2e-fake.sh server-restart.spec.ts
+#   E2E_FAKE_BACKEND_PORT / E2E_FAKE_PORT override the ports (the config and
+#   the server fixture both read E2E_FAKE_BACKEND_PORT).
 #
 # Prerequisites: tmux, the Rust toolchain, pnpm (workspace installed and
 # libraries built: `pnpm install && pnpm -r build` in frontend/), and the
@@ -38,25 +33,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
-SCENARIO_DIR="$FRONTEND_DIR/packages/apps/web/e2e-fake/scenarios"
-
-BACKEND_PORT="${E2E_FAKE_BACKEND_PORT:-7899}"
-WEB_PORT="${E2E_FAKE_PORT:-5198}"
-TMUX_SOCKET="delta-e2e-$$"
-
-# The per-run state (server.log, transcripts) lives in a temp dir deleted on
-# exit, which is useless once CI tears the runner down. Mirror the diagnostic
-# artifacts to a stable, repo-relative path that the CI upload step references
-# (alongside Playwright's own traces/videos/screenshots). The whole dir is
-# wiped at the start of each run so a previous run's logs never masquerade as
-# this one's.
-ARTIFACT_DIR="$FRONTEND_DIR/packages/apps/web/test-results/e2e-fake"
-
-# Elevated, overridable structured log level for the spawned server so the
-# turn-state FSM transitions and live-state resolutions (emitted at debug) are
-# captured in server.log. A caller-provided RUST_LOG wins, so local debugging
-# can narrow or widen it without editing this script.
-SERVER_RUST_LOG="${RUST_LOG:-delta_usecase=debug,info}"
 
 log() { printf '\033[1;36m[e2e-fake]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[e2e-fake]\033[0m %s\n' "$*" >&2; exit 1; }
@@ -65,91 +41,15 @@ command -v tmux >/dev/null 2>&1 || die "tmux not found on PATH"
 command -v cargo >/dev/null 2>&1 || die "cargo not found on PATH"
 command -v pnpm >/dev/null 2>&1 || die "pnpm not found on PATH"
 
-# --- Build both binaries up front so the server start below is instant. -----
+# Build both binaries up front so the fixture's server spawn is instant (the
+# fixture launches the built `target/debug/{delta-server,fake-claude}`).
 log "Building delta-server and fake-claude ..."
 (cd "$BACKEND_DIR" && cargo build -p delta-server -p fake-claude)
 
-# --- Per-run state, torn down on exit. ---------------------------------------
-RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/delta-e2e-fake.XXXXXX")"
-SERVER_PID=""
-
-preserve_artifacts() {
-  # Copy the per-run diagnostics out of the soon-to-be-deleted temp dir into a
-  # stable path CI uploads. Best-effort: a missing source (e.g. the server
-  # never started) must not turn teardown into a failure.
-  mkdir -p "$ARTIFACT_DIR" 2>/dev/null || return 0
-  [ -f "$RUN_DIR/server.log" ] && cp "$RUN_DIR/server.log" "$ARTIFACT_DIR/server.log" 2>/dev/null || true
-  if [ -d "$RUN_DIR/transcripts" ]; then
-    cp -R "$RUN_DIR/transcripts" "$ARTIFACT_DIR/transcripts" 2>/dev/null || true
-  fi
-}
-
-teardown() {
-  if [ -n "$SERVER_PID" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-  fi
-  preserve_artifacts
-  # Kill the whole per-run tmux server: every pane this run spawned dies with
-  # it, and other sockets (a developer's `delta`, another run) are untouched.
-  tmux -L "$TMUX_SOCKET" kill-server 2>/dev/null || true
-  rm -rf "$RUN_DIR"
-}
-trap teardown EXIT
-
-# Start each run from a clean artifact dir so stale logs can't be mistaken for
-# this run's evidence.
-rm -rf "$ARTIFACT_DIR"
-
-mkdir -p "$RUN_DIR/workdir" "$RUN_DIR/transcripts"
-
-# The spawn command line is fixed, so per-run configuration reaches the fake
-# through this wrapper: it pins the scenario directory and the transcript
-# directory, then forwards the CLI args delta-server passes.
-WRAPPER="$RUN_DIR/claude-bin.sh"
-cat > "$WRAPPER" <<EOF
-#!/bin/sh
-FAKE_CLAUDE_SCENARIO_DIR='$SCENARIO_DIR' \\
-FAKE_CLAUDE_TRANSCRIPT_DIR='$RUN_DIR/transcripts' \\
-exec '$BACKEND_DIR/target/debug/fake-claude' "\$@"
-EOF
-chmod +x "$WRAPPER"
-
-# --- Start the backend. -------------------------------------------------------
-log "Starting delta-server on 127.0.0.1:$BACKEND_PORT (tmux socket: $TMUX_SOCKET) ..."
-log "Server log: $RUN_DIR/server.log"
-RUST_LOG="$SERVER_RUST_LOG" \
-  DELTA_PORT="$BACKEND_PORT" \
-  DELTA_DB_PATH="$RUN_DIR/delta.db" \
-  DELTA_SESSION_WORKDIR="$RUN_DIR/workdir" \
-  DELTA_TMUX_SOCKET="$TMUX_SOCKET" \
-  DELTA_CLAUDE_BIN="$WRAPPER" \
-  DELTA_LAUNCH_DEADLINE_MS=3000 \
-  DELTA_PERMISSION_DECISION_TIMEOUT_MS=3000 \
-  "$BACKEND_DIR/target/debug/delta-server" >"$RUN_DIR/server.log" 2>&1 &
-SERVER_PID=$!
-
-# Wait for the health endpoint instead of sleeping a fixed time.
-for _ in $(seq 1 100); do
-  if curl -sf "http://127.0.0.1:$BACKEND_PORT/health" >/dev/null 2>&1; then
-    break
-  fi
-  kill -0 "$SERVER_PID" 2>/dev/null || {
-    cat "$RUN_DIR/server.log" >&2
-    die "delta-server exited during startup"
-  }
-  sleep 0.1
-done
-curl -sf "http://127.0.0.1:$BACKEND_PORT/health" >/dev/null 2>&1 \
-  || die "delta-server did not become healthy on port $BACKEND_PORT"
-
-# --- Run the suite (Playwright owns the Vite dev server). ---------------------
-log "Running the fake-mode Playwright suite (web port $WEB_PORT) ..."
-status=0
+# Run the suite; the worker fixture boots and tears down the server, and
+# Playwright owns the Vite dev server (proxied to the backend port).
+log "Running the fake-mode Playwright suite ..."
 (
   cd "$FRONTEND_DIR"
-  E2E_FAKE_BACKEND_PORT="$BACKEND_PORT" E2E_FAKE_PORT="$WEB_PORT" \
-    pnpm --filter @delta/web e2e:fake "$@"
-) || status=$?
-log "Suite finished (exit $status)."
-exit "$status"
+  pnpm --filter @delta/web e2e:fake "$@"
+)

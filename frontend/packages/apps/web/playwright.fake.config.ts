@@ -8,10 +8,14 @@ import { defineConfig, devices } from '@playwright/test';
  * bridge all hit a live `delta-server`, which spawns real tmux panes; only the
  * model behind them is a deterministic script.
  *
- * The backend is booted by `scripts/e2e-fake.sh` (the `make e2e-fake` entry
- * point), which owns the temp database, the per-run tmux socket, and teardown.
- * This config only starts the Vite dev server, proxied to that backend via
- * DELTA_PORT (see vite.config.ts).
+ * The backend is booted by a worker-scoped Playwright fixture
+ * (`e2e-fake/support/server.ts`), which owns the temp database, the per-run
+ * tmux socket, the scripted-claude wrapper, and teardown — and can kill and
+ * relaunch the server mid-suite for the restart coverage. `scripts/e2e-fake.sh`
+ * (the `make e2e-fake` entry point) only builds the binaries and invokes this
+ * suite. This config starts the Vite dev server, proxied to the backend via
+ * DELTA_PORT (see vite.config.ts); the fixture spawns the server on that same
+ * `E2E_FAKE_BACKEND_PORT`.
  */
 
 // Dedicated ports so the suite never collides with `make dev` (5173/7878) or
@@ -52,9 +56,15 @@ export default defineConfig({
     command: `pnpm exec vite --port ${PORT} --strictPort`,
     env: { DELTA_PORT: String(BACKEND_PORT) },
     url: `http://localhost:${PORT}`,
-    // Never adopt a stray server on the port: it could be a mock-mode one (no
-    // backend behind it) and the suite would silently test the wrong thing.
-    reuseExistingServer: false,
+    // Locally, adopt a server already bound to the port: a hard-killed run
+    // (Ctrl-C storm, kill -9) leaks its Vite child, and with strict mode the
+    // next run would abort on this port check before the worker fixture's
+    // stale-run sweep ever gets to run. The port is dedicated to this suite,
+    // so a squatter is that leaked Vite — same config, serving current
+    // sources on demand — and adopting it is what lets an interrupted run
+    // self-heal. CI keeps strict mode: its runners are fresh, so a bound
+    // port there is a real error that must stay loud.
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 });
