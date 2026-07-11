@@ -56,9 +56,15 @@ export default defineConfig({
     command: `pnpm exec vite --port ${PORT} --strictPort`,
     env: { DELTA_PORT: String(BACKEND_PORT) },
     url: `http://localhost:${PORT}`,
-    // Never adopt a stray server on the port: it could be a mock-mode one (no
-    // backend behind it) and the suite would silently test the wrong thing.
-    reuseExistingServer: false,
+    // Locally, adopt a server already bound to the port: a hard-killed run
+    // (Ctrl-C storm, kill -9) leaks its Vite child, and with strict mode the
+    // next run would abort on this port check before the worker fixture's
+    // stale-run sweep ever gets to run. The port is dedicated to this suite,
+    // so a squatter is that leaked Vite — same config, serving current
+    // sources on demand — and adopting it is what lets an interrupted run
+    // self-heal. CI keeps strict mode: its runners are fresh, so a bound
+    // port there is a real error that must stay loud.
+    reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
 });

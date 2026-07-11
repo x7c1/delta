@@ -178,6 +178,17 @@ function sweepStaleRuns(): void {
     }
     fs.rmSync(dir, { recursive: true, force: true });
   }
+
+  // Stale tmux config files: the server writes /tmp/delta-tmux-<socket>.conf
+  // for every socket it opens and never deletes it, so even clean runs leave
+  // one behind. Prefix-matched to this suite's sockets, so a dev socket's
+  // conf is never touched.
+  for (const name of entries) {
+    if (!name.startsWith(`delta-tmux-${SOCKET_PREFIX}`) || !name.endsWith('.conf')) {
+      continue;
+    }
+    fs.rmSync(path.join(tmpBase, name), { force: true });
+  }
 }
 
 /** Poll `/health` until the server answers ok, or throw with the log tail. */
