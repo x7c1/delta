@@ -177,13 +177,26 @@ Run it with:
 make e2e-fake
 ```
 
-`scripts/e2e-fake.sh` builds both binaries, boots the server on a dedicated
-port (7899) with a per-run temp database and tmux socket
-(`delta-e2e-<pid>`, killed on exit), shortens the launch watchdog via
-`DELTA_LAUNCH_DEADLINE_MS`, and lets Playwright start the Vite dev server
-(port 5198) proxied to that backend. Nothing it touches collides with
-`make dev` or the mock suite. It needs tmux, the Playwright chromium browser
-(see above), and built workspace libraries (`make build`).
+Ownership is split. `scripts/e2e-fake.sh` is a thin wrapper: it only builds
+the two binaries (`delta-server`, `fake-claude`) and invokes the Playwright
+suite. The **server lifecycle is owned by a worker-scoped Playwright fixture**
+(`packages/apps/web/e2e-fake/support/server.ts`), which runs in the worker
+process and holds the child-process handle — which is what makes the
+server-restart coverage possible (kill the server, relaunch it against the
+same database and tmux socket) and means a worker crash reboots the server.
+The fixture owns the per-run temp database and tmux socket
+(`delta-e2e-fake-<pid>`, killed on teardown), the scripted-claude wrapper, a
+shortened launch watchdog (`DELTA_LAUNCH_DEADLINE_MS`), the dedicated backend
+port (7899), and the `/health` readiness poll; Playwright starts the Vite dev
+server (port 5198) proxied to that backend. Because a hard kill (SIGKILL,
+Ctrl-C) can skip teardown, the fixture also **sweeps at startup**: it kills any
+leftover `delta-e2e-fake-*` tmux server and removes any `delta-e2e-fake.*` temp
+dir from a crashed run, so leaks are bounded to one run. Each server generation
+logs to its own file under `test-results/e2e-fake/` (`server.log`,
+`server.2.log`, …), all uploaded by CI on failure. Nothing the e2e-fake run
+touches collides with `make dev` or the mock suite. It needs tmux, the
+Playwright chromium browser (see above), and built workspace libraries
+(`make build`).
 
 **Writing a scenario.** Scenarios are JSON files in
 `packages/apps/web/e2e-fake/scenarios/`, executed step by step by the fake:

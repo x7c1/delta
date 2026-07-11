@@ -8,10 +8,14 @@ import { defineConfig, devices } from '@playwright/test';
  * bridge all hit a live `delta-server`, which spawns real tmux panes; only the
  * model behind them is a deterministic script.
  *
- * The backend is booted by `scripts/e2e-fake.sh` (the `make e2e-fake` entry
- * point), which owns the temp database, the per-run tmux socket, and teardown.
- * This config only starts the Vite dev server, proxied to that backend via
- * DELTA_PORT (see vite.config.ts).
+ * The backend is booted by a worker-scoped Playwright fixture
+ * (`e2e-fake/support/server.ts`), which owns the temp database, the per-run
+ * tmux socket, the scripted-claude wrapper, and teardown — and can kill and
+ * relaunch the server mid-suite for the restart coverage. `scripts/e2e-fake.sh`
+ * (the `make e2e-fake` entry point) only builds the binaries and invokes this
+ * suite. This config starts the Vite dev server, proxied to the backend via
+ * DELTA_PORT (see vite.config.ts); the fixture spawns the server on that same
+ * `E2E_FAKE_BACKEND_PORT`.
  */
 
 // Dedicated ports so the suite never collides with `make dev` (5173/7878) or

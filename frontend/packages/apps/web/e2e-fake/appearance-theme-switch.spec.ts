@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './support/fixtures';
 
 /**
  * End-to-end verification that the Settings appearance picker drives the

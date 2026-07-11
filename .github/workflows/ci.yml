@@ -161,8 +161,12 @@ jobs:
       # These failures appear only in CI and don't reproduce locally, so on a
       # failed run capture every piece of evidence: the Playwright HTML report,
       # test-results/ (traces, videos, screenshots, and the preserved backend
-      # server.log + fake transcripts under e2e-fake/). if-no-files-found:
-      # ignore keeps a green run from erroring when nothing was produced.
+      # logs + fake transcripts under e2e-fake/). A single run can span several
+      # server generations across restarts, each logged to its own file
+      # (server.log, server.2.log, …) that the worker fixture writes directly
+      # under test-results/e2e-fake/, so uploading test-results/ wholesale
+      # collects every generation. if-no-files-found: ignore keeps a green run
+      # from erroring when nothing was produced.
       - name: Upload e2e-fake diagnostics
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
