@@ -135,15 +135,24 @@ describe the new ownership split (bash builds, the fixture boots).
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Kill a run mid-suite (Ctrl-C and/or `kill -9` the Playwright
+- [x] Kill a run mid-suite (Ctrl-C and/or `kill -9` the Playwright
       process), then start a new run: the startup sweep removes the
       leaked tmux server and temp dir, and no `delta-e2e` tmux servers
       accumulate across repeated interrupted runs.
-- [ ] Force a spec failure after a restart (temporarily break an
+      (Verified by killing playwright mid-suite; the first attempt
+      exposed a real gap — the leaked Vite webServer blocked the next
+      run on the port check before the sweep could run — fixed by
+      adopting the existing server locally and also sweeping the
+      per-socket tmux conf files; the rerun then reclaimed every leak
+      and passed 27/27.)
+- [x] Force a spec failure after a restart (temporarily break an
       assertion in `server-restart.spec.ts`): every server log
       generation (`server.log`, `server.2.log`, …) is preserved
       locally, and the paths match what the updated
       `.github/workflows/ci.yml` upload step collects.
+      (Verified by breaking the restored-badge assertion: both
+      generations landed under `test-results/e2e-fake/`, covered by
+      the workflow's `test-results/` upload glob.)
 
 ## Out of scope
 
