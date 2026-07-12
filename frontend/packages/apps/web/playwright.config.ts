@@ -25,7 +25,14 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'list',
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: 'on-first-retry',
+    // In CI, retain a full Playwright trace for any failing test so a failure
+    // that does not reproduce locally is still diagnosable after the runner is
+    // gone (the CI workflow uploads test-results/ on failure). retries stays 0
+    // (see above), so a flake surfaces as a red run rather than being retried
+    // away — retain-on-failure captures the trace on the failing run itself,
+    // no retry needed. Local runs keep trace off so no unconsumed trace
+    // artifacts are written.
+    trace: process.env.CI ? 'retain-on-failure' : 'off',
   },
   projects: [
     {
