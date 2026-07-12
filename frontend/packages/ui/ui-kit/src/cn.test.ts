@@ -20,4 +20,19 @@ describe('cn', () => {
   it('dedups conflicting text color utilities to the last one passed', () => {
     expect(cn('text-slate-500', 'text-slate-700')).toBe('text-slate-700');
   });
+
+  // The thread-tree regression: default twMerge classifies the semantic size
+  // tokens (text-body/secondary/caption/terminal) as text COLORS, so a later
+  // color utility (`text-accent` on the active row) silently deleted the size
+  // class and the row inherited the ancestor font-size. The custom font-size
+  // class group in cn.ts keeps sizes and colors in separate conflict groups.
+  it('keeps a semantic font-size token alongside a text color', () => {
+    expect(cn('text-secondary', 'text-accent')).toBe('text-secondary text-accent');
+    expect(cn('text-caption text-fg-muted')).toBe('text-caption text-fg-muted');
+  });
+
+  it('still dedups conflicting semantic font-size tokens to the last one', () => {
+    expect(cn('text-caption', 'text-secondary')).toBe('text-secondary');
+    expect(cn('text-sm', 'text-body')).toBe('text-body');
+  });
 });
