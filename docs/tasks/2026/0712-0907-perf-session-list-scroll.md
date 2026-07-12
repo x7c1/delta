@@ -68,15 +68,15 @@ Reduce the per-scroll work while keeping the current visuals and behavior:
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] With a session list long enough to scroll (10+ sessions), flick-
+- [x] With a session list long enough to scroll (10+ sessions), flick-
       scrolling the pane is smooth in both a Chromium browser and a WebKit
       browser.
-- [ ] Rows keep their dynamic heights measured correctly: sessions with
+- [x] Rows keep their dynamic heights measured correctly: sessions with
       sub-thread trees (always shown expanded) render at their natural
       height, rows never overlap or leave gaps while scrolling or when a
       row's thread tree loads in, and focusing a session applies the
       focused styling (border/tint/ring).
-- [ ] Live updates (new session activity, rate-limit banner, connection
+- [x] Live updates (new session activity, rate-limit banner, connection
       state) still reflect in the list without a full-pane visual flash.
 
 ## Out of scope
