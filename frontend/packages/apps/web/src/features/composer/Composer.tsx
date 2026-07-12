@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, type FormEvent } from 'react';
+import { useCallback, useRef, type FormEvent } from 'react';
 import type { ThreadId } from '@delta/model';
 import type { SendRequest, Thread } from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
@@ -6,7 +6,8 @@ import {
   NEW_SESSION_DRAFT_KEY,
   useComposerStore,
 } from '../../store/composerStore';
-import { COMPOSER_MAX_HEIGHT, autoGrowGeometry } from './autoGrow';
+import { COMPOSER_MAX_HEIGHT } from './autoGrow';
+import { useAutoGrow } from './useAutoGrow';
 import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { useSubmitSend } from './useSubmitSend';
@@ -221,19 +222,10 @@ export function Composer({ mode }: ComposerProps) {
   // Auto-grow the textarea with its content up to a cap, then scroll
   // internally. Keyed on the controlled `draft` so it grows as you type, shrinks
   // back when text is deleted, and resets to the min height after a submit
-  // clears the draft. Reset the inline height to `auto` first so `scrollHeight`
-  // reflects the content's natural height (not a previously-applied larger one),
-  // then clamp it and toggle the internal scrollbar past the cap.
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) {
-      return;
-    }
-    el.style.height = 'auto';
-    const { height, overflow } = autoGrowGeometry(el.scrollHeight);
-    el.style.height = `${height}px`;
-    el.style.overflowY = overflow ? 'auto' : 'hidden';
-  }, [draft]);
+  // clears the draft. The measurement is coalesced into one animation frame per
+  // burst so a keystroke never forces a synchronous reflow before paint (see
+  // {@link useAutoGrow}).
+  useAutoGrow(textareaRef, draft);
 
   const placeholder = isNew
     ? 'Message to start a new session…'
