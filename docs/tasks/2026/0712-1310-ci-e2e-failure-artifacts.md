@@ -56,11 +56,14 @@ Make e2e failures in CI self-diagnosing:
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] A deliberately-broken e2e run on the task branch (temporary commit,
+- [x] A deliberately-broken e2e run on the task branch (temporary commit,
       reverted before merge) produces a downloadable artifact containing
-      the failing test's `error-context.md`.
-- [ ] A green CI run uploads no artifacts and its duration is not
-      meaningfully longer than before.
+      the failing test's `error-context.md`. Verified: the broken run
+      uploaded `e2e-mock-diagnostics` (3.4 MB) containing `error-context.md`
+      and `trace.zip` for each failing test.
+- [x] A green CI run uploads no artifacts and its duration is not
+      meaningfully longer than before. Verified on the pre-break green run
+      of this branch (no artifacts, no notable duration change).
 
 ## Out of scope
 
