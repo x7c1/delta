@@ -48,6 +48,15 @@ if (
 // requested `left`/`top` onto `scrollLeft`/`scrollTop` so tests that assert on
 // the post-scroll position keep working; tests that care about the smooth
 // contract install their own `vi.fn()` over this default to spy on calls.
+//
+// After mirroring, dispatch a `scroll` event, as a real browser does when a
+// programmatic scroll changes the offset. `@tanstack/react-virtual` learns its
+// scroll position ONLY through that event (its `scrollToIndex` calls
+// `scrollTo`, then waits for the resulting `scroll` to re-window) — without the
+// dispatch a virtualized list never re-windows to a programmatic scroll target
+// in jsdom, so transcript timeline-jump / breadcrumb-landing tests could never
+// mount an off-window row. The mirrored value is set before dispatch so any
+// listener reads the post-scroll offset.
 if (typeof HTMLElement.prototype.scrollTo !== 'function') {
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
     configurable: true,
@@ -57,20 +66,33 @@ if (typeof HTMLElement.prototype.scrollTo !== 'function') {
       options?: ScrollToOptions | number,
       maybeY?: number,
     ): void {
+      let moved = false;
       if (typeof options === 'object' && options !== null) {
         if (typeof options.left === 'number') {
           this.scrollLeft = options.left;
+          moved = true;
         }
         if (typeof options.top === 'number') {
           this.scrollTop = options.top;
+          moved = true;
         }
-        return;
-      }
-      if (typeof options === 'number') {
+      } else if (typeof options === 'number') {
         this.scrollLeft = options;
+        moved = true;
         if (typeof maybeY === 'number') {
           this.scrollTop = maybeY;
         }
+      }
+      if (moved) {
+        // Dispatch asynchronously, as a real browser does — a programmatic
+        // scroll fires its `scroll` event on a later task, never synchronously
+        // inside the caller. A synchronous dispatch here would re-enter
+        // `@tanstack/react-virtual`'s `flushSync` while React is mid-lifecycle
+        // (its `scrollToIndex` calls `scrollTo` from an effect), producing a
+        // spurious "flushSync was called from inside a lifecycle method"
+        // warning that never occurs in the browser. A microtask keeps the
+        // re-window within the same `act()`/`waitFor` flush the tests await.
+        queueMicrotask(() => this.dispatchEvent(new Event('scroll')));
       }
     },
   });

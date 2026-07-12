@@ -19,7 +19,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import type { MessagesResponse } from '@delta/wire-gen';
+import type { MessagesResponse, Thread } from '@delta/wire-gen';
 import {
   BRANCH_THREAD_ID,
   MAIN_THREAD_ID,
@@ -1438,6 +1438,15 @@ describe('TranscriptPane', () => {
       body.scrollTop = 600;
       fireEvent.scroll(body);
 
+      // Under virtualization the scroll fires the virtualizer's synchronous
+      // re-render, and — since the user is at the bottom (sticking) and no
+      // branch is pending yet — the stick-to-bottom effect re-pins the tail
+      // (`scrollTop := scrollHeight`; a browser clamps this to the max, jsdom
+      // stores it verbatim). Capture wherever that settles; the point of this
+      // case is that the *branch-compose overlay growth* below moves it no
+      // further.
+      const restingScrollTop = body.scrollTop;
+
       // A branch is now pending: the banner grows the overlay.
       act(() =>
         useComposerStore.setState({
@@ -1457,7 +1466,7 @@ describe('TranscriptPane', () => {
       // The grown banner does NOT grow the reserve and does NOT re-stick the
       // body: the banner floats over the transcript tail instead of pushing it.
       expect(body.style.paddingBottom).toBe('284px');
-      expect(body.scrollTop).toBe(600);
+      expect(body.scrollTop).toBe(restingScrollTop);
     });
 
     // v19 top-row layout. The collapsed state places the breadcrumb and
@@ -2099,5 +2108,411 @@ describe('TranscriptPane composer context bar', () => {
     expect(
       within(card).queryByTestId('composer-context-popover'),
     ).not.toBeInTheDocument();
+  });
+
+  describe('transcript virtualization', () => {
+    beforeEach(() => {
+      // Start each case from a clean timeline-expand state: clear the persisted
+      // preference AND the in-memory cache the expand hook shares across
+      // components, so a case that seeds `expanded=true` is actually read from
+      // localStorage rather than shadowed by a stale cache from an earlier test.
+      window.localStorage.clear();
+      resetTimelineExpandedForTests();
+    });
+
+    // A long thread of alternating user/assistant turns. Each turn carries a
+    // distinctive, findable text so a test can assert exactly which messages
+    // are mounted at any scroll position.
+    function longThreadMessages(
+      count: number,
+      threadId: number = MAIN_THREAD_ID,
+    ): MessagesResponse['messages'] {
+      return Array.from({ length: count }, (_, i) => {
+        const role = i % 2 === 0 ? 'user' : 'assistant';
+        const text = `turn-${i}`;
+        return {
+          uuid: `v-${threadId}-${i}`,
+          session_id: SESSION_ID,
+          thread_id: threadId,
+          role,
+          linear_parent_uuid: i === 0 ? null : `v-${threadId}-${i - 1}`,
+          semantic_parent_uuid: null,
+          prompt_id: null,
+          seq: i,
+          content_text: text,
+          content: [{ type: 'text', text }],
+          created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+        };
+      });
+    }
+
+    /** The Panel body is the scroll container: the message list's parent. */
+    function scrollBody(): HTMLElement {
+      return screen.getByTestId('transcript-message-list')
+        .parentElement as HTMLElement;
+    }
+
+    /**
+     * Give the scroll body a realistic tall `scrollHeight` (jsdom reports 0,
+     * which makes the stick-to-bottom logic treat every scroll position as "at
+     * the bottom" and re-pin the tail — undoing a programmatic jump). A real
+     * browser reports the true content height, so a mid-thread jump is NOT at
+     * the bottom and stick stays off. Only affects our stick math; the
+     * virtualizer sizes its window from `offsetHeight` + scroll offset instead.
+     */
+    function stubTallScrollBody(body: HTMLElement): void {
+      Object.defineProperty(body, 'scrollHeight', {
+        configurable: true,
+        get: () => 50000,
+      });
+      Object.defineProperty(body, 'clientHeight', {
+        configurable: true,
+        get: () => 600,
+      });
+    }
+
+    /**
+     * True once `scrollIntoView` has been called on the article for `uuid`. The
+     * timeline jump's landing runs `scrollMessageIntoView` immediately followed
+     * by the jump highlight on the freshly-mounted row (both in the same
+     * `run()`), so a `scrollIntoView` hit on the target is a stable proxy for
+     * "the pane scrolled to it and the highlight was applied" — stable because
+     * `vi.fn().mock` records the call permanently, unlike the transient
+     * highlight class the virtualizer may recycle. Requires the shared
+     * `scrollIntoView` spy installed by the test.
+     */
+    function scrolledIntoView(
+      spy: ReturnType<typeof vi.fn>,
+      uuid: string,
+    ): boolean {
+      return spy.mock.instances.some(
+        (inst) =>
+          inst instanceof Element &&
+          inst.getAttribute('data-message-uuid') === uuid,
+      );
+    }
+
+    /**
+     * Render the pane wired to `navStore.activeThreadId`, mirroring how the real
+     * app resolves the active thread — so a `setActiveThread(...)` (from a
+     * cross-lane timeline jump or a breadcrumb click) actually re-renders the
+     * pane into the new thread. `renderPane` hard-codes `activeThread`, which is
+     * fine for single-thread cases but cannot exercise thread switches.
+     */
+    function NavAwareTranscript({ threads }: { threads: Thread[] }) {
+      const activeThreadId = useNavStore((s) => s.activeThreadId);
+      const activeThread =
+        threads.find((t) => t.id === activeThreadId) ?? null;
+      return (
+        <TranscriptPane
+          threads={threads}
+          activeThread={activeThread}
+          readOnly={false}
+        />
+      );
+    }
+
+    function renderNavAware(threads: Thread[]) {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const client = new ApiClient({ baseUrl: 'http://localhost' });
+      return render(
+        <QueryClientProvider client={queryClient}>
+          <ApiProvider client={client}>
+            <NavAwareTranscript threads={threads} />
+          </ApiProvider>
+        </QueryClientProvider>,
+      );
+    }
+
+    /** The sorted set of message-item uuids currently mounted in the DOM. */
+    function mountedUuids(): string[] {
+      return screen
+        .getAllByTestId('message-item')
+        .map((el) => el.getAttribute('data-message-uuid') ?? '')
+        .sort();
+    }
+
+    it('mounts only the windowed subset of a long thread, and scrolling changes which messages are mounted', async () => {
+      const total = 240;
+      server.use(
+        http.get('*/api/threads/:id/messages', () =>
+          HttpResponse.json({ messages: longThreadMessages(total) }),
+        ),
+      );
+      renderPane();
+      await waitFor(() => expect(screen.queryAllByTestId('message-item').length).toBeGreaterThan(0));
+
+      // Far fewer than the whole thread is mounted — the jsdom viewport
+      // (600px, see test/setup) plus overscan bounds the window well under 240.
+      const initial = screen.getAllByTestId('message-item');
+      expect(initial.length).toBeGreaterThan(0);
+      expect(initial.length).toBeLessThan(60);
+      const initialUuids = mountedUuids();
+
+      // Scroll deep into the thread: the virtualizer swaps its window, so a
+      // different set of messages is mounted (the top ones recycle out).
+      const body = scrollBody();
+      const totalSize = Number.parseFloat(
+        screen.getByTestId('transcript-message-list').style.height,
+      );
+      act(() => {
+        body.scrollTop = totalSize; // jump toward the tail
+        fireEvent.scroll(body);
+      });
+
+      await waitFor(() => {
+        const nowUuids = mountedUuids();
+        // The window moved: the mounted set is no longer identical.
+        expect(nowUuids).not.toEqual(initialUuids);
+      });
+      // Still windowed after the jump — never the whole thread.
+      expect(screen.getAllByTestId('message-item').length).toBeLessThan(60);
+      // The tail turn is now mounted; the very first turn is not.
+      expect(screen.getByText(`turn-${total - 1}`)).toBeInTheDocument();
+      expect(screen.queryByText('turn-0')).not.toBeInTheDocument();
+    });
+
+    it('a timeline jump to an off-window message scrolls to it and flashes the jump highlight (same thread)', async () => {
+      const total = 60;
+      window.localStorage.setItem(timelineExpandedKey(), 'true');
+      useNavStore.setState({ focusedSessionId: SESSION_ID });
+      server.use(
+        http.get('*/api/threads/:id/messages', () =>
+          HttpResponse.json({ messages: longThreadMessages(total) }),
+        ),
+      );
+      // A jsdom scrollIntoView is a no-op for mounting — the virtualizer does
+      // the mounting; scrollIntoView only aligns the already-mounted article.
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView =
+        scrollIntoView as Element['scrollIntoView'];
+
+      renderPane();
+      // Expanded timeline is ready once its jump-edge control is present.
+      await screen.findByTestId('thread-timeline-jump-end');
+      // The pane starts at the top (jsdom reports scrollHeight 0), so the TAIL
+      // turn is outside the mounted window.
+      await waitFor(() =>
+        expect(screen.getByText('turn-0')).toBeInTheDocument(),
+      );
+      expect(screen.queryByText(`turn-${total - 1}`)).not.toBeInTheDocument();
+      stubTallScrollBody(scrollBody());
+
+      // Jump to the last message via the timeline's jump-to-end (same lane).
+      act(() => {
+        fireEvent.click(screen.getByTestId('thread-timeline-jump-end'));
+      });
+
+      // The tail turn's row is brought into the window (virtualizer scroll)…
+      await waitFor(() =>
+        expect(screen.getByText(`turn-${total - 1}`)).toBeInTheDocument(),
+      );
+      // …and once mounted the jump lands on it (scroll + highlight in run()).
+      await waitFor(() =>
+        expect(
+          scrolledIntoView(scrollIntoView, `v-${MAIN_THREAD_ID}-${total - 1}`),
+        ).toBe(true),
+      );
+    });
+
+    it('a cross-thread timeline jump switches threads then scrolls to the off-window target and flashes it', async () => {
+      // Start on the (short) branch thread; the long main thread's earliest
+      // turn is the global timeline start, so jump-start is a CROSS-lane jump:
+      // switch to main, wait for it to render, then scroll to its first row.
+      const mainCount = 60;
+      window.localStorage.setItem(timelineExpandedKey(), 'true');
+      useNavStore.setState({
+        focusedSessionId: SESSION_ID,
+        activeThreadId: BRANCH_THREAD_ID,
+      });
+      const branchMessages: MessagesResponse['messages'] = [
+        {
+          uuid: 'branch-msg-0',
+          session_id: SESSION_ID,
+          thread_id: BRANCH_THREAD_ID,
+          role: 'user',
+          linear_parent_uuid: null,
+          semantic_parent_uuid: null,
+          prompt_id: null,
+          seq: 0,
+          content_text: 'branch-turn',
+          content: [{ type: 'text', text: 'branch-turn' }],
+          // Later than every main turn so main owns the timeline start.
+          created_at: '2026-06-01T00:00:00Z',
+        },
+      ];
+      server.use(
+        http.get('*/api/threads/:id/messages', ({ params }) => {
+          const id = Number(params.id);
+          if (id === MAIN_THREAD_ID) {
+            return HttpResponse.json({
+              messages: longThreadMessages(mainCount, MAIN_THREAD_ID),
+            });
+          }
+          return HttpResponse.json({ messages: branchMessages });
+        }),
+      );
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView =
+        scrollIntoView as Element['scrollIntoView'];
+
+      renderNavAware(mockThreads);
+      await screen.findByTestId('thread-timeline-jump-start');
+      await waitFor(() =>
+        expect(screen.getByText('branch-turn')).toBeInTheDocument(),
+      );
+      stubTallScrollBody(scrollBody());
+
+      // Jump to the timeline start (main's earliest turn) — cross-lane.
+      act(() => {
+        fireEvent.click(screen.getByTestId('thread-timeline-jump-start'));
+      });
+
+      // The pane switched threads (setActiveThread) and, after the main thread
+      // rendered, the virtualizer scrolled its first row into the window and the
+      // jump landed on it (scroll + highlight in the same run()).
+      await waitFor(() =>
+        expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+      );
+      await waitFor(() =>
+        expect(screen.getByText('turn-0')).toBeInTheDocument(),
+      );
+      await waitFor(() =>
+        expect(
+          scrolledIntoView(scrollIntoView, `v-${MAIN_THREAD_ID}-0`),
+        ).toBe(true),
+      );
+    });
+
+    it('follows the growing streaming preview while at the bottom, and does not move while reading scrollback', async () => {
+      const total = 60;
+      server.use(
+        http.get('*/api/threads/:id/messages', () =>
+          HttpResponse.json({ messages: longThreadMessages(total) }),
+        ),
+      );
+      renderPane();
+      await waitFor(() =>
+        expect(screen.getAllByTestId('message-item').length).toBeGreaterThan(0),
+      );
+
+      const body = scrollBody();
+      Object.defineProperty(body, 'scrollHeight', {
+        configurable: true,
+        get: () => 5000,
+      });
+      Object.defineProperty(body, 'clientHeight', {
+        configurable: true,
+        get: () => 400,
+      });
+
+      // At the bottom (sticking): a growing streaming preview keeps the tail
+      // pinned to the bottom.
+      body.scrollTop = 4600; // 5000 - 400: exactly the bottom
+      fireEvent.scroll(body);
+      act(() => {
+        useLiveStore.getState().applyEvent({
+          kind: 'assistant_streaming',
+          session_id: SESSION_ID,
+          thread_id: MAIN_THREAD_ID,
+          message_id: 'stream-1',
+          index: 0,
+          final: false,
+          delta: 'streaming…',
+        });
+      });
+      await waitFor(() => expect(body.scrollTop).toBe(5000));
+
+      // Now the user scrolls UP to read scrollback (stick off): further preview
+      // growth must NOT yank them back to the bottom.
+      body.scrollTop = 500;
+      fireEvent.scroll(body);
+      act(() => {
+        useLiveStore.getState().applyEvent({
+          kind: 'assistant_streaming',
+          session_id: SESSION_ID,
+          thread_id: MAIN_THREAD_ID,
+          message_id: 'stream-1',
+          index: 0,
+          final: false,
+          delta: 'streaming… more and more text arriving',
+        });
+      });
+      // Give any (unwanted) re-pin a chance to run, then assert we stayed put.
+      await Promise.resolve();
+      expect(body.scrollTop).toBe(500);
+    });
+
+    it('breadcrumb "go up" lands on and flashes the child chip even when its owning message starts outside the window', async () => {
+      // A long main thread whose branch sprouts from an EARLY message. Viewing
+      // the branch and going up lands at the (far) bottom of main by default;
+      // the go-up landing must resolve the chip's owning row, mount it, and
+      // flash the chip.
+      const mainCount = 60;
+      // The branch sprouts from a LATE main turn, which is outside the mounted
+      // window when the parent renders at the top (jsdom starts at scrollTop 0).
+      const branchRootUuid = `v-${MAIN_THREAD_ID}-${mainCount - 4}`;
+      const threads: typeof mockThreads = [
+        mockThreads[0],
+        { ...mockThreads[1], root_message_uuid: branchRootUuid },
+      ];
+      useNavStore.setState({
+        focusedSessionId: SESSION_ID,
+        activeThreadId: BRANCH_THREAD_ID,
+      });
+      server.use(
+        http.get('*/api/threads/:id/messages', ({ params }) => {
+          const id = Number(params.id);
+          if (id === MAIN_THREAD_ID) {
+            return HttpResponse.json({
+              messages: longThreadMessages(mainCount, MAIN_THREAD_ID),
+            });
+          }
+          return HttpResponse.json({
+            messages: [
+              {
+                uuid: 'branch-only',
+                session_id: SESSION_ID,
+                thread_id: BRANCH_THREAD_ID,
+                role: 'user',
+                linear_parent_uuid: null,
+                semantic_parent_uuid: null,
+                prompt_id: null,
+                seq: 0,
+                content_text: 'inside branch',
+                content: [{ type: 'text', text: 'inside branch' }],
+                created_at: '2026-02-01T00:00:00Z',
+              },
+            ],
+          });
+        }),
+      );
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView =
+        scrollIntoView as Element['scrollIntoView'];
+
+      renderNavAware(threads);
+      await waitFor(() =>
+        expect(screen.getByText('inside branch')).toBeInTheDocument(),
+      );
+      stubTallScrollBody(scrollBody());
+
+      // Click the breadcrumb "main" crumb to go up to the parent.
+      const crumb = await screen.findByRole('button', { name: 'main' });
+      act(() => fireEvent.click(crumb));
+
+      // The parent renders; the go-up landing resolves the chip's owning row
+      // (a late, otherwise off-window turn), mounts it via the virtualizer, then
+      // scrolls to and flashes the child chip.
+      await waitFor(() => {
+        const chip = document.querySelector(
+          `[data-child-thread-id="${BRANCH_THREAD_ID}"]`,
+        );
+        expect(chip).not.toBeNull();
+        expect(chip?.querySelector('.ring-2')).not.toBeNull();
+      });
+    });
   });
 });

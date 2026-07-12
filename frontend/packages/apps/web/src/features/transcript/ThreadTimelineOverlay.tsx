@@ -616,11 +616,20 @@ export const SCROLL_DOM_READY_TIMEOUT_MS = 1000;
  * Returns a cancel handle the caller can fire to abort the wait if the
  * component unmounts or another jump supersedes this one before the element
  * lands.
+ *
+ * The optional `ensureMounted` callback is invoked once per poll frame with
+ * the target uuid. Under virtualization the target article is never in the DOM
+ * until the pane's virtualizer scrolls its window to it, so this callback (the
+ * transcript's {@link TranscriptScrollController.ensureMessageMounted}) nudges
+ * the virtualizer each frame until the row mounts and the `querySelector` below
+ * finds it. For a fully-mounted (non-virtualized) body it is omitted and the
+ * poll simply waits for the re-render, exactly as before.
  */
 export function scheduleScrollAfterRender(
   container: HTMLElement | null,
   uuid: string,
   onScroll?: () => void,
+  ensureMounted?: (uuid: string) => void,
 ): () => void {
   let highlightCancel: (() => void) | null = null;
   let reflowRafHandle: number | null = null;
@@ -661,6 +670,11 @@ export function scheduleScrollAfterRender(
       if (cancelled) {
         return;
       }
+      // Nudge the virtualizer to mount the target row. Idempotent and cheap:
+      // once the uuid resolves to an index the pane scrolls its window there,
+      // and a frame or two later the article appears and the poll below fires.
+      // A no-op for a non-virtualized body (no controller passed).
+      ensureMounted?.(uuid);
       // Re-query each frame so a re-render that swapped the target node's
       // identity (or appended it for the first time) is picked up at the
       // earliest possible paint. The selector is article-anchored (see
@@ -690,6 +704,11 @@ export function scheduleScrollAfterRender(
       highlightCancel?.();
     };
   }
+  // rAF-less fallback (older test runners): nudge the virtualizer once, then
+  // run on the next tick. There is no polling here, so a virtualized off-screen
+  // target may not have mounted yet — acceptable for the fallback since every
+  // real browser and the jsdom test runner provide rAF (the polled path above).
+  ensureMounted?.(uuid);
   const handle = setTimeout(run, 0);
   return () => {
     clearTimeout(handle);
@@ -705,6 +724,29 @@ export function scheduleScrollAfterRender(
   };
 }
 
+/**
+ * Bridge into the transcript pane's virtualizer. Under virtualization only the
+ * visible window (plus overscan) of message rows is mounted, so a jump target
+ * that sits outside that window is NOT in the DOM — a bare `querySelector` +
+ * `scrollIntoView` can never find it. {@link ensureMessageMounted} asks the
+ * pane to bring the row into the mounted window (scrolling the virtualizer so
+ * the row mounts); the overlay then polls for the freshly-mounted article and
+ * applies the precise scroll + jump highlight through the existing DOM path.
+ *
+ * The controller is optional: the overlay's isolated tests render a static,
+ * fully-mounted conversation body with no virtualizer, so when it is absent the
+ * overlay falls back to the pure-DOM path unchanged.
+ */
+export interface TranscriptScrollController {
+  /**
+   * Ensure the message row for `uuid` is mounted in the virtualized pane,
+   * scrolling the window if needed. A no-op when the uuid is not part of the
+   * current thread's rendered messages. Callers keep polling the DOM for the
+   * row to appear, so nothing is returned.
+   */
+  ensureMessageMounted(uuid: string): void;
+}
+
 export interface ThreadTimelineOverlayProps {
   /** All threads (main + subthreads) in the focused session. */
   threads: Thread[];
@@ -716,6 +758,13 @@ export interface ThreadTimelineOverlayProps {
    * a portaled preview) does not misdirect the scroll.
    */
   conversationBodyRef: RefObject<HTMLElement | null>;
+  /**
+   * Bridge into the pane's virtualizer so an off-screen jump target is mounted
+   * before the scroll fires (see {@link TranscriptScrollController}). Optional:
+   * when omitted the overlay uses the pure-DOM path, which is correct for a
+   * fully-mounted (non-virtualized) conversation body.
+   */
+  scrollController?: TranscriptScrollController | null;
 }
 
 /** Lane row height in pixels. */
@@ -942,6 +991,7 @@ export function ThreadTimelineOverlay({
   threads,
   activeThreadId,
   conversationBodyRef,
+  scrollController = null,
 }: ThreadTimelineOverlayProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -1414,22 +1464,39 @@ export function ThreadTimelineOverlay({
     pendingScrollCancelRef.current = null;
     const container = conversationBodyRef.current;
     if (current.threadId === activeThreadRef.current) {
-      // Same lane: the target message is already in the DOM, scroll right
-      // away. No frame deferral, no thread switch. The highlight fires
-      // right after the scroll so the eye spots where the playhead landed.
-      //
-      // The time-based guard is stamped IMMEDIATELY before the scroll fires
-      // (not at the top of the effect): the guard window must start ticking
-      // from the moment the IO ripples actually begin, otherwise a slow
-      // re-trigger could let the window expire before the scroll lands.
-      // For a same-lane jump the two moments are the same tick — this is
-      // straightforward — but keeping the stamp adjacent to the scroll keeps
-      // the cross-lane path's analogous discipline (see below) easy to read.
-      markProgrammaticScroll();
-      scrollMessageIntoView(container, current.uuid);
-      pendingScrollCancelRef.current = highlightMessageJump(
+      // Same lane: no thread switch. Under virtualization the target row may
+      // still be OUTSIDE the mounted window, so first ask the pane to bring it
+      // in. If it is already mounted (the common case, and always so for a
+      // non-virtualized body) — or there is no controller that could mount it —
+      // scroll right away; the highlight fires right after so the eye spots
+      // where the playhead landed. Only when a controller exists AND the row is
+      // still off-window do we fall through to the polling path below (where
+      // `scrollController` is therefore non-null).
+      scrollController?.ensureMessageMounted(current.uuid);
+      const alreadyMounted =
+        container?.querySelector(articleMessageSelector(current.uuid)) != null;
+      if (alreadyMounted || scrollController === null) {
+        // Stamp the time-based guard IMMEDIATELY before the scroll fires (not
+        // at the top of the effect): the guard window must start ticking from
+        // the moment the IO ripples actually begin, otherwise a slow
+        // re-trigger could let the window expire before the scroll lands.
+        markProgrammaticScroll();
+        scrollMessageIntoView(container, current.uuid);
+        pendingScrollCancelRef.current = highlightMessageJump(
+          container,
+          current.uuid,
+        );
+        return;
+      }
+      // Off-screen same-lane target: poll until the virtualizer mounts the row
+      // (nudged each frame via ensureMessageMounted), then scroll + highlight.
+      // The guard is stamped in the onScroll callback — at the moment the
+      // scroll actually fires — because the poll can span several frames.
+      pendingScrollCancelRef.current = scheduleScrollAfterRender(
         container,
         current.uuid,
+        () => markProgrammaticScroll(),
+        (uuid) => scrollController.ensureMessageMounted(uuid),
       );
       return;
     }
@@ -1477,6 +1544,14 @@ export function ThreadTimelineOverlay({
         markProgrammaticScroll();
         releaseOnce();
       },
+      // Under virtualization the new thread's rows are windowed, so the target
+      // is not in the DOM until the virtualizer scrolls to it. Nudge it each
+      // poll frame; once the freshly-switched thread has rendered its rows and
+      // the uuid resolves, the row mounts and the poll fires. A no-op for a
+      // non-virtualized body (no controller).
+      scrollController
+        ? (uuid) => scrollController.ensureMessageMounted(uuid)
+        : undefined,
     );
     // Wrap the cancel so the counter is also released if the scroll is
     // aborted (superseded by another jump or unmount) — otherwise a stacked
@@ -1496,6 +1571,7 @@ export function ThreadTimelineOverlay({
   }, [
     scrubTick,
     conversationBodyRef,
+    scrollController,
     setActiveThread,
     markProgrammaticScroll,
     decrementCrossLaneInFlight,
@@ -2019,6 +2095,12 @@ export function ThreadTimelineOverlay({
       }
       setActiveMessageIndexFromPaneScroll(targetIndex);
     };
+    const scheduleFlush = () => {
+      if (debounceHandle !== null) {
+        clearTimeout(debounceHandle);
+      }
+      debounceHandle = setTimeout(flush, PANE_SCROLL_DEBOUNCE_MS);
+    };
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -2033,10 +2115,7 @@ export function ThreadTimelineOverlay({
             intersecting.delete(uuid);
           }
         }
-        if (debounceHandle !== null) {
-          clearTimeout(debounceHandle);
-        }
-        debounceHandle = setTimeout(flush, PANE_SCROLL_DEBOUNCE_MS);
+        scheduleFlush();
       },
       {
         root: container,
@@ -2057,9 +2136,23 @@ export function ThreadTimelineOverlay({
     // `MutationObserver` so articles that appear after this initial pass
     // (streaming arrival, a background refetch) are picked up without
     // remounting the IO.
+    //
+    // Under virtualization this set churns constantly: the transcript mounts
+    // only the visible window (+overscan) of rows and unmounts the rest as the
+    // pane scrolls. Two hazards follow, both handled by `observeMatching`
+    // reconciling against the CURRENTLY-mounted articles on every mutation:
+    //   1. New rows scrolling in must be observed (the original job).
+    //   2. Rows scrolling out must be forgotten. An element removed from the
+    //      DOM does not reliably emit an IO leave entry, so without an explicit
+    //      prune its `intersecting`/`observed` bookkeeping goes stale and the
+    //      flush could commit — or keep pinning — the playhead to a row that no
+    //      longer exists. We unobserve it, drop it from `observed`, and (if it
+    //      was intersecting) drop it from `intersecting` and re-flush so the
+    //      topmost STILL-mounted article takes over.
     const observed = new Set<Element>();
     const observeMatching = () => {
       const targets = container.querySelectorAll(ALL_ARTICLES_SELECTOR);
+      const live = new Set<Element>(targets);
       for (const target of targets) {
         if (observed.has(target)) {
           continue;
@@ -2067,11 +2160,29 @@ export function ThreadTimelineOverlay({
         observed.add(target);
         observer.observe(target);
       }
+      let prunedIntersecting = false;
+      for (const el of observed) {
+        if (live.has(el)) {
+          continue;
+        }
+        observer.unobserve(el);
+        observed.delete(el);
+        const uuid = el.getAttribute('data-message-uuid');
+        if (uuid !== null && intersecting.delete(uuid)) {
+          prunedIntersecting = true;
+        }
+      }
+      // A now-unmounted row that had been the committed topmost is gone from
+      // `intersecting`; re-flush so the playhead re-derives from the survivors
+      // rather than staying frozen on the vanished row until the next scroll.
+      if (prunedIntersecting) {
+        scheduleFlush();
+      }
     };
     observeMatching();
-    // Track newly-added articles too: when a fresh message lands or the
-    // pane re-renders the active thread's content, the new article needs
-    // to be observed for the follower to track scroll past it.
+    // Track added AND removed articles: a fresh message landing or the
+    // virtualizer swapping its window both fire childList mutations, so a
+    // single handler both observes new rows and prunes unmounted ones.
     let mutationObserver: MutationObserver | null = null;
     if (typeof MutationObserver !== 'undefined') {
       mutationObserver = new MutationObserver(() => observeMatching());

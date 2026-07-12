@@ -3923,6 +3923,89 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       fake.restore();
     }
   });
+
+  it('drops an unmounted article from its bookkeeping so the committed playhead never tracks a vanished row (virtualization churn)', async () => {
+    // Under virtualization the pane mounts only a window of message rows and
+    // unmounts the rest as it scrolls. A row removed from the DOM does NOT
+    // reliably emit an IntersectionObserver leave, so its entry in the
+    // follower's `intersecting` map would go stale and keep driving the
+    // playhead to a row that no longer exists. The overlay's MutationObserver
+    // prunes such rows and re-derives the playhead from the survivors.
+    const fake = installFakeIO();
+    try {
+      stubAxisRect({ left: 0, width: 240 });
+      const threads = [makeThread(1)];
+      const messages = new Map([
+        [
+          1,
+          [
+            makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+            makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          ],
+        ],
+      ]);
+      renderOverlay({
+        threads,
+        messagesByThread: messages,
+        activeThreadId: 1,
+        conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      const articles = within(
+        screen.getByTestId('conversation-body'),
+      ).getAllByText(/msg-/);
+      const emitBothMsgATopmost = (io: {
+        emit: (entries: Partial<IntersectionObserverEntry>[]) => void;
+      }) =>
+        io.emit([
+          {
+            target: articles[0],
+            isIntersecting: true,
+            boundingClientRect: { top: 10 } as DOMRect,
+          },
+          {
+            target: articles[1],
+            isIntersecting: true,
+            boundingClientRect: { top: 200 } as DOMRect,
+          },
+        ]);
+
+      // Both rows intersect; msg-a is topmost, so the playhead commits msg-a.
+      const io = await getLiveIO(fake, articles.length);
+      act(() => emitBothMsgATopmost(io));
+      await waitFor(() =>
+        expect(
+          playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+        ).toBe(`${LANE_LEFT_PAD_PX}px`),
+      );
+
+      // Repopulate the live follower binding (the effect re-binds as the async
+      // query settles) so its `intersecting` map holds the stale msg-a entry
+      // that the prune must clear — mirroring a real pane where the IO has
+      // reported both rows as visible.
+      const live = await getLiveIO(fake, articles.length);
+      act(() => emitBothMsgATopmost(live));
+
+      // The virtualizer unmounts msg-a's row — remove it from the DOM WITHOUT
+      // an IO leave, exactly as a real unmount does. The overlay's
+      // MutationObserver must prune msg-a from its bookkeeping and re-flush, so
+      // the committed playhead moves to msg-b — the only STILL-mounted article
+      // — rather than staying frozen on the vanished msg-a.
+      const msgA = document.querySelector('article[data-message-uuid="msg-a"]');
+      expect(msgA).not.toBeNull();
+      act(() => {
+        msgA!.remove();
+      });
+
+      await waitFor(() =>
+        expect(
+          playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+        ).toBe(`${240 + LANE_LEFT_PAD_PX}px`),
+      );
+    } finally {
+      fake.restore();
+    }
+  });
 });
 
 describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {

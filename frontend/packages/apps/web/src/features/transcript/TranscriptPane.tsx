@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { threadAncestry, type ThreadId } from '@delta/model';
 import type { Message, Thread } from '@delta/wire-gen';
 import { useThreadMessagesQuery } from '@delta/api-client';
@@ -36,6 +37,7 @@ import { SubagentRunningIndicator } from './SubagentRunningIndicator';
 import {
   ThreadTimelineOverlay,
   useTimelineExpanded,
+  type TranscriptScrollController,
 } from './ThreadTimelineOverlay';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
@@ -51,6 +53,26 @@ import {
  * "at the bottom" and keeps following new content.
  */
 const STICK_THRESHOLD_PX = 64;
+
+/**
+ * Seed height (px) the virtualizer assigns a message row before it has been
+ * measured. Only a spacer estimate: each mounted row reports its true height
+ * back via `measureElement` (ResizeObserver-backed), so a one-line meta row and
+ * a long Markdown turn with expanded tool cards both settle to their real size.
+ * Tuned to a middling turn height so the initial scrollbar and the count of
+ * rows the window seeds are in the right ballpark before measurement corrects
+ * them.
+ */
+const ESTIMATED_MESSAGE_HEIGHT_PX = 160;
+
+/**
+ * Rows rendered above and below the visible window. A modest buffer keeps
+ * scrolling smooth (rows exist just before they scroll into view, and the
+ * pane→playhead follower / branch highlight see a little margin beyond the
+ * fold) while still recycling off-screen DOM so the mounted node count stays
+ * bounded regardless of thread length — the whole point of the virtualization.
+ */
+const MESSAGE_OVERSCAN = 6;
 
 /**
  * Fallback gap (px) between the bottom overlay and the resting content when the
@@ -345,6 +367,31 @@ export function TranscriptPane({
   const stickRef = useRef(true);
   const prevPendingRef = useRef(pendingCount);
 
+  // Recompute "is the user near the bottom?" on every scroll so the
+  // stick-to-bottom effects know whether to follow new content.
+  //
+  // CRITICAL ordering: this effect is declared BEFORE `useVirtualizer` below so
+  // its `scroll` listener attaches first and therefore runs first on each scroll
+  // event. The virtualizer's own scroll handler `flushSync`-renders the pane
+  // synchronously during the scroll dispatch, which runs the stick-to-bottom
+  // re-pin effects; if our listener ran second, those effects would still see
+  // the PREVIOUS `stickRef` (true while the user was at the bottom) and re-pin
+  // to the tail on the very scroll that is carrying the user upward — fighting
+  // the scroll. Updating `stickRef` first means the virtualizer's synchronous
+  // re-render sees the fresh "not at bottom" decision.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) {
+      return;
+    }
+    const onScroll = () => {
+      stickRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
   // The bottom overlay (composer + pending strip + bottom notices) floats over
   // the scrolling body and grows with the composer's content. Reserve bottom
   // padding equal to its MEASURED height (plus the overlay inset as a gap) so
@@ -426,6 +473,94 @@ export function TranscriptPane({
   );
   const [timelineExpanded] = useTimelineExpanded(expandedSessionId);
 
+  // Virtualize the message list: only the visible window (+overscan) of rows is
+  // mounted, so opening (or cross-thread jumping into) a long thread no longer
+  // pays an O(N) mount, and every forced layout read (composer autosize,
+  // overlay measurement) walks a bounded, not a whole-thread, layout tree —
+  // which is where WebKit's amplified layout cost was landing. The scroll
+  // element is the Panel body (`bodyRef`).
+  //
+  // `getItemKey` keys the measurement cache by message uuid, not index, so a
+  // measured height travels with its message across list changes (a streaming
+  // append, a refetch) instead of a tall turn's height landing on whatever
+  // message later occupies its old index. `scrollPaddingStart` is the pinned
+  // top-region height, so `scrollToIndex` (used by the timeline jump bridge and
+  // the breadcrumb landing below) lands a row just BELOW the floating breadcrumb
+  // / timeline cards rather than hidden under them — `scrollToIndex` does not
+  // read the CSS `scroll-margin-top` that a `scrollIntoView` honours.
+  //
+  // `scrollMargin` is the scroll element's own `padding-top` reserve (the same
+  // `topRegionReserve`, applied as `bodyStyle.paddingTop` below). The message
+  // list is NOT the first thing at the top of the scroll content — the body
+  // reserves that much padding for the pinned breadcrumb/timeline region — so
+  // the virtualizer's row offsets, which otherwise accumulate from 0, would be
+  // short by that padding: `scrollToIndex` would land a jump target one
+  // top-region height too LOW (it sets `scrollTop = item.start - scrollPaddingStart`,
+  // and `item.start` must equal the row's true offset from the scroll-content
+  // top for that to land correctly). Telling the virtualizer the list starts
+  // `scrollMargin` px down makes `item.start` absolute; the row `transform`
+  // below subtracts it back so rows still position correctly inside the spacer.
+  const messageVirtualizer = useVirtualizer({
+    count: renderedMessages.length,
+    getScrollElement: () => bodyRef.current,
+    estimateSize: () => ESTIMATED_MESSAGE_HEIGHT_PX,
+    overscan: MESSAGE_OVERSCAN,
+    getItemKey: (index) => renderedMessages[index].uuid,
+    scrollPaddingStart: topRegionReserve ?? 0,
+    scrollMargin: topRegionReserve ?? 0,
+  });
+  const virtualMessageItems = messageVirtualizer.getVirtualItems();
+  // The virtualizer's estimated total content height. Recomputed each render;
+  // it changes as rows are measured, which is why the stick-to-bottom effects
+  // key on it (a measurement-driven growth while pinned must re-pin the tail).
+  const messagesTotalSize = messageVirtualizer.getTotalSize();
+
+  // A signature of the currently-mounted virtual window (first..last row
+  // index), used as an effect dependency in place of `virtualMessageItems`
+  // itself. `getVirtualItems()` returns a FRESH array on every render (even
+  // when the window has not moved), so depending on the array reference
+  // directly would re-run "window changed" effects on every unrelated
+  // re-render instead of only on an actual window shift. This string is
+  // stable across renders where the window is unchanged, so effects that key
+  // on it (the breadcrumb "go up" landing below, and the branch-highlight
+  // effect further down) only re-run when the mounted rows actually differ.
+  const mountedWindowKey =
+    virtualMessageItems.length > 0
+      ? `${virtualMessageItems[0].index}:${
+          virtualMessageItems[virtualMessageItems.length - 1].index
+        }`
+      : '';
+
+  // uuid → row-index lookup for the current thread's rendered messages. Kept in
+  // a ref so the scroll controller (a stable object handed to the timeline
+  // overlay) always reads the LIVE map after a thread switch re-renders, rather
+  // than closing over a stale one.
+  const messageIndexByUuid = useMemo(() => {
+    const map = new Map<string, number>();
+    renderedMessages.forEach((message, index) => map.set(message.uuid, index));
+    return map;
+  }, [renderedMessages]);
+  const messageIndexByUuidRef = useRef(messageIndexByUuid);
+  messageIndexByUuidRef.current = messageIndexByUuid;
+
+  // Bridge handed to the timeline overlay so a jump to an OFF-SCREEN message
+  // (never mounted under virtualization) first scrolls the virtualizer's window
+  // to that row; the overlay then polls for the freshly-mounted article and
+  // applies its precise scroll + jump highlight. Stable identity (deps: the
+  // virtualizer instance only) so it does not thrash the overlay's jump effect.
+  const scrollController = useMemo<TranscriptScrollController>(
+    () => ({
+      ensureMessageMounted: (uuid: string) => {
+        const index = messageIndexByUuidRef.current.get(uuid);
+        if (index === undefined) {
+          return;
+        }
+        messageVirtualizer.scrollToIndex(index, { align: 'start' });
+      },
+    }),
+    [messageVirtualizer],
+  );
+
   // When navigating UP to an ancestor via the breadcrumb, this holds the child
   // thread one level down toward where we were. After the ancestor renders, the
   // scroll effect brings that child's chip — where the branch sprouts — into
@@ -460,21 +595,6 @@ export function TranscriptPane({
     el.addEventListener('click', onClick);
     return () => el.removeEventListener('click', onClick);
   }, [setBranchOrigin]);
-
-  // Recompute "is the user near the bottom?" on every scroll so the
-  // stick-to-bottom effects know whether to follow new content.
-  useLayoutEffect(() => {
-    const el = bodyRef.current;
-    if (!el) {
-      return;
-    }
-    const onScroll = () => {
-      stickRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
-    };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
 
   // The last message's content length lets streaming/incremental appends to the
   // same message count as a content change, so growing replies keep scrolling.
@@ -529,9 +649,24 @@ export function TranscriptPane({
   ]);
 
   // Keyed on the rendered content changing: jump to the bottom after paint when
-  // sticking.
+  // sticking. Under virtualization `scrollHeight` is the virtualizer's estimated
+  // total (`messagesTotalSize`) plus the tail extras (streaming bubble, running
+  // indicator, question card) that render after the windowed rows — so pinning
+  // to `scrollHeight` still lands at the true conversation tail. As rows get
+  // MEASURED the estimated total shifts; keying on `messagesTotalSize` re-runs
+  // this effect on each such shift so a pinned tail is re-asserted instead of
+  // drifting when a below-estimate row above resolves to its real height. The
+  // `stickRef` guard keeps this from ever yanking a user reading scrollback.
+  //
+  // While a branch is being composed the re-pin is held (same as the bottom
+  // overlay's measurement effect): a measurement-driven `messagesTotalSize`
+  // change must not shift the transcript out from under the passage the user
+  // selected to branch from. The re-pin resumes once the branch is cleared/sent.
   useLayoutEffect(() => {
     if (!stickRef.current) {
+      return;
+    }
+    if (useComposerStore.getState().branchOrigin !== null) {
       return;
     }
     const el = bodyRef.current;
@@ -540,7 +675,13 @@ export function TranscriptPane({
     }
     // The live preview grows in place (its own bubble, not a `messages` entry),
     // so its text length is a content-change signal too — keep following it.
-  }, [messages.length, lastContentLength, pendingCount, streaming?.text.length]);
+  }, [
+    messages.length,
+    lastContentLength,
+    pendingCount,
+    streaming?.text.length,
+    messagesTotalSize,
+  ]);
 
   // The Panel footer (notifications, Composer, queue, chips) sits outside the
   // scroll region and has a variable height: when a notice appears or the
@@ -581,22 +722,55 @@ export function TranscriptPane({
   // we left into view and flash it, rather than landing at the bottom of a
   // possibly long parent. Retries across renders until the ancestor's messages
   // (and thus the chip) have rendered; clears the request once it lands.
+  //
+  // Under virtualization the chip lives inside a message ROW that may sit far
+  // outside the mounted window, so a bare `querySelector` for the chip would
+  // never find it. First resolve which message owns the chip (via `childMap`)
+  // and scroll the virtualizer to that row so it mounts; the effect re-runs as
+  // the window changes (`mountedWindowKey` dep — NOT the `virtualMessageItems`
+  // array itself, whose reference changes on every render regardless of
+  // whether the window moved) and, once the chip's row is mounted, lands and
+  // flashes it.
   useEffect(() => {
     const childId = scrollToChildRef.current;
     if (childId === null || !activeThread) {
       return;
     }
+    // The chip's owning message is the `childMap` entry whose children include
+    // this branch. Mounting that row is what makes the chip queryable below.
+    let ownerUuid: string | null = null;
+    for (const [uuid, children] of childMap) {
+      if (children.some((child) => child.id === childId)) {
+        ownerUuid = uuid;
+        break;
+      }
+    }
+    if (ownerUuid !== null) {
+      const ownerIndex = messageIndexByUuid.get(ownerUuid);
+      if (ownerIndex !== undefined) {
+        messageVirtualizer.scrollToIndex(ownerIndex, { align: 'center' });
+      }
+    }
     const chip = bodyRef.current?.querySelector(
       `[data-child-thread-id="${childId}"]`,
     );
     if (!chip) {
+      // Row not mounted yet — the scrollToIndex above is bringing it in; this
+      // effect re-runs on the next window change and completes the landing.
       return;
     }
     scrollToChildRef.current = null;
     // Jump instantly (no smooth animation): the flash, not motion, draws the eye.
     chip.scrollIntoView({ block: 'center' });
     setFlashChildId(childId);
-  }, [activeThread?.id, renderedMessages, childMap]);
+  }, [
+    activeThread?.id,
+    renderedMessages,
+    childMap,
+    messageIndexByUuid,
+    messageVirtualizer,
+    mountedWindowKey,
+  ]);
 
   // Clear the post-navigation chip flash after a moment.
   useEffect(() => {
@@ -637,7 +811,9 @@ export function TranscriptPane({
   // up") marks every occurrence of its title; the pending branch keeps its
   // selected passage visible independent of focus. Re-run when content changes
   // (rendered text nodes are recreated) so the marks track streaming and
-  // refetches; clear on leave/unmount or when nothing is to be highlighted.
+  // refetches, and when the mounted window shifts (virtualization) so visible
+  // occurrences stay marked while scrolling; clear on leave/unmount or when
+  // nothing is to be highlighted.
   useEffect(() => {
     const body = bodyRef.current;
     if (!body || (!highlightTitle && !pendingBranchQuote)) {
@@ -659,7 +835,13 @@ export function TranscriptPane({
     );
     setBranchHighlight(ranges);
     return () => clearBranchHighlight();
-  }, [highlightTitle, pendingBranchQuote, messages.length, lastContentLength]);
+  }, [
+    highlightTitle,
+    pendingBranchQuote,
+    messages.length,
+    lastContentLength,
+    mountedWindowKey,
+  ]);
 
   const breadcrumbItems = ancestry.map((thread, index) => ({
     key: thread.id,
@@ -1179,6 +1361,7 @@ export function TranscriptPane({
           threads={threads}
           activeThreadId={activeThread.id}
           conversationBodyRef={bodyRef}
+          scrollController={scrollController}
         />
       )}
       {terminalButton}
@@ -1222,6 +1405,7 @@ export function TranscriptPane({
             threads={threads}
             activeThreadId={activeThread.id}
             conversationBodyRef={bodyRef}
+            scrollController={scrollController}
           />
         )}
         {(showBreadcrumb || terminalButton) && (
@@ -1377,92 +1561,133 @@ export function TranscriptPane({
           </p>
         )}
 
-      {renderedMessages.map((message) => {
-        const children = childMap.get(message.uuid) ?? [];
-        // A "tool" message renders as a Collapsible card: an assistant tool call
-        // (`tool_use`) or a standalone tool result (`tool_result` — paired
-        // results are already dropped as empty-rendering, so any that survive are
-        // orphans Claude delivers as `role: user`). The check comes before the
-        // user/prose split so an orphan tool_result is treated as a tool card,
-        // not a user turn.
-        const isToolTurn = message.content.some(
-          (block) => block.type === 'tool_use' || block.type === 'tool_result',
-        );
-        // Tool rows, the harness-injected task-notification card (a collapsed
-        // `<task-notification>` user turn), and meta lines all render as nested
-        // aside cards: they are tightened and left-indented so they read as
-        // nested steps, distinct from prose.
-        const isNestedCard =
-          isToolTurn || isTaskNotificationMessage(message) || message.role === 'meta';
-        const topGap = isNestedCard
-          ? 'pt-0.5'
-          : message.role === 'user'
-            ? 'pt-2'
-            : 'pt-1.5';
-        const bottomGap = isNestedCard
-          ? 'pb-0.5'
-          : message.role === 'user'
-            ? 'pb-1'
-            : 'pb-2';
-        // Inset a nested card (left margin) so it reads as a nested step.
-        const indent = isNestedCard ? 'ml-6 mr-0' : '';
-        return (
-          // One block per message: the message and its sub-thread chips. The
-          // block owns the vertical rhythm (not the message article), so adjacent
-          // messages are separated by a consistent gap while the chips hug their
-          // parent message just below it (see their small pt).
-          <div key={message.uuid} className={`${topGap} ${bottomGap} ${indent}`}>
-            <MessageItem
-              message={message}
-              pairing={pairing}
-              isLatest={message.uuid === latestAssistantUuid}
-              onSelectQuote={handleSelectQuote}
-            />
-            {children.length > 0 && (
-              <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">
-                {children.map((child) => (
-                  // The wrapper carries the scroll target id so a breadcrumb
-                  // "go up" can bring this chip into view (see scrollToChildRef).
-                  <span
-                    key={child.id}
-                    data-child-thread-id={child.id}
-                    className="inline-flex"
-                  >
-                    <Chip
-                      // The chip's clickable pill shape conveys that it enters
-                      // the branch, so no "[enter →]" label is shown. The
-                      // accessible name still says "Enter <title>" for screen
-                      // readers (and to distinguish it from the navigator tree
-                      // node of the same branch).
-                      ariaLabel={`Enter ${child.title}`}
-                      // Briefly ring the chip after a breadcrumb "go up" scrolls
-                      // it into view, so the eye catches where the branch began.
-                      className={
-                        flashChildId === child.id
-                          ? 'ring-2 ring-accent-hover ring-offset-1'
-                          : undefined
-                      }
-                      // Clear the hover highlight on click: entering the branch
-                      // does not fire mouseleave, so the mark would otherwise
-                      // linger across the whole child thread.
-                      onClick={() => {
-                        setHoveredBranchTitle(null);
-                        setActiveThread(child.id);
-                      }}
-                      // Hovering the chip marks every occurrence of its text in
-                      // the body, so it is clear what the branch was about.
-                      onMouseEnter={() => setHoveredBranchTitle(child.title)}
-                      onMouseLeave={() => setHoveredBranchTitle(null)}
-                    >
-                      ⤷ {child.title}
-                    </Chip>
-                  </span>
-                ))}
+      {/*
+        Virtualized message list. The outer `<div>` is a spacer sized to the
+        full virtual height (`getTotalSize`); only the rows in the current window
+        (+overscan) are mounted, each absolutely positioned by the virtualizer's
+        `transform: translateY(start)`. This bounds the live DOM-node count — and
+        thus the layout tree every forced reflow walks — regardless of thread
+        length. Each row attaches `measureElement` (ResizeObserver-backed) as its
+        ref and mirrors its index onto `data-index`, so a tool card expanding /
+        collapsing in place re-measures rather than corrupting the rows below it.
+        Tail extras (streaming bubble, running indicator, question card) render
+        AFTER this spacer in normal flow, so they stay pinned to the conversation
+        tail and `scrollHeight` (spacer + tail extras) still reaches the true
+        bottom for stick-to-bottom.
+      */}
+      <div
+        data-testid="transcript-message-list"
+        className="relative w-full"
+        style={{ height: messagesTotalSize }}
+      >
+        {virtualMessageItems.map((virtualRow) => {
+          const message = renderedMessages[virtualRow.index];
+          const children = childMap.get(message.uuid) ?? [];
+          // A "tool" message renders as a Collapsible card: an assistant tool
+          // call (`tool_use`) or a standalone tool result (`tool_result` —
+          // paired results are already dropped as empty-rendering, so any that
+          // survive are orphans Claude delivers as `role: user`). The check
+          // comes before the user/prose split so an orphan tool_result is
+          // treated as a tool card, not a user turn.
+          const isToolTurn = message.content.some(
+            (block) => block.type === 'tool_use' || block.type === 'tool_result',
+          );
+          // Tool rows, the harness-injected task-notification card (a collapsed
+          // `<task-notification>` user turn), and meta lines all render as
+          // nested aside cards: they are tightened and left-indented so they
+          // read as nested steps, distinct from prose.
+          const isNestedCard =
+            isToolTurn ||
+            isTaskNotificationMessage(message) ||
+            message.role === 'meta';
+          const topGap = isNestedCard
+            ? 'pt-0.5'
+            : message.role === 'user'
+              ? 'pt-2'
+              : 'pt-1.5';
+          const bottomGap = isNestedCard
+            ? 'pb-0.5'
+            : message.role === 'user'
+              ? 'pb-1'
+              : 'pb-2';
+          // Inset a nested card (left margin) so it reads as a nested step.
+          const indent = isNestedCard ? 'ml-6 mr-0' : '';
+          return (
+            // The virtualizer positions this row absolutely; `measureElement`
+            // reads its real height and `data-index` maps a measurement back to
+            // its row. The gap/indent (the message's vertical rhythm + nested
+            // inset) lives on the INNER wrapper so it is counted in the measured
+            // height while the outer element stays a clean positioning box.
+            //
+            // `virtualRow.start` is absolute from the scroll-content top (it
+            // includes `scrollMargin`, the body's top-region padding); this
+            // spacer already sits below that padding in normal flow, so subtract
+            // `scrollMargin` back out to position rows relative to the spacer.
+            <div
+              key={message.uuid}
+              data-index={virtualRow.index}
+              ref={messageVirtualizer.measureElement}
+              className="absolute left-0 top-0 w-full"
+              style={{
+                transform: `translateY(${
+                  virtualRow.start - messageVirtualizer.options.scrollMargin
+                }px)`,
+              }}
+            >
+              <div className={`${topGap} ${bottomGap} ${indent}`}>
+                <MessageItem
+                  message={message}
+                  pairing={pairing}
+                  isLatest={message.uuid === latestAssistantUuid}
+                  onSelectQuote={handleSelectQuote}
+                />
+                {children.length > 0 && (
+                  <div className="flex flex-wrap justify-end gap-1.5 px-3 pt-1.5">
+                    {children.map((child) => (
+                      // The wrapper carries the scroll target id so a breadcrumb
+                      // "go up" can bring this chip into view (scrollToChildRef).
+                      <span
+                        key={child.id}
+                        data-child-thread-id={child.id}
+                        className="inline-flex"
+                      >
+                        <Chip
+                          // The chip's clickable pill shape conveys that it
+                          // enters the branch, so no "[enter →]" label is shown.
+                          // The accessible name still says "Enter <title>" for
+                          // screen readers (and to distinguish it from the
+                          // navigator tree node of the same branch).
+                          ariaLabel={`Enter ${child.title}`}
+                          // Briefly ring the chip after a breadcrumb "go up"
+                          // scrolls it into view, so the eye catches the origin.
+                          className={
+                            flashChildId === child.id
+                              ? 'ring-2 ring-accent-hover ring-offset-1'
+                              : undefined
+                          }
+                          // Clear the hover highlight on click: entering the
+                          // branch does not fire mouseleave, so the mark would
+                          // otherwise linger across the whole child thread.
+                          onClick={() => {
+                            setHoveredBranchTitle(null);
+                            setActiveThread(child.id);
+                          }}
+                          // Hovering the chip marks every occurrence of its text
+                          // in the body, so it is clear what the branch was about.
+                          onMouseEnter={() => setHoveredBranchTitle(child.title)}
+                          onMouseLeave={() => setHoveredBranchTitle(null)}
+                        >
+                          ⤷ {child.title}
+                        </Chip>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        })}
+      </div>
 
       {/* The provisional live assistant bubble, appended at the tail while the
           turn streams. It mirrors MessageItem's assistant styling (left, plain
