@@ -198,11 +198,11 @@ const PLAYHEAD_TRANSITION_MS = 100;
 /**
  * CSS class added to a transcript message article right after a wheel/click
  * jump scrolls it into view, then removed after the highlight fades so the
- * eye spots where the navigation landed. The class drives a one-shot
- * background-color fade on the inner message bubble — no overlay layer, the
- * highlight lands directly on the element MessageItem paints with the rest
- * color. Matches the rule under `.delta-timeline-jump-highlight` in
- * index.css.
+ * eye spots where the navigation landed. The class drives a one-shot,
+ * compositor-friendly `::after` wash overlay on the inner message bubble
+ * whose `opacity` fades to zero — only `opacity` is animated, so the flash
+ * does not repaint the message body every frame. Matches the rule under
+ * `.delta-timeline-jump-highlight` in index.css.
  *
  * Exported so a test can assert the class is applied without depending on
  * the literal string in two places.
@@ -211,10 +211,10 @@ export const TIMELINE_JUMP_HIGHLIGHT_CLASS = 'delta-timeline-jump-highlight';
 
 /**
  * Duration (ms) the {@link TIMELINE_JUMP_HIGHLIGHT_CLASS} stays applied. The
- * CSS animation under that class fades the temporary amber background back
- * to fully transparent over this window, exposing the bubble's resting
- * color; once the class is removed the bubble is at its normal color and a
- * subsequent jump to the same message can re-apply the highlight cleanly.
+ * CSS animation under that class fades the wash overlay's `opacity` to zero
+ * over this window, exposing the bubble's resting color; once the class is
+ * removed the overlay is torn down and a subsequent jump to the same message
+ * can re-apply the highlight cleanly.
  * Tuned to be brief but still legible: long enough to register as a fade
  * rather than a blink, short enough not to linger after the jump has landed.
  * MUST stay in lock-step with the matching CSS `animation` duration in
@@ -480,20 +480,32 @@ export function scrollMessageIntoView(
 
 /**
  * Briefly mark the matching transcript message with the jump-highlight class
- * so the eye spots where the navigation landed. The class sets a temporary
- * background-color on the bubble and the CSS transition fades it back to the
- * resting color — no overlay layer, the highlight lands directly on the
- * message body. Scoped to the given container AND the `<article>` tag (see
+ * so the eye spots where the navigation landed. The class attaches a
+ * compositor-friendly `::after` wash overlay to the bubble whose `opacity`
+ * fades from the wash color to transparent (see the
+ * `.delta-timeline-jump-highlight` rule in index.css) — no paint-triggering
+ * property is animated, so the flash stays smooth even over a long message.
+ * Scoped to the given container AND the `<article>` tag (see
  * {@link articleMessageSelector}) so neither a duplicate uuid in a portaled
  * preview nor the timeline's own dots steal the highlight (a dot
  * highlighting amber would be confusing and would mask the missing
  * article-level highlight).
  *
- * Removing the class after {@link TIMELINE_JUMP_HIGHLIGHT_MS} lets a
- * subsequent jump to the same message re-apply the highlight from rest.
- * The cleanup uses `window.setTimeout` so the call is no-op safe under SSR
- * or jsdom without native timers (a missing `setTimeout` would just skip
- * the highlight).
+ * Removing the class after {@link TIMELINE_JUMP_HIGHLIGHT_MS} tears the
+ * overlay back down, so a subsequent jump to the same message re-applies the
+ * highlight from rest. When the class is ALREADY present (a repeat jump to a
+ * message still mid-fade), the overlay is restarted by removing the class and
+ * re-adding it across a `requestAnimationFrame` boundary — the pseudo-element
+ * is destroyed on removal and recreated on the next frame's add, replaying
+ * the opacity keyframe from the start. This replaces the old forced
+ * synchronous reflow (`void offsetWidth`): a fresh overlay node does not need
+ * a reflow to restart. The common first-jump case (class not yet present)
+ * adds the class synchronously, so the flash lands on the same frame as the
+ * scroll.
+ *
+ * The removal timer uses `window.setTimeout` so the call is no-op safe under
+ * SSR or jsdom without native timers (a missing `setTimeout` would just skip
+ * the removal).
  *
  * Returns a cancel handle the caller can fire to clear the class early if
  * the component unmounts or a superseding jump arrives before the timer.
@@ -509,25 +521,50 @@ export function highlightMessageJump(
   if (!target) {
     return () => undefined;
   }
-  // Toggle the class off first so a repeat jump to the same message can
-  // re-trigger the highlight cleanly (the CSS sets the temporary background
-  // when the class is present; removing it first then adding it is what
-  // restarts the visible transition).
-  target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
-  // Force a reflow so the remove + add cycle is two paint frames apart and
-  // the transition restarts cleanly. Reading `offsetWidth` is the standard
-  // trick; the assignment to a void variable keeps the side effect alive
-  // under aggressive minifiers.
-  void (target as HTMLElement).offsetWidth;
-  target.classList.add(TIMELINE_JUMP_HIGHLIGHT_CLASS);
-  if (typeof window === 'undefined' || typeof window.setTimeout !== 'function') {
-    return () => target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
-  }
-  const handle = window.setTimeout(() => {
+  const canUseTimers =
+    typeof window !== 'undefined' && typeof window.setTimeout === 'function';
+  const canUseRaf =
+    typeof window !== 'undefined' &&
+    typeof window.requestAnimationFrame === 'function';
+
+  let removalHandle: number | null = null;
+  let restartRafHandle: number | null = null;
+
+  const scheduleRemoval = () => {
+    if (!canUseTimers) {
+      return;
+    }
+    removalHandle = window.setTimeout(() => {
+      target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
+    }, TIMELINE_JUMP_HIGHLIGHT_MS);
+  };
+
+  const applyHighlight = () => {
+    target.classList.add(TIMELINE_JUMP_HIGHLIGHT_CLASS);
+    scheduleRemoval();
+  };
+
+  if (target.classList.contains(TIMELINE_JUMP_HIGHLIGHT_CLASS) && canUseRaf) {
+    // Repeat jump to a message still mid-fade: drop the overlay now and
+    // re-create it on the next frame so the opacity keyframe replays from
+    // the start (no forced reflow needed — the pseudo-element is a fresh
+    // node once the class is re-added).
     target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
-  }, TIMELINE_JUMP_HIGHLIGHT_MS);
+    restartRafHandle = window.requestAnimationFrame(() => {
+      restartRafHandle = null;
+      applyHighlight();
+    });
+  } else {
+    applyHighlight();
+  }
+
   return () => {
-    window.clearTimeout(handle);
+    if (removalHandle !== null && canUseTimers) {
+      window.clearTimeout(removalHandle);
+    }
+    if (restartRafHandle !== null && canUseRaf) {
+      window.cancelAnimationFrame(restartRafHandle);
+    }
     target.classList.remove(TIMELINE_JUMP_HIGHLIGHT_CLASS);
   };
 }

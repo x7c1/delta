@@ -370,59 +370,81 @@ body {
  * TIMELINE_JUMP_HIGHLIGHT_MS so the eye notices where the navigation landed
  * without being shouted at.
  *
- * The wash is applied as an `inset` `box-shadow` overlay rather than by
- * animating the bubble's own `background-color`. Animating background-color
- * directly forces the keyframe to end at `transparent`, which overrides the
- * bubble's resting color for the lifetime of the `forwards` fill — the
- * resting color only re-appears the instant the class is removed, producing
- * a visible "show through to the page surface, then snap back" flicker at
- * the end of the fade. With a transparent box-shadow overlay the bubble's
- * own background paints throughout, and the wash simply alpha-fades to zero
- * on top of it, so the animation lands naturally on the resting color with
- * no snap. The `9999px` spread is the standard trick for filling an element
- * of unknown size with an inset shadow; `border-radius` is honoured by the
- * shadow, so the wash hugs the bubble's rounded corners.
+ * The wash is painted ONCE as an absolutely-positioned `::after` overlay
+ * filling the bubble, and only its `opacity` is animated (0.7 -> 0). This is
+ * the whole point of this rule: `opacity` is a compositor-accelerated
+ * property, so the browser promotes the overlay to its own layer and fades
+ * it on the GPU without repainting the message body on every frame. The
+ * previous implementation animated a huge-spread `inset box-shadow`, which
+ * is NOT compositor-accelerated — every frame repainted the entire message
+ * element, and on a long assistant message (a large paint area) that made
+ * the landing flash visibly stutter, especially on WebKit engines. Nothing
+ * paint-triggering (`box-shadow`, `background-color`, layout) is animated
+ * here now; the overlay's color is set statically and only `opacity` moves.
  *
- * The first selector targets the inner bubble divs MessageItem paints for a
- * user turn (`max-w-[85%]`) and an assistant prose turn (the article's
- * direct `.rounded-lg` child), so the highlight lands on the SAME element
- * the resting bubble color sits on — no overlay halo around the bubble.
+ * The overlay sits at `z-index: -1` inside a stacking context the bubble
+ * establishes (`position: relative; isolation: isolate`), so it paints
+ * ABOVE the bubble's own background but BELOW the text — the wash tints the
+ * bubble surface without dimming the words, matching how the old inset
+ * shadow painted between background and content. `border-radius: inherit`
+ * makes the overlay hug the bubble's rounded corners.
+ *
+ * The first pair of selectors targets the inner bubble divs MessageItem
+ * paints for a user turn (`max-w-[85%]`) and an assistant prose turn (the
+ * article's direct `.rounded-lg` child), so the highlight lands on the SAME
+ * element the resting bubble color sits on — no overlay halo around the
+ * bubble.
  *
  * Articles without an inner bubble (tool / meta / task-notification cards)
  * fall through to the article-level rule via `:not(:has(...))`, so the
- * effect is still visible on those. The `:has()` guard prevents the article
- * rule from doubling onto a bubble that already has its own wash, which
- * would otherwise paint amber behind the bubble's own amber. Modern
- * browsers (Chrome 105+, Safari 15.4+, Firefox 121+) all support `:has()`
- * natively.
+ * effect is still visible on those (with an explicit `border-radius` since
+ * they have no bubble radius to inherit). The `:has()` guard prevents the
+ * article rule from doubling onto a bubble that already has its own wash.
+ * Modern browsers (Chrome 105+, Safari 15.4+, Firefox 121+) all support
+ * `:has()` natively.
  *
  * The wash color is sourced from `--delta-color-highlight-wash`. Light
  * holds the original amber-100; dark uses a desaturated indigo aligned on
  * the accent hue family, and sepia uses a muted copper that survives
- * against the beige surface. `prefers-reduced-motion: reduce` disables the
- * animation entirely for users who opt out of motion.
+ * against the beige surface. `prefers-reduced-motion: reduce` removes the
+ * overlay entirely (`display: none`) so users who opt out of motion see no
+ * flash at all.
  */
 .delta-timeline-jump-highlight > .rounded-lg,
-.delta-timeline-jump-highlight > .max-w-\[85\%\] {
+.delta-timeline-jump-highlight > .max-w-\[85\%\],
+.delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])) {
+  position: relative;
+  isolation: isolate;
+}
+.delta-timeline-jump-highlight > .rounded-lg::after,
+.delta-timeline-jump-highlight > .max-w-\[85\%\]::after,
+.delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background-color: rgb(var(--delta-color-highlight-wash));
+  will-change: opacity;
   animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
 }
-.delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])) {
+.delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
   border-radius: 0.375rem;
-  animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
 }
 @keyframes delta-timeline-jump-highlight-fade {
   0% {
-    box-shadow: inset 0 0 0 9999px rgb(var(--delta-color-highlight-wash) / 0.7);
+    opacity: 0.7;
   }
   100% {
-    box-shadow: inset 0 0 0 9999px rgb(var(--delta-color-highlight-wash) / 0);
+    opacity: 0;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\])),
-  .delta-timeline-jump-highlight > .rounded-lg,
-  .delta-timeline-jump-highlight > .max-w-\[85\%\] {
-    animation: none;
+  .delta-timeline-jump-highlight > .rounded-lg::after,
+  .delta-timeline-jump-highlight > .max-w-\[85\%\]::after,
+  .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
+    display: none;
   }
 }
 
