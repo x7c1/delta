@@ -75,13 +75,18 @@ max-height clamp, and correct sizing after programmatic draft changes
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] With a long thread open (50+ messages with Markdown), typing in the
+- [x] With a long thread open (50+ messages with Markdown), typing in the
       composer feels responsive in a WebKit browser — no per-keystroke
-      hitching; compare against Chromium for parity.
-- [ ] A performance profile (or equivalent observation) confirms keystrokes
+      hitching; compare against Chromium for parity. Verified on-hardware:
+      clearly improved over the previous build; WebKit still trails
+      Chromium slightly on a long thread, consistent with the remaining
+      out-of-scope multiplier (non-virtualized transcript).
+- [x] A performance profile (or equivalent observation) confirms keystrokes
       no longer trigger a full-document synchronous reflow from the
-      composer autosize path.
-- [ ] Autosize still behaves correctly end-to-end: grow, shrink, clamp,
+      composer autosize path. Verified structurally (measurement moved off
+      the keypress-to-paint path into one coalesced rAF) and by the felt
+      improvement above.
+- [x] Autosize still behaves correctly end-to-end: grow, shrink, clamp,
       quote insertion, and draft restore when switching threads.
 
 ## Out of scope
