@@ -103,6 +103,27 @@ jobs:
       - name: E2E (mock mode)
         run: pnpm --filter @delta/web e2e
 
+      # Mock-mode e2e failures often surface only in CI and don't reproduce
+      # locally, so on a failed run capture the Playwright output to make the
+      # failure diagnosable after the runner is gone: test-results/ holds an
+      # error-context.md (an ARIA page snapshot) per failure plus the trace
+      # retained in CI. playwright-report/ (the HTML report) is not written
+      # under CI's `github` reporter — the path is kept for parity with the
+      # fake-mode upload and is harmlessly skipped by if-no-files-found: ignore,
+      # which also stops the step erroring when a pre-e2e failure leaves nothing
+      # to upload. The paths are repo-root-relative — upload-artifact ignores
+      # the job's working-directory.
+      - name: Upload e2e (mock mode) diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mock-diagnostics
+          path: |
+            frontend/packages/apps/web/playwright-report/
+            frontend/packages/apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Fake-mode e2e: the real backend + tmux with the scripted fake-claude
   # binary behind it, driven by the browser. Complements (never replaces) the
   # mock-mode e2e job above: that one isolates the frontend, this one proves
@@ -175,4 +196,5 @@ jobs:
           path: |
             frontend/packages/apps/web/playwright-report/
             frontend/packages/apps/web/test-results/
+          retention-days: 7
           if-no-files-found: ignore
