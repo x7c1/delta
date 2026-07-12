@@ -74,17 +74,22 @@
    * Roles, not raw sizes, pick the token at each call site:
    *   body       1rem     (16px) — transcript message bodies, composer input
    *   secondary  0.875rem (14px) — tool/meta cards, supporting prose, forms
-   *   caption    0.75rem  (12px) — timestamps, badges, labels, timeline chrome
+   *   caption    0.875rem (14px) — timestamps, badges, labels, timeline chrome
    *   terminal   0.875rem (14px) — the embedded xterm canvas
    *
-   * 12px is the hard legibility floor; there is intentionally no smaller step
-   * (the retired 0.65rem/0.7rem call sites all fold up into `caption`). Values
-   * are authored in rem so they scale with the root font-size, but the root
+   * caption deliberately equals secondary in SIZE: this UI is CJK-heavy and
+   * kanji get muddy below ~14px on 1x displays, so the classic 12px caption
+   * tier trades away too much legibility (dogfooding verdict, 2026-07-12).
+   * The caption/secondary split is still worth keeping as separate tokens —
+   * the role distinction lives on in color (`text-fg-subtle`/`muted`) and
+   * weight, and the values can diverge again with a one-line change. The
+   * retired 0.65rem/0.7rem call sites all fold up into `caption`. Values are
+   * authored in rem so they scale with the root font-size, but the root
    * itself is deliberately left at the browser default — text size moves
    * independently of the rem-based layout/spacing tokens above. */
   --delta-text-body: 1rem;
   --delta-text-secondary: 0.875rem;
-  --delta-text-caption: 0.75rem;
+  --delta-text-caption: 0.875rem;
   --delta-text-terminal: 0.875rem;
 
   /*

@@ -92,7 +92,9 @@ export default {
       fontSize: {
         body: ['var(--delta-text-body)', '1.5rem'],
         secondary: ['var(--delta-text-secondary)', '1.375rem'],
-        caption: ['var(--delta-text-caption)', '1rem'],
+        // Pairs the 14px caption (the 12px era paired 1rem); dense rows that
+        // must stay tight carry their own leading-* overrides.
+        caption: ['var(--delta-text-caption)', '1.25rem'],
         terminal: ['var(--delta-text-terminal)', '1.25rem'],
       },
       colors: {
