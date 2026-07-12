@@ -10,7 +10,7 @@ check_command: "make check && ! grep -rnE 'text-(xs|sm|base|lg|xl|\\[)' frontend
 assignee: null
 branch: task/0712-0250-feat-font-size-tokens
 created_at: 2026-07-12T02:50:00Z
-updated_at: 2026-07-12T03:44:29Z
+updated_at: 2026-07-12T05:16:56Z
 ---
 
 # feat(web): tokenize font sizes and raise the type scale
@@ -91,12 +91,12 @@ automatically — do not restate sizes there.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] At 100% browser zoom, transcript message bodies and the composer read
+- [x] At 100% browser zoom, transcript message bodies and the composer read
       at 16px and the UI is comfortably legible without zooming — visual
       judgement during dogfooding.
-- [ ] No text anywhere in the UI renders below 12px (spot-check the thread
+- [x] No text anywhere in the UI renders below 12px (spot-check the thread
       timeline overlay and message metadata, the previous 0.65rem sites).
-- [ ] The terminal pane, composer overlay, thread timeline, and badges show
+- [x] The terminal pane, composer overlay, thread timeline, and badges show
       no layout breakage (clipping, overflow, misaligned rows) at the new
       sizes, in both light and dark themes.
 
