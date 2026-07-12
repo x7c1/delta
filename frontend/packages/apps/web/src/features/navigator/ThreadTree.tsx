@@ -110,7 +110,7 @@ function ThreadTreeNode({
         onClick={() => onSelectThread(node.thread.id)}
         style={{ paddingLeft: `${0.5 + depth * 0.85}rem` }}
         className={cn(
-          'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-[13px] leading-5 hover:bg-surface-elevated-hover',
+          'flex w-full items-center justify-between gap-2 py-0.5 pr-2 text-left text-caption leading-5 hover:bg-surface-elevated-hover',
           isActive && 'bg-accent/10 font-medium text-accent',
         )}
         aria-current={isActive ? 'true' : undefined}

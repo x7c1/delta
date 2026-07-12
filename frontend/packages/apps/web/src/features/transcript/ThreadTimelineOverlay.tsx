@@ -738,7 +738,7 @@ const LANE_RIGHT_PAD_PX = 16;
  * sync via `TERMINAL_TOGGLE_BUTTON_CLASS` over there.
  */
 export const TIMELINE_TOGGLE_BUTTON_CLASS =
-  'inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-3 py-1.5 text-xs font-medium text-fg shadow-md transition-colors hover:bg-surface-elevated';
+  'inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-3 py-1.5 text-caption font-medium text-fg shadow-md transition-colors hover:bg-surface-elevated';
 
 /**
  * Tailwind class string for the expanded-state jump-to-edge buttons (skip-back
@@ -2096,7 +2096,7 @@ export function ThreadTimelineOverlay({
     <section
       data-testid="thread-timeline-overlay"
       data-expanded="true"
-      className="select-none rounded-md border border-border-default bg-surface text-xs text-fg-muted shadow-md"
+      className="select-none rounded-md border border-border-default bg-surface text-caption text-fg-muted shadow-md"
       aria-label="Subthread timeline"
     >
       {/* The expanded header is a two-region row:
@@ -2129,7 +2129,7 @@ export function ThreadTimelineOverlay({
           onClick={toggle}
           data-testid="thread-timeline-toggle"
           aria-expanded={expanded}
-          className="flex flex-1 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-fg transition-colors hover:bg-surface-elevated"
+          className="flex flex-1 items-center gap-1.5 rounded-md px-3 py-1.5 text-caption font-medium text-fg transition-colors hover:bg-surface-elevated"
         >
           <span aria-hidden="true" className="text-fg-subtle">▾</span>
           Timeline
@@ -2167,7 +2167,7 @@ export function ThreadTimelineOverlay({
           className="max-h-64 overflow-y-auto px-2 pb-1"
         >
           {lanes.length === 0 ? (
-            <p className="px-1 py-1 text-[0.7rem] text-fg-subtle">
+            <p className="px-1 py-1 text-caption text-fg-subtle">
               No threads to show yet.
             </p>
           ) : (
@@ -2342,7 +2342,7 @@ export function ThreadTimelineOverlay({
                         // the old `lineHeight: LANE_HEIGHT_PX` centred only
                         // at exactly that height and would leave the glyph
                         // pinned to the top of a taller stretched cell.
-                        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-[0.65rem] ${
+                        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-caption ${
                           lane.isMain ? 'text-fg' : 'text-fg-muted'
                         } ${labelHighlightClasses}`}
                         style={{

@@ -267,7 +267,7 @@ export function Composer({ mode }: ComposerProps) {
   return (
     <form onSubmit={submit} className="space-y-2">
       {branching && (
-        <div className="flex items-start justify-between gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-xs">
+        <div className="flex items-start justify-between gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-caption">
           <span className="flex flex-col gap-0.5">
             <span className="font-medium text-accent">
               Branch from selected text
@@ -312,7 +312,7 @@ export function Composer({ mode }: ComposerProps) {
           // `px-3`: together they give the text a 14px left inset that matches
           // its 14px top inset (card `py-2` + the textarea's `py-1.5`), rather
           // than the lopsided 20px the card-default `pl-2` would stack up to.
-          className="min-h-[2.5rem] w-full resize-none bg-transparent py-1.5 pl-0.5 pr-10 text-sm focus:outline-none"
+          className="min-h-[2.5rem] w-full resize-none bg-transparent py-1.5 pl-0.5 pr-10 text-body focus:outline-none"
           onKeyDown={(event) => {
             if (
               event.key === 'Enter' &&

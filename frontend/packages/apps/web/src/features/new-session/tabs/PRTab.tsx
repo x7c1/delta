@@ -119,7 +119,7 @@ export function PRTab() {
   if (isAnyError) {
     return (
       <div
-        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger"
         data-testid="pr-tab-error"
         role="alert"
       >
@@ -209,11 +209,11 @@ function PrSection({
 
   return (
     <section className="space-y-1" data-testid={testId}>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+      <h3 className="text-caption font-semibold uppercase tracking-wide text-fg-subtle">
         {heading}
       </h3>
       {grouped.length === 0 ? (
-        <p className="text-xs text-fg-subtle">{emptyMessage}</p>
+        <p className="text-caption text-fg-subtle">{emptyMessage}</p>
       ) : (
         <ul className="space-y-0.5">
           {grouped.map((row, index) => (
@@ -300,7 +300,7 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
       data-selected={showSelected ? 'true' : 'false'}
       title={disabled ? `No local clone — run \`${cloneHint}\` somewhere first.` : pr.url}
       className={cn(
-        'flex w-full min-w-0 flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-xs',
+        'flex w-full min-w-0 flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left text-caption',
         disabled
           ? 'cursor-not-allowed opacity-60'
           : showSelected
@@ -309,17 +309,17 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
       )}
     >
       <div className="flex w-full min-w-0 items-center gap-2">
-        <span className="shrink-0 font-mono text-xs font-medium text-fg">
+        <span className="shrink-0 font-mono text-caption font-medium text-fg">
           {repoLabel}
         </span>
         <span className="min-w-0 flex-1 truncate">{pr.title}</span>
         {pr.draft && (
-          <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-[0.65rem] uppercase tracking-wide text-warning">
+          <span className="shrink-0 rounded bg-warning/10 px-1.5 py-0.5 text-caption uppercase tracking-wide text-warning">
             draft
           </span>
         )}
       </div>
-      <div className="flex w-full min-w-0 items-center gap-2 text-[0.7rem] text-fg-subtle">
+      <div className="flex w-full min-w-0 items-center gap-2 text-caption text-fg-subtle">
         <span className="shrink-0 font-mono" title={pr.head_ref}>
           {displayBranch(pr.head_ref)}
         </span>
@@ -330,7 +330,7 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
       </div>
       {disabled && (
         <p
-          className="mt-0.5 text-[0.7rem] text-fg-subtle"
+          className="mt-0.5 text-caption text-fg-subtle"
           data-testid="pr-tab-row-no-clone-hint"
         >
           No local clone — run <code className="rounded bg-surface-sunken px-1 font-mono">{cloneHint}</code> somewhere first.
@@ -343,11 +343,11 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
 function GhUnavailableHint() {
   return (
     <p
-      className="text-xs text-fg-subtle"
+      className="text-caption text-fg-subtle"
       data-testid="pr-tab-gh-unavailable"
     >
       Run{' '}
-      <code className="rounded bg-surface-sunken px-1 py-0.5 font-mono text-[0.7rem] text-fg">
+      <code className="rounded bg-surface-sunken px-1 py-0.5 font-mono text-caption text-fg">
         gh auth login
       </code>{' '}
       to enable this tab.

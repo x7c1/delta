@@ -122,7 +122,7 @@ export function RepositoryTab() {
   if (repositoriesQuery.isError) {
     return (
       <div
-        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+        className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-caption text-danger"
         data-testid="repository-tab-error"
         role="alert"
       >
@@ -134,11 +134,11 @@ export function RepositoryTab() {
   if (repositories.length === 0) {
     return (
       <div
-        className="rounded-md border border-dashed border-border-default bg-surface-elevated px-4 py-6 text-sm text-fg-muted"
+        className="rounded-md border border-dashed border-border-default bg-surface-elevated px-4 py-6 text-secondary text-fg-muted"
         data-testid="repository-tab-empty"
       >
         <p className="font-medium text-fg">No repositories yet.</p>
-        <p className="mt-1 text-xs text-fg-subtle">
+        <p className="mt-1 text-caption text-fg-subtle">
           Start a session via the Directory tab to register your first repo.
         </p>
       </div>
@@ -148,7 +148,7 @@ export function RepositoryTab() {
   return (
     <div className="space-y-3" data-testid="repository-tab">
       <section className="space-y-1" data-testid="repository-tab-repos">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+        <h3 className="text-caption font-semibold uppercase tracking-wide text-fg-subtle">
           Repositories
         </h3>
         <ul className="space-y-0.5">
@@ -166,7 +166,7 @@ export function RepositoryTab() {
 
       {selectedRepo && (
         <section className="space-y-1" data-testid="repository-tab-clones">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+          <h3 className="text-caption font-semibold uppercase tracking-wide text-fg-subtle">
             Clones
           </h3>
           <ul className="space-y-0.5">
@@ -185,7 +185,7 @@ export function RepositoryTab() {
                     }}
                     aria-pressed={isPicked}
                     className={cn(
-                      'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-elevated-hover',
+                      'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-caption hover:bg-surface-elevated-hover',
                       isPicked
                         ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
                         : 'text-fg',
@@ -203,7 +203,7 @@ export function RepositoryTab() {
                     </span>
                     {clone.last_branch && (
                       <span
-                        className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-[0.7rem] text-fg-subtle"
+                        className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-caption text-fg-subtle"
                         title={clone.last_branch}
                       >
                         {displayBranch(clone.last_branch)}
@@ -245,18 +245,18 @@ function RepoRow({ repo, isSelected, onSelect }: RepoRowProps) {
       data-testid="repository-tab-repo-row"
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium">{repo.display_name}</div>
-        <div className="truncate font-mono text-[0.7rem] text-fg-subtle">
+        <div className="truncate text-caption font-medium">{repo.display_name}</div>
+        <div className="truncate font-mono text-caption text-fg-subtle">
           {repo.identity_key}
         </div>
       </div>
       {isPathKey && (
-        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-[0.65rem] uppercase tracking-wide text-fg-subtle">
+        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-caption uppercase tracking-wide text-fg-subtle">
           local
         </span>
       )}
       {repo.clones.length > 1 && (
-        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-[0.65rem] text-fg-muted">
+        <span className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 text-caption text-fg-muted">
           {repo.clones.length} clones
         </span>
       )}

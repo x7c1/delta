@@ -81,6 +81,20 @@ export default {
         mono,
         terminal,
       },
+      // Semantic font-size scale. Values live as CSS custom properties in
+      // src/index.css (`--delta-text-*`, which also documents how call sites
+      // pick a token by role); each utility here references its variable so the
+      // value layer stays in one place — a later user-facing stylesheet can
+      // override a token on `:root` and every `text-*` utility (plus xterm, via
+      // src/theme.ts reading `--delta-text-terminal`) follows. Each entry pairs
+      // the size with an explicit line-height. `terminal` is consumed only by
+      // xterm through src/theme.ts, but is exposed here for symmetry.
+      fontSize: {
+        body: ['var(--delta-text-body)', '1.5rem'],
+        secondary: ['var(--delta-text-secondary)', '1.375rem'],
+        caption: ['var(--delta-text-caption)', '1rem'],
+        terminal: ['var(--delta-text-terminal)', '1.25rem'],
+      },
       colors: {
         // Theme-fixed semantic color tokens. The RGB triple is identical in
         // light and dark themes (declared three times in src/index.css all

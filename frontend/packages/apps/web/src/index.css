@@ -65,6 +65,29 @@
   --delta-font-terminal: theme(fontFamily.terminal);
 
   /*
+   * Semantic font-size tokens. These are the value layer for the app's type
+   * scale; tailwind.config.js (theme.extend.fontSize) maps utility names onto
+   * them (`text-body`, `text-secondary`, `text-caption`) with paired
+   * line-heights, and src/theme.ts reads `--delta-text-terminal` at runtime
+   * for xterm (which takes its font size as a JavaScript number, not a class).
+   *
+   * Roles, not raw sizes, pick the token at each call site:
+   *   body       1rem     (16px) — transcript message bodies, composer input
+   *   secondary  0.875rem (14px) — tool/meta cards, supporting prose, forms
+   *   caption    0.75rem  (12px) — timestamps, badges, labels, timeline chrome
+   *   terminal   0.875rem (14px) — the embedded xterm canvas
+   *
+   * 12px is the hard legibility floor; there is intentionally no smaller step
+   * (the retired 0.65rem/0.7rem call sites all fold up into `caption`). Values
+   * are authored in rem so they scale with the root font-size, but the root
+   * itself is deliberately left at the browser default — text size moves
+   * independently of the rem-based layout/spacing tokens above. */
+  --delta-text-body: 1rem;
+  --delta-text-secondary: 0.875rem;
+  --delta-text-caption: 0.75rem;
+  --delta-text-terminal: 0.875rem;
+
+  /*
    * Semantic color tokens — default fallback values.
    *
    * The active theme's values normally come from a `:root[data-theme="..."]`
@@ -309,8 +332,10 @@ body {
 /*
  * Rendered assistant Markdown. A small, chat-tuned stylesheet covering just the
  * elements Claude actually emits, instead of a full typography framework. Text
- * size is inherited from the message (text-sm). Tailwind's Preflight resets list
- * markers and heading sizes/weights to nothing, so those are re-stated here.
+ * size is inherited from the message body (the `text-body` token), and the
+ * headings/inline-code sizes below are em-based so they track it. Tailwind's
+ * Preflight resets list markers and heading sizes/weights to nothing, so those
+ * are re-stated here.
  */
 /*
  * Marker highlight for the passage a pending branch was selected from (painted

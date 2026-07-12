@@ -11,9 +11,9 @@ describe('MessageTimestamp', () => {
   it('applies the canonical monospace base styling', () => {
     render(<MessageTimestamp timestamp="2026-01-01 09:00:00" />);
     const node = screen.getByText('2026-01-01 09:00:00');
-    // The single source of timestamp styling: mono, xs, tabular-nums.
+    // The single source of timestamp styling: mono, caption, tabular-nums.
     expect(node).toHaveClass('font-mono');
-    expect(node).toHaveClass('text-xs');
+    expect(node).toHaveClass('text-caption');
     expect(node).toHaveClass('tabular-nums');
   });
 

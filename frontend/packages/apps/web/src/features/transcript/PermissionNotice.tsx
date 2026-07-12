@@ -87,7 +87,7 @@ export function PermissionNoticeCard({
 
   return (
     <div
-      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset max-w-xs space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs shadow-md"
+      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset max-w-xs space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-caption shadow-md"
       data-testid="permission-notice"
       role="alert"
     >

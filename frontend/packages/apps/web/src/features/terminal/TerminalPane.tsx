@@ -9,7 +9,11 @@ import '@xterm/xterm/css/xterm.css';
 import { isMockMode, wsUrl } from '../../config';
 import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
-import { terminalBackground, terminalFontFamily } from '../../theme';
+import {
+  terminalBackground,
+  terminalFontFamily,
+  terminalFontSize,
+} from '../../theme';
 
 export interface TerminalPaneProps {
   /**
@@ -178,12 +182,12 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
           onClick={() => setTerminalOpen(false)}
           aria-label="Close terminal"
           title="Close terminal"
-          className="absolute right-2 top-2 z-10 rounded bg-terminal-overlay/60 px-1.5 py-0.5 text-sm leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
+          className="absolute right-2 top-2 z-10 rounded bg-terminal-overlay/60 px-1.5 py-0.5 text-secondary leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
         >
           »
         </button>
         {unavailableNote && (
-          <p className="p-3 text-xs text-terminal-fg">{unavailableNote}</p>
+          <p className="p-3 text-caption text-terminal-fg">{unavailableNote}</p>
         )}
       </div>
     </Panel>
@@ -198,12 +202,13 @@ function createEntry(sessionId: SessionId, parent: HTMLDivElement): PaneEntry {
 
   const term = new Terminal({
     convertEol: true,
-    // The design tokens own the stack and the background (tailwind.config.js
-    // `fontFamily.terminal` / `--delta-color-terminal-bg`); xterm takes them
-    // as JavaScript options, so they are read off the document here instead
-    // of being restated. See the config for the per-OS font reasoning.
+    // The design tokens own the stack, the size, and the background
+    // (tailwind.config.js `fontFamily.terminal` / `--delta-text-terminal` /
+    // `--delta-color-terminal-bg`); xterm takes them as JavaScript options, so
+    // they are read off the document here instead of being restated. See the
+    // config for the per-OS font reasoning.
     fontFamily: terminalFontFamily(),
-    fontSize: 13,
+    fontSize: terminalFontSize(),
     theme: { background: terminalBackground() },
     // `term.unicode` is a proposed API that the Unicode 11 addon touches, so it
     // must be opted into or `loadAddon`/`activeVersion` throws at attach time.

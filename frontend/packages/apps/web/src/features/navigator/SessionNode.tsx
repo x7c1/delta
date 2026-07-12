@@ -250,7 +250,7 @@ export function SessionNode({
           <button
             type="button"
             onClick={onFocus}
-            className="flex min-w-0 flex-1 flex-col gap-0.5 text-left text-sm"
+            className="flex min-w-0 flex-1 flex-col gap-0.5 text-left text-secondary"
             aria-current={isFocused ? 'true' : undefined}
             data-testid="session-node"
           >
@@ -322,7 +322,7 @@ export function SessionNode({
                 keeps the repo, a long local path keeps `…/projects/delta`.
                 The repo span is omitted entirely when neither yields a usable
                 label. */}
-            <span className="flex items-baseline gap-2 text-xs text-fg-subtle">
+            <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
               {repoLabel && (
                 <span
                   className="min-w-0 flex-1 truncate text-left [direction:rtl]"

@@ -64,7 +64,7 @@ export function LaunchOptionsPicker() {
 
   return (
     <section
-      className="space-y-1 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-xs"
+      className="space-y-1 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-caption"
       data-testid="launch-options-picker"
     >
       <h3 className="font-semibold uppercase tracking-wide text-fg-muted">

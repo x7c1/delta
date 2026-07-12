@@ -233,12 +233,12 @@ export function QuestionCard({
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-sm"
+      className="flex flex-col gap-2 rounded-md border border-accent/30 bg-accent/10 px-3 py-2 text-secondary"
       data-testid="question-card"
       role="group"
       aria-label="Question from Claude Code"
     >
-      <p className="text-xs font-medium text-accent">
+      <p className="text-caption font-medium text-accent">
         Claude is asking a question
       </p>
 
@@ -293,7 +293,7 @@ export function QuestionCard({
                             {opt.label}
                           </span>
                           {opt.description && (
-                            <span className="block text-xs text-fg-muted">
+                            <span className="block text-caption text-fg-muted">
                               {opt.description}
                             </span>
                           )}
@@ -314,7 +314,7 @@ export function QuestionCard({
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
-                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-border-default bg-surface-elevated px-2 py-1 font-mono text-xs text-fg-muted"
+                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-border-default bg-surface-elevated px-2 py-1 font-mono text-caption text-fg-muted"
                         >
                           {opt.preview}
                         </pre>

@@ -86,6 +86,7 @@ vi.mock('../../theme', () => ({
   terminalBackground: () =>
     document.documentElement.dataset.theme === 'dark' ? '#000000' : '#ffffff',
   terminalFontFamily: () => 'monospace',
+  terminalFontSize: () => 14,
 }));
 
 // Force non-mock mode so TerminalPane wires up an xterm instance.

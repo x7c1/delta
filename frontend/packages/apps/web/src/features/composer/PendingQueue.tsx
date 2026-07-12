@@ -110,7 +110,7 @@ export function PendingQueue({ entries }: PendingQueueProps) {
   );
 
   return (
-    <div className="space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1.5 text-xs">
+    <div className="space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1.5 text-caption">
       <div className="flex items-center gap-2 font-medium text-warning">
         <span>In progress</span>
         {hasActiveWork && (

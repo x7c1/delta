@@ -45,7 +45,7 @@ export function NewSessionTabBar() {
           aria-selected={activeTab === tab.id}
           onClick={() => onSelect(tab.id)}
           className={cn(
-            'rounded px-3 py-1.5 text-xs font-medium transition',
+            'rounded px-3 py-1.5 text-caption font-medium transition',
             activeTab === tab.id
               ? 'bg-accent/10 text-accent ring-1 ring-accent-disabled'
               : 'text-fg-muted hover:bg-surface-elevated hover:text-fg',
