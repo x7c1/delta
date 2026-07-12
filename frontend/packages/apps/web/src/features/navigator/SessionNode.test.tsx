@@ -9,14 +9,16 @@ import {
   vi,
 } from 'vitest';
 import type { ComponentProps } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { setupServer } from 'msw/node';
+import { http, HttpResponse } from 'msw';
 import { createHandlers, SESSION_ID } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import type { SessionListItem } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
 import { useLiveStore } from '../../store/liveStore';
+import { useNavStore } from '../../store/navStore';
 import { SessionNode } from './SessionNode';
 
 const server = setupServer(...createHandlers());
@@ -25,8 +27,18 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers();
   // Running and unread are read from the live store (thread-keyed), OR-aggregated
-  // over the session's threads onto the collapsed row — reset between cases.
-  useLiveStore.setState({ runningThreads: {}, unread: {}, runningSubagents: {} });
+  // over the session's threads onto the collapsed row; the permission badge is
+  // read from `notices`. Reset all of them between cases.
+  useLiveStore.setState({
+    runningThreads: {},
+    unread: {},
+    runningSubagents: {},
+    notices: {},
+  });
+  // The card header and thread tree now drive focus through `useNavStore`
+  // directly (rather than an `onFocus` prop), so clear the nav selection
+  // between cases too.
+  useNavStore.setState({ focusedSessionId: null, activeThreadId: null });
 });
 afterAll(() => server.close());
 
@@ -47,6 +59,27 @@ function setSubThreadRunning() {
 /** Flag the session's main thread (id 1) unread in the store. */
 function setUnread() {
   useLiveStore.setState({ unread: { 1: 1 } });
+}
+
+/**
+ * Record a pending permission notice for the session in the live store. The
+ * row now reads its permission state from `notices` with a narrow selector
+ * (rather than taking a `needsPermission` prop), so tests seed the store.
+ */
+function setNeedsPermission() {
+  useLiveStore.setState({
+    notices: {
+      [SESSION_ID]: [
+        {
+          kind: 'permission',
+          requestId: 1,
+          toolName: 'Bash',
+          toolInput: '{}',
+          dismissed: false,
+        },
+      ],
+    },
+  });
 }
 
 /** Record a background subagent running on the session's main thread (id 1). */
@@ -91,13 +124,7 @@ function renderNode(props: Partial<ComponentProps<typeof SessionNode>>) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <SessionNode
-          item={item}
-          isFocused={false}
-          onFocus={() => {}}
-          onClose={() => {}}
-          {...props}
-        />
+        <SessionNode item={item} isFocused={false} {...props} />
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -135,7 +162,8 @@ describe('SessionNode running indicator', () => {
 
   it('shows the running indicator and the permission badge together', () => {
     setRunning();
-    renderNode({ needsPermission: true });
+    setNeedsPermission();
+    renderNode({});
 
     expect(screen.getByTestId('session-running')).toBeInTheDocument();
     expect(
@@ -385,5 +413,41 @@ describe('SessionNode kebab menu', () => {
 
     expect(writeText).toHaveBeenCalledTimes(1);
     expect(writeText).toHaveBeenCalledWith(item.session.id);
+  });
+
+  it('issues a close request for the session when "Close" is picked', async () => {
+    // The close mutation is now wired inside the row (previously an `onClose`
+    // prop), so assert the click reaches `POST /api/sessions/{id}/close` with
+    // this session's id.
+    const closed = vi.fn<(id: string | readonly string[]) => void>();
+    server.use(
+      http.post('*/api/sessions/:id/close', ({ params }) => {
+        closed(params.id);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    renderNode({});
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Session actions for/ }),
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Close' }));
+
+    await waitFor(() => expect(closed).toHaveBeenCalledWith(item.session.id));
+  });
+});
+
+describe('SessionNode focus', () => {
+  it('focuses the session and activates its main thread when the card header is clicked', () => {
+    // Focus is now driven inside the row (previously an `onFocus` prop): the
+    // header click focuses the session and selects its main thread — the main
+    // thread is not listed in the tree, so the header is how you reach it.
+    renderNode({});
+
+    fireEvent.click(screen.getByTestId('session-node'));
+
+    const nav = useNavStore.getState();
+    expect(nav.focusedSessionId).toBe(item.session.id);
+    expect(nav.activeThreadId).toBe(item.main_thread_id);
   });
 });

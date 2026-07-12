@@ -1,14 +1,17 @@
-import { useState, type CSSProperties, type Ref } from 'react';
+import { memo, useMemo, useState, type CSSProperties, type Ref } from 'react';
 import { displayBranch, type ThreadId } from '@delta/model';
 import type { SessionListItem } from '@delta/wire-gen';
-import { useSessionThreadsQuery } from '@delta/api-client';
+import {
+  useCloseSessionMutation,
+  useSessionThreadsQuery,
+} from '@delta/api-client';
 import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import {
   DEFAULT_OPEN_CWD_HANDLER_LABEL,
   useOpenCwd,
 } from '../open-cwd/useOpenCwd';
-import { threadIsRunning, useLiveStore } from '../../store/liveStore';
+import { noticeOf, threadIsRunning, useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { ThreadTree } from './ThreadTree';
@@ -16,15 +19,6 @@ import { ThreadTree } from './ThreadTree';
 export interface SessionNodeProps {
   item: SessionListItem;
   isFocused: boolean;
-  /**
-   * Whether this session has a pending permission request (a tool blocked on a
-   * prompt in its terminal). Surfaced as a badge so a request on a non-focused
-   * session is discoverable from the list; the actionable notice lives in the
-   * session's conversation pane.
-   */
-  needsPermission?: boolean;
-  onFocus: () => void;
-  onClose: () => void;
   /**
    * Ref to the row's `<li>`, used by the virtualizer's `measureElement` to read
    * the card's real height (it varies: the focused card expands its thread
@@ -37,10 +31,16 @@ export interface SessionNodeProps {
    */
   index?: number;
   /**
-   * Inline style for the row's `<li>`. The virtualizer absolutely positions each
-   * row via `transform: translateY(...)`, which it supplies here.
+   * The virtual row's absolute vertical offset within the list, in pixels. The
+   * virtualizer positions each row with `transform: translateY(<start>px)`.
+   * Passing the raw number rather than a prebuilt style object lets this
+   * component build and memoize the style itself: a scroll commit recomputes the
+   * visible window but not a mounted row's own offset, so the memoized style
+   * keeps a stable identity across scrolls and lets {@link memo} skip re-rendering
+   * rows that did not move. Omitted when the list is rendered without windowing
+   * (the row then sits in normal document flow).
    */
-  style?: CSSProperties;
+  start?: number;
 }
 
 /** A short, readable stand-in for a session that has no title yet. */
@@ -88,21 +88,37 @@ function basename(path: string): string {
  * it shares the focused session's query key so the two are deduped into one
  * request per session. Clicking a sub-thread in a non-focused session focuses
  * that session and activates the thread, switching the center pane to it.
+ *
+ * Wrapped in {@link memo}: the windowed list re-renders on every scroll tick,
+ * so each row must skip re-rendering unless its own inputs changed. That holds
+ * only while every prop stays referentially stable across the parent's renders
+ * — when adding a prop, pass a primitive or a stably-memoized value (as `start`
+ * is), never a fresh per-render closure or object literal, or the memo is
+ * defeated for every row.
  */
-export function SessionNode({
+export const SessionNode = memo(function SessionNode({
   item,
   isFocused,
-  needsPermission = false,
-  onFocus,
-  onClose,
   rowRef,
   index,
-  style,
+  start,
 }: SessionNodeProps) {
   const client = useApiClient();
   const openCwd = useOpenCwd();
+  const closeSession = useCloseSessionMutation(client);
   const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const setActiveThread = useNavStore((state) => state.setActiveThread);
+  // Whether this session has a pending permission request (a tool blocked on a
+  // prompt in its terminal). Surfaced as a badge so a request on a non-focused
+  // session is discoverable from the list; the actionable notice lives in the
+  // session's conversation pane. Read here with a narrow boolean selector rather
+  // than passed down from the pane: a permission notice arriving on ANY session
+  // then re-renders only the row(s) whose flag actually flips, and the pane no
+  // longer subscribes to the whole notices map (which would re-render every
+  // visible row on each notice update).
+  const needsPermission = useLiveStore(
+    (state) => noticeOf(state.notices, item.session.id, 'permission') !== null,
+  );
   // Running and unread are THREAD-keyed in the store, but the collapsed row
   // surfaces them differently:
   //
@@ -135,6 +151,24 @@ export function SessionNode({
   // painted under the next row's card. While the menu is open, lift this row
   // above its siblings so the dropdown is visible (see the `zIndex` on `<li>`).
   const [menuOpen, setMenuOpen] = useState(false);
+  // Build the row's absolute-positioning style from the primitive `start`
+  // offset. Memoized because a mounted row's own offset only changes on
+  // reorder/resize, so the style object keeps a stable identity across the
+  // scroll commits that re-render the list — the stable identity the row's
+  // `memo` bailout depends on (see the contract on the component above).
+  const positionStyle = useMemo<CSSProperties | undefined>(
+    () =>
+      start === undefined
+        ? undefined
+        : {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            transform: `translateY(${start}px)`,
+          },
+    [start],
+  );
   // Fetch this row's thread tree. Mounted only for sessions in the windowed
   // viewport (+overscan), so the number of in-flight thread queries is bounded
   // by the visible window, not the full session list. Shares the focused
@@ -228,10 +262,11 @@ export function SessionNode({
     <li
       ref={rowRef}
       data-index={index}
-      // Spread the virtualizer's positioning style, then lift this row above its
-      // siblings while its menu is open so the dropdown is not covered by the
-      // next row's card (sibling rows are z-auto, painting in DOM order).
-      style={menuOpen ? { ...style, zIndex: 20 } : style}
+      // The virtualizer's positioning style, built from `start` and memoized
+      // above; while the menu is open, merge in a raised `zIndex` so the
+      // dropdown is not covered by the next row's card (sibling rows are
+      // z-auto, painting in DOM order).
+      style={menuOpen ? { ...positionStyle, zIndex: 20 } : positionStyle}
       // pb-1.5 is the inter-card gap (baked into each measured row). The first
       // card also needs that gap above it: the windowed rows are absolutely
       // positioned, so a `pt` on the list container is ignored — give the top
@@ -249,7 +284,13 @@ export function SessionNode({
         <div className="flex items-center gap-2 px-2 py-2">
           <button
             type="button"
-            onClick={onFocus}
+            // Focus this session and return to its main thread. The main thread
+            // is not listed in the tree, so clicking the card header is how you
+            // reach it; `selectThread(main_thread_id)` focuses the session (a
+            // focus switch clears the active thread) and then re-selects main,
+            // which also covers re-clicking the already-focused session while
+            // viewing one of its sub-threads.
+            onClick={() => selectThread(item.main_thread_id)}
             className="flex min-w-0 flex-1 flex-col gap-0.5 text-left text-secondary"
             aria-current={isFocused ? 'true' : undefined}
             data-testid="session-node"
@@ -378,7 +419,7 @@ export function SessionNode({
                 ? [
                     {
                       label: 'Close',
-                      onSelect: onClose,
+                      onSelect: () => closeSession.mutate(item.session.id),
                       tone: 'danger' as const,
                     },
                   ]
@@ -405,4 +446,4 @@ export function SessionNode({
       </div>
     </li>
   );
-}
+});
