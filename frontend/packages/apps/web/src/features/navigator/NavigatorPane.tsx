@@ -10,13 +10,9 @@ import {
   StatusDot,
   type DotTone,
 } from '@delta/ui-kit';
-import {
-  useCloseSessionMutation,
-  useVersionQuery,
-  type ConnectionStatus,
-} from '@delta/api-client';
+import { useVersionQuery, type ConnectionStatus } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
-import { noticeOf, useLiveStore } from '../../store/liveStore';
+import { useLiveStore } from '../../store/liveStore';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { SessionNode } from './SessionNode';
@@ -274,7 +270,6 @@ export function NavigatorPane({
   onLoadMoreSessions,
 }: NavigatorPaneProps) {
   const client = useApiClient();
-  const closeSession = useCloseSessionMutation(client);
   // Delta workspace version. Pre-formatted server-side (`v0.2.1` on release,
   // `v0.2.1+dev.<sha>` on debug — see `crate::version::display_version`), held
   // in-memory only (no localStorage) — the query is cached for the page
@@ -344,12 +339,10 @@ export function NavigatorPane({
   // Each window's row is hidden when the window is absent — a non-Pro/Max
   // account, or before the first API response — rather than shown zeroed.
   const rateLimits = useLiveStore((state) => state.rateLimits);
-  // Per-session notices. A pending permission request drives a badge on its
-  // session's row (the notice card itself lives in the focused session's
-  // conversation pane), so a request on a non-focused session is still
-  // discoverable. A dismissed notice keeps its badge: the request is still
-  // genuinely awaiting an answer.
-  const notices = useLiveStore((state) => state.notices);
+  // Per-session notices (a pending permission request driving the row's badge)
+  // are read inside each SessionNode with a narrow selector, not subscribed to
+  // here: a notice arriving on any session must not re-render the whole pane —
+  // and thus every visible row — when only the affected row's badge changes.
   // Running and unread are THREAD-keyed in the store now, so each SessionNode
   // OR-aggregates them over its own threads (and shows them per thread in its
   // tree). The collapsed-row spinner/dot is therefore computed inside the node
@@ -360,9 +353,7 @@ export function NavigatorPane({
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const settingsOpen = useNavStore((state) => state.settingsOpen);
   const openSettings = useNavStore((state) => state.openSettings);
-  const setFocusedSession = useNavStore((state) => state.setFocusedSession);
   const startNewSession = useNavStore((state) => state.startNewSession);
-  const setActiveThread = useNavStore((state) => state.setActiveThread);
   const setNewSessionWorkdir = useComposerStore(
     (state) => state.setNewSessionWorkdir,
   );
@@ -551,32 +542,21 @@ export function NavigatorPane({
       >
         {virtualItems.map((virtualRow) => {
           const item = sessions[virtualRow.index];
+          // Props are kept memo-friendly (stable/primitive): `rowRef` is the
+          // virtualizer's stable `measureElement`, `start` is the raw offset the
+          // row turns into its own memoized style, and focus/close/permission
+          // are handled inside the row rather than via fresh per-render
+          // closures. Combined with `memo(SessionNode)`, a scroll commit — or an
+          // unrelated pane-level store update — no longer re-renders every
+          // visible row, only the rows whose own inputs changed.
           return (
             <SessionNode
               key={item.session.id}
               rowRef={virtualizer.measureElement}
               index={virtualRow.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                transform: `translateY(${virtualRow.start}px)`,
-              }}
+              start={virtualRow.start}
               item={item}
               isFocused={focusedSessionId === item.session.id}
-              needsPermission={
-                noticeOf(notices, item.session.id, 'permission') !== null
-              }
-              onFocus={() => {
-                setFocusedSession(item.session.id);
-                // The main thread is not listed in the tree, so clicking the
-                // session card is how you return to it. Always select main —
-                // this also covers re-clicking the already-focused session
-                // while viewing one of its sub-threads.
-                setActiveThread(item.main_thread_id);
-              }}
-              onClose={() => closeSession.mutate(item.session.id)}
             />
           );
         })}
