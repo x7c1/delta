@@ -427,7 +427,7 @@ body {
   pointer-events: none;
   background-color: rgb(var(--delta-color-highlight-wash));
   will-change: opacity;
-  animation: delta-timeline-jump-highlight-fade 800ms ease-out forwards;
+  animation: delta-timeline-jump-highlight-fade 600ms ease-out forwards;
 }
 .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
   border-radius: 0.375rem;

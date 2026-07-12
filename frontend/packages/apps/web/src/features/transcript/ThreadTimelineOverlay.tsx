@@ -221,7 +221,7 @@ export const TIMELINE_JUMP_HIGHLIGHT_CLASS = 'delta-timeline-jump-highlight';
  * index.css — a shorter constant snaps the bubble back mid-fade, a longer
  * one leaves the class on stale.
  */
-export const TIMELINE_JUMP_HIGHLIGHT_MS = 800;
+export const TIMELINE_JUMP_HIGHLIGHT_MS = 600;
 
 /**
  * Debounce window (ms) for pane-scroll → playhead-follow updates. The
