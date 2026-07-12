@@ -548,7 +548,7 @@ function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
       <span
-        className="truncate font-mono text-secondary text-fg"
+        className="truncate font-mono text-code text-fg"
         title={root.path}
       >
         {displayPath(root.path, home)}
@@ -670,7 +670,7 @@ function LaunchOptionRow({
             {option.label}
           </div>
         )}
-        <div className="truncate font-mono text-secondary text-fg">
+        <div className="truncate font-mono text-code text-fg">
           <span>{option.name}</span>
           {option.value !== null && (
             <span className="text-fg-muted"> {option.value}</span>

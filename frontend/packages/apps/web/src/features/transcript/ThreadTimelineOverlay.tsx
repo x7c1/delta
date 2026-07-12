@@ -2342,7 +2342,7 @@ export function ThreadTimelineOverlay({
                         // the old `lineHeight: LANE_HEIGHT_PX` centred only
                         // at exactly that height and would leave the glyph
                         // pinned to the top of a taller stretched cell.
-                        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-caption ${
+                        className={`flex h-full items-center truncate whitespace-nowrap rounded-sm py-0.5 pl-1 pr-2 font-mono text-code ${
                           lane.isMain ? 'text-fg' : 'text-fg-muted'
                         } ${labelHighlightClasses}`}
                         style={{

@@ -92,7 +92,7 @@ export function LaunchOptionsPicker() {
                   {option.label}
                 </span>
               )}
-              <span className="min-w-0 truncate font-mono text-fg-muted">
+              <span className="min-w-0 truncate font-mono text-code text-fg-muted">
                 {option.name}
                 {option.value !== null && (
                   <span className="text-fg-subtle"> {option.value}</span>

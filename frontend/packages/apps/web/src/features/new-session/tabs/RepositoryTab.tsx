@@ -198,12 +198,12 @@ export function RepositoryTab() {
                         : 'false'
                     }
                   >
-                    <span className="min-w-0 flex-1 truncate font-mono">
+                    <span className="min-w-0 flex-1 truncate font-mono text-code">
                       {displayPath(clone.path, home)}
                     </span>
                     {clone.last_branch && (
                       <span
-                        className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-caption text-fg-subtle"
+                        className="shrink-0 rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-code text-fg-subtle"
                         title={clone.last_branch}
                       >
                         {displayBranch(clone.last_branch)}
@@ -246,7 +246,7 @@ function RepoRow({ repo, isSelected, onSelect }: RepoRowProps) {
     >
       <div className="min-w-0 flex-1">
         <div className="truncate text-caption font-medium">{repo.display_name}</div>
-        <div className="truncate font-mono text-caption text-fg-subtle">
+        <div className="truncate font-mono text-code text-fg-subtle">
           {repo.identity_key}
         </div>
       </div>

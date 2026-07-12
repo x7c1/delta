@@ -34,5 +34,10 @@ describe('cn', () => {
   it('still dedups conflicting semantic font-size tokens to the last one', () => {
     expect(cn('text-caption', 'text-secondary')).toBe('text-secondary');
     expect(cn('text-sm', 'text-body')).toBe('text-body');
+    // The version-label pattern: text-code overrides the base text-caption
+    // while the color utility survives beside it.
+    expect(cn('text-caption text-fg-muted', 'font-mono text-code')).toBe(
+      'text-fg-muted font-mono text-code',
+    );
   });
 });

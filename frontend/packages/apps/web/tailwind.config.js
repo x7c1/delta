@@ -95,6 +95,9 @@ export default {
         // Pairs the 14px caption (the 12px era paired 1rem); dense rows that
         // must stay tight carry their own leading-* overrides.
         caption: ['var(--delta-text-caption)', '1.25rem'],
+        // Same line-height as caption so mono spans inline with caption text
+        // share one line box (rationale for the smaller size: index.css).
+        code: ['var(--delta-text-code)', '1.25rem'],
         terminal: ['var(--delta-text-terminal)', '1.25rem'],
       },
       colors: {

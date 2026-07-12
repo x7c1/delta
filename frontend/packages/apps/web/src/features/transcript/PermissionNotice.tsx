@@ -94,7 +94,7 @@ export function PermissionNoticeCard({
       <p className="font-medium text-warning">
         Permission requested: {notice.toolName}
       </p>
-      <p className="break-all font-mono text-fg-muted">
+      <p className="break-all font-mono text-code text-fg-muted">
         {toolInputSummary(notice.toolInput)}
       </p>
       {fallback ? (

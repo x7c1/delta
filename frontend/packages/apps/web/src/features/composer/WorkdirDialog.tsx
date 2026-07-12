@@ -148,7 +148,7 @@ export function WorkdirChip({ onEdit }: WorkdirChipProps) {
     >
       <span className="shrink-0 font-medium text-accent">Start in:</span>
       <span
-        className="min-w-0 flex-1 truncate font-mono text-fg"
+        className="min-w-0 flex-1 truncate font-mono text-code text-fg"
         title={selected}
       >
         {displayPath(selected, home)}

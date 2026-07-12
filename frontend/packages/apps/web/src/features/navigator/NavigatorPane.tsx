@@ -214,7 +214,7 @@ function RateLimitRow({
   }, []);
   return (
     <div
-      className="flex items-center gap-1.5 font-mono text-caption text-fg-muted"
+      className="flex items-center gap-1.5 font-mono text-code text-fg-muted"
       data-testid={testId}
     >
       <span className="w-5 shrink-0 text-fg-subtle">{label}</span>
@@ -497,7 +497,7 @@ export function NavigatorPane({
                   'text-caption text-fg-muted',
                   connection === 'open' &&
                     version !== null &&
-                    'font-mono',
+                    'font-mono text-code',
                 )}
                 data-testid="connection-label"
               >

@@ -283,7 +283,7 @@ export function QuestionCard({
                         {q.multiSelect && (
                           <span
                             aria-hidden="true"
-                            className="mt-0.5 font-mono text-accent"
+                            className="mt-0.5 font-mono text-code text-accent"
                           >
                             {selected ? '[x]' : '[ ]'}
                           </span>
@@ -314,7 +314,7 @@ export function QuestionCard({
                       {opt.preview && (
                         <pre
                           data-testid={`question-option-preview-${qi}-${oi}`}
-                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-border-default bg-surface-elevated px-2 py-1 font-mono text-caption text-fg-muted"
+                          className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded border border-border-default bg-surface-elevated px-2 py-1 font-mono text-code text-fg-muted"
                         >
                           {opt.preview}
                         </pre>

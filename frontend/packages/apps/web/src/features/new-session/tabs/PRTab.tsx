@@ -309,7 +309,7 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
       )}
     >
       <div className="flex w-full min-w-0 items-center gap-2">
-        <span className="shrink-0 font-mono text-caption font-medium text-fg">
+        <span className="shrink-0 font-mono text-code font-medium text-fg">
           {repoLabel}
         </span>
         <span className="min-w-0 flex-1 truncate">{pr.title}</span>
@@ -320,7 +320,7 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
         )}
       </div>
       <div className="flex w-full min-w-0 items-center gap-2 text-caption text-fg-subtle">
-        <span className="shrink-0 font-mono" title={pr.head_ref}>
+        <span className="shrink-0 font-mono text-code" title={pr.head_ref}>
           {displayBranch(pr.head_ref)}
         </span>
         <span aria-hidden>·</span>
@@ -333,7 +333,7 @@ function PrRow({ pr, onPick, isSelected }: PrRowProps) {
           className="mt-0.5 text-caption text-fg-subtle"
           data-testid="pr-tab-row-no-clone-hint"
         >
-          No local clone — run <code className="rounded bg-surface-sunken px-1 font-mono">{cloneHint}</code> somewhere first.
+          No local clone — run <code className="rounded bg-surface-sunken px-1 font-mono text-code">{cloneHint}</code> somewhere first.
         </p>
       )}
     </button>
@@ -347,7 +347,7 @@ function GhUnavailableHint() {
       data-testid="pr-tab-gh-unavailable"
     >
       Run{' '}
-      <code className="rounded bg-surface-sunken px-1 py-0.5 font-mono text-caption text-fg">
+      <code className="rounded bg-surface-sunken px-1 py-0.5 font-mono text-code text-fg">
         gh auth login
       </code>{' '}
       to enable this tab.

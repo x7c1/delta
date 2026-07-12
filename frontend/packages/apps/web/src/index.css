@@ -72,10 +72,19 @@
    * for xterm (which takes its font size as a JavaScript number, not a class).
    *
    * Roles, not raw sizes, pick the token at each call site:
-   *   body       1rem     (16px) — transcript message bodies, composer input
-   *   secondary  0.875rem (14px) — tool/meta cards, supporting prose, forms
-   *   caption    0.875rem (14px) — timestamps, badges, labels, timeline chrome
-   *   terminal   0.875rem (14px) — the embedded xterm canvas
+   *   body       1rem      (16px) — transcript message bodies, composer input
+   *   secondary  0.875rem  (14px) — tool/meta cards, supporting prose, forms
+   *   caption    0.875rem  (14px) — timestamps, badges, labels, timeline chrome
+   *   code       0.8125rem (13px) — `font-mono` UI chrome: paths, branch refs,
+   *                                 flag names, shas, the version readout
+   *   terminal   0.875rem  (14px) — the embedded xterm canvas
+   *
+   * code sits one notch below caption because monospaced faces render
+   * optically larger than the sans at the same nominal size — much more so on
+   * macOS, where the stack resolves to Menlo/SF Mono (tall x-height, wide
+   * 0.6em advances) than on Linux's Liberation Mono. 13px mono matches 14px
+   * sans; pairing `font-mono` with a 14px token reads oversized next to its
+   * sans neighbors.
    *
    * caption deliberately equals secondary in SIZE: this UI is CJK-heavy and
    * kanji get muddy below ~14px on 1x displays, so the classic 12px caption
@@ -90,6 +99,7 @@
   --delta-text-body: 1rem;
   --delta-text-secondary: 0.875rem;
   --delta-text-caption: 0.875rem;
+  --delta-text-code: 0.8125rem;
   --delta-text-terminal: 0.875rem;
 
   /*
@@ -535,10 +545,17 @@ article[data-message-uuid] {
   border-radius: 0.375rem;
   padding: 0.5rem 0.75rem;
   overflow-x: auto;
+  /* Same optical-size step-down as inline code above; without it, blocks
+   * inherit the full 16px body size in mono, which reads oversized (see the
+   * `code` token rationale in the :root block). */
+  font-size: 0.875em;
 }
 .markdown-body pre code {
   background: transparent;
   padding: 0;
+  /* Neutralize the inline-code 0.875em so it doesn't compound with the
+   * pre's own step-down. */
+  font-size: 1em;
 }
 
 .markdown-body blockquote {
