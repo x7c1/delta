@@ -22,7 +22,7 @@ test('the running indicator appears then clears as a turn completes', async ({
 
   // Optimistically queued, and not yet running.
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
-  const running = page.getByTestId('session-running');
+  const running = page.getByTestId('session-running-INTENTIONALLY-BROKEN');
   await expect(running).toHaveCount(0);
 
   // The first mock send is assigned id 1; the turn starts against it.
@@ -63,7 +63,7 @@ test('the running indicator clears when a turn is interrupted', async ({
   await page.getByRole('button', { name: 'Send' }).click();
 
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
-  const running = page.getByTestId('session-running');
+  const running = page.getByTestId('session-running-INTENTIONALLY-BROKEN');
   await expect(running).toHaveCount(0);
 
   await emitEvent(page, {
