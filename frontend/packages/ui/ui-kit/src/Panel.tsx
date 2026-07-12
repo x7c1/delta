@@ -65,7 +65,10 @@ export function Panel({
       {header !== undefined && (
         <header
           className={cn(
-            'flex h-10 shrink-0 items-center border-b border-border-default',
+            // 44px: sized for header controls built on the 20px-line-height
+            // type tokens (caption/secondary) plus py-1.5 padding, leaving
+            // ~6px of air above and below — h-10 left them looking crushed.
+            'flex h-11 shrink-0 items-center border-b border-border-default',
             headerClassName ?? 'px-3',
           )}
         >
