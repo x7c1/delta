@@ -49,7 +49,10 @@ import { sessionScopedKey } from '../../store/sessionScopedStorage';
 function timelineExpandedKey(sessionId: string = SESSION_ID): string {
   return sessionScopedKey(sessionId, TIMELINE_EXPANDED_SUBKEY);
 }
-import { TranscriptPane } from './TranscriptPane';
+import {
+  TranscriptPane,
+  shouldCompensateTranscriptResize,
+} from './TranscriptPane';
 
 const server = setupServer(...createHandlers());
 
@@ -2512,6 +2515,36 @@ describe('TranscriptPane composer context bar', () => {
         );
         expect(chip).not.toBeNull();
         expect(chip?.querySelector('.ring-2')).not.toBeNull();
+      });
+    });
+
+    // The scroll-jank fix: the virtualizer is configured with
+    // `shouldAdjustScrollPositionOnItemSizeChange` so a row above the current
+    // scroll offset that resizes from its flat estimate to its real height has
+    // its `scrollTop` compensated, keeping the visible content from jumping
+    // while scrolling up through history. A real measurement-driven resize is
+    // impractical to simulate under jsdom (it computes no layout), so the
+    // predicate the option delegates to is exercised directly here.
+    describe('measurement-resize scroll compensation predicate', () => {
+      it('compensates a row that resizes ABOVE the current scroll offset', () => {
+        // Row starts at 100px, viewport scrolled to 500px: the row is above the
+        // fold, so its resize would shift the visible content — compensate.
+        expect(shouldCompensateTranscriptResize(100, 500)).toBe(true);
+      });
+
+      it('does NOT compensate a row that resizes AT or BELOW the scroll offset', () => {
+        // A row starting exactly at (or below) the scroll offset is in/under the
+        // viewport; its resize grows content below the fold and needs no
+        // scrollTop fixup.
+        expect(shouldCompensateTranscriptResize(500, 500)).toBe(false);
+        expect(shouldCompensateTranscriptResize(900, 500)).toBe(false);
+      });
+
+      it('treats a null scroll offset (before the first scroll) as the top, so nothing compensates', () => {
+        // At the top nothing sits above the fold; a null offset must not throw
+        // and must resolve to 0.
+        expect(shouldCompensateTranscriptResize(0, null)).toBe(false);
+        expect(shouldCompensateTranscriptResize(160, null)).toBe(false);
       });
     });
   });

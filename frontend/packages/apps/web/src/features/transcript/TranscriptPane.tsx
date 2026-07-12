@@ -61,7 +61,11 @@ const STICK_THRESHOLD_PX = 64;
  * a long Markdown turn with expanded tool cards both settle to their real size.
  * Tuned to a middling turn height so the initial scrollbar and the count of
  * rows the window seeds are in the right ballpark before measurement corrects
- * them.
+ * them. The exact value is not critical: `shouldAdjustScrollPositionOnItemSizeChange`
+ * (see the virtualizer config below) compensates `scrollTop` as each row's
+ * estimate is replaced by its real height, so estimate error no longer
+ * translates into visible scroll jank — it only affects the pre-measurement
+ * scrollbar approximation.
  */
 const ESTIMATED_MESSAGE_HEIGHT_PX = 160;
 
@@ -110,6 +114,44 @@ const FLOATING_CARD_CLASS =
  * card's own `bottom-overlay-inset`, even if the token is themed. Falls back to
  * {@link OVERLAY_INSET_FALLBACK_PX} when the value is unavailable or non-numeric.
  */
+/**
+ * Predicate for the transcript virtualizer's
+ * `shouldAdjustScrollPositionOnItemSizeChange`: return true when a row that has
+ * just replaced its {@link ESTIMATED_MESSAGE_HEIGHT_PX} estimate with its real
+ * measured height sits ABOVE the current scroll offset, so virtual-core
+ * compensates `scrollTop` by the size delta and the visible content stays put.
+ *
+ * Why override the library default at all: virtual-core 3.17's built-in
+ * predicate compensates an above-viewport resize only while NOT scrolling
+ * backward (`scrollDirection !== 'backward'`) — it deliberately skips
+ * compensation during an upward scroll so it does not nudge native scroll
+ * momentum. That is fine for near-uniform row heights (the session navigator
+ * uses the same library with no option and scrolls fine), but transcript rows
+ * span ~30px meta lines to 1000px+ Markdown turns, so the estimate error is
+ * huge. Uncompensated, each measurement of a not-yet-measured history row above
+ * the fold shifts every following row's offset while `scrollTop` holds — the
+ * content visibly jumps on every newly-mounted row as the user scrolls up
+ * through history (the reported judder). Compensating regardless of direction
+ * trades a hair of momentum-fighting for a stable viewport, the right call
+ * given the height variance here.
+ *
+ * `item.start` and `scrollOffset` share one coordinate system — both absolute
+ * from the scroll-content top, with `scrollMargin` (the top-region reserve)
+ * already baked into `item.start` — so the comparison needs no `scrollMargin`
+ * fixup. `scrollOffset` is `null` before the first scroll; treat that as 0 (the
+ * top), where nothing sits above the fold and no compensation is due.
+ *
+ * Exported so a test can exercise the predicate directly (a real
+ * measurement-driven resize is impractical to simulate under jsdom, which
+ * computes no layout).
+ */
+export function shouldCompensateTranscriptResize(
+  itemStart: number,
+  scrollOffset: number | null,
+): boolean {
+  return itemStart < (scrollOffset ?? 0);
+}
+
 function overlayInsetPx(el: Element): number {
   const raw = getComputedStyle(el)
     .getPropertyValue('--delta-overlay-inset')
@@ -509,6 +551,34 @@ export function TranscriptPane({
     scrollPaddingStart: topRegionReserve ?? 0,
     scrollMargin: topRegionReserve ?? 0,
   });
+  // Compensate `scrollTop` when a row ABOVE the current scroll offset resizes
+  // from its flat estimate to its real measured height, so the visible content
+  // does not jump under the user. This is load-bearing here specifically
+  // because transcript rows are wildly variable (~30px meta lines vs 1000px+
+  // Markdown turns), so each measurement of an unmeasured history row above the
+  // fold moves every following offset by a large delta. Without it,
+  // virtual-core's built-in default deliberately SKIPS this compensation while
+  // scrolling backward (upward) — see `resizeItem`'s `scrollDirection !==
+  // 'backward'` guard — so scrolling up through history juddered on every
+  // newly-mounted row. See {@link shouldCompensateTranscriptResize} for the
+  // full rationale and the coordinate-system note (`item.start` and
+  // `scrollOffset` are both absolute from the scroll-content top, so no
+  // `scrollMargin` fixup is needed).
+  //
+  // Assigned directly on the instance rather than passed to `useVirtualizer`:
+  // in virtual-core 3.17 this predicate is a public field on the `Virtualizer`
+  // instance that `resizeItem` reads (`this.shouldAdjust…`), NOT a member of
+  // `VirtualizerOptions` — `setOptions` never copies it onto the instance, so
+  // passing it as an option is both a type error and a runtime no-op. The
+  // instance is stable across renders (react-virtual memoizes it and only calls
+  // `setOptions`), so re-assigning the same closure each render is idempotent,
+  // and it lands before any post-render measurement fires. Mirrors the existing
+  // in-render `messageIndexByUuidRef.current = …` assignment pattern below.
+  messageVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
+    item,
+    _delta,
+    instance,
+  ) => shouldCompensateTranscriptResize(item.start, instance.scrollOffset);
   const virtualMessageItems = messageVirtualizer.getVirtualItems();
   // The virtualizer's estimated total content height. Recomputed each render;
   // it changes as rows are measured, which is why the stick-to-bottom effects
