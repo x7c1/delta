@@ -19,7 +19,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
-import type { MessagesResponse, Thread } from '@delta/wire-gen';
+import type { Message, MessagesResponse, Thread } from '@delta/wire-gen';
 import {
   BRANCH_THREAD_ID,
   MAIN_THREAD_ID,
@@ -51,6 +51,7 @@ function timelineExpandedKey(sessionId: string = SESSION_ID): string {
 }
 import {
   TranscriptPane,
+  estimateMessageHeight,
   shouldCompensateTranscriptResize,
 } from './TranscriptPane';
 
@@ -2545,6 +2546,75 @@ describe('TranscriptPane composer context bar', () => {
         // and must resolve to 0.
         expect(shouldCompensateTranscriptResize(0, null)).toBe(false);
         expect(shouldCompensateTranscriptResize(160, null)).toBe(false);
+      });
+    });
+
+    // The scroll-jank fix's other half: `estimateSize` seeds each unmeasured
+    // row from its content instead of one flat height, so the first-measurement
+    // delta (and thus the compensation yank while scrolling up) is small. jsdom
+    // computes no layout, so the heuristic is exercised directly; it only needs
+    // to ORDER rows by rough height — a tall Markdown/tool turn far above a
+    // one-line ack — for the seed to shrink the reconciliation delta.
+    describe('content-aware row height estimate', () => {
+      const makeMessage = (content: Message['content']): Message => ({
+        uuid: 'u',
+        session_id: 's',
+        thread_id: 1,
+        role: 'assistant',
+        linear_parent_uuid: null,
+        semantic_parent_uuid: null,
+        prompt_id: 'p',
+        seq: 0,
+        content_text: '',
+        content,
+        created_at: '2026-01-01T00:00:00Z',
+        model: 'claude-opus-4-8',
+        git_branch: 'main',
+        cwd: '/home/dev/repo',
+        response_time_ms: 9400,
+      });
+
+      it('estimates a tall multi-block turn far larger than a one-line ack', () => {
+        const ack = estimateMessageHeight(
+          makeMessage([{ type: 'text', text: 'ok' }]),
+        );
+        const long = 'lorem ipsum dolor sit amet '.repeat(60);
+        const tall = estimateMessageHeight(
+          makeMessage([
+            { type: 'text', text: long },
+            {
+              type: 'tool_use',
+              id: 't1',
+              name: 'Bash',
+              input: { command: 'ls -la' },
+            },
+            {
+              type: 'tool_result',
+              tool_use_id: 't1',
+              content: Array.from({ length: 20 }, (_, i) => `line ${i}`).join(
+                '\n',
+              ),
+              is_error: false,
+            },
+          ]),
+        );
+        expect(tall).toBeGreaterThan(ack * 5);
+      });
+
+      it('grows monotonically with a text block’s wrapped line count', () => {
+        const oneLine = estimateMessageHeight(
+          makeMessage([{ type: 'text', text: 'a short reply' }]),
+        );
+        const manyLines = estimateMessageHeight(
+          makeMessage([
+            { type: 'text', text: Array.from({ length: 30 }, () => 'line').join('\n') },
+          ]),
+        );
+        expect(manyLines).toBeGreaterThan(oneLine);
+      });
+
+      it('never seeds below a small floor (an empty turn is still a row)', () => {
+        expect(estimateMessageHeight(makeMessage([]))).toBeGreaterThanOrEqual(48);
       });
     });
   });

@@ -15,6 +15,8 @@ export {
 } from './ws-fake';
 export {
   BRANCH_THREAD_ID,
+  buildVariableHeightThread,
+  MOCK_BIG_THREAD_KEY,
   MAIN_THREAD_ID,
   SESSION_2_MAIN_THREAD_ID,
   SESSION_2_BRANCH_THREAD_ID,

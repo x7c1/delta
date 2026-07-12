@@ -55,19 +55,63 @@ import {
 const STICK_THRESHOLD_PX = 64;
 
 /**
- * Seed height (px) the virtualizer assigns a message row before it has been
- * measured. Only a spacer estimate: each mounted row reports its true height
- * back via `measureElement` (ResizeObserver-backed), so a one-line meta row and
- * a long Markdown turn with expanded tool cards both settle to their real size.
- * Tuned to a middling turn height so the initial scrollbar and the count of
- * rows the window seeds are in the right ballpark before measurement corrects
- * them. The exact value is not critical: `shouldAdjustScrollPositionOnItemSizeChange`
- * (see the virtualizer config below) compensates `scrollTop` as each row's
- * estimate is replaced by its real height, so estimate error no longer
- * translates into visible scroll jank — it only affects the pre-measurement
- * scrollbar approximation.
+ * Per-message seed-height model used as the virtualizer's `estimateSize`, in
+ * place of a single flat seed. A transcript's rows
+ * span ~30px acks to 1000px+ Markdown turns, so a flat estimate is wrong by
+ * hundreds of px on most rows. That error is the root of the scroll jank: the
+ * FIRST time an unmeasured history row above the fold is mounted and measured,
+ * the virtualizer must reconcile a large `measured − estimate` delta — either by
+ * yanking `scrollTop` (compensation on) or by letting the content jump
+ * (compensation off). Either way the size of that jump equals the estimate
+ * error, so shrinking the error shrinks the jank. This heuristic reads the
+ * content blocks a row will render — prose/thinking lines, a monospace tool
+ * card's input and result — and sums their approximate rendered heights, which
+ * measures ~4x closer than the flat seed and so cuts the reconciliation delta
+ * proportionally. It is only a seed: `measureElement` still reports each row's
+ * exact height, so any residual error self-corrects once a row is measured.
+ *
+ * The px constants are approximate on purpose (line height, a wrap width, card
+ * chrome); they only need to land the seed in the right ballpark, not be exact.
  */
-const ESTIMATED_MESSAGE_HEIGHT_PX = 160;
+const EST_CHARS_PER_LINE = 88;
+const EST_LINE_PX = 22;
+const EST_BLOCK_PAD_PX = 10;
+const EST_TOOL_HEADER_PX = 44;
+const EST_META_PX = 26;
+const EST_BASE_PX = 20;
+const EST_MIN_PX = 48;
+
+function estimateWrappedLines(text: string): number {
+  let lines = 0;
+  for (const line of text.split('\n')) {
+    lines += Math.max(1, Math.ceil(line.length / EST_CHARS_PER_LINE));
+  }
+  return lines;
+}
+
+export function estimateMessageHeight(message: Message): number {
+  let px = EST_BASE_PX + EST_META_PX;
+  for (const block of message.content) {
+    if (block.type === 'text') {
+      px += estimateWrappedLines(block.text) * EST_LINE_PX + EST_BLOCK_PAD_PX;
+    } else if (block.type === 'thinking') {
+      px += estimateWrappedLines(block.thinking) * EST_LINE_PX + EST_BLOCK_PAD_PX;
+    } else if (block.type === 'tool_use') {
+      const input =
+        typeof block.input === 'string'
+          ? block.input
+          : JSON.stringify(block.input ?? {});
+      px += EST_TOOL_HEADER_PX + estimateWrappedLines(input) * EST_LINE_PX;
+    } else if (block.type === 'tool_result') {
+      const content =
+        typeof block.content === 'string'
+          ? block.content
+          : JSON.stringify(block.content ?? '');
+      px += EST_TOOL_HEADER_PX + estimateWrappedLines(content) * EST_LINE_PX;
+    }
+  }
+  return Math.max(EST_MIN_PX, Math.round(px));
+}
 
 /**
  * Rows rendered above and below the visible window. A modest buffer keeps
@@ -117,7 +161,7 @@ const FLOATING_CARD_CLASS =
 /**
  * Predicate for the transcript virtualizer's
  * `shouldAdjustScrollPositionOnItemSizeChange`: return true when a row that has
- * just replaced its {@link ESTIMATED_MESSAGE_HEIGHT_PX} estimate with its real
+ * just replaced its {@link estimateMessageHeight} estimate with its real
  * measured height sits ABOVE the current scroll offset, so virtual-core
  * compensates `scrollTop` by the size delta and the visible content stays put.
  *
@@ -545,7 +589,7 @@ export function TranscriptPane({
   const messageVirtualizer = useVirtualizer({
     count: renderedMessages.length,
     getScrollElement: () => bodyRef.current,
-    estimateSize: () => ESTIMATED_MESSAGE_HEIGHT_PX,
+    estimateSize: (index) => estimateMessageHeight(renderedMessages[index]),
     overscan: MESSAGE_OVERSCAN,
     getItemKey: (index) => renderedMessages[index].uuid,
     scrollPaddingStart: topRegionReserve ?? 0,

@@ -31,8 +31,11 @@ import type {
   Turn,
 } from '@delta/wire-gen';
 import {
+  buildVariableHeightThread,
   gitBranches,
   gitRepoInfo,
+  MAIN_THREAD_ID,
+  MOCK_BIG_THREAD_KEY,
   MOCK_VERSION,
   MOCK_WORKDIR_HOME,
   mockSpawnSessionId,
@@ -125,6 +128,18 @@ export interface MockApi {
  */
 export function createMockApi(): MockApi {
   const store: MockStore = seedData();
+
+  // Opt-in repro seam: when an e2e spec has published a positive count on
+  // `globalThis[MOCK_BIG_THREAD_KEY]` before boot, swap the focused main
+  // thread's small seed for a long, wildly-variable-height transcript. Gated
+  // on the flag so the normal seed — and every other test — is unaffected.
+  const bigThreadCount = Number(
+    (globalThis as Record<string, unknown>)[MOCK_BIG_THREAD_KEY] ?? 0,
+  );
+  if (Number.isFinite(bigThreadCount) && bigThreadCount > 0) {
+    store.messagesByThread[MAIN_THREAD_ID] =
+      buildVariableHeightThread(bigThreadCount);
+  }
 
   const findSessionByThread = (threadId: number) =>
     store.sessions.find((entry) =>

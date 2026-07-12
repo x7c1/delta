@@ -394,6 +394,163 @@ export const mockMessagesByThread: Record<number, Message[]> = {
 };
 
 /**
+ * Global key an e2e spec sets (via `page.addInitScript`, before boot) to make
+ * the mock backend replace the focused `main` thread's transcript with a long,
+ * wildly-variable-height synthetic thread of this many messages. Read once when
+ * {@link createMockApi} builds its store, so it must be set before the app
+ * requests messages. Absent/`0` leaves the normal small seed untouched, so no
+ * existing test is affected. Powers the transcript scroll-jank repro/regression
+ * spec, which needs a thread whose real row heights diverge hard from the
+ * virtualizer's flat estimate in both directions.
+ */
+export const MOCK_BIG_THREAD_KEY = '__deltaE2eBigThread';
+
+/**
+ * A deterministic paragraph of `words` words, seeded by `seed`, so generated
+ * transcript content is stable across runs (a repro's jank metric must be
+ * reproducible) without shipping a lorem-ipsum dependency.
+ */
+function pseudoWords(seed: number, words: number): string {
+  const bank = [
+    'delta',
+    'virtualizer',
+    'scroll',
+    'measurement',
+    'transcript',
+    'render',
+    'webkit',
+    'layout',
+    'estimate',
+    'compensation',
+    'overscan',
+    'markdown',
+    'anchor',
+    'viewport',
+    'reflow',
+    'height',
+    'window',
+    'offset',
+    'kinetic',
+    'judder',
+  ];
+  const out: string[] = [];
+  let x = seed * 2654435761;
+  for (let i = 0; i < words; i += 1) {
+    x = (x ^ (x << 13)) >>> 0;
+    x = (x ^ (x >> 17)) >>> 0;
+    x = (x ^ (x << 5)) >>> 0;
+    out.push(bank[x % bank.length]);
+  }
+  const sentence = out.join(' ');
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1) + '.';
+}
+
+/**
+ * Build a long transcript for the focused `main` thread whose row heights span
+ * the full range the real UI produces — a one-line meta/ack row (~30px), a
+ * medium prose turn, and a very tall Markdown turn with code fences, lists and
+ * a tool card (1000px+) — so every row's measured height diverges hard from the
+ * virtualizer's flat {@link ESTIMATED_MESSAGE_HEIGHT_PX}-style estimate in both
+ * directions. Deterministic content (uuid `big-<n>`, seeded text) keeps the
+ * repro's jank numbers stable run to run.
+ */
+export function buildVariableHeightThread(count: number): Message[] {
+  const messages: Message[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const uuid = `big-${i}`;
+    const role: Message['role'] = i % 2 === 0 ? 'user' : 'assistant';
+    const linear = i === 0 ? null : `big-${i - 1}`;
+    // Six repeating shapes across the six-message cycle so consecutive rows
+    // never share a height: tiny ack, one-liner, medium, huge, question,
+    // code-heavy. Heights deliberately swing far above and below the estimate.
+    const shape = i % 6;
+    let content: Message['content'];
+    let text: string;
+    if (shape === 0) {
+      text = 'ok';
+      content = [{ type: 'text', text }];
+    } else if (shape === 1) {
+      text = pseudoWords(i, 10);
+      content = [{ type: 'text', text }];
+    } else if (shape === 2) {
+      text = [pseudoWords(i, 40), '', pseudoWords(i + 1, 45)].join('\n');
+      content = [{ type: 'text', text }];
+    } else if (shape === 4) {
+      text = `Question ${i}: ${pseudoWords(i, 8)}?`;
+      content = [{ type: 'text', text }];
+    } else if (shape === 5) {
+      const code = [
+        '```ts',
+        'function measure(rows: Row[]): number {',
+        '  let total = 0;',
+        '  for (const row of rows) total += row.height;',
+        '  return total;',
+        '}',
+        '```',
+      ].join('\n');
+      text = [
+        `## Section ${i}`,
+        pseudoWords(i, 60),
+        '',
+        code,
+        '',
+        pseudoWords(i + 2, 70),
+        '',
+        code,
+      ].join('\n');
+      content = [{ type: 'text', text }];
+    } else {
+      // shape === 3: the very tall turn — long prose, a bullet list, a tool
+      // card, then more prose.
+      const bullets = Array.from({ length: 8 }, (_, k) => `- ${pseudoWords(i + k, 12)}`).join('\n');
+      text = [
+        pseudoWords(i, 90),
+        '',
+        bullets,
+        '',
+        pseudoWords(i + 3, 110),
+        '',
+        pseudoWords(i + 5, 80),
+      ].join('\n');
+      content = [
+        { type: 'text', text: pseudoWords(i, 90) },
+        {
+          type: 'tool_use',
+          id: `big-tool-${i}`,
+          name: 'Bash',
+          input: { command: 'ls -la && cat README.md' },
+        },
+        {
+          type: 'tool_result',
+          tool_use_id: `big-tool-${i}`,
+          content: Array.from({ length: 20 }, (_, k) => `line ${k}: ${pseudoWords(i + k, 6)}`).join('\n'),
+          is_error: false,
+        },
+        { type: 'text', text: [bullets, '', pseudoWords(i + 3, 110)].join('\n') },
+      ];
+    }
+    messages.push({
+      uuid,
+      session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
+      role,
+      linear_parent_uuid: linear,
+      semantic_parent_uuid: null,
+      prompt_id: `big-prompt-${i}`,
+      seq: i,
+      content_text: text,
+      content,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
+      model: role === 'assistant' ? 'claude-opus-4-8' : null,
+      git_branch: 'main',
+      cwd: '/home/dev/repo',
+      response_time_ms: role === 'assistant' ? 9400 : null,
+    });
+  }
+  return messages;
+}
+
+/**
  * Deterministic id of the `ordinal`-th session spawned by a mock new-session
  * send within one {@link seedData} store. The real server mints a UUID; the
  * mock keeps the id predictable so tests can address the spawn (e.g. emit a
