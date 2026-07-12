@@ -66,7 +66,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
       <span
         role="note"
         data-testid="message-meta-popover"
-        className="pointer-events-none absolute right-0 top-full z-10 mt-1 hidden w-80 max-w-[90vw] grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-left text-xs text-fg-muted shadow-lg group-hover/info:grid group-focus-within/info:grid"
+        className="pointer-events-none absolute right-0 top-full z-10 mt-1 hidden w-80 max-w-[90vw] grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-left text-caption text-fg-muted shadow-lg group-hover/info:grid group-focus-within/info:grid"
       >
         <span className="text-fg-subtle">model</span>
         <span className="min-w-0 break-all" data-testid="popover-model">
@@ -87,7 +87,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
   if (!isLatest) {
     return (
       <div
-        className="mt-1 flex flex-col items-end font-mono text-xs text-fg-subtle"
+        className="mt-1 flex flex-col items-end font-mono text-caption text-fg-subtle"
         data-testid="message-meta"
       >
         {timestampWithPopover}
@@ -97,7 +97,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
 
   return (
     <div
-      className="mt-1 flex w-full items-start justify-between gap-4 font-mono text-xs text-fg-subtle"
+      className="mt-1 flex w-full items-start justify-between gap-4 font-mono text-caption text-fg-subtle"
       data-testid="message-meta"
       data-latest="true"
     >

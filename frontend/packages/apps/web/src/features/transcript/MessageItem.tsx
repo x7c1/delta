@@ -93,7 +93,7 @@ export const MessageItem = memo(function MessageItem({
         .find((line) => line !== '') ?? '';
     return (
       <article
-        className="px-3 text-sm"
+        className="px-3 text-secondary"
         data-role={message.role}
         data-message-uuid={message.uuid}
         data-testid="message-item"
@@ -134,7 +134,7 @@ export const MessageItem = memo(function MessageItem({
       .join('\n');
     return (
       <article
-        className="px-3 text-sm"
+        className="px-3 text-secondary"
         data-role={message.role}
         data-message-uuid={message.uuid}
         data-task-notification="true"
@@ -217,7 +217,7 @@ export const MessageItem = memo(function MessageItem({
           >
             <div className="space-y-2">
               <div>
-                <div className="text-[0.65rem] uppercase tracking-wide text-fg-subtle">
+                <div className="text-caption uppercase tracking-wide text-fg-subtle">
                   input
                 </div>
                 <pre className="whitespace-pre-wrap text-fg-muted">
@@ -226,7 +226,7 @@ export const MessageItem = memo(function MessageItem({
               </div>
               {result && (
                 <div>
-                  <div className="text-[0.65rem] uppercase tracking-wide text-fg-subtle">
+                  <div className="text-caption uppercase tracking-wide text-fg-subtle">
                     result
                   </div>
                   <pre className="whitespace-pre-wrap text-fg-muted">
@@ -290,7 +290,7 @@ export const MessageItem = memo(function MessageItem({
   if (isUserTurn) {
     return (
       <article
-        className="flex flex-col items-end px-3 text-sm"
+        className="flex flex-col items-end px-3 text-body"
         data-role={message.role}
         data-message-uuid={message.uuid}
         data-testid="message-item"
@@ -314,7 +314,7 @@ export const MessageItem = memo(function MessageItem({
   );
   return (
     <article
-      className="px-3 text-sm"
+      className="px-3 text-body"
       data-role={message.role}
       data-message-uuid={message.uuid}
       data-testid="message-item"

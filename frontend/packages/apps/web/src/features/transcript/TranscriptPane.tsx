@@ -802,7 +802,7 @@ export function TranscriptPane({
   if (resumeUnavailable && !newSession) {
     bottomContent = (
       <div
-        className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-xs text-danger"
+        className="flex items-center gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption text-danger"
         data-testid="resume-unavailable-notice"
         role="alert"
       >
@@ -839,7 +839,7 @@ export function TranscriptPane({
           >
             {readOnly && !newSession && (
               <div
-                className="flex items-center gap-2 rounded border border-border-default bg-surface-elevated px-2 py-1 text-xs text-fg-subtle"
+                className="flex items-center gap-2 rounded border border-border-default bg-surface-elevated px-2 py-1 text-caption text-fg-subtle"
                 data-testid="readonly-notice"
               >
                 <Badge tone="neutral">closed</Badge>
@@ -851,7 +851,7 @@ export function TranscriptPane({
 
             {showExternalInput && activeThread && (
               <div
-                className="flex items-start gap-2 rounded border border-info/30 bg-info/10 px-2 py-1 text-xs"
+                className="flex items-start gap-2 rounded border border-info/30 bg-info/10 px-2 py-1 text-caption"
                 data-testid="external-input-notice"
               >
                 <Badge className="shrink-0" tone="info">
@@ -908,7 +908,7 @@ export function TranscriptPane({
               />
               <span className="group/ctx pointer-events-auto absolute right-0.5 top-0.5 z-10">
                 <span
-                  className="cursor-help px-1 py-1 text-xs leading-none tabular-nums text-fg-subtle"
+                  className="cursor-help px-1 py-1 text-caption leading-none tabular-nums text-fg-subtle"
                   data-testid="composer-context-label"
                   tabIndex={0}
                   aria-label="Context window usage"
@@ -920,7 +920,7 @@ export function TranscriptPane({
                 <span
                   role="note"
                   data-testid="composer-context-popover"
-                  className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-xs text-fg-muted shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
+                  className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-caption text-fg-muted shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
                 >
                   Context window usage
                 </span>
@@ -1365,14 +1365,14 @@ export function TranscriptPane({
       )}
 
       {!newSession && messagesQuery.isLoading && (
-        <p className="px-3 py-4 text-sm text-fg-subtle">Loading transcript…</p>
+        <p className="px-3 py-4 text-secondary text-fg-subtle">Loading transcript…</p>
       )}
 
       {!newSession &&
         !messagesQuery.isLoading &&
         messages.length === 0 &&
         pendingCount === 0 && (
-          <p className="px-3 py-4 text-sm text-fg-subtle">
+          <p className="px-3 py-4 text-secondary text-fg-subtle">
             No messages yet. Send the first message below.
           </p>
         )}
@@ -1479,7 +1479,7 @@ export function TranscriptPane({
       {showStreaming && streaming && (
         <div className="pt-1.5 pb-2">
           <article
-            className="px-3 text-sm"
+            className="px-3 text-body"
             data-role="assistant"
             data-testid="streaming-message"
           >

@@ -18,7 +18,7 @@ export function Breadcrumb({ items, className }: BreadcrumbProps) {
   return (
     <nav
       aria-label="Breadcrumb"
-      className={cn('flex flex-wrap items-center gap-1 text-xs', className)}
+      className={cn('flex flex-wrap items-center gap-1 text-caption', className)}
     >
       {items.map((item, index) => {
         const isLast = index === items.length - 1;

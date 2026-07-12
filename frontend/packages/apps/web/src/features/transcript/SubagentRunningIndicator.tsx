@@ -38,7 +38,7 @@ export function SubagentRunningIndicator({
       className="ml-6 mr-0 px-3 pt-1.5 pb-2"
       data-testid="subagent-running-indicator"
     >
-      <div className="rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-sm text-info">
+      <div className="rounded-lg border border-info/30 bg-info/10 px-3 py-2 text-secondary text-info">
         <div className="flex items-center gap-2">
           <Spinner />
           <span className="font-medium">
@@ -51,7 +51,7 @@ export function SubagentRunningIndicator({
           {subagents.map((subagent) => (
             <li
               key={subagent.toolUseId}
-              className="truncate text-xs text-info"
+              className="truncate text-caption text-info"
               title={subagentLabel(subagent)}
             >
               {subagentLabel(subagent)}

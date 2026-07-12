@@ -18,8 +18,8 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: 'px-2 py-1 text-xs',
-  md: 'px-3 py-1.5 text-sm',
+  sm: 'px-2 py-1 text-caption',
+  md: 'px-3 py-1.5 text-secondary',
 };
 
 /** A generic, domain-agnostic button. Props are pure visual vocabulary. */

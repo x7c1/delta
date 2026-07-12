@@ -17,7 +17,7 @@ export function TerminalFallback({ onClose }: TerminalFallbackProps) {
       className="border-l border-border-default"
       header={
         <div className="flex items-center justify-between">
-          <span className="text-sm font-semibold text-fg">Terminal</span>
+          <span className="text-secondary font-semibold text-fg">Terminal</span>
           <Button
             size="sm"
             variant="ghost"
@@ -30,7 +30,7 @@ export function TerminalFallback({ onClose }: TerminalFallbackProps) {
       }
       bodyClassName="bg-terminal-bg"
     >
-      <p className="p-3 text-xs text-terminal-fg">
+      <p className="p-3 text-caption text-terminal-fg">
         The terminal could not be displayed. It was isolated so it would not
         affect the rest of the app — reload the page to try again.
       </p>

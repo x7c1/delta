@@ -37,7 +37,7 @@ export function ErrorSnackbar() {
           // codebase (PermissionNotice, workdir picker) so screen readers
           // pick it up without extra ARIA plumbing.
           role="alert"
-          className="pointer-events-auto flex items-start gap-2 rounded border border-danger/40 bg-surface-elevated px-3 py-2 text-xs shadow-lg"
+          className="pointer-events-auto flex items-start gap-2 rounded border border-danger/40 bg-surface-elevated px-3 py-2 text-caption shadow-lg"
           data-testid="error-snackbar-item"
         >
           <div className="min-w-0 flex-1">

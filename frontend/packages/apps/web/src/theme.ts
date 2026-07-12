@@ -11,9 +11,9 @@
  *   variables (`bg-terminal-bg`, `pb-composer-reserve`, `inset-x-overlay-inset`,
  *   …), so styled markup resolves through the variables too.
  * - **Runtime readers** — this module, for the consumers Tailwind cannot
- *   reach: xterm takes its `fontFamily` and theme colors as JavaScript
- *   options, so the terminal reads the resolved variables off the document
- *   instead of restating the values.
+ *   reach: xterm takes its `fontFamily`, `fontSize`, and theme colors as
+ *   JavaScript options, so the terminal reads the resolved variables off the
+ *   document instead of restating the values.
  *
  * Because every consumer resolves through the custom properties, a later
  * user-facing stylesheet can override a token on `:root` and the whole UI
@@ -35,6 +35,47 @@ function readToken(name: string): string {
  */
 export function terminalFontFamily(): string {
   return readToken('--delta-font-terminal');
+}
+
+/**
+ * The embedded terminal's font size (`--delta-text-terminal`), shared with the
+ * `text-terminal` utility so the panel chrome and the xterm canvas stay on the
+ * same type scale.
+ *
+ * The token is authored in `rem` (so it scales with the root font-size like the
+ * rest of the scale), but xterm's `fontSize` option is a plain pixel *number*.
+ * Resolve the `rem` against the document root's computed font-size and return
+ * the product; a bare `px` value is accepted too. If the property is unset,
+ * malformed, or the stylesheet has not loaded yet, fall back to 14px (the
+ * canonical value of `--delta-text-terminal` in src/index.css) so xterm never
+ * sees `NaN`.
+ */
+export function terminalFontSize(): number {
+  const FALLBACK = 14;
+  const raw = readToken('--delta-text-terminal');
+  if (raw === '') {
+    return FALLBACK;
+  }
+  const rem = raw.match(/^([\d.]+)rem$/);
+  if (rem) {
+    const value = Number.parseFloat(rem[1]);
+    const rootPx = Number.parseFloat(
+      getComputedStyle(document.documentElement).fontSize,
+    );
+    const base = Number.isFinite(rootPx) && rootPx > 0 ? rootPx : 16;
+    if (Number.isFinite(value) && value > 0) {
+      return value * base;
+    }
+    return FALLBACK;
+  }
+  const px = raw.match(/^([\d.]+)px$/);
+  if (px) {
+    const value = Number.parseFloat(px[1]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+  return FALLBACK;
 }
 
 /**

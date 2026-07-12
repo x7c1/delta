@@ -33,7 +33,7 @@ export function StatusDot({ tone, label, title, className }: StatusDotProps) {
   const ariaLabel = !label && title ? title : undefined;
   return (
     <span
-      className={cn('inline-flex items-center gap-1.5 text-xs', className)}
+      className={cn('inline-flex items-center gap-1.5 text-caption', className)}
       title={title}
       role={ariaLabel ? 'status' : undefined}
       aria-label={ariaLabel}

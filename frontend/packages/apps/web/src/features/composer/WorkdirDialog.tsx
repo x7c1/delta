@@ -143,7 +143,7 @@ export function WorkdirChip({ onEdit }: WorkdirChipProps) {
 
   return (
     <div
-      className="flex items-center gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-xs"
+      className="flex items-center gap-2 rounded border border-accent/30 bg-accent/10 px-2 py-1 text-caption"
       data-testid="workdir-chip"
     >
       <span className="shrink-0 font-medium text-accent">Start in:</span>
