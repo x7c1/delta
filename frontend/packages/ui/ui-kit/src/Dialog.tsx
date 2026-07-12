@@ -108,7 +108,7 @@ export function Dialog({
         <header className="shrink-0 border-b border-border-default px-4 py-3">
           <h2
             id={titleId}
-            className="text-sm font-semibold text-fg"
+            className="text-secondary font-semibold text-fg"
           >
             {title}
           </h2>

@@ -27,7 +27,7 @@ export function Collapsible({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left text-xs text-fg-muted hover:bg-surface-elevated-hover"
+        className="flex w-full items-center gap-1 px-2 py-1 text-left text-caption text-fg-muted hover:bg-surface-elevated-hover"
       >
         <span className="text-fg-subtle" aria-hidden>
           {open ? '▾' : '▸'}
@@ -35,7 +35,7 @@ export function Collapsible({
         <span className="min-w-0 flex-1 truncate">{summary}</span>
       </button>
       {open && (
-        <div className="border-t border-border-default px-2 py-1.5 text-xs">
+        <div className="border-t border-border-default px-2 py-1.5 text-caption">
           {children}
         </div>
       )}

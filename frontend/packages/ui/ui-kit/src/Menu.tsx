@@ -208,7 +208,7 @@ export function Menu({
                 // it a label longer than the panel's `min-w-[8rem]` (e.g. `Copy
                 // session ID`) wrapped to a second line. The panel itself has no
                 // max width, so it now grows to fit the longest label naturally.
-                'block w-full whitespace-nowrap px-3 py-1.5 text-left text-sm transition-colors',
+                'block w-full whitespace-nowrap px-3 py-1.5 text-left text-secondary transition-colors',
                 ITEM_TONE_CLASSES[item.tone ?? 'default'],
               )}
             >

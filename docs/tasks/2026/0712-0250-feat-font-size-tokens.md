@@ -6,11 +6,11 @@ base_ref: null
 blocked_by: []
 subagent_type: general-purpose
 retries_remaining: 1
-check_command: "make check && ! grep -rnE 'text-(xs|sm|base|lg|xl|\\[)' frontend/packages/apps/web/src --include='*.tsx' && ! grep -rnE 'fontSize: *[0-9]' frontend/packages/apps/web/src"
+check_command: "make check && ! grep -rnE 'text-(xs|sm|base|lg|xl|\\[)' frontend/packages/apps/web/src frontend/packages/ui/ui-kit/src --include='*.tsx' && ! grep -rnE 'fontSize: *[0-9]' frontend/packages/apps/web/src frontend/packages/ui/ui-kit/src"
 assignee: null
 branch: task/0712-0250-feat-font-size-tokens
 created_at: 2026-07-12T02:50:00Z
-updated_at: 2026-07-12T03:47:00Z
+updated_at: 2026-07-12T03:44:29Z
 ---
 
 # feat(web): tokenize font sizes and raise the type scale
@@ -52,8 +52,11 @@ step in the process:
      chrome; this replaces and retires the 0.65rem / 0.7rem call sites
    - `terminal`: 0.875rem (14px) — the xterm canvas
 2. Replace every raw size utility (`text-xs`, `text-sm`, `text-[…]`) in
-   `frontend/packages/apps/web/src` with a semantic utility, choosing by the
-   text's role, not by mechanically mapping old size to nearest new size.
+   `frontend/packages/apps/web/src` and the shared UI kit
+   `frontend/packages/ui/ui-kit/src` (11 sites, including a 0.65rem badge —
+   its components render throughout the app, so leaving them out produces a
+   visibly mixed scale) with a semantic utility, choosing by the text's role,
+   not by mechanically mapping old size to nearest new size.
 3. Route the terminal size through the existing runtime-token pattern: read
    the token in `src/theme.ts` (convert rem to the px number xterm expects)
    and pass it to the `Terminal` constructor in `TerminalPane.tsx`, replacing
@@ -73,14 +76,15 @@ automatically — do not restate sizes there.
       `index.css` `:root` and exposed as Tailwind utilities in
       `tailwind.config.js`, and the workspace builds and type-checks
       (`make check`).
-- [x] No raw Tailwind size utilities remain in the app:
+- [x] No raw Tailwind size utilities remain in the app or the shared UI kit:
       `grep -rnE 'text-(xs|sm|base|lg|xl|\[)' frontend/packages/apps/web/src
-      --include='*.tsx'` returns no matches (appended to `check_command` as a
-      gate).
+      frontend/packages/ui/ui-kit/src --include='*.tsx'` returns no matches
+      (appended to `check_command` as a gate).
 - [x] No hardcoded pixel font size remains in component code:
-      `grep -rnE 'fontSize: *[0-9]' frontend/packages/apps/web/src` returns no
-      matches (appended to `check_command`); the xterm size is read from the
-      token via `theme.ts` instead.
+      `grep -rnE 'fontSize: *[0-9]' frontend/packages/apps/web/src
+      frontend/packages/ui/ui-kit/src` returns no matches (appended to
+      `check_command`); the xterm size is read from the token via `theme.ts`
+      instead.
 - [x] Existing tests still pass with the new sizes (`make check` runs the
       frontend suite; update any test that asserts on the replaced class
       names).
