@@ -164,7 +164,7 @@ export function WorkdirPickerBody({
                   onClick={() => setCandidate(item.path)}
                   aria-pressed={candidate === item.path}
                   className={cn(
-                    'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-caption hover:bg-surface-elevated-hover',
+                    'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
                     candidate === item.path
                       ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                       : 'text-fg',
@@ -222,7 +222,7 @@ export function WorkdirPickerBody({
               onClick={() => setCandidate(listing.path)}
               aria-pressed={candidate === listing.path}
               className={cn(
-                'w-full truncate rounded px-2 py-1 text-left font-mono text-caption hover:bg-surface-elevated-hover',
+                'w-full truncate rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
                 candidate === listing.path
                   ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                   : 'text-fg',
@@ -245,7 +245,7 @@ export function WorkdirPickerBody({
                   <button
                     type="button"
                     onClick={() => navigateTo(listing.parent)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-caption text-fg hover:bg-surface-elevated-hover"
+                    className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code text-fg hover:bg-surface-elevated-hover"
                     data-testid="workdir-parent"
                   >
                     <ParentDirIcon className="h-4 w-4 shrink-0" />
@@ -258,7 +258,7 @@ export function WorkdirPickerBody({
                   <button
                     type="button"
                     onClick={() => navigateTo(entry.path)}
-                    className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-caption text-fg hover:bg-surface-elevated-hover"
+                    className="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code text-fg hover:bg-surface-elevated-hover"
                     title={entry.path}
                   >
                     <FolderIcon className="h-4 w-4 shrink-0" />

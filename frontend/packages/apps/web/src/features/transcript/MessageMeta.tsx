@@ -87,7 +87,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
   if (!isLatest) {
     return (
       <div
-        className="mt-1 flex flex-col items-end font-mono text-caption text-fg-subtle"
+        className="mt-1 flex flex-col items-end font-mono text-code text-fg-subtle"
         data-testid="message-meta"
       >
         {timestampWithPopover}
@@ -97,7 +97,7 @@ export function MessageMeta({ message, timestamp, isLatest }: MessageMetaProps) 
 
   return (
     <div
-      className="mt-1 flex w-full items-start justify-between gap-4 font-mono text-caption text-fg-subtle"
+      className="mt-1 flex w-full items-start justify-between gap-4 font-mono text-code text-fg-subtle"
       data-testid="message-meta"
       data-latest="true"
     >

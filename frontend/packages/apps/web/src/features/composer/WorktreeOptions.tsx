@@ -243,7 +243,7 @@ function WorktreeStartPointSelector({
           <span className="flex flex-col">
             <span className="font-medium text-fg">
               Latest{' '}
-              <span className="font-mono text-fg-muted">{defaultBranch}</span>
+              <span className="font-mono text-code text-fg-muted">{defaultBranch}</span>
             </span>
             <span className="text-fg-muted">
               Fetch and branch from the default branch.
@@ -374,7 +374,7 @@ function RemoteBranchPicker({
           value={selectedName}
           onChange={(event) => onSelect(event.target.value)}
           placeholder="origin branch (e.g. feature/x)"
-          className="rounded border border-border-default bg-surface px-2 py-1 font-mono text-caption text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+          className="rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           data-testid="remote-branch-input"
         />
       </label>
@@ -400,7 +400,7 @@ function RemoteBranchPicker({
                 onClick={() => onSelect(name)}
                 aria-pressed={selectedName === name}
                 className={cn(
-                  'w-full truncate rounded px-2 py-1 text-left font-mono text-caption hover:bg-surface-elevated-hover',
+                  'w-full truncate rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
                   selectedName === name
                     ? 'bg-accent/10 text-accent ring-1 ring-accent/30'
                     : 'text-fg',
