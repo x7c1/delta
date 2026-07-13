@@ -1155,11 +1155,15 @@ describe('TranscriptPane', () => {
     expect(useNavStore.getState().preNewSessionFocus).toBeNull();
   });
 
-  it('clears a pending branch selection on a plain (collapsed) click in the transcript body', async () => {
+  it('clears a pending branch and collapses the selection on a stationary click even when the engine has not collapsed the selection yet', async () => {
     // A passage was selected for "Branch from selected text" (a pending
-    // branchOrigin on the active thread). A plain click in the conversation —
-    // one that leaves the selection collapsed — drops it, so dismissing no
-    // longer requires the composer's ✕.
+    // branchOrigin on the active thread). A stationary plain click in the
+    // conversation drops it, so dismissing no longer requires the composer's ✕.
+    // Some engines (WebKit) defer collapsing the native selection until AFTER
+    // the click fires — so even though getSelection() still reports a
+    // non-collapsed selection here, a stationary click must clear the origin
+    // AND explicitly collapse the selection (removeAllRanges) so the release's
+    // mouseup re-arm has nothing to pick back up.
     useComposerStore.setState({
       branchOrigin: {
         parentThreadId: MAIN_THREAD_ID,
@@ -1167,44 +1171,70 @@ describe('TranscriptPane', () => {
         locatorQuote: 'selected passage',
       },
     });
-    // A plain click collapses the selection.
-    const getSelection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ isCollapsed: true } as Selection);
+    // WebKit-style deferred collapse: the selection is still non-collapsed at
+    // click time. `removeAllRanges` is observed so the explicit collapse is
+    // asserted.
+    const removeAllRanges = vi.fn();
+    const getSelection = vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      removeAllRanges,
+    } as unknown as Selection);
 
     renderPane();
     const message = await screen.findByText('What is a delta?');
 
-    fireEvent.click(message);
+    // A stationary single click: mousedown and click at the same point.
+    fireEvent.mouseDown(message, { clientX: 100, clientY: 100 });
+    fireEvent.click(message, { clientX: 100, clientY: 100, detail: 1 });
 
     await waitFor(() =>
       expect(useComposerStore.getState().branchOrigin).toBeNull(),
     );
+    expect(removeAllRanges).toHaveBeenCalled();
     getSelection.mockRestore();
   });
 
-  it('keeps a pending branch selection when a click leaves a non-empty selection (drag-select end)', async () => {
-    // The mouseup that finishes a drag-select also fires a click, but it leaves
-    // a non-empty (non-collapsed) selection — the one that just set the branch
-    // origin. That click must NOT immediately undo it.
+  it('keeps a pending branch when the click is preceded by pointer movement (drag-select end)', async () => {
+    // The mouseup that finishes a drag-select also fires a click, but the
+    // pointer travelled from the mousedown point — that is a drag, the gesture
+    // that just set the branch origin. It must NOT immediately undo it. The
+    // detection is by pointer movement, not by a mocked isCollapsed.
     const origin = {
       parentThreadId: MAIN_THREAD_ID,
       semanticParentUuid: 'm-user' as const,
       locatorQuote: 'selected passage',
     };
     useComposerStore.setState({ branchOrigin: origin });
-    const getSelection = vi
-      .spyOn(window, 'getSelection')
-      .mockReturnValue({ isCollapsed: false } as Selection);
 
     renderPane();
     const message = await screen.findByText('What is a delta?');
 
-    fireEvent.click(message);
+    // mousedown then a click well beyond the slop = a drag-select release.
+    fireEvent.mouseDown(message, { clientX: 100, clientY: 100 });
+    fireEvent.click(message, { clientX: 220, clientY: 160, detail: 1 });
 
-    // The branch origin survives a non-collapsed click.
+    // The branch origin survives the drag-select release click.
     expect(useComposerStore.getState().branchOrigin).toEqual(origin);
-    getSelection.mockRestore();
+  });
+
+  it('keeps a pending branch when the click is a double/triple-click selection (detail > 1)', async () => {
+    // A double/triple-click word/paragraph select fires a click with detail > 1
+    // and no pointer travel. That gesture just armed the origin, so its own
+    // click must not immediately undo it.
+    const origin = {
+      parentThreadId: MAIN_THREAD_ID,
+      semanticParentUuid: 'm-user' as const,
+      locatorQuote: 'selected passage',
+    };
+    useComposerStore.setState({ branchOrigin: origin });
+
+    renderPane();
+    const message = await screen.findByText('What is a delta?');
+
+    fireEvent.mouseDown(message, { clientX: 100, clientY: 100 });
+    fireEvent.click(message, { clientX: 100, clientY: 100, detail: 2 });
+
+    expect(useComposerStore.getState().branchOrigin).toEqual(origin);
   });
 
   it('paints the pending branch quote in the body via the branch-origin highlight', async () => {
