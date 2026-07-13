@@ -238,6 +238,55 @@ describe('GET /api/sessions/{id}/sends mock', () => {
     expect(sends).toEqual([]);
   });
 
+  it('reports the turn as in_flight from turn_started until turn_completed', async () => {
+    // The envelope must mirror the real server's turn phases across a full
+    // turn: `awaiting_echo` while the dispatch is outstanding, `in_flight`
+    // for the whole running turn (whose send is already `matched`, so the
+    // send list alone would wrongly read as idle), and `idle` only after the
+    // turn ends. The `in_flight` report is what the app's authoritative
+    // turn re-seed reconciles against — an `idle` here mid-turn would wipe
+    // the running flag the `turn_started` event just set.
+    const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const posted = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        thread_id: MAIN_THREAD_ID,
+        text: 'drive a turn',
+      })
+    ).json()) as SendResponse;
+
+    let envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.turn.state).toBe('awaiting_echo');
+
+    applyEvent({
+      kind: 'turn_started',
+      session_id: SESSION_ID,
+      send_id: posted.send.id,
+      thread_id: MAIN_THREAD_ID,
+      matched_uuid: 'uuid-m1',
+    });
+    envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.turn).toEqual({
+      state: 'in_flight',
+      send_id: posted.send.id,
+      thread_id: MAIN_THREAD_ID,
+    });
+
+    applyEvent({
+      kind: 'turn_completed',
+      session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
+      stop_reason: null,
+    });
+    envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.turn).toEqual({
+      state: 'idle',
+      send_id: null,
+      thread_id: null,
+    });
+  });
+
   it('responds 404 for an unknown session id', async () => {
     const handlers = createHandlers() as HttpHandler[];
     const response = await runGet(
