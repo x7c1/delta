@@ -17,14 +17,41 @@ const HIGHLIGHT_NAME = 'branch-origin';
 /** Minimal shape of the Custom Highlight API, which the DOM lib may not type. */
 interface HighlightRegistry {
   set(name: string, highlight: object): void;
-  delete(name: string): void;
+}
+interface HighlightObject {
+  add(range: Range): void;
+  clear(): void;
 }
 interface HighlightConstructor {
-  new (...ranges: Range[]): object;
+  new (): HighlightObject;
 }
 
 function registry(): HighlightRegistry | undefined {
   return (CSS as unknown as { highlights?: HighlightRegistry }).highlights;
+}
+
+// A single Highlight instance, registered once and mutated in place. WebKitGTK
+// (observed on 2.52/Epiphany) does not repaint the previously marked ranges
+// when the registry entry is replaced with a new Highlight or deleted — the
+// stale marks linger until an unrelated repaint touches them. Mutating a
+// registered Highlight's range set is the invalidation path every engine
+// tracks, so the entry itself is never replaced or removed.
+let branchHighlight: HighlightObject | null = null;
+
+function ensureBranchHighlight(): HighlightObject | undefined {
+  if (branchHighlight) {
+    return branchHighlight;
+  }
+  const highlights = registry();
+  const HighlightCtor = (
+    window as unknown as { Highlight?: HighlightConstructor }
+  ).Highlight;
+  if (!highlights || !HighlightCtor) {
+    return undefined;
+  }
+  branchHighlight = new HighlightCtor();
+  highlights.set(HIGHLIGHT_NAME, branchHighlight);
+  return branchHighlight;
 }
 
 /**
@@ -83,20 +110,18 @@ export function findAllQuoteRanges(root: Node, quote: string): Range[] {
  * An empty list clears the highlight.
  */
 export function setBranchHighlight(ranges: Range[]): void {
-  const highlights = registry();
-  const HighlightCtor = (window as unknown as { Highlight?: HighlightConstructor })
-    .Highlight;
-  if (!highlights || !HighlightCtor) {
+  const highlight = ensureBranchHighlight();
+  if (!highlight) {
     return;
   }
-  if (ranges.length === 0) {
-    highlights.delete(HIGHLIGHT_NAME);
-    return;
+  highlight.clear();
+  for (const range of ranges) {
+    highlight.add(range);
   }
-  highlights.set(HIGHLIGHT_NAME, new HighlightCtor(...ranges));
 }
 
 /** Remove the branch-origin highlight, if any. */
 export function clearBranchHighlight(): void {
-  registry()?.delete(HIGHLIGHT_NAME);
+  // No lazy init here: if nothing was ever painted there is nothing to clear.
+  branchHighlight?.clear();
 }

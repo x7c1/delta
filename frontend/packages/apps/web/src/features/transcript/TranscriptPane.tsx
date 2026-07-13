@@ -53,6 +53,15 @@ import {
 const STICK_THRESHOLD_PX = 64;
 
 /**
+ * Pointer travel (px, per axis) between `mousedown` and `click` under which a
+ * click counts as stationary — a plain click rather than the release of a
+ * drag-select. Kept small so a genuine drag (which arms a pending branch) is
+ * never mistaken for a plain dismiss click, while the sub-pixel jitter a real
+ * "stationary" click can carry still reads as stationary.
+ */
+const CLICK_DRAG_SLOP_PX = 6;
+
+/**
  * Fallback gap (px) between the bottom overlay and the resting content when the
  * `--delta-overlay-inset` token cannot be read (e.g. jsdom, which computes no
  * styles). Mirrors the token's resting value (0.75rem at the 16px default root)
@@ -436,29 +445,60 @@ export function TranscriptPane({
 
   // A plain click anywhere in the transcript body drops a pending branch
   // selection (the "Branch from selected text" affordance), so dismissing it no
-  // longer requires hunting for the composer's ✕. The gate is strict: only a
-  // click that leaves the selection COLLAPSED clears. The mouseup that finishes
-  // a drag-select also fires a click, but it leaves a non-empty selection (which
-  // is what just set/updated the branch origin), so it must not immediately undo
-  // it. Attached via the body ref (like the scroll listener) since the shared
-  // Panel body does not take an onClick. `branchOrigin` is read live from the
-  // store so the listener does not need re-binding as it changes.
+  // longer requires hunting for the composer's ✕. Whether *this* click ended a
+  // drag-select is detected directly, not inferred from selection state: some
+  // engines defer collapsing the native selection until AFTER the click fires
+  // (WebKit especially, when the click lands on the selected text itself), so a
+  // selection-state gate would wrongly read a plain click as a drag end and
+  // never dismiss. Instead, record the pointer position on `mousedown` and, on
+  // `click`, keep the pending branch only when the pointer moved past a small
+  // slop (a real drag) or the click was a double/triple-click (`detail > 1`,
+  // which just armed the origin via word/paragraph select). Otherwise dismiss:
+  // clear the origin, clear the highlight, and explicitly collapse the native
+  // selection so engines that defer the collapse still drop the stale selected
+  // text — otherwise the release's `mouseup` re-arm in MessageItem would pick it
+  // straight back up. Attached via the body ref (like the scroll listener) since
+  // the shared Panel body does not take an onClick. `branchOrigin` is read live
+  // from the store so the listener does not need re-binding as it changes.
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) {
       return;
     }
-    const onClick = () => {
-      if (!window.getSelection()?.isCollapsed) {
+    let downX = 0;
+    let downY = 0;
+    const onMouseDown = (event: MouseEvent) => {
+      downX = event.clientX;
+      downY = event.clientY;
+    };
+    const onClick = (event: MouseEvent) => {
+      const draggedPastSlop =
+        Math.abs(event.clientX - downX) > CLICK_DRAG_SLOP_PX ||
+        Math.abs(event.clientY - downY) > CLICK_DRAG_SLOP_PX;
+      if (draggedPastSlop || event.detail > 1) {
         return;
       }
       if (useComposerStore.getState().branchOrigin !== null) {
         setBranchOrigin(null);
         clearBranchHighlight();
       }
+      // Collapse any lingering native selection, outside the branch gate:
+      // Chromium deselects on a plain click natively but WebKit does not
+      // always, and a stale selection would both keep its highlight and
+      // re-arm the branch on the next in-message mouseup. Out of the gate so
+      // a click still deselects when the branch was dismissed some other way
+      // (e.g. the composer's ✕, which leaves the selection alone).
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) {
+        selection.removeAllRanges();
+      }
     };
+    el.addEventListener('mousedown', onMouseDown);
     el.addEventListener('click', onClick);
-    return () => el.removeEventListener('click', onClick);
+    return () => {
+      el.removeEventListener('mousedown', onMouseDown);
+      el.removeEventListener('click', onClick);
+    };
   }, [setBranchOrigin]);
 
   // Recompute "is the user near the bottom?" on every scroll so the

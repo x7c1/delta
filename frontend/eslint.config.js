@@ -7,6 +7,8 @@ export default tseslint.config(
       '**/dist/**',
       '**/dist-types/**',
       '**/node_modules/**',
+      // Gitignored scratch space (agent logs, repro scripts, etc.); never linted.
+      '**/.tmp/**',
       '**/*.config.{js,ts}',
       '**/.dependency-cruiser.cjs',
     ],
