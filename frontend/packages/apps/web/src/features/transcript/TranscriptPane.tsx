@@ -185,6 +185,18 @@ const FLOATING_CARD_CLASS =
  * fixup. `scrollOffset` is `null` before the first scroll; treat that as 0 (the
  * top), where nothing sits above the fold and no compensation is due.
  *
+ * `isStuck` short-circuits to NO compensation while the transcript is pinned at
+ * the bottom (stick-to-bottom on). While pinned, the stick re-pin owns the
+ * scroll position — it re-pins to the tail on every measurement-driven size
+ * change — so compensating here is not only redundant but harmful: a
+ * compensation write is a SECOND, competing writer of `scrollTop` at the tail,
+ * and its writes can be UPWARD (a row above shrinking below its estimate),
+ * which the direction-aware stick listener would misread as an upward user
+ * gesture and unstick — breaking streaming-follow. Yielding while stuck keeps
+ * the re-pin the sole writer at the tail and removes that competing signal. It
+ * does not weaken the estimate-yank fix this predicate exists for: that jank
+ * occurs while reading history DEEP above the tail, where stick is already off.
+ *
  * Exported so a test can exercise the predicate directly (a real
  * measurement-driven resize is impractical to simulate under jsdom, which
  * computes no layout).
@@ -192,7 +204,11 @@ const FLOATING_CARD_CLASS =
 export function shouldCompensateTranscriptResize(
   itemStart: number,
   scrollOffset: number | null,
+  isStuck: boolean,
 ): boolean {
+  if (isStuck) {
+    return false;
+  }
   return itemStart < (scrollOffset ?? 0);
 }
 
@@ -451,10 +467,37 @@ export function TranscriptPane({
   // never yanked away). The scroll region is the Panel body.
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const stickRef = useRef(true);
+  // The last `scrollTop` this listener observed, so each scroll event can be
+  // classified by DIRECTION (up vs down) rather than only by distance-to-bottom.
+  const prevScrollTopRef = useRef(0);
   const prevPendingRef = useRef(pendingCount);
 
-  // Recompute "is the user near the bottom?" on every scroll so the
-  // stick-to-bottom effects know whether to follow new content.
+  // Recompute whether the transcript should follow new content on every scroll.
+  // The rule is DIRECTION-AWARE, not merely distance-based: the user's gesture
+  // is the highest-priority writer of `scrollTop`.
+  //   - A user scroll UPWARD (scrollTop decreased) unsticks IMMEDIATELY, even
+  //     inside the 64px bottom zone. Being near the bottom justifies following
+  //     NEW content; it never justifies cancelling an upward user gesture. This
+  //     is what breaks the "stick trap": WebKitGTK kinetic scrolling delivers a
+  //     slow upward wheel motion as many small (10–20px) scroll events, so a
+  //     purely distance-based rule kept `stickRef` true across the whole gesture
+  //     (never leaving the 64px zone), and each measurement-driven
+  //     `messagesTotalSize` change then re-pinned the tail mid-gesture — the
+  //     view scrolled up a hair and snapped back to the bottom, repeatedly, so a
+  //     slow scroll could never escape the tail.
+  //   - A user scroll DOWNWARD (scrollTop increased) re-arms stick only once it
+  //     is back inside the bottom zone, so returning to the tail resumes
+  //     following. The other explicit re-arm paths (thread switch, own send)
+  //     still set `stickRef` directly.
+  //
+  // Programmatic writes must not be misread as a user gesture. The re-pin
+  // effects write `scrollTop = scrollHeight` (a DOWNWARD write toward the tail),
+  // which re-arms stick — correct and harmless, since they only fire while stick
+  // is already true. The one dangerous case is an UPWARD programmatic write
+  // (virtual-core's measurement compensation) unsticking and breaking
+  // streaming-follow; that is neutralized separately by gating compensation off
+  // while stuck (see `shouldCompensateTranscriptResize`), so no upward
+  // programmatic write occurs while pinned at the tail.
   //
   // CRITICAL ordering: this effect is declared BEFORE `useVirtualizer` below so
   // its `scroll` listener attaches first and therefore runs first on each scroll
@@ -470,9 +513,19 @@ export function TranscriptPane({
     if (!el) {
       return;
     }
+    prevScrollTopRef.current = el.scrollTop;
     const onScroll = () => {
-      stickRef.current =
-        el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
+      const top = el.scrollTop;
+      const prev = prevScrollTopRef.current;
+      prevScrollTopRef.current = top;
+      if (top < prev) {
+        // User (or any writer) moved the view UP: yield to the gesture.
+        stickRef.current = false;
+      } else if (top > prev) {
+        // Moved DOWN: follow the tail again only once back in the bottom zone.
+        stickRef.current =
+          el.scrollHeight - top - el.clientHeight < STICK_THRESHOLD_PX;
+      }
     };
     el.addEventListener('scroll', onScroll, { passive: true });
     return () => el.removeEventListener('scroll', onScroll);
@@ -609,6 +662,14 @@ export function TranscriptPane({
   // `scrollOffset` are both absolute from the scroll-content top, so no
   // `scrollMargin` fixup is needed).
   //
+  // The predicate is passed `stickRef.current` so it yields entirely while
+  // pinned at the tail: there the stick re-pin owns the scroll position, so
+  // compensation would be a redundant, competing writer whose UPWARD writes the
+  // direction-aware stick listener would misread as an upward user gesture (see
+  // that predicate's doc). Compensation stays fully active once stick is off —
+  // i.e. exactly while reading history above the tail, which is where the
+  // estimate-yank it guards against actually occurs.
+  //
   // Assigned directly on the instance rather than passed to `useVirtualizer`:
   // in virtual-core 3.17 this predicate is a public field on the `Virtualizer`
   // instance that `resizeItem` reads (`this.shouldAdjust…`), NOT a member of
@@ -622,7 +683,12 @@ export function TranscriptPane({
     item,
     _delta,
     instance,
-  ) => shouldCompensateTranscriptResize(item.start, instance.scrollOffset);
+  ) =>
+    shouldCompensateTranscriptResize(
+      item.start,
+      instance.scrollOffset,
+      stickRef.current,
+    );
   const virtualMessageItems = messageVirtualizer.getVirtualItems();
   // The virtualizer's estimated total content height. Recomputed each render;
   // it changes as rows are measured, which is why the stick-to-bottom effects
@@ -770,7 +836,14 @@ export function TranscriptPane({
   // MEASURED the estimated total shifts; keying on `messagesTotalSize` re-runs
   // this effect on each such shift so a pinned tail is re-asserted instead of
   // drifting when a below-estimate row above resolves to its real height. The
-  // `stickRef` guard keeps this from ever yanking a user reading scrollback.
+  // `stickRef` guard keeps this from ever yanking a user reading scrollback —
+  // and, crucially, since the scroll listener now unsticks on ANY upward user
+  // movement (even within the bottom zone), an in-progress slow upward gesture
+  // has already set `stickRef` false by the time this measurement-driven re-run
+  // fires, so the re-pin no longer snaps the tail back mid-gesture (the "stick
+  // trap"). A programmatic `scrollTop = scrollHeight` here is a downward write,
+  // which the listener treats as re-arming stick — correct, since this only runs
+  // while already sticking.
   //
   // While a branch is being composed the re-pin is held (same as the bottom
   // overlay's measurement effect): a measurement-driven `messagesTotalSize`

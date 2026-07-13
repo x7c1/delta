@@ -2449,6 +2449,116 @@ describe('TranscriptPane composer context bar', () => {
       expect(body.scrollTop).toBe(500);
     });
 
+    describe('direction-aware stick (the "stick trap")', () => {
+      // Wire a long thread into a body whose scroll geometry we control, drive a
+      // scroll, and return the body so a case can assert the re-pin's effect.
+      async function renderWithScrollBody(): Promise<HTMLElement> {
+        const total = 60;
+        server.use(
+          http.get('*/api/threads/:id/messages', () =>
+            HttpResponse.json({ messages: longThreadMessages(total) }),
+          ),
+        );
+        renderPane();
+        await waitFor(() =>
+          expect(
+            screen.getAllByTestId('message-item').length,
+          ).toBeGreaterThan(0),
+        );
+        const body = scrollBody();
+        Object.defineProperty(body, 'scrollHeight', {
+          configurable: true,
+          get: () => 5000,
+        });
+        Object.defineProperty(body, 'clientHeight', {
+          configurable: true,
+          get: () => 400,
+        });
+        return body;
+      }
+
+      // Grow the streaming preview: a content change that re-runs the
+      // stick-to-bottom re-pin effect (a proxy for the measurement-driven
+      // `messagesTotalSize` change that arms the trap in the field — both are
+      // gated on the SAME `stickRef`, so either exercises the guard).
+      function fireRepinTrigger(delta: string): void {
+        act(() => {
+          useLiveStore.getState().applyEvent({
+            kind: 'assistant_streaming',
+            session_id: SESSION_ID,
+            thread_id: MAIN_THREAD_ID,
+            message_id: 'stream-trap',
+            index: 0,
+            final: false,
+            delta,
+          });
+        });
+      }
+
+      it('unsticks on a SMALL upward user scroll inside the bottom zone, so a re-pin does not snap back to the tail', async () => {
+        const body = await renderWithScrollBody();
+
+        // Pinned at the exact bottom: stick is on.
+        body.scrollTop = 4600; // 5000 - 400
+        fireEvent.scroll(body);
+
+        // The user nudges UP by 20px — still only 20px from the bottom, INSIDE
+        // the 64px stick zone. A purely distance-based rule would keep sticking
+        // (the trap); the direction-aware rule unsticks on the upward move.
+        body.scrollTop = 4580; // distance-to-bottom = 20 < 64
+        fireEvent.scroll(body);
+
+        // A re-pin fires mid-gesture. Before the fix it snapped scrollTop back to
+        // scrollHeight (5000), trapping the user at the tail; now the upward
+        // gesture has unstuck, so the position is left alone.
+        fireRepinTrigger('streaming…');
+        await Promise.resolve();
+        expect(body.scrollTop).toBe(4580);
+      });
+
+      it('re-arms stick when the user scrolls back DOWN into the bottom zone', async () => {
+        const body = await renderWithScrollBody();
+
+        // Start pinned, then scroll up out of the zone (unstick).
+        body.scrollTop = 4600;
+        fireEvent.scroll(body);
+        body.scrollTop = 3000; // far up: reading history, stick off
+        fireEvent.scroll(body);
+        fireRepinTrigger('a');
+        await Promise.resolve();
+        // Reading history is not yanked to the tail.
+        expect(body.scrollTop).toBe(3000);
+
+        // The user scrolls back DOWN to within the bottom zone: stick re-arms, so
+        // the next content re-pins the tail again.
+        body.scrollTop = 4580; // distance-to-bottom = 20 < 64, moving downward
+        fireEvent.scroll(body);
+        fireRepinTrigger('ab');
+        await Promise.resolve();
+        expect(body.scrollTop).toBe(5000);
+      });
+
+      it('keeps following the tail across a programmatic downward re-pin write (streaming-follow intact)', async () => {
+        const body = await renderWithScrollBody();
+
+        // Pinned at the bottom: stick on.
+        body.scrollTop = 4600;
+        fireEvent.scroll(body);
+
+        // Content streams in: the re-pin writes scrollTop = scrollHeight (a
+        // DOWNWARD write). That programmatic write fires its own scroll event,
+        // which must NOT be misread as a user gesture — it re-arms stick, so a
+        // second chunk keeps following the tail rather than falling behind.
+        fireRepinTrigger('first');
+        await Promise.resolve();
+        expect(body.scrollTop).toBe(5000);
+        fireEvent.scroll(body); // the programmatic write's own scroll event
+        fireRepinTrigger('first-second');
+        await Promise.resolve();
+        expect(body.scrollTop).toBe(5000);
+      });
+    });
+
     it('breadcrumb "go up" lands on and flashes the child chip even when its owning message starts outside the window', async () => {
       // A long main thread whose branch sprouts from an EARLY message. Viewing
       // the branch and going up lands at the (far) bottom of main by default;
@@ -2530,22 +2640,33 @@ describe('TranscriptPane composer context bar', () => {
       it('compensates a row that resizes ABOVE the current scroll offset', () => {
         // Row starts at 100px, viewport scrolled to 500px: the row is above the
         // fold, so its resize would shift the visible content — compensate.
-        expect(shouldCompensateTranscriptResize(100, 500)).toBe(true);
+        // (Not stuck: the user has scrolled up to read history.)
+        expect(shouldCompensateTranscriptResize(100, 500, false)).toBe(true);
       });
 
       it('does NOT compensate a row that resizes AT or BELOW the scroll offset', () => {
         // A row starting exactly at (or below) the scroll offset is in/under the
         // viewport; its resize grows content below the fold and needs no
         // scrollTop fixup.
-        expect(shouldCompensateTranscriptResize(500, 500)).toBe(false);
-        expect(shouldCompensateTranscriptResize(900, 500)).toBe(false);
+        expect(shouldCompensateTranscriptResize(500, 500, false)).toBe(false);
+        expect(shouldCompensateTranscriptResize(900, 500, false)).toBe(false);
       });
 
       it('treats a null scroll offset (before the first scroll) as the top, so nothing compensates', () => {
         // At the top nothing sits above the fold; a null offset must not throw
         // and must resolve to 0.
-        expect(shouldCompensateTranscriptResize(0, null)).toBe(false);
-        expect(shouldCompensateTranscriptResize(160, null)).toBe(false);
+        expect(shouldCompensateTranscriptResize(0, null, false)).toBe(false);
+        expect(shouldCompensateTranscriptResize(160, null, false)).toBe(false);
+      });
+
+      it('does NOT compensate while stuck (pinned at the tail), even for a row above the fold', () => {
+        // While pinned at the bottom the stick re-pin owns the scroll position,
+        // so compensation is redundant AND would be a competing writer whose
+        // upward writes the direction-aware stick listener would misread as an
+        // upward user gesture. `isStuck` short-circuits to no compensation,
+        // regardless of where the resized row sits relative to the fold.
+        expect(shouldCompensateTranscriptResize(100, 500, true)).toBe(false);
+        expect(shouldCompensateTranscriptResize(0, null, true)).toBe(false);
       });
     });
 
