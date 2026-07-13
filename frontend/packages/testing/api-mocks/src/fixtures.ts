@@ -446,6 +446,16 @@ export interface MockStore {
      * `applyEvent`). Absent/empty means none is running.
      */
     runningSubagents?: RunningSubagent[];
+    /**
+     * The turn currently in flight, mirrored from the scripted
+     * `turn_started` event (cleared by `turn_completed`/`turn_interrupted`)
+     * so the sends envelope reports `in_flight` for the whole running turn
+     * the way the real server does (see `applyEvent`). Without it the
+     * envelope would fall back to `idle` as soon as the send is `matched`,
+     * and the app's authoritative turn re-seed would wipe the running flag
+     * the event just set. Absent means no turn is in flight.
+     */
+    activeTurn?: { sendId: number; threadId: number | null };
   }[];
   messagesByThread: Record<number, Message[]>;
   sends: Send[];

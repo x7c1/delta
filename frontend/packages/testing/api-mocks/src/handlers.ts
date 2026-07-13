@@ -259,18 +259,29 @@ export function createMockApi(): MockApi {
             (send.status === 'queued' || send.status === 'dispatched'),
         )
         .sort((a, b) => a.id - b.id);
-      // Derive the turn state the way the server reports it: a `dispatched`
-      // send is the one outstanding dispatch awaiting its echo (`in_flight`
-      // only begins at the echo match, which the mock cannot observe); with
-      // none outstanding, the session is idle.
+      // Derive the turn state the way the server reports it: `turn_started`
+      // (mirrored into `activeTurn`) began an in-flight turn that lasts until
+      // its completion/interruption; otherwise a `dispatched` send is the one
+      // outstanding dispatch awaiting its echo; with neither, the session is
+      // idle. Without the `activeTurn` phase the envelope would report `idle`
+      // for the whole running turn (its send is already `matched`), and the
+      // app's authoritative re-seed (`seedActiveTurn`) would wipe the running
+      // flag the `turn_started` event just set — a real-server divergence that
+      // surfaced as a flaky running-indicator e2e.
       const outstanding = sends.find((send) => send.status === 'dispatched');
-      const turn: Turn = outstanding
+      const turn: Turn = entry.activeTurn
         ? {
-            state: 'awaiting_echo',
-            send_id: outstanding.id,
-            thread_id: outstanding.thread_id,
+            state: 'in_flight',
+            send_id: entry.activeTurn.sendId,
+            thread_id: entry.activeTurn.threadId,
           }
-        : { state: 'idle', send_id: null, thread_id: null };
+        : outstanding
+          ? {
+              state: 'awaiting_echo',
+              send_id: outstanding.id,
+              thread_id: outstanding.thread_id,
+            }
+          : { state: 'idle', send_id: null, thread_id: null };
       const body: SendsResponse = {
         sends,
         turn,
@@ -784,6 +795,16 @@ export function createMockApi(): MockApi {
     }
   };
 
+  const setActiveTurn = (
+    sessionId: string,
+    turn: { sendId: number; threadId: number | null } | undefined,
+  ) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (entry) {
+      entry.activeTurn = turn;
+    }
+  };
+
   const startSubagent = (
     sessionId: string,
     subagent: RunningSubagent,
@@ -863,6 +884,13 @@ export function createMockApi(): MockApi {
           send.status = 'matched';
           send.matched_uuid = event.matched_uuid;
         }
+        // The turn is now in flight: keep that queryable until the turn ends,
+        // so the sends envelope reports `in_flight` the way the real server
+        // does (the matched send alone would read as `idle`).
+        setActiveTurn(event.session_id, {
+          sendId: event.send_id,
+          threadId: event.thread_id,
+        });
         break;
       }
       case 'turn_completed':
@@ -871,6 +899,7 @@ export function createMockApi(): MockApi {
         // transcript lands during the turn). A pending dialog cannot outlive
         // its turn, mirroring the server's runtime sweep.
         resolveOpenSends(event.session_id, 'matched');
+        setActiveTurn(event.session_id, undefined);
         setPendingPermission(event.session_id, undefined);
         setPendingQuestion(event.session_id, undefined);
         // A subagent cannot outlive its turn, mirroring the server's sweep.
@@ -878,6 +907,7 @@ export function createMockApi(): MockApi {
         break;
       case 'turn_interrupted':
         resolveOpenSends(event.session_id, 'cancelled');
+        setActiveTurn(event.session_id, undefined);
         setPendingPermission(event.session_id, undefined);
         setPendingQuestion(event.session_id, undefined);
         clearSubagents(event.session_id);
