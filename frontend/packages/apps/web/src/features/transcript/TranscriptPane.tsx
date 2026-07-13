@@ -482,19 +482,16 @@ export function TranscriptPane({
         setBranchOrigin(null);
         clearBranchHighlight();
       }
-      // Collapse any lingering native selection, outside the branch gate so a
-      // repeat click still clears a selection the engine refused to drop the
-      // first time. WebKitGTK runs its own selection handling AFTER the click
-      // event and can overwrite a clear issued during dispatch, so clear again
-      // once that deferred processing has run.
-      const collapseSelection = () => {
-        const selection = window.getSelection();
-        if (selection && !selection.isCollapsed) {
-          selection.removeAllRanges();
-        }
-      };
-      collapseSelection();
-      window.setTimeout(collapseSelection, 0);
+      // Collapse any lingering native selection, outside the branch gate:
+      // Chromium deselects on a plain click natively but WebKit does not
+      // always, and a stale selection would both keep its highlight and
+      // re-arm the branch on the next in-message mouseup. Out of the gate so
+      // a click still deselects when the branch was dismissed some other way
+      // (e.g. the composer's ✕, which leaves the selection alone).
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) {
+        selection.removeAllRanges();
+      }
     };
     el.addEventListener('mousedown', onMouseDown);
     el.addEventListener('click', onClick);
