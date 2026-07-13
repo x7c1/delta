@@ -1194,6 +1194,29 @@ describe('TranscriptPane', () => {
     getSelection.mockRestore();
   });
 
+  it('collapses a lingering selection on a stationary click even with no pending branch', async () => {
+    // WebKitGTK can refuse to drop the native selection on the click that
+    // dismissed the branch (its own selection handling runs after the click
+    // and overwrites the clear). The user's next click then arrives with the
+    // branch already gone — the selection must still be collapsed, or the
+    // stale highlight lingers indefinitely.
+    useComposerStore.setState({ branchOrigin: null });
+    const removeAllRanges = vi.fn();
+    const getSelection = vi.spyOn(window, 'getSelection').mockReturnValue({
+      isCollapsed: false,
+      removeAllRanges,
+    } as unknown as Selection);
+
+    renderPane();
+    const message = await screen.findByText('What is a delta?');
+
+    fireEvent.mouseDown(message, { clientX: 100, clientY: 100 });
+    fireEvent.click(message, { clientX: 100, clientY: 100, detail: 1 });
+
+    expect(removeAllRanges).toHaveBeenCalled();
+    getSelection.mockRestore();
+  });
+
   it('keeps a pending branch when the click is preceded by pointer movement (drag-select end)', async () => {
     // The mouseup that finishes a drag-select also fires a click, but the
     // pointer travelled from the mousedown point — that is a drag, the gesture

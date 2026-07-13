@@ -481,8 +481,20 @@ export function TranscriptPane({
       if (useComposerStore.getState().branchOrigin !== null) {
         setBranchOrigin(null);
         clearBranchHighlight();
-        window.getSelection()?.removeAllRanges();
       }
+      // Collapse any lingering native selection, outside the branch gate so a
+      // repeat click still clears a selection the engine refused to drop the
+      // first time. WebKitGTK runs its own selection handling AFTER the click
+      // event and can overwrite a clear issued during dispatch, so clear again
+      // once that deferred processing has run.
+      const collapseSelection = () => {
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) {
+          selection.removeAllRanges();
+        }
+      };
+      collapseSelection();
+      window.setTimeout(collapseSelection, 0);
     };
     el.addEventListener('mousedown', onMouseDown);
     el.addEventListener('click', onClick);
