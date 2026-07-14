@@ -14,6 +14,7 @@ afterEach(() => {
     focusedSessionId: null,
     preNewSessionFocus: null,
     activeThreadId: null,
+    activeThreadJumpTarget: null,
     settingsOpen: false,
   });
 });
@@ -183,5 +184,53 @@ describe('navStore persistence (new-session intent)', () => {
     expect(raw).not.toBeNull();
     const persisted = JSON.parse(raw as string).state;
     expect(persisted).not.toHaveProperty('preNewSessionFocus');
+  });
+});
+
+describe('navStore active-thread jump intent', () => {
+  it('setActiveThreadWithJumpTarget switches the thread and records the intent atomically', () => {
+    useNavStore.getState().setActiveThreadWithJumpTarget(5, 'uuid-x');
+    expect(useNavStore.getState().activeThreadId).toBe(5);
+    expect(useNavStore.getState().activeThreadJumpTarget).toEqual({
+      threadId: 5,
+      targetUuid: 'uuid-x',
+    });
+  });
+
+  it('setActiveThread clears any pending jump intent (plain navigation)', () => {
+    useNavStore.getState().setActiveThreadWithJumpTarget(5, 'uuid-x');
+    useNavStore.getState().setActiveThread(6);
+    expect(useNavStore.getState().activeThreadId).toBe(6);
+    expect(useNavStore.getState().activeThreadJumpTarget).toBeNull();
+  });
+
+  it('clearActiveThreadJumpTarget with no argument clears unconditionally', () => {
+    useNavStore.getState().setActiveThreadWithJumpTarget(5, 'uuid-x');
+    useNavStore.getState().clearActiveThreadJumpTarget();
+    expect(useNavStore.getState().activeThreadJumpTarget).toBeNull();
+  });
+
+  it('clearActiveThreadJumpTarget only clears when the expected uuid still matches (no clobber of a newer jump)', () => {
+    useNavStore.getState().setActiveThreadWithJumpTarget(5, 'first');
+    // A newer jump replaces the intent before the earlier one settles.
+    useNavStore.getState().setActiveThreadWithJumpTarget(6, 'second');
+    // The earlier jump's settle callback must NOT clear the newer intent.
+    useNavStore.getState().clearActiveThreadJumpTarget('first');
+    expect(useNavStore.getState().activeThreadJumpTarget).toEqual({
+      threadId: 6,
+      targetUuid: 'second',
+    });
+    // The newer jump's own settle clears it.
+    useNavStore.getState().clearActiveThreadJumpTarget('second');
+    expect(useNavStore.getState().activeThreadJumpTarget).toBeNull();
+  });
+
+  it('does not persist the jump intent to localStorage', () => {
+    vi.stubGlobal('window', { innerWidth: 2000 });
+    useNavStore.getState().setActiveThreadWithJumpTarget(5, 'uuid-x');
+    const raw = localStorage.getItem(NAV_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const persisted = JSON.parse(raw as string).state;
+    expect(persisted).not.toHaveProperty('activeThreadJumpTarget');
   });
 });

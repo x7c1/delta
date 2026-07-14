@@ -30,6 +30,7 @@ import {
   WHEEL_PER_EVENT_CLAMP_PX,
   WHEEL_STEP_COOLDOWN_MS,
   WHEEL_VELOCITY_WINDOW_MS,
+  nearestRenderedNeighborUuid,
   normalizeWheelDeltaPx,
   resetTimelineExpandedForTests,
   scheduleScrollAfterRender,
@@ -3647,6 +3648,179 @@ describe('ThreadTimelineOverlay scheduleScrollAfterRender DOM-ready wait (v11 Im
       window.requestAnimationFrame = originalRaf;
       window.cancelAnimationFrame = originalCancelRaf;
     }
+  });
+
+  it('runs the onTimeout fallback (once, before settle) when the target never renders — and never on a successful landing', async () => {
+    // A cross-lane jump to a renders-nothing target (e.g. a tool_result
+    // carrier) polls to the DOM-ready timeout without ever scrolling. The
+    // timeout leg must run the caller's deterministic fallback (scroll to a
+    // rendering neighbor) BEFORE releasing the guard via onSettled — and never
+    // on the success leg.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    const originalPerfNow = window.performance.now;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised here */
+    }) as typeof window.cancelAnimationFrame;
+    let nowValue = 1_000;
+    window.performance.now = (() => nowValue) as typeof performance.now;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        const onSettled = vi.fn();
+        const onTimeout = vi.fn(() => {
+          // The fallback fires while the schedule is still un-settled.
+          expect(onSettled).not.toHaveBeenCalled();
+        });
+        const cancel = scheduleScrollAfterRender(
+          container,
+          'never-arrives',
+          undefined,
+          onSettled,
+          onTimeout,
+        );
+        // First tick: target absent, still within budget — no fallback yet.
+        let cb = rafCallbacks.shift()!;
+        nowValue = 1_000;
+        cb(nowValue);
+        expect(onTimeout).not.toHaveBeenCalled();
+        expect(onSettled).not.toHaveBeenCalled();
+        // Cross the timeout: the fallback runs exactly once, then settle.
+        nowValue = 1_000 + SCROLL_DOM_READY_TIMEOUT_MS + 1;
+        cb = rafCallbacks.shift()!;
+        cb(nowValue);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onSettled).toHaveBeenCalledTimes(1);
+        // A late cancel neither re-fires the fallback nor re-settles.
+        cancel();
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onSettled).toHaveBeenCalledTimes(1);
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+      window.performance.now = originalPerfNow;
+    }
+  });
+
+  it('does NOT run onTimeout when the target renders in time (success leg)', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised here */
+    }) as typeof window.cancelAnimationFrame;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        const target = document.createElement('article');
+        target.setAttribute('data-message-uuid', 'here');
+        container.appendChild(target);
+        const onTimeout = vi.fn();
+        const onSettled = vi.fn();
+        const cancel = scheduleScrollAfterRender(
+          container,
+          'here',
+          undefined,
+          onSettled,
+          onTimeout,
+        );
+        const cb = rafCallbacks.shift()!;
+        cb(performance.now());
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        expect(onSettled).toHaveBeenCalledTimes(1);
+        cancel();
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
+});
+
+describe('nearestRenderedNeighborUuid (cross-lane timeout fallback target)', () => {
+  function makeContainer(renderedUuids: string[]): HTMLElement {
+    const container = document.createElement('div');
+    for (const uuid of renderedUuids) {
+      const article = document.createElement('article');
+      article.setAttribute('data-message-uuid', uuid);
+      container.appendChild(article);
+    }
+    return container;
+  }
+
+  // A single lane's timeline order; the middle entry renders nothing.
+  const sorted = [
+    { uuid: 'a', threadId: 1 as const },
+    { uuid: 'b', threadId: 1 as const },
+    { uuid: 'target', threadId: 1 as const },
+    { uuid: 'd', threadId: 1 as const },
+    { uuid: 'e', threadId: 1 as const },
+  ];
+
+  it('returns the closest rendering neighbor, preferring the tail-ward one on a tie', () => {
+    // Both immediate neighbors render: distance ties, tail-ward (`d`) wins so
+    // the pane lands just past the non-rendering carrier.
+    const container = makeContainer(['a', 'b', 'd', 'e']);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'target', 1),
+    ).toBe('d');
+  });
+
+  it('reaches past a non-rendering immediate neighbor to the next rendering one', () => {
+    // `d` (immediate tail-ward) is NOT rendered, so the nearest rendering
+    // neighbor is `b` (immediate head-ward) at the same distance.
+    const container = makeContainer(['a', 'b', 'e']);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'target', 1),
+    ).toBe('b');
+  });
+
+  it('ignores neighbors in other lanes', () => {
+    const mixed = [
+      { uuid: 'x-other', threadId: 2 as const },
+      { uuid: 'target', threadId: 1 as const },
+      { uuid: 'y-lane', threadId: 1 as const },
+    ];
+    // The head-ward neighbor is in another lane; only the tail-ward same-lane
+    // `y-lane` is eligible.
+    const container = makeContainer(['x-other', 'y-lane']);
+    expect(
+      nearestRenderedNeighborUuid(container, mixed, 'target', 1),
+    ).toBe('y-lane');
+  });
+
+  it('returns null when no lane message is rendered (caller falls back to lane top)', () => {
+    const container = makeContainer([]);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'target', 1),
+    ).toBeNull();
+  });
+
+  it('returns null when the target is not in the sorted list', () => {
+    const container = makeContainer(['a', 'b']);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'missing', 1),
+    ).toBeNull();
   });
 });
 

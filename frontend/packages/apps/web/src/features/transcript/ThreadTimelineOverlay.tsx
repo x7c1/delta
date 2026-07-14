@@ -479,6 +479,51 @@ export function scrollMessageIntoView(
 }
 
 /**
+ * Find the uuid of the message nearest {@link targetUuid} (by timeline order,
+ * within the same lane {@link threadId}) whose `<article>` is currently
+ * rendered in {@link container}.
+ *
+ * A cross-lane jump can target a message that renders NO article — an axis
+ * click on a renders-nothing carrier (e.g. a `tool_result`, filtered out of
+ * the transcript by `messageRendersNothing`). `scheduleScrollAfterRender` then
+ * polls to its DOM-ready timeout and never scrolls, leaving the pane wherever
+ * the thread switch parked it (the tail). This resolves the deterministic
+ * fallback the timeout path scrolls to instead: the closest lane neighbor that
+ * actually renders, so the pane lands NEAR the target's timeline position
+ * rather than at the tail. Expands outward from the target and, on a distance
+ * tie, prefers the later (tail-ward) neighbor so the pane sits just past the
+ * carrier. Returns `null` when no lane message is rendered, so the caller can
+ * fall back to the lane top.
+ */
+export function nearestRenderedNeighborUuid(
+  container: HTMLElement | null,
+  sorted: ReadonlyArray<{ uuid: string; threadId: ThreadId }>,
+  targetUuid: string,
+  threadId: ThreadId,
+): string | null {
+  if (!container) {
+    return null;
+  }
+  const targetIndex = sorted.findIndex((m) => m.uuid === targetUuid);
+  if (targetIndex < 0) {
+    return null;
+  }
+  const isRendered = (uuid: string): boolean =>
+    container.querySelector(articleMessageSelector(uuid)) !== null;
+  for (let distance = 1; distance < sorted.length; distance += 1) {
+    const after = sorted[targetIndex + distance];
+    if (after && after.threadId === threadId && isRendered(after.uuid)) {
+      return after.uuid;
+    }
+    const before = sorted[targetIndex - distance];
+    if (before && before.threadId === threadId && isRendered(before.uuid)) {
+      return before.uuid;
+    }
+  }
+  return null;
+}
+
+/**
  * Briefly mark the matching transcript message with the jump-highlight class
  * so the eye spots where the navigation landed. The class attaches a
  * compositor-friendly `::after` wash overlay to the bubble whose `opacity`
@@ -620,6 +665,14 @@ export const SCROLL_DOM_READY_TIMEOUT_MS = 1000;
  * counter so it can never latch — every increment has exactly one matching
  * decrement regardless of which path the schedule takes.
  *
+ * The optional `onTimeout` callback fires ONLY on the DOM-ready timeout leg —
+ * the target's article never rendered within the budget — immediately before
+ * `onSettled`. Cross-lane callers use it to run a deterministic fallback
+ * scroll (to the nearest rendering neighbor of a renders-nothing target)
+ * instead of silently leaving the pane wherever the thread switch parked it.
+ * It does NOT fire on the success leg (the scroll landed) or the cancel leg (a
+ * superseding jump / unmount).
+ *
  * Returns a cancel handle the caller can fire to abort the wait if the
  * component unmounts or another jump supersedes this one before the element
  * lands. Invoking it also drives `onSettled` (once).
@@ -629,6 +682,7 @@ export function scheduleScrollAfterRender(
   uuid: string,
   onScroll?: () => void,
   onSettled?: () => void,
+  onTimeout?: () => void,
 ): () => void {
   let settled = false;
   const settle = () => {
@@ -694,9 +748,12 @@ export function scheduleScrollAfterRender(
         return;
       }
       if (window.performance.now() - start >= SCROLL_DOM_READY_TIMEOUT_MS) {
-        // Target never rendered within the budget. No scroll fires, but the
-        // schedule has still terminated — settle so the caller's guard
+        // Target never rendered within the budget (e.g. a renders-nothing
+        // carrier message). Run the caller's deterministic fallback scroll
+        // BEFORE settling — it parks the pane on the nearest rendering
+        // neighbor instead of the tail — then settle so the caller's guard
         // counter is released instead of latching forever.
+        onTimeout?.();
         settle();
         return;
       }
@@ -1005,7 +1062,12 @@ export function ThreadTimelineOverlay({
   conversationBodyRef,
 }: ThreadTimelineOverlayProps) {
   const client = useApiClient();
-  const setActiveThread = useNavStore((state) => state.setActiveThread);
+  const setActiveThreadWithJumpTarget = useNavStore(
+    (state) => state.setActiveThreadWithJumpTarget,
+  );
+  const clearActiveThreadJumpTarget = useNavStore(
+    (state) => state.clearActiveThreadJumpTarget,
+  );
   // The expanded preference is per-session — read the focused session id from
   // `navStore` rather than threading it through props, so the call site in
   // `TranscriptPane` does not need to know about the storage shape. The
@@ -1062,6 +1124,16 @@ export function ThreadTimelineOverlay({
     () => buildLargeSortedMessages(lanes),
     [lanes],
   );
+
+  // Mirror the sorted list into a ref so effects that must read the latest
+  // messages WITHOUT re-firing on a background-refetch array-identity change
+  // (the navigation jump effect, the wheel/arrow handlers, the cross-lane
+  // timeout fallback) can reach it. Declared here — above the first consumer —
+  // so those closures never reference it before initialization.
+  const sortedMessagesRef = useRef(sortedMessages);
+  useEffect(() => {
+    sortedMessagesRef.current = sortedMessages;
+  }, [sortedMessages]);
 
   // One x map shared across every lane. Each message's px x is derived from
   // its `(timeMs, seq)` once, globally, so a message at a given timestamp
@@ -1343,6 +1415,57 @@ export function ThreadTimelineOverlay({
       crossLaneJumpInFlightCountRef.current -= 1;
     }
   }, []);
+
+  // Handle for the pending "clear the jump intent" frame callback, so a
+  // superseding jump or unmount can cancel it before it fires.
+  const jumpIntentClearRafRef = useRef<number | null>(null);
+  // Clear the navigation-intent handoff a couple of animation frames AFTER the
+  // jump's scroll settled — NOT synchronously in `onSettled`. The intent is
+  // what keeps TranscriptPane's scroll listener from re-arming stick while the
+  // jump's own programmatic `scrollIntoView` (and its one-frame reflow recall)
+  // fire their scroll events. Per the HTML rendering steps, scroll events are
+  // dispatched BEFORE `requestAnimationFrame` callbacks, so a double-rAF defer
+  // guarantees the intent is still live when BOTH landing scroll events reach
+  // the pane — including a near-tail target whose reflow recall re-clamps at
+  // the bottom. Only after that does the intent clear, so a genuine later user
+  // scroll re-arms stick normally. Falls back to a synchronous clear when rAF
+  // is unavailable (older test runners). `expectedUuid` guards against a newer
+  // jump's intent being cleared by an earlier jump's settle.
+  const scheduleJumpIntentClear = useCallback(
+    (expectedUuid: string) => {
+      const clear = () => clearActiveThreadJumpTarget(expectedUuid);
+      if (
+        typeof window === 'undefined' ||
+        typeof window.requestAnimationFrame !== 'function'
+      ) {
+        clear();
+        return;
+      }
+      if (jumpIntentClearRafRef.current !== null) {
+        window.cancelAnimationFrame(jumpIntentClearRafRef.current);
+      }
+      jumpIntentClearRafRef.current = window.requestAnimationFrame(() => {
+        jumpIntentClearRafRef.current = window.requestAnimationFrame(() => {
+          jumpIntentClearRafRef.current = null;
+          clear();
+        });
+      });
+    },
+    [clearActiveThreadJumpTarget],
+  );
+  useEffect(
+    () => () => {
+      if (
+        jumpIntentClearRafRef.current !== null &&
+        typeof window !== 'undefined' &&
+        typeof window.cancelAnimationFrame === 'function'
+      ) {
+        window.cancelAnimationFrame(jumpIntentClearRafRef.current);
+        jumpIntentClearRafRef.current = null;
+      }
+    },
+    [],
+  );
   // The destination lane of the most recent overlay-driven cross-lane jump.
   // When such a jump calls `setActiveThread`, the `activeThreadId` prop
   // changes to this thread and the external-thread effect re-runs; comparing
@@ -1569,10 +1692,19 @@ export function ThreadTimelineOverlay({
     // echoing back (and skip it) rather than treating it as a fresh external
     // navigator pick.
     crossLaneJumpTargetThreadRef.current = current.threadId;
-    setActiveThread(current.threadId);
+    // Record the navigation intent ATOMICALLY with the active-thread switch:
+    // TranscriptPane's thread-change layout effect reads it synchronously in
+    // the resulting commit and lands the pane on this exact message instead of
+    // the newly focused lane's tail (the tail-stick writers it would otherwise
+    // fire do not own this switch). The intent also keeps the pane's scroll
+    // listener from re-arming stick through the landing; it is cleared a couple
+    // of frames after the scroll settles (see `scheduleJumpIntentClear`).
+    const jumpUuid = current.uuid;
+    const jumpThreadId = current.threadId;
+    setActiveThreadWithJumpTarget(jumpThreadId, jumpUuid);
     const rawCancel = scheduleScrollAfterRender(
       container,
-      current.uuid,
+      jumpUuid,
       () => {
         // onScroll: element is in the DOM, scrollIntoView is about to fire.
         // Stamp the time-based guard NOW so its 200ms window starts ticking
@@ -1582,10 +1714,33 @@ export function ThreadTimelineOverlay({
         // guard alone.
         markProgrammaticScroll();
       },
-      // onSettled: release the in-flight counter. The decrement is clamped at
-      // zero, so passing it raw is safe even if the cancel handle also fires
-      // after the scroll already settled.
-      decrementCrossLaneInFlight,
+      // onSettled: release the in-flight counter (clamped at zero, so passing
+      // it after a possible cancel-handle double-fire is safe), then clear the
+      // jump intent a couple of frames later so it outlives the landing scroll
+      // events (which would otherwise re-arm stick).
+      () => {
+        decrementCrossLaneInFlight();
+        scheduleJumpIntentClear(jumpUuid);
+      },
+      // onTimeout: the target never rendered an article (a renders-nothing
+      // carrier). Park the pane on the nearest rendering lane neighbor instead
+      // of leaving it at the tail. Stamp the programmatic-scroll guard first so
+      // the fallback scroll does not feed the pane → playhead follower.
+      () => {
+        markProgrammaticScroll();
+        const neighbor = nearestRenderedNeighborUuid(
+          container,
+          sortedMessagesRef.current,
+          jumpUuid,
+          jumpThreadId,
+        );
+        if (neighbor !== null) {
+          scrollMessageIntoView(container, neighbor);
+        } else if (container) {
+          // No lane message rendered at all: fall back to the lane top.
+          container.scrollTop = 0;
+        }
+      },
     );
     // The cancel handle drives onSettled itself, so it already releases the
     // counter when a superseding jump or unmount aborts the wait.
@@ -1599,9 +1754,10 @@ export function ThreadTimelineOverlay({
   }, [
     scrubTick,
     conversationBodyRef,
-    setActiveThread,
+    setActiveThreadWithJumpTarget,
     markProgrammaticScroll,
     decrementCrossLaneInFlight,
+    scheduleJumpIntentClear,
   ]);
 
   // The lane the highlight follows: the active message's lane when there is
@@ -1621,10 +1777,6 @@ export function ThreadTimelineOverlay({
   useEffect(() => {
     activeMessageIndexRef.current = activeMessageIndex;
   }, [activeMessageIndex]);
-  const sortedMessagesRef = useRef(sortedMessages);
-  useEffect(() => {
-    sortedMessagesRef.current = sortedMessages;
-  }, [sortedMessages]);
   const largeSortedMessagesRef = useRef(largeSortedMessages);
   useEffect(() => {
     largeSortedMessagesRef.current = largeSortedMessages;

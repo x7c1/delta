@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
-import { useManualEventControl } from './support/app';
+import { BRANCH_THREAD_ID, SESSION_ID } from '@delta/api-mocks';
+import { emitEvent, useManualEventControl } from './support/app';
 
 /**
  * The thread-timeline playhead must follow every external thread selection —
@@ -40,6 +41,61 @@ function lane(page: Page, threadId: number): Locator {
   return page.locator(
     `[data-testid="thread-timeline-lane"][data-thread-id="${threadId}"]`,
   );
+}
+
+/** A rendered transcript message article by uuid (never a timeline dot). */
+function article(page: Page, uuid: string): Locator {
+  return page.locator(`article[data-message-uuid="${uuid}"]`);
+}
+
+/**
+ * The transcript's scrolling body — the `scrollbar-none` Panel body that holds
+ * the message articles (the navigator and timeline axis also use
+ * `scrollbar-none`, so scope by a contained message-item).
+ */
+function paneBody(page: Page): Locator {
+  return page.locator('.scrollbar-none', {
+    has: page.locator('[data-testid="message-item"]'),
+  });
+}
+
+/** The transcript body's live scroll metrics. */
+async function paneMetrics(
+  page: Page,
+): Promise<{ scrollTop: number; distToBottom: number }> {
+  return paneBody(page).evaluate((el) => ({
+    scrollTop: el.scrollTop,
+    distToBottom: el.scrollHeight - el.scrollTop - el.clientHeight,
+  }));
+}
+
+/**
+ * Vertical offset (px) of an article's top from the pane body's top. A
+ * timeline jump lands the target near the pane top (`block: 'start'`, just
+ * below the pinned top-region overlay), so a small positive offset means the
+ * pane scrolled TO that article rather than leaving it at the tail (large
+ * offset / off-screen) or unscrolled below an earlier turn.
+ */
+async function articleOffsetFromPaneTop(
+  page: Page,
+  uuid: string,
+): Promise<number> {
+  const body = await paneBody(page).boundingBox();
+  const art = await article(page, uuid).boundingBox();
+  if (!body || !art) {
+    throw new Error('missing bounding box');
+  }
+  return art.y - body.y;
+}
+
+/** Click a timeline mark by its dot's centre (the axis handler resolves the
+ *  nearest mark from the pointer's clientX). */
+async function clickDot(page: Page, uuid: string): Promise<void> {
+  const box = await dot(page, uuid).boundingBox();
+  if (!box) {
+    throw new Error(`dot ${uuid} has no bounding box`);
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 }
 
 /**
@@ -224,4 +280,127 @@ test('the playhead follows a left-pane thread selection after a renders-nothing 
       timeout: 5000,
     })
     .toBeGreaterThan(20);
+});
+
+/**
+ * A cross-lane axis click on another lane's LARGE dot must scroll the
+ * transcript pane TO that message, and later streamed content must NOT yank the
+ * pane away from it.
+ *
+ * This reproduces M2 deterministically: the branch lane's LAST large turn
+ * (uuid-b3b) is a near-tail target, so the landing `scrollIntoView` clamps at
+ * the container bottom. Pre-fix, that landing scroll re-armed the pane's
+ * stick-to-bottom follow, so the very next streamed chunk glued the pane to the
+ * new tail and pushed the jump target off-screen. The fix keeps stick disarmed
+ * through the landing, so streamed content grows BELOW the fold and the pane
+ * stays on the target.
+ *
+ * A short viewport forces the branch transcript to scroll so the yank (or its
+ * absence) is measurable.
+ */
+test('a cross-lane jump to a near-tail turn stays put when later content streams in (no tail re-stick)', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.setViewportSize({ width: 1000, height: 520 });
+  await page.goto('/');
+
+  await page.getByTestId('thread-timeline-toggle').click();
+  await expect(lane(page, 1)).toHaveAttribute('data-active', 'true');
+  await expect(dot(page, 'uuid-b3b')).toBeVisible();
+
+  // Click the branch lane's last large turn (uuid-b3b) from the main lane: a
+  // cross-lane jump whose landing clamps at the bottom.
+  await clickDot(page, 'uuid-b3b');
+
+  // Drilled into the branch, playhead on the branch lane, target visible.
+  await expect(page.locator('[aria-current="page"]')).toHaveText(
+    'delta etymology',
+  );
+  await expect(lane(page, 2)).toHaveAttribute('data-active', 'true', {
+    timeout: 5000,
+  });
+  await expect(article(page, 'uuid-b3b')).toBeVisible();
+  // The playhead stays on the branch lane, on/near the clicked mark (the
+  // pane → playhead follower may refine to another mark of the same lane).
+  await expectPlayheadOnLaneMarks(page, 2, [
+    'uuid-b3b',
+    'uuid-b1',
+    'uuid-b2',
+    'uuid-b3',
+    'uuid-b4',
+  ]);
+
+  // Stream a tall assistant chunk into the branch thread. Pre-fix (stick
+  // re-armed by the bottom-clamped landing) the pane follows this to the new
+  // tail; with the fix the pane stays put and the chunk grows below the fold.
+  const tall = Array.from({ length: 40 }, (_, i) => `streamed line ${i}`).join(
+    '\n',
+  );
+  await emitEvent(page, {
+    kind: 'assistant_streaming',
+    session_id: SESSION_ID,
+    thread_id: BRANCH_THREAD_ID,
+    message_id: 'stream-b',
+    index: 0,
+    final: false,
+    delta: tall,
+  });
+  await expect(page.getByTestId('streaming-message')).toBeVisible();
+
+  // The pane did NOT follow the stream to the tail: the freshly streamed
+  // content sits well below the fold (pre-fix this collapsed to ≈ 0), and the
+  // jump target uuid-b3b is still on screen rather than pushed off the top.
+  await expect
+    .poll(async () => (await paneMetrics(page)).distToBottom, { timeout: 5000 })
+    .toBeGreaterThan(120);
+  await expect(article(page, 'uuid-b3b')).toBeVisible();
+  expect(await articleOffsetFromPaneTop(page, 'uuid-b3b')).toBeGreaterThan(0);
+});
+
+/**
+ * A cross-lane axis click on another lane's renders-nothing SMALL mark (a
+ * tool_result carrier with no transcript article) must leave the pane near the
+ * target's timeline position — on the nearest rendering neighbor — after the
+ * DOM-ready poll times out, NOT parked at the tail.
+ *
+ * uuid-b4 is the last message in the branch lane and renders nothing; its
+ * nearest rendering neighbor is the preceding large turn uuid-b3b, so the
+ * deterministic timeout fallback scrolls uuid-b3b into view (rather than
+ * leaving the pane wherever the switch parked it).
+ *
+ * NOTE on this fixture: uuid-b4's only rendering neighbor (uuid-b3b) happens to
+ * be the branch's tail turn, so the resulting scroll position is close to the
+ * bottom either way — the deterministic difference between the fallback and the
+ * pre-fix tail-park (fallback fires exactly once, releases the in-flight
+ * counter, scrolls to the nearest rendering neighbor, stick stays disarmed) is
+ * pinned by the unit tests. This spec exercises the timeout → fallback path
+ * end-to-end and asserts the pane settles on the neighbor rather than crashing
+ * or stranding the pane off the neighbor.
+ */
+test('an axis click on another lane\'s renders-nothing mark settles the pane on the nearest rendering neighbor after the DOM-ready timeout', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.setViewportSize({ width: 1000, height: 520 });
+  await page.goto('/');
+
+  await page.getByTestId('thread-timeline-toggle').click();
+  await expect(dot(page, 'uuid-b4')).toBeVisible();
+
+  // Click the branch lane's renders-nothing carrier (uuid-b4): its DOM-ready
+  // poll can never land, so it runs to SCROLL_DOM_READY_TIMEOUT_MS (1000 ms).
+  await clickDot(page, 'uuid-b4');
+  await expect(page.locator('[aria-current="page"]')).toHaveText(
+    'delta etymology',
+  );
+
+  // After the timeout the fallback scrolls the nearest rendering neighbor
+  // (uuid-b3b) into view, anchored to the top region (block: 'start').
+  await expect(article(page, 'uuid-b3b')).toBeVisible();
+  await expect
+    .poll(async () => articleOffsetFromPaneTop(page, 'uuid-b3b'), {
+      timeout: 5000,
+    })
+    .toBeLessThan(220);
 });

@@ -80,6 +80,7 @@ describe('TranscriptPane', () => {
   beforeEach(() => {
     useNavStore.setState({
       activeThreadId: MAIN_THREAD_ID,
+      activeThreadJumpTarget: null,
       focusedSessionId: NEW_SESSION_FOCUS,
       preNewSessionFocus: null,
     });
@@ -2152,5 +2153,198 @@ describe('TranscriptPane composer context bar', () => {
     expect(
       within(card).queryByTestId('composer-context-popover'),
     ).not.toBeInTheDocument();
+  });
+
+  // A timeline-initiated cross-lane jump records a navigation intent
+  // (`activeThreadJumpTarget`) atomically with the active-thread switch. The
+  // pane must then land the transcript on the jump target rather than snapping
+  // to the newly focused lane's tail — and the jump's own bottom-clamped
+  // programmatic scroll must NOT re-arm the stick-to-bottom follow. A plain
+  // (navigator / chip / breadcrumb) switch carries no intent and keeps the
+  // usual stick-to-bottom jump + armed-stick behavior.
+  describe('timeline-jump navigation intent', () => {
+    let observeCounts: Map<Element, number>;
+    let observations: Map<Element, ResizeObserverCallback>;
+    let originalRO: typeof ResizeObserver;
+
+    beforeEach(() => {
+      observeCounts = new Map();
+      observations = new Map();
+      originalRO = globalThis.ResizeObserver;
+      class ControllableRO implements ResizeObserver {
+        private observedEls = new Set<Element>();
+        constructor(private cb: ResizeObserverCallback) {}
+        observe(el: Element): void {
+          observations.set(el, this.cb);
+          observeCounts.set(el, (observeCounts.get(el) ?? 0) + 1);
+          this.observedEls.add(el);
+        }
+        unobserve(el: Element): void {
+          observations.delete(el);
+          this.observedEls.delete(el);
+        }
+        disconnect(): void {
+          for (const el of this.observedEls) {
+            observations.delete(el);
+          }
+          this.observedEls.clear();
+        }
+      }
+      globalThis.ResizeObserver =
+        ControllableRO as unknown as typeof ResizeObserver;
+    });
+
+    afterEach(() => {
+      globalThis.ResizeObserver = originalRO;
+    });
+
+    /** Render the pane and expose a `switchTo(id)` that re-renders with a new
+     *  active thread — the workspace's reaction to an active-thread change. */
+    function renderTranscript(activeThreadId: number) {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const client = new ApiClient({ baseUrl: 'http://localhost' });
+      const tree = (id: number) => (
+        <QueryClientProvider client={queryClient}>
+          <ApiProvider client={client}>
+            <TranscriptPane
+              threads={mockThreads}
+              activeThread={mockThreads.find((t) => t.id === id)!}
+              readOnly={false}
+            />
+          </ApiProvider>
+        </QueryClientProvider>
+      );
+      const utils = render(tree(activeThreadId));
+      return { ...utils, switchTo: (id: number) => utils.rerender(tree(id)) };
+    }
+
+    /** The Panel scroll body, primed with a scrollable geometry jsdom omits. */
+    function primeBody(): HTMLElement {
+      const body = document.querySelector('.scrollbar-hover') as HTMLElement;
+      Object.defineProperty(body, 'scrollHeight', {
+        configurable: true,
+        get: () => 1000,
+      });
+      Object.defineProperty(body, 'clientHeight', {
+        configurable: true,
+        get: () => 400,
+      });
+      return body;
+    }
+
+    it('does not jump to the tail (and leaves stick disarmed) on a switch carrying a jump intent', async () => {
+      const { switchTo } = renderTranscript(MAIN_THREAD_ID);
+      await screen.findByTestId('bottom-overlay');
+      const body = primeBody();
+      // The user was reading scrollback, well above the tail (a real scroll so
+      // the source lane's own stick is disarmed and a late message load cannot
+      // re-glue it to the tail before we switch).
+      body.scrollTop = 200;
+      fireEvent.scroll(body);
+
+      // The overlay's cross-lane jump: record the intent atomically with the
+      // switch, then the workspace re-renders the pane onto the target lane.
+      act(() => {
+        useNavStore.setState({
+          activeThreadId: BRANCH_THREAD_ID,
+          activeThreadJumpTarget: {
+            threadId: BRANCH_THREAD_ID,
+            targetUuid: 'uuid-b2',
+          },
+        });
+        switchTo(BRANCH_THREAD_ID);
+      });
+
+      // The thread-change effect skipped its `scrollTop = scrollHeight` jump:
+      // the pane stays where the overlay's own scheduleScrollAfterRender will
+      // place it, not glued to the tail.
+      expect(body.scrollTop).toBe(200);
+    });
+
+    it('still jumps to the tail and arms stick on a plain switch with no jump intent', async () => {
+      const { switchTo } = renderTranscript(MAIN_THREAD_ID);
+      await screen.findByTestId('bottom-overlay');
+      const body = primeBody();
+      body.scrollTop = 200;
+      fireEvent.scroll(body);
+
+      // A navigator / chip switch: setActiveThread carries no intent (and
+      // clears any lingering one).
+      act(() => {
+        useNavStore.getState().setActiveThread(BRANCH_THREAD_ID);
+        switchTo(BRANCH_THREAD_ID);
+      });
+
+      // The pinned behavior: open the newly focused thread at its tail.
+      expect(body.scrollTop).toBe(1000);
+    });
+
+    it('does not re-arm stick when the jump landing clamps at the container bottom', async () => {
+      const { switchTo } = renderTranscript(MAIN_THREAD_ID);
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(observations.get(overlay)).toBeDefined());
+      const body = primeBody();
+      body.scrollTop = 200;
+      fireEvent.scroll(body);
+
+      act(() => {
+        useNavStore.setState({
+          activeThreadId: BRANCH_THREAD_ID,
+          activeThreadJumpTarget: {
+            threadId: BRANCH_THREAD_ID,
+            targetUuid: 'uuid-b2',
+          },
+        });
+        switchTo(BRANCH_THREAD_ID);
+      });
+      // Jump-to-tail skipped: stick is disarmed.
+      expect(body.scrollTop).toBe(200);
+
+      // The landing `scrollIntoView({ block: 'start' })` on a near-tail target
+      // clamps at the bottom and fires a scroll event within the stick
+      // threshold. While the intent is live this must NOT re-arm stick.
+      body.scrollTop = 990;
+      fireEvent.scroll(body);
+
+      // A subsequent content-growth render (modelled by the overlay's
+      // re-measure, which re-sticks the body only when stick is armed) leaves
+      // scrollTop unchanged — the pane is not glued to the tail.
+      overlay.getBoundingClientRect = () => ({ height: 100 }) as DOMRect;
+      act(() => {
+        const fire = observations.get(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
+      expect(body.scrollTop).toBe(990);
+
+      // Once the jump is consumed, a genuine user scroll near the bottom
+      // re-arms stick normally.
+      act(() => useNavStore.getState().clearActiveThreadJumpTarget());
+      body.scrollTop = 990;
+      fireEvent.scroll(body);
+      act(() => {
+        const fire = observations.get(overlay)!;
+        fire([], fire as unknown as ResizeObserver);
+      });
+      expect(body.scrollTop).toBe(1000);
+    });
+
+    it('binds the bottom-overlay measure effect once and does not re-run it on every unrelated render', async () => {
+      const { switchTo } = renderTranscript(MAIN_THREAD_ID);
+      const overlay = await screen.findByTestId('bottom-overlay');
+      await waitFor(() => expect(observeCounts.get(overlay)).toBeDefined());
+      const initialObserveCount = observeCounts.get(overlay)!;
+
+      // Re-render several times without changing whether the overlay is
+      // mounted. The measure effect is keyed on the overlay's PRESENCE, not on
+      // `bottomContent`'s per-render JSX identity, so it must not tear down and
+      // re-observe on these renders.
+      act(() => switchTo(MAIN_THREAD_ID));
+      act(() => switchTo(MAIN_THREAD_ID));
+      act(() => switchTo(MAIN_THREAD_ID));
+
+      expect(observeCounts.get(overlay)).toBe(initialObserveCount);
+    });
   });
 });

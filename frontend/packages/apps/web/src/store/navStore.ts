@@ -39,6 +39,24 @@ export const NEW_SESSION_FOCUS = '__new__';
 export type FocusedSession = SessionId | typeof NEW_SESSION_FOCUS | null;
 
 /**
+ * The navigation intent recorded by a timeline-initiated cross-lane jump: the
+ * exact message the playhead landed on (`targetUuid`) and the lane it lives in
+ * (`threadId`). Written atomically with the active-thread switch (see
+ * {@link NavState.setActiveThreadWithJumpTarget}) so TranscriptPane's
+ * thread-change layout effect can read it synchronously in the same commit and
+ * decline to jump-to-tail — the transcript pane must land on the jump target,
+ * not the newly focused lane's tail.
+ *
+ * Purely ephemeral: never persisted, and cleared the moment any plain
+ * (non-jump) navigation happens (navigator/chip/breadcrumb) or once the jump's
+ * scroll has settled.
+ */
+export interface ThreadJumpTarget {
+  threadId: ThreadId;
+  targetUuid: string;
+}
+
+/**
  * Navigation/layout state: the focused session, the active thread within it, and
  * terminal pane visibility. Focus is purely client-side — the server emits no
  * focus event.
@@ -55,6 +73,12 @@ export interface NavState {
   preNewSessionFocus: FocusedSession;
   /** Active thread within the focused session (scoped to it). */
   activeThreadId: ThreadId | null;
+  /**
+   * The pending cross-lane jump intent (see {@link ThreadJumpTarget}), or
+   * `null` when the current active-thread change was not a timeline jump or the
+   * jump has already settled. Never persisted.
+   */
+  activeThreadJumpTarget: ThreadJumpTarget | null;
   /**
    * Whether the settings overlay is shown. When set, the settings dialog is
    * layered on top of the workspace (the center conversation pane stays in
@@ -87,7 +111,31 @@ export interface NavState {
    * screen keeps new-session as the mandatory default).
    */
   cancelNewSession: () => void;
+  /**
+   * Switch the active thread from a plain (non-timeline) navigation source —
+   * navigator selection, branch chip, breadcrumb. Clears any pending jump
+   * intent so the transcript pane keeps its usual stick-to-bottom jump +
+   * armed-stick behavior for these sources.
+   */
   setActiveThread: (threadId: ThreadId) => void;
+  /**
+   * Switch the active thread as part of a timeline-initiated cross-lane jump,
+   * recording the jump target atomically with the switch. TranscriptPane's
+   * thread-change layout effect reads {@link activeThreadJumpTarget}
+   * synchronously in the resulting commit and lands on the target instead of
+   * the lane's tail.
+   */
+  setActiveThreadWithJumpTarget: (
+    threadId: ThreadId,
+    targetUuid: string,
+  ) => void;
+  /**
+   * Clear the pending jump intent once the jump's scroll has settled. When
+   * `expectedTargetUuid` is given, only clears if the current intent still
+   * points at that uuid, so a later jump's intent is never clobbered by an
+   * earlier jump's settle callback.
+   */
+  clearActiveThreadJumpTarget: (expectedTargetUuid?: string) => void;
   /** Open the settings overlay. */
   openSettings: () => void;
   /** Close the settings overlay, returning to the workspace beneath it. */
@@ -115,6 +163,7 @@ export const useNavStore = create<NavState>()(
       focusedSessionId: null,
       preNewSessionFocus: null,
       activeThreadId: null,
+      activeThreadJumpTarget: null,
       settingsOpen: false,
       terminalOpen: false,
       terminalWidth: DEFAULT_TERMINAL_WIDTH,
@@ -128,6 +177,7 @@ export const useNavStore = create<NavState>()(
               {
                 focusedSessionId: sessionId,
                 activeThreadId: null,
+                activeThreadJumpTarget: null,
                 settingsOpen: false,
               },
         ),
@@ -139,6 +189,7 @@ export const useNavStore = create<NavState>()(
               : state.focusedSessionId,
           focusedSessionId: NEW_SESSION_FOCUS,
           activeThreadId: null,
+          activeThreadJumpTarget: null,
           // Starting a new session closes the settings overlay.
           settingsOpen: false,
         })),
@@ -154,10 +205,31 @@ export const useNavStore = create<NavState>()(
           return {
             focusedSessionId: prev,
             activeThreadId: null,
+            activeThreadJumpTarget: null,
             preNewSessionFocus: null,
           };
         }),
-      setActiveThread: (threadId) => set({ activeThreadId: threadId }),
+      setActiveThread: (threadId) =>
+        set({ activeThreadId: threadId, activeThreadJumpTarget: null }),
+      setActiveThreadWithJumpTarget: (threadId, targetUuid) =>
+        set({
+          activeThreadId: threadId,
+          activeThreadJumpTarget: { threadId, targetUuid },
+        }),
+      clearActiveThreadJumpTarget: (expectedTargetUuid) =>
+        set((state) => {
+          if (state.activeThreadJumpTarget === null) {
+            return state;
+          }
+          if (
+            expectedTargetUuid !== undefined &&
+            state.activeThreadJumpTarget.targetUuid !== expectedTargetUuid
+          ) {
+            // A newer jump has already replaced the intent — leave it alone.
+            return state;
+          }
+          return { activeThreadJumpTarget: null };
+        }),
       openSettings: () => set({ settingsOpen: true }),
       closeSettings: () => set({ settingsOpen: false }),
       setTerminalOpen: (open) => set({ terminalOpen: open }),
