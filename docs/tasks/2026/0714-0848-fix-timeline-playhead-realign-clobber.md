@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0714-0848-fix-timeline-playhead-realign-clobber
 created_at: 2026-07-14T08:48:45Z
-updated_at: 2026-07-14T12:26:00Z
+updated_at: 2026-07-14T12:33:32Z
 ---
 
 # fix(web): stop the timeline realign effect from reverting a committed playhead move
@@ -120,13 +120,13 @@ renders-nothing/timeout scenario intact.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In a real dogfooding session with tool-heavy threads: interleave
+- [x] In a real dogfooding session with tool-heavy threads: interleave
       timeline axis clicks with thread and child-thread selections from the
       left-pane session list, and confirm the playhead and lane highlight
       follow every selection.
-- [ ] Wheel/arrow timeline scrubbing and cross-lane jump clicks still land and
+- [x] Wheel/arrow timeline scrubbing and cross-lane jump clicks still land and
       animate as before.
-- [ ] Expanding the timeline fresh (first open on a session) anchors the
+- [x] Expanding the timeline fresh (first open on a session) anchors the
       playhead to the active thread's lane, not another lane's tail.
 
 ## Out of scope
