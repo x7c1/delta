@@ -925,6 +925,42 @@ function markDiameterPx(size: TimelineDotSize): number {
 }
 
 /**
+ * Resolve where the playhead should sit while the user has not navigated yet
+ * (the "auto-anchor"): the ACTIVE thread's latest large (main-conversation)
+ * turn, so a freshly-opened overlay highlights the lane the user is actually
+ * in — not whichever lane happens to hold the global tail.
+ *
+ * - `activeThreadId === null` (no lane to anchor onto): the global tail.
+ * - The active lane has no large turn yet (its messages are still loading, or
+ *   the lane only carries tool calls): hold `prev` unchanged. The caller
+ *   re-resolves when `largeSortedMessages` next changes, so a lane whose
+ *   messages land late still gets anchored — without ever flashing another
+ *   lane's tail in the meantime.
+ *
+ * Shared by the `useState` initializer (with `prev = null`) and the
+ * auto-anchor effect so mount and follow-up renders agree on the same pick.
+ */
+function resolveAutoAnchorUuid(
+  sortedMessages: SortedMessage[],
+  largeSortedMessages: SortedMessage[],
+  activeThreadId: ThreadId | null,
+  prev: string | null,
+): string | null {
+  if (sortedMessages.length === 0) {
+    return null;
+  }
+  if (activeThreadId === null) {
+    return sortedMessages[sortedMessages.length - 1].uuid;
+  }
+  for (let i = largeSortedMessages.length - 1; i >= 0; i -= 1) {
+    if (largeSortedMessages[i].threadId === activeThreadId) {
+      return largeSortedMessages[i].uuid;
+    }
+  }
+  return prev;
+}
+
+/**
  * The fixed footer between the conversation pane and the composer: a swim-lane
  * timeline of every subthread (and the main thread). Each thread is a row,
  * each speech turn is a mark, and every mark sits on a SHARED time axis driven
@@ -1051,12 +1087,42 @@ export function ThreadTimelineOverlay({
     [sortedMessages, timeRange],
   );
 
-  // The active message's index in `sortedMessages`. A fresh mount lands on
-  // the latest message so a newly opened session highlights the most recent
-  // utterance. `null` means there are no messages to land on yet.
-  const [activeMessageIndex, setActiveMessageIndexState] = useState<number | null>(
-    () => (sortedMessages.length === 0 ? null : sortedMessages.length - 1),
+  // The active message's UUID is the canonical playhead state — NOT its index.
+  // The index into `sortedMessages` drifts whenever the array is replaced (a
+  // background refetch, a message appended to another lane, ...), so pinning
+  // the index and "realigning" it back to the same message on every array
+  // change is a race against the effect that snapshots the pick: if the
+  // realign pass runs before the snapshot catches up, it resolves a STALE
+  // message and reverts a just-committed reposition. Storing the UUID and
+  // deriving the index per render (see `activeMessageIndex` below) makes an
+  // array-identity change unable to move the playhead by construction.
+  //
+  // A fresh mount anchors to the active thread's latest large turn (see
+  // {@link resolveAutoAnchorUuid}) so the overlay opens on the lane the user
+  // is in; the auto-anchor effect below keeps refining the pick as messages
+  // load. `null` means there is nothing to land on yet.
+  const [activeMessageUuid, setActiveMessageUuidState] = useState<string | null>(
+    () =>
+      resolveAutoAnchorUuid(
+        sortedMessages,
+        largeSortedMessages,
+        activeThreadId,
+        null,
+      ),
   );
+
+  // The active message's index in `sortedMessages`, DERIVED from the canonical
+  // UUID on every render. When the picked message is not in the current list
+  // (deleted, or the session compacted) the index is `null` and the playhead
+  // simply has nothing to sit on until the auto-anchor / external-thread
+  // effects pick a new target.
+  const activeMessageIndex = useMemo<number | null>(() => {
+    if (activeMessageUuid === null) {
+      return null;
+    }
+    const index = sortedMessages.findIndex((m) => m.uuid === activeMessageUuid);
+    return index < 0 ? null : index;
+  }, [sortedMessages, activeMessageUuid]);
 
   // A monotonically-increasing counter incremented on every user-driven
   // navigation that should trigger a JUMP (wheel scrub / axis click). The
@@ -1095,9 +1161,12 @@ export function ThreadTimelineOverlay({
       const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
       setScrubTick((tick) => tick + 1);
       bumpUserActedTick();
-      setActiveMessageIndexState(clamped);
+      // Resolve the index to its message's UUID at commit time — the UUID is
+      // the canonical state, so a later array-identity change re-derives the
+      // index and keeps the playhead on the exact message the user picked.
+      setActiveMessageUuidState(sortedMessages[clamped].uuid);
     },
-    [sortedMessages.length, bumpUserActedTick],
+    [sortedMessages, bumpUserActedTick],
   );
 
   /**
@@ -1122,22 +1191,23 @@ export function ThreadTimelineOverlay({
         return;
       }
       const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
+      const uuid = sortedMessages[clamped].uuid;
       let changed = false;
-      setActiveMessageIndexState((prev) => {
-        if (prev === clamped) {
+      setActiveMessageUuidState((prev) => {
+        if (prev === uuid) {
           return prev;
         }
         changed = true;
-        return clamped;
+        return uuid;
       });
       // Bump the "user has acted" gate only when we actually moved the
-      // index — repeat IO entries for the same topmost message should not
+      // playhead — repeat IO entries for the same topmost message should not
       // keep flipping the auto-anchor gate on every burst.
       if (changed) {
         bumpUserActedTick();
       }
     },
-    [sortedMessages.length, bumpUserActedTick],
+    [sortedMessages, bumpUserActedTick],
   );
 
   // The active message itself, derived from the index — the single source of
@@ -1155,74 +1225,45 @@ export function ThreadTimelineOverlay({
   const playheadX =
     activeMessage === null ? 0 : messagePxByUuid.get(activeMessage.uuid) ?? 0;
 
-  // Snapshot the active message into a ref so the navigation effect (which
-  // depends on `scrubTick` alone) can read the latest pick without listing
-  // `activeMessage` in its deps. Without this snapshot, a fresh
-  // `sortedMessages` reference (e.g. from a background refetch) would swap
-  // the `activeMessage` object identity and re-fire the auto-switch — which
-  // is exactly the bug that overrode a user's Navigator click.
+  // Snapshot the active message into a ref so the timeline → pane navigation
+  // effect (which depends on `scrubTick` alone) can read the latest pick
+  // without listing `activeMessage` in its deps — a fresh `sortedMessages`
+  // reference from a background refetch swaps the `activeMessage` object
+  // identity, and depending on it directly would re-fire the auto-switch that
+  // once overrode a user's Navigator click. The sync effect sits ABOVE that
+  // navigation effect so the ref is fresh by the time it reads.
   const activeMessageRef = useRef(activeMessage);
   useEffect(() => {
     activeMessageRef.current = activeMessage;
   }, [activeMessage]);
 
-  // Re-anchor to the latest message whenever a new one lands at the tail
-  // while the user has not yet navigated. A navigation pins the active index
-  // to whatever the user picked, and moving it on a fresh message would feel
-  // like the timeline yanked away.
+  // Auto-anchor the playhead while the user has not yet navigated. This is the
+  // one effect that positions the playhead on mount (and keeps it following as
+  // messages load / land) BEFORE any wheel/click/pane-scroll/external-thread
+  // action. The target resolution lives in {@link resolveAutoAnchorUuid}: the
+  // active thread's latest large turn, retrying via the `largeSortedMessages`
+  // dep while the lane's messages are still loading, with the global tail as
+  // the fallback only when `activeThreadId` is null.
   //
-  // Gated on {@link userActedTick} (not {@link scrubTick}) so a pane-scroll
-  // follow update also counts as "user has navigated" — without that
-  // distinction the follower would commit a new index and this effect
-  // would yank it back to the tail on the very next render.
+  // Gated on {@link userActedTick} (not {@link scrubTick}) so any user action —
+  // wheel/click jump OR pane-scroll follow OR external-thread reposition —
+  // pins the pick and switches this effect off. There is no companion "realign
+  // the index across an array-identity change" effect: the canonical-state
+  // note above explains why deriving the index from the UUID makes one
+  // unnecessary.
   useEffect(() => {
     if (userActedTick !== 0) {
       return;
     }
-    setActiveMessageIndexState((prev) => {
-      if (sortedMessages.length === 0) {
-        return null;
-      }
-      const latest = sortedMessages.length - 1;
-      return prev === latest ? prev : latest;
-    });
-  }, [sortedMessages, userActedTick]);
-
-  // Keep the active index pointing at the SAME message across a
-  // `sortedMessages` reference change (e.g. a background refetch landed a
-  // new array with the same content, or a fresh message appended at the
-  // tail). Without this the index would drift relative to the message the
-  // user picked, and the wheel/click handlers would step from the wrong
-  // anchor. A `null` index (no messages yet, or the picked message vanished)
-  // falls back to the latest entry. Gated on {@link userActedTick} (same
-  // reason as the auto-anchor effect above): any user action — jump OR
-  // pane scroll — should preserve the picked message across refetches.
-  useEffect(() => {
-    if (userActedTick === 0) {
-      return;
-    }
-    setActiveMessageIndexState((prev) => {
-      if (sortedMessages.length === 0) {
-        return null;
-      }
-      if (prev === null) {
-        return sortedMessages.length - 1;
-      }
-      const prevUuid = activeMessageRef.current?.uuid;
-      if (!prevUuid) {
-        return prev;
-      }
-      const realigned = sortedMessages.findIndex((m) => m.uuid === prevUuid);
-      if (realigned < 0) {
-        // The picked message is no longer in the list (deleted, or the
-        // session compacted). Clamp to the closest valid index.
-        return Math.max(0, Math.min(sortedMessages.length - 1, prev));
-      }
-      return realigned;
-    });
-    // `activeMessageRef` is intentionally not in deps — it is a ref kept in
-    // sync by another effect, and reading it here is just a cached lookup.
-  }, [sortedMessages, userActedTick]);
+    setActiveMessageUuidState((prev) =>
+      resolveAutoAnchorUuid(
+        sortedMessages,
+        largeSortedMessages,
+        activeThreadId,
+        prev,
+      ),
+    );
+  }, [sortedMessages, largeSortedMessages, activeThreadId, userActedTick]);
 
   const activeThreadRef = useRef<ThreadId | null>(activeThreadId);
   useEffect(() => {
@@ -1340,11 +1381,11 @@ export function ThreadTimelineOverlay({
   const externalThreadInitializedRef = useRef(false);
   const lastObservedActiveThreadIdRef = useRef<ThreadId | null>(activeThreadId);
   useEffect(() => {
-    // Skip the very first render — `activeThreadId` arrives as a prop and
-    // the auto-anchor effect already lands the playhead on the latest
-    // message of the global sorted list. Only react to subsequent changes
-    // (the user picked a different subthread from somewhere outside the
-    // overlay).
+    // Skip the very first render — `activeThreadId` arrives as a prop and the
+    // auto-anchor effect already lands the playhead on that thread's latest
+    // large turn (retrying as the lane's messages load). Only react to
+    // subsequent changes here (the user picked a different subthread from
+    // somewhere outside the overlay).
     if (!externalThreadInitializedRef.current) {
       externalThreadInitializedRef.current = true;
       lastObservedActiveThreadIdRef.current = activeThreadId;

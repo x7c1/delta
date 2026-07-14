@@ -389,7 +389,8 @@ describe('ThreadTimelineOverlay jump-to-edge buttons', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }, { uuid: 'msg-c' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+    // Initial playhead anchors to the active lane’s latest large turn
+    // (msg-c, x=1 → 240px).
     expect(
       playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
@@ -843,7 +844,8 @@ describe('ThreadTimelineOverlay playhead', () => {
         ],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+      // Initial playhead anchors to the active lane’s latest large turn
+      // (msg-c, x=1 → 240px).
       expect(
         playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
@@ -891,7 +893,8 @@ describe('ThreadTimelineOverlay playhead', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }, { uuid: 'msg-c' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+    // Initial playhead anchors to the active lane’s latest large turn
+    // (msg-c, x=1 → 240px).
     expect(
       playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
@@ -1900,22 +1903,40 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
       }),
     ];
     const messages = new Map([
-      [1, [makeMessage(1, 0, 'a', { created_at: '2026-01-01T00:00:00Z' })]],
-      [2, [makeMessage(2, 0, 'b', { created_at: '2026-01-01T00:02:00Z' })]],
+      [1, [makeUserText(1, 0, 'a', '2026-01-01T00:00:00Z')]],
+      [2, [makeUserText(2, 0, 'b', '2026-01-01T00:02:00Z')]],
     ]);
-    // The playhead's initial position is the latest dot (msg-b on lane 2),
-    // so the lane-2 highlight follows the playhead even when prop says lane 1.
+    // Mount on lane 2: the playhead anchors to lane 2's latest large turn
+    // (msg-b), so the prop and the playhead's lane agree at first.
     renderOverlay({
       threads,
       messagesByThread: messages,
-      activeThreadId: 1,
+      activeThreadId: 2,
       conversationArticles: [{ uuid: 'a' }, { uuid: 'b' }],
     });
     const lanes = await screen.findAllByTestId('thread-timeline-lane');
     await waitFor(() => {
       expect(lanes[1]).toHaveAttribute('data-active', 'true');
     });
-    expect(lanes[0]).toHaveAttribute('data-active', 'false');
+    // Wheel-up one step jumps the playhead back to msg-a on lane 1 (a
+    // cross-lane step). `setActiveThread` fires, but the overlay's
+    // `activeThreadId` PROP stays 2 here — so the lane-1 highlight can only
+    // follow if it derives from the playhead-active message's lane rather
+    // than the prop. That is exactly the invariant under test.
+    const body = screen.getByTestId('thread-timeline-axis-column');
+    act(() => {
+      body.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -50,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(lanes[0]).toHaveAttribute('data-active', 'true');
+    });
+    expect(lanes[1]).toHaveAttribute('data-active', 'false');
   });
 
   // v30 fix 2: the active-row hairline used to be `border-y border-slate-200`
@@ -2020,7 +2041,8 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
       ],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    // Initial playhead lands on the latest message (large-c, x=1 → 240px).
+    // Initial playhead anchors to the active lane’s latest large turn
+    // (large-c, x=1 → 240px).
     expect(
       playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
     ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
@@ -2159,7 +2181,8 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
   it('steps one large message per plain ArrowLeft / ArrowRight keydown through the jump path', async () => {
     renderThreeLargeTurns();
     await screen.findAllByTestId('thread-timeline-dot');
-    // Initial playhead lands on the latest message (msg-c, x=1 → 240px).
+    // Initial playhead anchors to the active lane’s latest large turn
+    // (msg-c, x=1 → 240px).
     expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
     // ArrowLeft → one large message towards the older end (msg-b), the
     // same playhead move a single wheel-up step produces. The handled key
@@ -4101,7 +4124,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
         conversationArticles: [{ uuid: 'msg-b' }],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      // Initial playhead is on msg-b (the latest message, x=240).
+      // Initial playhead anchors to lane 2’s latest large turn (msg-b, x=240).
       expect(
         playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
       ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
@@ -5749,8 +5772,8 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
         ],
       ],
     ]);
-    // Mount with lane 1 active. The playhead initially lands on the
-    // latest message of the global sorted list (msg-c at x=240).
+    // Mount with lane 1 as the active thread (the anchor rationale is
+    // asserted at the sanity check below).
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -5778,11 +5801,11 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
       </QueryClientProvider>,
     );
     await screen.findAllByTestId('thread-timeline-dot');
-    // Sanity: the initial playhead sits on the global tail (msg-c at x=240
-    // = LANE_LEFT_PAD_PX + 240). This is the auto-anchor effect's pick on
-    // first mount, not a deliberate "show me the latest of lane 1".
+    // Sanity: the initial playhead sits on lane 1's latest large turn
+    // (msg-a at x=0 = LANE_LEFT_PAD_PX). The mount anchors to the ACTIVE
+    // lane, not whichever lane holds the global tail.
     const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
-    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
+    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX}px`);
     // Now flip activeThreadId to lane 2 from the outside, mirroring a
     // Navigator click. Re-render the pane with lane 2's articles so the
     // DOM matches what the live app shows after the switch.
@@ -5817,6 +5840,288 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
     const lanes = screen.getAllByTestId('thread-timeline-lane');
     expect(lanes[1]).toHaveAttribute('data-active', 'true');
     expect(lanes[0]).toHaveAttribute('data-active', 'false');
+  });
+
+  /**
+   * WorkspaceScreen's binding flush invalidates the active thread's messages
+   * on EVERY selection, so a refetch — and with it a brand-new
+   * `sortedMessages` array identity — is guaranteed to land moments after an
+   * external reposition commits. The playhead must stay on the reposition
+   * target: the old index-canonical implementation "realigned" the index from
+   * a ref that could lag one commit behind the reposition, so the refetch
+   * could revert the playhead onto the PREVIOUS thread's message. With the
+   * UUID as canonical state and the index derived per render, an array
+   * identity change cannot move the playhead by construction.
+   */
+  it('keeps the playhead on the external reposition target when a messages refetch replaces the sorted array identity', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    // Lane 1: msg-a at t=0 (plus msg-e at t=30s once the refetch lands).
+    // Lane 2: msg-b at t=1m, msg-c at t=2m (the reposition target). msg-e's
+    // timestamp sits INSIDE the existing time range so the refetch changes
+    // the array contents/identity without moving msg-c's x (240).
+    let lane1Grew = false;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => {
+        if (threadId === 1) {
+          return {
+            messages: [
+              makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+              ...(lane1Grew
+                ? [makeUserText(1, 1, 'msg-e', '2026-01-01T00:00:30Z')]
+                : []),
+            ],
+          };
+        }
+        return {
+          messages: [
+            makeUserText(2, 0, 'msg-b', '2026-01-01T00:01:00Z'),
+            makeUserText(2, 1, 'msg-c', '2026-01-01T00:02:00Z'),
+          ],
+        };
+      },
+    );
+    const bodyRef = createRef<HTMLDivElement>();
+    const tree = (activeThreadId: number, articleUuids: string[]) => (
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              {articleUuids.map((uuid) => (
+                <article key={uuid} data-message-uuid={uuid}>
+                  {uuid}
+                </article>
+              ))}
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={activeThreadId}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(tree(1, ['msg-a']));
+    await screen.findAllByTestId('thread-timeline-dot');
+    const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
+    // Mount anchor: lane 1's latest large turn (msg-a at x=0).
+    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX}px`);
+    // External selection of lane 2: the reposition commits onto msg-c.
+    rerender(tree(2, ['msg-b', 'msg-c']));
+    await waitFor(() => {
+      expect(playheadLeftPx(playheads()[1])).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
+    });
+    // The post-selection refetch lands: lane 1 grew, so the refetched
+    // `sortedMessages` is a superset with a new array identity.
+    lane1Grew = true;
+    await act(async () => {
+      await queryClient.refetchQueries();
+    });
+    // The playhead must still sit on msg-c — not revert to a pre-selection
+    // message.
+    expect(playheadLeftPx(playheads()[1])).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
+    const lanes = screen.getAllByTestId('thread-timeline-lane');
+    expect(lanes[1]).toHaveAttribute('data-active', 'true');
+    expect(lanes[0]).toHaveAttribute('data-active', 'false');
+  });
+
+  /**
+   * The same identity-change guarantee for a USER pick (wheel step): a message
+   * appended to a NON-active lane replaces the sorted array, and the playhead
+   * must not move off the picked message.
+   */
+  it('keeps the playhead on the user-picked message when a refetch appends messages to a non-active lane', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    // Lane 1 (active): msg-a at t=0, msg-b at t=1m. Lane 2: msg-c at t=2m,
+    // growing by msg-d at t=1m30s — inside the range, so lane 1's xs hold.
+    let lane2Grew = false;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => {
+        if (threadId === 1) {
+          return {
+            messages: [
+              makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+              makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+            ],
+          };
+        }
+        return {
+          messages: [
+            makeUserText(2, 0, 'msg-c', '2026-01-01T00:02:00Z'),
+            ...(lane2Grew
+              ? [makeUserText(2, 1, 'msg-d', '2026-01-01T00:01:30Z')]
+              : []),
+          ],
+        };
+      },
+    );
+    const bodyRef = createRef<HTMLDivElement>();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body">
+              <article data-message-uuid="msg-a">msg-a</article>
+              <article data-message-uuid="msg-b">msg-b</article>
+            </div>
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={1}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId('thread-timeline-dot');
+    const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
+    // Mount anchor: lane 1's latest large turn (msg-b at x=120).
+    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 120}px`);
+    // Wheel-up one step: the user picks msg-a (x=0), a same-lane jump.
+    const body = screen.getByTestId('thread-timeline-axis-column');
+    act(() => {
+      body.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -50, bubbles: true, cancelable: true }),
+      );
+    });
+    await waitFor(() => {
+      expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX}px`);
+    });
+    // Lane 2 grows and its refetch replaces the sorted array identity.
+    lane2Grew = true;
+    await act(async () => {
+      await queryClient.refetchQueries();
+    });
+    // The playhead stays on msg-a.
+    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX}px`);
+  });
+
+  /**
+   * Mount-anchor contract (the remount corner of the same user-visible bug): a
+   * fresh overlay mount with a non-null `activeThreadId` must anchor to THAT
+   * thread's latest large turn — never to another lane's global tail — and
+   * must keep waiting (no wrong-lane flash) when the lane's messages have not
+   * loaded yet, anchoring as soon as they land.
+   */
+  it('anchors a fresh mount to the active thread’s latest large turn once its messages load, without flashing the global tail', async () => {
+    stubAxisRect({ left: 0, width: 240 });
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    // Lane 2 holds the global tail (msg-c at t=2m). Lane 1 (the ACTIVE lane)
+    // carries msg-a at t=0 and msg-b at t=1m, withheld until `lane1Loaded`.
+    let lane1Loaded = false;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const apiClient = new ApiClient({ baseUrl: 'http://localhost' });
+    vi.spyOn(apiClient, 'getThreadMessages').mockImplementation(
+      async (threadId) => {
+        if (threadId === 1) {
+          return {
+            messages: lane1Loaded
+              ? [
+                  makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+                  makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+                ]
+              : [],
+          };
+        }
+        return { messages: [makeUserText(2, 0, 'msg-c', '2026-01-01T00:02:00Z')] };
+      },
+    );
+    const bodyRef = createRef<HTMLDivElement>();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={apiClient}>
+          <div>
+            <div ref={bodyRef} data-testid="conversation-body" />
+            <ThreadTimelineOverlay
+              threads={threads}
+              activeThreadId={1}
+              conversationBodyRef={bodyRef}
+            />
+          </div>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId('thread-timeline-dot');
+    const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
+    // Lane 1's messages are still absent: the playhead must NOT sit on the
+    // global tail (msg-c at x=240) — the old mount behavior that briefly
+    // highlighted the wrong lane on every fresh expand.
+    expect(playheadLeftPx(playheads()[0])).not.toBe(
+      `${LANE_LEFT_PAD_PX + 240}px`,
+    );
+    // Lane 1's messages land: the anchor retries via the
+    // `largeSortedMessages` dep and lands on the lane's latest large turn
+    // (msg-b at x=120).
+    lane1Loaded = true;
+    await act(async () => {
+      await queryClient.refetchQueries();
+    });
+    await waitFor(() => {
+      expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 120}px`);
+    });
+    const lanes = screen.getAllByTestId('thread-timeline-lane');
+    expect(lanes[0]).toHaveAttribute('data-active', 'true');
+  });
+
+  it('anchors a fresh mount to the global tail only when activeThreadId is null', async () => {
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        root_message_uuid: null,
+        created_at: '2026-01-01T00:01:00Z',
+      }),
+    ];
+    const messages = new Map([
+      [1, [makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z')]],
+      [2, [makeUserText(2, 0, 'msg-b', '2026-01-01T00:02:00Z')]],
+    ]);
+    renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: null,
+      conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
+    });
+    await screen.findAllByTestId('thread-timeline-dot');
+    // No active thread to anchor onto → the global tail (msg-b at x=240).
+    await waitFor(() => {
+      expect(
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+      ).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
+    });
   });
 
   it('triggers horizontal scroll catch-up so the playhead lands inside the axis viewport after the external switch', async () => {
@@ -6206,7 +6511,8 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
     const { rerender } = render(tree(1, ['msg-a', 'msg-d']));
     await screen.findAllByTestId('thread-timeline-dot');
     const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
-    // The auto-anchor lands the playhead on the global tail msg-d (x=240).
+    // The auto-anchor lands on the active lane’s latest large turn (msg-d,
+    // x=240 — also the global tail here).
     expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
     // Switch to lane 2 externally while its timeline messages are still
     // absent — the effect must bail without consuming the change.
