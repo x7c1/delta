@@ -608,24 +608,43 @@ export const SCROLL_DOM_READY_TIMEOUT_MS = 1000;
  * polled, matching the v10 deferral.
  *
  * The optional `onScroll` callback fires immediately before the
- * `scrollIntoView` call. Cross-lane callers use this to clear a guard flag
- * that suppresses pane → playhead sync during the DOM-ready wait; clearing
- * the flag right before the scroll lets the time-based programmatic-scroll
- * guard cover the remaining IO ripple window.
+ * `scrollIntoView` call — i.e. ONLY when the target element actually
+ * rendered and the scroll lands. Cross-lane callers use this to stamp the
+ * time-based programmatic-scroll guard right before the scroll, so it covers
+ * the remaining IO ripple window.
+ *
+ * The optional `onSettled` callback fires exactly once, whichever way the
+ * schedule terminates: the scroll fired (success), the DOM-ready poll timed
+ * out, or the returned cancel handle was invoked (superseding jump /
+ * unmount). Cross-lane callers use this to release the in-flight guard
+ * counter so it can never latch — every increment has exactly one matching
+ * decrement regardless of which path the schedule takes.
  *
  * Returns a cancel handle the caller can fire to abort the wait if the
  * component unmounts or another jump supersedes this one before the element
- * lands.
+ * lands. Invoking it also drives `onSettled` (once).
  */
 export function scheduleScrollAfterRender(
   container: HTMLElement | null,
   uuid: string,
   onScroll?: () => void,
+  onSettled?: () => void,
 ): () => void {
+  let settled = false;
+  const settle = () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    onSettled?.();
+  };
   let highlightCancel: (() => void) | null = null;
   let reflowRafHandle: number | null = null;
   const run = () => {
     onScroll?.();
+    // The scroll is committing — settle now (before scrollIntoView, matching
+    // the historical order where the guard-release ran inside `onScroll`).
+    settle();
     scrollMessageIntoView(container, uuid);
     highlightCancel = highlightMessageJump(container, uuid);
     // Re-call scrollIntoView on the next animation frame so the browser has
@@ -675,6 +694,10 @@ export function scheduleScrollAfterRender(
         return;
       }
       if (window.performance.now() - start >= SCROLL_DOM_READY_TIMEOUT_MS) {
+        // Target never rendered within the budget. No scroll fires, but the
+        // schedule has still terminated — settle so the caller's guard
+        // counter is released instead of latching forever.
+        settle();
         return;
       }
       rafHandle = window.requestAnimationFrame(tick);
@@ -688,6 +711,7 @@ export function scheduleScrollAfterRender(
         reflowRafHandle = null;
       }
       highlightCancel?.();
+      settle();
     };
   }
   const handle = setTimeout(run, 0);
@@ -702,6 +726,7 @@ export function scheduleScrollAfterRender(
       reflowRafHandle = null;
     }
     highlightCancel?.();
+    settle();
   };
 }
 
@@ -1258,19 +1283,35 @@ export function ThreadTimelineOverlay({
   //      right edge.
   //
   // Keeping the IO fully suppressed until the scroll lands ensures the
-  // first-observation batch of the new thread is always ignored. Once the
-  // scroll fires (or times out / is cancelled), the counter is decremented
-  // so the user's subsequent manual scroll resumes normal pane → timeline
-  // sync as soon as the last jump settles. Decrements are clamped at zero
-  // so a duplicate cancel (cancel handle invoked twice, or invoked after
-  // onScroll already fired) cannot wrap into a negative count that would
-  // leave the guard permanently armed.
+  // first-observation batch of the new thread is always ignored. Every
+  // increment is paired with exactly one decrement, routed through
+  // `scheduleScrollAfterRender`'s `onSettled` callback, which fires once
+  // whichever way the schedule terminates — the scroll fired (success), the
+  // DOM-ready poll timed out, or the cancel handle ran (superseding jump /
+  // unmount). The timeout leg matters: a jump whose target uuid never renders
+  // (e.g. an axis click resolving to a renders-nothing carrier message) would
+  // otherwise poll to the timeout and return without releasing, latching the
+  // counter above zero forever and silently killing both navigator-driven
+  // repositioning and pane → playhead follow. Decrements are clamped at zero
+  // so a duplicate release (cancel handle invoked after onSettled already
+  // fired) cannot wrap into a negative count that would leave the guard
+  // permanently armed.
   const crossLaneJumpInFlightCountRef = useRef(0);
   const decrementCrossLaneInFlight = useCallback(() => {
     if (crossLaneJumpInFlightCountRef.current > 0) {
       crossLaneJumpInFlightCountRef.current -= 1;
     }
   }, []);
+  // The destination lane of the most recent overlay-driven cross-lane jump.
+  // When such a jump calls `setActiveThread`, the `activeThreadId` prop
+  // changes to this thread and the external-thread effect re-runs; comparing
+  // the prop against this ref lets that effect distinguish its own jump
+  // echoing back (skip it) from a genuinely new external navigator pick (act
+  // on it). It is cleared back to `null` whenever the external-thread effect
+  // commits a (non-jump) reposition, so a stale target can never combine with
+  // that effect's own pane-scroll guard counter to misfire the echo-skip
+  // check.
+  const crossLaneJumpTargetThreadRef = useRef<ThreadId | null>(null);
 
   // When `activeThreadId` is driven by an external setter (Navigator click in
   // the left pane, breadcrumb, etc.) the conversation pane re-renders into
@@ -1312,27 +1353,43 @@ export function ThreadTimelineOverlay({
     if (lastObservedActiveThreadIdRef.current === activeThreadId) {
       return;
     }
-    lastObservedActiveThreadIdRef.current = activeThreadId;
     if (activeThreadId === null) {
+      // A null active thread is terminal — nothing to reposition onto.
+      // Consume the observation so we do not re-enter for the same value.
+      lastObservedActiveThreadIdRef.current = activeThreadId;
       return;
     }
-    // Suppress when the active thread change was driven BY the overlay
-    // itself (wheel/click cross-lane jump). That path has already raised
-    // {@link crossLaneJumpInFlightCountRef} for the deliberate jump target
-    // and is in the middle of polling for the destination article to
-    // render. Re-firing here would double-bump the counter and overwrite
-    // the user's pick with the lane's tail. Only EXTERNAL setters
-    // (Navigator click, breadcrumb, etc.) flip the prop without an
-    // in-flight overlay-driven jump.
-    if (crossLaneJumpInFlightCountRef.current > 0) {
+    // Skip when the active thread change is the overlay's OWN cross-lane jump
+    // echoing back: a wheel/click jump called `setActiveThread(target)`, which
+    // flips this prop to `target`. That jump is already positioning the pane
+    // on the user's picked message, so repositioning here would clobber it
+    // with the lane's tail. Consume the observation so a later
+    // `largeSortedMessages` change cannot re-enter and override the user's
+    // pick. This is detected by the in-flight counter being up AND the jump's
+    // recorded destination matching the new prop value.
+    if (
+      crossLaneJumpInFlightCountRef.current > 0 &&
+      crossLaneJumpTargetThreadRef.current === activeThreadId
+    ) {
+      lastObservedActiveThreadIdRef.current = activeThreadId;
       return;
+    }
+    // A navigator-driven change to a DIFFERENT thread than any in-flight
+    // overlay jump is the newest user intent — the in-flight jump (if any) is
+    // now stale, so cancel it and proceed. Cancelling drives the jump's
+    // `onSettled`, releasing its counter, so the guard does not stay armed
+    // against this deliberate reposition.
+    if (crossLaneJumpInFlightCountRef.current > 0) {
+      pendingScrollCancelRef.current?.();
+      pendingScrollCancelRef.current = null;
     }
     // The new lane's latest large turn = last entry in the global large
     // list whose `threadId` matches. If the lane has no large messages
     // yet (e.g. messages still loading, or the lane only carries tool
-    // calls), leave the playhead alone — the next render that brings the
-    // large message in will re-fire this effect via the
-    // `largeSortedMessages` dep.
+    // calls), leave the playhead alone WITHOUT consuming the observation —
+    // the next render that brings the large message in re-fires this effect
+    // via the `largeSortedMessages` dep and retries. Consuming here would
+    // latch the observation and silently drop the retry.
     let targetUuid: string | null = null;
     for (let i = largeSortedMessages.length - 1; i >= 0; i -= 1) {
       if (largeSortedMessages[i].threadId === activeThreadId) {
@@ -1347,6 +1404,18 @@ export function ThreadTimelineOverlay({
     if (targetIndex < 0) {
       return;
     }
+    // A reposition is actually committing now — consume the observation so
+    // this exact change is not re-processed, while an earlier bail (lane not
+    // loaded) leaves it unconsumed for retry.
+    lastObservedActiveThreadIdRef.current = activeThreadId;
+    // This reposition is NOT a cross-lane jump, so any target recorded by a
+    // previous overlay-driven jump is now stale. Clear it before raising the
+    // counter below: otherwise the pane-scroll guard counter this effect holds
+    // for the next {@link PANE_SCROLL_PROGRAMMATIC_GUARD_MS} would combine with
+    // the stale target and make the echo-skip branch above misfire on a genuine
+    // navigator pick of that same thread arriving inside the window — silently
+    // swallowing the exact deliberate selection this fix must always honour.
+    crossLaneJumpTargetThreadRef.current = null;
     // Suppress the pane-scroll observer for the same window the regular
     // cross-lane jump uses. The pane is about to re-render the new thread's
     // articles; without the guard, the IO's first-observation batch would
@@ -1437,33 +1506,28 @@ export function ThreadTimelineOverlay({
     // active thread so the IO effect (which re-runs on activeThreadId
     // change) sees the guard already up when it first-fires its observation
     // batch on the new thread's articles. The counter is decremented via the
-    // `onScroll` callback passed to scheduleScrollAfterRender — right before
-    // scrollIntoView fires, at which point the time-based guard
-    // (markProgrammaticScroll, stamped at the same moment) takes over
-    // covering the remaining IO ripple window. If the jump is cancelled
-    // before the element lands (superseding jump or unmount),
-    // cancelWithCountClear decrements the counter immediately.
+    // `onSettled` callback passed to scheduleScrollAfterRender, which fires
+    // exactly once whichever way the schedule terminates — the scroll landed,
+    // the DOM-ready poll timed out, or the cancel handle ran (superseding
+    // jump / unmount). That guarantees this increment always has a matching
+    // decrement, so the counter can never latch above zero.
     //
-    // CRITICAL: the time-based guard MUST be stamped here in the onScroll
-    // callback — NOT at jump-trigger time — because scheduleScrollAfterRender
-    // can poll for many frames waiting for the new thread's re-render. If we
-    // stamped the guard at trigger time the window could expire before the
-    // scroll lands, leaving the post-scroll IO ripples completely unguarded.
-    // That was the residual tail-jump race that survived the v12 fix.
+    // The time-based guard is stamped in the `onScroll` callback (fired only
+    // when the element actually rendered and the scroll is about to land) so
+    // its window covers the post-scroll IO ripple.
+    //
+    // CRITICAL: the time-based guard MUST be stamped in the onScroll callback
+    // — NOT at jump-trigger time — because scheduleScrollAfterRender can poll
+    // for many frames waiting for the new thread's re-render. If we stamped
+    // the guard at trigger time the window could expire before the scroll
+    // lands, leaving the post-scroll IO ripples completely unguarded. That
+    // was the residual tail-jump race that survived the v12 fix.
     crossLaneJumpInFlightCountRef.current += 1;
-    // `released` guards against double-release: if the cancel handle fires
-    // AFTER onScroll already ran (cancel-after-scroll for highlight cleanup),
-    // the counter must not double-decrement. Sharing one flag between the
-    // onScroll path and the cancel path is the simplest correct shape — the
-    // counter is decremented at most once per jump.
-    let released = false;
-    const releaseOnce = () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      decrementCrossLaneInFlight();
-    };
+    // Record this jump's destination lane so the external-thread effect can
+    // recognise the resulting `activeThreadId` prop change as its own jump
+    // echoing back (and skip it) rather than treating it as a fresh external
+    // navigator pick.
+    crossLaneJumpTargetThreadRef.current = current.threadId;
     setActiveThread(current.threadId);
     const rawCancel = scheduleScrollAfterRender(
       container,
@@ -1471,22 +1535,20 @@ export function ThreadTimelineOverlay({
       () => {
         // onScroll: element is in the DOM, scrollIntoView is about to fire.
         // Stamp the time-based guard NOW so its 200ms window starts ticking
-        // from the moment the IO ripples will arrive, then release the
-        // state-based counter so a tail-message IO batch arriving in the
-        // very next tick is suppressed by the time-based guard alone.
+        // from the moment the IO ripples will arrive; the state-based counter
+        // is released by onSettled (below), so a tail-message IO batch
+        // arriving in the very next tick is suppressed by the time-based
+        // guard alone.
         markProgrammaticScroll();
-        releaseOnce();
       },
+      // onSettled: release the in-flight counter. The decrement is clamped at
+      // zero, so passing it raw is safe even if the cancel handle also fires
+      // after the scroll already settled.
+      decrementCrossLaneInFlight,
     );
-    // Wrap the cancel so the counter is also released if the scroll is
-    // aborted (superseded by another jump or unmount) — otherwise a stacked
-    // jump's counter would never decrement and the guard would stay armed
-    // indefinitely.
-    const cancelWithCountClear = () => {
-      releaseOnce();
-      rawCancel();
-    };
-    pendingScrollCancelRef.current = cancelWithCountClear;
+    // The cancel handle drives onSettled itself, so it already releases the
+    // counter when a superseding jump or unmount aborts the wait.
+    pendingScrollCancelRef.current = rawCancel;
     // `scrubTick` is the re-trigger AND the gate: a fresh scrub bumps the
     // tick, re-fires this effect, and re-emits the (possibly identical)
     // navigation intent. A re-click at the same x bumps the tick even when
