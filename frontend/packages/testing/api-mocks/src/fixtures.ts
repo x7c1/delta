@@ -286,6 +286,94 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
     },
+    // A paired tool call / tool result split across two messages, as Claude's
+    // transcript records them: the `tool_use` lives in an assistant message
+    // (uuid-b3, which renders as a tool call) and its `tool_result` arrives in
+    // the following `user` message (uuid-b4). Because that result is paired to
+    // a visible call, uuid-b4 renders NOTHING in the transcript — yet it is a
+    // `user` row, so it still gets a mark on the thread timeline. That
+    // renders-nothing carrier is exactly the case that makes a timeline axis
+    // click resolve to a uuid with no transcript article, so the cross-lane
+    // jump's DOM-ready poll can never land and must time out. It gives the
+    // timeline e2e (and dogfooding) a real tool-heavy lane to exercise the
+    // playhead-follow guard against.
+    {
+      uuid: 'uuid-b3',
+      session_id: SESSION_ID,
+      thread_id: BRANCH_THREAD_ID,
+      role: 'assistant',
+      linear_parent_uuid: 'uuid-b2',
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-3',
+      seq: 2,
+      content_text: null,
+      content: [
+        {
+          type: 'tool_use',
+          id: 'tb1',
+          name: 'Read',
+          input: { path: 'etymology.md' },
+        },
+      ],
+      created_at: '2026-01-01T00:05:03Z',
+      model: 'claude-opus-4-8',
+      git_branch: 'main',
+      cwd: '/home/dev/repo',
+      response_time_ms: 9400,
+    },
+    {
+      // A large (prose) turn between the tool_use and its result carrier. Its
+      // only job on the timeline is to break the run of consecutive auxiliary
+      // (small) marks: without it, uuid-b3 and uuid-b4 would be adjacent small
+      // dots and cluster into a single mark whose representative is the
+      // rendering uuid-b3 — so the renders-nothing carrier uuid-b4 would have
+      // no standalone, clickable dot. With this large mark between them, both
+      // uuid-b3 and uuid-b4 render as lone dots.
+      uuid: 'uuid-b3b',
+      session_id: SESSION_ID,
+      thread_id: BRANCH_THREAD_ID,
+      role: 'assistant',
+      linear_parent_uuid: 'uuid-b3',
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-3',
+      seq: 3,
+      content_text: 'The file confirms the Greek origin of the word.',
+      content: [
+        {
+          type: 'text',
+          text: 'The file confirms the Greek origin of the word.',
+        },
+      ],
+      created_at: '2026-01-01T00:05:05Z',
+      model: 'claude-opus-4-8',
+      git_branch: 'main',
+      cwd: '/home/dev/repo',
+      response_time_ms: 9400,
+    },
+    {
+      uuid: 'uuid-b4',
+      session_id: SESSION_ID,
+      thread_id: BRANCH_THREAD_ID,
+      role: 'user',
+      linear_parent_uuid: 'uuid-b3b',
+      semantic_parent_uuid: null,
+      prompt_id: 'prompt-3',
+      seq: 4,
+      content_text: null,
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'tb1',
+          content: 'delta: from Greek Δ',
+          is_error: false,
+        },
+      ],
+      created_at: '2026-01-01T00:30:00Z',
+      model: null,
+      git_branch: 'main',
+      cwd: '/home/dev/repo',
+      response_time_ms: null,
+    },
   ],
   [SESSION_2_MAIN_THREAD_ID]: [
     {
