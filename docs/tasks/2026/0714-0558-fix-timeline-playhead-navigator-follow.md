@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0714-0558-fix-timeline-playhead-navigator-follow
 created_at: 2026-07-14T05:58:10Z
-updated_at: 2026-07-14T08:41:00Z
+updated_at: 2026-07-14T12:33:53Z
 ---
 
 # fix(web): keep the timeline playhead following navigator thread selection
@@ -101,11 +101,11 @@ scroll callback, which is exactly the untested edge).
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In a real dogfooding session with tool-heavy threads: interleave
+- [x] In a real dogfooding session with tool-heavy threads: interleave
       timeline axis clicks (including small-dot/cluster regions on other
       lanes) with thread selections from the left-pane session list, and
       confirm the playhead and lane highlight follow every selection.
-- [ ] Wheel/arrow timeline scrubbing and cross-lane jump clicks still land
+- [x] Wheel/arrow timeline scrubbing and cross-lane jump clicks still land
       and animate as before (no regression from the guard rework).
 
 ## Out of scope
