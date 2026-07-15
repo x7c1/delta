@@ -258,6 +258,36 @@ export const PANE_SCROLL_PROGRAMMATIC_GUARD_MS = 200;
 export const PANE_SCROLL_OBSERVER_THRESHOLD = 0;
 
 /**
+ * CSS custom property that carries the top-region reserve height (px). The
+ * transcript body sets it inline (see `TranscriptPane`) and message articles
+ * read it as their `scroll-margin-top` (see index.css), so a
+ * `scrollIntoView({ block: 'start' })` parks the target this many pixels below
+ * the container's top edge. The pane-scroll follower reads the same value to
+ * locate the reading-region start line (see {@link readTopRegionReserve}).
+ */
+const TOP_REGION_RESERVE_VAR = '--delta-top-region-reserve';
+
+/**
+ * Resolve the top-region reserve (px) currently in effect on the transcript
+ * scroll container. Reads the same `--delta-top-region-reserve` custom
+ * property the CSS `scroll-margin-top` uses, so the follower's reading-region
+ * start line matches exactly where a programmatic `scrollIntoView` parks its
+ * target. Falls back to 0 when the variable is unset or unparseable (SSR, or
+ * jsdom tests that never install the reserve), which degrades the follower to
+ * plain topmost-visible selection.
+ */
+function readTopRegionReserve(container: Element): number {
+  if (typeof getComputedStyle !== 'function') {
+    return 0;
+  }
+  const raw = getComputedStyle(container)
+    .getPropertyValue(TOP_REGION_RESERVE_VAR)
+    .trim();
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
  * Read the persisted expanded preference for a session; defaults to collapsed
  * when no preference has been saved yet or the storage layer is unavailable
  * (SSR / privacy-mode browsers). The boolean is encoded as the strings
@@ -2208,10 +2238,14 @@ export function ThreadTimelineOverlay({
     // entry callback work stays O(1).
     const indexByUuid = new Map<string, number>();
     sortedMessages.forEach((m, i) => indexByUuid.set(m.uuid, i));
-    // The set of articles currently intersecting the viewport. We commit
-    // the topmost-visible by smallest `boundingClientRect.top` per
-    // debounce tick — that is the message the user is most likely reading.
-    const intersecting = new Map<string, number>();
+    // The set of articles currently intersecting the viewport, keyed by uuid
+    // to their viewport-relative top and bottom edges. We commit the article
+    // that owns the reading-region start line per debounce tick — that is the
+    // message the user is most likely reading (see `flush`). Both edges are
+    // retained because the selection skips articles whose body has already
+    // scrolled entirely above the reading-region line (bottom edge at/above
+    // it), which needs the bottom, not just the top.
+    const intersecting = new Map<string, { top: number; bottom: number }>();
     let debounceHandle: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
       debounceHandle = null;
@@ -2248,15 +2282,38 @@ export function ThreadTimelineOverlay({
       if (intersecting.size === 0) {
         return;
       }
-      // Pick the topmost visible: smallest viewport-top wins. Ties (rare,
-      // and only if two articles share an exact y) fall back to smallest
-      // global index so the choice is deterministic.
+      // Select the article that OWNS the reading-region start line, not the
+      // raw smallest-top. `scrollIntoView({ block: 'start' })` parks its
+      // target exactly at that line (message articles carry
+      // `scroll-margin-top: var(--delta-top-region-reserve)`), which leaves
+      // the PREVIOUS article still intersecting by a sliver in the reserve
+      // band above the line — with a slightly smaller (more negative) top.
+      // Committing raw smallest-top there would systematically pick that
+      // previous article and yank the playhead one mark backwards. Instead we
+      // skip any article whose bottom edge has already crossed above the line
+      // (its body no longer occupies the reading region) and pick the topmost
+      // of the rest. A flush that escapes the guards after a programmatic
+      // scroll then resolves to the very message the scroll established — an
+      // idempotent no-op — so WHEN it fires stops mattering. The line is read
+      // from the same custom property the CSS uses; it degrades to 0 (plain
+      // topmost-visible) when unset. Ties fall back to smallest global index
+      // so the choice is deterministic.
+      const reserveLine =
+        container.getBoundingClientRect().top + readTopRegionReserve(container);
       let bestUuid: string | null = null;
       let bestTop = Number.POSITIVE_INFINITY;
       let bestIndex = Number.POSITIVE_INFINITY;
-      for (const [uuid, top] of intersecting) {
+      for (const [uuid, { top, bottom }] of intersecting) {
         const idx = indexByUuid.get(uuid);
         if (idx === undefined) {
+          continue;
+        }
+        // Body has fully scrolled above the reading-region line: not what the
+        // user is reading, skip it. Guarded on a finite bottom so tests that
+        // emit a top-only rect (bottom left `undefined` on the literal, same
+        // as an unparseable NaN under `Number.isFinite`) keep plain
+        // topmost-visible.
+        if (Number.isFinite(bottom) && bottom <= reserveLine) {
           continue;
         }
         if (top < bestTop || (top === bestTop && idx < bestIndex)) {
@@ -2283,7 +2340,10 @@ export function ThreadTimelineOverlay({
             continue;
           }
           if (entry.isIntersecting) {
-            intersecting.set(uuid, entry.boundingClientRect.top);
+            intersecting.set(uuid, {
+              top: entry.boundingClientRect.top,
+              bottom: entry.boundingClientRect.bottom,
+            });
           } else {
             intersecting.delete(uuid);
           }

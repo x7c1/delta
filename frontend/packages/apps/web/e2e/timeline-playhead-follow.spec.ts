@@ -404,3 +404,89 @@ test('an axis click on another lane\'s renders-nothing mark settles the pane on 
     })
     .toBeLessThan(220);
 });
+
+/**
+ * Wheel-scrubbing the playhead rightward parks the target message at the
+ * reading-region start line (message articles carry
+ * `scroll-margin-top: var(--delta-top-region-reserve)`), leaving the PREVIOUS
+ * turn partially visible in the reserve band just above it. A later re-render
+ * (streaming, a background refetch) re-binds the pane→playhead
+ * IntersectionObserver, whose initial-observation flush can land AFTER the
+ * 200 ms programmatic-scroll guard expires. Before the reserve-line fix that
+ * flush committed the raw topmost-visible article and yanked the playhead
+ * LEFTWARD onto it (deterministic here: the playhead snapped from the scrubbed
+ * target uuid-b3b back to the branch lane's first turn uuid-b1). The fix
+ * selects the article that OWNS the reserve line, so the late flush resolves
+ * back to the scrubbed target and the playhead stays put.
+ *
+ * A short viewport forces the transcript to scroll so the scrub actually parks
+ * the target at the line.
+ */
+test('a wheel-scrubbed playhead stays on its mark when a re-render fires after the guard window (no snap-back-left)', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.setViewportSize({ width: 1000, height: 300 });
+  await page.goto('/');
+
+  await page.getByTestId('thread-timeline-toggle').click();
+  await expect(lane(page, 1)).toHaveAttribute('data-active', 'true');
+  await expect(dot(page, 'uuid-b3b')).toBeVisible();
+
+  // Wheel-scrub rightward (newer) over the axis. Stepping through the global
+  // large-turn list carries the playhead off the main lane's tail into the
+  // branch lane and clamps on the branch's last large turn, uuid-b3b — the
+  // scrubbed target. Notches are spaced past the wheel-step cooldown so each
+  // commits.
+  const anchor = await dot(page, 'uuid-a1').boundingBox();
+  if (!anchor) {
+    throw new Error('anchor dot has no bounding box');
+  }
+  await page.mouse.move(
+    anchor.x + anchor.width / 2,
+    anchor.y + anchor.height / 2,
+  );
+  for (let i = 0; i < 5; i += 1) {
+    await page.mouse.wheel(0, 120);
+    await page.waitForTimeout(160);
+  }
+
+  // The scrub drilled into the branch lane and landed the playhead on uuid-b3b.
+  await expect(lane(page, 2)).toHaveAttribute('data-active', 'true', {
+    timeout: 5000,
+  });
+  const branchPlayhead = lane(page, 2).locator(
+    '[data-testid="thread-timeline-playhead"]',
+  );
+  const targetX = await centerX(dot(page, 'uuid-b3b'));
+  // Where a leftward yank lands: pre-fix the escaped flush commits the
+  // topmost-visible article, the branch lane's first turn uuid-b1.
+  const yankX = await centerX(dot(page, 'uuid-b1'));
+  await expect
+    .poll(async () => Math.abs((await centerX(branchPlayhead)) - targetX), {
+      timeout: 5000,
+    })
+    .toBeLessThanOrEqual(3);
+  // Sanity: the scrubbed mark and the leftward-yank mark are far enough apart
+  // that the post-rerender assertion below is meaningful.
+  expect(targetX - yankX).toBeGreaterThan(8);
+
+  // Trigger a re-render + observer re-bind by streaming content, then idle
+  // well past the programmatic-scroll guard window so any escaped flush has
+  // fired.
+  await emitEvent(page, {
+    kind: 'assistant_streaming',
+    session_id: SESSION_ID,
+    thread_id: BRANCH_THREAD_ID,
+    message_id: 'stream-guard',
+    index: 0,
+    final: false,
+    delta: 'streamed while idle',
+  });
+  await page.waitForTimeout(700);
+
+  // The playhead is STILL on uuid-b3b — not yanked left. Pre-fix this
+  // deterministically reverted onto the topmost-visible earlier turn.
+  const settledX = await centerX(branchPlayhead);
+  expect(Math.abs(settledX - targetX)).toBeLessThanOrEqual(3);
+});

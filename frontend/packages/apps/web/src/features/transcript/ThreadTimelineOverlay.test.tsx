@@ -6923,3 +6923,366 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
     }
   });
 });
+
+describe('ThreadTimelineOverlay pane scroll follower reserve-line selection', () => {
+  // Regression suite for the leftward playhead yank: after a same-lane jump
+  // parks the target at the reading-region start line (message articles carry
+  // `scroll-margin-top: var(--delta-top-region-reserve)`), the PREVIOUS
+  // article is left intersecting by a sliver in the reserve band above the
+  // line, with a smaller (more negative) top. The old follower committed the
+  // raw smallest-top, so any IO flush that escaped the guards after the jump
+  // yanked the playhead one mark backwards. The fix selects the article that
+  // OWNS the line (skipping any whose bottom edge has crossed above it),
+  // making the post-jump commit idempotent: it resolves to the very message
+  // the scroll established, so WHEN the flush fires no longer matters.
+
+  type FakeIO = {
+    callback: IntersectionObserverCallback;
+    options?: IntersectionObserverInit;
+    observed: Set<Element>;
+    emit: (entries: Partial<IntersectionObserverEntry>[]) => void;
+  };
+
+  function installFakeIO(): { instances: FakeIO[]; restore: () => void } {
+    const instances: FakeIO[] = [];
+    const original = (
+      globalThis as { IntersectionObserver?: typeof IntersectionObserver }
+    ).IntersectionObserver;
+    class FakeIntersectionObserver {
+      callback: IntersectionObserverCallback;
+      options?: IntersectionObserverInit;
+      observed = new Set<Element>();
+      emit!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+      constructor(
+        cb: IntersectionObserverCallback,
+        opts?: IntersectionObserverInit,
+      ) {
+        this.callback = cb;
+        this.options = opts;
+        this.emit = (entries) => {
+          this.callback(
+            entries as IntersectionObserverEntry[],
+            this as unknown as IntersectionObserver,
+          );
+        };
+        instances.push(this as unknown as FakeIO);
+      }
+      observe(el: Element) {
+        this.observed.add(el);
+      }
+      unobserve(el: Element) {
+        this.observed.delete(el);
+      }
+      disconnect() {
+        this.observed.clear();
+      }
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    (
+      globalThis as { IntersectionObserver?: unknown }
+    ).IntersectionObserver = FakeIntersectionObserver;
+    return {
+      instances,
+      restore: () => {
+        (
+          globalThis as {
+            IntersectionObserver?: typeof IntersectionObserver | undefined;
+          }
+        ).IntersectionObserver = original;
+      },
+    };
+  }
+
+  async function getLiveIO(
+    fake: { instances: FakeIO[] },
+    expectedObserved: number,
+  ): Promise<FakeIO> {
+    return waitFor(() => {
+      const candidate = fake.instances.at(-1);
+      expect(candidate?.observed.size).toBe(expectedObserved);
+      return candidate as FakeIO;
+    });
+  }
+
+  /**
+   * The top-region reserve (px) installed on the conversation body for these
+   * cases. In production `TranscriptPane` drives `--delta-top-region-reserve`
+   * inline; here we set it directly so `readTopRegionReserve` resolves it and
+   * the follower's reading-region line sits at `containerTop + RESERVE`
+   * (containerTop is 0 in jsdom).
+   */
+  const RESERVE = 40;
+
+  function playheadLeft(): string {
+    return playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]);
+  }
+
+  function articlesInBody(): HTMLElement[] {
+    return within(screen.getByTestId('conversation-body')).getAllByText(/msg-/);
+  }
+
+  function threeMessages() {
+    return new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+  }
+
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+  });
+
+  it('leaves the playhead on the scrubbed target when an IO flush lands after the guard window (post-scroll geometry is a no-op)', async () => {
+    // Reproduces the leftward yank at b2bcf0b: a same-lane wheel step parks
+    // msg-b at the reserve line, msg-a is left partially visible in the
+    // reserve band above it, and a late IO flush (past the 200 ms guard)
+    // would commit the raw smallest-top (msg-a). With the fix, msg-a is
+    // skipped (its bottom edge sits AT the line) and the flush resolves back
+    // to msg-b — the message the scroll established.
+    const fake = installFakeIO();
+    let nowMs = 10_000;
+    const originalPerfNow = window.performance.now;
+    window.performance.now = (() => nowMs) as typeof performance.now;
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      const { bodyRef } = renderOverlay({
+        threads: [makeThread(1)],
+        messagesByThread: threeMessages(),
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      bodyRef.current!.style.setProperty(
+        '--delta-top-region-reserve',
+        `${RESERVE}px`,
+      );
+      // Playhead starts on the tail (msg-c, x=240).
+      expect(playheadLeft()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+
+      // Same-lane wheel-up: msg-c → msg-b. This bumps scrubTick, which stamps
+      // the programmatic-scroll guard and (in production) parks msg-b at the
+      // reserve line via scrollIntoView.
+      const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+      act(() => {
+        axisColumn.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(playheadLeft()).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
+      });
+
+      const articles = articlesInBody();
+      const io = await getLiveIO(fake, articles.length);
+      const msgA = articles.find((a) => a.textContent === 'msg-a')!;
+      const msgB = articles.find((a) => a.textContent === 'msg-b')!;
+      const msgC = articles.find((a) => a.textContent === 'msg-c')!;
+
+      // Expire the guard window so the flush is NOT suppressed by time — this
+      // is the exact condition an observer re-bind hits mid-session.
+      nowMs += PANE_SCROLL_PROGRAMMATIC_GUARD_MS + 50;
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgC,
+              isIntersecting: false,
+              boundingClientRect: { top: 9999, bottom: 9999 } as DOMRect,
+            },
+            // msg-a: sliver still visible in the reserve band, smallest top,
+            // but its BOTTOM sits AT the reserve line — body has left the
+            // reading region.
+            {
+              target: msgA,
+              isIntersecting: true,
+              boundingClientRect: { top: -30, bottom: RESERVE } as DOMRect,
+            },
+            // msg-b: parked exactly at the reserve line by the scroll.
+            {
+              target: msgB,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE,
+                bottom: RESERVE + 180,
+              } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // Idempotent: still on msg-b (x=120). At b2bcf0b this asserted x=0.
+      expect(playheadLeft()).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
+    } finally {
+      fake.restore();
+      window.performance.now = originalPerfNow;
+    }
+  });
+
+  it('still follows a genuine user scroll that brings an earlier message body below the reserve line (follower not deadened)', async () => {
+    // The skip must not deaden legitimate follows: when the user scrolls so an
+    // earlier article's body starts just below the reading-region line, the
+    // playhead moves to it.
+    const fake = installFakeIO();
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      const { bodyRef } = renderOverlay({
+        threads: [makeThread(1)],
+        messagesByThread: threeMessages(),
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      bodyRef.current!.style.setProperty(
+        '--delta-top-region-reserve',
+        `${RESERVE}px`,
+      );
+      // Playhead starts on the tail (msg-c, x=240).
+      expect(playheadLeft()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+
+      const articles = articlesInBody();
+      const io = await getLiveIO(fake, articles.length);
+      const msgA = articles.find((a) => a.textContent === 'msg-a')!;
+      const msgB = articles.find((a) => a.textContent === 'msg-b')!;
+      const msgC = articles.find((a) => a.textContent === 'msg-c')!;
+
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgC,
+              isIntersecting: false,
+              boundingClientRect: { top: 9999, bottom: 9999 } as DOMRect,
+            },
+            // msg-a: body starts just BELOW the reserve line and extends down
+            // — clearly in the reading region.
+            {
+              target: msgA,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE + 5,
+                bottom: RESERVE + 200,
+              } as DOMRect,
+            },
+            {
+              target: msgB,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE + 205,
+                bottom: RESERVE + 400,
+              } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // Followed the scroll to msg-a (x=0).
+      expect(playheadLeft()).toBe(`${LANE_LEFT_PAD_PX}px`);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it('selects a tall article that spans the reserve line rather than skipping ahead to the next', async () => {
+    // A tall article whose top is ABOVE the line and bottom BELOW it still
+    // occupies the reading region — it must be selected, not skipped to the
+    // next article.
+    const fake = installFakeIO();
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      const { bodyRef } = renderOverlay({
+        threads: [makeThread(1)],
+        messagesByThread: threeMessages(),
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      bodyRef.current!.style.setProperty(
+        '--delta-top-region-reserve',
+        `${RESERVE}px`,
+      );
+
+      const articles = articlesInBody();
+      const io = await getLiveIO(fake, articles.length);
+      const msgA = articles.find((a) => a.textContent === 'msg-a')!;
+      const msgB = articles.find((a) => a.textContent === 'msg-b')!;
+      const msgC = articles.find((a) => a.textContent === 'msg-c')!;
+
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgC,
+              isIntersecting: false,
+              boundingClientRect: { top: 9999, bottom: 9999 } as DOMRect,
+            },
+            // msg-a: tall — top well ABOVE the line, bottom well BELOW it. It
+            // spans the reading-region start line.
+            {
+              target: msgA,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: -100,
+                bottom: RESERVE + 200,
+              } as DOMRect,
+            },
+            // msg-b: fully below the line (the article that would be picked if
+            // the spanning article were wrongly skipped).
+            {
+              target: msgB,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE + 205,
+                bottom: RESERVE + 400,
+              } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // The spanning article msg-a (x=0) is selected — no skip-ahead to msg-b.
+      expect(playheadLeft()).toBe(`${LANE_LEFT_PAD_PX}px`);
+    } finally {
+      fake.restore();
+    }
+  });
+});
