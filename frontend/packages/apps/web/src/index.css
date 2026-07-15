@@ -292,9 +292,11 @@
    * (close to the copper accent at lower saturation) so it reads as a
    * calm landing flash against the beige surface, not a coloured stamp. */
   --delta-color-highlight-wash: 128 83 55;
-  /* The copper wash is dark against the beige surface; a lower peak keeps
-   * the flash a warm tint rather than a brown stamp over the bubble. */
-  --delta-highlight-wash-peak: 0.35;
+  /* The copper wash is dark against the beige surface — a dark-over-light
+   * wash carries more contrast per unit of opacity than dark's
+   * light-over-dark indigo — so sepia sits below dark's peak to keep the
+   * flash a warm tint rather than a brown stamp over the bubble. */
+  --delta-highlight-wash-peak: 0.25;
 }
 
 html,
