@@ -166,6 +166,14 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // the turn machine back to idle. Default `false` when the field is absent.
     let is_api_error = raw.is_api_error_message == Some(true);
 
+    // `promptSource: "queued"` marks the replay of a prompt the CLI buffered
+    // while a turn was in flight, later written back as an ordinary
+    // `type: "user"` line. Attribution keys on this to keep a post-compact
+    // queued replay out of the local-command group it shares a `promptId`
+    // with (see the `is_queued_replay` guard in `attribute.rs`). Independent
+    // of `is_queued_command`, which flags the LEGACY attachment shape.
+    let is_queued_replay = raw.prompt_source.as_deref() == Some("queued");
+
     let role = if is_compact_summary {
         Role::CompactSummary
     } else if is_queued_command {
@@ -202,6 +210,7 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
         // 0 since it has no file position.
         seq: 0,
         is_queued_command,
+        is_queued_replay,
         is_api_error,
         model,
         git_branch: raw.git_branch,
@@ -288,7 +297,12 @@ mod tests {
     fn dequeued_user_line_parses_as_a_plain_user_message() {
         // The replay current claude writes when a queued prompt dequeues: an
         // ordinary `type: "user"` line carrying a `promptSource: "queued"`
-        // provenance field, which must not perturb the parse.
+        // provenance field. The parse surfaces it as a plain user line (it
+        // must not perturb `role` or `flatten_text`) and lifts the provenance
+        // to the new `is_queued_replay` flag, which attribution reads to keep
+        // the replay out of a local-command group when the queue drains right
+        // after a `/compact`. `is_queued_command` — the LEGACY attachment
+        // shape's flag — stays `false`; the two flags are distinct.
         let line = r#"{"uuid":"u9","parentUuid":"m8","type":"user","promptSource":"queued","timestamp":"2026-01-01T00:00:00Z","message":{"role":"user","content":"Reply with only the word: ok"}}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::User);
@@ -296,7 +310,27 @@ mod tests {
             msg.flatten_text().as_deref(),
             Some("Reply with only the word: ok")
         );
+        assert!(msg.is_queued_replay);
         assert!(!msg.is_queued_command);
+    }
+
+    #[test]
+    fn ordinary_user_line_is_not_flagged_queued_replay() {
+        // A user line with no `promptSource` field must leave `is_queued_replay`
+        // false: the flag is opt-in on the modern replay shape only.
+        let line = r#"{"uuid":"u1","type":"user","message":{"role":"user","content":"hi"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert!(!msg.is_queued_replay);
+    }
+
+    #[test]
+    fn non_queued_prompt_source_leaves_the_replay_flag_false() {
+        // A user line whose `promptSource` is anything other than `"queued"`
+        // (here `"cli"`, the ordinary interactive-submit provenance) is NOT a
+        // buffered-queue replay and must not set the flag.
+        let line = r#"{"uuid":"u1","type":"user","promptSource":"cli","message":{"role":"user","content":"hi"}}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert!(!msg.is_queued_replay);
     }
 
     #[test]
@@ -315,6 +349,11 @@ mod tests {
             Some("queued while the turn was busy")
         );
         assert!(msg.is_queued_command);
+        // Orthogonality pin: the LEGACY attachment shape sets ONLY
+        // `is_queued_command`; the MODERN `promptSource: "queued"` replay flag
+        // must stay false so downstream fold logic (compact-group exclusion)
+        // keys off the correct provenance.
+        assert!(!msg.is_queued_replay);
     }
 
     #[test]

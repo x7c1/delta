@@ -46,6 +46,20 @@ pub struct TranscriptMessage {
     /// injection (e.g. a background task notification), not external input — it
     /// inherits the active thread instead.
     pub is_queued_command: bool,
+    /// True when Claude Code stamped this line with `promptSource: "queued"`:
+    /// the replay of a prompt the user submitted while a turn was in flight,
+    /// which the CLI buffered in its internal input queue and wrote back as
+    /// an ordinary `type: "user"` line once the queue drained.
+    ///
+    /// Distinct from [`Self::is_queued_command`] (the LEGACY attachment shape).
+    /// A modern queued replay is a real user line and flows the normal
+    /// send-correlation path; the flag exists so the attribution fold can
+    /// exclude it from local-command grouping when the CLI happens to have
+    /// drained the queue right after a `/compact` (auto or manual) — the
+    /// replay then shares the compact group's `promptId`, but is a genuine
+    /// human turn, not command machinery, and must NOT be folded to
+    /// [`Role::Meta`] via the group's Meta reclassification.
+    pub is_queued_replay: bool,
     /// True when Claude Code flagged this line `isApiErrorMessage`: a synthetic
     /// assistant line it writes when a turn ends on an API error (a
     /// usage/session limit, a rate limit, or any other API failure) rather than
