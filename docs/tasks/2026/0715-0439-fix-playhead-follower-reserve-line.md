@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0715-0439-fix-playhead-follower-reserve-line
 created_at: 2026-07-15T04:39:26Z
-updated_at: 2026-07-15T06:16:00Z
+updated_at: 2026-07-15T08:05:00Z
 ---
 
 # fix(web): keep the timeline playhead on the scrub target when the pane follower flushes late
@@ -108,12 +108,12 @@ navigation-intent suites added on this branch.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In a real tool-heavy streaming session: wheel/arrow-scrub the playhead
+- [x] In a real tool-heavy streaming session: wheel/arrow-scrub the playhead
       rightward, pause at various points — the playhead never snaps back
       left on its own.
-- [ ] Manually scrolling the transcript pane still drags the playhead to the
+- [x] Manually scrolling the transcript pane still drags the playhead to the
       message being read (follow behavior intact).
-- [ ] Cross-lane jumps, axis clicks, and navigator/left-pane selection
+- [x] Cross-lane jumps, axis clicks, and navigator/left-pane selection
       behave as on the base branch (no regression to the two fixes under
       verification there).
 

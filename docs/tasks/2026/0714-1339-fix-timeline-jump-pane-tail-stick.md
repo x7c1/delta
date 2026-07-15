@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0714-1339-fix-timeline-jump-pane-tail-stick
 created_at: 2026-07-14T13:39:55Z
-updated_at: 2026-07-14T15:42:00Z
+updated_at: 2026-07-15T08:05:00Z
 ---
 
 # fix(web): keep the transcript pane on the jump target for timeline-initiated thread switches
@@ -123,13 +123,13 @@ every render while stick is armed.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Wheel/arrow scrub across lanes in a real tool-heavy session: the pane
+- [x] Wheel/arrow scrub across lanes in a real tool-heavy session: the pane
       shows the message the playhead landed on, and later streamed content
       does not yank the pane (or the playhead) to the tail.
-- [ ] Axis clicks on other lanes' dots (large and small/cluster regions):
+- [x] Axis clicks on other lanes' dots (large and small/cluster regions):
       pane lands on/near the target, playhead stays on the pick, no
       split-brain during live streaming.
-- [ ] Left-pane thread/child selection, branch chip click, and breadcrumb
+- [x] Left-pane thread/child selection, branch chip click, and breadcrumb
       drill-in still open the thread at its tail as before.
 
 ## Out of scope
