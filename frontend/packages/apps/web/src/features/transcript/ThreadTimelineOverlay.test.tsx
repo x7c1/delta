@@ -30,6 +30,7 @@ import {
   WHEEL_PER_EVENT_CLAMP_PX,
   WHEEL_STEP_COOLDOWN_MS,
   WHEEL_VELOCITY_WINDOW_MS,
+  nearestRenderedNeighborUuid,
   normalizeWheelDeltaPx,
   resetTimelineExpandedForTests,
   scheduleScrollAfterRender,
@@ -3648,6 +3649,179 @@ describe('ThreadTimelineOverlay scheduleScrollAfterRender DOM-ready wait (v11 Im
       window.cancelAnimationFrame = originalCancelRaf;
     }
   });
+
+  it('runs the onTimeout fallback (once, before settle) when the target never renders — and never on a successful landing', async () => {
+    // A cross-lane jump to a renders-nothing target (e.g. a tool_result
+    // carrier) polls to the DOM-ready timeout without ever scrolling. The
+    // timeout leg must run the caller's deterministic fallback (scroll to a
+    // rendering neighbor) BEFORE releasing the guard via onSettled — and never
+    // on the success leg.
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    const originalPerfNow = window.performance.now;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised here */
+    }) as typeof window.cancelAnimationFrame;
+    let nowValue = 1_000;
+    window.performance.now = (() => nowValue) as typeof performance.now;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        const onSettled = vi.fn();
+        const onTimeout = vi.fn(() => {
+          // The fallback fires while the schedule is still un-settled.
+          expect(onSettled).not.toHaveBeenCalled();
+        });
+        const cancel = scheduleScrollAfterRender(
+          container,
+          'never-arrives',
+          undefined,
+          onSettled,
+          onTimeout,
+        );
+        // First tick: target absent, still within budget — no fallback yet.
+        let cb = rafCallbacks.shift()!;
+        nowValue = 1_000;
+        cb(nowValue);
+        expect(onTimeout).not.toHaveBeenCalled();
+        expect(onSettled).not.toHaveBeenCalled();
+        // Cross the timeout: the fallback runs exactly once, then settle.
+        nowValue = 1_000 + SCROLL_DOM_READY_TIMEOUT_MS + 1;
+        cb = rafCallbacks.shift()!;
+        cb(nowValue);
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onSettled).toHaveBeenCalledTimes(1);
+        // A late cancel neither re-fires the fallback nor re-settles.
+        cancel();
+        expect(onTimeout).toHaveBeenCalledTimes(1);
+        expect(onSettled).toHaveBeenCalledTimes(1);
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+      window.performance.now = originalPerfNow;
+    }
+  });
+
+  it('does NOT run onTimeout when the target renders in time (success leg)', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView =
+      scrollIntoView as Element['scrollIntoView'];
+    const rafCallbacks: FrameRequestCallback[] = [];
+    const originalRaf = window.requestAnimationFrame;
+    const originalCancelRaf = window.cancelAnimationFrame;
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    }) as typeof window.requestAnimationFrame;
+    window.cancelAnimationFrame = (() => {
+      /* not exercised here */
+    }) as typeof window.cancelAnimationFrame;
+    try {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+      try {
+        const target = document.createElement('article');
+        target.setAttribute('data-message-uuid', 'here');
+        container.appendChild(target);
+        const onTimeout = vi.fn();
+        const onSettled = vi.fn();
+        const cancel = scheduleScrollAfterRender(
+          container,
+          'here',
+          undefined,
+          onSettled,
+          onTimeout,
+        );
+        const cb = rafCallbacks.shift()!;
+        cb(performance.now());
+        expect(scrollIntoView).toHaveBeenCalledTimes(1);
+        expect(onTimeout).not.toHaveBeenCalled();
+        expect(onSettled).toHaveBeenCalledTimes(1);
+        cancel();
+      } finally {
+        document.body.removeChild(container);
+      }
+    } finally {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
+});
+
+describe('nearestRenderedNeighborUuid (cross-lane timeout fallback target)', () => {
+  function makeContainer(renderedUuids: string[]): HTMLElement {
+    const container = document.createElement('div');
+    for (const uuid of renderedUuids) {
+      const article = document.createElement('article');
+      article.setAttribute('data-message-uuid', uuid);
+      container.appendChild(article);
+    }
+    return container;
+  }
+
+  // A single lane's timeline order; the middle entry renders nothing.
+  const sorted = [
+    { uuid: 'a', threadId: 1 as const },
+    { uuid: 'b', threadId: 1 as const },
+    { uuid: 'target', threadId: 1 as const },
+    { uuid: 'd', threadId: 1 as const },
+    { uuid: 'e', threadId: 1 as const },
+  ];
+
+  it('returns the closest rendering neighbor, preferring the tail-ward one on a tie', () => {
+    // Both immediate neighbors render: distance ties, tail-ward (`d`) wins so
+    // the pane lands just past the non-rendering carrier.
+    const container = makeContainer(['a', 'b', 'd', 'e']);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'target', 1),
+    ).toBe('d');
+  });
+
+  it('reaches past a non-rendering immediate neighbor to the next rendering one', () => {
+    // `d` (immediate tail-ward) is NOT rendered, so the nearest rendering
+    // neighbor is `b` (immediate head-ward) at the same distance.
+    const container = makeContainer(['a', 'b', 'e']);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'target', 1),
+    ).toBe('b');
+  });
+
+  it('ignores neighbors in other lanes', () => {
+    const mixed = [
+      { uuid: 'x-other', threadId: 2 as const },
+      { uuid: 'target', threadId: 1 as const },
+      { uuid: 'y-lane', threadId: 1 as const },
+    ];
+    // The head-ward neighbor is in another lane; only the tail-ward same-lane
+    // `y-lane` is eligible.
+    const container = makeContainer(['x-other', 'y-lane']);
+    expect(
+      nearestRenderedNeighborUuid(container, mixed, 'target', 1),
+    ).toBe('y-lane');
+  });
+
+  it('returns null when no lane message is rendered (caller falls back to lane top)', () => {
+    const container = makeContainer([]);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'target', 1),
+    ).toBeNull();
+  });
+
+  it('returns null when the target is not in the sorted list', () => {
+    const container = makeContainer(['a', 'b']);
+    expect(
+      nearestRenderedNeighborUuid(container, sorted, 'missing', 1),
+    ).toBeNull();
+  });
 });
 
 describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement 3)', () => {
@@ -6746,6 +6920,369 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
     } finally {
       window.requestAnimationFrame = originalRaf;
       window.cancelAnimationFrame = originalCancelRaf;
+    }
+  });
+});
+
+describe('ThreadTimelineOverlay pane scroll follower reserve-line selection', () => {
+  // Regression suite for the leftward playhead yank: after a same-lane jump
+  // parks the target at the reading-region start line (message articles carry
+  // `scroll-margin-top: var(--delta-top-region-reserve)`), the PREVIOUS
+  // article is left intersecting by a sliver in the reserve band above the
+  // line, with a smaller (more negative) top. The old follower committed the
+  // raw smallest-top, so any IO flush that escaped the guards after the jump
+  // yanked the playhead one mark backwards. The fix selects the article that
+  // OWNS the line (skipping any whose bottom edge has crossed above it),
+  // making the post-jump commit idempotent: it resolves to the very message
+  // the scroll established, so WHEN the flush fires no longer matters.
+
+  type FakeIO = {
+    callback: IntersectionObserverCallback;
+    options?: IntersectionObserverInit;
+    observed: Set<Element>;
+    emit: (entries: Partial<IntersectionObserverEntry>[]) => void;
+  };
+
+  function installFakeIO(): { instances: FakeIO[]; restore: () => void } {
+    const instances: FakeIO[] = [];
+    const original = (
+      globalThis as { IntersectionObserver?: typeof IntersectionObserver }
+    ).IntersectionObserver;
+    class FakeIntersectionObserver {
+      callback: IntersectionObserverCallback;
+      options?: IntersectionObserverInit;
+      observed = new Set<Element>();
+      emit!: (entries: Partial<IntersectionObserverEntry>[]) => void;
+      constructor(
+        cb: IntersectionObserverCallback,
+        opts?: IntersectionObserverInit,
+      ) {
+        this.callback = cb;
+        this.options = opts;
+        this.emit = (entries) => {
+          this.callback(
+            entries as IntersectionObserverEntry[],
+            this as unknown as IntersectionObserver,
+          );
+        };
+        instances.push(this as unknown as FakeIO);
+      }
+      observe(el: Element) {
+        this.observed.add(el);
+      }
+      unobserve(el: Element) {
+        this.observed.delete(el);
+      }
+      disconnect() {
+        this.observed.clear();
+      }
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    (
+      globalThis as { IntersectionObserver?: unknown }
+    ).IntersectionObserver = FakeIntersectionObserver;
+    return {
+      instances,
+      restore: () => {
+        (
+          globalThis as {
+            IntersectionObserver?: typeof IntersectionObserver | undefined;
+          }
+        ).IntersectionObserver = original;
+      },
+    };
+  }
+
+  async function getLiveIO(
+    fake: { instances: FakeIO[] },
+    expectedObserved: number,
+  ): Promise<FakeIO> {
+    return waitFor(() => {
+      const candidate = fake.instances.at(-1);
+      expect(candidate?.observed.size).toBe(expectedObserved);
+      return candidate as FakeIO;
+    });
+  }
+
+  /**
+   * The top-region reserve (px) installed on the conversation body for these
+   * cases. In production `TranscriptPane` drives `--delta-top-region-reserve`
+   * inline; here we set it directly so `readTopRegionReserve` resolves it and
+   * the follower's reading-region line sits at `containerTop + RESERVE`
+   * (containerTop is 0 in jsdom).
+   */
+  const RESERVE = 40;
+
+  function playheadLeft(): string {
+    return playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]);
+  }
+
+  function articlesInBody(): HTMLElement[] {
+    return within(screen.getByTestId('conversation-body')).getAllByText(/msg-/);
+  }
+
+  function threeMessages() {
+    return new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-b', '2026-01-01T00:01:00Z'),
+          makeUserText(1, 2, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+    ]);
+  }
+
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+  });
+
+  it('leaves the playhead on the scrubbed target when an IO flush lands after the guard window (post-scroll geometry is a no-op)', async () => {
+    // Reproduces the leftward yank at b2bcf0b: a same-lane wheel step parks
+    // msg-b at the reserve line, msg-a is left partially visible in the
+    // reserve band above it, and a late IO flush (past the 200 ms guard)
+    // would commit the raw smallest-top (msg-a). With the fix, msg-a is
+    // skipped (its bottom edge sits AT the line) and the flush resolves back
+    // to msg-b — the message the scroll established.
+    const fake = installFakeIO();
+    let nowMs = 10_000;
+    const originalPerfNow = window.performance.now;
+    window.performance.now = (() => nowMs) as typeof performance.now;
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      const { bodyRef } = renderOverlay({
+        threads: [makeThread(1)],
+        messagesByThread: threeMessages(),
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      bodyRef.current!.style.setProperty(
+        '--delta-top-region-reserve',
+        `${RESERVE}px`,
+      );
+      // Playhead starts on the tail (msg-c, x=240).
+      expect(playheadLeft()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+
+      // Same-lane wheel-up: msg-c → msg-b. This bumps scrubTick, which stamps
+      // the programmatic-scroll guard and (in production) parks msg-b at the
+      // reserve line via scrollIntoView.
+      const axisColumn = screen.getByTestId('thread-timeline-axis-column');
+      act(() => {
+        axisColumn.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -50,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      await waitFor(() => {
+        expect(playheadLeft()).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
+      });
+
+      const articles = articlesInBody();
+      const io = await getLiveIO(fake, articles.length);
+      const msgA = articles.find((a) => a.textContent === 'msg-a')!;
+      const msgB = articles.find((a) => a.textContent === 'msg-b')!;
+      const msgC = articles.find((a) => a.textContent === 'msg-c')!;
+
+      // Expire the guard window so the flush is NOT suppressed by time — this
+      // is the exact condition an observer re-bind hits mid-session.
+      nowMs += PANE_SCROLL_PROGRAMMATIC_GUARD_MS + 50;
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgC,
+              isIntersecting: false,
+              boundingClientRect: { top: 9999, bottom: 9999 } as DOMRect,
+            },
+            // msg-a: sliver still visible in the reserve band, smallest top,
+            // but its BOTTOM sits AT the reserve line — body has left the
+            // reading region.
+            {
+              target: msgA,
+              isIntersecting: true,
+              boundingClientRect: { top: -30, bottom: RESERVE } as DOMRect,
+            },
+            // msg-b: parked exactly at the reserve line by the scroll.
+            {
+              target: msgB,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE,
+                bottom: RESERVE + 180,
+              } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // Idempotent: still on msg-b (x=120). At b2bcf0b this asserted x=0.
+      expect(playheadLeft()).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
+    } finally {
+      fake.restore();
+      window.performance.now = originalPerfNow;
+    }
+  });
+
+  it('still follows a genuine user scroll that brings an earlier message body below the reserve line (follower not deadened)', async () => {
+    // The skip must not deaden legitimate follows: when the user scrolls so an
+    // earlier article's body starts just below the reading-region line, the
+    // playhead moves to it.
+    const fake = installFakeIO();
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      const { bodyRef } = renderOverlay({
+        threads: [makeThread(1)],
+        messagesByThread: threeMessages(),
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      bodyRef.current!.style.setProperty(
+        '--delta-top-region-reserve',
+        `${RESERVE}px`,
+      );
+      // Playhead starts on the tail (msg-c, x=240).
+      expect(playheadLeft()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+
+      const articles = articlesInBody();
+      const io = await getLiveIO(fake, articles.length);
+      const msgA = articles.find((a) => a.textContent === 'msg-a')!;
+      const msgB = articles.find((a) => a.textContent === 'msg-b')!;
+      const msgC = articles.find((a) => a.textContent === 'msg-c')!;
+
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgC,
+              isIntersecting: false,
+              boundingClientRect: { top: 9999, bottom: 9999 } as DOMRect,
+            },
+            // msg-a: body starts just BELOW the reserve line and extends down
+            // — clearly in the reading region.
+            {
+              target: msgA,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE + 5,
+                bottom: RESERVE + 200,
+              } as DOMRect,
+            },
+            {
+              target: msgB,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE + 205,
+                bottom: RESERVE + 400,
+              } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // Followed the scroll to msg-a (x=0).
+      expect(playheadLeft()).toBe(`${LANE_LEFT_PAD_PX}px`);
+    } finally {
+      fake.restore();
+    }
+  });
+
+  it('selects a tall article that spans the reserve line rather than skipping ahead to the next', async () => {
+    // A tall article whose top is ABOVE the line and bottom BELOW it still
+    // occupies the reading region — it must be selected, not skipped to the
+    // next article.
+    const fake = installFakeIO();
+    stubAxisRect({ left: 0, width: 240 });
+    try {
+      const { bodyRef } = renderOverlay({
+        threads: [makeThread(1)],
+        messagesByThread: threeMessages(),
+        activeThreadId: 1,
+        conversationArticles: [
+          { uuid: 'msg-a' },
+          { uuid: 'msg-b' },
+          { uuid: 'msg-c' },
+        ],
+      });
+      await screen.findAllByTestId('thread-timeline-dot');
+      bodyRef.current!.style.setProperty(
+        '--delta-top-region-reserve',
+        `${RESERVE}px`,
+      );
+
+      const articles = articlesInBody();
+      const io = await getLiveIO(fake, articles.length);
+      const msgA = articles.find((a) => a.textContent === 'msg-a')!;
+      const msgB = articles.find((a) => a.textContent === 'msg-b')!;
+      const msgC = articles.find((a) => a.textContent === 'msg-c')!;
+
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          io.emit([
+            {
+              target: msgC,
+              isIntersecting: false,
+              boundingClientRect: { top: 9999, bottom: 9999 } as DOMRect,
+            },
+            // msg-a: tall — top well ABOVE the line, bottom well BELOW it. It
+            // spans the reading-region start line.
+            {
+              target: msgA,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: -100,
+                bottom: RESERVE + 200,
+              } as DOMRect,
+            },
+            // msg-b: fully below the line (the article that would be picked if
+            // the spanning article were wrongly skipped).
+            {
+              target: msgB,
+              isIntersecting: true,
+              boundingClientRect: {
+                top: RESERVE + 205,
+                bottom: RESERVE + 400,
+              } as DOMRect,
+            },
+          ]);
+        });
+        act(() => {
+          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      // The spanning article msg-a (x=0) is selected — no skip-ahead to msg-b.
+      expect(playheadLeft()).toBe(`${LANE_LEFT_PAD_PX}px`);
+    } finally {
+      fake.restore();
     }
   });
 });

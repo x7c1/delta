@@ -52,6 +52,12 @@
    * copper that survives against its warm beige surface (the original
    * amber-100 was visually identical to the sepia surface and disappeared
    * entirely).
+   *
+   * `highlight-wash-peak` is the flash's starting opacity (the keyframes
+   * fade it to 0). The amber-100 wash is pale, so light needs the full 0.7
+   * to register at all; the dark and sepia washes carry far more contrast
+   * against their surfaces, so those themes override the peak lower to keep
+   * the landing flash understated instead of a coloured stamp.
    */
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;
@@ -59,6 +65,7 @@
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
   --delta-color-highlight-wash: 254 243 199;
+  --delta-highlight-wash-peak: 0.7;
 
   /* The terminal font stack, defined once in tailwind.config.js
    * (fontFamily.terminal) and exposed here for xterm (src/theme.ts). */
@@ -205,6 +212,9 @@
    * value keeps the same hue family while staying calm enough not to
    * dominate the landing message. */
   --delta-color-highlight-wash: 148 156 222;
+  /* The indigo wash is bright against the dark chrome; a lower peak keeps
+   * the flash noticeable without lighting up the whole bubble. */
+  --delta-highlight-wash-peak: 0.35;
 }
 
 :root[data-theme='light'] {
@@ -233,6 +243,7 @@
   --delta-color-terminal-overlay: 30 41 59;
   --delta-color-terminal-overlay-hover: 51 65 85;
   --delta-color-highlight-wash: 254 243 199;
+  --delta-highlight-wash-peak: 0.7;
 }
 
 /*
@@ -281,6 +292,11 @@
    * (close to the copper accent at lower saturation) so it reads as a
    * calm landing flash against the beige surface, not a coloured stamp. */
   --delta-color-highlight-wash: 128 83 55;
+  /* The copper wash is dark against the beige surface — a dark-over-light
+   * wash carries more contrast per unit of opacity than dark's
+   * light-over-dark indigo — so sepia sits below dark's peak to keep the
+   * flash a warm tint rather than a brown stamp over the bubble. */
+  --delta-highlight-wash-peak: 0.25;
 }
 
 html,
@@ -371,7 +387,8 @@ body {
  * without being shouted at.
  *
  * The wash is painted ONCE as an absolutely-positioned `::after` overlay
- * filling the bubble, and only its `opacity` is animated (0.7 -> 0). This is
+ * filling the bubble, and only its `opacity` is animated (from the theme's
+ * `--delta-highlight-wash-peak` down to 0). This is
  * the whole point of this rule: `opacity` is a compositor-accelerated
  * property, so the browser promotes the overlay to its own layer and fades
  * it on the GPU without repainting the message body on every frame. The
@@ -403,10 +420,13 @@ body {
  * Modern browsers (Chrome 105+, Safari 15.4+, Firefox 121+) all support
  * `:has()` natively.
  *
- * The wash color is sourced from `--delta-color-highlight-wash`. Light
- * holds the original amber-100; dark uses a desaturated indigo aligned on
- * the accent hue family, and sepia uses a muted copper that survives
- * against the beige surface. `prefers-reduced-motion: reduce` removes the
+ * The wash color is sourced from `--delta-color-highlight-wash` and the
+ * flash's starting opacity from `--delta-highlight-wash-peak`. Light holds
+ * the original amber-100 at the full 0.7 peak; dark uses a desaturated
+ * indigo aligned on the accent hue family and sepia a muted copper that
+ * survives against the beige surface, both at a lower peak so the
+ * higher-contrast washes stay understated. `prefers-reduced-motion: reduce`
+ * removes the
  * overlay entirely (`display: none`) so users who opt out of motion see no
  * flash at all.
  */
@@ -427,14 +447,14 @@ body {
   pointer-events: none;
   background-color: rgb(var(--delta-color-highlight-wash));
   will-change: opacity;
-  animation: delta-timeline-jump-highlight-fade 600ms ease-out forwards;
+  animation: delta-timeline-jump-highlight-fade 450ms ease-out forwards;
 }
 .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
   border-radius: 0.375rem;
 }
 @keyframes delta-timeline-jump-highlight-fade {
   0% {
-    opacity: 0.7;
+    opacity: var(--delta-highlight-wash-peak, 0.7);
   }
   100% {
     opacity: 0;

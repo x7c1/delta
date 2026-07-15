@@ -354,6 +354,32 @@ export function TranscriptPane({
   const stickRef = useRef(true);
   const prevPendingRef = useRef(pendingCount);
 
+  // The pending timeline-jump intent (set atomically with a cross-lane
+  // active-thread switch by the overlay). While an intent for THIS lane is
+  // live the pane must land on the jump target, never the lane's tail: the
+  // thread-change effect skips its stick-to-bottom jump (below) and the scroll
+  // listener refuses to re-arm stick from the jump's own programmatic
+  // scrollIntoView — even when the target sits near the tail and the landing
+  // scroll clamps at the bottom. Only a genuine user scroll (after the intent
+  // is consumed) re-arms stick. Subscribing reactively is cheap: the intent
+  // flips at most twice per cross-lane jump (set, then cleared on settle). The
+  // ref mirror lets the scroll listener read the latest value without
+  // re-binding its native listener every render.
+  const activeThreadJumpTarget = useNavStore(
+    (state) => state.activeThreadJumpTarget,
+  );
+  const jumpTargetRef = useRef(activeThreadJumpTarget);
+  useLayoutEffect(() => {
+    jumpTargetRef.current = activeThreadJumpTarget;
+  }, [activeThreadJumpTarget]);
+  // The active thread id mirrored into a ref so the once-bound scroll listener
+  // can compare a live jump intent's lane against the pane's current lane
+  // without re-binding on every thread switch.
+  const activeThreadIdRef = useRef<ThreadId | null>(activeThread?.id ?? null);
+  useLayoutEffect(() => {
+    activeThreadIdRef.current = activeThread?.id ?? null;
+  }, [activeThread?.id]);
+
   // The bottom overlay (composer + pending strip + bottom notices) floats over
   // the scrolling body and grows with the composer's content. Reserve bottom
   // padding equal to its MEASURED height (plus the overlay inset as a gap) so
@@ -509,6 +535,19 @@ export function TranscriptPane({
       return;
     }
     const onScroll = () => {
+      // A timeline jump into this lane is landing: its programmatic
+      // scrollIntoView fires a scroll event just like a user scroll, and for a
+      // near-tail target it clamps at the bottom. Re-arming stick here would
+      // glue the pane to the tail (M2) and then live content would push the
+      // jump target off-screen. So while an intent for this lane is live, never
+      // arm — keep stick disarmed and let the jump land on its target. The
+      // intent is cleared a couple of frames after the scroll settles (see the
+      // overlay), so a genuine user scroll afterwards re-arms normally.
+      const jump = jumpTargetRef.current;
+      if (jump !== null && jump.threadId === activeThreadIdRef.current) {
+        stickRef.current = false;
+        return;
+      }
       stickRef.current =
         el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD_PX;
     };
@@ -538,6 +577,20 @@ export function TranscriptPane({
     // A breadcrumb "go up" navigation wants to land on the origin chip, not the
     // bottom: skip the stick-to-bottom jump and let the scroll effect take over.
     if (scrollToChildRef.current !== null) {
+      stickRef.current = false;
+      return;
+    }
+    // A timeline-initiated cross-lane jump switched into this lane and wants to
+    // land on the message the playhead picked, not the lane's tail. Read the
+    // intent synchronously in this same commit (the overlay set it atomically
+    // with the active-thread switch) and skip the stick-to-bottom jump — the
+    // overlay's scheduleScrollAfterRender places the pane on the target, and
+    // the scroll listener above keeps stick disarmed through the landing.
+    // Branches exactly like the breadcrumb precedent above. Read the store
+    // directly (not the ref mirror) so this does not depend on the
+    // jump-target sync layout effect having run first in this commit.
+    const jumpTarget = useNavStore.getState().activeThreadJumpTarget;
+    if (jumpTarget !== null && jumpTarget.threadId === activeThread?.id) {
       stickRef.current = false;
       return;
     }
@@ -1005,6 +1058,14 @@ export function TranscriptPane({
       {bottomContent}
     </div>
   );
+  // Whether a bottom overlay is mounted at all. This is the ONLY real state the
+  // measure effect below derives from: the effect re-binds its ResizeObserver
+  // when the overlay node appears or disappears, and the observer itself
+  // handles every subsequent size change (composer auto-grow, banners). Keying
+  // the effect on this boolean instead of `bottomContent`'s JSX identity (a
+  // fresh object every render) stops it from re-running — and rewriting the
+  // body's `scrollTop` while stick is armed — on every unrelated render.
+  const hasBottomOverlay = bottomContent != null;
 
   // Track the bottom overlay's actual height and drive the body's bottom padding
   // from it (height + the overlay inset as a gap), so resting content clears the
@@ -1055,7 +1116,7 @@ export function TranscriptPane({
     const observer = new ResizeObserver(apply);
     observer.observe(overlay);
     return () => observer.disconnect();
-  }, [bottomContent]);
+  }, [hasBottomOverlay]);
 
   // Track whichever top-region surface is currently mounted and drive
   // the body's `--delta-top-region-reserve` CSS variable from its
