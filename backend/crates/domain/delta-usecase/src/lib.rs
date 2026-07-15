@@ -8,6 +8,7 @@
 //! It depends only on [`delta_model`]. The concrete implementations live in the
 //! gateway crates; the composition root wires them together.
 
+mod agent;
 mod error;
 mod interactor;
 mod launch_config;
@@ -20,6 +21,14 @@ mod session_listing;
 mod session_page;
 mod turn;
 
+pub use agent::{
+    AgentAdapter, AgentCapabilities, AgentEvent, AgentEventStream, AgentPermissionRequest,
+    AgentProvider, AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
+    InterruptCapability, LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle,
+    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
+    SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    TurnStatus,
+};
 pub use error::{Error, Result};
 pub use interactor::{
     BoxedInteractor, ExternalHandler, ExternalHandlerId, Interactor, PendingPermission,
