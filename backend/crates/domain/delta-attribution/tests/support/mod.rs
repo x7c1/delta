@@ -30,6 +30,7 @@ pub fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
         created_at: Some("2026-01-01T00:00:00Z".into()),
         seq: 0,
         is_queued_command: false,
+        is_queued_replay: false,
         is_api_error: false,
         model: None,
         git_branch: None,
@@ -64,6 +65,19 @@ pub fn api_error_line(uuid: &str) -> TranscriptMessage {
 pub fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         is_queued_command: true,
+        ..user_line(uuid, text)
+    }
+}
+
+/// A modern queued-prompt REPLAY: an ordinary `type: "user"` line whose
+/// `promptSource` was `"queued"`. Claude Code writes this when a prompt the
+/// user submitted while a turn was in flight drains from the CLI's internal
+/// input queue. Distinct from [`queued_command_line`] — the flags are
+/// independent, and only the *replay* shape's flag guards the compact-group
+/// exclusion in attribution.
+pub fn queued_replay_line(uuid: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        is_queued_replay: true,
         ..user_line(uuid, text)
     }
 }

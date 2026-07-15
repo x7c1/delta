@@ -61,4 +61,14 @@ pub(super) struct RawLine {
     /// matches an outstanding send, never resets `carry_thread`).
     #[serde(rename = "isCompactSummary")]
     pub is_compact_summary: Option<bool>,
+    /// The provenance tag Claude Code stamps on the replay of a prompt the
+    /// user submitted while a turn was in flight: the CLI buffers it in its
+    /// internal input queue and, when the queue drains, writes the buffered
+    /// prompt back as a plain `type: "user"` line with `promptSource:
+    /// "queued"`. Other user lines omit the field or carry a non-`"queued"`
+    /// value (e.g. `"cli"`). Attribution reads this to keep a post-compact
+    /// queued replay out of the local-command group it shares a `promptId`
+    /// with (see the `is_queued_replay` guard in `attribute.rs`).
+    #[serde(rename = "promptSource")]
+    pub prompt_source: Option<String>,
 }

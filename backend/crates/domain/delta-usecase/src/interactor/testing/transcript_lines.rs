@@ -17,6 +17,7 @@ pub(crate) fn user_line(uuid: &str, text: &str) -> TranscriptMessage {
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
         is_queued_command: false,
+        is_queued_replay: false,
         is_api_error: false,
         model: None,
         git_branch: None,
@@ -36,6 +37,7 @@ pub(crate) fn assistant_line(uuid: &str, text: &str) -> TranscriptMessage {
         // The reader assigns the real line index on read; this is a placeholder.
         seq: 0,
         is_queued_command: false,
+        is_queued_replay: false,
         is_api_error: false,
         model: None,
         git_branch: None,
@@ -67,6 +69,32 @@ pub(crate) fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         is_queued_command: true,
         ..user_line(uuid, text)
+    }
+}
+
+/// A modern queued-prompt REPLAY: an ordinary `type: "user"` line whose
+/// `promptSource` was `"queued"`. Claude Code writes this when a prompt the
+/// user submitted while a turn was in flight drains from the CLI's internal
+/// input queue. Distinct from [`queued_command_line`] — the flags are
+/// independent, and only the *replay* shape's flag guards the compact-group
+/// exclusion in attribution. Callers that need to reproduce the post-compact
+/// promptId collision should additionally stamp the group's `promptId` on
+/// the returned line (via [`with_prompt_id`]).
+pub(crate) fn queued_replay_line(uuid: &str, text: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        is_queued_replay: true,
+        ..user_line(uuid, text)
+    }
+}
+
+/// Stamp a `promptId` onto an existing transcript line — mirrors Claude Code's
+/// per-turn `promptId` that groups the members of a slash/local-command
+/// sequence (and, in the post-compact edge case, catches a queued-prompt
+/// replay under the same id).
+pub(crate) fn with_prompt_id(prompt_id: &str, line: TranscriptMessage) -> TranscriptMessage {
+    TranscriptMessage {
+        prompt_id: Some(PromptId::from(prompt_id)),
+        ..line
     }
 }
 

@@ -35,9 +35,9 @@ pub(crate) use transcript_lines::{
     agent_tool_use_line, api_error_line, assistant_line, assistant_line_at,
     background_tool_use_line, bash_tool_use_line, compact_summary_line,
     foreground_agent_tool_use_line, interrupt_line, local_command_caveat_line,
-    local_command_name_line, local_command_stdout_line, queued_command_line,
+    local_command_name_line, local_command_stdout_line, queued_command_line, queued_replay_line,
     task_notification_line, task_notification_line_both_missing,
-    task_notification_line_task_id_only, tool_result_line, user_line,
+    task_notification_line_task_id_only, tool_result_line, user_line, with_prompt_id,
 };
 
 // Re-exported so test files can call `SessionStore` methods on `ix.store()`

@@ -350,10 +350,21 @@ pub fn attribute_lines(
         // `Role::Meta` so it renders collapsed instead of as a user bubble, and
         // — crucially — exclude it from `is_human_turn` so it does not run
         // through external-input handling on `main`.
-        let in_local_command_group = line
-            .prompt_id
-            .as_ref()
-            .is_some_and(|id| state.local_command_prompts.contains(id));
+        //
+        // Exception: a `promptSource: "queued"` replay is a genuine human turn
+        // even when its `promptId` collides with a local-command group's. Claude
+        // Code reuses the current `promptId` for the queued-prompt replay it
+        // emits post-compact, so a prompt the user typed *while* an
+        // auto- or manual `/compact` was running ends up sharing the compact
+        // group's `promptId`. Excluding queued replays here keeps the replay
+        // out of the group's Meta reclassification, so it flows through the
+        // normal `is_human_turn` branch (matches the head outstanding send by
+        // text, emits `SendMatched`, and attributes to the send's thread).
+        let in_local_command_group = !line.is_queued_replay
+            && line
+                .prompt_id
+                .as_ref()
+                .is_some_and(|id| state.local_command_prompts.contains(id));
         let role = if in_local_command_group && matches!(line.role, Role::User) {
             Role::Meta
         } else {
