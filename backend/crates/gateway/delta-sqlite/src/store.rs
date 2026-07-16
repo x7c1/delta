@@ -8,8 +8,8 @@ use tokio::sync::Mutex;
 
 use delta_attribution::SubagentLaunch;
 use delta_model::{
-    LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, PromptId, Role, Send,
-    SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
+    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus,
+    PromptId, Role, Send, SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 use delta_usecase::{
     NewSession, RecentWorkdir, RepositoryCloneRow, RepositoryScanRoot, SessionPageCursor,
@@ -186,6 +186,9 @@ struct SessionParts {
     repo_root: Option<String>,
     requested_workdir: Option<String>,
     repository_display_name: Option<String>,
+    provider: String,
+    provider_session_id: Option<String>,
+    provider_thread_id: Option<String>,
 }
 
 fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
@@ -200,6 +203,9 @@ fn map_session(row: &Row<'_>) -> rusqlite::Result<SessionParts> {
         repo_root: row.get(7)?,
         requested_workdir: row.get(8)?,
         repository_display_name: row.get(9)?,
+        provider: row.get(10)?,
+        provider_session_id: row.get(11)?,
+        provider_thread_id: row.get(12)?,
     })
 }
 
@@ -215,6 +221,9 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
         repo_root: parts.repo_root,
         requested_workdir: parts.requested_workdir,
         repository_display_name: parts.repository_display_name,
+        provider: AgentProvider::parse(&parts.provider)?,
+        provider_session_id: parts.provider_session_id,
+        provider_thread_id: parts.provider_thread_id,
     })
 }
 
@@ -224,7 +233,10 @@ fn session_from_parts(parts: SessionParts) -> Result<Session> {
 /// derivable from `last_activity_at`/`created_at` and not returned.
 fn page_row_from_row(row: &Row<'_>) -> Result<SessionPageRow> {
     let session = session_from_parts(map_session(row)?)?;
-    let last_activity_at: Option<String> = row.get(10)?;
+    // `last_activity_at` follows the `SESSION_COLS` block, so its positional
+    // index is the column count of `SESSION_COLS` (13) — the first column after
+    // the session fields.
+    let last_activity_at: Option<String> = row.get(13)?;
     Ok((session, last_activity_at))
 }
 
@@ -325,7 +337,8 @@ fn query_session_by_id(conn: &Connection, id: &SessionId) -> Result<Option<Sessi
 }
 
 const SESSION_COLS: &str = "id, cwd, transcript_path, title, status, created_at, \
-     branch_at_launch, repo_root, requested_workdir, repository_display_name";
+     branch_at_launch, repo_root, requested_workdir, repository_display_name, \
+     provider, provider_session_id, provider_thread_id";
 /// Thread columns plus the derived `root_message_uuid`: the branch edge's
 /// canonical home is `message.semantic_parent_uuid`, so the root is computed
 /// from the thread's first semantically parented message — falling back to the
@@ -409,6 +422,7 @@ impl SessionStore for SqliteStore {
         Ok((session, main_id))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
@@ -417,6 +431,7 @@ impl SessionStore for SqliteStore {
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
+        provider: AgentProvider,
     ) -> std::result::Result<(Session, ThreadId), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
@@ -425,12 +440,15 @@ impl SessionStore for SqliteStore {
         // spawn-time git snapshot (`branch_at_launch`, `repo_root`,
         // `repository_display_name`) and the user-selected `requested_workdir`
         // are written once here and never updated later — see the doc on
-        // `Session`.
+        // `Session`. `provider` records the backend; the provider-minted
+        // conversation ids are unknown until launch returns, so they stay NULL
+        // here and are filled later via `set_provider_ids`.
         conn.execute(
             "INSERT INTO session
              (id, cwd, transcript_path, title, status, created_at,
-              branch_at_launch, repo_root, requested_workdir, repository_display_name)
-             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6, ?7)",
+              branch_at_launch, repo_root, requested_workdir, repository_display_name,
+              provider)
+             VALUES (?1, ?2, NULL, NULL, 'spawning', ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 id.as_str(),
                 cwd,
@@ -439,6 +457,7 @@ impl SessionStore for SqliteStore {
                 repo_root,
                 requested_workdir,
                 repository_display_name,
+                provider.as_str(),
             ],
         )
         .map_err(Error::from)?;
@@ -455,9 +474,29 @@ impl SessionStore for SqliteStore {
                 repo_root: repo_root.map(str::to_owned),
                 requested_workdir: requested_workdir.map(str::to_owned),
                 repository_display_name: repository_display_name.map(str::to_owned),
+                provider,
+                provider_session_id: None,
+                provider_thread_id: None,
             },
             main_id,
         ))
+    }
+
+    async fn set_provider_ids(
+        &self,
+        id: &SessionId,
+        provider_session_id: Option<&str>,
+        provider_thread_id: Option<&str>,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        conn.execute(
+            "UPDATE session
+             SET provider_session_id = ?2, provider_thread_id = ?3
+             WHERE id = ?1",
+            params![id.as_str(), provider_session_id, provider_thread_id],
+        )
+        .map_err(Error::from)?;
+        Ok(())
     }
 
     async fn delete_session(

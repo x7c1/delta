@@ -1,5 +1,6 @@
 //! The single Claude Code TUI session Delta wraps.
 
+use crate::agent_provider::AgentProvider;
 use crate::newtype::string_newtype;
 use crate::session_status::SessionStatus;
 
@@ -72,4 +73,21 @@ pub struct Session {
     /// session launched in a linked worktree carries the same label as one
     /// launched in the main tree.
     pub repository_display_name: Option<String>,
+    /// Which AI-agent backend drives this session. [`AgentProvider::Claude`]
+    /// for every session Delta launched before multi-provider support, and for
+    /// any row that predates the `session.provider` column (it reads the
+    /// column's `'claude'` default). The core keys behaviour off the provider's
+    /// capabilities, never off this value directly.
+    pub provider: AgentProvider,
+    /// The provider's own identifier for the underlying conversation, when the
+    /// provider — not Delta — mints it (e.g. Codex's `thr_...` returned from
+    /// `thread/start`). `None` for a Claude session, whose conversation id *is*
+    /// the Delta-minted [`Self::id`], and for any row that predates the column.
+    pub provider_session_id: Option<String>,
+    /// The provider's thread identifier. A Delta session maps 1:1 onto a
+    /// provider thread, so for Codex this currently equals
+    /// [`Self::provider_session_id`]; it is kept distinct so a future
+    /// many-threads-per-session provider has a home for it. `None` for Claude
+    /// and for rows that predate the column.
+    pub provider_thread_id: Option<String>,
 }

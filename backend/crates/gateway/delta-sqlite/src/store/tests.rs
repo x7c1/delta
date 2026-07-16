@@ -1,6 +1,6 @@
 use delta_model::{
-    ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus, SessionId,
-    SessionStatus, ThreadId,
+    AgentProvider, ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus,
+    SessionId, SessionStatus, ThreadId,
 };
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
@@ -795,6 +795,65 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// A freshly inserted session round-trips its provider, and the
+/// provider-minted conversation ids written later via `set_provider_ids`.
+#[tokio::test]
+async fn a_spawning_session_round_trips_provider_fields() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // A Claude spawn (every existing caller) reads back as Claude with no
+    // provider ids — the behaviour before this change.
+    store
+        .insert_spawning_session(
+            &SessionId::from("claude-1"),
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let claude = store
+        .session(&SessionId::from("claude-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claude.provider, AgentProvider::Claude);
+    assert_eq!(claude.provider_session_id, None);
+    assert_eq!(claude.provider_thread_id, None);
+
+    // A Codex spawn records its provider; the provider-minted ids are unknown
+    // at spawn (NULL) and are filled in later via `set_provider_ids`.
+    let codex_id = SessionId::from("codex-1");
+    store
+        .insert_spawning_session(
+            &codex_id,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Codex,
+        )
+        .await
+        .unwrap();
+    let spawned = store.session(&codex_id).await.unwrap().unwrap();
+    assert_eq!(spawned.provider, AgentProvider::Codex);
+    assert_eq!(spawned.provider_session_id, None);
+    assert_eq!(spawned.provider_thread_id, None);
+
+    store
+        .set_provider_ids(&codex_id, Some("thr_abc"), Some("thr_abc"))
+        .await
+        .unwrap();
+    let resolved = store.session(&codex_id).await.unwrap().unwrap();
+    assert_eq!(resolved.provider, AgentProvider::Codex);
+    assert_eq!(resolved.provider_session_id.as_deref(), Some("thr_abc"));
+    assert_eq!(resolved.provider_thread_id.as_deref(), Some("thr_abc"));
+}
+
 /// The session-list page query is index-backed: its plan must walk
 /// `ix_session_recency` and must NOT fall back to a full sort (temp b-tree).
 /// Guards against a regression that reintroduces the O(total sessions) scan
@@ -951,6 +1010,7 @@ async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
             Some("/user-chosen"),
             Some("/user-chosen"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -1258,7 +1318,15 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&spawning, "/work", None, None, None, None)
+        .insert_spawning_session(
+            &spawning,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
 
@@ -1583,7 +1651,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(&id, "/work", None, None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None, AgentProvider::Claude)
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -1683,7 +1751,7 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&id, "/work", None, None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None, AgentProvider::Claude)
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();
@@ -2079,8 +2147,21 @@ async fn opening_a_pre_provider_database_migrates_and_loads_old_rows_as_claude()
     // Opening through the store applies the guarded ALTERs; it must open cleanly.
     let store = SqliteStore::open(path_str).unwrap();
 
-    // The columns are not yet surfaced through the domain reads in C1, so read
-    // them straight from SQLite to confirm the migrated values.
+    // The domain read now surfaces the provider fields (added to `Session` in
+    // C3a): a pre-migration row loads as a Claude session with no
+    // provider-minted ids, and `map_session` does not choke on the now-wider
+    // column set.
+    let session = store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .expect("pre-provider session still loads");
+    assert_eq!(session.provider, AgentProvider::Claude);
+    assert_eq!(session.provider_session_id, None);
+    assert_eq!(session.provider_thread_id, None);
+
+    // Also confirm the migrated values straight from SQLite, including
+    // `launch_option.provider`, which has no domain read path yet.
     let conn = store.conn.lock().await;
     let (provider, provider_session_id, provider_thread_id): (
         String,
@@ -2289,6 +2370,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             Some("/repo-a"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -2301,6 +2383,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             Some("/repo-a"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -2313,12 +2396,21 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             Some("/repo-a-mirror"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
     let s4 = SessionId::from("sess-4");
     store
-        .insert_spawning_session(&s4, "/scratch", None, None, Some("/scratch"), None)
+        .insert_spawning_session(
+            &s4,
+            "/scratch",
+            None,
+            None,
+            Some("/scratch"),
+            None,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
 
