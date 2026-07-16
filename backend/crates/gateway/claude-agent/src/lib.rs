@@ -368,3 +368,5 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
 
 #[cfg(test)]
 mod contract;
+#[cfg(test)]
+mod golden;
