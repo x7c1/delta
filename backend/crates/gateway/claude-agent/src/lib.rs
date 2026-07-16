@@ -31,10 +31,12 @@
 //! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`] are the entry points
 //! that feed Claude's lossy wire input (hook payloads, transcript lines) into
 //! the neutral [`AgentEvent`] projection on this session's [`events`] stream.
-//! The parsing lives in the [`ingest`] module. This phase wires only the
+//! The parsing lives in the [`ingest`] module. This phase wires the
 //! **permission** projection (the `PermissionRequest` hook and its correlated
-//! `tool_result`); the turn/tool projections join it as the seam grows. See
-//! that module for the intended growth.
+//! `tool_result`) and the **turn-lifecycle** projection (the `UserPromptSubmit`
+//! echo, the `Stop` hook, and the `[Request interrupted by user…]` transcript
+//! marker); the tool projections join them as the seam grows. See that module
+//! for the intended growth.
 //!
 //! [`events`]: AgentAdapter::events
 
