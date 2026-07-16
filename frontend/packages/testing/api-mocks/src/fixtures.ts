@@ -180,6 +180,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-a1',
@@ -204,6 +205,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-u2',
@@ -221,6 +223,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-a2',
@@ -252,6 +255,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
   ],
   [BRANCH_THREAD_ID]: [
@@ -271,6 +275,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-b2',
@@ -294,6 +299,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     // A paired tool call / tool result split across two messages, as Claude's
     // transcript records them: the `tool_use` lives in an assistant message
@@ -329,6 +335,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     {
       // A large (prose) turn between the tool_use and its result carrier. Its
@@ -358,6 +365,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-b4',
@@ -382,6 +390,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
   ],
   [SESSION_2_MAIN_THREAD_ID]: [
@@ -401,6 +410,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-s2-a1',
@@ -423,6 +433,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
   ],
   [SESSION_2_BRANCH_THREAD_ID]: [
@@ -442,6 +453,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
   ],
   [SESSION_3_MAIN_THREAD_ID]: [
@@ -463,6 +475,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-s3-a1',
@@ -486,6 +499,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
   ],
 };

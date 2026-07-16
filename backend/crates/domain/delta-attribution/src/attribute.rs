@@ -694,6 +694,10 @@ pub fn attribute_lines(
 
         messages.push(Message {
             uuid: line.uuid,
+            // Claude reconstructs messages from JSONL lines, not provider items,
+            // and its streaming preview is dropped-and-replaced (no id join), so
+            // it never carries a provider item id.
+            provider_item_id: None,
             session_id: session_id.clone(),
             thread_id,
             // The reclassified role: a local-command command-name line folds to

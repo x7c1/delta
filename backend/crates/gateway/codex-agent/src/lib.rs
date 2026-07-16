@@ -28,12 +28,14 @@
 //! goes to the connection-level "unrouted" channel.
 
 mod adapter;
+mod content;
 mod error;
 mod factory;
 mod translate;
 pub mod wire;
 
 pub use adapter::CodexAppServerAdapter;
+pub use content::CodexConversationSource;
 pub use factory::CodexAdapterFactory;
 
 use std::collections::HashMap;

@@ -71,6 +71,7 @@ function message(
     git_branch: null,
     cwd: null,
     response_time_ms: null,
+    provider_item_id: null,
   };
 }
 
