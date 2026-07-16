@@ -15,6 +15,7 @@ use delta_model::{AgentProvider, Message, MessageUuid, Send, ThreadId};
 use tokio::sync::oneshot;
 
 use super::runtime::SessionLiveState;
+use crate::agent::AgentEvent;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
 use crate::interactor::lifecycle::FreshSpawn;
@@ -184,6 +185,24 @@ pub(in crate::interactor) enum SessionInput {
         send_id: i64,
         reply: Reply<Option<SessionEvent>>,
     },
+
+    // ---- Agent event pump --------------------------------------------------
+    /// One neutral [`AgentEvent`] from a terminal-less agent session's event
+    /// stream (Codex), delivered by that session's event pump.
+    ///
+    /// Routed through the same mailbox as every other signal so it is ordered
+    /// against this session's other work — content persistence and the turn
+    /// machine mutate in event-arrival order, and a `TurnCompleted` lands after
+    /// the messages of the turn it ends. Fire-and-forget: the pump is a
+    /// background drain with no caller to reply to. The handler folds the event
+    /// through the session's content accumulator (persisting any completed
+    /// messages), advances the turn machine on turn-end, and emits the resulting
+    /// browser events on the async seam ([`InteractorCore::emit_async_event`]) —
+    /// the event arrives after the driving `enqueue`/spawn call already returned,
+    /// so there is no synchronous `Vec<SessionEvent>` to fold it into.
+    ///
+    /// [`InteractorCore::emit_async_event`]: crate::interactor::InteractorCore::emit_async_event
+    IngestAgentEvent { event: AgentEvent },
 
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous

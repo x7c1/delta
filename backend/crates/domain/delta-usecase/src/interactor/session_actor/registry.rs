@@ -115,11 +115,17 @@ where
         };
         let (sender, receiver) = mpsc::unbounded_channel();
         let _ = sender.send(input);
+        // A weak handle to the actor's own mailbox, handed to the actor so a use
+        // case (the Codex event pump) can post more inputs back to itself. Weak
+        // so it never keeps the mailbox open: only the strong sender in this map
+        // does, so retirement (which removes the entry) still closes the channel.
+        let self_sender = sender.downgrade();
         map.insert(id.clone(), sender);
         tokio::spawn(actor::run(
             core,
             id.clone(),
             receiver,
+            self_sender,
             Arc::downgrade(&self.actors),
         ));
     }

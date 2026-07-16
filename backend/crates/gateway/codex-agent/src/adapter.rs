@@ -53,16 +53,16 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use delta_usecase::{
-    AgentAdapter, AgentCapabilities, AgentEvent, AgentEventStream, AgentProvider,
-    AgentSessionHandle, ContextInjectionCapability, Error as UsecaseError, EventCapability,
-    ForkCapability, InterruptCapability, LaunchCapability, LaunchRequest, PermissionCapability,
-    PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability, ResumeRequest,
-    SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability, SteerCapability,
-    TerminalCapability, TranscriptCapability,
+    AgentAdapter, AgentCapabilities, AgentContentSource, AgentEvent, AgentEventStream,
+    AgentProvider, AgentSessionHandle, ContextInjectionCapability, Error as UsecaseError,
+    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchRequest,
+    PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability,
+    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionId,
+    SessionIdentityCapability, SteerCapability, TerminalCapability, ThreadId, TranscriptCapability,
 };
 
 use crate::translate::{classify_server_request, translate_notification, ServerRequestKind};
-use crate::{AppServerConnection, StartedThread, ThreadEvent};
+use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEvent};
 
 /// The Codex decision wire value for an allow.
 const DECISION_ACCEPT: &str = "accept";
@@ -358,6 +358,18 @@ impl AgentAdapter for CodexAppServerAdapter {
     ) -> UsecaseResult<Option<PtyHandle>> {
         // Codex is `TerminalCapability::NoTerminal`: there is nothing to attach.
         Ok(None)
+    }
+
+    fn content_source(
+        &self,
+        session_id: SessionId,
+        main_thread: ThreadId,
+        seed_seq: i64,
+    ) -> Box<dyn AgentContentSource> {
+        // Codex pushes structured `item/*` / `turn/*` frames, so its event pump
+        // folds them into canonical messages through this accumulator (the
+        // `CodexConversationSource`), rather than reading a transcript.
+        codex_content_source(session_id, main_thread, seed_seq)
     }
 }
 

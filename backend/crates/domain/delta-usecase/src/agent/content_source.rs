@@ -45,12 +45,33 @@ use crate::agent::AgentEvent;
 ///
 /// A pure fold: the implementation owns whatever cross-event state it needs
 /// (sequence counters, pending tool-call pairing), never performs I/O, and is
-/// therefore cheap to call for every event. `Send` so the pump can hold it as a
-/// trait object across `await` points while draining an async event stream.
-pub trait AgentContentSource: Send {
+/// therefore cheap to call for every event. `Send + Sync` because the session
+/// actor owns one inside its runtime state and holds a `&SessionContext` across
+/// `await` points (which the actor future must be able to send across threads),
+/// and `Debug` so the session runtime that owns one (via a boxed trait object)
+/// keeps its derived `Debug`.
+pub trait AgentContentSource: Send + Sync + std::fmt::Debug {
     /// Fold one neutral [`AgentEvent`] into the canonical conversation content
     /// it completed: the messages newly produced by this event and the ordered
     /// [`Effect`]s the persistence pipeline must execute for them. Empty when
     /// the event carried no content (control-only or streaming).
     fn ingest(&mut self, event: &AgentEvent) -> (Vec<Message>, Vec<Effect>);
+}
+
+/// A content source that produces nothing.
+///
+/// The default [`AgentContentSource`] a provider that does not push structured
+/// content frames returns from [`crate::agent::AgentAdapter::content_source`].
+/// Claude pulls its conversation content from a JSONL transcript
+/// (`ConversationSource`), so its event pump — were one ever run — would fold no
+/// content here; this is the harmless seam it gets. The event pump only runs for
+/// a push-based provider (Codex), whose adapter overrides the default with a
+/// real accumulator, so this is never actually fed in production.
+#[derive(Debug, Default)]
+pub struct NullContentSource;
+
+impl AgentContentSource for NullContentSource {
+    fn ingest(&mut self, _event: &AgentEvent) -> (Vec<Message>, Vec<Effect>) {
+        (Vec::new(), Vec::new())
+    }
 }

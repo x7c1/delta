@@ -12,9 +12,12 @@
 //! config) before they reach here.
 
 use async_trait::async_trait;
+use delta_model::{SessionId, ThreadId};
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::agent::{AgentCapabilities, AgentEvent, AgentProvider};
+use crate::agent::{
+    AgentCapabilities, AgentContentSource, AgentEvent, AgentProvider, NullContentSource,
+};
 use crate::error::Result;
 
 /// Inputs for launching a fresh agent session.
@@ -136,6 +139,31 @@ pub trait AgentAdapter: Send + Sync {
 
     /// Take the session's event stream. Handed out once per session.
     fn events(&self, handle: &AgentSessionHandle) -> AgentEventStream;
+
+    /// Build the push-based content accumulator for one session's event stream.
+    ///
+    /// The event pump feeds this every [`AgentEvent`] the session's [`events`]
+    /// stream yields and persists the canonical content each event completes. It
+    /// is a provider concern — how a provider's structured frames fold into
+    /// Delta's canonical messages — so it lives on the adapter, keyed by the
+    /// session's identity (`session_id`, its `main_thread`, and `seed_seq`, the
+    /// store's current `MAX(seq) + 1` so minted ordering continues past whatever
+    /// is already persisted).
+    ///
+    /// The default returns a [`NullContentSource`]: a provider that pulls its
+    /// content from a transcript (Claude) rather than pushing structured frames
+    /// runs no such pump, so it needs no accumulator. A push-based provider
+    /// (Codex) overrides this with a real accumulator.
+    ///
+    /// [`events`]: Self::events
+    fn content_source(
+        &self,
+        _session_id: SessionId,
+        _main_thread: ThreadId,
+        _seed_seq: i64,
+    ) -> Box<dyn AgentContentSource> {
+        Box::new(NullContentSource)
+    }
 
     /// Attach to the session's terminal, when it has one. `Ok(None)` when the
     /// provider exposes no attachable terminal

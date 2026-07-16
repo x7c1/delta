@@ -173,6 +173,29 @@ where
             handle: handle.clone(),
         });
 
+        // Build the push-based content accumulator for this session's event
+        // stream and hand it to the runtime, so the event pump (spawned below)
+        // can fold each pushed frame into canonical messages. A fresh Codex
+        // session has nothing persisted yet, so the sequence is seeded at 0.
+        self.state.set_agent_content_source(adapter.content_source(
+            session_id.clone(),
+            main_thread_id,
+            0,
+        ));
+
+        // Spawn the event pump: it drains the adapter's `events()` stream and
+        // posts each frame back to THIS actor as an `IngestAgentEvent`, so
+        // control (turn machine), content (persistence), and streaming all run
+        // in mailbox order. `events()` is handed out once per session; take it
+        // here, after `bind_agent`, so the buffered opener (`SessionStarted`) and
+        // the first turn's frames are all captured. Codex frames arrive after the
+        // send below has already returned to the browser — exactly why they reach
+        // the browser through the async seam rather than a synchronous return.
+        crate::interactor::agent_event::spawn_codex_event_pump(
+            self.self_sender.clone(),
+            adapter.events(&handle),
+        );
+
         let first_send = match first_prompt {
             Some(text) => {
                 // The send row names the real session + main thread, exactly

@@ -67,6 +67,7 @@ struct PendingTool {
 /// stream with [`Self::ingest`]; it returns the messages that event completed
 /// (empty for control-only or streaming events). See the module docs for the
 /// fidelity contract and the state it owns.
+#[derive(Debug)]
 pub struct CodexConversationSource {
     session_id: SessionId,
     /// Codex v1 is single-thread (decision D), so every message lands here.
