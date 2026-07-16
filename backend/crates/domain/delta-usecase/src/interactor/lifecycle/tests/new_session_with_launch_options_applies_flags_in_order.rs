@@ -34,6 +34,7 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
     // left out, and the unknown id is skipped.
     ix.enqueue_send(
         SendTarget::NewSession {
+            provider: crate::AgentProvider::Claude,
             workdir: None,
             launch_option_ids: vec![verbose.id, permission_mode.id, 9999],
             worktree: None,

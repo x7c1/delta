@@ -490,9 +490,17 @@ impl SessionStore for SqliteStore {
         provider_thread_id: Option<&str>,
     ) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
+        // Record the provider-minted ids and, if the row is still `spawning`,
+        // activate it (spawning → active). This is the structured-provider
+        // analogue of `register_session`'s first-hook activation: a terminal-less
+        // provider (Codex) has no hook to flip the status, so the launch-return
+        // that yields these ids is what confirms the session exists. An
+        // already-active/ended row keeps its status (the CASE else branch).
         conn.execute(
             "UPDATE session
-             SET provider_session_id = ?2, provider_thread_id = ?3
+             SET provider_session_id = ?2,
+                 provider_thread_id = ?3,
+                 status = CASE WHEN status = 'spawning' THEN 'active' ELSE status END
              WHERE id = ?1",
             params![id.as_str(), provider_session_id, provider_thread_id],
         )

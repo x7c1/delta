@@ -3,9 +3,13 @@
 
 use std::sync::Arc;
 
+use crate::agent::AgentAdapterFactory;
 use crate::Interactor;
 
-use super::{FakeGhCli, FakeGitWorktree, FakeStore, FakeTmux, FakeTranscript, FakeWorkspace};
+use super::{
+    FakeAgentFactory, FakeGhCli, FakeGitWorktree, FakeStore, FakeTmux, FakeTranscript,
+    FakeWorkspace,
+};
 
 /// The base working directory the test interactor spawns sessions under.
 pub(crate) const TEST_WORKDIR_BASE: &str = "/work";
@@ -70,6 +74,13 @@ pub(crate) fn interactor_with_git_and_gh(
     gh_cli: Arc<FakeGhCli>,
 ) -> TestInteractor {
     interactor_with_git(git_worktree).with_gh_cli(gh_cli as Arc<dyn crate::ports::GhCli>)
+}
+
+/// Build a test interactor with a Codex [`AgentAdapterFactory`] wired in, for
+/// the terminal-less Codex session-creation tests. Everything else is the
+/// default fake set.
+pub(crate) fn interactor_with_codex_factory(factory: Arc<FakeAgentFactory>) -> TestInteractor {
+    interactor().with_codex_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
 }
 
 /// An interactor whose tmux dispatch always fails.

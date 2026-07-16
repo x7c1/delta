@@ -134,6 +134,7 @@ where
                 workdir,
                 launch_option_ids,
                 worktree,
+                provider,
             } => {
                 // `locator_quote` is intentionally dropped here, not forwarded
                 // to the spawn: a brand-new session has no earlier passage to
@@ -147,6 +148,7 @@ where
                         workdir,
                         launch_option_ids,
                         worktree,
+                        provider,
                         reply,
                     })
                     .await?;
@@ -172,10 +174,16 @@ where
                 // no first prompt); the worktree path rides only on a
                 // composer-initiated new session.
                 worktree: None,
+                // Cold start is the Claude tmux path; a Codex session is only
+                // ever created from a composer-initiated new session (which
+                // carries a first prompt and its own provider selection).
+                provider: delta_model::AgentProvider::Claude,
                 reply,
             })
             .await?;
-        Ok(spawn.token)
+        Ok(spawn
+            .token
+            .expect("a Claude cold-start spawn always mints a pane token"))
     }
 
     /// Ensure at least one Claude Code session is up, spawning one if absent.

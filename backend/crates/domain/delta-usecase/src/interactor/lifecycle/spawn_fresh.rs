@@ -18,9 +18,13 @@ use super::{SESSION_ID_FLAG, SETTINGS_FLAG};
 /// carried a first prompt — the already-enqueued `send` row for it (which
 /// names the eagerly-created session row and its `main` thread).
 pub(in crate::interactor) struct FreshSpawn {
-    pub token: PaneToken,
-    /// The `dispatched` send row for the first prompt, written before the
-    /// launch; `None` for a prompt-less plain spawn.
+    /// The launch's tmux pane token. `Some` for a pane-backed spawn (Claude);
+    /// `None` for a terminal-less agent spawn (Codex), which has no pane.
+    pub token: Option<PaneToken>,
+    /// The send row for the first prompt, written before the launch; `None`
+    /// for a prompt-less plain spawn. For a Claude spawn it is `dispatched`
+    /// (awaiting its echo); for a Codex spawn it is already completed at the
+    /// `turn/start` acknowledgement.
     pub first_send: Option<Send>,
 }
 
@@ -480,6 +484,9 @@ where
             has_first_prompt = first_send.is_some(),
             "fresh spawn launched; awaiting first UserPromptSubmit to bind"
         );
-        Ok(FreshSpawn { token, first_send })
+        Ok(FreshSpawn {
+            token: Some(token),
+            first_send,
+        })
     }
 }

@@ -19,6 +19,7 @@ async fn composer_first_send_rolls_back_pending_spawn_on_dispatch_failure() {
     let err = ix
         .enqueue_send(
             SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),
                 worktree: None,

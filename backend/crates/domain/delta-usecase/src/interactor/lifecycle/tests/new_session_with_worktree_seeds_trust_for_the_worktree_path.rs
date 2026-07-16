@@ -21,6 +21,7 @@ async fn new_session_with_worktree_seeds_trust_for_the_worktree_path() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
             worktree: Some(WorktreeSpec {

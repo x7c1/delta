@@ -12,6 +12,7 @@ async fn new_session_with_invalid_workdir_spawns_nothing() {
     let err = ix
         .enqueue_send(
             SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: Some("/nope".to_owned()),
                 launch_option_ids: Vec::new(),
                 worktree: None,

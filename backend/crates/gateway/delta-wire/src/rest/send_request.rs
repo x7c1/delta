@@ -1,11 +1,12 @@
 //! Request body for `POST /api/sends`.
 
-use delta_model::{MessageUuid, ThreadId};
+use delta_model::{AgentProvider, MessageUuid, ThreadId};
 use delta_usecase::SendTarget;
 use serde::Deserialize;
 use ts_rs::TS;
 
 use super::worktree_spec::WireWorktreeSpec;
+use crate::session::WireAgentProvider;
 
 /// Request body for `POST /api/sends`.
 ///
@@ -75,6 +76,15 @@ pub struct WireCreateSendRequest {
     #[serde(default)]
     #[ts(optional)]
     pub worktree: Option<WireWorktreeSpec>,
+    /// Which AI-agent backend a fresh session should launch on. Only meaningful
+    /// with `new_session: true`; for a thread send the session is already
+    /// running on its provider, so this is ignored. When omitted, a new session
+    /// defaults to Claude — reproducing the historical behavior byte-for-byte —
+    /// so an existing client that never sets it is unaffected. `"codex"` starts
+    /// a terminal-less Codex session over `codex app-server`.
+    #[serde(default)]
+    #[ts(optional)]
+    pub provider: Option<WireAgentProvider>,
 }
 
 /// Why a [`WireCreateSendRequest`] could not be resolved to a [`SendTarget`].
@@ -125,6 +135,12 @@ impl WireCreateSendRequest {
                     workdir: self.workdir,
                     launch_option_ids: self.launch_option_ids.unwrap_or_default(),
                     worktree: self.worktree.map(Into::into),
+                    // Omitted provider defaults to Claude, keeping the existing
+                    // new-session behavior byte-identical.
+                    provider: self
+                        .provider
+                        .map(Into::into)
+                        .unwrap_or(AgentProvider::Claude),
                 }
             }
         };
@@ -149,6 +165,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         let (target, text, quote) = req.into_target().expect("a plain thread send is valid");
         assert!(
@@ -178,6 +195,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         let (target, _, _) = req.into_target().expect("a branch send is valid");
         match target {
@@ -210,6 +228,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(matches!(
@@ -235,6 +254,7 @@ mod tests {
             workdir: Some("/projects/app".into()),
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -257,6 +277,7 @@ mod tests {
             workdir: Some("/ignored".into()),
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         let (target, _, _) = req.into_target().expect("a plain thread send is valid");
         assert!(matches!(
@@ -281,6 +302,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Unspecified);
     }
@@ -299,6 +321,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         assert_eq!(req.into_target().unwrap_err(), SendTargetError::Conflicting);
     }
@@ -317,6 +340,7 @@ mod tests {
             workdir: None,
             launch_option_ids: None,
             worktree: None,
+            provider: None,
         };
         assert_eq!(
             req.into_target().unwrap_err(),
@@ -358,6 +382,7 @@ mod tests {
             workdir: None,
             launch_option_ids: Some(vec![3, 1, 2]),
             worktree: None,
+            provider: None,
         };
         let (target, _, _) = req.into_target().expect("a new-session send is valid");
         assert!(
@@ -398,6 +423,38 @@ mod tests {
         }
     }
 
+    /// A `new_session` send with no `provider` defaults to Claude, so an
+    /// existing client that never sets the field reproduces the historical
+    /// behavior.
+    #[test]
+    fn new_session_defaults_to_claude_when_provider_is_omitted() {
+        let req: WireCreateSendRequest =
+            serde_json::from_str(r#"{"new_session":true,"text":"go"}"#).unwrap();
+        assert_eq!(
+            req.provider, None,
+            "an omitted provider deserializes as None"
+        );
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        assert!(
+            matches!(target, SendTarget::NewSession { provider, .. } if provider == AgentProvider::Claude),
+            "an omitted provider resolves to Claude on the target"
+        );
+    }
+
+    /// A `new_session` send carrying `provider: "codex"` resolves to a Codex
+    /// `NewSession` target, where composition dispatches it to the Codex path.
+    #[test]
+    fn new_session_with_codex_provider_carries_it() {
+        let req: WireCreateSendRequest =
+            serde_json::from_str(r#"{"new_session":true,"text":"go","provider":"codex"}"#).unwrap();
+        assert_eq!(req.provider, Some(WireAgentProvider::Codex));
+        let (target, _, _) = req.into_target().expect("a new-session send is valid");
+        assert!(
+            matches!(target, SendTarget::NewSession { provider, .. } if provider == AgentProvider::Codex),
+            "the codex provider rides on the NewSession target"
+        );
+    }
+
     /// A `worktree` on a thread send is dropped: an existing thread's session is
     /// already running, so the request resolves to a plain `Thread` target.
     #[test]
@@ -413,6 +470,7 @@ mod tests {
             worktree: Some(WireWorktreeSpec {
                 start_point: super::super::worktree_spec::WireWorktreeStartPoint::Head,
             }),
+            provider: None,
         };
         let (target, _, _) = req.into_target().expect("a plain thread send is valid");
         assert!(matches!(
