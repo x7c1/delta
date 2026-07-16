@@ -471,6 +471,23 @@ pub struct SessionRuntime {
     ///
     /// [`AgentAdapter::content_source`]: crate::agent::AgentAdapter::content_source
     agent_content_source: Option<Box<dyn AgentContentSource>>,
+    /// Correlation between a Delta permission-row id and the adapter-scoped
+    /// provider token for a terminal-less agent session (Codex), keyed by the
+    /// `i64` row id.
+    ///
+    /// The event pump allocates a row when it ingests a
+    /// [`AgentEvent::PermissionRequested`] and records the row → token pairing
+    /// here; the browser-decision path reads it back to translate the row id to
+    /// the token it hands [`AgentAdapter::resolve_permission`], and the pump
+    /// removes it when the request resolves. The token is opaque to the domain —
+    /// stored and forwarded, never interpreted. `None`-valued in effect (empty)
+    /// for a Claude session, whose permission decisions never cross the adapter.
+    /// Not part of [`Self::is_empty`]: an entry only ever exists alongside
+    /// [`Self::open_agent`], which already pins the actor alive.
+    ///
+    /// [`AgentEvent::PermissionRequested`]: crate::agent::AgentEvent::PermissionRequested
+    /// [`AgentAdapter::resolve_permission`]: crate::agent::AgentAdapter::resolve_permission
+    agent_permission_tokens: HashMap<i64, String>,
     /// When the most recent auto-compact re-dispatch ran for this session.
     ///
     /// Two paths can drive that re-dispatch — the live
@@ -534,15 +551,61 @@ impl SessionRuntime {
         self.open_agent = Some(agent);
     }
 
+    /// The live terminal-less agent session (Codex), when open — its adapter and
+    /// provider handle. `None` for a pane-backed (Claude) or closed session.
+    /// Read by the browser-decision path to reach [`AgentAdapter::resolve_permission`].
+    ///
+    /// [`AgentAdapter::resolve_permission`]: crate::agent::AgentAdapter::resolve_permission
+    pub fn open_agent(&self) -> Option<&OpenAgentSession> {
+        self.open_agent.as_ref()
+    }
+
     /// Remove the terminal-less agent session (closing it), returning it so the
     /// caller can drive the adapter's `close`.
     ///
-    /// Also drops the session's content accumulator: it only has meaning while
-    /// the agent session is open (its event pump ends when the adapter closes),
-    /// so keeping it past the close would leak per-session fold state.
+    /// Also drops the session's content accumulator and any permission
+    /// correlations: both only have meaning while the agent session is open (its
+    /// event pump ends when the adapter closes), so keeping them past the close
+    /// would leak per-session state.
     pub fn remove_open_agent(&mut self) -> Option<OpenAgentSession> {
         self.agent_content_source = None;
+        self.agent_permission_tokens.clear();
         self.open_agent.take()
+    }
+
+    /// Record the correlation between a Delta permission-row id and the
+    /// adapter-scoped provider token, for the event pump's `PermissionRequested`
+    /// ingestion. The token is stored verbatim and never interpreted.
+    pub fn correlate_agent_permission(&mut self, request_id: i64, token: String) {
+        self.agent_permission_tokens.insert(request_id, token);
+    }
+
+    /// The adapter-scoped provider token correlated with a permission-row id, if
+    /// this is an adapter-backed permission awaiting a decision. Read by the
+    /// browser-decision path to translate the row id back to the token
+    /// [`AgentAdapter::resolve_permission`] answers by; its presence is also what
+    /// distinguishes an adapter permission from a Claude (hook-path) one.
+    ///
+    /// [`AgentAdapter::resolve_permission`]: crate::agent::AgentAdapter::resolve_permission
+    pub fn agent_permission_token(&self, request_id: i64) -> Option<&str> {
+        self.agent_permission_tokens
+            .get(&request_id)
+            .map(String::as_str)
+    }
+
+    /// Resolve an adapter-scoped provider token back to its permission-row id,
+    /// removing the correlation. The event pump calls this when the adapter
+    /// emits a `PermissionResolved` (which carries the provider token) so it can
+    /// route the resolution to the reducer under the `i64` id the runtime mirror
+    /// and browser speak. `None` when the token is unknown (already resolved).
+    pub fn resolve_agent_permission_token(&mut self, token: &str) -> Option<i64> {
+        let request_id = self
+            .agent_permission_tokens
+            .iter()
+            .find(|(_, t)| t.as_str() == token)
+            .map(|(id, _)| *id)?;
+        self.agent_permission_tokens.remove(&request_id);
+        Some(request_id)
     }
 
     /// Install the push-based content accumulator for the open agent session.

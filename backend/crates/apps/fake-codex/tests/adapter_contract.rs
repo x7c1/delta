@@ -380,7 +380,11 @@ async fn permission_case(decision: PermissionDecision) {
         "the approval carries its tool name: {before:?}"
     );
 
-    adapter
+    // Answer through `&dyn AgentAdapter` (not the concrete type) so the test
+    // proves the decision seam is reachable over the trait object the core holds
+    // — `resolve_permission` is a trait method, not an inherent one.
+    let adapter_dyn: &dyn AgentAdapter = &adapter;
+    adapter_dyn
         .resolve_permission(&handle, &request_id, decision)
         .await
         .expect("resolve_permission");

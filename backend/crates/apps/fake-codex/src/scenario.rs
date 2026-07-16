@@ -38,7 +38,7 @@
 //! | `item_completed { item }` | Emit an `item/completed` notification carrying `item`. |
 //! | `turn_started` | Emit a `turn/started` notification. |
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
-//! | `request_approval { method?, params? }` | Emit a server → client request (default method `item/requestApproval`) with a freshly minted id. The fake does NOT block on the client's reply in this phase — it emits and continues. |
+//! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/requestApproval`) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
 //! | `notification { method, params? }` | Emit an arbitrary notification (escape hatch for shapes not covered above). |
 //!
 //! Every emitted notification (and the approval request) gets `threadId` stamped
@@ -80,6 +80,14 @@ pub enum Emit {
         method: String,
         #[serde(default)]
         params: Value,
+        /// When true, the fake **suspends** the turn after emitting this approval
+        /// and resumes only once the client answers it — so a scenario can gate a
+        /// turn on a real decision, and the fake, on resuming, echoes the
+        /// accept/decline it received as an assistant message (observable proof
+        /// the decision round-tripped). Default false keeps the fire-and-forget
+        /// behavior (emit and continue without waiting).
+        #[serde(default)]
+        blocking: bool,
     },
     Notification {
         method: String,
@@ -209,6 +217,7 @@ mod tests {
             Emit::RequestApproval {
                 method: DEFAULT_APPROVAL_METHOD.to_owned(),
                 params: Value::Null,
+                blocking: false,
             }
         );
         assert_eq!(
