@@ -1,0 +1,11 @@
+[package]
+name = "agent-contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The shared, provider-neutral contract cases are written against the domain's
+# `AgentAdapter` trait alone, so every gateway adapter runs the identical suite.
+delta-usecase = { workspace = true }

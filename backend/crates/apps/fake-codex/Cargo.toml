@@ -14,7 +14,10 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 # The end-to-end round-trip test drives the real client transport against this
-# fake binary.
+# fake binary; the adapter contract suite drives `CodexAppServerAdapter` (which
+# needs the neutral domain types) against it through the shared cases.
 codex-agent = { workspace = true }
+delta-usecase = { workspace = true }
+agent-contract = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "process", "sync", "rt", "macros", "time"] }
 serde_json = { workspace = true }

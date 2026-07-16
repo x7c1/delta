@@ -83,6 +83,12 @@ pub enum Error {
     #[error("tmux driver error: {0}")]
     Tmux(String),
 
+    /// An agent adapter / transport failure (e.g. the app-server connection
+    /// dropped, or a provider RPC errored). Reported by a gateway adapter as it
+    /// crosses the [`crate::AgentAdapter`] trait boundary. Surfaced as `500`.
+    #[error("agent error: {0}")]
+    Agent(String),
+
     /// A worktree was requested for a fresh session, but the selected working
     /// directory is not inside a git repository. The caller named a directory
     /// that cannot host a worktree, so this is surfaced as `400`.

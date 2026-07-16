@@ -13,5 +13,6 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+agent-contract = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync"] }
 serde_json = { workspace = true }

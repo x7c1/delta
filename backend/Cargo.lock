@@ -3,6 +3,13 @@
 version = 4
 
 [[package]]
+name = "agent-contract"
+version = "0.3.0"
+dependencies = [
+ "delta-usecase",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -188,6 +195,7 @@ dependencies = [
 name = "claude-agent"
 version = "0.3.0"
 dependencies = [
+ "agent-contract",
  "async-trait",
  "delta-usecase",
  "serde",
@@ -199,6 +207,8 @@ dependencies = [
 name = "codex-agent"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
+ "delta-usecase",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -418,7 +428,9 @@ dependencies = [
 name = "fake-codex"
 version = "0.3.0"
 dependencies = [
+ "agent-contract",
  "codex-agent",
+ "delta-usecase",
  "serde",
  "serde_json",
  "tokio",
