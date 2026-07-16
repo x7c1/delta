@@ -2023,6 +2023,110 @@ async fn opening_a_pre_subagent_task_id_database_migrates_and_loads_old_rows_as_
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// An existing database created before the multi-provider columns
+/// (`session.provider`/`provider_session_id`/`provider_thread_id` and
+/// `launch_option.provider`) existed must gain them on open, with every
+/// pre-existing row reading back as a Claude row: `provider = 'claude'` and the
+/// nullable provider-minted ids NULL. These columns are additive and unused by
+/// the C1 runtime — this test pins that an already-deployed database opens
+/// cleanly and its rows keep their historical (Claude) meaning after migration.
+///
+/// The "legacy" file is built by hand with the original pre-additive table
+/// shapes (`session`/`launch_option` carrying only their base columns) and
+/// `user_version = 0`, then opened through the store: the guarded
+/// `ADDITIVE_COLUMNS` steps add every additive column — the provider ones under
+/// test plus the earlier ones (`last_activity_at`, `default_enabled`, …) — so
+/// this exercises the real recovery path a genuinely old database takes.
+/// (`DROP COLUMN` cannot faithfully undo the columns here: SQLite's schema
+/// re-parse chokes on the `--plugin-dir` token already present in the
+/// `launch_option` comment.)
+#[tokio::test]
+async fn opening_a_pre_provider_database_migrates_and_loads_old_rows_as_claude() {
+    let dir = std::env::temp_dir().join(format!("delta-provider-migrate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a faithful pre-additive database directly: only the base columns,
+    // `user_version = 0` (untouched), one session and one launch-option row.
+    {
+        let conn = rusqlite::Connection::open(path_str).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (
+               id              TEXT PRIMARY KEY,
+               cwd             TEXT NOT NULL,
+               transcript_path TEXT,
+               title           TEXT,
+               status          TEXT NOT NULL
+                                 CHECK (status IN ('spawning','active','ended','failed')),
+               created_at      TEXT NOT NULL
+             ) STRICT;
+             CREATE TABLE launch_option (
+               id         INTEGER PRIMARY KEY,
+               label      TEXT,
+               name       TEXT NOT NULL,
+               value      TEXT,
+               created_at TEXT NOT NULL
+             ) STRICT;
+             INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
+               VALUES ('sess-1', '/work', '/tmp/t.jsonl', NULL, 'active', '2026-01-01T00:00:00Z');
+             INSERT INTO launch_option (label, name, value, created_at)
+               VALUES ('plugins', '--plugin-dir', '/plug', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    }
+
+    // Opening through the store applies the guarded ALTERs; it must open cleanly.
+    let store = SqliteStore::open(path_str).unwrap();
+
+    // The columns are not yet surfaced through the domain reads in C1, so read
+    // them straight from SQLite to confirm the migrated values.
+    let conn = store.conn.lock().await;
+    let (provider, provider_session_id, provider_thread_id): (
+        String,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT provider, provider_session_id, provider_thread_id \
+             FROM session WHERE id = 'sess-1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        provider, "claude",
+        "a pre-migration session is a Claude row"
+    );
+    assert_eq!(
+        provider_session_id, None,
+        "a pre-migration Claude session has no provider-minted session id"
+    );
+    assert_eq!(
+        provider_thread_id, None,
+        "a pre-migration Claude session has no provider-minted thread id"
+    );
+
+    let option_provider: String = conn
+        .query_row(
+            "SELECT provider FROM launch_option WHERE name = '--plugin-dir'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        option_provider, "claude",
+        "a pre-migration launch option is a Claude option"
+    );
+    drop(conn);
+
+    // Re-opening the now-migrated database is a clean no-op (the columns already
+    // exist, so the guarded ALTERs do not run again).
+    SqliteStore::open(path_str).unwrap();
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // SCHEMA_VERSION startup gate. The four cases below are the contract from the
 // compatibility policy doc (subdomain 1): a fresh DB stamps current; a pre-gate
 // v0.1.0 DB is silently rescued; any other non-matching version is refused with

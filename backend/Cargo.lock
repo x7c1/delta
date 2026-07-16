@@ -196,6 +196,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-agent"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -402,6 +412,16 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "fake-codex"
+version = "0.3.0"
+dependencies = [
+ "codex-agent",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
