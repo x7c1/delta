@@ -9,13 +9,25 @@
 //!
 //! ## Scope in this phase
 //!
-//! Only the **permission** projection is wired: the `PermissionRequest` hook
-//! becomes [`AgentEvent::PermissionRequested`], and the correlated `tool_result`
-//! transcript line becomes [`AgentEvent::PermissionResolved`]. The seam is
-//! shaped so the remaining projections (prompt echo → `TurnStarted`, `Stop` →
-//! `TurnCompleted`, tool blocks → `ToolStarted`/`ToolCompleted`) slot in as new
-//! [`ClaudeHook`] variants and transcript-line matchers without changing the
-//! adapter's public surface. The transcript matcher here is deliberately
+//! The **permission** and **turn-lifecycle** projections are wired:
+//!
+//! - The `PermissionRequest` hook becomes [`AgentEvent::PermissionRequested`],
+//!   and the correlated `tool_result` transcript line becomes
+//!   [`AgentEvent::PermissionResolved`].
+//! - The `UserPromptSubmit` hook (Claude's prompt echo) becomes
+//!   [`AgentEvent::TurnStarted`] — the turn-start half of
+//!   `send_emits_user_prompt_and_turn_started`, whose `UserPromptAccepted` half
+//!   is emitted by the adapter's `send` (the mechanical dispatch fact).
+//! - The `Stop` hook becomes [`AgentEvent::TurnCompleted`] with
+//!   [`TurnStatus::Completed`].
+//! - The `[Request interrupted by user…]` transcript marker becomes
+//!   [`AgentEvent::TurnCompleted`] with [`TurnStatus::Interrupted`] — a turn
+//!   that ended without a `Stop` hook.
+//!
+//! The seam is shaped so the remaining projections (tool blocks →
+//! `ToolStarted`/`ToolCompleted`, assistant text → `AssistantMessage`) slot in
+//! as new [`ClaudeHook`] variants and transcript-line matchers without changing
+//! the adapter's public surface. The transcript matcher here is deliberately
 //! minimal; a later phase replaces its internals with the shared transcript
 //! reader while keeping this projection's meaning.
 //!
@@ -32,13 +44,21 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use delta_usecase::{AgentEvent, AgentPermissionRequest, PermissionDecision};
+use delta_usecase::{AgentEvent, AgentPermissionRequest, PermissionDecision, TurnStatus};
+
+/// Prefix Claude Code writes as a `role: user` transcript line when the user
+/// interrupts the in-flight turn (`[Request interrupted by user]` or
+/// `[Request interrupted by user for tool use]`). Matching on the shared prefix
+/// covers both variants. This is the gateway-local copy of the same textual
+/// convention the transcript reader recognises; a later phase folds this
+/// projection into the shared reader.
+const INTERRUPT_MARKER_PREFIX: &str = "[Request interrupted by user";
 
 /// A parsed Claude hook payload the adapter projects onto its event stream.
 ///
-/// Extensible by design: this phase models only the permission-request hook;
-/// the prompt/turn/tool hooks join as further variants. The `hook` tag selects
-/// the variant so a single [`ingest_hook`] entry point can grow.
+/// Extensible by design: this phase models the permission-request, prompt-echo,
+/// and stop hooks; the tool hooks join as further variants. The `hook` tag
+/// selects the variant so a single [`ingest_hook`] entry point can grow.
 ///
 /// [`ingest_hook`]: crate::ClaudeCodePtyHookAdapter::ingest_hook
 #[derive(Debug, Clone, Deserialize)]
@@ -55,6 +75,16 @@ pub enum ClaudeHook {
         #[serde(default)]
         tool_use_id: Option<String>,
     },
+    /// The `UserPromptSubmit` hook: Claude accepted a prompt into a turn (the
+    /// echo of Delta's dispatch, or a prompt typed straight into the pane). It
+    /// is the turn-start signal — projected as [`AgentEvent::TurnStarted`]. The
+    /// prompt text is not read here: the accepted-prompt fact
+    /// ([`AgentEvent::UserPromptAccepted`]) is emitted by the adapter's `send`;
+    /// this hook contributes only the turn boundary.
+    UserPromptSubmit {},
+    /// The `Stop` hook: the in-flight turn completed. Projected as
+    /// [`AgentEvent::TurnCompleted`] with [`TurnStatus::Completed`].
+    Stop {},
 }
 
 /// A permission dialog the adapter has projected and not yet resolved.
@@ -96,7 +126,10 @@ fn tool_result_from_line(line: &str) -> Option<ToolResultLine> {
 /// state it establishes, if any.
 ///
 /// Pure so the projection is unit-testable without the adapter's channels.
-/// `request_id` is minted by the caller (the adapter's per-session sequence).
+/// `request_id` is minted by the caller (the adapter's per-session sequence)
+/// and used only by the permission-request variant, which is the one hook whose
+/// event is keyed by an id Claude's payload does not carry; the turn hooks
+/// ignore it.
 pub(crate) fn project_hook(
     hook: ClaudeHook,
     request_id: String,
@@ -121,7 +154,56 @@ pub(crate) fn project_hook(
             };
             (event, Some(open))
         }
+        ClaudeHook::UserPromptSubmit {} => (
+            // Claude confirms a turn via the prompt echo, without naming it.
+            AgentEvent::TurnStarted {
+                provider_turn_id: None,
+            },
+            None,
+        ),
+        ClaudeHook::Stop {} => (
+            AgentEvent::TurnCompleted {
+                status: TurnStatus::Completed,
+            },
+            None,
+        ),
     }
+}
+
+/// Whether a hook mints a permission correlation id. Only the permission
+/// request does (Claude's payload carries none); the turn hooks are keyed by no
+/// id, so the caller must not burn a sequence number on them.
+pub(crate) fn hook_needs_request_id(hook: &ClaudeHook) -> bool {
+    matches!(hook, ClaudeHook::PermissionRequest { .. })
+}
+
+/// The minimal `role: user` transcript-line view the interrupt-marker
+/// projection needs. Deliberately lenient, like [`ToolResultLine`]: any line
+/// that is not a JSON user record with text simply fails to match.
+#[derive(Debug, Clone, Deserialize)]
+struct UserLine {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+/// Project a transcript line as the turn-ending interrupt marker, or `None`
+/// when the line is anything else.
+///
+/// Claude writes a `role: user` line whose text is `[Request interrupted by
+/// user…]` when the user aborts the in-flight turn; no `Stop` hook fires, so
+/// this marker is the turn-end signal. It projects
+/// [`AgentEvent::TurnCompleted`] with [`TurnStatus::Interrupted`]. Carries no
+/// state, so it is safe to try against every transcript line.
+pub(crate) fn project_interrupt_marker(line: &str) -> Option<AgentEvent> {
+    let parsed: UserLine = serde_json::from_str(line).ok()?;
+    let text = parsed.text?;
+    (parsed.kind == "user" && text.trim_start().starts_with(INTERRUPT_MARKER_PREFIX)).then_some(
+        AgentEvent::TurnCompleted {
+            status: TurnStatus::Interrupted,
+        },
+    )
 }
 
 /// Project a transcript line against the session's open permission dialog.
@@ -241,5 +323,81 @@ mod tests {
         assert!(project_transcript_line("", &open).is_none());
         assert!(project_transcript_line("not json", &open).is_none());
         assert!(project_transcript_line(r#"{"type":"assistant"}"#, &open).is_none());
+    }
+
+    #[test]
+    fn a_user_prompt_submit_hook_projects_turn_started() {
+        let hook: ClaudeHook =
+            serde_json::from_str(r#"{"hook":"user_prompt_submit","prompt":"hello"}"#)
+                .expect("parse");
+        let (event, open) = project_hook(hook, String::new());
+        assert!(matches!(
+            event,
+            AgentEvent::TurnStarted {
+                provider_turn_id: None
+            }
+        ));
+        assert!(
+            open.is_none(),
+            "a prompt echo opens no permission dialog to track"
+        );
+    }
+
+    #[test]
+    fn a_stop_hook_projects_turn_completed() {
+        let hook: ClaudeHook = serde_json::from_str(r#"{"hook":"stop"}"#).expect("parse");
+        let (event, open) = project_hook(hook, String::new());
+        assert!(matches!(
+            event,
+            AgentEvent::TurnCompleted {
+                status: TurnStatus::Completed
+            }
+        ));
+        assert!(open.is_none());
+    }
+
+    #[test]
+    fn only_the_permission_request_hook_mints_a_request_id() {
+        let permission: ClaudeHook =
+            serde_json::from_str(r#"{"hook":"permission_request","tool_name":"Bash"}"#)
+                .expect("parse");
+        assert!(hook_needs_request_id(&permission));
+        let prompt: ClaudeHook =
+            serde_json::from_str(r#"{"hook":"user_prompt_submit"}"#).expect("parse");
+        assert!(!hook_needs_request_id(&prompt));
+        let stop: ClaudeHook = serde_json::from_str(r#"{"hook":"stop"}"#).expect("parse");
+        assert!(!hook_needs_request_id(&stop));
+    }
+
+    #[test]
+    fn both_interrupt_marker_variants_project_an_interrupted_completion() {
+        for text in [
+            "[Request interrupted by user]",
+            "[Request interrupted by user for tool use]",
+        ] {
+            let line = serde_json::json!({ "type": "user", "text": text }).to_string();
+            assert!(
+                matches!(
+                    project_interrupt_marker(&line),
+                    Some(AgentEvent::TurnCompleted {
+                        status: TurnStatus::Interrupted
+                    })
+                ),
+                "expected an interrupted completion for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_interrupt_lines_do_not_project_a_completion() {
+        assert!(project_interrupt_marker("").is_none());
+        assert!(project_interrupt_marker("not json").is_none());
+        // A normal user prompt is not the interrupt marker.
+        assert!(project_interrupt_marker(r#"{"type":"user","text":"a normal prompt"}"#).is_none());
+        // The marker text on a non-user line does not count.
+        assert!(project_interrupt_marker(
+            r#"{"type":"assistant","text":"[Request interrupted by user]"}"#
+        )
+        .is_none());
     }
 }
