@@ -16,14 +16,19 @@
 //! ([`AgentEvent::SessionStarted`], [`AgentEvent::UserPromptAccepted`],
 //! [`AgentEvent::SessionEnded`]). Those cases run and pass.
 //!
-//! The cases that assert turn/permission lifecycle events
+//! The **permission** cases are active: they drive the adapter's ingestion seam
+//! ([`ClaudeCodePtyHookAdapter::ingest_hook`] +
+//! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`]), which projects a
+//! `PermissionRequest` hook and its correlated `tool_result` into
+//! [`AgentEvent::PermissionRequested`]/[`AgentEvent::PermissionResolved`].
+//!
+//! The remaining cases that assert turn lifecycle events
 //! ([`AgentEvent::TurnStarted`], [`AgentEvent::TurnCompleted`],
-//! [`AgentEvent::PermissionRequested`]/`Resolved`,
-//! [`AgentEvent::UnsupportedInteraction`]) depend on the core routing Claude's
-//! hooks and transcript into the `AgentEvent` stream — a later phase. Until
-//! then they are `#[ignore]`d scaffolds with the intended assertion in the
-//! body, rather than faked passes. Each drops the adapter before draining so an
-//! accidentally-un-ignored scaffold fails fast instead of hanging.
+//! [`AgentEvent::UnsupportedInteraction`]) depend on the seam's prompt/turn
+//! projections — a later phase. Until then they are `#[ignore]`d scaffolds with
+//! the intended assertion in the body, rather than faked passes. Each drops the
+//! adapter before draining so an accidentally-un-ignored scaffold fails fast
+//! instead of hanging.
 
 use async_trait::async_trait;
 use std::sync::Mutex;
@@ -312,10 +317,10 @@ async fn claude_launch_builds_the_expected_command() {
 
 // --- Claude adapter: pending (Phase B) scaffolds ----------------------------
 //
-// These assert events the adapter cannot yet emit because Claude's hooks and
-// transcript are not routed into the `AgentEvent` stream in this phase. They
-// are real scaffolds (the intended assertion is in the body); when the event
-// projection lands, drop the `#[ignore]`.
+// These assert turn-lifecycle events the ingestion seam does not project yet
+// (only the permission projection is wired in this phase). They are real
+// scaffolds (the intended assertion is in the body); when the prompt/turn
+// projections land, drop the `#[ignore]`.
 
 /// `send_emits_user_prompt_and_turn_started`.
 #[tokio::test]
@@ -374,42 +379,87 @@ async fn turn_completion_is_emitted_once() {
     assert_eq!(completions, 1, "exactly one TurnCompleted per turn");
 }
 
-/// `permission_request_can_be_allowed`.
+/// `permission_request_can_be_allowed`: a `PermissionRequest` hook fed through
+/// the ingestion seam projects `PermissionRequested`, and the correlated
+/// `tool_result` (no error → allowed) projects `PermissionResolved(Allow)` for
+/// the same minted request id.
 #[tokio::test]
-#[ignore = "Phase B: permission flow is not yet routed through AgentEvent"]
 async fn permission_request_can_be_allowed() {
     let adapter = claude_adapter();
     let handle = adapter.launch(launch_request()).await.expect("launch");
     let mut stream = adapter.events(&handle);
+    assert!(matches!(
+        stream.recv().await,
+        Some(AgentEvent::SessionStarted { .. })
+    ));
+
+    adapter
+        .ingest_hook(
+            &handle,
+            r#"{"hook":"permission_request","tool_name":"Bash",
+                "tool_input":{"command":"rm -i x"},"tool_use_id":"tu-allow"}"#,
+        )
+        .expect("ingest permission-request hook");
+    // The correlated tool_result carries no error, so the call was allowed.
+    adapter.ingest_transcript_lines(
+        &handle,
+        &[r#"{"type":"tool_result","tool_use_id":"tu-allow"}"#.to_owned()],
+    );
+
     drop(adapter);
     let events = drain(&mut stream).await;
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::PermissionRequested { .. })),
-        "expected a PermissionRequested to allow"
-    );
+
+    let requested_id = events.iter().find_map(|e| match e {
+        AgentEvent::PermissionRequested { request } => Some(request.request_id.clone()),
+        _ => None,
+    });
+    let requested_id = requested_id.expect("expected a PermissionRequested to allow");
     assert!(
         events.iter().any(|e| matches!(
             e,
             AgentEvent::PermissionResolved {
+                request_id,
                 decision: delta_usecase::PermissionDecision::Allow,
-                ..
-            }
+            } if *request_id == requested_id
         )),
-        "expected PermissionResolved(Allow)"
+        "expected PermissionResolved(Allow) for the requested id, got {events:?}"
     );
 }
 
-/// `permission_request_can_be_denied`.
+/// `permission_request_can_be_denied`: the same seam, but the correlated
+/// `tool_result` is an error, which projects `PermissionResolved(Deny)`.
 #[tokio::test]
-#[ignore = "Phase B: permission flow is not yet routed through AgentEvent"]
 async fn permission_request_can_be_denied() {
     let adapter = claude_adapter();
     let handle = adapter.launch(launch_request()).await.expect("launch");
     let mut stream = adapter.events(&handle);
+    assert!(matches!(
+        stream.recv().await,
+        Some(AgentEvent::SessionStarted { .. })
+    ));
+
+    adapter
+        .ingest_hook(
+            &handle,
+            r#"{"hook":"permission_request","tool_name":"Bash",
+                "tool_input":{"command":"rm -rf /"},"tool_use_id":"tu-deny"}"#,
+        )
+        .expect("ingest permission-request hook");
+    // An errored tool_result is the deny signal.
+    adapter.ingest_transcript_lines(
+        &handle,
+        &[r#"{"type":"tool_result","tool_use_id":"tu-deny","is_error":true}"#.to_owned()],
+    );
+
     drop(adapter);
     let events = drain(&mut stream).await;
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::PermissionRequested { .. })),
+        "expected a PermissionRequested to deny, got {events:?}"
+    );
     assert!(
         events.iter().any(|e| matches!(
             e,
@@ -418,7 +468,7 @@ async fn permission_request_can_be_denied() {
                 ..
             }
         )),
-        "expected PermissionResolved(Deny)"
+        "expected PermissionResolved(Deny), got {events:?}"
     );
 }
 

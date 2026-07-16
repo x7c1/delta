@@ -16,22 +16,38 @@
 //! driven differs.
 //!
 //! The event-source side of Claude — HTTP hooks and the JSONL transcript tail —
-//! is NOT yet projected into the [`AgentEvent`] stream here. The core still owns
-//! that ingestion; folding it into an `AgentEvent` projection is a later phase.
-//! Consequently this adapter's event stream carries only the events it produces
-//! for the operations it performs directly: [`AgentEvent::SessionStarted`] at
-//! launch/resume, [`AgentEvent::UserPromptAccepted`] on send, and
-//! [`AgentEvent::SessionEnded`] on close. The turn/tool/permission events that
-//! derive from hooks and the transcript arrive once that projection lands.
+//! is fed in through the ingestion seam below rather than pushed by Claude. The
+//! events the adapter produces from the operations it performs directly are
+//! [`AgentEvent::SessionStarted`] at launch/resume,
+//! [`AgentEvent::UserPromptAccepted`] on send, and [`AgentEvent::SessionEnded`]
+//! on close; the hook/transcript-derived events arrive through the seam.
 //!
 //! The claude launch flags are mirrored here from the core's spawn path; the
 //! two converge onto this adapter when the spawn path is rerouted through it.
+//!
+//! ## Ingestion seam
+//!
+//! [`ClaudeCodePtyHookAdapter::ingest_hook`] and
+//! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`] are the entry points
+//! that feed Claude's lossy wire input (hook payloads, transcript lines) into
+//! the neutral [`AgentEvent`] projection on this session's [`events`] stream.
+//! The parsing lives in the [`ingest`] module. This phase wires only the
+//! **permission** projection (the `PermissionRequest` hook and its correlated
+//! `tool_result`); the turn/tool projections join it as the seam grows. See
+//! that module for the intended growth.
+//!
+//! [`events`]: AgentAdapter::events
+
+mod ingest;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+pub use ingest::ClaudeHook;
+use ingest::{project_hook, project_transcript_line, OpenPermission};
 
 use delta_usecase::{
     pane_for, AgentAdapter, AgentCapabilities, AgentEvent, AgentEventStream, AgentProvider,
@@ -66,11 +82,18 @@ pub struct ClaudeLaunchConfig {
     pub settings_path: String,
 }
 
-/// Per-session event plumbing: the sender the adapter emits through, and the
-/// receiver handed out (once) by [`AgentAdapter::events`].
+/// Per-session event plumbing: the sender the adapter emits through, the
+/// receiver handed out (once) by [`AgentAdapter::events`], and the projection
+/// state the ingestion seam keeps for this session.
 struct SessionChannel {
     tx: UnboundedSender<AgentEvent>,
     rx: Option<UnboundedReceiver<AgentEvent>>,
+    /// The permission dialog currently projected and not yet resolved, if any.
+    /// Claude shows one at a time, so at most one exists.
+    open_permission: Option<OpenPermission>,
+    /// Monotonic per-session counter minting the ids the projected permission
+    /// events are keyed by (Claude's `PermissionRequest` hook carries none).
+    permission_seq: u64,
 }
 
 /// The [`AgentAdapter`] for Claude Code (tmux PTY + hooks + transcript).
@@ -112,7 +135,15 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
         self.sessions
             .lock()
             .expect("sessions mutex poisoned")
-            .insert(key.clone(), SessionChannel { tx, rx: Some(rx) });
+            .insert(
+                key.clone(),
+                SessionChannel {
+                    tx,
+                    rx: Some(rx),
+                    open_permission: None,
+                    permission_seq: 0,
+                },
+            );
         AgentSessionHandle {
             provider: AgentProvider::Claude,
             provider_session_id,
@@ -131,6 +162,60 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
             .get(key)
         {
             let _ = channel.tx.send(event);
+        }
+    }
+
+    /// Ingest a Claude hook payload for `handle`'s session, projecting the
+    /// [`AgentEvent`] it implies onto the session's [`events`] stream.
+    ///
+    /// This is one half of the ingestion seam. Parsing lives in [`ingest`]; the
+    /// adapter only mints the correlation id and tracks the open dialog. For an
+    /// unknown session (the stream was never opened) this is a no-op.
+    ///
+    /// Errors only on a malformed payload; a well-formed hook is always
+    /// projected. This phase recognises the `PermissionRequest` hook.
+    ///
+    /// [`events`]: AgentAdapter::events
+    pub fn ingest_hook(
+        &self,
+        handle: &AgentSessionHandle,
+        payload_json: &str,
+    ) -> serde_json::Result<()> {
+        let hook: ClaudeHook = serde_json::from_str(payload_json)?;
+        let mut sessions = self.sessions.lock().expect("sessions mutex poisoned");
+        if let Some(channel) = sessions.get_mut(&handle.key) {
+            channel.permission_seq += 1;
+            let request_id = format!("{}-perm-{}", handle.key, channel.permission_seq);
+            let (event, open) = project_hook(hook, request_id);
+            channel.open_permission = open;
+            let _ = channel.tx.send(event);
+        }
+        Ok(())
+    }
+
+    /// Ingest transcript lines for `handle`'s session, projecting any
+    /// [`AgentEvent`] they imply onto the session's [`events`] stream.
+    ///
+    /// The other half of the ingestion seam. Lines that carry no projected
+    /// meaning (blank, non-JSON, or records this phase does not model) are
+    /// skipped, so a whole transcript tail can be fed safely. This phase
+    /// resolves the open permission dialog when its correlated `tool_result`
+    /// arrives. For an unknown session this is a no-op.
+    ///
+    /// [`events`]: AgentAdapter::events
+    pub fn ingest_transcript_lines(&self, handle: &AgentSessionHandle, lines: &[String]) {
+        let mut sessions = self.sessions.lock().expect("sessions mutex poisoned");
+        let Some(channel) = sessions.get_mut(&handle.key) else {
+            return;
+        };
+        for line in lines {
+            let Some(open) = channel.open_permission.as_ref() else {
+                break;
+            };
+            if let Some(event) = project_transcript_line(line, open) {
+                channel.open_permission = None;
+                let _ = channel.tx.send(event);
+            }
         }
     }
 }

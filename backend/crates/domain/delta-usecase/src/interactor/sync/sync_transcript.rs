@@ -1,9 +1,12 @@
 use delta_attribution::{attribute_lines, AttributionState, Effect, OutstandingSend};
 use delta_model::{Message, Session};
 
+use crate::agent::AgentEvent;
 use crate::error::Result;
+use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::RunningSubagent;
+use crate::interactor::PermissionDecision;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
@@ -118,23 +121,28 @@ where
                     // `tool_use_id`, plus any pending dialog row the
                     // `PermissionRequest` hook owns (answered in the TUI after
                     // the browser-decision wait timed out).
+                    // The `tool_use_id` → row correlation is projection-owned
+                    // and stays here; each resolved row then flows through the
+                    // permission reducer as a clean neutral event, which keeps
+                    // the queryable mirror in step with the broadcast (clearing
+                    // both the dialog and any question — their row ids are
+                    // disjoint, so resolving both is safe) and emits the
+                    // `PermissionResolved` that settles the browser notice.
+                    let decision = if allowed {
+                        PermissionDecision::Allow
+                    } else {
+                        PermissionDecision::Deny
+                    };
                     for request_id in self
                         .store
                         .resolve_permission_by_tool_use_id(&session.id, &tool_use_id, allowed)
                         .await?
                     {
-                        // Keep the queryable runtime mirror in step with the
-                        // broadcast, so the sends envelope never reports a
-                        // dialog (or question) that already resolved. The same
-                        // `PermissionResolved` event clears either notice in
-                        // the browser; a question's row id and a permission's
-                        // row id are disjoint, so resolving both here is safe.
-                        self.state.resolve_pending_permission(request_id);
-                        self.state.resolve_pending_question(request_id);
-                        events.push(SessionEvent::PermissionResolved {
-                            session_id: session.id.clone(),
-                            request_id,
-                        });
+                        let event = AgentEvent::PermissionResolved {
+                            request_id: request_id.to_string(),
+                            decision,
+                        };
+                        events.extend(reduce_permission_event(self.state, &session.id, &event));
                     }
                 }
                 Effect::TurnInterrupted => {
