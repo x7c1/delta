@@ -27,8 +27,12 @@
 //! that thread's [`ThreadEvent`] channel; anything not scoped to a known thread
 //! goes to the connection-level "unrouted" channel.
 
+mod adapter;
 mod error;
+mod translate;
 pub mod wire;
+
+pub use adapter::CodexAppServerAdapter;
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -267,6 +271,54 @@ impl AppServerConnection {
             events,
             result,
         })
+    }
+
+    /// Resume a thread via `thread/resume`, register its event channel, and
+    /// return the provider thread id together with the channel. Symmetric with
+    /// [`AppServerConnection::start_thread`]; the server's history replay (if
+    /// any) rides its own notifications on the returned channel.
+    ///
+    /// The server may echo the requested thread id back under `threadId`; when
+    /// it omits it the requested id (carried in `params.threadId`) is used, so a
+    /// lean resume result still yields a usable id.
+    pub async fn resume_thread(&self, params: Option<Value>) -> Result<StartedThread> {
+        let requested = params
+            .as_ref()
+            .and_then(|p| p.get("threadId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let result = self.request("thread/resume", params).await?;
+        let thread_id = result
+            .get("threadId")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or(requested)
+            .ok_or_else(|| Error::UnexpectedResponse {
+                method: "thread/resume".to_owned(),
+                detail: format!("result has no string `threadId` and none was requested: {result}"),
+            })?;
+        let events = self.subscribe_thread(&thread_id);
+        Ok(StartedThread {
+            thread_id,
+            events,
+            result,
+        })
+    }
+
+    /// Answer a server-originated request with a success result. `id` is the
+    /// verbatim id the [`ServerRequest`] carried, echoed back with the same JSON
+    /// type the server used.
+    pub async fn respond(&self, id: &Value, result: Value) -> Result<()> {
+        let frame = wire::encode_success_response(id, result).map_err(Error::Encode)?;
+        self.write_frame(&frame).await
+    }
+
+    /// Answer a server-originated request with a JSON-RPC error. Used to reject a
+    /// request Delta does not model, so a well-behaved server unblocks its turn
+    /// rather than waiting forever for a reply.
+    pub async fn respond_error(&self, id: &Value, code: i64, message: &str) -> Result<()> {
+        let frame = wire::encode_error_response(id, code, message).map_err(Error::Encode)?;
+        self.write_frame(&frame).await
     }
 
     /// Take the connection-level "unrouted" channel: frames that were not scoped

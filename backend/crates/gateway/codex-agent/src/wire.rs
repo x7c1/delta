@@ -26,7 +26,7 @@
 //! deliberately lenient so a later correction is localised here.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// A JSON-RPC request id.
 ///
@@ -222,6 +222,24 @@ pub fn encode_request(
 /// Serialise an outgoing notification as a single newline-terminated frame.
 pub fn encode_notification(method: &str, params: Option<Value>) -> serde_json::Result<String> {
     let mut line = serde_json::to_string(&OutgoingNotification { method, params })?;
+    line.push('\n');
+    Ok(line)
+}
+
+/// Serialise a success response to a server-originated request. `id` is echoed
+/// back verbatim (the server's own id type), so a string id stays a string and
+/// an integer id stays an integer.
+pub fn encode_success_response(id: &Value, result: Value) -> serde_json::Result<String> {
+    let mut line = serde_json::to_string(&json!({ "id": id, "result": result }))?;
+    line.push('\n');
+    Ok(line)
+}
+
+/// Serialise an error response to a server-originated request. Used to answer a
+/// request Delta does not model so the server does not block waiting on a reply.
+pub fn encode_error_response(id: &Value, code: i64, message: &str) -> serde_json::Result<String> {
+    let mut line =
+        serde_json::to_string(&json!({ "id": id, "error": { "code": code, "message": message } }))?;
     line.push('\n');
     Ok(line)
 }

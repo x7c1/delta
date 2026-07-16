@@ -72,6 +72,17 @@ impl Server<'_> {
                 let thread_id = self.scenario.thread_id.clone();
                 self.respond(id, json!({ "threadId": thread_id }))
             }
+            "thread/resume" => {
+                // Resume echoes back the requested thread id (a real server
+                // rebuilds that thread's history); fall back to the scenario's
+                // id when the client did not name one.
+                let thread_id = params
+                    .get("threadId")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&self.scenario.thread_id)
+                    .to_owned();
+                self.respond(id, json!({ "threadId": thread_id }))
+            }
             "turn/start" => {
                 // The turn is scoped to the thread the client named, falling
                 // back to the scenario's thread id.

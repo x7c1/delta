@@ -1,24 +1,24 @@
-//! Provider-neutral adapter contract test harness, run against the Claude
-//! adapter.
+//! The provider-neutral adapter contract suite, run against the Claude adapter.
 //!
-//! The cases here are written generically over any [`AgentAdapter`] and read
-//! the adapter's declared [`AgentCapabilities`] to decide what to assert — so
-//! the same suite runs against a future structured adapter (Codex) unchanged.
-//! In this phase there is one implementor, so the harness lives in this crate;
-//! when a second adapter arrives it lifts verbatim into a shared test-support
-//! crate (the case functions take `&impl AgentAdapter` precisely so that move
-//! is mechanical).
+//! The suite itself lives in the shared [`agent_contract`] crate; every case is
+//! written generically over `&impl AgentAdapter` so the Codex adapter runs the
+//! identical bodies. This module supplies the Claude fixture and calls each
+//! shared case, then adds the Claude-specific cases whose *stimulus* is
+//! provider-specific.
 //!
-//! ## Active vs. pending
+//! ## Shared cases (mechanical, driven through the trait)
 //!
-//! The Claude adapter drives the *mechanical* side of the session (launch,
-//! send, interrupt, close) and emits the events it produces at those points
+//! Launch/send/interrupt/close and the events those operations emit directly
 //! ([`AgentEvent::SessionStarted`], [`AgentEvent::UserPromptAccepted`],
-//! [`AgentEvent::SessionEnded`]). Those cases run and pass.
+//! [`AgentEvent::SessionEnded`]) come from [`agent_contract`].
 //!
-//! The **permission** and **turn-lifecycle** cases are active: they drive the
-//! adapter's ingestion seam ([`ClaudeCodePtyHookAdapter::ingest_hook`] +
-//! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`]), which projects:
+//! ## Claude-specific cases (driven through the ingestion seam)
+//!
+//! The **permission** and **turn-lifecycle** cases drive the adapter's ingestion
+//! seam ([`ClaudeCodePtyHookAdapter::ingest_hook`] +
+//! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`]) — Claude's lossy input
+//! is fed in explicitly, since there is no live hook/transcript source in a unit
+//! test. They project:
 //!
 //! - a `PermissionRequest` hook and its correlated `tool_result` into
 //!   [`AgentEvent::PermissionRequested`]/[`AgentEvent::PermissionResolved`];
@@ -28,19 +28,20 @@
 //! - the `[Request interrupted by user…]` transcript marker into
 //!   [`AgentEvent::TurnCompleted`]`(Interrupted)`.
 //!
-//! The one remaining case that asserts [`AgentEvent::UnsupportedInteraction`]
-//! depends on structured server→client requests Claude does not emit, so it is
-//! deferred to the phase that introduces them. Until then it is an `#[ignore]`d
-//! scaffold with the intended assertion in the body, rather than a faked pass.
-//! Each drops the adapter before draining so an accidentally-un-ignored
-//! scaffold fails fast instead of hanging.
+//! The `no_server_request_silently_hangs` case asserts
+//! [`AgentEvent::UnsupportedInteraction`], which depends on structured
+//! server→client requests Claude does not emit; it is exercised meaningfully by
+//! the Codex adapter instead. Here it stays an `#[ignore]`d scaffold with the
+//! intended assertion in the body, rather than a faked pass. It drops the
+//! adapter before draining so an accidentally-un-ignored scaffold fails fast
+//! instead of hanging.
 
 use async_trait::async_trait;
 use std::sync::Mutex;
 
+use agent_contract::{drain, launch_request};
 use delta_usecase::{
-    AgentAdapter, AgentEvent, AgentEventStream, AgentProvider, ContextInjectionCapability,
-    InterruptCapability, LaunchRequest, Result, SendRequest, SessionEndReason, TmuxDriver,
+    AgentAdapter, AgentEvent, AgentProvider, LaunchRequest, Result, SendRequest, TmuxDriver,
 };
 
 use crate::{ClaudeCodePtyHookAdapter, ClaudeLaunchConfig};
@@ -118,158 +119,31 @@ fn claude_adapter() -> ClaudeCodePtyHookAdapter<RecordingTmux> {
     )
 }
 
-fn launch_request() -> LaunchRequest {
-    LaunchRequest {
-        session_id: "01920000-0000-7000-8000-000000000001".to_owned(),
-        workdir: "/tmp/workdir".to_owned(),
-        extra_args: Vec::new(),
-        first_prompt: None,
-    }
-}
-
-/// Drain every event buffered on `stream`. The caller must have dropped the
-/// adapter first so the channel is closed and this returns rather than blocks.
-async fn drain(stream: &mut AgentEventStream) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-    while let Some(event) = stream.recv().await {
-        events.push(event);
-    }
-    events
-}
-
-// --- Provider-neutral cases (active) ----------------------------------------
-
-/// `launch_returns_provider_session_id`: launching yields a handle carrying a
-/// provider session id, and the stream opens with a matching `SessionStarted`.
-async fn case_launch_returns_provider_session_id<A: AgentAdapter>(adapter: &A) {
-    let handle = adapter.launch(launch_request()).await.expect("launch");
-    assert!(
-        !handle.provider_session_id.is_empty(),
-        "launch must return a provider session id"
-    );
-    let mut stream = adapter.events(&handle);
-    match stream.recv().await {
-        Some(AgentEvent::SessionStarted {
-            provider_session_id,
-        }) => assert_eq!(provider_session_id, handle.provider_session_id),
-        other => panic!("expected SessionStarted, got {other:?}"),
-    }
-}
-
-/// `send_emits_user_prompt_accepted`: a send surfaces the prompt as an accepted
-/// user prompt on the event stream (the mechanical half of
-/// `send_emits_user_prompt_and_turn_started`; the `TurnStarted` half is the
-/// pending scaffold below).
-async fn case_send_emits_user_prompt_accepted<A: AgentAdapter>(adapter: &A) {
-    let handle = adapter.launch(launch_request()).await.expect("launch");
-    let mut stream = adapter.events(&handle);
-    assert!(matches!(
-        stream.recv().await,
-        Some(AgentEvent::SessionStarted { .. })
-    ));
-    adapter
-        .send(
-            &handle,
-            SendRequest {
-                text: "hello agent".to_owned(),
-            },
-        )
-        .await
-        .expect("send");
-    match stream.recv().await {
-        Some(AgentEvent::UserPromptAccepted { text, .. }) => assert_eq!(text, "hello agent"),
-        other => panic!("expected UserPromptAccepted, got {other:?}"),
-    }
-}
-
-/// `context_injection_does_not_pollute_visible_prompt` (asserted only for
-/// `HiddenPerTurn` providers): the visible prompt the adapter reports is
-/// exactly what was sent — no hidden context is folded into it (Claude injects
-/// hidden context out of band via the `UserPromptSubmit` hook).
-async fn case_context_injection_does_not_pollute_visible_prompt<A: AgentAdapter>(adapter: &A) {
-    if adapter.capabilities().context_injection != ContextInjectionCapability::HiddenPerTurn {
-        return;
-    }
-    let handle = adapter.launch(launch_request()).await.expect("launch");
-    let mut stream = adapter.events(&handle);
-    assert!(matches!(
-        stream.recv().await,
-        Some(AgentEvent::SessionStarted { .. })
-    ));
-    let visible = "just the user's words";
-    adapter
-        .send(
-            &handle,
-            SendRequest {
-                text: visible.to_owned(),
-            },
-        )
-        .await
-        .expect("send");
-    match stream.recv().await {
-        Some(AgentEvent::UserPromptAccepted { text, .. }) => assert_eq!(
-            text, visible,
-            "the visible prompt must not carry injected context"
-        ),
-        other => panic!("expected UserPromptAccepted, got {other:?}"),
-    }
-}
-
-/// `interrupt_is_accepted_when_supported` (skipped when the provider declares
-/// `InterruptCapability::Unsupported`): interrupting an open session succeeds.
-/// The turn-ending event it produces is the pending `interrupt_ends_turn`
-/// scaffold below.
-async fn case_interrupt_is_accepted_when_supported<A: AgentAdapter>(adapter: &A) {
-    if adapter.capabilities().interrupt == InterruptCapability::Unsupported {
-        return;
-    }
-    let handle = adapter.launch(launch_request()).await.expect("launch");
-    adapter.interrupt(&handle).await.expect("interrupt");
-}
-
-/// `close_ends_the_session`: closing an open session succeeds and emits
-/// `SessionEnded`.
-async fn case_close_ends_the_session<A: AgentAdapter>(adapter: &A) {
-    let handle = adapter.launch(launch_request()).await.expect("launch");
-    let mut stream = adapter.events(&handle);
-    assert!(matches!(
-        stream.recv().await,
-        Some(AgentEvent::SessionStarted { .. })
-    ));
-    adapter.close(&handle).await.expect("close");
-    match stream.recv().await {
-        Some(AgentEvent::SessionEnded { reason }) => {
-            assert_eq!(reason, SessionEndReason::Closed)
-        }
-        other => panic!("expected SessionEnded, got {other:?}"),
-    }
-}
-
-// --- Claude adapter: active cases -------------------------------------------
+// --- Shared provider-neutral cases (run against the Claude adapter) ---------
 
 #[tokio::test]
 async fn launch_returns_provider_session_id() {
-    case_launch_returns_provider_session_id(&claude_adapter()).await;
+    agent_contract::case_launch_returns_provider_session_id(&claude_adapter()).await;
 }
 
 #[tokio::test]
 async fn send_emits_user_prompt_accepted() {
-    case_send_emits_user_prompt_accepted(&claude_adapter()).await;
+    agent_contract::case_send_emits_user_prompt_accepted(&claude_adapter()).await;
 }
 
 #[tokio::test]
 async fn context_injection_does_not_pollute_visible_prompt() {
-    case_context_injection_does_not_pollute_visible_prompt(&claude_adapter()).await;
+    agent_contract::case_context_injection_does_not_pollute_visible_prompt(&claude_adapter()).await;
 }
 
 #[tokio::test]
 async fn interrupt_is_accepted_when_supported() {
-    case_interrupt_is_accepted_when_supported(&claude_adapter()).await;
+    agent_contract::case_interrupt_is_accepted_when_supported(&claude_adapter()).await;
 }
 
 #[tokio::test]
 async fn close_ends_the_session() {
-    case_close_ends_the_session(&claude_adapter()).await;
+    agent_contract::case_close_ends_the_session(&claude_adapter()).await;
 }
 
 /// Claude-specific: the launch command line is the exact spawn shape Claude
