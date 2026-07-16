@@ -343,6 +343,31 @@ describe('SessionNode branch display', () => {
   });
 });
 
+describe('SessionNode provider badge', () => {
+  it('shows the Claude monogram for a Claude session', () => {
+    // The shared `item` fixture runs on Claude.
+    renderNode({});
+
+    const badge = screen.getByTestId('session-provider-badge');
+    expect(badge).toHaveTextContent('CL');
+    // The full product name is the tooltip / accessible name.
+    expect(screen.getByTitle('Claude Code')).toBeInTheDocument();
+  });
+
+  it('shows the Codex monogram for a Codex session', () => {
+    renderNode({
+      item: {
+        ...item,
+        session: { ...item.session, provider: 'codex' },
+      },
+    });
+
+    const badge = screen.getByTestId('session-provider-badge');
+    expect(badge).toHaveTextContent('CX');
+    expect(screen.getByTitle('Codex')).toBeInTheDocument();
+  });
+});
+
 describe('SessionNode kebab menu', () => {
   // jsdom does not implement `navigator.clipboard`, so install a stub holding a
   // `vi.fn()` writeText. `configurable: true` lets afterAll restore the original

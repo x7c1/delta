@@ -29,16 +29,23 @@ import type {
  *   "this session cannot be resumed" UI is developable with no backend. It sorts
  *   just after the two detailed sessions (top of page 2), leaving page 1 and the
  *   auto-focus unchanged.
+ * - `sess-mock-4` — **closed, Codex provider**. The other three run on Claude;
+ *   this one carries `provider: 'codex'` so the navigator's provider badge is
+ *   exercisable for both providers with no backend. It has an empty main thread
+ *   (no messages) and sorts just below `sess-mock-3` (still on page 2), again
+ *   leaving page 1 and the auto-focus unchanged.
  */
 
 export const SESSION_ID = 'sess-mock-1';
 export const SESSION_ID_2 = 'sess-mock-2';
 export const SESSION_ID_3 = 'sess-mock-3';
+export const SESSION_ID_4 = 'sess-mock-4';
 export const MAIN_THREAD_ID = 1;
 export const BRANCH_THREAD_ID = 2;
 export const SESSION_2_MAIN_THREAD_ID = 3;
 export const SESSION_2_BRANCH_THREAD_ID = 4;
 export const SESSION_3_MAIN_THREAD_ID = 5;
+export const SESSION_4_MAIN_THREAD_ID = 6;
 
 /**
  * Number of sessions returned per page by the mock `GET /api/sessions`. Small on
@@ -63,8 +70,8 @@ export const SESSIONS_PAGE_SIZE = 2;
 export const FILLER_SESSION_COUNT = 40;
 const FIRST_FILLER_THREAD_ID = 100;
 
-/** Total seeded sessions: the three detailed ones plus the filler. */
-export const TOTAL_SEEDED_SESSIONS = 3 + FILLER_SESSION_COUNT;
+/** Total seeded sessions: the four detailed ones plus the filler. */
+export const TOTAL_SEEDED_SESSIONS = 4 + FILLER_SESSION_COUNT;
 
 export const mockSession: Session = {
   id: SESSION_ID,
@@ -109,6 +116,28 @@ export const mockSession3: Session = {
   // (renders the cwd basename instead of an `org/repo` label).
   repository_display_name: null,
   provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
+};
+
+export const mockSession4: Session = {
+  id: SESSION_ID_4,
+  cwd: '/home/dev/projects/codex-lab',
+  transcript_path: '/tmp/transcript-4.jsonl',
+  title: 'codex refactor',
+  status: 'ended',
+  // Sorts just below sess-mock-3 (2025-12-31) yet above every filler (which
+  // start at 2025-12-30T00:00:00Z and go older), so this Codex session lands at
+  // the top-of-page-2 region and page 1 / the auto-focus stay unchanged.
+  created_at: '2025-12-30T12:00:00Z',
+  branch_at_launch: 'feat/codex-adapter',
+  repo_root: '/home/dev/projects/codex-lab',
+  repository_display_name: 'dev/codex-lab',
+  // The one non-Claude seed: exercises the navigator provider badge's Codex
+  // path (the other three sessions run on Claude). Its repository name is kept
+  // distinct from the Claude seeds so text-based session-node locators in the
+  // e2e specs (e.g. filter by `dev/delta`) still resolve to a single card.
+  provider: 'codex',
   provider_session_id: null,
   provider_thread_id: null,
 };
@@ -159,6 +188,17 @@ export const mockThreads3: Thread[] = [
     parent_thread_id: null,
     root_message_uuid: null,
     created_at: '2025-12-31T00:00:00Z',
+  },
+];
+
+export const mockThreads4: Thread[] = [
+  {
+    id: SESSION_4_MAIN_THREAD_ID,
+    session_id: SESSION_ID_4,
+    title: 'main',
+    parent_thread_id: null,
+    root_message_uuid: null,
+    created_at: '2025-12-30T12:00:00Z',
   },
 ];
 
@@ -663,6 +703,12 @@ export function seedData(): MockStore {
         mainThreadId: SESSION_3_MAIN_THREAD_ID,
         threads: structuredClone(mockThreads3),
         resumable: false,
+      },
+      {
+        session: structuredClone(mockSession4),
+        open: false,
+        mainThreadId: SESSION_4_MAIN_THREAD_ID,
+        threads: structuredClone(mockThreads4),
       },
       ...structuredClone(filler),
     ],
