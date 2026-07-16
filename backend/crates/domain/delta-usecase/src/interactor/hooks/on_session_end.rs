@@ -98,6 +98,12 @@ where
             "SessionEnd for a ready/unknown session; normal end, no failure handling"
         );
         self.apply_turn_input(crate::turn::TurnInput::Close).await?;
-        Ok(Vec::new())
+        // The `claude` process is gone, so no more of this session's transcript
+        // is ingested — a lingering BACKGROUND subagent's completion
+        // `<task-notification>` can never be folded to clear its indicator. The
+        // `Close` above already swept the foreground entries; sweep whatever
+        // background entries survive so their indicators do not stick forever,
+        // returning a `SubagentFinished` per entry for the caller to broadcast.
+        self.sweep_running_subagents_on_process_gone().await
     }
 }

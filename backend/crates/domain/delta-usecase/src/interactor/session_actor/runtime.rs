@@ -726,6 +726,34 @@ impl SessionRuntime {
         result
     }
 
+    /// Remove and return ALL running-subagent entries, regardless of kind.
+    ///
+    /// This is the **process-gone sweep**, used by the two graceful signals
+    /// that the session's `claude` process is confirmed gone —
+    /// `on_session_end`'s normal-end path and `close_session`. Once the process
+    /// is gone no more of this session's transcript is ingested, so a BACKGROUND
+    /// entry's completion `<task-notification>` can never be folded and
+    /// [`Self::finish_subagent`] can never fire for it: the indicator would
+    /// otherwise stay lit forever. Draining hands every lingering entry back to
+    /// the caller so it can emit a `SubagentFinished` per entry and clear the
+    /// persisted launch row.
+    ///
+    /// How it differs from the other clears:
+    /// - [`Self::finish_subagent`] removes ONE entry, driven by a single folded
+    ///   completion notification — the normal, process-alive end.
+    /// - [`Self::forget_turn`] also clears the whole set, but on session
+    ///   DELETION and event-lessly (the persisted rows go by cascade). This
+    ///   returns the drained entries precisely because the session still
+    ///   exists, so the caller must emit events and drop persisted state itself.
+    ///
+    /// At both call sites the `TurnInput::Close` transition has already swept
+    /// the foreground entries (see [`Self::apply_turn`]), so in practice this
+    /// returns the surviving BACKGROUND entries. Draining the whole set anyway
+    /// is deliberately kind-agnostic so nothing lingering can be missed.
+    pub fn drain_running_subagents(&mut self) -> Vec<RunningSubagent> {
+        std::mem::take(&mut self.running_subagents)
+    }
+
     /// Drop the turn state without any orphan handling. Used when the session
     /// row itself is being deleted (its sends go with it by cascade).
     ///
@@ -1015,5 +1043,56 @@ impl SessionRuntime {
     #[cfg(test)]
     pub(crate) fn resuming(&self) -> Option<&ResumingSession> {
         self.resuming.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn subagent(tool_use_id: &str, background: bool) -> RunningSubagent {
+        RunningSubagent {
+            thread_id: ThreadId(1),
+            tool_use_id: tool_use_id.to_owned(),
+            task_id: None,
+            subagent_type: None,
+            description: None,
+            background,
+        }
+    }
+
+    #[test]
+    fn drain_running_subagents_returns_every_entry_and_empties_the_set() {
+        let mut runtime = SessionRuntime::default();
+        // A foreground and a background entry, so the drain is proven
+        // kind-agnostic (unlike the turn-end sweep, which keeps background).
+        runtime.start_subagent(subagent("toolu_fg", false));
+        runtime.start_subagent(subagent("toolu_bg", true));
+
+        let drained = runtime.drain_running_subagents();
+
+        assert_eq!(
+            drained
+                .iter()
+                .map(|s| s.tool_use_id.clone())
+                .collect::<Vec<_>>(),
+            vec!["toolu_fg".to_owned(), "toolu_bg".to_owned()],
+            "drain returns all entries in start order, regardless of kind"
+        );
+        assert!(
+            runtime.live_state().running_subagents.is_empty(),
+            "drain leaves the running set empty"
+        );
+    }
+
+    #[test]
+    fn drain_running_subagents_is_empty_when_none_are_running() {
+        let mut runtime = SessionRuntime::default();
+
+        assert!(
+            runtime.drain_running_subagents().is_empty(),
+            "draining an empty set yields nothing"
+        );
+        assert!(runtime.live_state().running_subagents.is_empty());
     }
 }

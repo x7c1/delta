@@ -27,6 +27,7 @@ mod repository;
 mod routing;
 mod runtime;
 pub(crate) mod session_actor;
+mod sweep_running_subagents;
 mod sync;
 mod turn_input;
 mod workdir;

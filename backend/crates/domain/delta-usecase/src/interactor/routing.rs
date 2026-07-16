@@ -206,7 +206,11 @@ where
     /// Close an open session: capture its final transcript line, kill its
     /// pane, and drop its binding. The conversational data remains in the
     /// store. Unknown ids are a clean `SessionNotFound`.
-    pub async fn close_session(&self, id: &SessionId) -> Result<()> {
+    ///
+    /// Returns any [`SessionEvent::SubagentFinished`]s the process-gone sweep
+    /// produced (a lingering background subagent cleared because its completion
+    /// notification can no longer arrive); the transport broadcasts them.
+    pub async fn close_session(&self, id: &SessionId) -> Result<Vec<SessionEvent>> {
         self.request(id, |reply| SessionInput::CloseSession { reply })
             .await
     }
