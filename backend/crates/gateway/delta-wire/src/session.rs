@@ -1,6 +1,6 @@
 //! The wire form of [`Session`].
 
-use delta_model::{Session, SessionStatus};
+use delta_model::{AgentProvider, Session, SessionStatus};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -26,6 +26,29 @@ impl From<SessionStatus> for WireSessionStatus {
             SessionStatus::Active => WireSessionStatus::Active,
             SessionStatus::Ended => WireSessionStatus::Ended,
             SessionStatus::Failed => WireSessionStatus::Failed,
+        }
+    }
+}
+
+/// JSON shape of a session's AI-agent provider.
+///
+/// Mirrors the domain [`AgentProvider`] variant-for-variant; this wire twin
+/// carries the serialization concerns the domain type must not know about: the
+/// lowercase variant tokens (matching the persisted `session.provider` values)
+/// and the TypeScript export the UI uses to render the provider badge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(rename = "AgentProvider")]
+pub enum WireAgentProvider {
+    Claude,
+    Codex,
+}
+
+impl From<AgentProvider> for WireAgentProvider {
+    fn from(provider: AgentProvider) -> Self {
+        match provider {
+            AgentProvider::Claude => WireAgentProvider::Claude,
+            AgentProvider::Codex => WireAgentProvider::Codex,
         }
     }
 }
@@ -70,6 +93,18 @@ pub struct WireSession {
     /// predate this field. The navigator renders this directly as the session
     /// card's repo line, falling back to the `cwd` basename when `null`.
     pub repository_display_name: Option<String>,
+    /// Which AI-agent backend drives this session (`"claude"` / `"codex"`).
+    /// The UI renders the provider badge from this; it is never used to branch
+    /// behaviour.
+    pub provider: WireAgentProvider,
+    /// The provider's own conversation id, when the provider (not Delta) mints
+    /// it (e.g. Codex's `thr_...`). `null` for a Claude session and for rows
+    /// that predate provider persistence.
+    pub provider_session_id: Option<String>,
+    /// The provider's thread id. Currently equals `provider_session_id` for
+    /// providers that map a session 1:1 onto a thread. `null` for Claude and
+    /// for rows that predate provider persistence.
+    pub provider_thread_id: Option<String>,
 }
 
 impl From<Session> for WireSession {
@@ -84,6 +119,9 @@ impl From<Session> for WireSession {
             branch_at_launch: session.branch_at_launch,
             repo_root: session.repo_root,
             repository_display_name: session.repository_display_name,
+            provider: session.provider.into(),
+            provider_session_id: session.provider_session_id,
+            provider_thread_id: session.provider_thread_id,
         }
     }
 }
@@ -107,6 +145,9 @@ mod tests {
             repo_root: Some("/work/delta".into()),
             requested_workdir: None,
             repository_display_name: Some("x7c1/delta".into()),
+            provider: AgentProvider::Claude,
+            provider_session_id: None,
+            provider_thread_id: None,
         };
         assert_eq!(
             serde_json::to_value(WireSession::from(session)).unwrap(),
@@ -120,8 +161,34 @@ mod tests {
                 "branch_at_launch": "main",
                 "repo_root": "/work/delta",
                 "repository_display_name": "x7c1/delta",
+                "provider": "claude",
+                "provider_session_id": null,
+                "provider_thread_id": null,
             }),
         );
+    }
+
+    #[test]
+    fn a_codex_session_serializes_its_provider_and_ids() {
+        let session = Session {
+            id: SessionId::from("sess-2"),
+            cwd: "/work/delta".into(),
+            transcript_path: None,
+            title: None,
+            status: SessionStatus::Active,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            branch_at_launch: None,
+            repo_root: None,
+            requested_workdir: None,
+            repository_display_name: None,
+            provider: AgentProvider::Codex,
+            provider_session_id: Some("thr_abc".into()),
+            provider_thread_id: Some("thr_abc".into()),
+        };
+        let value = serde_json::to_value(WireSession::from(session)).unwrap();
+        assert_eq!(value["provider"], serde_json::json!("codex"));
+        assert_eq!(value["provider_session_id"], serde_json::json!("thr_abc"));
+        assert_eq!(value["provider_thread_id"], serde_json::json!("thr_abc"));
     }
 
     #[test]

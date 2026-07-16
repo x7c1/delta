@@ -46,7 +46,7 @@ pub struct WireSessionsResponse {
 mod tests {
     use super::*;
 
-    use delta_model::{Session, SessionId, SessionStatus, ThreadId};
+    use delta_model::{AgentProvider, Session, SessionId, SessionStatus, ThreadId};
 
     #[test]
     fn a_page_serializes_with_the_rest_field_names() {
@@ -62,6 +62,9 @@ mod tests {
                 repo_root: None,
                 requested_workdir: None,
                 repository_display_name: None,
+                provider: AgentProvider::Claude,
+                provider_session_id: None,
+                provider_thread_id: None,
             },
             open: true,
             main_thread_id: ThreadId(1),
@@ -85,6 +88,9 @@ mod tests {
                         "branch_at_launch": null,
                         "repo_root": null,
                         "repository_display_name": null,
+                        "provider": "claude",
+                        "provider_session_id": null,
+                        "provider_thread_id": null,
                     },
                     "open": true,
                     "main_thread_id": 1,

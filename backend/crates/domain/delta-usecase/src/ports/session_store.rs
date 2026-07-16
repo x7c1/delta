@@ -6,8 +6,8 @@ use async_trait::async_trait;
 
 use delta_attribution::SubagentLaunch;
 use delta_model::{
-    LaunchOption, Message, MessageUuid, PermissionRequest, Send, Session, SessionId, Thread,
-    ThreadId,
+    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, Send, Session, SessionId,
+    Thread, ThreadId,
 };
 
 use crate::error::Result;
@@ -105,6 +105,17 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// inside a git repository. Persisted once here and never updated later:
     /// see [`Session::repository_display_name`] for the spawn-snapshot
     /// semantics.
+    ///
+    /// `provider` is the AI-agent backend the session runs on, recorded in the
+    /// `session.provider` column. Every Claude spawn passes
+    /// [`AgentProvider::Claude`] (the historical default); a structured
+    /// provider such as Codex passes its own value. The provider-minted
+    /// conversation ids are not known yet at spawn time — they are learned from
+    /// the provider's launch response and written later via
+    /// [`Self::set_provider_ids`].
+    // Each parameter is a distinct spawn-time column; bundling them into a
+    // struct would not clarify the call sites (mirrors `Interactor::new`).
+    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
@@ -113,7 +124,21 @@ pub trait SessionStore: std::marker::Send + Sync {
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
+        provider: AgentProvider,
     ) -> Result<(Session, ThreadId)>;
+
+    /// Record the provider-minted conversation identifiers for a session: the
+    /// `provider_session_id` and `provider_thread_id` a structured provider
+    /// (e.g. Codex) returns from its launch/`thread/start` call. Overwrites
+    /// whatever was stored (both start `NULL` at spawn). A Claude session never
+    /// calls this — its conversation id is the Delta-minted [`SessionId`], so
+    /// both columns stay `NULL`.
+    async fn set_provider_ids(
+        &self,
+        id: &SessionId,
+        provider_session_id: Option<&str>,
+        provider_thread_id: Option<&str>,
+    ) -> Result<()>;
 
     /// Delete a session row and everything it owns (threads, messages, sends,
     /// permission requests, the sync cursor — removed by cascade). Used to reap
@@ -578,6 +603,7 @@ impl SessionStore for Box<dyn SessionStore> {
         (**self).register_session(new).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
@@ -586,6 +612,7 @@ impl SessionStore for Box<dyn SessionStore> {
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
+        provider: AgentProvider,
     ) -> Result<(Session, ThreadId)> {
         (**self)
             .insert_spawning_session(
@@ -595,7 +622,19 @@ impl SessionStore for Box<dyn SessionStore> {
                 repo_root,
                 requested_workdir,
                 repository_display_name,
+                provider,
             )
+            .await
+    }
+
+    async fn set_provider_ids(
+        &self,
+        id: &SessionId,
+        provider_session_id: Option<&str>,
+        provider_thread_id: Option<&str>,
+    ) -> Result<()> {
+        (**self)
+            .set_provider_ids(id, provider_session_id, provider_thread_id)
             .await
     }
 

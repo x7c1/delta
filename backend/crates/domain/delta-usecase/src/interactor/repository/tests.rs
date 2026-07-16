@@ -4,7 +4,7 @@
 //! and assert the aggregated Repository tree round-trips correctly.
 
 use crate::interactor::testing::*;
-use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
+use delta_model::{AgentProvider, ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
 
 /// Build a minimal user-role message whose only purpose is to stamp a
 /// session's `last_activity_at` to `created_at`. The other Message fields are
@@ -60,6 +60,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -71,6 +72,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR_2),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -82,6 +84,7 @@ async fn repositories_bundle_clones_with_the_same_origin() {
             Some(EXISTING_DIR_3),
             Some(EXISTING_DIR_3),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -132,6 +135,7 @@ async fn clones_without_origin_stand_alone_by_path() {
             Some(EXISTING_DIR),
             None,
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -143,6 +147,7 @@ async fn clones_without_origin_stand_alone_by_path() {
             Some(EXISTING_DIR_2),
             None,
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -172,6 +177,7 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -183,6 +189,7 @@ async fn lazy_gc_drops_clones_whose_paths_no_longer_exist() {
             Some(MISSING_DIR),
             Some(MISSING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -213,6 +220,7 @@ async fn sessions_outside_a_git_repo_never_contribute() {
             None,
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -240,6 +248,7 @@ async fn deferred_per_clone_fields_are_empty_by_default() {
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -274,6 +283,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR_2),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -285,6 +295,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some(EXISTING_DIR_3),
             Some(EXISTING_DIR_3),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -296,6 +307,7 @@ async fn recency_ordering_uses_max_across_a_repos_clones() {
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -381,6 +393,7 @@ async fn session_and_scan_clones_with_the_same_identity_key_union() {
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -427,6 +440,7 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
             Some(&clone_path),
             Some(&clone_path),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -509,6 +523,7 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -536,6 +551,7 @@ async fn same_clone_path_with_different_repo_roots_dedups_keeping_newest() {
             Some(EXISTING_DIR_3),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -630,6 +646,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
                 Some(repo_root.as_str()),
                 Some(p),
                 None,
+                AgentProvider::Claude,
             )
             .await
             .unwrap();
@@ -644,6 +661,7 @@ async fn generated_paths_have_independent_cap_from_user_paths() {
                 Some(repo_root.as_str()),
                 Some(p),
                 None,
+                AgentProvider::Claude,
             )
             .await
             .unwrap();
@@ -702,7 +720,15 @@ async fn active_repo_limit_drops_oldest_repositories() {
     for (i, p) in paths.iter().enumerate() {
         let sid = SessionId::from(format!("s-{i:03}").as_str());
         ix.store()
-            .insert_spawning_session(&sid, p, Some("main"), Some(p), Some(p), None)
+            .insert_spawning_session(
+                &sid,
+                p,
+                Some("main"),
+                Some(p),
+                Some(p),
+                None,
+                AgentProvider::Claude,
+            )
             .await
             .unwrap();
         // Stamp a message timestamp that grows with i, so repo i is strictly

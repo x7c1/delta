@@ -1,5 +1,6 @@
 use delta_model::Send;
 
+use crate::agent::AgentProvider;
 use crate::error::Result;
 use crate::interactor::launch_options::expand_leading_tilde;
 use crate::interactor::session_actor::actor::SessionContext;
@@ -387,6 +388,8 @@ where
                 launch_repo_root.as_deref(),
                 requested_workdir_recorded.as_deref(),
                 repository_display_name.as_deref(),
+                // The fresh-spawn path drives Claude Code (tmux PTY + hooks).
+                AgentProvider::Claude,
             )
             .await?;
         let first_send = match first_prompt.as_deref() {
