@@ -208,6 +208,7 @@ name = "codex-agent"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "delta-model",
  "delta-usecase",
  "serde",
  "serde_json",

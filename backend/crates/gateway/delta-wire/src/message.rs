@@ -79,6 +79,10 @@ pub struct WireMessage {
     /// The turn's response time in milliseconds, or `null` when no duration was
     /// recorded for the turn.
     pub response_time_ms: Option<f64>,
+    /// The provider's own id for the source item (Codex's `item.id`), or `null`
+    /// for Claude and any message with no provider item. The browser uses it as
+    /// the reconcile key that id-joins a streaming preview to its final message.
+    pub provider_item_id: Option<String>,
 }
 
 impl From<Message> for WireMessage {
@@ -103,6 +107,7 @@ impl From<Message> for WireMessage {
             git_branch: message.git_branch,
             cwd: message.cwd,
             response_time_ms: message.response_time_ms,
+            provider_item_id: message.provider_item_id,
         }
     }
 }
@@ -133,6 +138,7 @@ mod tests {
             git_branch: Some("main".into()),
             cwd: Some("/repo".into()),
             response_time_ms: Some(1234.0),
+            provider_item_id: None,
         };
         assert_eq!(
             serde_json::to_value(WireMessage::from(message)).unwrap(),
@@ -152,6 +158,7 @@ mod tests {
                 "git_branch": "main",
                 "cwd": "/repo",
                 "response_time_ms": 1234.0,
+                "provider_item_id": null,
             }),
         );
     }

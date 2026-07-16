@@ -175,6 +175,10 @@ CREATE TABLE IF NOT EXISTS message (
   git_branch           TEXT,
   cwd                  TEXT,
   response_time_ms     REAL,
+  -- The provider's own id for the source item (Codex's `item.id`), carried so a
+  -- streaming delta and its final message id-join in place. NULL for Claude and
+  -- for any message with no provider item. Additive; see `ADDITIVE_COLUMNS`.
+  provider_item_id     TEXT,
   PRIMARY KEY (session_id, uuid)
 ) STRICT;
 
@@ -393,6 +397,15 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "message",
         column: "response_time_ms",
         add_column_sql: "ALTER TABLE message ADD COLUMN response_time_ms REAL",
+    },
+    // The provider's source-item id (Codex's `item.id`), added to `message`
+    // after it first shipped. Nullable with no default: an existing database
+    // gains it as NULL on every pre-existing row, which is exactly the "no
+    // provider item" meaning Claude messages carry.
+    AdditiveColumn {
+        table: "message",
+        column: "provider_item_id",
+        add_column_sql: "ALTER TABLE message ADD COLUMN provider_item_id TEXT",
     },
     // Spawn-time git snapshot, added to `session` after it first shipped. Both
     // are nullable with no default: an existing database gains them as NULL on

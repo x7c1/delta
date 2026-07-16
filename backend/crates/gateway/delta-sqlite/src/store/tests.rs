@@ -383,6 +383,7 @@ async fn message_upsert_and_thread_view() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -433,6 +434,7 @@ async fn compact_summary_role_persists_and_round_trips() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -473,6 +475,7 @@ async fn message_metadata_round_trips_through_upsert_and_read() {
         git_branch: Some("feature/meta".into()),
         cwd: Some("/home/dev/repo".into()),
         response_time_ms: Some(9400.5),
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -525,6 +528,7 @@ async fn last_activity_at_returns_latest_message_timestamp() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(&[
@@ -561,6 +565,7 @@ async fn last_activity_at_is_stored_on_session_and_recomputed_on_reingest() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
 
     // The recency lives on the `session` row as a denormalized column, written
@@ -681,6 +686,7 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         };
         legacy
             .upsert_messages(&[
@@ -774,6 +780,7 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
                 git_branch: Some("will-be-stripped".into()),
                 cwd: Some("will-be-stripped".into()),
                 response_time_ms: Some(9400.0),
+                provider_item_id: None,
             }])
             .await
             .unwrap();
@@ -824,6 +831,7 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
             git_branch: None,
             cwd: None,
             response_time_ms: Some(1234.0),
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -973,6 +981,7 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
 
     // `/projects/a` had its latest activity at 00:10; `/projects/b`'s most
@@ -1094,6 +1103,7 @@ async fn upsert_preserves_thread_overlay_on_reingest() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -1181,6 +1191,7 @@ async fn upsert_keeps_missing_created_at_null() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store.upsert_messages(&[msg]).await.unwrap();
 
@@ -1235,6 +1246,7 @@ async fn branch_thread_derives_root_from_send_then_message() {
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -1264,6 +1276,7 @@ async fn session_active_at(store: &SqliteStore, id: &str, activity_at: &str) -> 
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -1761,6 +1774,7 @@ async fn delete_session_cascades_to_children() {
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -1837,6 +1851,7 @@ async fn message_fts_indexes_inserts_and_updates() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -2474,6 +2489,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     let s1_thread = store.main_thread_id(&s1).await.unwrap();
     let s2_thread = store.main_thread_id(&s2).await.unwrap();

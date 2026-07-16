@@ -26,6 +26,7 @@ fn mk_msg(session_id: &SessionId, thread_id: ThreadId, uuid: &str, created_at: &
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     }
 }
 
