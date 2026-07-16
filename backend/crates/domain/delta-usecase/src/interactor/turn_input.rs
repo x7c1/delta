@@ -7,10 +7,11 @@
 //! actor, where the turn state is plain owned data: the mailbox already
 //! serialized every input that can move it.
 
+use crate::agent::{AgentEvent, TurnStatus};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
-use crate::turn::{OrphanedSend, TurnInput, TurnState};
+use crate::turn::{turn_input_for_agent_event, OrphanedSend, TurnInput, TurnState};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -90,5 +91,25 @@ where
             }
         }
         Ok(result.next)
+    }
+
+    /// Apply a turn-*end* fact, expressed as a provider-neutral
+    /// [`AgentEvent::TurnCompleted`] status, to the session's turn machine.
+    ///
+    /// Every live turn-end path (the `Stop` hook, the transcript interrupt
+    /// marker, the API-error abort, the local-command end) names its end as a
+    /// [`TurnStatus`] and routes through here, so [`turn_input_for_agent_event`]
+    /// — the single neutral mapping proven in the `turn` module — owns which
+    /// [`TurnInput`] a completed / interrupted / failed turn feeds the machine,
+    /// rather than each call site choosing `Stop`/`Interrupt` directly. The
+    /// mapping is total for a `TurnCompleted` event, so the `expect` documents
+    /// an invariant rather than hiding a fallible parse.
+    pub(in crate::interactor) async fn apply_turn_end(
+        &mut self,
+        status: TurnStatus,
+    ) -> Result<TurnState> {
+        let input = turn_input_for_agent_event(&AgentEvent::TurnCompleted { status })
+            .expect("a TurnCompleted event always maps to a turn-end input");
+        self.apply_turn_input(input).await
     }
 }
