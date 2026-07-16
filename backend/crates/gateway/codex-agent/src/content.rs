@@ -48,7 +48,7 @@
 use std::collections::HashMap;
 
 use delta_model::{ContentBlock, Message, MessageUuid, PromptId, Role, SessionId, ThreadId};
-use delta_usecase::AgentEvent;
+use delta_usecase::{AgentContentSource, AgentEvent, Effect};
 use serde_json::Value;
 
 /// A tool call awaiting its completion frame: the name and input captured from
@@ -258,6 +258,41 @@ impl CodexConversationSource {
             None => MessageUuid::from(format!("codex-user-{n}")),
         }
     }
+}
+
+impl AgentContentSource for CodexConversationSource {
+    /// Fold one neutral [`AgentEvent`] into the batch the persistence pipeline
+    /// consumes.
+    ///
+    /// Delegates to the inherent [`CodexConversationSource::ingest`], which
+    /// produces the messages the event completed. Codex emits no neutral
+    /// [`Effect`]s through this content seam: the turn-end / permission
+    /// correlation the effects encode is driven off the control stream
+    /// (`events()` → the Turn FSM / permission reducers), not the content fold,
+    /// so the batch is messages-only — the effect list is always empty.
+    fn ingest(&mut self, event: &AgentEvent) -> (Vec<Message>, Vec<Effect>) {
+        (CodexConversationSource::ingest(self, event), Vec::new())
+    }
+}
+
+/// Build a Codex session's content source as the domain-side
+/// [`AgentContentSource`] trait object the event pump holds.
+///
+/// The Delta-side constructor: the pump knows a session's `session_id`, its
+/// `main_thread` (Codex v1 lands every message there), and `seed_seq` — the
+/// store's current `MAX(seq) + 1`, so minted ordering continues past whatever
+/// is already persisted — and gets back the boxed neutral seam without naming
+/// the concrete type. Dormant in this slice: nothing wires the pump yet.
+pub fn codex_content_source(
+    session_id: SessionId,
+    main_thread: ThreadId,
+    seed_seq: i64,
+) -> Box<dyn AgentContentSource> {
+    Box::new(CodexConversationSource::new(
+        session_id,
+        main_thread,
+        seed_seq,
+    ))
 }
 
 /// The uuid synthesized for a message reconstructed from a provider item. Stable
@@ -471,5 +506,35 @@ mod tests {
         assert_ne!(a[0].uuid, b[0].uuid);
         assert_eq!(a[0].uuid, MessageUuid::from("codex-user-0"));
         assert_eq!(b[0].uuid, MessageUuid::from("codex-user-1"));
+    }
+
+    #[test]
+    fn the_content_source_trait_yields_the_messages_and_no_effects() {
+        // Drive through the domain-side `AgentContentSource` seam (the shape the
+        // pump holds), built by the Delta-side factory. It must return the same
+        // messages the inherent fold produces, plus an empty effect list.
+        let mut src = codex_content_source(SessionId::from("sess-1"), ThreadId(1), 7);
+        let (messages, effects) = src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "item_1".to_owned(),
+            text: "hi".to_owned(),
+        });
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].uuid, MessageUuid::from("codex-item-item_1"));
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(messages[0].seq, 7, "the factory's seed_seq is honoured");
+        assert!(
+            effects.is_empty(),
+            "Codex emits no neutral effects through the content seam"
+        );
+    }
+
+    #[test]
+    fn the_content_source_trait_returns_an_empty_batch_for_control_events() {
+        let mut src = codex_content_source(SessionId::from("s"), ThreadId(1), 0);
+        let (messages, effects) = src.ingest(&AgentEvent::TurnStarted {
+            provider_turn_id: Some("turn_1".to_owned()),
+        });
+        assert!(messages.is_empty());
+        assert!(effects.is_empty());
     }
 }

@@ -16,6 +16,7 @@
 
 mod adapter;
 mod capabilities;
+mod content_source;
 mod event;
 mod factory;
 mod provider;
@@ -29,6 +30,7 @@ pub use capabilities::{
     InterruptCapability, LaunchCapability, PermissionCapability, ResumeCapability,
     SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
 };
+pub use content_source::AgentContentSource;
 pub use event::{AgentEvent, AgentPermissionRequest, SessionEndReason, TurnStatus};
 pub use factory::AgentAdapterFactory;
 pub use provider::AgentProvider;

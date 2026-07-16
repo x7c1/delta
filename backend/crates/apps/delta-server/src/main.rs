@@ -54,6 +54,11 @@ async fn main() -> anyhow::Result<()> {
     // flushes after the `Stop` hook still reach the browser within ~0.5s.
     state.spawn_transcript_tail();
 
+    // Drain the interactor's async event seam into the broadcast, so a producer
+    // that emits after its driving call returned still reaches browsers. Wired
+    // but dormant in this slice — no live path emits on the seam yet.
+    state.spawn_async_event_drain();
+
     let app = router(state);
 
     // Bind to loopback only.
