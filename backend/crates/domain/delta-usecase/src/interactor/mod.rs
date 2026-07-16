@@ -52,7 +52,8 @@ use crate::agent::AgentAdapterFactory;
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
 use crate::ports::{
-    ExternalOpener, GhCli, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace,
+    AsyncEventSink, ExternalOpener, GhCli, GitWorktree, SessionEvent, SessionStore, TmuxDriver,
+    Transcript, Workspace,
 };
 use crate::pull_request::{PullRequest, PullRequestLens};
 
@@ -161,6 +162,19 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// tests). Currently held but never consulted — provider dispatch is a
     /// later change.
     pub(in crate::interactor) codex_adapter_factory: Option<Arc<dyn AgentAdapterFactory>>,
+    /// The async event-emission seam: the sending half a producer that emits
+    /// events *after* its driving call returned pushes on (see
+    /// [`AsyncEventSink`]). The server owns the matching receiver and forwards
+    /// each drained event to its broadcast.
+    ///
+    /// `None` by default — the synchronous return path (every hook handler and
+    /// tick returning its `Vec<SessionEvent>`) is untouched, and a
+    /// configuration that never wires the seam (the default constructor, the
+    /// domain tests) simply drops any async emit. Production wiring installs the
+    /// sink through [`Interactor::with_event_sink`]. Currently a dormant seam:
+    /// no live path emits on it yet — the push-based producer (the Codex event
+    /// pump) that does lands in a later change.
+    pub(in crate::interactor) event_sink: Option<AsyncEventSink>,
     /// Per-lens memo of the latest `gh search prs` result, keeping a focus
     /// flip between the two lenses cheap. Bounded by
     /// [`PR_SEARCH_CACHE_TTL`] so the picker still picks up newly-opened
@@ -250,6 +264,7 @@ where
             gh_cli: Arc::new(UnavailableGhCli),
             external_opener: Arc::new(UnwiredExternalOpener),
             codex_adapter_factory: None,
+            event_sink: None,
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
@@ -349,6 +364,28 @@ where
             permission_index: self.permission_index,
         }
     }
+
+    /// Inject the async event-emission [`AsyncEventSink`].
+    ///
+    /// The default constructor holds no sink (`None`), so a configuration that
+    /// never drives an async producer — the existing call sites, the domain
+    /// tests — is unaffected and any async emit is silently dropped. The server
+    /// wires the sink whose receiver its drain task forwards to the broadcast.
+    /// Same constraint as [`Self::with_launch_config`]: must run before any
+    /// session actor is spawned.
+    pub fn with_event_sink(self, sink: AsyncEventSink) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_event_sink must be called before any session actor is spawned");
+        };
+        core.event_sink = Some(sink);
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self {
+            core,
+            sessions,
+            permission_index: self.permission_index,
+        }
+    }
 }
 
 /// Stub `gh` driver wired by [`Interactor::new`] when no real driver has
@@ -401,5 +438,20 @@ where
     /// browser decision before falling back to the TUI prompt.
     pub fn permission_decision_deadline(&self) -> std::time::Duration {
         self.launch.permission_decision_deadline
+    }
+
+    /// Emit an event onto the async event seam, if one is wired.
+    ///
+    /// The complement of the synchronous return path: where a hook handler or
+    /// tick hands its `Vec<SessionEvent>` back to a caller that broadcasts them,
+    /// this pushes a single event onto the [`AsyncEventSink`] the server drains
+    /// — for a producer that emits after its driving call has already returned.
+    /// A no-op when no sink is wired (the default), so it is always safe to
+    /// call. Currently dormant: the push-based producer that emits through it
+    /// (the Codex event pump) lands in a later change.
+    pub fn emit_async_event(&self, event: SessionEvent) {
+        if let Some(sink) = &self.event_sink {
+            sink.emit(event);
+        }
     }
 }
