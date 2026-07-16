@@ -11,6 +11,7 @@ export type { RateLimitWindow } from './generated/RateLimitWindow';
 
 export type { Session } from './generated/Session';
 export type { SessionStatus } from './generated/SessionStatus';
+export type { AgentProvider } from './generated/AgentProvider';
 export type { Thread } from './generated/Thread';
 export type { Message } from './generated/Message';
 export type { MessageRole } from './generated/MessageRole';

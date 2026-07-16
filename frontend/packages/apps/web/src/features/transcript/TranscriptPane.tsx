@@ -14,9 +14,13 @@ import { useThreadMessagesQuery } from '@delta/api-client';
 import { Badge, Breadcrumb, Button, Chip, Panel } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
-import { useComposerStore } from '../../store/composerStore';
+import {
+  DEFAULT_NEW_SESSION_PROVIDER,
+  useComposerStore,
+} from '../../store/composerStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
+import { ProviderSelector } from '../composer/ProviderSelector';
 import { PendingQueue } from '../composer/PendingQueue';
 import {
   usePendingSends,
@@ -169,6 +173,9 @@ export function TranscriptPane({
   );
   const setNewSessionSelectedPrUrl = useComposerStore(
     (state) => state.setNewSessionSelectedPrUrl,
+  );
+  const setNewSessionProvider = useComposerStore(
+    (state) => state.setNewSessionProvider,
   );
   // The picker's open state lives in the store (not local component state) so
   // the navigator's "New" button can (re)open it without a focus transition.
@@ -611,6 +618,7 @@ export function TranscriptPane({
       setNewSessionWorkdir(null);
       resetNewSessionLaunchOptions();
       setNewSessionSelectedPrUrl(null);
+      setNewSessionProvider(DEFAULT_NEW_SESSION_PROVIDER);
       closeWorkdirDialog();
     }
   }, [
@@ -618,6 +626,7 @@ export function TranscriptPane({
     setNewSessionWorkdir,
     resetNewSessionLaunchOptions,
     setNewSessionSelectedPrUrl,
+    setNewSessionProvider,
     closeWorkdirDialog,
   ]);
 
@@ -1024,6 +1033,10 @@ export function TranscriptPane({
               context bar above is not counted as a spacing sibling (which would
               push the composer down by a row gap). */}
           <div className="space-y-2">
+            {/* The provider axis leads the new-session card: it selects the
+                backend the session launches on and (in later slices) gates the
+                capability-dependent controls below it. */}
+            {newSession && <ProviderSelector />}
             {/* A directory is chosen: show it as a chip with a ✎ to change it
                 (the ✎ reopens the picker without resetting the selection). The
                 chip renders nothing when no directory is selected, so there is
