@@ -29,10 +29,12 @@
 
 mod adapter;
 mod error;
+mod factory;
 mod translate;
 pub mod wire;
 
 pub use adapter::CodexAppServerAdapter;
+pub use factory::CodexAdapterFactory;
 
 use std::collections::HashMap;
 use std::process::Stdio;

@@ -261,6 +261,7 @@ dependencies = [
 name = "delta-bootstrap"
 version = "0.3.0"
 dependencies = [
+ "codex-agent",
  "delta-model",
  "delta-sqlite",
  "delta-transcript",
