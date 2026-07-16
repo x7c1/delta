@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -27,7 +27,13 @@ where
     /// pane is dropped this runs [`Self::sync_transcript`] once — while the
     /// on-disk transcript still reflects this session's own run — to capture
     /// any straggler line.
-    pub(in crate::interactor) async fn close_session(&mut self) -> Result<()> {
+    ///
+    /// Returns any [`SessionEvent::SubagentFinished`]s produced by the
+    /// process-gone sweep (see [`Self::sweep_running_subagents_on_process_gone`]),
+    /// for the caller to broadcast. Closing tears down the `claude` process, so
+    /// a lingering background subagent's completion notification can no longer
+    /// arrive to clear its indicator; the sweep clears it here instead.
+    pub(in crate::interactor) async fn close_session(&mut self) -> Result<Vec<SessionEvent>> {
         let Some(session) = self.store.session(self.id).await? else {
             return Err(Error::SessionNotFound(self.id.as_str().to_owned()));
         };
@@ -49,6 +55,11 @@ where
         // progress: feed `Close` into the turn machine (an unechoed outstanding
         // send is cancelled; an in-flight one is swept if it never matched).
         self.apply_turn_input(crate::turn::TurnInput::Close).await?;
-        Ok(())
+        // The `claude` process is torn down, so no more transcript is ingested:
+        // a lingering BACKGROUND subagent's completion `<task-notification>` can
+        // never be folded to clear its indicator. The `Close` above swept the
+        // foreground entries; sweep the surviving background ones so they do not
+        // stick forever, returning a `SubagentFinished` per entry to broadcast.
+        self.sweep_running_subagents_on_process_gone().await
     }
 }

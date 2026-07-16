@@ -130,12 +130,16 @@ pub(crate) async fn open_session(
 ///
 /// Kills the live pane and drops it from the registry, broadcasting
 /// `SessionClosed`; the conversation remains in the store and can be reopened.
+/// Closing also sweeps any lingering background subagent whose completion
+/// notification can no longer arrive; the resulting `SubagentFinished` events
+/// are broadcast so live viewers' indicators clear immediately.
 pub(crate) async fn close_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let id = SessionId::from(id);
-    state.interactor().close_session(&id).await?;
+    let subagent_finished = state.interactor().close_session(&id).await?;
+    state.broadcast(subagent_finished);
     state.broadcast([delta_usecase::SessionEvent::SessionClosed { session_id: id }]);
     Ok(StatusCode::NO_CONTENT)
 }
