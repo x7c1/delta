@@ -122,7 +122,7 @@ export const mockSession3: Session = {
 
 export const mockSession4: Session = {
   id: SESSION_ID_4,
-  cwd: '/home/dev/projects/delta',
+  cwd: '/home/dev/projects/codex-lab',
   transcript_path: '/tmp/transcript-4.jsonl',
   title: 'codex refactor',
   status: 'ended',
@@ -131,10 +131,12 @@ export const mockSession4: Session = {
   // the top-of-page-2 region and page 1 / the auto-focus stay unchanged.
   created_at: '2025-12-30T12:00:00Z',
   branch_at_launch: 'feat/codex-adapter',
-  repo_root: '/home/dev/projects/delta',
-  repository_display_name: 'dev/delta',
+  repo_root: '/home/dev/projects/codex-lab',
+  repository_display_name: 'dev/codex-lab',
   // The one non-Claude seed: exercises the navigator provider badge's Codex
-  // path (the other three sessions run on Claude).
+  // path (the other three sessions run on Claude). Its repository name is kept
+  // distinct from the Claude seeds so text-based session-node locators in the
+  // e2e specs (e.g. filter by `dev/delta`) still resolve to a single card.
   provider: 'codex',
   provider_session_id: null,
   provider_thread_id: null,
