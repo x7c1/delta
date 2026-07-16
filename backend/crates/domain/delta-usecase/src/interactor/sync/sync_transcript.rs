@@ -1,5 +1,5 @@
 use delta_attribution::Effect;
-use delta_model::{Message, Session};
+use delta_model::{Message, Session, SessionId};
 
 use crate::agent::AgentEvent;
 use crate::error::Result;
@@ -77,7 +77,7 @@ where
             return Ok((Vec::new(), Vec::new()));
         }
 
-        self.persist_conversation_batch(session, messages, effects)
+        self.persist_conversation_batch(&session.id, messages, effects)
             .await
     }
 
@@ -85,15 +85,22 @@ where
     /// in decision order, persist its messages, and return them alongside any
     /// [`SessionEvent`]s the effects produced.
     ///
-    /// This is the shared body every provider's [`ConversationSource`] output
-    /// flows through — nothing here is Claude-specific. It executes each
-    /// [`Effect`] the source decided on (permission resolution, turn-end
-    /// signals, send matching, subagent indicator/launch bookkeeping) and then
-    /// upserts the messages with the overlay-preserving `ON CONFLICT` rule the
-    /// store owns. The caller broadcasts the returned events.
-    async fn persist_conversation_batch(
+    /// This is the shared body every provider's content source flows through —
+    /// the Claude transcript sync above, and the Codex event pump
+    /// ([`SessionContext::on_agent_event`]) — nothing here is Claude-specific. It
+    /// executes each [`Effect`] the source decided on (permission resolution,
+    /// turn-end signals, send matching, subagent indicator/launch bookkeeping)
+    /// and then upserts the messages with the overlay-preserving `ON CONFLICT`
+    /// rule the store owns. The caller broadcasts the returned events.
+    ///
+    /// Keyed by [`SessionId`] rather than the full [`Session`] row because only
+    /// the id is ever needed here — the Codex pump holds no `Session` row to
+    /// pass, so taking the id keeps both callers on the same signature.
+    ///
+    /// [`SessionContext::on_agent_event`]: crate::interactor::session_actor::actor::SessionContext::on_agent_event
+    pub(in crate::interactor) async fn persist_conversation_batch(
         &mut self,
-        session: &Session,
+        session_id: &SessionId,
         messages: Vec<Message>,
         effects: Vec<Effect>,
     ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
@@ -123,21 +130,21 @@ where
                     };
                     for request_id in self
                         .store
-                        .resolve_permission_by_tool_use_id(&session.id, &tool_use_id, allowed)
+                        .resolve_permission_by_tool_use_id(session_id, &tool_use_id, allowed)
                         .await?
                     {
                         let event = AgentEvent::PermissionResolved {
                             request_id: request_id.to_string(),
                             decision,
                         };
-                        events.extend(reduce_permission_event(self.state, &session.id, &event));
+                        events.extend(reduce_permission_event(self.state, session_id, &event));
                     }
                 }
                 Effect::TurnInterrupted => {
                     // Recover the interrupted turn's thread BEFORE the machine
                     // runs: `apply_turn_input` can sweep the head dispatched
                     // send (the authoritative thread source).
-                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
+                    let thread_id = self.store.in_progress_turn_thread(session_id).await?;
                     // The interrupt ends the turn: route it as a
                     // `TurnCompleted(Interrupted)` fact (which maps to the
                     // machine's `Interrupt` input, back to `Idle`). Dispatching
@@ -147,7 +154,7 @@ where
                     self.apply_turn_end(crate::agent::TurnStatus::Interrupted)
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
-                        session_id: session.id.clone(),
+                        session_id: session_id.clone(),
                         thread_id: Some(thread_id),
                     });
                 }
@@ -165,11 +172,11 @@ where
                     // caller releases the queued send after this sync returns (it
                     // keys on `TurnInterrupted`), so no keystrokes are sent from
                     // inside the ingestion path.
-                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
+                    let thread_id = self.store.in_progress_turn_thread(session_id).await?;
                     self.apply_turn_end(crate::agent::TurnStatus::Failed)
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
-                        session_id: session.id.clone(),
+                        session_id: session_id.clone(),
                         thread_id: Some(thread_id),
                     });
                 }
@@ -191,11 +198,11 @@ where
                     // chip. The caller releases any queued send after this sync
                     // returns (it keys on `TurnInterrupted`), so no keystrokes are
                     // sent from inside the ingestion path.
-                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
+                    let thread_id = self.store.in_progress_turn_thread(session_id).await?;
                     self.apply_turn_end(crate::agent::TurnStatus::Completed)
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
-                        session_id: session.id.clone(),
+                        session_id: session_id.clone(),
                         thread_id: Some(thread_id),
                     });
                 }
@@ -212,7 +219,7 @@ where
                     // Persist the launching thread so a completion notification
                     // landing in a later sync window can be attributed to it.
                     self.store
-                        .record_subagent_launch(&session.id, &tool_use_id, thread_id)
+                        .record_subagent_launch(session_id, &tool_use_id, thread_id)
                         .await?;
                     // For a background subagent the immediate `PostToolUse`
                     // hook may have ALREADY arrived (and likely has — the call
@@ -229,7 +236,7 @@ where
                         .map(str::to_owned)
                     {
                         self.store
-                            .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                            .upgrade_subagent_task_id(session_id, &tool_use_id, &task_id)
                             .await?;
                     }
                 }
@@ -279,13 +286,13 @@ where
                     {
                         if self.state.upgrade_subagent_task_id(&tool_use_id, &task_id) {
                             self.store
-                                .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                                .upgrade_subagent_task_id(session_id, &tool_use_id, &task_id)
                                 .await?;
                         }
                     }
                     if newly {
                         events.push(SessionEvent::SubagentStarted {
-                            session_id: session.id.clone(),
+                            session_id: session_id.clone(),
                             thread_id,
                             tool_use_id,
                             subagent_type,
@@ -306,7 +313,7 @@ where
                     // The notification was folded and matched its launch: the
                     // correlation is consumed, so clear the persisted row.
                     self.store
-                        .clear_subagent_launch(&session.id, &tool_use_id)
+                        .clear_subagent_launch(session_id, &tool_use_id)
                         .await?;
                     // This is the BACKGROUND subagent's end signal. A background
                     // `Agent`/`Task` was started by `PreToolUse` and survived its
@@ -319,7 +326,7 @@ where
                     // indicator) is a harmless no-op here.
                     if self.state.finish_subagent(&tool_use_id) {
                         events.push(SessionEvent::SubagentFinished {
-                            session_id: session.id.clone(),
+                            session_id: session_id.clone(),
                             tool_use_id,
                         });
                     }

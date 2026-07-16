@@ -46,6 +46,13 @@ pub(in crate::interactor) struct SessionContext<'a, T, X, S, W, G> {
     /// the routing layer guarantees they match.
     pub(in crate::interactor) id: &'a SessionId,
     pub(in crate::interactor) state: &'a mut SessionRuntime,
+    /// A weak handle to this actor's own mailbox, so a use case running here
+    /// can spawn a background task (the Codex event pump) that posts more
+    /// inputs *back to this same actor* — keeping every signal on one ordered
+    /// mailbox. Weak so the spawned task never keeps the actor alive: when the
+    /// registry drops the strong sender (actor retired / interactor gone), the
+    /// upgrade fails and the task stops.
+    pub(in crate::interactor) self_sender: &'a mpsc::WeakUnboundedSender<SessionInput>,
 }
 
 impl<T, X, S, W, G> std::ops::Deref for SessionContext<'_, T, X, S, W, G> {
@@ -62,6 +69,7 @@ pub(in crate::interactor) async fn run<T, X, S, W, G>(
     core: Arc<InteractorCore<T, X, S, W, G>>,
     id: SessionId,
     mut mailbox: mpsc::UnboundedReceiver<SessionInput>,
+    self_sender: mpsc::WeakUnboundedSender<SessionInput>,
     registry: Weak<Mutex<ActorMap>>,
 ) where
     T: TmuxDriver,
@@ -84,6 +92,7 @@ pub(in crate::interactor) async fn run<T, X, S, W, G>(
             core: &core,
             id: &id,
             state: &mut state,
+            self_sender: &self_sender,
         };
         handle(&mut ctx, input).await;
 
@@ -251,6 +260,9 @@ where
         }
         SessionInput::ReleaseSend { send_id, reply } => {
             let _ = reply.send(ctx.release_send(send_id).await);
+        }
+        SessionInput::IngestAgentEvent { event } => {
+            ctx.on_agent_event(event).await;
         }
         SessionInput::SyncTick { reply } => {
             let _ = reply.send(ctx.sync_tick().await);

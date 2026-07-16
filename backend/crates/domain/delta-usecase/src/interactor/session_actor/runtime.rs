@@ -13,9 +13,10 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::oneshot;
 
-use delta_model::ThreadId;
+use delta_attribution::Effect;
+use delta_model::{Message, ThreadId};
 
-use crate::agent::{AgentAdapter, AgentSessionHandle};
+use crate::agent::{AgentAdapter, AgentContentSource, AgentEvent, AgentSessionHandle};
 use crate::interactor::PermissionDecision;
 use crate::pane_token::PaneToken;
 use crate::turn::{transition, Transition, TurnInput, TurnState};
@@ -458,6 +459,18 @@ pub struct SessionRuntime {
     /// nested `Agent` launches per session — small in practice — but a sweep
     /// keyed off `SubagentCompleted` or session close would tighten the bound.
     pending_post_tool_use_agent_ids: HashMap<String, String>,
+    /// The push-based content accumulator for a terminal-less agent session
+    /// (Codex): the event pump folds every [`AgentEvent`] from the session's
+    /// stream through this to produce the canonical messages each event
+    /// completed. `Some` only while a Codex session is open — built at spawn from
+    /// the adapter ([`AgentAdapter::content_source`]) and dropped when the agent
+    /// session is removed ([`Self::remove_open_agent`]). `None` for a Claude
+    /// session (which pulls its content from a transcript, not this push seam)
+    /// and between sessions. Not part of [`Self::is_empty`]: it only ever exists
+    /// alongside [`Self::open_agent`], which already pins the actor alive.
+    ///
+    /// [`AgentAdapter::content_source`]: crate::agent::AgentAdapter::content_source
+    agent_content_source: Option<Box<dyn AgentContentSource>>,
     /// When the most recent auto-compact re-dispatch ran for this session.
     ///
     /// Two paths can drive that re-dispatch — the live
@@ -523,8 +536,36 @@ impl SessionRuntime {
 
     /// Remove the terminal-less agent session (closing it), returning it so the
     /// caller can drive the adapter's `close`.
+    ///
+    /// Also drops the session's content accumulator: it only has meaning while
+    /// the agent session is open (its event pump ends when the adapter closes),
+    /// so keeping it past the close would leak per-session fold state.
     pub fn remove_open_agent(&mut self) -> Option<OpenAgentSession> {
+        self.agent_content_source = None;
         self.open_agent.take()
+    }
+
+    /// Install the push-based content accumulator for the open agent session.
+    ///
+    /// Called at Codex spawn with the source the adapter built. Replaces any
+    /// previous one (a fresh open builds a fresh accumulator seeded from the
+    /// store's current sequence).
+    pub fn set_agent_content_source(&mut self, source: Box<dyn AgentContentSource>) {
+        self.agent_content_source = Some(source);
+    }
+
+    /// Fold one neutral [`AgentEvent`] through the session's content accumulator,
+    /// returning the canonical content it completed — the messages plus the
+    /// ordered [`Effect`]s the persistence pipeline must run. `None` when the
+    /// session has no accumulator (not a Codex session, or already closed), so
+    /// the caller skips the persistence step entirely.
+    pub fn fold_agent_content(
+        &mut self,
+        event: &AgentEvent,
+    ) -> Option<(Vec<Message>, Vec<Effect>)> {
+        self.agent_content_source
+            .as_mut()
+            .map(|source| source.ingest(event))
     }
 
     /// Bind a pane to the session (the session is now open).
@@ -870,6 +911,32 @@ impl SessionRuntime {
             buffer.chunks.push((index, delta));
         }
         buffer.final_ = buffer.final_ || final_;
+    }
+
+    /// Accumulate one streaming fragment whose transport carries no explicit
+    /// chunk index (Codex's `AssistantDelta`), auto-assigning the next index and
+    /// returning it so the caller can broadcast the increment.
+    ///
+    /// Where Claude's `MessageDisplay` hook numbers its chunks, Codex deltas
+    /// arrive un-indexed; the next index is the count of fragments already held
+    /// for this `message_id` (0 when a different message id starts a fresh
+    /// preview), so repeated deltas for one item append in arrival order rather
+    /// than overwriting. Delegates to [`Self::accumulate_streaming`] for the
+    /// actual buffering, so the per-turn reconciliation (cleared at turn end) is
+    /// identical to the hook path.
+    pub fn accumulate_streaming_delta(
+        &mut self,
+        message_id: &str,
+        thread_id: ThreadId,
+        final_: bool,
+        delta: String,
+    ) -> u32 {
+        let index = match &self.streaming_message {
+            Some(existing) if existing.message_id == message_id => existing.chunks.len() as u32,
+            _ => 0,
+        };
+        self.accumulate_streaming(message_id, thread_id, index, final_, delta);
+        index
     }
 
     /// The current live preview, if a message is streaming.

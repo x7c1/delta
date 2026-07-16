@@ -431,11 +431,19 @@ name = "fake-codex"
 version = "0.3.0"
 dependencies = [
  "agent-contract",
+ "axum",
  "codex-agent",
+ "delta-server",
+ "delta-sqlite",
+ "delta-transcript",
  "delta-usecase",
+ "git-worktree",
  "serde",
  "serde_json",
+ "tmux-driver",
  "tokio",
+ "tower",
+ "workspace-fs",
 ]
 
 [[package]]
