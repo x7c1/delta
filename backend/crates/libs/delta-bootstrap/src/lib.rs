@@ -26,9 +26,10 @@ pub use delta_usecase::LaunchConfig;
 
 use std::sync::Arc;
 
+use codex_agent::{CodexAdapterFactory, CodexLaunchConfig};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{BoxedInteractor, ExternalOpener, GhCli, Interactor};
+use delta_usecase::{AgentAdapterFactory, BoxedInteractor, ExternalOpener, GhCli, Interactor};
 use external_opener::SystemOpener;
 use gh_cli::Gh;
 use git_worktree::Git;
@@ -137,6 +138,12 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     let git_worktree = Git::new();
     let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
     let external_opener: Arc<dyn ExternalOpener> = Arc::new(SystemOpener::new());
+    // Held but dormant: the factory carries only Codex launch config, so this
+    // spawns no `codex app-server` process at startup — a machine without Codex
+    // still boots normally. Nothing consults it yet; provider dispatch that
+    // calls `connect()` lands in a later change.
+    let codex_adapter_factory: Arc<dyn AgentAdapterFactory> =
+        Arc::new(CodexAdapterFactory::new(codex_launch_from_env()));
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -150,7 +157,29 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     )
     .with_launch_config(config.launch.clone())
     .with_gh_cli(gh_cli)
-    .with_external_opener(external_opener))
+    .with_external_opener(external_opener)
+    .with_codex_adapter_factory(codex_adapter_factory))
+}
+
+/// The Codex launch configuration sourced from the environment.
+///
+/// `DELTA_CODEX_BIN` substitutes the `codex` command the shared app-server is
+/// spawned from (default the bare `codex`, resolved via `PATH`), mirroring
+/// `DELTA_CLAUDE_BIN` for the Claude launch. Only the binary is configurable in
+/// this slice; the default `app-server` argument is kept.
+///
+/// Read here in the composition root — rather than threaded through [`Config`]
+/// — so every existing `Config` construction stays untouched. Reading the
+/// variable has no side effect: the resulting config is only stored on the
+/// factory and no process is spawned until a Codex session needs one.
+fn codex_launch_from_env() -> CodexLaunchConfig {
+    let mut codex = CodexLaunchConfig::default();
+    if let Ok(bin) = std::env::var("DELTA_CODEX_BIN") {
+        if !bin.is_empty() {
+            codex.codex_bin = bin;
+        }
+    }
+    codex
 }
 
 #[cfg(test)]

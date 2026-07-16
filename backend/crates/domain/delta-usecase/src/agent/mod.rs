@@ -17,6 +17,7 @@
 mod adapter;
 mod capabilities;
 mod event;
+mod factory;
 mod provider;
 
 pub use adapter::{
@@ -29,4 +30,5 @@ pub use capabilities::{
     SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
 };
 pub use event::{AgentEvent, AgentPermissionRequest, SessionEndReason, TurnStatus};
+pub use factory::AgentAdapterFactory;
 pub use provider::AgentProvider;

@@ -47,6 +47,7 @@ use std::time::{Duration, Instant};
 
 use delta_model::SessionId;
 
+use crate::agent::AgentAdapterFactory;
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
 use crate::ports::{
@@ -143,6 +144,22 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// non-generic field keeps the interactor's five type parameters
     /// untouched.
     pub(in crate::interactor) external_opener: Arc<dyn ExternalOpener>,
+    /// The factory that lazily builds the Codex [`AgentAdapter`] when a Codex
+    /// session first needs it. Held as a trait object for the same reason as
+    /// [`Self::gh_cli`] — it is not routed through the session actors, so a
+    /// non-generic field keeps the interactor's five type parameters untouched.
+    ///
+    /// A factory (rather than a live adapter) is held because standing a Codex
+    /// adapter up spawns `codex app-server` and runs its `initialize`
+    /// handshake; doing that at startup would break a machine without Codex
+    /// installed. The factory carries only launch configuration, so
+    /// construction has no side effects and the spawn is deferred to
+    /// [`AgentAdapterFactory::connect`].
+    ///
+    /// `None` when no Codex factory has been wired (the default constructor,
+    /// tests). Currently held but never consulted — provider dispatch is a
+    /// later change.
+    pub(in crate::interactor) codex_adapter_factory: Option<Arc<dyn AgentAdapterFactory>>,
     /// Per-lens memo of the latest `gh search prs` result, keeping a focus
     /// flip between the two lenses cheap. Bounded by
     /// [`PR_SEARCH_CACHE_TTL`] so the picker still picks up newly-opened
@@ -231,6 +248,7 @@ where
             repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             gh_cli: Arc::new(UnavailableGhCli),
             external_opener: Arc::new(UnwiredExternalOpener),
+            codex_adapter_factory: None,
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
@@ -299,6 +317,29 @@ where
             panic!("with_external_opener must be called before any session actor is spawned");
         };
         core.external_opener = opener;
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self {
+            core,
+            sessions,
+            permission_index: self.permission_index,
+        }
+    }
+
+    /// Inject the factory that lazily builds the Codex [`AgentAdapter`].
+    ///
+    /// The default constructor holds no factory (`None`), so a configuration
+    /// that does not drive Codex — the existing call sites, tests — is
+    /// unaffected. Production wiring installs a factory carrying the Codex
+    /// launch configuration; no `codex app-server` process is spawned here (the
+    /// factory only holds config), so a machine without Codex still starts
+    /// normally. Same constraint as [`Self::with_launch_config`]: must run
+    /// before any session actor is spawned.
+    pub fn with_codex_adapter_factory(self, factory: Arc<dyn AgentAdapterFactory>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_codex_adapter_factory must be called before any session actor is spawned");
+        };
+        core.codex_adapter_factory = Some(factory);
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
         Self {
