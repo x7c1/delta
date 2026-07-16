@@ -57,8 +57,10 @@ pub(in crate::interactor) enum SessionInput {
     },
     /// Resume the (closed but known) session.
     OpenSession { reply: Reply<PaneToken> },
-    /// Close the session: final sync, kill the pane, drop the binding.
-    CloseSession { reply: Reply<()> },
+    /// Close the session: final sync, kill the pane, drop the binding. Replies
+    /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
+    /// produced, for the transport to broadcast.
+    CloseSession { reply: Reply<Vec<SessionEvent>> },
     /// Wipe the residual input of the session's pane, if open.
     ClearInput { reply: Reply<()> },
 
