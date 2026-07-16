@@ -392,17 +392,46 @@ pub fn attribute_lines(
                         tool_use_id: tool_use_id.clone(),
                         allowed: !is_error,
                     });
-                    // In-memory state recovery only — no `Effect` is emitted.
-                    // The live `PostToolUse(Agent)` hook is responsible for
-                    // persisting the `agentId` on the launch row; this branch
-                    // mirrors that upgrade against the in-memory launch entry
-                    // so a fold without the hook (cold-start replay / re-fold)
-                    // can still match a `<task-notification>` body that ships
-                    // only `<task-id>`. The structural sibling
-                    // `toolUseResult.agentId` is not preserved in
-                    // `ContentBlock::ToolResult`, so the id is rescued from the
-                    // human-readable `tool_result` text instead.
-                    if let Some(launch) = state.launched_threads.get_mut(tool_use_id) {
+                    if *is_error {
+                        // A denied/errored LAUNCH: the `tool_result` reports the
+                        // background `Agent`/`Task` never actually started (e.g.
+                        // `toolDenialKind: "automode-blocked"`), so the
+                        // `<task-notification>` that normally completes a
+                        // background subagent will NEVER arrive. Left alone, the
+                        // running indicator lit by the launch's `tool_use` stays
+                        // stuck forever: the turn-end sweep deliberately KEEPS
+                        // background entries, and reloading re-seeds from the
+                        // same authoritative `running_subagents`.
+                        //
+                        // Gate on a recorded launch (`launched_threads`) rather
+                        // than firing on every `is_error`. Only background
+                        // `Agent`/`Task`/`Bash` launches are recorded here (see
+                        // the `ToolUse` arm below), so this precisely targets the
+                        // stuck background case: foreground subagent denials are
+                        // never recorded and are already cleared by the turn-end
+                        // sweep, and unrelated errored tools never get a spurious
+                        // `SubagentCompleted`. `remove` drops the entry (mirroring
+                        // the `<task-notification>` path) so a later stray
+                        // notification can't double-fire and replay stays
+                        // consistent. Reusing `SubagentCompleted` is intentional:
+                        // its sync handler clears the stale persisted launch row
+                        // and finishes the (id-keyed, kind-agnostic) running entry.
+                        if state.launched_threads.remove(tool_use_id).is_some() {
+                            effects.push(Effect::SubagentCompleted {
+                                tool_use_id: tool_use_id.clone(),
+                            });
+                        }
+                    } else if let Some(launch) = state.launched_threads.get_mut(tool_use_id) {
+                        // In-memory state recovery only — no `Effect` is emitted.
+                        // The live `PostToolUse(Agent)` hook is responsible for
+                        // persisting the `agentId` on the launch row; this branch
+                        // mirrors that upgrade against the in-memory launch entry
+                        // so a fold without the hook (cold-start replay / re-fold)
+                        // can still match a `<task-notification>` body that ships
+                        // only `<task-id>`. The structural sibling
+                        // `toolUseResult.agentId` is not preserved in
+                        // `ContentBlock::ToolResult`, so the id is rescued from the
+                        // human-readable `tool_result` text instead.
                         if launch.task_id.is_none() {
                             if let Some(id) =
                                 claude_format::agent_id_from_tool_result_content(content)
