@@ -182,6 +182,17 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// PRs on the user's timescale.
     pub(in crate::interactor) pr_search_cache:
         tokio::sync::Mutex<std::collections::HashMap<PullRequestLens, PrSearchCacheEntry>>,
+    /// request-row id → owning session, so a permission decision (which only
+    /// carries the request id) can be routed to the right actor. Entries are
+    /// claimed atomically by `decide_permission`/`abandon_permission_decision`,
+    /// mirroring the waiter lifecycle inside the actor.
+    ///
+    /// Held on the core (not the outer [`Interactor`]) so both the routing layer
+    /// and a session actor can reach it: the Claude path seeds it from the
+    /// routing layer after the `PermissionRequest` hook returns, while the Codex
+    /// event pump — which allocates the permission row inside the actor — seeds
+    /// it there through the actor's [`Deref`](std::ops::Deref) to the core.
+    pub(in crate::interactor) permission_index: std::sync::Mutex<HashMap<i64, SessionId>>,
 }
 
 /// The public entry point: wraps the shared [`InteractorCore`] and routes
@@ -197,11 +208,6 @@ pub struct Interactor<T, X, S, W, G> {
     core: Arc<InteractorCore<T, X, S, W, G>>,
     /// session_id → actor mailbox; actors spawn on first contact.
     pub(in crate::interactor) sessions: SessionRegistry<T, X, S, W, G>,
-    /// request-row id → owning session, so a permission decision (which only
-    /// carries the request id) can be routed to the right actor. Entries are
-    /// claimed atomically by `decide_permission`/`abandon_permission_decision`,
-    /// mirroring the waiter lifecycle inside the actor.
-    pub(in crate::interactor) permission_index: std::sync::Mutex<HashMap<i64, SessionId>>,
 }
 
 impl<T, X, S, W, G> std::ops::Deref for Interactor<T, X, S, W, G> {
@@ -267,13 +273,10 @@ where
             codex_adapter_factory: None,
             event_sink: None,
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            permission_index: std::sync::Mutex::new(HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: std::sync::Mutex::new(HashMap::new()),
-        }
+        Self { core, sessions }
     }
 
     /// Replace the launch configuration (binary to spawn, watchdog deadlines).
@@ -290,11 +293,7 @@ where
         core.launch = launch;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 
     /// Inject the `gh` CLI driver for the PR tab.
@@ -313,11 +312,7 @@ where
         core.gh_cli = gh_cli;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 
     /// Inject the [`ExternalOpener`] driver for the `open cwd` endpoint.
@@ -336,11 +331,7 @@ where
         core.external_opener = opener;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 
     /// Inject the factory that lazily builds the Codex [`AgentAdapter`].
@@ -359,11 +350,7 @@ where
         core.codex_adapter_factory = Some(factory);
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 
     /// Inject the async event-emission [`AsyncEventSink`].
@@ -381,11 +368,7 @@ where
         core.event_sink = Some(sink);
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 }
 

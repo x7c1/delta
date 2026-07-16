@@ -5,7 +5,7 @@ use std::io::{BufRead, StdoutLock, Write};
 
 use serde_json::{json, Map, Value};
 
-use crate::scenario::{Emit, Scenario, Turn};
+use crate::scenario::{Emit, Scenario};
 
 /// Resolve the scenario and serve JSON-RPC frames until stdin closes.
 pub fn run() -> Result<(), String> {
@@ -16,6 +16,7 @@ pub fn run() -> Result<(), String> {
         scenario,
         out: stdout.lock(),
         server_request_seq: 0,
+        pending: None,
     };
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| format!("read stdin: {e}"))?;
@@ -36,6 +37,17 @@ struct Server<'a> {
     out: StdoutLock<'a>,
     /// Mints ids for server → client requests (`*/requestApproval`).
     server_request_seq: u64,
+    /// The suspended remainder of a turn, set when a `blocking` approval was
+    /// emitted and awaiting the client's decision. Resumed (and cleared) when the
+    /// client's response frame arrives. `None` when no turn is gated.
+    pending: Option<PendingTurn>,
+}
+
+/// A turn suspended on a `blocking` approval: the emits still to play once the
+/// client answers, plus the thread they belong to.
+struct PendingTurn {
+    thread_id: String,
+    remaining: Vec<Emit>,
 }
 
 impl Server<'_> {
@@ -52,11 +64,19 @@ impl Server<'_> {
             }
             // A notification: method, no id (e.g. `initialized`). No reply.
             (Some(_method), None) => Ok(()),
-            // A response to one of our server → client requests. Nothing to do
-            // in this phase; log so a captured run shows the client answered.
+            // A response to one of our server → client requests. If a turn is
+            // suspended on a blocking approval, this is the decision it was
+            // waiting for: resume the turn, echoing the received decision. When
+            // nothing is pending (a fire-and-forget approval) just log it.
             (None, Some(id)) => {
-                eprintln!("fake-codex: client answered server request {id}");
-                Ok(())
+                let decision = frame
+                    .get("result")
+                    .and_then(|r| r.get("decision"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_owned();
+                eprintln!("fake-codex: client answered server request {id} with {decision}");
+                self.resume_pending_turn(&decision)
             }
             (None, None) => Err(format!("frame is not a JSON-RPC message: {frame}")),
         }
@@ -95,7 +115,7 @@ impl Server<'_> {
                 let turn_id = turn.as_ref().map(|t| t.turn_id.clone()).unwrap_or_default();
                 self.respond(id, json!({ "turnId": turn_id }))?;
                 if let Some(turn) = turn {
-                    self.play_turn(&turn, &thread_id)?;
+                    self.play_emits(&turn.emit, &thread_id)?;
                 }
                 Ok(())
             }
@@ -121,9 +141,12 @@ impl Server<'_> {
         }
     }
 
-    /// Play a turn's scripted emissions, in order, stamping `threadId` into each.
-    fn play_turn(&mut self, turn: &Turn, thread_id: &str) -> Result<(), String> {
-        for emit in &turn.emit {
+    /// Play scripted emissions in order, stamping `threadId` into each. Stops
+    /// early (suspending the turn) when a `blocking` approval is emitted: the
+    /// emits after it are parked in [`Self::pending`] and replayed by
+    /// [`Self::resume_pending_turn`] once the client answers.
+    fn play_emits(&mut self, emits: &[Emit], thread_id: &str) -> Result<(), String> {
+        for (i, emit) in emits.iter().enumerate() {
             match emit {
                 Emit::ItemStarted { item } => self.emit_notification(
                     "item/started",
@@ -140,10 +163,22 @@ impl Server<'_> {
                     "turn/completed",
                     with_thread_id(json!({ "status": status }), thread_id),
                 )?,
-                Emit::RequestApproval { method, params } => {
-                    // A server → client request. The fake emits it and continues
-                    // (it does not block on the client's reply in this phase).
-                    self.emit_server_request(method, with_thread_id(params.clone(), thread_id))?
+                Emit::RequestApproval {
+                    method,
+                    params,
+                    blocking,
+                } => {
+                    // A server → client request.
+                    self.emit_server_request(method, with_thread_id(params.clone(), thread_id))?;
+                    if *blocking {
+                        // Suspend the turn: park the rest and wait for the
+                        // client's decision (resumed in `resume_pending_turn`).
+                        self.pending = Some(PendingTurn {
+                            thread_id: thread_id.to_owned(),
+                            remaining: emits[i + 1..].to_vec(),
+                        });
+                        return Ok(());
+                    }
                 }
                 Emit::Notification { method, params } => {
                     self.emit_notification(method, with_thread_id(params.clone(), thread_id))?
@@ -151,6 +186,36 @@ impl Server<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Resume a turn suspended on a `blocking` approval, now that the client has
+    /// answered with `decision` (`accept`/`decline`). Echoes the received
+    /// decision back as a completed assistant message — so the value that
+    /// round-tripped to the server is observable end-to-end — then plays the
+    /// parked remainder of the turn. A no-op when no turn is suspended.
+    fn resume_pending_turn(&mut self, decision: &str) -> Result<(), String> {
+        let Some(pending) = self.pending.take() else {
+            return Ok(());
+        };
+        let thread_id = pending.thread_id;
+        // Echo the decision as an assistant message, on a dedicated item id so it
+        // never collides with the turn's own items.
+        let echo_id = format!("approval_echo_{}", self.server_request_seq);
+        self.emit_notification(
+            "item/started",
+            with_thread_id(
+                json!({ "item": { "id": echo_id, "itemType": "agent_message" } }),
+                &thread_id,
+            ),
+        )?;
+        self.emit_notification(
+            "item/completed",
+            with_thread_id(
+                json!({ "item": { "id": echo_id, "itemType": "agent_message", "text": decision } }),
+                &thread_id,
+            ),
+        )?;
+        self.play_emits(&pending.remaining, &thread_id)
     }
 
     fn respond(&mut self, id: Value, result: Value) -> Result<(), String> {

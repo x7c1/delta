@@ -280,3 +280,140 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
         "the user prompt was persisted as well"
     );
 }
+
+/// The Codex permission full loop, answered **allow**: an approval gates the
+/// turn, the browser allows it by the Delta row id, and the fake proceeds having
+/// received `accept`.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_permission_full_loop_allow() {
+    permission_full_loop("allow", "accept").await;
+}
+
+/// The same loop, answered **deny**: the fake proceeds having received
+/// `decline`, and the turn still completes.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_permission_full_loop_deny() {
+    permission_full_loop("deny", "decline").await;
+}
+
+/// Drive the full browser → server → `fake-codex` permission loop.
+///
+/// The scenario gates its turn on a **blocking** approval: the fake emits the
+/// approval and suspends until the client answers. The test waits for the
+/// `PermissionRequested` broadcast (carrying the Delta `i64` row id, not the
+/// provider token), decides via `POST /api/permissions/{id}/decision`, and then
+/// asserts (a) the decision settled over the broadcast (`PermissionResolved` +
+/// `TurnCompleted`) and (b) the fake received the exact `accept`/`decline` — it
+/// echoes the received decision as an assistant message, which the test reads
+/// back from the persisted transcript.
+async fn permission_full_loop(decision_wire: &str, expected_echo: &str) {
+    let scenario = ScenarioGuard::write(
+        r#"{
+            "thread_id": "thr_perm_loop",
+            "turn": {
+                "turn_id": "turn_perm_loop",
+                "emit": [
+                    { "type": "turn_started" },
+                    { "type": "request_approval", "blocking": true, "params": { "itemId": "m1", "toolName": "Bash" } },
+                    { "type": "turn_completed", "status": "completed" }
+                ]
+            }
+        }"#,
+    );
+
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    // Create a Codex session with a first prompt.
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "new_session": true, "provider": "codex", "text": "run a command" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the send was created: {body:?}"
+    );
+    let session_id = body["send"]["session_id"].as_str().unwrap().to_owned();
+    let thread_id = body["send"]["thread_id"].as_i64().unwrap();
+
+    // Wait for the approval notice. It carries the Delta row id — the decision
+    // endpoint's key — not the adapter's opaque provider token.
+    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let request_id = loop {
+        let event = tokio::time::timeout_at(deadline, events.recv())
+            .await
+            .expect("timed out waiting for the permission request")
+            .expect("the broadcast channel stayed open");
+        if let SessionEvent::PermissionRequested {
+            session_id: sid,
+            request_id,
+            tool_name,
+            ..
+        } = event
+        {
+            assert_eq!(sid.as_str(), session_id, "the notice names our session");
+            assert_eq!(tool_name, "Bash", "the notice carries the tool name");
+            assert!(request_id > 0, "the notice carries a Delta row id");
+            break request_id;
+        }
+    };
+
+    // Decide by the i64 row id over the REST surface.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/permissions/{request_id}/decision"))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "decision": decision_wire }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::NO_CONTENT,
+        "the decision was accepted"
+    );
+
+    // The decision settles over the broadcast: the notice resolves and the turn
+    // (unblocked by the answer reaching the fake) completes.
+    let mut resolved = false;
+    let mut turn_completed = false;
+    while !(resolved && turn_completed) {
+        let event = tokio::time::timeout_at(deadline, events.recv())
+            .await
+            .expect("timed out waiting for the decision to settle")
+            .expect("the broadcast channel stayed open");
+        match event {
+            SessionEvent::PermissionResolved {
+                request_id: rid, ..
+            } => {
+                assert_eq!(rid, request_id, "the settle names the same row id");
+                resolved = true;
+            }
+            SessionEvent::TurnCompleted { .. } => turn_completed = true,
+            _ => {}
+        }
+    }
+
+    // The fake received the exact accept/decline: it echoes the decision it was
+    // handed as an assistant message, which persisted through the same content
+    // path as any other reply.
+    let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
+    assert_eq!(status, StatusCode::OK, "messages fetched: {body:?}");
+    let messages = body["messages"].as_array().unwrap();
+    assert!(
+        messages
+            .iter()
+            .any(|m| m["role"] == json!("assistant") && m["content_text"] == json!(expected_echo)),
+        "the fake echoed the received decision `{expected_echo}`, got {messages:?}"
+    );
+}

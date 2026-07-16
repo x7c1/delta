@@ -18,7 +18,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::agent::{
     AgentCapabilities, AgentContentSource, AgentEvent, AgentProvider, NullContentSource,
 };
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::interactor::PermissionDecision;
 
 /// Inputs for launching a fresh agent session.
 #[derive(Debug, Clone)]
@@ -133,6 +134,39 @@ pub trait AgentAdapter: Send + Sync {
 
     /// Interrupt the session's in-flight turn.
     async fn interrupt(&self, handle: &AgentSessionHandle) -> Result<()>;
+
+    /// Answer a pending permission request with a decision, over the provider's
+    /// wire.
+    ///
+    /// `request_id` is the adapter-scoped provider token the adapter surfaced on
+    /// the matching [`AgentEvent::PermissionRequested`]
+    /// ([`AgentPermissionRequest::request_id`]): the core stores it verbatim
+    /// alongside the Delta permission-row id and hands it back here, never
+    /// interpreting it. The adapter owns the whole wire translation — mapping the
+    /// neutral [`PermissionDecision`] onto the provider's own decision value and
+    /// answering the outstanding request — and emits an
+    /// [`AgentEvent::PermissionResolved`] on the session's stream so the core's
+    /// event pump can settle its runtime mirror and browser notice.
+    ///
+    /// The default is an error: a provider whose permission decisions are
+    /// *ingested* rather than *answered over the wire* (Claude, which resolves a
+    /// dialog through its hook + transcript path) never routes a decision here,
+    /// so reaching this default is a wiring mistake, surfaced rather than
+    /// silently dropped.
+    ///
+    /// [`AgentPermissionRequest::request_id`]: crate::agent::AgentPermissionRequest::request_id
+    async fn resolve_permission(
+        &self,
+        _handle: &AgentSessionHandle,
+        _request_id: &str,
+        _decision: PermissionDecision,
+    ) -> Result<()> {
+        Err(Error::Agent(format!(
+            "the {:?} adapter does not answer permission decisions over the wire \
+             (its decisions are ingested through the hook/transcript path)",
+            self.provider()
+        )))
+    }
 
     /// Close the session, tearing down its underlying resource.
     async fn close(&self, handle: &AgentSessionHandle) -> Result<()>;

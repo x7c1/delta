@@ -13,13 +13,14 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::agent::{
-    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentEventStream, AgentProvider,
-    AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
+    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentEvent, AgentEventStream,
+    AgentProvider, AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle,
     ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
     SteerCapability, TerminalCapability, TranscriptCapability,
 };
 use crate::error::{Error, Result};
+use crate::interactor::PermissionDecision;
 
 /// What the fake adapter observed, for a test to inspect after a spawn.
 #[derive(Debug, Default, Clone)]
@@ -30,6 +31,10 @@ pub(crate) struct FakeAgentLog {
     pub sends: Vec<String>,
     /// The number of `close` calls.
     pub closes: usize,
+    /// The `resolve_permission` calls the adapter received: the adapter-scoped
+    /// provider token and the decision, in order. Proves a browser decision
+    /// reached the adapter over the trait with the correct token/decision.
+    pub resolves: Vec<(String, PermissionDecision)>,
 }
 
 /// A scripted, in-memory [`AgentAdapter`] standing in for the Codex adapter.
@@ -41,14 +46,28 @@ pub(crate) struct FakeAgentAdapter {
     /// id. `None` reproduces a `turn/start` ack that carried no turn id.
     turn_id: Option<String>,
     log: Arc<Mutex<FakeAgentLog>>,
+    /// The sender the test pushes live [`AgentEvent`]s on, drained by the event
+    /// pump via [`AgentAdapter::events`]. `resolve_permission` also emits a
+    /// `PermissionResolved` here, mirroring the real Codex adapter.
+    tx: mpsc::UnboundedSender<AgentEvent>,
+    /// The receiver handed out once by [`AgentAdapter::events`].
+    rx: Mutex<Option<mpsc::UnboundedReceiver<AgentEvent>>>,
 }
 
 impl FakeAgentAdapter {
-    fn new(thread_id: String, turn_id: Option<String>, log: Arc<Mutex<FakeAgentLog>>) -> Arc<Self> {
+    fn new(
+        thread_id: String,
+        turn_id: Option<String>,
+        log: Arc<Mutex<FakeAgentLog>>,
+        tx: mpsc::UnboundedSender<AgentEvent>,
+        rx: mpsc::UnboundedReceiver<AgentEvent>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             thread_id,
             turn_id,
             log,
+            tx,
+            rx: Mutex::new(Some(rx)),
         })
     }
 }
@@ -109,9 +128,35 @@ impl AgentAdapter for FakeAgentAdapter {
     }
 
     fn events(&self, _handle: &AgentSessionHandle) -> AgentEventStream {
-        // No live pump in this slice; hand out an already-closed stream.
-        let (_tx, rx) = mpsc::unbounded_channel();
-        AgentEventStream::new(rx)
+        // Hand out the live receiver the test pushes events on (once); a second
+        // request yields an already-closed stream, matching the real adapter.
+        match self.rx.lock().unwrap().take() {
+            Some(rx) => AgentEventStream::new(rx),
+            None => {
+                let (_tx, rx) = mpsc::unbounded_channel();
+                AgentEventStream::new(rx)
+            }
+        }
+    }
+
+    async fn resolve_permission(
+        &self,
+        _handle: &AgentSessionHandle,
+        request_id: &str,
+        decision: PermissionDecision,
+    ) -> Result<()> {
+        self.log
+            .lock()
+            .unwrap()
+            .resolves
+            .push((request_id.to_owned(), decision));
+        // Mirror the real Codex adapter: emit the resolution on the stream so the
+        // event pump settles the runtime mirror and browser notice.
+        let _ = self.tx.send(AgentEvent::PermissionResolved {
+            request_id: request_id.to_owned(),
+            decision,
+        });
+        Ok(())
     }
 
     async fn attach_terminal(&self, _handle: &AgentSessionHandle) -> Result<Option<PtyHandle>> {
@@ -134,26 +179,37 @@ enum ConnectOutcome {
 pub(crate) struct FakeAgentFactory {
     outcome: ConnectOutcome,
     log: Arc<Mutex<FakeAgentLog>>,
+    /// The sender the built adapter drains through `events()`; a test pushes live
+    /// [`AgentEvent`]s here to drive the session's event pump.
+    event_tx: mpsc::UnboundedSender<AgentEvent>,
+    /// The matching receiver, moved into the adapter at `connect`.
+    event_rx: Mutex<Option<mpsc::UnboundedReceiver<AgentEvent>>>,
 }
 
 impl FakeAgentFactory {
     /// A factory whose `connect` yields an adapter minting `thread_id` and
     /// returning `turn_id` from each send.
     pub(crate) fn new(thread_id: impl Into<String>, turn_id: Option<&str>) -> Arc<Self> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             outcome: ConnectOutcome::Adapter {
                 thread_id: thread_id.into(),
                 turn_id: turn_id.map(str::to_owned),
             },
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
+            event_tx,
+            event_rx: Mutex::new(Some(event_rx)),
         })
     }
 
     /// A factory whose `connect` fails, so a caller must roll back cleanly.
     pub(crate) fn failing() -> Arc<Self> {
+        let (event_tx, event_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             outcome: ConnectOutcome::Fail,
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
+            event_tx,
+            event_rx: Mutex::new(Some(event_rx)),
         })
     }
 
@@ -161,6 +217,13 @@ impl FakeAgentFactory {
     /// this stays empty (no adapter is built).
     pub(crate) fn log(&self) -> Arc<Mutex<FakeAgentLog>> {
         Arc::clone(&self.log)
+    }
+
+    /// A sender that pushes live [`AgentEvent`]s onto the built adapter's event
+    /// stream, so a test can drive the session's event pump (e.g. surface a
+    /// `PermissionRequested`).
+    pub(crate) fn event_sender(&self) -> mpsc::UnboundedSender<AgentEvent> {
+        self.event_tx.clone()
     }
 }
 
@@ -174,11 +237,20 @@ impl AgentAdapterFactory for FakeAgentFactory {
         match &self.outcome {
             ConnectOutcome::Adapter { thread_id, turn_id } => {
                 // Share the factory's log with the adapter, so `factory.log()`
-                // reflects the built adapter's live observations.
+                // reflects the built adapter's live observations, and move the
+                // event receiver in so `event_sender()` drives its stream.
+                let rx = self
+                    .event_rx
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .expect("fake agent connect is called once");
                 let adapter = FakeAgentAdapter::new(
                     thread_id.clone(),
                     turn_id.clone(),
                     Arc::clone(&self.log),
+                    self.event_tx.clone(),
+                    rx,
                 );
                 Ok(adapter as Arc<dyn AgentAdapter>)
             }

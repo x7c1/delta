@@ -29,12 +29,12 @@
 //!
 //! An `*/requestApproval` server request surfaces as
 //! [`AgentEvent::PermissionRequested`]; the adapter remembers the verbatim wire
-//! id so [`CodexAppServerAdapter::resolve_permission`] can answer it with the
-//! frozen decision mapping (allow → `accept`, deny → `decline`) and emit
-//! [`AgentEvent::PermissionResolved`]. This concrete method is the Codex analogue
-//! of the Claude adapter's ingestion seam: it is how a decision reaches the
-//! provider. The composition layer wires it to a browser decision later; this
-//! phase leaves the adapter dormant-but-tested.
+//! id so [`AgentAdapter::resolve_permission`] can answer it with the frozen
+//! decision mapping (allow → `accept`, deny → `decline`) and emit
+//! [`AgentEvent::PermissionResolved`]. That trait method — reachable through
+//! `Arc<dyn AgentAdapter>` — is the Codex analogue of the Claude adapter's
+//! ingestion seam: it is how a browser decision reaches the provider, routed by
+//! the core from the Delta permission-row id back to the adapter-scoped token.
 //!
 //! ## Never hang
 //!
@@ -195,55 +195,6 @@ impl CodexAppServerAdapter {
             provider_message_id,
         })
     }
-
-    /// Answer an open approval request with a decision, mapping it to the Codex
-    /// wire value (allow → `accept`, deny → `decline`), and emit
-    /// [`AgentEvent::PermissionResolved`].
-    ///
-    /// This is the Codex counterpart to the Claude adapter's ingestion seam: the
-    /// concrete entry point through which a decision reaches the provider. Errors
-    /// when the session or the request id is unknown (already answered, or never
-    /// open).
-    pub async fn resolve_permission(
-        &self,
-        handle: &AgentSessionHandle,
-        request_id: &str,
-        decision: PermissionDecision,
-    ) -> UsecaseResult<()> {
-        let wire_id = {
-            let sessions = self.sessions.lock().expect("sessions mutex poisoned");
-            let session = sessions
-                .get(&handle.key)
-                .ok_or_else(|| UsecaseError::Agent(format!("unknown session `{}`", handle.key)))?;
-            let removed = session
-                .approvals
-                .lock()
-                .expect("approvals mutex poisoned")
-                .remove(request_id);
-            removed
-        };
-        let wire_id = wire_id.ok_or_else(|| {
-            UsecaseError::Agent(format!(
-                "permission request `{request_id}` is not awaiting a decision"
-            ))
-        })?;
-        let decision_value = match decision {
-            PermissionDecision::Allow => DECISION_ACCEPT,
-            PermissionDecision::Deny => DECISION_DECLINE,
-        };
-        self.conn
-            .respond(&wire_id, json!({ "decision": decision_value }))
-            .await
-            .map_err(to_usecase_err)?;
-        self.emit(
-            &handle.key,
-            AgentEvent::PermissionResolved {
-                request_id: request_id.to_owned(),
-                decision,
-            },
-        );
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -319,6 +270,57 @@ impl AgentAdapter for CodexAppServerAdapter {
             )
             .await
             .map_err(to_usecase_err)?;
+        Ok(())
+    }
+
+    /// Answer an open approval request with a decision, mapping it to the Codex
+    /// wire value (allow → `accept`, deny → `decline`), and emit
+    /// [`AgentEvent::PermissionResolved`].
+    ///
+    /// This is the Codex counterpart to the Claude adapter's ingestion seam: the
+    /// entry point — reachable through `Arc<dyn AgentAdapter>` — through which a
+    /// browser decision reaches the provider. `request_id` is the adapter-scoped
+    /// token surfaced on the matching `PermissionRequested`, which keys the open
+    /// approval's verbatim wire id. Errors when the session or the request id is
+    /// unknown (already answered, or never open).
+    async fn resolve_permission(
+        &self,
+        handle: &AgentSessionHandle,
+        request_id: &str,
+        decision: PermissionDecision,
+    ) -> UsecaseResult<()> {
+        let wire_id = {
+            let sessions = self.sessions.lock().expect("sessions mutex poisoned");
+            let session = sessions
+                .get(&handle.key)
+                .ok_or_else(|| UsecaseError::Agent(format!("unknown session `{}`", handle.key)))?;
+            let removed = session
+                .approvals
+                .lock()
+                .expect("approvals mutex poisoned")
+                .remove(request_id);
+            removed
+        };
+        let wire_id = wire_id.ok_or_else(|| {
+            UsecaseError::Agent(format!(
+                "permission request `{request_id}` is not awaiting a decision"
+            ))
+        })?;
+        let decision_value = match decision {
+            PermissionDecision::Allow => DECISION_ACCEPT,
+            PermissionDecision::Deny => DECISION_DECLINE,
+        };
+        self.conn
+            .respond(&wire_id, json!({ "decision": decision_value }))
+            .await
+            .map_err(to_usecase_err)?;
+        self.emit(
+            &handle.key,
+            AgentEvent::PermissionResolved {
+                request_id: request_id.to_owned(),
+                decision,
+            },
+        );
         Ok(())
     }
 
