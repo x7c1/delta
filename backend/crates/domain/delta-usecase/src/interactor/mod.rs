@@ -16,6 +16,7 @@ mod cancel_send;
 mod context;
 mod enqueue;
 mod hooks;
+mod interrupt;
 mod launch_options;
 mod lifecycle;
 mod listing;

@@ -144,6 +144,23 @@ pub(crate) async fn close_session(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `POST /api/sessions/{id}/interrupt` — abort a session's in-flight turn.
+///
+/// For a terminal-less agent (Codex) this drives the adapter's `interrupt`
+/// without closing the session; the resulting `TurnInterrupted` settles over
+/// the async event seam (the WebSocket broadcast), so — like a permission
+/// decision or a question answer on a Codex session — no event is broadcast
+/// synchronously here. For a pane-backed (Claude) or closed session it is a
+/// well-defined no-op: Claude's turn interrupt is TUI-driven (Escape in the
+/// pane).
+pub(crate) async fn interrupt(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.interactor().interrupt(&SessionId::from(id)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// `GET /api/sessions/{id}/threads` — a session's thread tree for the navigator.
 pub(crate) async fn list_threads(
     State(state): State<AppState>,
