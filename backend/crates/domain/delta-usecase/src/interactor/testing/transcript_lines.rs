@@ -127,6 +127,20 @@ pub(crate) fn tool_result_line(uuid: &str, tool_use_id: &str) -> TranscriptMessa
     }
 }
 
+/// A tool-result carrier line reporting an error (`is_error: true`) — the shape
+/// a denied launch produces (e.g. the auto-mode classifier blocking an `Agent`
+/// launch writes a `tool_result` with `is_error: true`).
+pub(crate) fn errored_tool_result_line(uuid: &str, tool_use_id: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_use_id.into(),
+            content: serde_json::Value::Null,
+            is_error: true,
+        }],
+        ..user_line(uuid, "")
+    }
+}
+
 /// An assistant line launching a background tool call: a `ToolUse` whose input
 /// carries `run_in_background: true`. The launching `tool_use_id` becomes the
 /// correlation key for the later `<task-notification>`.
