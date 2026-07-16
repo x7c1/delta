@@ -150,12 +150,13 @@ where
                     // runs: `apply_turn_input` can sweep the head dispatched
                     // send (the authoritative thread source).
                     let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-                    // The interrupt ends the turn: feed `Interrupt` into the
-                    // turn machine (back to `Idle`). Dispatching any queued
-                    // send is left to the caller (which acts on the returned
-                    // `TurnInterrupted` after this sync returns), so no
+                    // The interrupt ends the turn: route it as a
+                    // `TurnCompleted(Interrupted)` fact (which maps to the
+                    // machine's `Interrupt` input, back to `Idle`). Dispatching
+                    // any queued send is left to the caller (which acts on the
+                    // returned `TurnInterrupted` after this sync returns), so no
                     // keystrokes are sent from inside the ingestion path.
-                    self.apply_turn_input(crate::turn::TurnInput::Interrupt)
+                    self.apply_turn_end(crate::agent::TurnStatus::Interrupted)
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session.id.clone(),
@@ -165,18 +166,20 @@ where
                 Effect::TurnAborted => {
                     // A synthetic `isApiErrorMessage` line ended the turn on an
                     // API error (usage/session limit, rate limit, ...). The turn
-                    // genuinely ended, so feed `Stop` into the turn machine (back
-                    // to `Idle`) — this is the honest turn-end signal and gives
-                    // the same orphan-send disposition the missing `Stop` hook
-                    // would have. We reuse `TurnInterrupted` as the browser
-                    // signal: like an interrupt, no `Stop` hook fired, so the
-                    // browser must clear the stuck pending chip and drop any
-                    // orphaned streaming preview (which may never get a persisted
-                    // message). The caller releases the queued send after this
-                    // sync returns (it keys on `TurnInterrupted`), so no
-                    // keystrokes are sent from inside the ingestion path.
+                    // genuinely ended in failure, so route it as a
+                    // `TurnCompleted(Failed)` fact — which maps to the machine's
+                    // `Stop` input (back to `Idle`), giving the same honest
+                    // turn-end disposition the missing `Stop` hook would have.
+                    // We reuse `TurnInterrupted` as the browser signal: like an
+                    // interrupt, no `Stop` hook fired, so the browser must clear
+                    // the stuck pending chip and drop any orphaned streaming
+                    // preview (which may never get a persisted message). The
+                    // caller releases the queued send after this sync returns (it
+                    // keys on `TurnInterrupted`), so no keystrokes are sent from
+                    // inside the ingestion path.
                     let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-                    self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
+                    self.apply_turn_end(crate::agent::TurnStatus::Failed)
+                        .await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session.id.clone(),
                         thread_id: Some(thread_id),
@@ -190,17 +193,19 @@ where
                     // the turn machine stays in `AwaitingEcho` forever and every
                     // later send defers to `queued` and never dispatches. The
                     // `SendMatched` effect emitted alongside this one already
-                    // consumed the send (it left `dispatched`), so feeding `Stop`
-                    // here returns the machine to `Idle` cleanly: its defensive
-                    // requeue/sweep is a no-op against the now-matched row. Reuse
-                    // `TurnInterrupted` as the browser signal — like an interrupt
-                    // or an API-error abort, no `Stop` hook fired, so the browser
-                    // must clear the stuck pending chip. The caller releases any
-                    // queued send after this sync returns (it keys on
-                    // `TurnInterrupted`), so no keystrokes are sent from inside
-                    // the ingestion path.
+                    // consumed the send (it left `dispatched`), so a
+                    // `TurnCompleted(Completed)` fact here (which maps to the
+                    // machine's `Stop` input) returns the machine to `Idle`
+                    // cleanly: its defensive requeue/sweep is a no-op against the
+                    // now-matched row. Reuse `TurnInterrupted` as the browser
+                    // signal — like an interrupt or an API-error abort, no `Stop`
+                    // hook fired, so the browser must clear the stuck pending
+                    // chip. The caller releases any queued send after this sync
+                    // returns (it keys on `TurnInterrupted`), so no keystrokes are
+                    // sent from inside the ingestion path.
                     let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-                    self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
+                    self.apply_turn_end(crate::agent::TurnStatus::Completed)
+                        .await?;
                     events.push(SessionEvent::TurnInterrupted {
                         session_id: session.id.clone(),
                         thread_id: Some(thread_id),
