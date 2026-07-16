@@ -17,7 +17,7 @@ use crate::agent::{
     AgentProvider, AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle,
     ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
-    SteerCapability, TerminalCapability, TranscriptCapability,
+    SteerCapability, TerminalCapability, TranscriptCapability, TurnStatus,
 };
 use crate::error::{Error, Result};
 use crate::interactor::PermissionDecision;
@@ -31,6 +31,9 @@ pub(crate) struct FakeAgentLog {
     pub sends: Vec<String>,
     /// The number of `close` calls.
     pub closes: usize,
+    /// The number of `interrupt` calls. Proves an interrupt reached the adapter
+    /// over the trait.
+    pub interrupts: usize,
     /// The `resolve_permission` calls the adapter received: the adapter-scoped
     /// provider token and the decision, in order. Proves a browser decision
     /// reached the adapter over the trait with the correct token/decision.
@@ -119,6 +122,17 @@ impl AgentAdapter for FakeAgentAdapter {
     }
 
     async fn interrupt(&self, _handle: &AgentSessionHandle) -> Result<()> {
+        self.log.lock().unwrap().interrupts += 1;
+        // Mirror the real Codex path: `turn/interrupt` makes the provider end the
+        // in-flight turn with an interrupted completion. The real adapter's
+        // interrupt only sends the RPC; the provider (fake-codex) emits the
+        // `turn/completed{interrupted}`. Here the adapter and server are
+        // collapsed, so emit the terminal turn event on the stream — as
+        // `resolve_permission` emits `PermissionResolved` — so the session's
+        // event pump drives the turn machine to `TurnInterrupted`.
+        let _ = self.tx.send(AgentEvent::TurnCompleted {
+            status: TurnStatus::Interrupted,
+        });
         Ok(())
     }
 

@@ -67,6 +67,14 @@ pub(in crate::interactor) enum SessionInput {
     /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
     /// produced, for the transport to broadcast.
     CloseSession { reply: Reply<Vec<SessionEvent>> },
+    /// Interrupt the session's in-flight turn without closing it: reach the open
+    /// agent and drive [`AgentAdapter::interrupt`], leaving the open agent (and
+    /// its event pump) in place so the provider's `turn/completed{interrupted}`
+    /// can arrive and settle the turn. A well-defined no-op for a pane-backed
+    /// (Claude) or closed session — those carry no open agent.
+    ///
+    /// [`AgentAdapter::interrupt`]: crate::agent::AgentAdapter::interrupt
+    Interrupt { reply: Reply<()> },
     /// Wipe the residual input of the session's pane, if open.
     ClearInput { reply: Reply<()> },
 

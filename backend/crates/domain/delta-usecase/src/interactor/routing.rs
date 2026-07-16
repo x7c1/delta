@@ -223,6 +223,33 @@ where
             .await
     }
 
+    /// Interrupt a session's in-flight turn, keeping the session open.
+    ///
+    /// For a terminal-less agent (Codex) this drives the adapter's `interrupt`
+    /// (sending `turn/interrupt` on the provider's wire) without tearing the
+    /// session down, so the provider's `turn/completed{interrupted}` still
+    /// arrives on the session's event pump and settles the turn — the resulting
+    /// [`SessionEvent::TurnInterrupted`] reaches the browser over the async
+    /// event seam, so there is nothing to return here.
+    ///
+    /// A no-op (returning `Ok`) when the session has no actor — a session with
+    /// no actor is closed by definition, and a closed or pane-backed (Claude)
+    /// session carries no open agent to interrupt. Claude's turn interrupt is
+    /// TUI-driven (Escape in the pane) with its own transcript-marker path,
+    /// which this REST route deliberately does not duplicate.
+    ///
+    /// [`SessionEvent::TurnInterrupted`]: crate::ports::SessionEvent::TurnInterrupted
+    pub async fn interrupt(&self, id: &SessionId) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        if !self
+            .sessions
+            .post_existing(id, SessionInput::Interrupt { reply: tx })
+        {
+            return Ok(());
+        }
+        rx.await.unwrap_or(Ok(()))
+    }
+
     /// Wipe the residual input of a session's pane, if it is open. A no-op
     /// (returning `Ok`) when the session is not open — including when it has
     /// no actor at all.
