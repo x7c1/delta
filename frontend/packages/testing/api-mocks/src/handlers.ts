@@ -469,6 +469,11 @@ export function createMockApi(): MockApi {
             branch_at_launch: null,
             repo_root: null,
             repository_display_name: null,
+            // A mock spawn always stands in for a Claude session; Codex
+            // provider ids are only minted by the real backend.
+            provider: 'claude',
+            provider_session_id: null,
+            provider_thread_id: null,
           },
           open: false,
           spawning: true,

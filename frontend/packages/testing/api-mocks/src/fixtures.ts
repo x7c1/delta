@@ -76,6 +76,9 @@ export const mockSession: Session = {
   branch_at_launch: 'main',
   repo_root: '/home/dev/projects/delta',
   repository_display_name: 'dev/delta',
+  provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
 };
 
 export const mockSession2: Session = {
@@ -88,6 +91,9 @@ export const mockSession2: Session = {
   branch_at_launch: 'feat/scratch-ideas',
   repo_root: '/home/dev/projects/scratch',
   repository_display_name: 'dev/scratch',
+  provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
 };
 
 export const mockSession3: Session = {
@@ -102,6 +108,9 @@ export const mockSession3: Session = {
   // `null` exercises the legacy/non-git fallback path on the navigator
   // (renders the cwd basename instead of an `org/repo` label).
   repository_display_name: null,
+  provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
 };
 
 export const mockThreads: Thread[] = [
@@ -597,6 +606,9 @@ function buildFillerSessions(): MockStore['sessions'] {
         branch_at_launch: null,
         repo_root: null,
         repository_display_name: null,
+        provider: 'claude',
+        provider_session_id: null,
+        provider_thread_id: null,
       },
       open: false,
       mainThreadId: threadId,
