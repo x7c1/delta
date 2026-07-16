@@ -471,6 +471,50 @@ mod tests {
         );
     }
 
+    /// The turn-start / send-row FSM decision for a structured provider (Codex)
+    /// versus Claude, in one place.
+    ///
+    /// Codex tracks its turn `ExternalPrompt`-style (`send_id: None`), because
+    /// `turn/start` is the authoritative confirmation and there is no echo to
+    /// match. So at turn end (`Stop`) the transition orphans **nothing** — a
+    /// successful send is never cancelled. Claude's send rides `AwaitingEcho →
+    /// InFlight { Some }`, whose `Stop` defensively `CancelIfUnmatched`es the
+    /// send (a no-op once the echo matched it). Routing a Codex send through
+    /// Claude's path would therefore cancel a send Codex never echoes.
+    #[test]
+    fn codex_external_prompt_turn_end_orphans_nothing_unlike_claude() {
+        // Codex: an external-prompt turn completing orphans nothing.
+        let codex_in_flight = transition(S::Idle, I::ExternalPrompt).next;
+        assert_eq!(codex_in_flight, S::InFlight { send_id: None });
+        assert_eq!(
+            transition(codex_in_flight, I::Stop),
+            Transition {
+                next: S::Idle,
+                orphaned: None,
+                anomalous: false,
+            },
+            "a completed Codex turn cancels nothing"
+        );
+
+        // Claude (unchanged): a dispatched+echoed send is swept defensively at
+        // turn end. This is exactly why Codex must NOT take this path.
+        let claude_in_flight = transition(
+            transition(S::Idle, I::Dispatch { send_id: 7 }).next,
+            I::EchoMatched { send_id: 7 },
+        )
+        .next;
+        assert_eq!(claude_in_flight, S::InFlight { send_id: Some(7) });
+        assert_eq!(
+            transition(claude_in_flight, I::Stop),
+            Transition {
+                next: S::Idle,
+                orphaned: Some(CancelIfUnmatched(7)),
+                anomalous: false,
+            },
+            "Claude's echo path stays byte-identical"
+        );
+    }
+
     /// A matching explicit cancel of the outstanding send exits AwaitingEcho
     /// back to Idle and orphans the row as Cancel: the only non-anomalous
     /// cancel, since the interactor guards every other state.

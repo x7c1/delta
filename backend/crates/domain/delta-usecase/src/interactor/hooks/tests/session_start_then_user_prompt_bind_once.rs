@@ -13,6 +13,7 @@ async fn session_start_then_user_prompt_bind_once() {
         // A composer-initiated New carries a held first prompt.
         ix.enqueue_send(
             crate::SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),
                 worktree: None,
@@ -75,6 +76,7 @@ async fn session_start_then_user_prompt_bind_once() {
         let ix = interactor();
         ix.enqueue_send(
             crate::SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),
                 worktree: None,

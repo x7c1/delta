@@ -45,6 +45,14 @@ where
         if let Some(handle) = self.state.remove_open() {
             self.tmux.kill_session(handle.token.as_str()).await?;
         }
+        // A terminal-less agent session (Codex) has no pane to kill; close it
+        // through its adapter instead, which tears down the session's local
+        // plumbing (the shared `codex app-server` connection stays up for any
+        // other threads). Claude sessions have no `open_agent`, so this is a
+        // no-op for them and their close path is unchanged.
+        if let Some(agent) = self.state.remove_open_agent() {
+            agent.adapter.close(&agent.handle).await?;
+        }
         // Deliberate no-op for git worktrees (MVP): a session that started in a
         // worktree keeps it on close. `session.cwd` is the worktree path, so a
         // later resume reattaches to the still-present worktree rather than

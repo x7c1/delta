@@ -20,6 +20,7 @@ async fn composer_first_send_writes_real_rows_before_spawn() {
     let (returned, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),
                 worktree: None,

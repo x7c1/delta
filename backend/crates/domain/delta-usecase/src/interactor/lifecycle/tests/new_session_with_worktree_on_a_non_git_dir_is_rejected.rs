@@ -19,6 +19,7 @@ async fn new_session_with_worktree_on_a_non_git_dir_is_rejected() {
     let err = ix
         .enqueue_send(
             SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: Some("/projects/plain".to_owned()),
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec {

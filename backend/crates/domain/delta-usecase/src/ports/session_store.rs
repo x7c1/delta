@@ -133,6 +133,16 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// whatever was stored (both start `NULL` at spawn). A Claude session never
     /// calls this — its conversation id is the Delta-minted [`SessionId`], so
     /// both columns stay `NULL`.
+    ///
+    /// If the row is still [`SessionStatus::Spawning`] this also activates it
+    /// (→ [`SessionStatus::Active`]): a terminal-less structured provider has no
+    /// hook to flip the status the way Claude's first `UserPromptSubmit` does
+    /// (via [`Self::register_session`]), so the launch-return that yields these
+    /// ids is the moment the session is confirmed live. An already-active or
+    /// ended row keeps its status.
+    ///
+    /// [`SessionStatus::Spawning`]: delta_model::SessionStatus::Spawning
+    /// [`SessionStatus::Active`]: delta_model::SessionStatus::Active
     async fn set_provider_ids(
         &self,
         id: &SessionId,

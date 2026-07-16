@@ -7,5 +7,9 @@
  * carries the serialization concerns the domain type must not know about: the
  * lowercase variant tokens (matching the persisted `session.provider` values)
  * and the TypeScript export the UI uses to render the provider badge.
+ *
+ * Also accepted inbound (`Deserialize`) as the optional `provider` selector on
+ * a new-session send, so the same token set names a provider in both
+ * directions.
  */
 export type AgentProvider = "claude" | "codex";

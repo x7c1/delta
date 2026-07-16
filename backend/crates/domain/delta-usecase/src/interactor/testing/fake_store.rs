@@ -177,6 +177,11 @@ impl SessionStore for FakeStore {
         if let Some(session) = g.sessions.iter_mut().find(|s| &s.id == id) {
             session.provider_session_id = provider_session_id.map(str::to_owned);
             session.provider_thread_id = provider_thread_id.map(str::to_owned);
+            // Mirror the real store: recording the ids activates a still-spawning
+            // row (the structured-provider analogue of first-hook activation).
+            if session.status == SessionStatus::Spawning {
+                session.status = SessionStatus::Active;
+            }
         }
         Ok(())
     }

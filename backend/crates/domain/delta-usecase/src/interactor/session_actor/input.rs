@@ -11,7 +11,7 @@
 
 use std::time::Instant;
 
-use delta_model::{Message, MessageUuid, Send, ThreadId};
+use delta_model::{AgentProvider, Message, MessageUuid, Send, ThreadId};
 use tokio::sync::oneshot;
 
 use super::runtime::SessionLiveState;
@@ -53,6 +53,11 @@ pub(in crate::interactor) enum SessionInput {
         /// selected `workdir`. Only meaningful when `workdir` is `Some` and that
         /// directory is a git repository.
         worktree: Option<WorktreeSpec>,
+        /// The AI-agent backend to launch on. [`AgentProvider::Claude`] takes
+        /// the historical tmux + hooks path (`spawn_fresh`); a structured
+        /// provider such as [`AgentProvider::Codex`] takes the terminal-less
+        /// adapter path (`spawn_codex`).
+        provider: AgentProvider,
         reply: Reply<FreshSpawn>,
     },
     /// Resume the (closed but known) session.

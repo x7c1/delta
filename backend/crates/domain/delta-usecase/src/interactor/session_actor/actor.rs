@@ -142,12 +142,25 @@ where
             workdir,
             launch_option_ids,
             worktree,
+            provider,
             reply,
         } => {
-            let _ = reply.send(
-                ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
-                    .await,
-            );
+            // Provider dispatch lives in composition, never in the core's turn
+            // or attribution logic: Claude keeps the tmux + hooks spawn path
+            // byte-for-byte, while a structured provider takes the terminal-less
+            // adapter path. This `match` is the only place the provider is
+            // branched on for launch.
+            let result = match provider {
+                delta_model::AgentProvider::Claude => {
+                    ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
+                        .await
+                }
+                delta_model::AgentProvider::Codex => {
+                    ctx.spawn_codex(first_prompt, workdir, launch_option_ids, worktree)
+                        .await
+                }
+            };
+            let _ = reply.send(result);
         }
         SessionInput::OpenSession { reply } => {
             let _ = reply.send(ctx.open_session().await);
