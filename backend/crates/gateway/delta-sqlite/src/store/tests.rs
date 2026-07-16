@@ -405,6 +405,45 @@ async fn message_upsert_and_thread_view() {
     assert_eq!(view[0].content.len(), 1);
 }
 
+/// A `compact_summary` role must persist: the attribution fold produces it for
+/// the synthetic line Claude Code writes on `/compact`, and the STRICT `message`
+/// table's role CHECK has to accept it (it previously omitted the value, so a
+/// real `/compact` write would fail the constraint — the fake store used by the
+/// usecase tests hid it).
+#[tokio::test]
+async fn compact_summary_role_persists_and_round_trips() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let msg = Message {
+        uuid: MessageUuid::from("cs-1"),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::CompactSummary,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("previous conversation summary".into()),
+        content: vec![ContentBlock::Text {
+            text: "previous conversation summary".into(),
+        }],
+        created_at: Some("2026-01-01T00:00:00Z".into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+    };
+    store
+        .upsert_messages(std::slice::from_ref(&msg))
+        .await
+        .unwrap();
+
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].role, Role::CompactSummary);
+}
+
 #[tokio::test]
 async fn message_metadata_round_trips_through_upsert_and_read() {
     // The per-message metadata columns (model, git_branch, cwd, response_time_ms)

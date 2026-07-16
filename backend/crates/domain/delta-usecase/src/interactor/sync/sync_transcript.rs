@@ -1,4 +1,4 @@
-use delta_attribution::{attribute_lines, AttributionState, Effect, OutstandingSend};
+use delta_attribution::Effect;
 use delta_model::{Message, Session};
 
 use crate::agent::AgentEvent;
@@ -8,6 +8,8 @@ use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::RunningSubagent;
 use crate::interactor::PermissionDecision;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+
+use super::conversation_source::{ClaudeConversationSource, ConversationSource};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -28,13 +30,17 @@ where
     /// parallel, which the old global sync lock forbade. The cursor is
     /// per-session state, so per-session serialization is exactly enough.
     ///
-    /// This method is only the I/O shell. The attribution decisions — which
-    /// thread each line lands on, which send is consumed, which permission
-    /// rows a tool_result settles, whether the turn was interrupted — are
-    /// made by the pure fold [`delta_attribution::attribute_lines`], seeded
-    /// here from the store (the latest persisted user thread as
-    /// `carry_thread`, plus the at-most-one outstanding `dispatched` send)
-    /// and executed afterwards as [`Effect`]s.
+    /// This method is only the I/O shell. It pulls a batch of canonical
+    /// conversation content from the provider's
+    /// [`ConversationSource`](super::conversation_source::ConversationSource)
+    /// — for Claude, the JSONL transcript read plus the pure attribution fold,
+    /// seeded from the store *inside* that source — and then runs the
+    /// provider-neutral persistence pipeline
+    /// ([`Self::persist_conversation_batch`]) over the resulting
+    /// `(messages, effects)`. The attribution decisions — which thread each
+    /// line lands on, which send is consumed, which permission rows a
+    /// tool_result settles, whether the turn was interrupted — are made by the
+    /// source and surfaced as [`Effect`]s the pipeline executes.
     ///
     /// Returns the newly-ingested messages and any [`SessionEvent`]s that the
     /// ingest produced. Two events can arise here:
@@ -56,62 +62,44 @@ where
         &mut self,
         session: &Session,
     ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
-        // A still-`spawning` session has no transcript path yet (the first hook
-        // never bound it), so there is nothing to sync.
-        let Some(transcript_path) = session.transcript_path.as_deref() else {
-            return Ok((Vec::new(), Vec::new()));
-        };
-        let main_thread = self.store.main_thread_id(&session.id).await?;
-
-        // Resume from the line-based cursor so each transcript line is read
-        // exactly once. This is the file line index, not a message count: lines
-        // that parse to nothing (blank, no-uuid such as Claude Code's
-        // `file-history-snapshot`, or unparsable) still advance it, so the
-        // cursor never lags behind the file and already-ingested lines are never
-        // reprocessed.
-        let from = self.store.transcript_lines_read(&session.id).await?;
-        let read = self.transcript.read_from(transcript_path, from).await?;
-
-        // Always advance the cursor to the file's true line count, even when no
-        // new messages parsed, so skipped trailing lines are not re-read next
-        // time.
-        self.store
-            .set_transcript_lines_read(&session.id, read.total_lines)
+        // Pull the next batch of canonical conversation content from the
+        // provider's source. For Claude this reads new transcript lines and
+        // folds them; all of the fold's Claude-specific seeding stays inside
+        // the source.
+        let (messages, effects) = ClaudeConversationSource::new(&self.transcript, &self.store)
+            .next_batch(session)
             .await?;
 
-        if read.messages.is_empty() {
+        // No new provider content this window: skip the pipeline entirely (and
+        // its empty write transaction), exactly as the pre-seam path returned
+        // early on a missing transcript path or an empty read.
+        if messages.is_empty() && effects.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
 
-        // Seed the fold: the turn in progress when this batch starts (the
-        // thread of the most recent persisted user message, defaulting to
-        // `main`) plus the one outstanding dispatched send, if any.
-        let carry_thread = self
-            .store
-            .latest_user_thread(&session.id)
-            .await?
-            .unwrap_or(main_thread);
-        let outstanding = self
-            .store
-            .head_dispatched_send(&session.id)
-            .await?
-            .as_ref()
-            .map(OutstandingSend::from);
-        // Reseed the outstanding background-task launches: a `run_in_background`
-        // Agent/Task/Bash launched in an earlier sync window, whose completion
-        // notification may land in this one. Without this the notification would
-        // not find its launching thread and fall back to `carry_thread`.
-        let launches = self
-            .store
-            .outstanding_subagent_launches(&session.id)
-            .await?;
-        let state = AttributionState::with_launches(carry_thread, outstanding, launches);
+        self.persist_conversation_batch(session, messages, effects)
+            .await
+    }
 
-        let outcome = attribute_lines(&session.id, main_thread, state, read.messages);
-
-        // Execute the fold's effects in decision order, then persist.
+    /// The provider-neutral persistence pipeline: execute the batch's effects
+    /// in decision order, persist its messages, and return them alongside any
+    /// [`SessionEvent`]s the effects produced.
+    ///
+    /// This is the shared body every provider's [`ConversationSource`] output
+    /// flows through — nothing here is Claude-specific. It executes each
+    /// [`Effect`] the source decided on (permission resolution, turn-end
+    /// signals, send matching, subagent indicator/launch bookkeeping) and then
+    /// upserts the messages with the overlay-preserving `ON CONFLICT` rule the
+    /// store owns. The caller broadcasts the returned events.
+    async fn persist_conversation_batch(
+        &mut self,
+        session: &Session,
+        messages: Vec<Message>,
+        effects: Vec<Effect>,
+    ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
+        // Execute the source's effects in decision order, then persist.
         let mut events = Vec::new();
-        for effect in outcome.effects {
+        for effect in effects {
             match effect {
                 Effect::ResolvePermission {
                     tool_use_id,
@@ -339,7 +327,7 @@ where
             }
         }
 
-        self.store.upsert_messages(&outcome.messages).await?;
-        Ok((outcome.messages, events))
+        self.store.upsert_messages(&messages).await?;
+        Ok((messages, events))
     }
 }

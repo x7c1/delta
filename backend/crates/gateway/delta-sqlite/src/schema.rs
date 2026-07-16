@@ -35,7 +35,7 @@
 /// applied on open to an existing DB.
 ///
 /// See the compatibility policy doc for the full rule set.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// All `CREATE TABLE`/`CREATE INDEX`/`CREATE TRIGGER` statements, idempotent
 /// via `IF NOT EXISTS`.
@@ -148,8 +148,18 @@ CREATE TABLE IF NOT EXISTS message (
   session_id           TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
   uuid                 TEXT NOT NULL,
   thread_id            INTEGER NOT NULL REFERENCES thread(id),
+  -- The role vocabulary is pinned to `delta_model::Role::as_str` (and its wire
+  -- twin `WireRole`). `compact_summary` is the synthetic line Claude Code
+  -- writes when `/compact` runs; the attribution fold produces and persists it,
+  -- so it must be an accepted value here. Widening this constraint is a schema
+  -- change SQLite cannot apply to an existing table in place (a CHECK edit
+  -- needs a full table rebuild), so it ships behind a `SCHEMA_VERSION` bump —
+  -- a fresh database gets the widened CHECK from this statement, and an
+  -- existing dev database is caught by the startup gate and rebuilt via
+  -- `make reset`.
   role                 TEXT NOT NULL
-                         CHECK (role IN ('user','assistant','system','meta','other')),
+                         CHECK (role IN
+                           ('user','assistant','system','meta','compact_summary','other')),
   linear_parent_uuid   TEXT,
   semantic_parent_uuid TEXT,
   prompt_id            TEXT,
