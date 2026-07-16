@@ -47,7 +47,10 @@ use async_trait::async_trait;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 pub use ingest::ClaudeHook;
-use ingest::{project_hook, project_transcript_line, OpenPermission};
+use ingest::{
+    hook_needs_request_id, project_hook, project_interrupt_marker, project_transcript_line,
+    OpenPermission,
+};
 
 use delta_usecase::{
     pane_for, AgentAdapter, AgentCapabilities, AgentEvent, AgentEventStream, AgentProvider,
@@ -173,7 +176,8 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
     /// unknown session (the stream was never opened) this is a no-op.
     ///
     /// Errors only on a malformed payload; a well-formed hook is always
-    /// projected. This phase recognises the `PermissionRequest` hook.
+    /// projected. This phase recognises the `PermissionRequest`,
+    /// `UserPromptSubmit`, and `Stop` hooks.
     ///
     /// [`events`]: AgentAdapter::events
     pub fn ingest_hook(
@@ -184,10 +188,21 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
         let hook: ClaudeHook = serde_json::from_str(payload_json)?;
         let mut sessions = self.sessions.lock().expect("sessions mutex poisoned");
         if let Some(channel) = sessions.get_mut(&handle.key) {
-            channel.permission_seq += 1;
-            let request_id = format!("{}-perm-{}", handle.key, channel.permission_seq);
+            // Mint a correlation id only for the permission request — the one
+            // hook whose event is keyed by an id Claude's payload omits — so a
+            // turn hook never burns a sequence number.
+            let request_id = if hook_needs_request_id(&hook) {
+                channel.permission_seq += 1;
+                format!("{}-perm-{}", handle.key, channel.permission_seq)
+            } else {
+                String::new()
+            };
             let (event, open) = project_hook(hook, request_id);
-            channel.open_permission = open;
+            // A permission request opens a dialog to track; the turn hooks open
+            // none, and must not clear one already open.
+            if open.is_some() {
+                channel.open_permission = open;
+            }
             let _ = channel.tx.send(event);
         }
         Ok(())
@@ -200,7 +215,9 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
     /// meaning (blank, non-JSON, or records this phase does not model) are
     /// skipped, so a whole transcript tail can be fed safely. This phase
     /// resolves the open permission dialog when its correlated `tool_result`
-    /// arrives. For an unknown session this is a no-op.
+    /// arrives, and projects the `[Request interrupted by user…]` marker as a
+    /// turn-ending [`AgentEvent::TurnCompleted`]. For an unknown session this is
+    /// a no-op.
     ///
     /// [`events`]: AgentAdapter::events
     pub fn ingest_transcript_lines(&self, handle: &AgentSessionHandle, lines: &[String]) {
@@ -209,11 +226,17 @@ impl<T: TmuxDriver> ClaudeCodePtyHookAdapter<T> {
             return;
         };
         for line in lines {
-            let Some(open) = channel.open_permission.as_ref() else {
-                break;
-            };
-            if let Some(event) = project_transcript_line(line, open) {
-                channel.open_permission = None;
+            // A `tool_result` resolving the open permission dialog takes the
+            // line first: a resolution consumes the dialog and moves on.
+            if let Some(open) = channel.open_permission.as_ref() {
+                if let Some(event) = project_transcript_line(line, open) {
+                    channel.open_permission = None;
+                    let _ = channel.tx.send(event);
+                    continue;
+                }
+            }
+            // Otherwise the line may be the turn-ending interrupt marker.
+            if let Some(event) = project_interrupt_marker(line) {
                 let _ = channel.tx.send(event);
             }
         }

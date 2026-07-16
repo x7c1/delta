@@ -16,19 +16,24 @@
 //! ([`AgentEvent::SessionStarted`], [`AgentEvent::UserPromptAccepted`],
 //! [`AgentEvent::SessionEnded`]). Those cases run and pass.
 //!
-//! The **permission** cases are active: they drive the adapter's ingestion seam
-//! ([`ClaudeCodePtyHookAdapter::ingest_hook`] +
-//! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`]), which projects a
-//! `PermissionRequest` hook and its correlated `tool_result` into
-//! [`AgentEvent::PermissionRequested`]/[`AgentEvent::PermissionResolved`].
+//! The **permission** and **turn-lifecycle** cases are active: they drive the
+//! adapter's ingestion seam ([`ClaudeCodePtyHookAdapter::ingest_hook`] +
+//! [`ClaudeCodePtyHookAdapter::ingest_transcript_lines`]), which projects:
 //!
-//! The remaining cases that assert turn lifecycle events
-//! ([`AgentEvent::TurnStarted`], [`AgentEvent::TurnCompleted`],
-//! [`AgentEvent::UnsupportedInteraction`]) depend on the seam's prompt/turn
-//! projections — a later phase. Until then they are `#[ignore]`d scaffolds with
-//! the intended assertion in the body, rather than faked passes. Each drops the
-//! adapter before draining so an accidentally-un-ignored scaffold fails fast
-//! instead of hanging.
+//! - a `PermissionRequest` hook and its correlated `tool_result` into
+//!   [`AgentEvent::PermissionRequested`]/[`AgentEvent::PermissionResolved`];
+//! - a `UserPromptSubmit` echo into [`AgentEvent::TurnStarted`] (its
+//!   `UserPromptAccepted` half coming from `send`);
+//! - a `Stop` hook into [`AgentEvent::TurnCompleted`]`(Completed)`;
+//! - the `[Request interrupted by user…]` transcript marker into
+//!   [`AgentEvent::TurnCompleted`]`(Interrupted)`.
+//!
+//! The one remaining case that asserts [`AgentEvent::UnsupportedInteraction`]
+//! depends on structured server→client requests Claude does not emit, so it is
+//! deferred to the phase that introduces them. Until then it is an `#[ignore]`d
+//! scaffold with the intended assertion in the body, rather than a faked pass.
+//! Each drops the adapter before draining so an accidentally-un-ignored
+//! scaffold fails fast instead of hanging.
 
 use async_trait::async_trait;
 use std::sync::Mutex;
@@ -322,9 +327,11 @@ async fn claude_launch_builds_the_expected_command() {
 // scaffolds (the intended assertion is in the body); when the prompt/turn
 // projections land, drop the `#[ignore]`.
 
-/// `send_emits_user_prompt_and_turn_started`.
+/// `send_emits_user_prompt_and_turn_started`: a send surfaces the prompt as an
+/// accepted user prompt (the mechanical dispatch fact), and the resulting
+/// `UserPromptSubmit` echo — fed through the ingestion seam — projects
+/// `TurnStarted`.
 #[tokio::test]
-#[ignore = "Phase B: TurnStarted derives from the UserPromptSubmit echo, not yet projected"]
 async fn send_emits_user_prompt_and_turn_started() {
     let adapter = claude_adapter();
     let handle = adapter.launch(launch_request()).await.expect("launch");
@@ -338,25 +345,30 @@ async fn send_emits_user_prompt_and_turn_started() {
         )
         .await
         .expect("send");
+    // Claude confirms the turn by echoing the prompt through the
+    // `UserPromptSubmit` hook; that echo is the turn-start signal.
+    adapter
+        .ingest_hook(&handle, r#"{"hook":"user_prompt_submit","prompt":"hello"}"#)
+        .expect("ingest user_prompt_submit hook");
     drop(adapter);
     let events = drain(&mut stream).await;
     assert!(
         events
             .iter()
             .any(|e| matches!(e, AgentEvent::UserPromptAccepted { .. })),
-        "expected UserPromptAccepted"
+        "expected UserPromptAccepted, got {events:?}"
     );
     assert!(
         events
             .iter()
             .any(|e| matches!(e, AgentEvent::TurnStarted { .. })),
-        "expected TurnStarted once the prompt echo is projected"
+        "expected TurnStarted once the prompt echo is projected, got {events:?}"
     );
 }
 
-/// `turn_completion_is_emitted_once`.
+/// `turn_completion_is_emitted_once`: the `Stop` hook fed through the seam
+/// projects exactly one `TurnCompleted` for the turn.
 #[tokio::test]
-#[ignore = "Phase B: TurnCompleted derives from the Stop hook, not yet projected"]
 async fn turn_completion_is_emitted_once() {
     let adapter = claude_adapter();
     let handle = adapter.launch(launch_request()).await.expect("launch");
@@ -370,6 +382,9 @@ async fn turn_completion_is_emitted_once() {
         )
         .await
         .expect("send");
+    adapter
+        .ingest_hook(&handle, r#"{"hook":"stop"}"#)
+        .expect("ingest stop hook");
     drop(adapter);
     let events = drain(&mut stream).await;
     let completions = events
@@ -472,14 +487,21 @@ async fn permission_request_can_be_denied() {
     );
 }
 
-/// `interrupt_ends_turn`.
+/// `interrupt_ends_turn`: interrupting injects the abort, and the
+/// `[Request interrupted by user…]` marker it leaves in the transcript — fed
+/// through the seam — projects `TurnCompleted(Interrupted)` (no `Stop` fires).
 #[tokio::test]
-#[ignore = "Phase B: TurnCompleted(Interrupted) derives from the transcript marker"]
 async fn interrupt_ends_turn() {
     let adapter = claude_adapter();
     let handle = adapter.launch(launch_request()).await.expect("launch");
     let mut stream = adapter.events(&handle);
     adapter.interrupt(&handle).await.expect("interrupt");
+    // The abort is confirmed by the interrupt marker Claude writes to the
+    // transcript, not by a `Stop` hook.
+    adapter.ingest_transcript_lines(
+        &handle,
+        &[r#"{"type":"user","text":"[Request interrupted by user]"}"#.to_owned()],
+    );
     drop(adapter);
     let events = drain(&mut stream).await;
     assert!(
@@ -489,7 +511,7 @@ async fn interrupt_ends_turn() {
                 status: delta_usecase::TurnStatus::Interrupted
             }
         )),
-        "expected TurnCompleted(Interrupted)"
+        "expected TurnCompleted(Interrupted), got {events:?}"
     );
 }
 
