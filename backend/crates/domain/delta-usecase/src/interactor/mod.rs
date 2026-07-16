@@ -8,6 +8,7 @@
 //! interactor. Per-session runtime state lives in the `session_actor` module
 //! (one actor task per session), reached through the `routing` impl.
 
+mod agent_permission;
 mod answer_question;
 mod cancel_question;
 mod cancel_send;

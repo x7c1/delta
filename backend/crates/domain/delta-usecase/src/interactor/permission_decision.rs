@@ -12,7 +12,9 @@
 //! and posts here, so a decision, an abandonment, and the hook registration
 //! can never interleave for one session.
 
+use crate::agent::AgentEvent;
 use crate::error::{Error, Result};
+use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -52,10 +54,6 @@ where
             .take_permission_waiter(request_id)
             .ok_or(Error::PermissionNotPending(request_id))?;
 
-        // The dialog is being answered: drop its queryable runtime mirror
-        // (keyed, so a stale id cannot wipe a newer dialog's state).
-        self.state.resolve_pending_permission(request_id);
-
         let allowed = decision == PermissionDecision::Allow;
         let Some(request) = self
             .store
@@ -65,7 +63,10 @@ where
             // The waiter existed but the row is not `pending` — it was already
             // resolved out from under us (e.g. a tool_result ingested in the
             // same instant). The hook handler still gets the answer; a decided
-            // row is left untouched.
+            // row is left untouched, and its resolution already cleared the
+            // mirror, so this path emits no further broadcast. Clear the mirror
+            // defensively (keyed, so it cannot wipe a newer dialog).
+            self.state.resolve_pending_permission(request_id);
             tracing::warn!(
                 request_id,
                 "permission decision arrived for a row that is no longer pending; \
@@ -86,10 +87,19 @@ where
             );
         }
 
-        Ok(vec![SessionEvent::PermissionResolved {
-            session_id: request.session_id,
-            request_id,
-        }])
+        // Route the resolution through the permission reducer: it drops the
+        // queryable dialog mirror (keyed, so a stale id cannot wipe a newer
+        // dialog) and produces the `PermissionResolved` broadcast that settles
+        // the browser notice.
+        let event = AgentEvent::PermissionResolved {
+            request_id: request_id.to_string(),
+            decision,
+        };
+        Ok(reduce_permission_event(
+            self.state,
+            &request.session_id,
+            &event,
+        ))
     }
 
     /// Abandon the waiter for a permission request whose hook wait timed out.
