@@ -21,6 +21,7 @@ workspace-fs = { path = "crates/gateway/workspace-fs" }
 git-worktree = { path = "crates/gateway/git-worktree" }
 gh-cli = { path = "crates/gateway/gh-cli" }
 delta-wire = { path = "crates/gateway/delta-wire" }
+codex-agent = { path = "crates/gateway/codex-agent" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
 delta-server = { path = "crates/apps/delta-server" }
 

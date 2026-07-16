@@ -1,0 +1,20 @@
+[package]
+name = "fake-codex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The fake impersonates the real `codex app-server`, so it speaks the raw
+# JSON-RPC wire directly (serde_json) and shares no code with the client under
+# test — a wire bug then cannot hide behind a shared helper.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The end-to-end round-trip test drives the real client transport against this
+# fake binary.
+codex-agent = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "process", "sync", "rt", "macros", "time"] }
+serde_json = { workspace = true }

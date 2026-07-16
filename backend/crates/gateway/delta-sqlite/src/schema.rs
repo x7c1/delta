@@ -96,7 +96,27 @@ CREATE TABLE IF NOT EXISTS session (
   -- `repo_root` because `repo_root` is the working-tree path (different per
   -- linked worktree) while this label is the cross-worktree repository
   -- identity. Additive; see `ADDITIVE_COLUMNS`.
-  repository_display_name TEXT
+  repository_display_name TEXT,
+  -- Which AI agent backs this session. `'claude'` for every session Delta has
+  -- launched to date (Claude Code in a tmux PTY); other providers (e.g.
+  -- `'codex'`, driven via the `codex app-server` JSON-RPC transport) select a
+  -- different adapter. `NOT NULL DEFAULT 'claude'` so a pre-existing row and
+  -- any insert that does not name a provider keep the historical meaning.
+  -- Additive (see `ADDITIVE_COLUMNS`): an existing database gains it with the
+  -- constant default on every row, no backfill needed.
+  provider TEXT NOT NULL DEFAULT 'claude',
+  -- The provider's own identifier for the underlying conversation, when the
+  -- provider (not Delta) mints it — e.g. Codex's `thr_...` returned from
+  -- `thread/start`. NULL for a Claude session, whose conversation id IS the
+  -- Delta-minted `session.id` (pinned via `--session-id`), and for any session
+  -- that predates this column. Additive; see `ADDITIVE_COLUMNS`.
+  provider_session_id TEXT,
+  -- The provider's thread identifier. A Delta session maps 1:1 onto a Codex
+  -- thread, so for Codex this currently equals `provider_session_id`; kept as a
+  -- distinct column so a future many-threads-per-session provider has a home
+  -- for it. NULL for Claude and for rows that predate this column. Additive;
+  -- see `ADDITIVE_COLUMNS`.
+  provider_thread_id TEXT
 ) STRICT;
 
 -- The transcript-ingestion cursor, split out of `session`: how many lines of
@@ -223,7 +243,13 @@ CREATE TABLE IF NOT EXISTS launch_option (
   name            TEXT NOT NULL,
   value           TEXT,
   default_enabled INTEGER NOT NULL DEFAULT 0 CHECK (default_enabled IN (0, 1)),
-  created_at      TEXT NOT NULL
+  created_at      TEXT NOT NULL,
+  -- Which provider this launch option applies to. Claude options are argv
+  -- flags (`--plugin-dir`, `--permission-mode`, …); other providers register
+  -- their own option set (e.g. Codex `thread/start` fields). `NOT NULL DEFAULT
+  -- 'claude'` so every pre-existing row and any insert that omits it stays a
+  -- Claude option. Additive (see `ADDITIVE_COLUMNS`).
+  provider        TEXT NOT NULL DEFAULT 'claude'
 ) STRICT;
 
 -- Outstanding background-task launches: the launching thread of each
@@ -415,6 +441,35 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "send",
         column: "restored_at",
         add_column_sql: "ALTER TABLE send ADD COLUMN restored_at TEXT",
+    },
+    // Multi-provider columns, added to `session`/`launch_option` after they
+    // first shipped. `provider` is `NOT NULL` with a *constant* `'claude'`
+    // default — no backfill needed, every pre-existing row simply takes the
+    // constant, which is exactly its historical meaning (all prior sessions
+    // and launch options are Claude). `provider_session_id`/`provider_thread_id`
+    // are nullable with no default: an existing database gains them as NULL on
+    // every pre-existing row (a Claude session has no provider-minted id — its
+    // conversation id is the Delta-minted `session.id`).
+    AdditiveColumn {
+        table: "session",
+        column: "provider",
+        add_column_sql: "ALTER TABLE session ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'",
+    },
+    AdditiveColumn {
+        table: "session",
+        column: "provider_session_id",
+        add_column_sql: "ALTER TABLE session ADD COLUMN provider_session_id TEXT",
+    },
+    AdditiveColumn {
+        table: "session",
+        column: "provider_thread_id",
+        add_column_sql: "ALTER TABLE session ADD COLUMN provider_thread_id TEXT",
+    },
+    AdditiveColumn {
+        table: "launch_option",
+        column: "provider",
+        add_column_sql:
+            "ALTER TABLE launch_option ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'",
     },
 ];
 
