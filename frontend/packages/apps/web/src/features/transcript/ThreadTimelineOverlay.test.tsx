@@ -3205,9 +3205,18 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
         }),
       );
     });
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${LANE_LEFT_PAD_PX}px`);
+    // The wheel handler is a native (`addEventListener`) listener, so the
+    // active-index state update it commits is scheduled by React rather than
+    // flushed synchronously inside the `act` above — a plain synchronous
+    // `expect` here races that flush and can observe the pre-scrub position
+    // (`256px`) under CI scheduling. `waitFor` retries the assertion across
+    // React's flush boundary, so it settles deterministically on the scrubbed
+    // position without weakening what is asserted.
+    await waitFor(() =>
+      expect(
+        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+      ).toBe(`${LANE_LEFT_PAD_PX}px`),
+    );
   });
 
   it('ignores click events whose target is a label cell', async () => {
