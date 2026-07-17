@@ -4,6 +4,7 @@ import { ApiProvider } from './data/apiContext';
 import { ErrorSnackbar } from './features/notifications/ErrorSnackbar';
 import { WorkspaceScreen } from './features/workspace/WorkspaceScreen';
 import { ThemeProvider } from './hooks/themeContext';
+import { VisualEffectsProvider } from './hooks/visualEffectsContext';
 
 export function createQueryClient(): QueryClient {
   return new QueryClient({
@@ -48,18 +49,23 @@ export function App() {
             'system' preference, and the localStorage write — so any consumer
             (settings picker, xterm bridge) reads the same shared state. */}
         <ThemeProvider>
-          {/* App-wide catch-all: a crash anywhere in the tree degrades to a
-              recoverable notice instead of a blank page. Region-level boundaries
-              (e.g. the terminal) handle their own failures before reaching here. */}
-          <ErrorBoundary label="app" fallback={() => <AppCrash />}>
-            <div className="h-full bg-surface-elevated text-fg">
-              <WorkspaceScreen />
-              {/* App-wide error snackbar. Rendered as a fixed overlay
-                  outside the workspace layout so a bottom-anchored
-                  notification never affects transcript scrolling. */}
-              <ErrorSnackbar />
-            </div>
-          </ErrorBoundary>
+          {/* Mirrors ThemeProvider: derives the effective rich/flat look from
+              the persisted visual-effects setting plus the environment and
+              stamps <html data-effects="…"> so the decorative CSS gates. */}
+          <VisualEffectsProvider>
+            {/* App-wide catch-all: a crash anywhere in the tree degrades to a
+                recoverable notice instead of a blank page. Region-level boundaries
+                (e.g. the terminal) handle their own failures before reaching here. */}
+            <ErrorBoundary label="app" fallback={() => <AppCrash />}>
+              <div className="h-full bg-surface-elevated text-fg">
+                <WorkspaceScreen />
+                {/* App-wide error snackbar. Rendered as a fixed overlay
+                    outside the workspace layout so a bottom-anchored
+                    notification never affects transcript scrolling. */}
+                <ErrorSnackbar />
+              </div>
+            </ErrorBoundary>
+          </VisualEffectsProvider>
         </ThemeProvider>
       </ApiProvider>
     </QueryClientProvider>

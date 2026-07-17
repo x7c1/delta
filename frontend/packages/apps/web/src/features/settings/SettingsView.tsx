@@ -24,6 +24,7 @@ import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
 import {
   type SettingsCategoryId,
+  type VisualEffectsSetting,
   useSettingsStore,
 } from '../../store/settingsStore';
 import { SYSTEM_PREFERENCE, type ThemePreference } from '../../hooks/useTheme';
@@ -583,6 +584,8 @@ function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
  */
 function AppearanceSection() {
   const { preference, setPreference } = useThemeContext();
+  const visualEffects = useSettingsStore((state) => state.visualEffects);
+  const setVisualEffects = useSettingsStore((state) => state.setVisualEffects);
 
   const options: { value: ThemePreference; label: string; hint: string }[] = [
     ...THEMES.map((theme) => ({
@@ -595,6 +598,22 @@ function AppearanceSection() {
       label: 'System',
       hint: 'Follow the OS preference',
     },
+  ];
+
+  // Visual-effects options. "Auto" defers to the platform (flat on Linux
+  // WebKit, rich elsewhere); "On"/"Off" force the look regardless of platform.
+  const effectsOptions: {
+    value: VisualEffectsSetting;
+    label: string;
+    hint: string;
+  }[] = [
+    {
+      value: 'auto',
+      label: 'Auto (platform default)',
+      hint: 'Flat on Linux WebKit, rich elsewhere',
+    },
+    { value: 'on', label: 'On', hint: 'Always show the rich look' },
+    { value: 'off', label: 'Off', hint: 'Always use the flat look' },
   ];
 
   return (
@@ -633,6 +652,54 @@ function AppearanceSection() {
                 value={option.value}
                 checked={selected}
                 onChange={() => setPreference(option.value)}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              <span className="flex flex-1 flex-col">
+                <span className="font-medium">{option.label}</span>
+                <span className="text-caption text-fg-muted">{option.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+
+      <h4 className="mb-1 mt-6 text-secondary font-semibold text-fg">
+        Visual effects
+      </h4>
+      <p className="mb-4 text-caption text-fg-muted">
+        Card shadows and the timeline landing flash. These are cheap on most
+        browsers but cost some (notably Linux WebKit) a repaint that reads as
+        lag; <span className="font-medium">Auto</span> keeps the rich look
+        everywhere except where it hurts.
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby="appearance-effects-heading"
+        className="flex flex-col gap-2 rounded-lg border border-border-default bg-surface-elevated p-3"
+        data-testid="appearance-effects-options"
+      >
+        <span id="appearance-effects-heading" className="sr-only">
+          Visual effects
+        </span>
+        {effectsOptions.map((option) => {
+          const selected = visualEffects === option.value;
+          return (
+            <label
+              key={option.value}
+              className={cn(
+                'flex cursor-pointer items-center gap-3 rounded border px-3 py-2 text-secondary transition',
+                selected
+                  ? 'border-accent bg-accent/10 text-fg ring-1 ring-accent/30'
+                  : 'border-border-default text-fg hover:bg-surface',
+              )}
+              data-testid={`appearance-effects-option-${option.value}`}
+            >
+              <input
+                type="radio"
+                name="appearance-effects"
+                value={option.value}
+                checked={selected}
+                onChange={() => setVisualEffects(option.value)}
                 className="h-3.5 w-3.5 accent-accent"
               />
               <span className="flex flex-1 flex-col">

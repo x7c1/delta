@@ -28,6 +28,7 @@ import {
 import { useNavStore } from '../../store/navStore';
 import {
   DEFAULT_SETTINGS_CATEGORY,
+  DEFAULT_VISUAL_EFFECTS_SETTING,
   SETTINGS_STORAGE_KEY,
   useSettingsStore,
 } from '../../store/settingsStore';
@@ -90,7 +91,10 @@ describe('SettingsView', () => {
     // the dialog (and its content) renders. The active category is persisted,
     // so reset it to the default between tests to keep them order-independent.
     useNavStore.setState({ settingsOpen: true });
-    useSettingsStore.setState({ activeCategory: DEFAULT_SETTINGS_CATEGORY });
+    useSettingsStore.setState({
+      activeCategory: DEFAULT_SETTINGS_CATEGORY,
+      visualEffects: DEFAULT_VISUAL_EFFECTS_SETTING,
+    });
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
     // The ThemeProvider reads matchMedia + localStorage at mount; default to
     // light-OS + cleared preference so each test starts on the SYSTEM default.
@@ -347,6 +351,46 @@ describe('SettingsView', () => {
         SYSTEM_PREFERENCE,
       );
       expect(document.documentElement.dataset.theme).toBe('light');
+    });
+
+    it('exposes the three-way visual-effects control', () => {
+      renderSettings();
+      switchToAppearance();
+      const group = screen.getByTestId('appearance-effects-options');
+      const radios = within(group).getAllByRole('radio');
+      expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
+        'auto',
+        'on',
+        'off',
+      ]);
+      expect(within(group).getByText('Auto (platform default)')).toBeInTheDocument();
+    });
+
+    it('reflects the stored visual-effects value (defaults to Auto)', () => {
+      renderSettings();
+      switchToAppearance();
+      expect(
+        within(screen.getByTestId('appearance-effects-option-auto')).getByRole(
+          'radio',
+        ),
+      ).toBeChecked();
+      expect(
+        within(screen.getByTestId('appearance-effects-option-on')).getByRole(
+          'radio',
+        ),
+      ).not.toBeChecked();
+    });
+
+    it('writes the store when a visual-effects option is picked', () => {
+      renderSettings();
+      switchToAppearance();
+      const offRadio = within(
+        screen.getByTestId('appearance-effects-option-off'),
+      ).getByRole('radio');
+      fireEvent.click(offRadio);
+
+      expect(offRadio).toBeChecked();
+      expect(useSettingsStore.getState().visualEffects).toBe('off');
     });
   });
 

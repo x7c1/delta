@@ -67,6 +67,21 @@
   --delta-color-highlight-wash: 254 243 199;
   --delta-highlight-wash-peak: 0.7;
 
+  /*
+   * Card drop-shadow, routed through a token so the visual-effects gate can
+   * strip it without a blanket `.shadow-md { box-shadow: none }` (which would
+   * also kill functional overlay shadows — dropdown menus, tooltips, dialogs).
+   * Only the session card (SessionNode) and the transcript's floating cards
+   * (TranscriptPane's FLOATING_CARD_CLASS) consume it via
+   * `shadow-[shadow:var(--delta-card-shadow)]` (the `shadow:` type hint keeps
+   * Tailwind from parsing the bare `var()` as a shadow *color*). The default
+   * value is Tailwind's
+   * `shadow-md`; `[data-effects='flat']` overrides it to a transparent shadow
+   * (see the visual-effects block near the bottom of this file).
+   */
+  --delta-card-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+
   /* The terminal font stack, defined once in tailwind.config.js
    * (fontFamily.terminal) and exposed here for xterm (src/theme.ts). */
   --delta-font-terminal: theme(fontFamily.terminal);
@@ -466,6 +481,37 @@ body {
   .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
     display: none;
   }
+}
+
+/*
+ * Visual-effects gate. `<html data-effects="rich" | "flat">` is stamped by
+ * VisualEffectsProvider from the user's setting plus the platform (see
+ * hooks/visualEffects.ts). "flat" strips the two decorative raster costs that
+ * WebKitGTK pays full price for on every repaint — the card drop-shadow and
+ * the timeline landing-wash overlay — while "rich" (and the unstamped
+ * default) leaves today's rendering untouched.
+ *
+ * The flat value is Tailwind's transparent stand-in (`0 0 #0000`), NOT the
+ * `none` keyword: the card utility composes the shadow into the same
+ * `box-shadow` list as the focus `ring-*` (`box-shadow: <ring>, <ring>,
+ * var(--delta-card-shadow)`), and a bare `none` in that list is invalid CSS —
+ * it would drop the whole declaration and take the focused card's ring with
+ * it. A transparent layer renders as no shadow while leaving the ring intact.
+ *
+ * This reaches only the card call sites that consume the token (SessionNode +
+ * TranscriptPane's FLOATING_CARD_CLASS); functional overlay shadows (dropdown
+ * menus, tooltips, dialogs) use `shadow-md`/`-lg`/`-xl` directly and are
+ * deliberately NOT gated. The landing-wash rule mirrors the
+ * `prefers-reduced-motion` block above (`display: none`), suppressing the
+ * `::after` overlay entirely.
+ */
+[data-effects='flat'] {
+  --delta-card-shadow: 0 0 #0000;
+}
+[data-effects='flat'] .delta-timeline-jump-highlight > .rounded-lg::after,
+[data-effects='flat'] .delta-timeline-jump-highlight > .max-w-\[85\%\]::after,
+[data-effects='flat'] .delta-timeline-jump-highlight:not(:has(> .rounded-lg)):not(:has(> .max-w-\[85\%\]))::after {
+  display: none;
 }
 
 /*
