@@ -27,14 +27,26 @@
 //!
 //! ## Permission handling
 //!
-//! An `*/requestApproval` server request surfaces as
+//! The two approval server-requests whose response is a binary decision —
+//! `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
+//! (classified in [`crate::translate`]) — surface as
 //! [`AgentEvent::PermissionRequested`]; the adapter remembers the verbatim wire
 //! id so [`AgentAdapter::resolve_permission`] can answer it with the frozen
 //! decision mapping (allow → `accept`, deny → `decline`) and emit
-//! [`AgentEvent::PermissionResolved`]. That trait method — reachable through
+//! [`AgentEvent::PermissionResolved`]. Both response types share the same
+//! `{ "decision": … }` shape (`CommandExecutionRequestApprovalResponse` and
+//! `FileChangeRequestApprovalResponse` in the vendored schema), so one reply path
+//! serves both; v1 does not use the `acceptForSession` / execpolicy / network
+//! amendment decision variants. That trait method — reachable through
 //! `Arc<dyn AgentAdapter>` — is the Codex analogue of the Claude adapter's
 //! ingestion seam: it is how a browser decision reaches the provider, routed by
 //! the core from the Delta permission-row id back to the adapter-scoped token.
+//!
+//! `item/permissions/requestApproval` is deliberately **not** an approval here:
+//! its response is a `GrantedPermissionProfile`, not a decision Delta can
+//! synthesise, so it takes the never-hang path below (surfaced as
+//! [`AgentEvent::UnsupportedInteraction`] and answered) rather than being
+//! answered with a fabricated grant.
 //!
 //! ## Never hang
 //!
@@ -390,6 +402,11 @@ impl AgentAdapter for CodexAppServerAdapter {
             PermissionDecision::Allow => DECISION_ACCEPT,
             PermissionDecision::Deny => DECISION_DECLINE,
         };
+        // Both approval kinds that reach here — command execution and file change
+        // — share the `{ "decision": … }` response shape, so a single reply
+        // serves both without needing to remember which method opened the
+        // request (the permissions approval, whose response differs, never
+        // becomes an open approval — it takes the unsupported path).
         self.conn
             .respond(&wire_id, json!({ "decision": decision_value }))
             .await

@@ -221,8 +221,8 @@ async fn server_request_is_demuxed_to_the_thread_channel() {
         server
             .send(json!({
                 "id": "srv-1",
-                "method": "item/requestApproval",
-                "params": { "threadId": "thr_approval", "toolName": "Bash" }
+                "method": "item/commandExecution/requestApproval",
+                "params": { "threadId": "thr_approval", "itemId": "exec-1", "command": "date" }
             }))
             .await;
         server
@@ -231,7 +231,7 @@ async fn server_request_is_demuxed_to_the_thread_channel() {
     let event = recv(&mut events).await;
     match event {
         ThreadEvent::ServerRequest(r) => {
-            assert_eq!(r.method, "item/requestApproval");
+            assert_eq!(r.method, "item/commandExecution/requestApproval");
             assert_eq!(r.id, json!("srv-1"));
         }
         other => panic!("expected a server request, got {other:?}"),

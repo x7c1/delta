@@ -335,12 +335,12 @@ mod tests {
     #[test]
     fn classifies_a_server_request() {
         let msg = parse_incoming(
-            r#"{"id":"srv-1","method":"item/requestApproval","params":{"threadId":"thr_3"}}"#,
+            r#"{"id":"srv-1","method":"item/commandExecution/requestApproval","params":{"threadId":"thr_3"}}"#,
         )
         .unwrap();
         match &msg {
             Incoming::ServerRequest(r) => {
-                assert_eq!(r.method, "item/requestApproval");
+                assert_eq!(r.method, "item/commandExecution/requestApproval");
                 assert_eq!(r.id, json!("srv-1"), "server ids are preserved verbatim");
             }
             other => panic!("expected server request, got {other:?}"),

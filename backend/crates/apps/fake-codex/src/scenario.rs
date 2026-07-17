@@ -12,7 +12,7 @@
 //!     "emit": [
 //!       { "type": "item_started",   "item": { "id": "item_1", "itemType": "agent_message" } },
 //!       { "type": "item_completed", "item": { "id": "item_1", "itemType": "agent_message", "text": "hi" } },
-//!       { "type": "request_approval", "method": "item/requestApproval", "params": { "toolName": "Bash" } },
+//!       { "type": "request_approval", "method": "item/commandExecution/requestApproval", "params": { "itemId": "exec_1", "command": "date" } },
 //!       { "type": "turn_completed", "status": "completed" }
 //!     ]
 //!   }
@@ -38,7 +38,7 @@
 //! | `item_completed { item }` | Emit an `item/completed` notification carrying `item`. |
 //! | `turn_started` | Emit a `turn/started` notification. |
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
-//! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/requestApproval`) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
+//! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
 //! | `notification { method, params? }` | Emit an arbitrary notification (escape hatch for shapes not covered above). |
 //!
 //! Every emitted notification (and the approval request) gets `threadId` stamped
@@ -58,8 +58,11 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-/// The default method for a scripted server → client approval request.
-pub const DEFAULT_APPROVAL_METHOD: &str = "item/requestApproval";
+/// The default method for a scripted server → client approval request: the real
+/// command-execution approval a `turn/start` turn drives (see the vendored
+/// `ServerRequest` schema). A scenario overrides it (e.g. with
+/// `item/fileChange/requestApproval`) via the step's `method` field.
+pub const DEFAULT_APPROVAL_METHOD: &str = "item/commandExecution/requestApproval";
 /// The default thread id when a scenario does not name one.
 pub const DEFAULT_THREAD_ID: &str = "thr_fake_0001";
 
@@ -201,7 +204,7 @@ mod tests {
                         { "type": "turn_started" },
                         { "type": "item_started", "item": { "id": "i1" } },
                         { "type": "item_completed", "item": { "id": "i1", "text": "hi" } },
-                        { "type": "request_approval", "method": "turn/requestApproval", "params": { "k": 1 } },
+                        { "type": "request_approval", "method": "item/fileChange/requestApproval", "params": { "itemId": "fc_1" } },
                         { "type": "request_approval" },
                         { "type": "notification", "method": "server/note", "params": { "n": 2 } },
                         { "type": "turn_completed", "status": "completed" }

@@ -12,13 +12,24 @@
 //! so the turn id is `params.turn.id` and the terminal status `params.turn.status`
 //! (one of `completed` / `interrupted` / `failed` / `inProgress`).
 //!
-//! **Still inferred, not yet reconciled (R2/R3):** the `item.itemType` vocabulary
-//! (`agent_message` vs. tool items), the rich item-content notifications
-//! (`item/agentMessage/delta`, `item/reasoning/*`, …), and the fields carried on
-//! an approval request (`itemId`, `toolName`) plus the approval method fan-out.
-//! The translation is deliberately lenient — an unknown notification maps to
-//! nothing rather than erroring, and an unknown item type is treated as a tool —
-//! so those later corrections stay localised to this file and the `wire` module.
+//! The approval fan-out is reconciled against the vendored `ServerRequest`
+//! registry (see `vendor/app-server-schema/`): the server drives `turn/start`
+//! approvals as server → client requests, and Delta models the two whose
+//! response is a binary decision —
+//! `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
+//! — as [`AgentPermissionRequest`]s built from each method's real params. Every
+//! other server → client request — the permissions approval (whose response is a
+//! `GrantedPermissionProfile`, not a decision), the experimental tool/user-input
+//! and dynamic tool-call requests, MCP elicitation, the deprecated legacy
+//! approvals, and anything a newer server adds — is surfaced as
+//! [`ServerRequestKind::Unsupported`] so the adapter can answer it and never hang.
+//!
+//! **Still inferred, not yet reconciled (R3):** the `item.itemType` vocabulary
+//! (`agent_message` vs. tool items) and the rich item-content notifications
+//! (`item/agentMessage/delta`, `item/reasoning/*`, …). The translation is
+//! deliberately lenient — an unknown notification maps to nothing rather than
+//! erroring, and an unknown item type is treated as a tool — so those later
+//! corrections stay localised to this file and the `wire` module.
 
 use serde_json::Value;
 
@@ -31,6 +42,21 @@ use crate::wire::{Notification, ServerRequest};
 /// separator-insensitively so both `agent_message` (the fake's shape) and a
 /// real server's `agentMessage` resolve to the same thing.
 const AGENT_MESSAGE_ITEM_TYPE: &str = "agentmessage";
+
+/// The server → client approval request for a command execution (a `turn/start`
+/// turn). Response is a binary `{decision}`, so Delta models it.
+const METHOD_COMMAND_EXECUTION_APPROVAL: &str = "item/commandExecution/requestApproval";
+/// The server → client approval request for a file change (a `turn/start` turn).
+/// Response is a binary `{decision}`, so Delta models it.
+const METHOD_FILE_CHANGE_APPROVAL: &str = "item/fileChange/requestApproval";
+
+/// Fallback tool name for a command-execution approval whose `command` is absent
+/// (the field is nullable in the vendored schema).
+const COMMAND_EXECUTION_TOOL_NAME: &str = "command_execution";
+/// Tool name for a file-change approval. Its params carry no command or file path
+/// (only `itemId` / `grantRoot` / `reason`), so a stable kind label names the
+/// interaction while the details ride `input_json`.
+const FILE_CHANGE_TOOL_NAME: &str = "file_change";
 
 /// The classification of a server-originated request.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,24 +107,51 @@ pub fn is_turn_completed(n: &Notification) -> bool {
 
 /// Classify a server-originated request as a modeled approval or an unmodeled
 /// interaction.
+///
+/// The fan-out is an explicit allowlist of the two approval methods whose
+/// response is a binary decision (`item/commandExecution/requestApproval`,
+/// `item/fileChange/requestApproval`) — matched by exact method string, not a
+/// `*/requestApproval` suffix heuristic. Everything else, including
+/// `item/permissions/requestApproval` (whose response is a
+/// `GrantedPermissionProfile`, not a decision Delta can produce), is unsupported:
+/// the adapter answers it and surfaces it, so the turn never hangs.
 pub fn classify_server_request(r: &ServerRequest) -> ServerRequestKind {
-    if is_approval_method(&r.method) {
-        ServerRequestKind::Approval(approval_request(r))
-    } else {
-        ServerRequestKind::Unsupported {
+    match r.method.as_str() {
+        METHOD_COMMAND_EXECUTION_APPROVAL => {
+            ServerRequestKind::Approval(command_execution_approval(r))
+        }
+        METHOD_FILE_CHANGE_APPROVAL => ServerRequestKind::Approval(file_change_approval(r)),
+        _ => ServerRequestKind::Unsupported {
             method: r.method.clone(),
             detail_json: r.params.clone(),
-        }
+        },
     }
 }
 
-/// The neutral permission request an approval server-request projects to. The
-/// `request_id` is the server request id rendered as a string — the same value
-/// the adapter maps back to the verbatim wire id when it answers.
-fn approval_request(r: &ServerRequest) -> AgentPermissionRequest {
+/// The neutral permission request a command-execution approval projects to. The
+/// command being run (`command`) names the tool — falling back to a stable kind
+/// label when the server omits it — `itemId` is the tool-use id, and the full
+/// params ride `input_json` so `cwd` / `commandActions` / the proposed amendments
+/// are preserved for the UI. The `request_id` is the server request id rendered
+/// as a string — the same value the adapter maps back to the verbatim wire id
+/// when it answers.
+fn command_execution_approval(r: &ServerRequest) -> AgentPermissionRequest {
     AgentPermissionRequest {
         request_id: request_id_of(&r.id),
-        tool_name: string_field(&r.params, "toolName").unwrap_or_default(),
+        tool_name: string_field(&r.params, "command")
+            .unwrap_or_else(|| COMMAND_EXECUTION_TOOL_NAME.to_owned()),
+        input_json: r.params.clone(),
+        tool_use_id: string_field(&r.params, "itemId"),
+    }
+}
+
+/// The neutral permission request a file-change approval projects to. Its params
+/// carry no command or file path (only `itemId` / `grantRoot` / `reason`), so a
+/// stable kind label names the interaction and the full params ride `input_json`.
+fn file_change_approval(r: &ServerRequest) -> AgentPermissionRequest {
+    AgentPermissionRequest {
+        request_id: request_id_of(&r.id),
+        tool_name: FILE_CHANGE_TOOL_NAME.to_owned(),
         input_json: r.params.clone(),
         tool_use_id: string_field(&r.params, "itemId"),
     }
@@ -112,12 +165,6 @@ pub fn request_id_of(id: &Value) -> String {
         Value::String(s) => s.clone(),
         other => other.to_string(),
     }
-}
-
-/// Whether a server → client method is an approval request Delta models. The
-/// frozen contract names these `*/requestApproval`.
-fn is_approval_method(method: &str) -> bool {
-    method.ends_with("requestApproval")
 }
 
 /// The `item` object a notification carries under `params.item`, if any.
@@ -404,50 +451,122 @@ mod tests {
     }
 
     #[test]
-    fn an_approval_request_becomes_a_permission_request() {
+    fn a_command_execution_approval_becomes_a_permission_request() {
+        // The real `item/commandExecution/requestApproval` params, as captured
+        // from a live server turn: the command names the tool, `itemId` is the
+        // tool-use id, and the full params (cwd, commandActions) ride input_json.
         let request = ServerRequest {
             id: json!("srv-1"),
-            method: "item/requestApproval".to_owned(),
-            params: json!({ "threadId": "thr_1", "itemId": "item_9", "toolName": "Bash" }),
+            method: "item/commandExecution/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "itemId": "exec-9",
+                "startedAtMs": 1_784_272_338_055_i64,
+                "command": "/bin/zsh -lc date",
+                "cwd": "/tmp",
+                "commandActions": [{ "type": "unknown", "command": "date" }]
+            }),
         };
         match classify_server_request(&request) {
             ServerRequestKind::Approval(req) => {
                 assert_eq!(req.request_id, "srv-1");
-                assert_eq!(req.tool_name, "Bash");
-                assert_eq!(req.tool_use_id, Some("item_9".to_owned()));
+                assert_eq!(
+                    req.tool_name, "/bin/zsh -lc date",
+                    "the command names the tool"
+                );
+                assert_eq!(req.tool_use_id, Some("exec-9".to_owned()));
+                assert_eq!(
+                    req.input_json["cwd"], "/tmp",
+                    "the full params ride input_json"
+                );
             }
             other => panic!("expected an approval, got {other:?}"),
         }
     }
 
     #[test]
-    fn any_other_request_approval_method_is_still_modeled() {
+    fn a_command_execution_approval_without_a_command_falls_back_to_a_kind_label() {
         let request = ServerRequest {
             id: json!(42),
-            method: "turn/requestApproval".to_owned(),
-            params: json!({}),
+            method: "item/commandExecution/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "t", "turnId": "tn", "itemId": "exec-1", "startedAtMs": 0
+            }),
         };
         match classify_server_request(&request) {
-            // A non-string id renders canonically so it still keys a lookup.
-            ServerRequestKind::Approval(req) => assert_eq!(req.request_id, "42"),
+            ServerRequestKind::Approval(req) => {
+                // A non-string id renders canonically so it still keys a lookup.
+                assert_eq!(req.request_id, "42");
+                assert_eq!(req.tool_name, "command_execution");
+                assert_eq!(req.tool_use_id, Some("exec-1".to_owned()));
+            }
             other => panic!("expected an approval, got {other:?}"),
         }
     }
 
     #[test]
-    fn an_unmodeled_server_request_is_unsupported() {
+    fn a_file_change_approval_becomes_a_permission_request() {
         let request = ServerRequest {
             id: json!("srv-2"),
-            method: "session/requestUserInput".to_owned(),
-            params: json!({ "threadId": "thr_1", "prompt": "pick one" }),
+            method: "item/fileChange/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "itemId": "fc-3",
+                "startedAtMs": 0,
+                "grantRoot": "/repo",
+                "reason": "extra write access"
+            }),
+        };
+        match classify_server_request(&request) {
+            ServerRequestKind::Approval(req) => {
+                assert_eq!(req.request_id, "srv-2");
+                assert_eq!(
+                    req.tool_name, "file_change",
+                    "a file change has no command, so a kind label names it"
+                );
+                assert_eq!(req.tool_use_id, Some("fc-3".to_owned()));
+                assert_eq!(req.input_json["grantRoot"], "/repo");
+            }
+            other => panic!("expected an approval, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_permissions_approval_is_unsupported_not_a_decision() {
+        // The permissions approval's response is a GrantedPermissionProfile, not
+        // a binary decision Delta can produce, so v1 surfaces it as unsupported
+        // (and the adapter answers it) rather than fabricating a grant.
+        let request = ServerRequest {
+            id: json!("srv-3"),
+            method: "item/permissions/requestApproval".to_owned(),
+            params: json!({ "threadId": "thr_1", "itemId": "p1", "permissions": {} }),
+        };
+        match classify_server_request(&request) {
+            ServerRequestKind::Unsupported { method, .. } => {
+                assert_eq!(method, "item/permissions/requestApproval");
+            }
+            other => panic!("expected unsupported, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unmodeled_server_request_is_unsupported() {
+        // A method Delta does not model surfaces as unsupported, carrying its raw
+        // params as detail so the adapter can log/annotate it.
+        let request = ServerRequest {
+            id: json!("srv-4"),
+            method: "item/tool/requestUserInput".to_owned(),
+            params: json!({ "threadId": "thr_1", "questions": [] }),
         };
         match classify_server_request(&request) {
             ServerRequestKind::Unsupported {
                 method,
                 detail_json,
             } => {
-                assert_eq!(method, "session/requestUserInput");
-                assert_eq!(detail_json["prompt"], "pick one");
+                assert_eq!(method, "item/tool/requestUserInput");
+                assert_eq!(detail_json["threadId"], "thr_1");
             }
             other => panic!("expected unsupported, got {other:?}"),
         }
