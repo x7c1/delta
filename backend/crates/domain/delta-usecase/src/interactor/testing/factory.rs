@@ -83,6 +83,18 @@ pub(crate) fn interactor_with_codex_factory(factory: Arc<FakeAgentFactory>) -> T
     interactor().with_codex_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
 }
 
+/// Build a test interactor with both a specific [`FakeGitWorktree`] and a Codex
+/// [`AgentAdapterFactory`] — for the PR-origin Codex spawn tests, which need to
+/// script the local git repo (so the worktree resolves) *and* drive the Codex
+/// adapter (so a terminal-less session is created in that worktree).
+pub(crate) fn interactor_with_git_and_codex_factory(
+    git_worktree: FakeGitWorktree,
+    factory: Arc<FakeAgentFactory>,
+) -> TestInteractor {
+    interactor_with_git(git_worktree)
+        .with_codex_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
+}
+
 /// An interactor whose tmux dispatch always fails.
 pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
     Interactor::new(

@@ -290,55 +290,16 @@ where
             Some(spec) => {
                 let repo_root = worktree_repo_root
                     .expect("worktree_repo_root is Some whenever a worktree was requested");
-                // Build the per-session worktree directory name from the
-                // repository identity so a listing of `$DELTA_WORKTREE_BASE`
-                // makes each worktree distinguishable at a glance (instead of
-                // a wall of UUID-suffixed `delta-<id>` entries). The slug is
-                // the display name with `/` rewritten to `-` and any unsafe
-                // character replaced — see [`worktree_dir_slug`]. When no
-                // display name is available (the path is somehow non-git, or
-                // slugifies to an empty string) we fall back to the literal
-                // `delta` so the path is never just `<base>/-<id>`. The
-                // **branch** name created for new-branch start points stays
-                // `delta-<session-id>` so the frontend's `displayBranch()`
-                // shortening continues to recognise it.
-                let slug = repository_display_name
-                    .as_deref()
-                    .map(worktree_dir_slug)
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "delta".to_owned());
-                let default_path =
-                    format!("{}/{}-{}", self.worktree_base, slug, session_id.as_str());
-                let effective_path = match spec.start_point {
-                    // New-branch start points: cut `delta-<id>` at `default_path`.
-                    start_point @ (WorktreeStartPoint::Head
-                    | WorktreeStartPoint::RemoteBranch(_)) => {
-                        let branch = format!("delta-{}", session_id.as_str());
-                        self.git_worktree
-                            .create_worktree(&repo_root, &default_path, &branch, start_point)
-                            .await?;
-                        default_path
-                    }
-                    // Use the branch itself: reuse the worktree already holding
-                    // it (incl. the main tree) when one exists, else create one
-                    // that checks it out at `default_path`.
-                    WorktreeStartPoint::UseRemoteBranch(name) => {
-                        match self
-                            .git_worktree
-                            .worktree_path_for_branch(&repo_root, &name)
-                            .await?
-                        {
-                            Some(existing) => existing,
-                            None => {
-                                self.git_worktree
-                                    .add_worktree_checkout(&repo_root, &default_path, &name)
-                                    .await?;
-                                default_path
-                            }
-                        }
-                    }
-                };
-                effective_path
+                // Build (or reuse) the per-session worktree and launch there.
+                // The directory-name and start-point handling is shared with
+                // the Codex launch path — see [`Self::resolve_worktree_launch_dir`].
+                self.resolve_worktree_launch_dir(
+                    &session_id,
+                    &repo_root,
+                    repository_display_name.as_deref(),
+                    spec,
+                )
+                .await?
             }
             None => match requested_workdir {
                 Some(dir) => dir,
@@ -488,5 +449,77 @@ where
             token: Some(token),
             first_send,
         })
+    }
+
+    /// Build (or reuse) the git worktree for an opt-in worktree request and
+    /// return its path — the effective launch directory. Shared by the Claude
+    /// ([`Self::spawn_fresh`]) and Codex
+    /// ([`spawn_codex`](super::super::session_actor::actor::SessionContext::spawn_codex))
+    /// launch paths, so a session started from a PR (which always arrives as a
+    /// [`WorktreeStartPoint::UseRemoteBranch`] request) lands in the same
+    /// worktree regardless of the chosen provider.
+    ///
+    /// `repo_root` is the repository containing the user-selected workdir — the
+    /// caller has already run the [`GitWorktree::repo_root`] gate — and
+    /// `repository_display_name` is that repo's short identity. Together they
+    /// shape the per-session worktree directory name from the repository
+    /// identity, so a listing of `$DELTA_WORKTREE_BASE` makes each worktree
+    /// distinguishable at a glance (instead of a wall of UUID-suffixed
+    /// `delta-<id>` entries). The slug is the display name with `/` rewritten to
+    /// `-` and any unsafe character replaced — see [`worktree_dir_slug`]. When
+    /// no display name is available (the path is somehow non-git, or slugifies
+    /// to an empty string) it falls back to the literal `delta` so the path is
+    /// never just `<base>/-<id>`.
+    ///
+    /// For the new-branch start points (`Head`/`RemoteBranch`) a per-session
+    /// `delta-<session-id>` branch is cut at `<base>/<slug>-<session-id>` — that
+    /// **branch** name is kept so the frontend's `displayBranch()` shortening
+    /// continues to recognise it. For `UseRemoteBranch` the user works on the
+    /// named branch itself: the worktree already holding it (incl. the main
+    /// tree) is reused when one exists (git forbids one branch in two
+    /// worktrees), otherwise a new worktree checking it out is created. The git
+    /// work is a real side effect, so callers invoke this only after their
+    /// side-effect-free validation has passed.
+    pub(in crate::interactor) async fn resolve_worktree_launch_dir(
+        &self,
+        session_id: &delta_model::SessionId,
+        repo_root: &str,
+        repository_display_name: Option<&str>,
+        spec: WorktreeSpec,
+    ) -> Result<String> {
+        let slug = repository_display_name
+            .map(worktree_dir_slug)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "delta".to_owned());
+        let default_path = format!("{}/{}-{}", self.worktree_base, slug, session_id.as_str());
+        let effective_path = match spec.start_point {
+            // New-branch start points: cut `delta-<id>` at `default_path`.
+            start_point @ (WorktreeStartPoint::Head | WorktreeStartPoint::RemoteBranch(_)) => {
+                let branch = format!("delta-{}", session_id.as_str());
+                self.git_worktree
+                    .create_worktree(repo_root, &default_path, &branch, start_point)
+                    .await?;
+                default_path
+            }
+            // Use the branch itself: reuse the worktree already holding it
+            // (incl. the main tree) when one exists, else create one that checks
+            // it out at `default_path`.
+            WorktreeStartPoint::UseRemoteBranch(name) => {
+                match self
+                    .git_worktree
+                    .worktree_path_for_branch(repo_root, &name)
+                    .await?
+                {
+                    Some(existing) => existing,
+                    None => {
+                        self.git_worktree
+                            .add_worktree_checkout(repo_root, &default_path, &name)
+                            .await?;
+                        default_path
+                    }
+                }
+            }
+        };
+        Ok(effective_path)
     }
 }

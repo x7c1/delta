@@ -59,6 +59,54 @@ test('picking a PR with a local clone pre-fills the composer and a Send carries 
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
 });
 
+test('picking a PR with Codex selected sends provider "codex" alongside the worktree request', async ({
+  page,
+}) => {
+  await useManualEventControl(page);
+  await page.goto('/');
+
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.getByTestId('new-session-tab-pr').click();
+  await expect(page.getByTestId('pr-tab-reviewer')).toBeVisible();
+
+  // Choose Codex as the session provider. The selector is the top-level axis
+  // of the new-session card and is shared across every tab, so it applies to a
+  // PR-origin start too. A PR head ref is checked out via a worktree, which the
+  // Codex launch path now honours (previously it rejected any worktree).
+  await page.getByTestId('provider-option-codex').click();
+
+  // Click the PR whose repo has a registered local clone (`x7c1/delta`).
+  await page
+    .locator('[data-testid="pr-tab-row"][data-has-local-clone="true"]')
+    .first()
+    .click();
+  await expect(page.getByTestId('workdir-chip')).toContainText('delta');
+
+  const sendRequest = page.waitForRequest(
+    (request) =>
+      request.url().endsWith('/api/sends') && request.method() === 'POST',
+  );
+  await page
+    .getByPlaceholder('Message to start a new session…')
+    .fill('resume PR work on codex');
+  await page.getByRole('button', { name: 'Send' }).click();
+
+  const request = await sendRequest;
+  expect(request.postDataJSON()).toMatchObject({
+    new_session: true,
+    text: 'resume PR work on codex',
+    workdir: '/home/dev/projects/delta',
+    worktree: {
+      start_point: { kind: 'use_remote_branch', name: 'feat/repo-tab' },
+    },
+    // The chosen provider rides the same send body as the worktree request —
+    // this is the whole point of the fix.
+    provider: 'codex',
+  });
+
+  await expect(page.getByTestId('pending-item')).toHaveCount(1);
+});
+
 test('a PR whose repo has no local clone is silently un-clickable with an inline hint', async ({
   page,
 }) => {

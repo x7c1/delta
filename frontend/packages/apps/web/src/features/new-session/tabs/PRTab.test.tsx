@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -15,6 +15,9 @@ import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../../data/apiContext';
 import { useComposerStore } from '../../../store/composerStore';
+import { useSettingsStore } from '../../../store/settingsStore';
+import { Composer } from '../../composer/Composer';
+import { ProviderSelector } from '../../composer/ProviderSelector';
 import { PRTab } from './PRTab';
 
 const server = setupServer(...createHandlers());
@@ -263,6 +266,131 @@ describe('PRTab', () => {
     // consistently. The divider supplies the grouping structure.
     expect(labelClasses[0]).not.toMatch(/font-semibold/);
     expect(labelClasses[0]).toMatch(/text-fg/);
+  });
+});
+
+describe('PRTab → new-session send (provider threading)', () => {
+  beforeEach(() => {
+    // A fresh compose: no pick, Claude default provider, and unseeded so the
+    // selector seeds from the persisted default set below.
+    useComposerStore.setState({
+      newSessionWorkdir: null,
+      newSessionWorktreeEnabled: false,
+      newSessionWorktreeStartPoint: { kind: 'head' },
+      newSessionSelectedPrUrl: null,
+      newSessionProvider: 'claude',
+      newSessionProviderSeeded: false,
+    });
+    useSettingsStore.setState({ defaultProvider: 'claude' });
+  });
+
+  /**
+   * Render the pieces TranscriptPane composes for a new session started from
+   * the PR tab — the provider selector, the PR list, and the composer — over
+   * the shared composer store, and capture the body of the `POST /api/sends`
+   * the composer fires. This exercises the real PR-origin path: a PR click
+   * pre-fills the worktree/workdir, the selector sets the provider, and the
+   * composer assembles the send from that store state.
+   */
+  function renderPrFlowAndCaptureSend(): { read: () => unknown } {
+    let captured: unknown;
+    server.use(
+      http.post('*/api/sends', async ({ request }) => {
+        captured = await request.json();
+        return HttpResponse.json(
+          {
+            send: {
+              id: 0,
+              session_id: '',
+              thread_id: 0,
+              semantic_parent_uuid: null,
+              text: 'irrelevant',
+              locator_quote: null,
+              status: 'dispatched',
+              matched_uuid: null,
+              created_at: '2026-01-01T00:00:00Z',
+            },
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const client = new ApiClient({ baseUrl: 'http://localhost' });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <ProviderSelector />
+          <PRTab />
+          <Composer mode={{ kind: 'new-session' }} />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+    return { read: () => captured };
+  }
+
+  it('starting from a selected PR with Codex chosen sends provider "codex" with the PR worktree', async () => {
+    const { read } = renderPrFlowAndCaptureSend();
+
+    // Pick the PR whose repo has a local clone: this pre-fills the workdir and
+    // a `use_remote_branch` worktree keyed to the PR's head branch.
+    fireEvent.click(
+      await screen.findByTitle('https://github.com/x7c1/delta/pull/174'),
+    );
+    await waitFor(() =>
+      expect(useComposerStore.getState().newSessionWorktreeEnabled).toBe(true),
+    );
+
+    // Choose Codex in the provider selector (the top-level axis of the flow).
+    fireEvent.click(
+      within(screen.getByTestId('provider-option-codex')).getByRole('radio'),
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'resume this PR' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'resume this PR',
+        workdir: '/home/dev/projects/delta',
+        worktree: {
+          start_point: { kind: 'use_remote_branch', name: 'feat/repo-tab' },
+        },
+        provider: 'codex',
+      });
+    });
+  });
+
+  it('starting from a selected PR on the Claude default omits provider but keeps the PR worktree', async () => {
+    // Claude stays byte-identical to today's PR-origin send: the worktree is
+    // present, but `provider` is omitted (the backend defaults it to Claude).
+    const { read } = renderPrFlowAndCaptureSend();
+
+    fireEvent.click(
+      await screen.findByTitle('https://github.com/x7c1/delta/pull/174'),
+    );
+    await waitFor(() =>
+      expect(useComposerStore.getState().newSessionWorktreeEnabled).toBe(true),
+    );
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'resume this PR' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'resume this PR',
+        workdir: '/home/dev/projects/delta',
+        worktree: {
+          start_point: { kind: 'use_remote_branch', name: 'feat/repo-tab' },
+        },
+      });
+    });
   });
 });
 
