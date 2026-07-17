@@ -21,6 +21,7 @@ import {
   SESSION_2_BRANCH_THREAD_ID,
   SESSION_4_MAIN_THREAD_ID,
   createHandlers,
+  mockProviders,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
@@ -615,6 +616,84 @@ describe('WorkspaceScreen multi-session', () => {
     );
     // Once the providers query settles (Codex → no terminal), the toggle and the
     // pane are both gone.
+    await waitFor(() =>
+      expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('withholds the terminal pane for a Claude session until the providers query resolves', async () => {
+    // The providers-loading window. `terminalOpen` is persisted `true`, so the
+    // pane's mount hinges entirely on the capability gate. Until the profile is
+    // known the gate must NOT fail open — otherwise the pane would mount and open
+    // its `/pty` bridge before the capability resolves, which for a terminal-less
+    // provider (Codex) fires the exact websocket the backend warns about. Here we
+    // gate the `/api/providers` response on a manual promise and prove the pane
+    // stays unmounted while the query is pending, then mounts once Claude's
+    // terminal capability resolves — attaching only when the capability is known.
+    let resolveProviders: () => void = () => {};
+    const providersGate = new Promise<void>((resolve) => {
+      resolveProviders = resolve;
+    });
+    server.use(
+      http.get('*/api/providers', async () => {
+        await providersGate;
+        return HttpResponse.json({ providers: mockProviders() });
+      }),
+    );
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // The session list resolves and its main thread reconciles, so the workspace
+    // is fully rendered — but the providers query is still pending, so the pane
+    // must be absent (the gate withholds it rather than failing open).
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+
+    // Once the capability is known (Claude → has terminal), the pane mounts and
+    // attaches — the historical behaviour, just deferred to when it is safe.
+    resolveProviders();
+    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+  });
+
+  it('never mounts the terminal pane for a Codex session across the providers-loading window', async () => {
+    // The Codex leak this fix targets: with `terminalOpen` persisted `true` and a
+    // Codex session focused on reload, the pane must never mount — not during the
+    // loading window (gate withholds) and not after (Codex reports no terminal).
+    // Since the pane is what opens the `/pty` bridge, a never-mounted pane is a
+    // never-requested websocket.
+    let resolveProviders: () => void = () => {};
+    const providersGate = new Promise<void>((resolve) => {
+      resolveProviders = resolve;
+    });
+    server.use(
+      http.get('*/api/providers', async () => {
+        await providersGate;
+        return HttpResponse.json({ providers: mockProviders() });
+      }),
+    );
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_4,
+      terminalOpen: true,
+    });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // Workspace fully rendered, providers still pending → pane withheld.
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_4_MAIN_THREAD_ID,
+      ),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+
+    // Providers resolve (Codex → no terminal): the pane stays absent.
+    resolveProviders();
     await waitFor(() =>
       expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
     );
