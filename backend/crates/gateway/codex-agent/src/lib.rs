@@ -31,6 +31,7 @@ mod adapter;
 mod content;
 mod error;
 mod factory;
+pub mod schema;
 mod translate;
 pub mod wire;
 
