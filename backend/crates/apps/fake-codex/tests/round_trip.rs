@@ -62,7 +62,8 @@ async fn handshake_and_thread_start_round_trip_against_the_fake_binary() {
     .await
     .expect("turn/start timed out")
     .expect("turn/start failed");
-    assert_eq!(turn["turnId"], "turn_fake_0001");
+    // Real `turn/start` returns the started turn under `result.turn`.
+    assert_eq!(turn["turn"]["id"], "turn_fake_0001");
 
     let mut methods = Vec::new();
     // The default turn emits: turn/started, item/started, item/completed,

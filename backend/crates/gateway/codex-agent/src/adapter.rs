@@ -61,7 +61,10 @@ use delta_usecase::{
     SessionIdentityCapability, SteerCapability, TerminalCapability, ThreadId, TranscriptCapability,
 };
 
-use crate::translate::{classify_server_request, translate_notification, ServerRequestKind};
+use crate::translate::{
+    classify_server_request, is_turn_completed, started_turn_id, translate_notification,
+    ServerRequestKind,
+};
 use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEvent};
 
 /// Codex's static capability profile — the single source of truth returned by
@@ -106,6 +109,13 @@ struct CodexSession {
     /// response must echo. Shared with the translation task, which inserts an
     /// entry when it surfaces a `PermissionRequested`.
     approvals: Arc<Mutex<HashMap<String, Value>>>,
+    /// The id of the turn currently in flight on this thread, if any. Real
+    /// `turn/interrupt` params are `{threadId, turnId}`, so the adapter must know
+    /// which turn to interrupt. Captured from the `turn/start` response (and
+    /// re-affirmed by the `turn/started` notification), and cleared on
+    /// `turn/completed`. Shared with the translation task, which maintains it as
+    /// the pushed `turn/*` frames arrive.
+    current_turn_id: Arc<Mutex<Option<String>>>,
     /// The translation task, aborted when the session is dropped so it never
     /// outlives the adapter.
     task: JoinHandle<()>,
@@ -148,6 +158,7 @@ impl CodexAppServerAdapter {
             provider_session_id: thread_id.clone(),
         });
         let approvals: Arc<Mutex<HashMap<String, Value>>> = Arc::new(Mutex::new(HashMap::new()));
+        let current_turn_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let task = tokio::spawn(translate_loop(
             events,
             tx.clone(),
@@ -156,6 +167,7 @@ impl CodexAppServerAdapter {
             // task would never exit.
             Arc::downgrade(&self.conn),
             Arc::clone(&approvals),
+            Arc::clone(&current_turn_id),
         ));
         self.sessions
             .lock()
@@ -166,6 +178,7 @@ impl CodexAppServerAdapter {
                     tx,
                     rx: Some(rx),
                     approvals,
+                    current_turn_id,
                     task,
                 },
             );
@@ -188,12 +201,32 @@ impl CodexAppServerAdapter {
         }
     }
 
+    /// Record (or clear) the id of the turn currently in flight for a session,
+    /// if the session is still known. Called with the turn id when a turn starts
+    /// and with `None` when it completes.
+    fn set_current_turn_id(&self, key: &str, turn_id: Option<String>) {
+        if let Some(session) = self
+            .sessions
+            .lock()
+            .expect("sessions mutex poisoned")
+            .get(key)
+        {
+            *session
+                .current_turn_id
+                .lock()
+                .expect("current turn id mutex poisoned") = turn_id;
+        }
+    }
+
     /// Start a turn for `handle` with the visible prompt `text`.
     ///
     /// `UserPromptAccepted` is emitted before the `turn/start` request is even
     /// issued, so it always precedes the turn's pushed notifications on the
-    /// stream. The `turn/start` response's `turnId` (when present) rides back as
-    /// the send receipt's provider message id.
+    /// stream. The visible prompt rides `turn/start` as the reconciled `input`
+    /// array (`[{ "type": "text", "text": … }]`, a single `TextUserInput`). The
+    /// `turn/start` response carries the started `Turn` under `result.turn`, whose
+    /// `id` becomes both the tracked turn id (which `turn/interrupt` references)
+    /// and the send receipt's provider message id.
     async fn start_turn(
         &self,
         handle: &AgentSessionHandle,
@@ -206,20 +239,35 @@ impl CodexAppServerAdapter {
                 text: text.clone(),
             },
         );
-        let params = json!({ "threadId": handle.provider_session_id, "input": text });
+        let params = json!({
+            "threadId": handle.provider_session_id,
+            "input": [{ "type": "text", "text": text }],
+        });
         let result = self
             .conn
             .request("turn/start", Some(params))
             .await
             .map_err(to_usecase_err)?;
-        let provider_message_id = result
-            .get("turnId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let provider_message_id = turn_id_of(&result);
+        // Track the turn synchronously off its start response, so an interrupt
+        // issued the instant `send` returns already knows which turn to end —
+        // without racing the asynchronous `turn/started` notification.
+        self.set_current_turn_id(&handle.key, provider_message_id.clone());
         Ok(SendReceipt {
             provider_message_id,
         })
     }
+}
+
+/// The id of the turn a `turn/start` response announces, read from the `Turn`
+/// object it carries under `result.turn` (see the vendored `TurnStartResponse`
+/// schema: `{ turn: Turn }`, `Turn.id`).
+fn turn_id_of(result: &Value) -> Option<String> {
+    result
+        .get("turn")
+        .and_then(|turn| turn.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 #[async_trait]
@@ -269,11 +317,36 @@ impl AgentAdapter for CodexAppServerAdapter {
         self.start_turn(handle, req.text).await
     }
 
+    /// Interrupt the turn currently in flight on this thread.
+    ///
+    /// Real `turn/interrupt` params are `{threadId, turnId}` (both required), so
+    /// the adapter sends the turn id it is tracking for this session. When no
+    /// turn is in flight (nothing tracked) there is nothing to interrupt, so this
+    /// is a no-op success rather than an RPC the server would reject for a missing
+    /// turn id. The turn is ended by the resulting `turn/completed{interrupted}`
+    /// flowing back through the same translation path as any other completion.
     async fn interrupt(&self, handle: &AgentSessionHandle) -> UsecaseResult<()> {
+        let turn_id = {
+            let sessions = self.sessions.lock().expect("sessions mutex poisoned");
+            sessions.get(&handle.key).and_then(|session| {
+                session
+                    .current_turn_id
+                    .lock()
+                    .expect("current turn id mutex poisoned")
+                    .clone()
+            })
+        };
+        let Some(turn_id) = turn_id else {
+            // No turn in flight: nothing to interrupt.
+            return Ok(());
+        };
         self.conn
             .request(
                 "turn/interrupt",
-                Some(json!({ "threadId": handle.provider_session_id })),
+                Some(json!({
+                    "threadId": handle.provider_session_id,
+                    "turnId": turn_id,
+                })),
             )
             .await
             .map_err(to_usecase_err)?;
@@ -394,10 +467,24 @@ async fn translate_loop(
     tx: UnboundedSender<AgentEvent>,
     conn: Weak<AppServerConnection>,
     approvals: Arc<Mutex<HashMap<String, Value>>>,
+    current_turn_id: Arc<Mutex<Option<String>>>,
 ) {
     while let Some(event) = events.recv().await {
         match event {
             ThreadEvent::Notification(notification) => {
+                // Maintain the tracked turn id off the pushed `turn/*` frames: a
+                // `turn/started` re-affirms the id (the `turn/start` response
+                // already set it), and a `turn/completed` clears it so a later
+                // interrupt does not reference a finished turn.
+                if let Some(turn_id) = started_turn_id(&notification) {
+                    *current_turn_id
+                        .lock()
+                        .expect("current turn id mutex poisoned") = Some(turn_id);
+                } else if is_turn_completed(&notification) {
+                    *current_turn_id
+                        .lock()
+                        .expect("current turn id mutex poisoned") = None;
+                }
                 for event in translate_notification(&notification) {
                     if tx.send(event).is_err() {
                         return;

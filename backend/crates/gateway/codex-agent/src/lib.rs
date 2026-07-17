@@ -262,14 +262,11 @@ impl AppServerConnection {
     /// notification is lost between learning the id and subscribing.
     pub async fn start_thread(&self, params: Option<Value>) -> Result<StartedThread> {
         let result = self.request("thread/start", params).await?;
-        let thread_id = result
-            .get("threadId")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::UnexpectedResponse {
+        let thread_id =
+            thread_id_from_result(&result).ok_or_else(|| Error::UnexpectedResponse {
                 method: "thread/start".to_owned(),
-                detail: format!("result has no string `threadId`: {result}"),
-            })?
-            .to_owned();
+                detail: format!("result has no string `thread.id`: {result}"),
+            })?;
         let events = self.subscribe_thread(&thread_id);
         Ok(StartedThread {
             thread_id,
@@ -283,9 +280,10 @@ impl AppServerConnection {
     /// [`AppServerConnection::start_thread`]; the server's history replay (if
     /// any) rides its own notifications on the returned channel.
     ///
-    /// The server may echo the requested thread id back under `threadId`; when
-    /// it omits it the requested id (carried in `params.threadId`) is used, so a
-    /// lean resume result still yields a usable id.
+    /// The server echoes the resumed thread back under `result.thread` (whose
+    /// `id` is the thread id); when it omits it the requested id (carried in
+    /// `params.threadId`) is used, so a lean resume result still yields a usable
+    /// id.
     pub async fn resume_thread(&self, params: Option<Value>) -> Result<StartedThread> {
         let requested = params
             .as_ref()
@@ -293,14 +291,13 @@ impl AppServerConnection {
             .and_then(Value::as_str)
             .map(str::to_owned);
         let result = self.request("thread/resume", params).await?;
-        let thread_id = result
-            .get("threadId")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
+        let thread_id = thread_id_from_result(&result)
             .or(requested)
             .ok_or_else(|| Error::UnexpectedResponse {
                 method: "thread/resume".to_owned(),
-                detail: format!("result has no string `threadId` and none was requested: {result}"),
+                detail: format!(
+                    "result has no string `thread.id` and none was requested: {result}"
+                ),
             })?;
         let events = self.subscribe_thread(&thread_id);
         Ok(StartedThread {
@@ -344,6 +341,18 @@ impl AppServerConnection {
         writer.flush().await.map_err(Error::Write)?;
         Ok(())
     }
+}
+
+/// The provider thread id a `thread/start` / `thread/resume` response carries,
+/// read from the `Thread` object under `result.thread` (see the vendored
+/// `ThreadStartResponse` / `ThreadResumeResponse` schemas: `{ thread: Thread, … }`,
+/// `Thread.id`).
+fn thread_id_from_result(result: &Value) -> Option<String> {
+    result
+        .get("thread")
+        .and_then(|thread| thread.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
 }
 
 /// The result of [`AppServerConnection::start_thread`].

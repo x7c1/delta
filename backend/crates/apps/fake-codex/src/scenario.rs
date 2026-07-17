@@ -44,8 +44,10 @@
 //! Every emitted notification (and the approval request) gets `threadId` stamped
 //! into its `params` so the client transport can demux it to the right thread.
 //!
-//! A separate `turn/interrupt` request (whenever it arrives) is answered and
-//! followed by a `turn/completed` notification with status `interrupted`.
+//! A separate `turn/interrupt` request (whenever it arrives) must carry
+//! `{threadId, turnId}` (the fake rejects it with a JSON-RPC error if the
+//! `turnId` is missing); it is answered and followed by a `turn/completed`
+//! notification with status `interrupted`, echoing the interrupted turn's id.
 //!
 //! How the file is found:
 //!
@@ -103,7 +105,8 @@ fn default_approval_method() -> String {
 /// What a `turn/start` request plays.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Turn {
-    /// The id returned from `turn/start` (as `result.turnId`).
+    /// The id returned from `turn/start` (under `result.turn.id`) and wrapped
+    /// into every emitted `turn/started` / `turn/completed` `params.turn`.
     #[serde(default = "default_turn_id")]
     pub turn_id: String,
     /// The notifications (and optional approval request) to emit, in order.

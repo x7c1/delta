@@ -7,13 +7,18 @@
 //! core reasons over. It is a pure function of the wire frame (no I/O), so the
 //! mapping is unit-tested in isolation.
 //!
-//! **Inferred, not yet verified against a vendored schema:** the `item.itemType`
-//! vocabulary (`agent_message` vs. tool items), the fields carried on an
-//! approval request (`itemId`, `toolName`), and that a turn's terminal status
-//! is one of `completed` / `interrupted` / `failed`. The translation is
-//! deliberately lenient — an unknown notification maps to nothing rather than
-//! erroring, and an unknown item type is treated as a tool — so a later
-//! correction stays localised to this file and the `wire` module.
+//! The `turn/*` envelope is reconciled against the vendored v2 schema: both
+//! `turn/started` and `turn/completed` wrap a `Turn` object under `params.turn`,
+//! so the turn id is `params.turn.id` and the terminal status `params.turn.status`
+//! (one of `completed` / `interrupted` / `failed` / `inProgress`).
+//!
+//! **Still inferred, not yet reconciled (R2/R3):** the `item.itemType` vocabulary
+//! (`agent_message` vs. tool items), the rich item-content notifications
+//! (`item/agentMessage/delta`, `item/reasoning/*`, …), and the fields carried on
+//! an approval request (`itemId`, `toolName`) plus the approval method fan-out.
+//! The translation is deliberately lenient — an unknown notification maps to
+//! nothing rather than erroring, and an unknown item type is treated as a tool —
+//! so those later corrections stay localised to this file and the `wire` module.
 
 use serde_json::Value;
 
@@ -47,15 +52,31 @@ pub enum ServerRequestKind {
 pub fn translate_notification(n: &Notification) -> Vec<AgentEvent> {
     match n.method.as_str() {
         "turn/started" => vec![AgentEvent::TurnStarted {
-            provider_turn_id: string_field(&n.params, "turnId"),
+            provider_turn_id: notification_turn_id(&n.params),
         }],
         "turn/completed" => vec![AgentEvent::TurnCompleted {
-            status: turn_status(string_field(&n.params, "status").as_deref()),
+            status: turn_status(notification_turn_status(&n.params).as_deref()),
         }],
         "item/started" => item_event(item_of(&n.params), true),
         "item/completed" => item_event(item_of(&n.params), false),
         _ => Vec::new(),
     }
+}
+
+/// The id of the turn a `turn/started` notification announces — the id
+/// `turn/interrupt` must reference — for the adapter's per-session turn tracking.
+/// `None` for any other notification (or a `turn/started` missing its id).
+pub fn started_turn_id(n: &Notification) -> Option<String> {
+    match n.method.as_str() {
+        "turn/started" => notification_turn_id(&n.params),
+        _ => None,
+    }
+}
+
+/// Whether a notification is the `turn/completed` that ends the current turn, so
+/// the adapter can clear its tracked turn id when the turn finishes.
+pub fn is_turn_completed(n: &Notification) -> bool {
+    n.method == "turn/completed"
 }
 
 /// Classify a server-originated request as a modeled approval or an unmodeled
@@ -176,6 +197,24 @@ fn normalise_item_type(item_type: &str) -> String {
         .collect()
 }
 
+/// The turn id a `turn/*` notification carries under `params.turn.id`. Both
+/// `turn/started` and `turn/completed` wrap the turn in a `Turn` object (see the
+/// vendored `TurnStartedNotification` / `TurnCompletedNotification` schemas).
+fn notification_turn_id(params: &Value) -> Option<String> {
+    turn_field(params, "id")
+}
+
+/// The terminal status a `turn/completed` notification carries under
+/// `params.turn.status`.
+fn notification_turn_status(params: &Value) -> Option<String> {
+    turn_field(params, "status")
+}
+
+/// Read a string field from the `turn` object a `turn/*` notification wraps.
+fn turn_field(params: &Value, key: &str) -> Option<String> {
+    params.get("turn").and_then(|turn| string_field(turn, key))
+}
+
 /// Map a `turn/completed` status string to the neutral [`TurnStatus`]. An
 /// absent or unrecognised status is treated as [`TurnStatus::Failed`]: a turn
 /// that ended in a shape we cannot read is not assumed to have succeeded.
@@ -206,10 +245,10 @@ mod tests {
     }
 
     #[test]
-    fn turn_started_carries_the_optional_turn_id() {
+    fn turn_started_carries_the_turn_id_from_the_nested_turn() {
         let events = translate_notification(&notification(
             "turn/started",
-            json!({ "threadId": "thr_1", "turnId": "turn_1" }),
+            json!({ "threadId": "thr_1", "turn": { "id": "turn_1", "status": "inProgress", "items": [] } }),
         ));
         assert_eq!(
             events,
@@ -234,14 +273,16 @@ mod tests {
     }
 
     #[test]
-    fn turn_completed_maps_each_status() {
+    fn turn_completed_maps_each_status_from_the_nested_turn() {
         for (wire, expected) in [
             ("completed", TurnStatus::Completed),
             ("interrupted", TurnStatus::Interrupted),
             ("failed", TurnStatus::Failed),
         ] {
-            let events =
-                translate_notification(&notification("turn/completed", json!({ "status": wire })));
+            let events = translate_notification(&notification(
+                "turn/completed",
+                json!({ "threadId": "thr_1", "turn": { "id": "turn_1", "status": wire, "items": [] } }),
+            ));
             assert_eq!(events, vec![AgentEvent::TurnCompleted { status: expected }]);
         }
     }
@@ -251,7 +292,7 @@ mod tests {
         assert_eq!(
             translate_notification(&notification(
                 "turn/completed",
-                json!({ "status": "weird" })
+                json!({ "turn": { "id": "turn_1", "status": "weird", "items": [] } })
             )),
             vec![AgentEvent::TurnCompleted {
                 status: TurnStatus::Failed
@@ -263,6 +304,30 @@ mod tests {
                 status: TurnStatus::Failed
             }]
         );
+    }
+
+    #[test]
+    fn started_turn_id_reads_the_nested_turn_id_only_for_turn_started() {
+        assert_eq!(
+            started_turn_id(&notification(
+                "turn/started",
+                json!({ "threadId": "t", "turn": { "id": "turn_7", "status": "inProgress", "items": [] } })
+            )),
+            Some("turn_7".to_owned())
+        );
+        // A `turn/completed` is not where the adapter learns the active turn id.
+        assert_eq!(
+            started_turn_id(&notification(
+                "turn/completed",
+                json!({ "turn": { "id": "turn_7", "status": "completed", "items": [] } })
+            )),
+            None
+        );
+        assert!(is_turn_completed(&notification(
+            "turn/completed",
+            json!({})
+        )));
+        assert!(!is_turn_completed(&notification("turn/started", json!({}))));
     }
 
     #[test]
