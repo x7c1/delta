@@ -205,8 +205,9 @@ where
         Ok(SessionLifecycle::Starting)
     }
 
-    /// Resume a closed but known session under a fresh tmux session.
-    pub async fn open_session(&self, id: &SessionId) -> Result<PaneToken> {
+    /// Resume a closed but known session: a fresh tmux session for Claude, or a
+    /// `thread/resume` adapter reconnect for a terminal-less Codex session.
+    pub async fn open_session(&self, id: &SessionId) -> Result<()> {
         self.request(id, |reply| SessionInput::OpenSession { reply })
             .await
     }

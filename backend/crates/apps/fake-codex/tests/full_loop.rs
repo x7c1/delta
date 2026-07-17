@@ -87,9 +87,16 @@ impl Drop for ScenarioGuard {
 
 /// Assemble the real backend wired to drive the `fake-codex` binary with
 /// `scenario`, returning the router and the shared state (whose broadcast the
-/// test subscribes to).
+/// test subscribes to). Uses a fresh in-memory store.
 fn build_app(scenario: &ScenarioGuard) -> (Router, AppState) {
-    let store = SqliteStore::open_in_memory().unwrap();
+    build_app_with(SqliteStore::open_in_memory().unwrap(), scenario)
+}
+
+/// Like [`build_app`] but over a caller-provided store, so a test can point two
+/// separate backends (with distinct scenarios) at ONE on-disk database — the
+/// server-restart simulation: the second backend boots with no in-process
+/// bindings but the first's persisted rows + provider ids.
+fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (Router, AppState) {
     let codex_config = CodexLaunchConfig {
         // The fake IS the app-server, so it takes no `app-server` argument.
         codex_bin: env!("CARGO_BIN_EXE_fake-codex").to_owned(),
@@ -435,6 +442,194 @@ async fn codex_second_message_dispatches_over_the_adapter_not_a_claude_resume() 
         session["open"],
         json!(true),
         "the session stays open across both turns (one pump, no resume teardown)"
+    );
+}
+
+/// A unique temp path for a shared on-disk SQLite database, removed on drop. The
+/// restart test opens it from two separate backends (before/after the simulated
+/// restart), so it must outlive both — unlike the in-memory store every other
+/// test uses.
+struct DbGuard {
+    path: std::path::PathBuf,
+}
+
+impl DbGuard {
+    fn new() -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "fake-codex-restart-{}-{:?}.db",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::remove_file(&path).ok();
+        Self { path }
+    }
+
+    fn open(&self) -> SqliteStore {
+        SqliteStore::open(&self.path.to_string_lossy()).unwrap()
+    }
+}
+
+impl Drop for DbGuard {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.path).ok();
+        // WAL sidecar files.
+        std::fs::remove_file(self.path.with_extension("db-wal")).ok();
+        std::fs::remove_file(self.path.with_extension("db-shm")).ok();
+    }
+}
+
+/// A one-turn scenario that streams `reply` from a distinct `turn_id`/`item_id`,
+/// so two successive turns (the second after a restart) produce distinct,
+/// non-colliding provider items. The provider thread id is fixed to `thr_restart`
+/// across both, so the resume reattaches to the same thread.
+fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str) -> ScenarioGuard {
+    ScenarioGuard::write(&format!(
+        r#"{{
+            "thread_id": "thr_restart",
+            "turn": {{
+                "turn_id": "{turn_id}",
+                "emit": [
+                    {{ "type": "turn_started" }},
+                    {{ "type": "item_started",   "item": {{ "id": "{item_id}", "type": "agentMessage" }} }},
+                    {{ "type": "item_completed", "item": {{ "id": "{item_id}", "type": "agentMessage", "text": "{reply}" }} }},
+                    {{ "type": "turn_completed", "status": "completed" }}
+                ]
+            }}
+        }}"#
+    ))
+}
+
+/// The Codex **resume-across-restart** full loop: create a session and complete a
+/// turn, then boot a SECOND backend over the SAME on-disk database with a fresh
+/// interactor (no in-process bindings — the post-restart state) and a distinct
+/// scenario, and send another message to the same thread.
+///
+/// This is the regression proof for dogfooding gap #1: after a server restart the
+/// live `codex app-server` connection + thread + bound `open_agent` are gone, so
+/// a send to a previously-created Codex session used to take the Claude resume
+/// path (`ensure_open` → `claude --resume`) and fail with `ResumeUnavailable`
+/// (surfaced as `409`). The fix reconnects the session over the adapter via
+/// `thread/resume` (reattaching to the SAME provider thread) and re-seeds the
+/// content source at the persisted message count, so the second turn dispatches,
+/// streams, and completes, and the persisted conversation **continues**: the
+/// first turn's assistant reply is preserved and the second's is appended with
+/// the next sequence number — no renumber, no duplicate.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_resume_across_restart_continues_the_persisted_conversation() {
+    const REPLY_ONE: &str = "reply from turn one";
+    const REPLY_TWO: &str = "reply from turn two";
+    let db = DbGuard::new();
+
+    // ---- Before the restart: create the session, complete turn 1. ----
+    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE);
+    let (thread_id, session_id) = {
+        let (app, state) = build_app_with(db.open(), &scenario1);
+        let mut events = state.subscribe();
+        state
+            .spawn_async_event_drain()
+            .expect("the async drain is taken exactly once");
+
+        let (status, body) = post_json(
+            &app,
+            "/api/sends",
+            json!({ "new_session": true, "provider": "codex", "text": "first message" }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::CREATED,
+            "the first send was created: {body:?}"
+        );
+        let session_id = body["send"]["session_id"].as_str().unwrap().to_owned();
+        let thread_id = body["send"]["thread_id"].as_i64().unwrap();
+
+        // Let turn 1 stream and complete, so its assistant reply is persisted.
+        drain_one_turn(&mut events, &session_id).await;
+        let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
+        assert_eq!(status, StatusCode::OK, "turn 1 messages fetched: {body:?}");
+        assert!(
+            body["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["content_text"] == json!(REPLY_ONE)),
+            "turn 1's assistant reply persisted before the restart: {body:?}"
+        );
+        (thread_id, session_id)
+        // `app`/`state` (and the turn-1 `fake-codex` subprocess) drop here — the
+        // server going away.
+    };
+
+    // ---- After the restart: a brand-new backend over the SAME database. ----
+    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO);
+    let (app, state) = build_app_with(db.open(), &scenario2);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    // The second send targets the SAME thread. Before the fix this returned `409`
+    // (ResumeUnavailable via the Claude path); after it must reconnect over the
+    // adapter and be accepted.
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "thread_id": thread_id, "text": "second message" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the post-restart send resumed the Codex session over the adapter (no 409): {body:?}"
+    );
+    assert_eq!(
+        body["send"]["session_id"].as_str().unwrap(),
+        session_id,
+        "the resumed send stays on the same session"
+    );
+
+    // Turn 2 streams and completes over the reconnected pump.
+    drain_one_turn(&mut events, &session_id).await;
+
+    // The persisted conversation continued: turn 1's reply is still there and
+    // turn 2's is appended, on contiguous sequence numbers with no duplicate —
+    // proof the content source was re-seeded at the persisted count, not 0.
+    let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "post-restart messages fetched: {body:?}"
+    );
+    let messages = body["messages"].as_array().unwrap();
+
+    // All four messages of the two-turn conversation are present: turn 1's user
+    // prompt + assistant reply (preserved across the restart) and turn 2's user
+    // prompt + assistant reply (appended after the resume). None was overwritten.
+    for expected in ["first message", REPLY_ONE, "second message", REPLY_TWO] {
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["content_text"] == json!(expected)),
+            "`{expected}` is present in the continued conversation: {messages:?}"
+        );
+    }
+    assert_eq!(
+        messages.len(),
+        4,
+        "the conversation has exactly its four messages — nothing lost or duplicated: {messages:?}"
+    );
+
+    // Sequence numbers are contiguous with no duplicate: history was extended,
+    // not renumbered.
+    let mut seqs: Vec<i64> = messages
+        .iter()
+        .map(|m| m["seq"].as_i64().unwrap())
+        .collect();
+    seqs.sort_unstable();
+    assert_eq!(
+        seqs,
+        vec![0, 1, 2, 3],
+        "sequence numbers continue contiguously across the resume: {messages:?}"
     );
 }
 

@@ -114,8 +114,10 @@ pub(crate) async fn create_session(
 
 /// `POST /api/sessions/{id}/open` — resume a closed, known session.
 ///
-/// Re-launches `claude --resume <id>` and binds the new pane, broadcasting
-/// `SessionOpened`. Re-opening an already-open session is a no-op.
+/// For a Claude session this re-launches `claude --resume <id>` and binds the
+/// new pane; for a terminal-less Codex session it reconnects the adapter via
+/// `thread/resume` (there is no pane). Either way it broadcasts `SessionOpened`,
+/// and re-opening an already-open session is a no-op.
 pub(crate) async fn open_session(
     State(state): State<AppState>,
     Path(id): Path<String>,

@@ -10,23 +10,33 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use delta_model::{ContentBlock, Message, MessageUuid, Role, SessionId, ThreadId};
 use tokio::sync::mpsc;
 
 use crate::agent::{
-    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentEvent, AgentEventStream,
-    AgentProvider, AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
-    InterruptCapability, LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle,
-    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
-    SteerCapability, TerminalCapability, TranscriptCapability, TurnStatus,
+    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
+    AgentEventStream, AgentProvider, AgentSessionHandle, ContextInjectionCapability,
+    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchRequest,
+    PermissionCapability, PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
+    SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    TurnStatus,
 };
 use crate::error::{Error, Result};
 use crate::interactor::PermissionDecision;
+use crate::Effect;
 
 /// What the fake adapter observed, for a test to inspect after a spawn.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct FakeAgentLog {
     /// The `LaunchRequest`s the adapter received, in order.
     pub launches: Vec<LaunchRequest>,
+    /// The provider session ids `resume` was called with, in order. Proves a
+    /// resume reattached to the persisted thread (not a fresh `launch`).
+    pub resumes: Vec<String>,
+    /// The `seed_seq` each `content_source` call was constructed with, in order.
+    /// Proves a fresh spawn seeds `0` and a resume seeds the persisted count, so
+    /// resumed history is not renumbered.
+    pub content_seeds: Vec<i64>,
     /// The visible send texts the adapter received, in order.
     pub sends: Vec<String>,
     /// The number of `close` calls.
@@ -107,6 +117,14 @@ impl AgentAdapter for FakeAgentAdapter {
     }
 
     async fn resume(&self, req: ResumeRequest) -> Result<AgentSessionHandle> {
+        // Record the provider id resumed against, so a test can prove the
+        // reconnect reattached to the persisted thread rather than launching a
+        // fresh one.
+        self.log
+            .lock()
+            .unwrap()
+            .resumes
+            .push(req.provider_session_id.clone());
         Ok(AgentSessionHandle {
             provider: AgentProvider::Codex,
             provider_session_id: req.provider_session_id.clone(),
@@ -173,8 +191,85 @@ impl AgentAdapter for FakeAgentAdapter {
         Ok(())
     }
 
+    fn content_source(
+        &self,
+        session_id: SessionId,
+        main_thread: ThreadId,
+        seed_seq: i64,
+    ) -> Box<dyn AgentContentSource> {
+        // Record the seed so a test can assert a fresh spawn seeds 0 and a resume
+        // seeds the persisted count. Return a functional accumulator (unlike the
+        // trait's `NullContentSource` default) so pushed user/assistant events
+        // actually persist as messages and `message_count` advances — which is
+        // what makes the resume seed observable end to end.
+        self.log.lock().unwrap().content_seeds.push(seed_seq);
+        Box::new(FakeContentSource {
+            session_id,
+            main_thread,
+            next_seq: seed_seq,
+        })
+    }
+
     async fn attach_terminal(&self, _handle: &AgentSessionHandle) -> Result<Option<PtyHandle>> {
         Ok(None)
+    }
+}
+
+/// A minimal functional [`AgentContentSource`] for the Codex actor tests: folds
+/// `UserPromptAccepted` / `AssistantMessage` into one canonical [`Message`] each,
+/// minting `seq` from `next_seq` (seeded by the adapter's `content_source`), so a
+/// test can drive real conversation content through the event pump and assert
+/// persistence + sequencing. Everything else the real accumulator handles (tool
+/// pairing, turn grouping) is out of scope here.
+#[derive(Debug)]
+struct FakeContentSource {
+    session_id: SessionId,
+    main_thread: ThreadId,
+    next_seq: i64,
+}
+
+impl AgentContentSource for FakeContentSource {
+    fn ingest(&mut self, event: &AgentEvent) -> (Vec<Message>, Vec<Effect>) {
+        // Key each uuid so successive turns never collide: the user prompt off
+        // its text, the assistant message off the provider item id — mirroring
+        // how the real accumulator derives stable, per-item uuids.
+        let built = match event {
+            AgentEvent::UserPromptAccepted { text, .. } => {
+                Some((Role::User, text.clone(), format!("fake-user-{text}"), None))
+            }
+            AgentEvent::AssistantMessage {
+                provider_item_id,
+                text,
+            } => Some((
+                Role::Assistant,
+                text.clone(),
+                format!("codex-item-{provider_item_id}"),
+                Some(provider_item_id.clone()),
+            )),
+            _ => return (Vec::new(), Vec::new()),
+        };
+        let (role, text, uuid, provider_item_id) = built.expect("matched arm builds a message");
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        let message = Message {
+            uuid: MessageUuid::from(uuid),
+            provider_item_id,
+            session_id: self.session_id.clone(),
+            thread_id: self.main_thread,
+            role,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: None,
+            prompt_id: None,
+            seq,
+            content_text: Some(text.clone()),
+            content: vec![ContentBlock::Text { text }],
+            created_at: None,
+            model: None,
+            git_branch: None,
+            cwd: None,
+            response_time_ms: None,
+        };
+        (vec![message], Vec::new())
     }
 }
 
@@ -190,14 +285,25 @@ enum ConnectOutcome {
 }
 
 /// A [`AgentAdapterFactory`] that hands out a [`FakeAgentAdapter`] (or fails).
+///
+/// It is **reconnectable**: each `connect` builds a fresh adapter, so a test can
+/// simulate a server restart (drop the in-process binding, then send again → the
+/// resume path calls `connect` a second time). The event channel driving the
+/// live adapter is regenerated per reconnect, and [`Self::event_sender`] always
+/// returns the current adapter's sender (usable before the first connect too, so
+/// existing single-connect tests keep working regardless of call order).
 pub(crate) struct FakeAgentFactory {
     outcome: ConnectOutcome,
     log: Arc<Mutex<FakeAgentLog>>,
-    /// The sender the built adapter drains through `events()`; a test pushes live
-    /// [`AgentEvent`]s here to drive the session's event pump.
-    event_tx: mpsc::UnboundedSender<AgentEvent>,
-    /// The matching receiver, moved into the adapter at `connect`.
-    event_rx: Mutex<Option<mpsc::UnboundedReceiver<AgentEvent>>>,
+    /// The sender the currently-built adapter drains through `events()`; a test
+    /// pushes live [`AgentEvent`]s here to drive the session's event pump. Swapped
+    /// to a fresh channel on each reconnect.
+    event_tx: Mutex<mpsc::UnboundedSender<AgentEvent>>,
+    /// The receiver for the NEXT `connect`. `Some` before the first connect (so
+    /// the pre-made channel is reused, matching the original single-connect
+    /// behaviour); `None` afterwards, which makes each reconnect mint a fresh
+    /// channel.
+    pending_rx: Mutex<Option<mpsc::UnboundedReceiver<AgentEvent>>>,
 }
 
 impl FakeAgentFactory {
@@ -211,8 +317,8 @@ impl FakeAgentFactory {
                 turn_id: turn_id.map(str::to_owned),
             },
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
-            event_tx,
-            event_rx: Mutex::new(Some(event_rx)),
+            event_tx: Mutex::new(event_tx),
+            pending_rx: Mutex::new(Some(event_rx)),
         })
     }
 
@@ -222,8 +328,8 @@ impl FakeAgentFactory {
         Arc::new(Self {
             outcome: ConnectOutcome::Fail,
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
-            event_tx,
-            event_rx: Mutex::new(Some(event_rx)),
+            event_tx: Mutex::new(event_tx),
+            pending_rx: Mutex::new(Some(event_rx)),
         })
     }
 
@@ -233,11 +339,12 @@ impl FakeAgentFactory {
         Arc::clone(&self.log)
     }
 
-    /// A sender that pushes live [`AgentEvent`]s onto the built adapter's event
-    /// stream, so a test can drive the session's event pump (e.g. surface a
-    /// `PermissionRequested`).
+    /// A sender that pushes live [`AgentEvent`]s onto the currently-built
+    /// adapter's event stream, so a test can drive the session's event pump (e.g.
+    /// surface a `PermissionRequested`, or feed a turn's content). After a
+    /// reconnect this returns the reconnected adapter's sender.
     pub(crate) fn event_sender(&self) -> mpsc::UnboundedSender<AgentEvent> {
-        self.event_tx.clone()
+        self.event_tx.lock().unwrap().clone()
     }
 }
 
@@ -250,20 +357,25 @@ impl AgentAdapterFactory for FakeAgentFactory {
     async fn connect(&self) -> Result<Arc<dyn AgentAdapter>> {
         match &self.outcome {
             ConnectOutcome::Adapter { thread_id, turn_id } => {
+                // First connect: reuse the pre-made channel (so `event_sender()`
+                // called before connect drives this adapter). Reconnect: mint a
+                // fresh channel and publish its sender so `event_sender()` now
+                // targets the reconnected adapter.
+                let rx = match self.pending_rx.lock().unwrap().take() {
+                    Some(rx) => rx,
+                    None => {
+                        let (tx, rx) = mpsc::unbounded_channel();
+                        *self.event_tx.lock().unwrap() = tx;
+                        rx
+                    }
+                };
                 // Share the factory's log with the adapter, so `factory.log()`
-                // reflects the built adapter's live observations, and move the
-                // event receiver in so `event_sender()` drives its stream.
-                let rx = self
-                    .event_rx
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .expect("fake agent connect is called once");
+                // reflects the built adapter's live observations.
                 let adapter = FakeAgentAdapter::new(
                     thread_id.clone(),
                     turn_id.clone(),
                     Arc::clone(&self.log),
-                    self.event_tx.clone(),
+                    self.event_tx.lock().unwrap().clone(),
                     rx,
                 );
                 Ok(adapter as Arc<dyn AgentAdapter>)

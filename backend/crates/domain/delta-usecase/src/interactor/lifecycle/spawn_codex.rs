@@ -27,9 +27,12 @@
 
 use std::sync::Arc;
 
-use delta_model::{AgentProvider, MessageUuid, Send, ThreadId};
+use delta_model::{AgentProvider, MessageUuid, Send, Session, ThreadId};
 
-use crate::agent::{AgentAdapter, AgentSessionHandle, LaunchRequest, SendRequest};
+use crate::agent::{
+    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, LaunchRequest, ResumeRequest,
+    SendRequest,
+};
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::OpenAgentSession;
@@ -37,6 +40,18 @@ use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace}
 use crate::send_target::WorktreeSpec;
 
 use super::FreshSpawn;
+
+/// How to obtain the provider handle when standing up a Codex agent binding: a
+/// fresh `thread/start` (launch) or a `thread/resume` reattach to an existing
+/// provider thread. The single difference the shared
+/// [`SessionContext::bind_codex_agent`] branches on.
+enum CodexBind {
+    /// A fresh spawn: start a new provider thread (`adapter.launch`).
+    Launch,
+    /// A resume: reattach to the persisted provider thread (`adapter.resume`),
+    /// so no new thread is minted.
+    Resume { provider_session_id: String },
+}
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -128,29 +143,18 @@ where
             )
             .await?;
 
-        // Stand up the adapter and start the thread. Both spawn a process /
-        // issue an RPC, so either can fail; roll the eager row back on failure
-        // (its main thread goes by cascade) so nothing dangles.
-        let adapter = match factory.connect().await {
-            Ok(adapter) => adapter,
-            Err(err) => {
-                self.rollback_codex_spawn().await;
-                return Err(err);
-            }
-        };
-        let handle = match adapter
-            .launch(LaunchRequest {
-                session_id: session_id.as_str().to_owned(),
-                workdir: cwd.clone(),
-                // Launch options are rejected above; a first prompt is delivered
-                // as its own turn below (not on launch) so we can complete the
-                // send row at the `turn/start` acknowledgement.
-                extra_args: Vec::new(),
-                first_prompt: None,
-            })
+        // Stand up the adapter, start the thread (`launch` → `thread/start`),
+        // bind it as the session's open agent, seed the content source at 0 (a
+        // fresh Codex session has nothing persisted yet), and spawn the event
+        // pump — the shared connect/bind/pump/content-source sequence a resume
+        // reuses (see [`Self::bind_codex_agent`]). Any failure here spawned a
+        // process / issued an RPC that did not complete, so roll the eager row
+        // back (its main thread goes by cascade) so nothing dangles.
+        let (adapter, handle) = match self
+            .bind_codex_agent(&factory, CodexBind::Launch, cwd.clone(), main_thread_id, 0)
             .await
         {
-            Ok(handle) => handle,
+            Ok(pair) => pair,
             Err(err) => {
                 self.rollback_codex_spawn().await;
                 return Err(err);
@@ -166,37 +170,6 @@ where
                 Some(&handle.provider_session_id),
             )
             .await?;
-
-        // Represent the running session as open-without-pane: hold the live
-        // adapter + handle so the connection stays up and the session reads as
-        // open, with no `OpenHandle` (so the PTY bridge has nothing to attach).
-        self.state.bind_agent(OpenAgentSession {
-            adapter: adapter.clone(),
-            handle: handle.clone(),
-        });
-
-        // Build the push-based content accumulator for this session's event
-        // stream and hand it to the runtime, so the event pump (spawned below)
-        // can fold each pushed frame into canonical messages. A fresh Codex
-        // session has nothing persisted yet, so the sequence is seeded at 0.
-        self.state.set_agent_content_source(adapter.content_source(
-            session_id.clone(),
-            main_thread_id,
-            0,
-        ));
-
-        // Spawn the event pump: it drains the adapter's `events()` stream and
-        // posts each frame back to THIS actor as an `IngestAgentEvent`, so
-        // control (turn machine), content (persistence), and streaming all run
-        // in mailbox order. `events()` is handed out once per session; take it
-        // here, after `bind_agent`, so the buffered opener (`SessionStarted`) and
-        // the first turn's frames are all captured. Codex frames arrive after the
-        // send below has already returned to the browser — exactly why they reach
-        // the browser through the async seam rather than a synchronous return.
-        crate::interactor::agent_event::spawn_codex_event_pump(
-            self.self_sender.clone(),
-            adapter.events(&handle),
-        );
 
         let first_send = match first_prompt {
             // The opening turn is dispatched exactly like every subsequent
@@ -274,6 +247,145 @@ where
             .mark_send_matched(send.id, &MessageUuid::from(matched))
             .await?;
         Ok(send)
+    }
+
+    /// Connect the Codex adapter and bind it as this session's open agent — the
+    /// shared connect → (`launch`|`resume`) → bind → content-source → event-pump
+    /// sequence used by BOTH a fresh spawn ([`Self::spawn_codex`]) and a resume
+    /// ([`Self::resume_codex_agent`]).
+    ///
+    /// The only two things that differ between the callers are passed in:
+    ///
+    /// - `bind` selects the provider handle — [`CodexBind::Launch`] starts a new
+    ///   thread, [`CodexBind::Resume`] reattaches to the persisted one (no new
+    ///   thread is minted);
+    /// - `seed_seq` is where the content accumulator begins numbering — `0` for a
+    ///   fresh session, the session's persisted `MAX(seq) + 1` on a resume so
+    ///   replayed/continued frames extend the existing history instead of
+    ///   renumbering or duplicating it.
+    ///
+    /// It holds the live adapter + handle in the runtime (so the connection stays
+    /// up and the session reads as open, with no `OpenHandle` for the PTY bridge
+    /// to attach to), then spawns the event pump that drains the adapter's
+    /// `events()` onto THIS actor's mailbox — so control (turn machine), content
+    /// (persistence), and streaming all run in mailbox order. `events()` is taken
+    /// after `bind_agent`, so the buffered opener (`SessionStarted`) and the
+    /// first frames are all captured.
+    ///
+    /// Returns the live adapter + handle now bound. It performs no rollback: a
+    /// fresh spawn deletes its eager row on failure, while a resume leaves the
+    /// already-persisted row untouched — so the caller owns that decision.
+    async fn bind_codex_agent(
+        &mut self,
+        factory: &Arc<dyn AgentAdapterFactory>,
+        bind: CodexBind,
+        cwd: String,
+        main_thread_id: ThreadId,
+        seed_seq: i64,
+    ) -> Result<(Arc<dyn AgentAdapter>, AgentSessionHandle)> {
+        let session_id = self.id.clone();
+        let adapter = factory.connect().await?;
+        let handle = match bind {
+            CodexBind::Launch => {
+                adapter
+                    .launch(LaunchRequest {
+                        session_id: session_id.as_str().to_owned(),
+                        workdir: cwd,
+                        // Launch options are rejected upstream; a first prompt is
+                        // delivered as its own turn (not on launch) so the send
+                        // row completes at the `turn/start` acknowledgement.
+                        extra_args: Vec::new(),
+                        first_prompt: None,
+                    })
+                    .await?
+            }
+            CodexBind::Resume {
+                provider_session_id,
+            } => {
+                adapter
+                    .resume(ResumeRequest {
+                        session_id: session_id.as_str().to_owned(),
+                        provider_session_id,
+                        workdir: cwd,
+                    })
+                    .await?
+            }
+        };
+
+        // Represent the running session as open-without-pane: hold the live
+        // adapter + handle so the connection stays up and the session reads as
+        // open, with no `OpenHandle` (so the PTY bridge has nothing to attach).
+        self.state.bind_agent(OpenAgentSession {
+            adapter: adapter.clone(),
+            handle: handle.clone(),
+        });
+
+        // Build the push-based content accumulator, seeded so minted ordering
+        // continues past whatever is already persisted.
+        self.state.set_agent_content_source(adapter.content_source(
+            session_id,
+            main_thread_id,
+            seed_seq,
+        ));
+
+        // Spawn the event pump. Codex frames arrive after the send that started
+        // the work has already returned to the browser — exactly why they reach
+        // the browser through the async seam rather than a synchronous return.
+        crate::interactor::agent_event::spawn_codex_event_pump(
+            self.self_sender.clone(),
+            adapter.events(&handle),
+        );
+
+        Ok((adapter, handle))
+    }
+
+    /// Reconnect a **closed** Codex session by resuming its provider thread, so a
+    /// send that arrives after the in-process binding was lost (e.g. across a
+    /// server restart) can dispatch over the adapter instead of falling into
+    /// Claude's `claude --resume` path (which a terminal-less session cannot
+    /// take — it has no pane and no transcript).
+    ///
+    /// This is the Codex mirror of a fresh spawn: it runs the same
+    /// [`Self::bind_codex_agent`] sequence, but with `adapter.resume` against the
+    /// session's **persisted** provider id (reattaching to the same thread) and
+    /// the content source **seeded at the session's persisted message count** —
+    /// which, for a single-thread Codex session whose seqs are minted densely
+    /// from 0, is exactly `MAX(seq) + 1`. Seeding at 0 (as a fresh spawn does)
+    /// would renumber/duplicate the existing history.
+    ///
+    /// The persisted provider ids and session row are the source of truth that
+    /// survives the restart; on failure the row is left as-is (unlike a fresh
+    /// spawn there is nothing eager to roll back).
+    pub(in crate::interactor) async fn resume_codex_agent(
+        &mut self,
+        session: &Session,
+    ) -> Result<()> {
+        let factory = self.codex_adapter_factory.clone().ok_or_else(|| {
+            Error::Agent("no Codex adapter factory is wired into the interactor".to_owned())
+        })?;
+        let provider_session_id = session.provider_session_id.clone().ok_or_else(|| {
+            Error::Agent(format!(
+                "Codex session `{}` has no persisted provider id to resume",
+                session.id
+            ))
+        })?;
+        let main_thread_id = self.store.main_thread_id(self.id).await?;
+        // The store's current message count is the next `seq` to mint: a Codex
+        // session lands every message on its main thread with seqs minted densely
+        // from 0, so `message_count == MAX(seq) + 1`. Continuing from here is what
+        // keeps resumed history from being renumbered or duplicated.
+        let seed_seq = self.store.message_count(self.id).await? as i64;
+        self.bind_codex_agent(
+            &factory,
+            CodexBind::Resume {
+                provider_session_id,
+            },
+            session.cwd.clone(),
+            main_thread_id,
+            seed_seq,
+        )
+        .await?;
+        Ok(())
     }
 
     /// Roll back the eagerly-inserted Codex session row after a connect/launch

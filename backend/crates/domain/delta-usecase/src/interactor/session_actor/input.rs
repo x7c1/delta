@@ -20,7 +20,6 @@ use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
 use crate::interactor::lifecycle::FreshSpawn;
 use crate::interactor::PermissionDecision;
-use crate::pane_token::PaneToken;
 use crate::ports::{
     MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
     UserPromptSubmitHook,
@@ -62,7 +61,7 @@ pub(in crate::interactor) enum SessionInput {
         reply: Reply<FreshSpawn>,
     },
     /// Resume the (closed but known) session.
-    OpenSession { reply: Reply<PaneToken> },
+    OpenSession { reply: Reply<()> },
     /// Close the session: final sync, kill the pane, drop the binding. Replies
     /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
     /// produced, for the transport to broadcast.
