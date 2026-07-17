@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { ProviderBadge, cn } from '@delta/ui-kit';
 import type { AgentProvider } from '@delta/wire-gen';
 import { useComposerStore } from '../../store/composerStore';
+import { useSettingsStore } from '../../store/settingsStore';
 
 /**
  * The AI-agent providers a new session can launch on, in display order, with
@@ -25,10 +27,31 @@ const PROVIDER_OPTIONS: { value: AgentProvider; label: string }[] = [
  * (Settings' appearance picker). The selection writes to
  * `composerStore.newSessionProvider`; the composer attaches it to the
  * new-session send (omitting it for the Claude default).
+ *
+ * The initial selection is seeded from the persisted default-provider setting
+ * (`settingsStore.defaultProvider`) once, when a fresh new-session compose is
+ * entered — this component mounts only in the new-session state. The seed only
+ * ever supplies the initial value: an explicit pick (which marks the selection
+ * seeded) is preserved, never re-seeded, even if the default later changes
+ * mid-compose. The seed guard resets when the new-session compose state is
+ * left (see {@link resetNewSessionProvider}).
  */
 export function ProviderSelector() {
   const provider = useComposerStore((state) => state.newSessionProvider);
   const setProvider = useComposerStore((state) => state.setNewSessionProvider);
+  const seedProvider = useComposerStore(
+    (state) => state.seedNewSessionProvider,
+  );
+  const defaultProvider = useSettingsStore((state) => state.defaultProvider);
+
+  // Seed the initial provider from the persisted default the first time a fresh
+  // new-session compose renders. `seedNewSessionProvider` is a no-op once the
+  // selection has been seeded or the user has picked one, so this never clobbers
+  // an explicit choice; it runs again only after a reset (re)enters new-session
+  // compose. Effect (not render) so it does not set store state during render.
+  useEffect(() => {
+    seedProvider(defaultProvider);
+  }, [defaultProvider, seedProvider]);
 
   return (
     <section data-testid="provider-selector">

@@ -90,7 +90,10 @@ describe('SettingsView', () => {
     // the dialog (and its content) renders. The active category is persisted,
     // so reset it to the default between tests to keep them order-independent.
     useNavStore.setState({ settingsOpen: true });
-    useSettingsStore.setState({ activeCategory: DEFAULT_SETTINGS_CATEGORY });
+    useSettingsStore.setState({
+      activeCategory: DEFAULT_SETTINGS_CATEGORY,
+      defaultProvider: 'claude',
+    });
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
     // The ThemeProvider reads matchMedia + localStorage at mount; default to
     // light-OS + cleared preference so each test starts on the SYSTEM default.
@@ -251,6 +254,7 @@ describe('SettingsView', () => {
         'Launch options',
         'Repository scan roots',
         'Appearance',
+        'Default provider',
       ]);
       expect(
         screen.getByTestId('settings-category-launch-options'),
@@ -261,8 +265,66 @@ describe('SettingsView', () => {
       expect(
         screen.getByTestId('settings-category-appearance'),
       ).toHaveAttribute('aria-selected', 'false');
+      expect(
+        screen.getByTestId('settings-category-default-provider'),
+      ).toHaveAttribute('aria-selected', 'false');
     });
 
+  });
+
+  describe('Default provider section', () => {
+    function switchToDefaultProvider() {
+      fireEvent.click(screen.getByTestId('settings-category-default-provider'));
+    }
+
+    it('lists both providers with their badges and full names', () => {
+      renderSettings();
+      switchToDefaultProvider();
+      const group = screen.getByTestId('default-provider-options');
+      const radios = within(group).getAllByRole('radio');
+      expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
+        'claude',
+        'codex',
+      ]);
+      // Each option pairs the shared ProviderBadge (accessible name = product
+      // name) with its spelled-out label.
+      const claude = screen.getByTestId('default-provider-option-claude');
+      const codex = screen.getByTestId('default-provider-option-codex');
+      expect(within(claude).getByLabelText('Claude Code')).toBeInTheDocument();
+      expect(within(claude).getByText('Claude Code')).toBeInTheDocument();
+      expect(within(codex).getByLabelText('Codex')).toBeInTheDocument();
+      expect(within(codex).getByText('Codex')).toBeInTheDocument();
+    });
+
+    it('highlights the current default (Claude on a fresh install)', () => {
+      renderSettings();
+      switchToDefaultProvider();
+      const claudeRadio = within(
+        screen.getByTestId('default-provider-option-claude'),
+      ).getByRole('radio');
+      const codexRadio = within(
+        screen.getByTestId('default-provider-option-codex'),
+      ).getByRole('radio');
+      expect(claudeRadio).toBeChecked();
+      expect(codexRadio).not.toBeChecked();
+    });
+
+    it('changes the default provider and persists it to localStorage', () => {
+      renderSettings();
+      switchToDefaultProvider();
+      const codexRadio = within(
+        screen.getByTestId('default-provider-option-codex'),
+      ).getByRole('radio');
+      fireEvent.click(codexRadio);
+
+      expect(codexRadio).toBeChecked();
+      expect(useSettingsStore.getState().defaultProvider).toBe('codex');
+      // The persist middleware wraps state under `{ state, version }`.
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw ?? '{}');
+      expect(parsed.state.defaultProvider).toBe('codex');
+    });
   });
 
   describe('Appearance section', () => {

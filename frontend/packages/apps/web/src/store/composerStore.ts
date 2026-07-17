@@ -119,6 +119,21 @@ export interface ComposerState {
    * byte identical to today's.
    */
   newSessionProvider: AgentProvider;
+  /**
+   * Whether `newSessionProvider` has been seeded from the persisted
+   * default-provider setting (or explicitly set by the user) yet for the
+   * current new-session compose state.
+   *
+   * The provider selector seeds the initial value from the Settings
+   * `defaultProvider` exactly once when a fresh new-session compose is entered.
+   * This flag distinguishes "not seeded yet" (seed from the default) from "user
+   * has since picked a provider" (leave their choice alone) — mirroring the
+   * launch-options seed guard so a later re-seed (e.g. the default changing
+   * mid-compose) never clobbers an explicit per-session choice. Reset to
+   * `false` together with `newSessionProvider` whenever the new-session compose
+   * state is (re)entered or cleared, so the next fresh compose reseeds.
+   */
+  newSessionProviderSeeded: boolean;
 
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
@@ -148,7 +163,25 @@ export interface ComposerState {
   closeWorkdirDialog: () => void;
   setNewSessionTab: (tab: NewSessionTab) => void;
   setNewSessionSelectedPrUrl: (url: string | null) => void;
+  /**
+   * Set the selected provider from a user interaction in the selector. Marks
+   * the selection as seeded, so a later seed will not overwrite an explicit
+   * per-session choice with the persisted default.
+   */
   setNewSessionProvider: (provider: AgentProvider) => void;
+  /**
+   * Seed the initial provider from the persisted default-provider setting.
+   * A no-op once the provider has already been seeded (or the user has picked
+   * one), so it only ever supplies the initial value. Marks the selection
+   * seeded.
+   */
+  seedNewSessionProvider: (provider: AgentProvider) => void;
+  /**
+   * Reset the provider to {@link DEFAULT_NEW_SESSION_PROVIDER} and clear the
+   * seeded flag, so the next new-session compose reseeds from the persisted
+   * default. Used wherever the new-session compose state is left.
+   */
+  resetNewSessionProvider: () => void;
 }
 
 /** The new-session screen's three tabs. */
@@ -218,6 +251,7 @@ export const useComposerStore = create<ComposerState>()(
       newSessionTab: DEFAULT_NEW_SESSION_TAB,
       newSessionSelectedPrUrl: null,
       newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
+      newSessionProviderSeeded: false,
 
       setDraft: (threadId, text) =>
         set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
@@ -278,7 +312,20 @@ export const useComposerStore = create<ComposerState>()(
       setNewSessionSelectedPrUrl: (url) => set({ newSessionSelectedPrUrl: url }),
 
       setNewSessionProvider: (provider) =>
-        set({ newSessionProvider: provider }),
+        set({ newSessionProvider: provider, newSessionProviderSeeded: true }),
+
+      seedNewSessionProvider: (provider) =>
+        set((state) =>
+          state.newSessionProviderSeeded
+            ? state
+            : { newSessionProvider: provider, newSessionProviderSeeded: true },
+        ),
+
+      resetNewSessionProvider: () =>
+        set({
+          newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
+          newSessionProviderSeeded: false,
+        }),
     }),
     {
       name: COMPOSER_STORAGE_KEY,
