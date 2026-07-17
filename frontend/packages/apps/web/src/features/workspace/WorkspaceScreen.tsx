@@ -320,16 +320,32 @@ export function WorkspaceScreen() {
   // Whether the focused session's provider offers an attachable terminal, read
   // from its capability profile — never from `provider === 'claude'`. A provider
   // with no terminal (Codex's headless app-server) hides the terminal toggle and
-  // pane entirely. Fail safe: while providers are still loading, on the
-  // new-session screen (no focused session yet), or for an unrecognised provider,
-  // default to showing the terminal (the historical Claude behaviour) rather than
-  // wrongly stripping it — a provider is only stripped when its profile is known
-  // and positively reports no terminal.
+  // pane entirely, and — because the pane is what opens the `/pty` bridge — must
+  // never mount it in the first place.
+  //
+  // The providers-loading window is the subtle case. Failing OPEN to `true` while
+  // the query is still in flight would briefly mount the pane for the focused
+  // session and open its `/pty` bridge before the capability is known: with
+  // `terminalOpen` persisted `true` (from a previous Claude session) and a Codex
+  // session focused on reload, that fires a PTY websocket the backend rejects
+  // with a "session is not open" warning. So while the profile is unresolved we
+  // WITHHOLD the terminal rather than fail open; a real terminal provider
+  // (Claude) attaches the instant the query resolves, and the `/pty` behaviour it
+  // then drives is byte-identical to before. Fail open only in the two cases
+  // where there is genuinely nothing to wait for: the new-session screen (no
+  // focused session), and a query that has SUCCEEDED but does not list the
+  // focused provider (an unrecognised provider — keep the historical default).
   const focusedProvider = focusedItem?.session.provider ?? null;
+  const focusedCapabilities =
+    focusedProvider === null
+      ? undefined
+      : capabilitiesByProvider.get(focusedProvider);
   const focusedHasTerminal =
     focusedProvider === null
       ? true
-      : capabilitiesByProvider.get(focusedProvider)?.has_terminal ?? true;
+      : focusedCapabilities !== undefined
+        ? focusedCapabilities.has_terminal
+        : providersQuery.isSuccess;
 
   // Fence the embedded terminal behind an error boundary: its attach runs in an
   // effect that can throw (e.g. an xterm addon failing to load), and without a
@@ -342,7 +358,11 @@ export function WorkspaceScreen() {
       resetKey={focusedRealSessionId}
       fallback={() => <TerminalFallback onClose={toggleTerminal} />}
     >
-      <TerminalPane sessionId={focusedRealSessionId} attachable={focusedOpen} />
+      <TerminalPane
+        sessionId={focusedRealSessionId}
+        attachable={focusedOpen}
+        hasTerminal={focusedHasTerminal}
+      />
     </ErrorBoundary>
   );
 
