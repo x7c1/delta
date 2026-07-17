@@ -44,6 +44,7 @@ export {
   workdirListing,
   recentWorkdirs,
   mockRepositories,
+  mockProviders,
   gitRepoInfo,
   gitBranches,
   type MockStore,

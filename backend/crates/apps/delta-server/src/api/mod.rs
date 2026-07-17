@@ -33,12 +33,12 @@ use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
     WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
     WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WirePullRequestsResponse, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRecentWorkdirItem, WireRepositoriesResponse,
-    WireRepositoryEntry, WireRepositoryScanRoot, WireRepositoryScanRootsResponse, WireSendResponse,
-    WireSendsResponse, WireSessionListItem, WireSessionsResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WirePermissionDecisionRequest, WireProvidersResponse, WirePullRequestsResponse,
+    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRecentWorkdirItem,
+    WireRepositoriesResponse, WireRepositoryEntry, WireRepositoryScanRoot,
+    WireRepositoryScanRootsResponse, WireSendResponse, WireSendsResponse, WireSessionListItem,
+    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -382,6 +382,18 @@ pub(crate) async fn list_pull_requests(
     })?;
     let list = state.interactor().list_pull_requests(lens).await?;
     Ok(Json(WirePullRequestsResponse::from(list)))
+}
+
+/// `GET /api/providers` — launch availability for every known agent provider.
+///
+/// For each provider (Claude, Codex) reports whether its configured launch
+/// binary is present on the server host, with a reason string when it is not.
+/// The new-session provider selector disables an unavailable provider and shows
+/// the reason, so a user cannot pick a provider that would fail at spawn. Always
+/// `200`: a missing binary is data (`available: false`), never an error.
+pub(crate) async fn list_providers(State(state): State<AppState>) -> Json<WireProvidersResponse> {
+    let availability = state.interactor().provider_availability().await;
+    Json(WireProvidersResponse::from(availability))
 }
 
 /// Query parameters for the git-detection endpoints: the directory to inspect.

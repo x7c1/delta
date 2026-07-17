@@ -50,6 +50,7 @@ export {
   useRemoveRepositoryScanRootMutation,
   useOpenCwdMutation,
   useVersionQuery,
+  useProvidersQuery,
 } from './query-hooks';
 export {
   appendMessage,

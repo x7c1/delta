@@ -3,6 +3,7 @@ import type {
   Message,
   PendingPermission,
   PendingQuestion,
+  ProviderAvailability,
   RunningSubagent,
   Send,
   Session,
@@ -997,5 +998,18 @@ export function mockRepositories(): {
         },
       ],
     },
+  ];
+}
+
+/**
+ * Per-provider launch availability for `GET /api/providers`. Both providers are
+ * available by default so the new-session provider selector is fully usable with
+ * no backend and existing tests / e2e are unaffected. A test that needs an
+ * unavailable provider overrides this handler (see `createHandlers`).
+ */
+export function mockProviders(): ProviderAvailability[] {
+  return [
+    { provider: 'claude', available: true, detail: null },
+    { provider: 'codex', available: true, detail: null },
   ];
 }
