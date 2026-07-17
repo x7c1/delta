@@ -37,6 +37,7 @@ use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::OpenAgentSession;
 use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::repository::{display_name, identity_key};
 use crate::send_target::WorktreeSpec;
 
 use super::FreshSpawn;
@@ -85,16 +86,12 @@ where
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
 
-        // A git worktree is a tmux/PTY-session concern, and per-provider launch
-        // options are not yet modeled for Codex (they map to `thread/start`
-        // fields, not argv flags). Reject a request carrying either rather than
-        // silently dropping it — the Codex start flow in this slice takes only a
-        // workdir and a first prompt. Neither is reachable from the UI yet.
-        if worktree.is_some() {
-            return Err(Error::Agent(
-                "a git worktree is not supported for a Codex session".to_owned(),
-            ));
-        }
+        // Per-provider launch options are not yet modeled for Codex (they map to
+        // `thread/start` fields, not argv flags), so reject a request carrying
+        // any rather than silently dropping it. A git worktree, by contrast, is
+        // just a working directory: it is resolved below exactly like the Claude
+        // path, so a session started from a PR (which always arrives as a
+        // `UseRemoteBranch` worktree request) lands in that PR's worktree.
         if !launch_option_ids.is_empty() {
             return Err(Error::Agent(
                 "launch options are not supported for a Codex session yet".to_owned(),
@@ -117,28 +114,69 @@ where
             Some(dir) => Some(self.workspace.resolve_existing_dir(&dir).await?),
             None => None,
         };
-        let cwd = match &requested_workdir {
-            Some(dir) => dir.clone(),
-            None => std::path::Path::new(&self.session_workdir_base)
-                .join(session_id.as_str())
-                .to_string_lossy()
-                .into_owned(),
+
+        // Resolve an opt-in worktree request exactly like the Claude path: a
+        // worktree needs a selected directory that is a git repository
+        // (`WorktreeRequiresWorkdir` / `WorktreeNotAGitRepo` otherwise — both
+        // rejected before any side effect), and the effective launch directory
+        // becomes the per-session worktree under `$DELTA_WORKTREE_BASE`. A
+        // PR-origin start always arrives as a `UseRemoteBranch(<pr-head>)`
+        // worktree request, so this is the path a "start a Codex session from a
+        // PR" click takes. `launch_repo_root` / `repository_display_name` feed
+        // the navigator's repo line (a worktree is always a git working tree),
+        // and `branch_at_launch` records the branch the conversation started on
+        // — the same columns `spawn_fresh` fills. Without a worktree the cwd is
+        // the user-selected dir (its git snapshot columns stay NULL, as before)
+        // or a per-session scratch dir under the spawn base, keyed by the
+        // session id (there is no pane token to key it by).
+        let (launch_repo_root, repository_display_name, branch_at_launch, cwd) = match worktree {
+            Some(spec) => {
+                let Some(dir) = requested_workdir.as_deref() else {
+                    return Err(Error::WorktreeRequiresWorkdir);
+                };
+                let repo_root = match self.git_worktree.repo_root(dir).await? {
+                    Some(root) => root,
+                    None => return Err(Error::WorktreeNotAGitRepo(dir.to_owned())),
+                };
+                // Snapshot the repo's short identity (from `origin`, falling back
+                // to the working-tree basename) — it names the worktree directory
+                // and feeds the navigator card, mirroring `spawn_fresh`.
+                let origin = self.git_worktree.origin_url(&repo_root).await?;
+                let identity = identity_key(origin, &repo_root);
+                let display = display_name(&identity, &repo_root);
+                let path = self
+                    .resolve_worktree_launch_dir(&session_id, &repo_root, Some(&display), spec)
+                    .await?;
+                let branch = self.git_worktree.current_branch(&path).await?;
+                (Some(repo_root), Some(display), branch, path)
+            }
+            None => {
+                let cwd = match &requested_workdir {
+                    Some(dir) => dir.clone(),
+                    None => std::path::Path::new(&self.session_workdir_base)
+                        .join(session_id.as_str())
+                        .to_string_lossy()
+                        .into_owned(),
+                };
+                (None, None, None, cwd)
+            }
         };
 
         // Eagerly insert the `spawning` session row (provider = Codex). The
         // provider-minted ids are unknown until `launch` returns, so they stay
         // NULL here and are filled — and the row activated — via
-        // `set_provider_ids` below. The git snapshot columns are left NULL: a
-        // terminal-less session does no git detection in this slice.
+        // `set_provider_ids` below. The git snapshot columns carry the worktree
+        // spawn's repo/branch identity (filled above); for a plain workdir with
+        // no worktree they stay NULL, as before.
         let (_session, main_thread_id) = self
             .store
             .insert_spawning_session(
                 &session_id,
                 &cwd,
-                None,
-                None,
+                branch_at_launch.as_deref(),
+                launch_repo_root.as_deref(),
                 requested_workdir.as_deref(),
-                None,
+                repository_display_name.as_deref(),
                 AgentProvider::Codex,
             )
             .await?;
