@@ -9,12 +9,14 @@
 //! 2. **Codex-specific** cases drive the scripted app-server through a full turn:
 //!    the structured `turn/*` / `item/*` notifications translate into
 //!    `TurnStarted` / `AssistantMessage` / `ToolStarted` / `ToolCompleted` /
-//!    `TurnCompleted`, an `*/requestApproval` server request becomes a
+//!    `TurnCompleted`, the real `item/commandExecution/requestApproval` and
+//!    `item/fileChange/requestApproval` server requests become a
 //!    `PermissionRequested` the adapter answers (allow → `accept`, deny →
 //!    `decline`), `turn/interrupt` ends the turn, and — the invariant that
-//!    matters most for an app-server with no interactive fallback — an unmodeled
-//!    server request surfaces as `UnsupportedInteraction` without the turn
-//!    hanging.
+//!    matters most for an app-server with no interactive fallback — a server
+//!    request Delta does not model (including `item/permissions/requestApproval`,
+//!    whose response is a permission profile rather than a decision) surfaces as
+//!    `UnsupportedInteraction` without the turn hanging.
 //!
 //! Correctness here is "against the fake": the wire shapes are the inferred
 //! contract shared by `codex-agent`'s `wire`/`translate` modules and these
@@ -331,22 +333,66 @@ async fn tool_items_translate_to_tool_events() {
     );
 }
 
-/// `permission_request_can_be_allowed`: an approval request surfaces as
-/// `PermissionRequested`; answering allow emits `PermissionResolved(Allow)`.
+/// A command-execution approval surfaces as `PermissionRequested` (its `command`
+/// naming the tool); answering allow emits `PermissionResolved(Allow)`.
 #[tokio::test]
-async fn permission_request_can_be_allowed() {
-    permission_case(PermissionDecision::Allow).await;
+async fn command_execution_permission_can_be_allowed() {
+    permission_case(
+        PermissionDecision::Allow,
+        command_execution_approval(),
+        "date",
+    )
+    .await;
 }
 
-/// `permission_request_can_be_denied`: the same path, answered deny.
+/// The same command-execution path, answered deny.
 #[tokio::test]
-async fn permission_request_can_be_denied() {
-    permission_case(PermissionDecision::Deny).await;
+async fn command_execution_permission_can_be_denied() {
+    permission_case(
+        PermissionDecision::Deny,
+        command_execution_approval(),
+        "date",
+    )
+    .await;
 }
 
-async fn permission_case(decision: PermissionDecision) {
-    let extra =
-        r#"{ "type": "request_approval", "params": { "itemId": "m1", "toolName": "Bash" } },"#;
+/// A file-change approval surfaces as `PermissionRequested` (named by its kind,
+/// as its params carry no command); answering allow emits
+/// `PermissionResolved(Allow)`.
+#[tokio::test]
+async fn file_change_permission_can_be_allowed() {
+    permission_case(
+        PermissionDecision::Allow,
+        file_change_approval(),
+        "file_change",
+    )
+    .await;
+}
+
+/// The same file-change path, answered deny.
+#[tokio::test]
+async fn file_change_permission_can_be_denied() {
+    permission_case(
+        PermissionDecision::Deny,
+        file_change_approval(),
+        "file_change",
+    )
+    .await;
+}
+
+/// A scripted command-execution approval step, with the real method + params.
+fn command_execution_approval() -> &'static str {
+    r#"{ "type": "request_approval", "method": "item/commandExecution/requestApproval",
+         "params": { "itemId": "m1", "command": "date", "cwd": "/tmp" } },"#
+}
+
+/// A scripted file-change approval step, with the real method + params.
+fn file_change_approval() -> &'static str {
+    r#"{ "type": "request_approval", "method": "item/fileChange/requestApproval",
+         "params": { "itemId": "m1", "grantRoot": "/repo", "reason": "write access" } },"#
+}
+
+async fn permission_case(decision: PermissionDecision, extra: &str, expected_tool: &str) {
     let (adapter, _guard) = adapter_with(&turn_scenario(extra)).await;
     let handle = adapter.launch(launch_request()).await.expect("launch");
     let mut stream = adapter.events(&handle);
@@ -375,9 +421,9 @@ async fn permission_case(decision: PermissionDecision) {
     assert!(
         before.iter().any(|e| matches!(
             e,
-            AgentEvent::PermissionRequested { request } if request.tool_name == "Bash"
+            AgentEvent::PermissionRequested { request } if request.tool_name == expected_tool
         )),
-        "the approval carries its tool name: {before:?}"
+        "the approval carries its tool name `{expected_tool}`: {before:?}"
     );
 
     // Answer through `&dyn AgentAdapter` (not the concrete type) so the test
@@ -438,14 +484,37 @@ async fn interrupt_ends_turn() {
     );
 }
 
-/// `no_server_request_silently_hangs`: an unmodeled server → client request
-/// surfaces as `UnsupportedInteraction`, and the turn still completes (the
-/// adapter answered the request rather than blocking on it).
+/// `no_server_request_silently_hangs` (permissions approval): the permissions
+/// approval is a real `*/requestApproval` method, but its response is a
+/// permission profile Delta cannot synthesise — so it must NOT be treated as an
+/// approval. It surfaces as `UnsupportedInteraction` and the turn still
+/// completes (the adapter answered it rather than blocking on it).
 #[tokio::test]
-async fn no_server_request_silently_hangs() {
-    // A server request whose method is NOT an approval: the adapter does not
-    // model it, so it must reject it and surface it — never hang.
-    let extra = r#"{ "type": "request_approval", "method": "session/requestUserInput", "params": { "prompt": "pick one" } },"#;
+async fn permissions_approval_is_unsupported_and_never_hangs() {
+    no_server_request_silently_hangs_for(
+        r#"{ "type": "request_approval", "method": "item/permissions/requestApproval",
+             "params": { "itemId": "m1", "cwd": "/tmp", "permissions": {} } },"#,
+        "item/permissions/requestApproval",
+    )
+    .await;
+}
+
+/// `no_server_request_silently_hangs` (unknown method): a server → client request
+/// Delta does not model at all surfaces as `UnsupportedInteraction` without the
+/// turn hanging.
+#[tokio::test]
+async fn unknown_server_request_is_unsupported_and_never_hangs() {
+    no_server_request_silently_hangs_for(
+        r#"{ "type": "request_approval", "method": "item/tool/requestUserInput", "params": { "questions": [] } },"#,
+        "item/tool/requestUserInput",
+    )
+    .await;
+}
+
+/// Drive a turn that emits a server → client request the adapter does not model,
+/// asserting it surfaces as `UnsupportedInteraction` for `method` and the turn
+/// still completes (the adapter answered the request rather than blocking on it).
+async fn no_server_request_silently_hangs_for(extra: &str, method: &str) {
     let (adapter, _guard) = adapter_with(&turn_scenario(extra)).await;
     let handle = adapter.launch(launch_request()).await.expect("launch");
     let mut stream = adapter.events(&handle);
@@ -453,7 +522,7 @@ async fn no_server_request_silently_hangs() {
         .send(
             &handle,
             SendRequest {
-                text: "trigger the unknown request".to_owned(),
+                text: "trigger the unmodeled request".to_owned(),
             },
         )
         .await
@@ -464,9 +533,9 @@ async fn no_server_request_silently_hangs() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            AgentEvent::UnsupportedInteraction { method, .. } if method == "session/requestUserInput"
+            AgentEvent::UnsupportedInteraction { method: m, .. } if m == method
         )),
-        "an unmodeled server request must surface as UnsupportedInteraction, got {events:?}"
+        "`{method}` must surface as UnsupportedInteraction, got {events:?}"
     );
     assert!(
         events.iter().any(is_turn_completed),

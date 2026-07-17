@@ -106,7 +106,7 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
                 "emit": [
                     { "type": "turn_started" },
                     { "type": "item_started", "item": { "id": "i1", "itemType": "command_execution" } },
-                    { "type": "request_approval", "params": { "toolName": "Bash" } },
+                    { "type": "request_approval", "params": { "itemId": "i1", "command": "date", "cwd": "/tmp" } },
                     { "type": "item_completed", "item": { "id": "i1" } },
                     { "type": "turn_completed", "status": "completed" }
                 ]
@@ -139,9 +139,9 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
     for _ in 0..5 {
         match recv(&mut started.events).await {
             ThreadEvent::ServerRequest(r) => {
-                assert_eq!(r.method, "item/requestApproval");
+                assert_eq!(r.method, "item/commandExecution/requestApproval");
                 assert_eq!(r.params["threadId"], "thr_script");
-                assert_eq!(r.params["toolName"], "Bash");
+                assert_eq!(r.params["command"], "date");
                 saw_approval = true;
             }
             ThreadEvent::Notification(n) if n.method == "turn/completed" => {

@@ -396,45 +396,81 @@ async fn codex_interrupt_settles_the_in_flight_turn_over_the_full_stack() {
     );
 }
 
-/// The Codex permission full loop, answered **allow**: an approval gates the
-/// turn, the browser allows it by the Delta row id, and the fake proceeds having
-/// received `accept`.
+/// The Codex command-execution permission full loop, answered **allow**: the
+/// approval gates the turn, the browser allows it by the Delta row id, and the
+/// fake proceeds having received `accept`.
 #[tokio::test(flavor = "multi_thread")]
-async fn codex_permission_full_loop_allow() {
-    permission_full_loop("allow", "accept").await;
+async fn codex_command_execution_permission_full_loop_allow() {
+    permission_full_loop("allow", "accept", command_execution_step(), "date").await;
 }
 
-/// The same loop, answered **deny**: the fake proceeds having received
-/// `decline`, and the turn still completes.
+/// The same command-execution loop, answered **deny**: the fake proceeds having
+/// received `decline`, and the turn still completes.
 #[tokio::test(flavor = "multi_thread")]
-async fn codex_permission_full_loop_deny() {
-    permission_full_loop("deny", "decline").await;
+async fn codex_command_execution_permission_full_loop_deny() {
+    permission_full_loop("deny", "decline", command_execution_step(), "date").await;
 }
 
-/// Drive the full browser → server → `fake-codex` permission loop.
+/// The Codex file-change permission full loop, answered **allow**: the same
+/// browser → server → fake path over the real file-change approval shape.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_file_change_permission_full_loop_allow() {
+    permission_full_loop("allow", "accept", file_change_step(), "file_change").await;
+}
+
+/// The same file-change loop, answered **deny**.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_file_change_permission_full_loop_deny() {
+    permission_full_loop("deny", "decline", file_change_step(), "file_change").await;
+}
+
+/// A blocking command-execution approval step, with the real method + params;
+/// `command` names the tool the browser sees.
+fn command_execution_step() -> &'static str {
+    r#"{ "type": "request_approval", "blocking": true,
+         "method": "item/commandExecution/requestApproval",
+         "params": { "itemId": "m1", "command": "date", "cwd": "/tmp" } }"#
+}
+
+/// A blocking file-change approval step, with the real method + params; it names
+/// no command, so the browser sees the `file_change` kind label.
+fn file_change_step() -> &'static str {
+    r#"{ "type": "request_approval", "blocking": true,
+         "method": "item/fileChange/requestApproval",
+         "params": { "itemId": "m1", "grantRoot": "/repo", "reason": "write access" } }"#
+}
+
+/// Drive the full browser → server → `fake-codex` permission loop for one
+/// approval shape.
 ///
 /// The scenario gates its turn on a **blocking** approval: the fake emits the
 /// approval and suspends until the client answers. The test waits for the
 /// `PermissionRequested` broadcast (carrying the Delta `i64` row id, not the
-/// provider token), decides via `POST /api/permissions/{id}/decision`, and then
-/// asserts (a) the decision settled over the broadcast (`PermissionResolved` +
-/// `TurnCompleted`) and (b) the fake received the exact `accept`/`decline` — it
-/// echoes the received decision as an assistant message, which the test reads
-/// back from the persisted transcript.
-async fn permission_full_loop(decision_wire: &str, expected_echo: &str) {
-    let scenario = ScenarioGuard::write(
-        r#"{
+/// provider token, and `expected_tool` as the tool name), decides via
+/// `POST /api/permissions/{id}/decision`, and then asserts (a) the decision
+/// settled over the broadcast (`PermissionResolved` + `TurnCompleted`) and (b)
+/// the fake received the exact `accept`/`decline` — it echoes the received
+/// decision as an assistant message, which the test reads back from the
+/// persisted transcript.
+async fn permission_full_loop(
+    decision_wire: &str,
+    expected_echo: &str,
+    approval_step: &str,
+    expected_tool: &str,
+) {
+    let scenario = ScenarioGuard::write(&format!(
+        r#"{{
             "thread_id": "thr_perm_loop",
-            "turn": {
+            "turn": {{
                 "turn_id": "turn_perm_loop",
                 "emit": [
-                    { "type": "turn_started" },
-                    { "type": "request_approval", "blocking": true, "params": { "itemId": "m1", "toolName": "Bash" } },
-                    { "type": "turn_completed", "status": "completed" }
+                    {{ "type": "turn_started" }},
+                    {approval_step},
+                    {{ "type": "turn_completed", "status": "completed" }}
                 ]
-            }
-        }"#,
-    );
+            }}
+        }}"#
+    ));
 
     let (app, state) = build_app(&scenario);
     let mut events = state.subscribe();
@@ -473,7 +509,7 @@ async fn permission_full_loop(decision_wire: &str, expected_echo: &str) {
         } = event
         {
             assert_eq!(sid.as_str(), session_id, "the notice names our session");
-            assert_eq!(tool_name, "Bash", "the notice carries the tool name");
+            assert_eq!(tool_name, expected_tool, "the notice carries the tool name");
             assert!(request_id > 0, "the notice carries a Delta row id");
             break request_id;
         }
