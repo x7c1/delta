@@ -163,10 +163,11 @@ async fn json_response(response: axum::response::Response) -> (StatusCode, Value
 
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
-    // A scripted turn: a streaming fragment, the completed assistant message,
-    // then a clean turn completion. The started item carries a strict prefix of
-    // the completed text, so it translates to a live `AssistantDelta` while the
-    // completed item translates to the persisted `AssistantMessage`.
+    // A scripted turn using the real item shapes: the assistant item starts
+    // (announced, no text yet), a streaming `item/agentMessage/delta` carries a
+    // strict prefix of the reply (→ a live `AssistantDelta`), the completed item
+    // carries the full text (→ the persisted `AssistantMessage`), then a clean
+    // turn completion.
     let scenario = ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_full_loop",
@@ -174,8 +175,9 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
                 "turn_id": "turn_full_loop",
                 "emit": [
                     {{ "type": "turn_started" }},
-                    {{ "type": "item_started",   "item": {{ "id": "item_1", "itemType": "agent_message", "text": "{REPLY_FRAGMENT}" }} }},
-                    {{ "type": "item_completed", "item": {{ "id": "item_1", "itemType": "agent_message", "text": "{REPLY}" }} }},
+                    {{ "type": "item_started",   "item": {{ "id": "item_1", "type": "agentMessage" }} }},
+                    {{ "type": "agent_message_delta", "item_id": "item_1", "delta": "{REPLY_FRAGMENT}" }},
+                    {{ "type": "item_completed", "item": {{ "id": "item_1", "type": "agentMessage", "text": "{REPLY}" }} }},
                     {{ "type": "turn_completed", "status": "completed" }}
                 ]
             }}

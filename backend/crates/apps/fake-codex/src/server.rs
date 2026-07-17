@@ -7,6 +7,12 @@ use serde_json::{json, Map, Value};
 
 use crate::scenario::{Emit, Scenario};
 
+/// A fixed timestamp (Unix ms) stamped into the item lifecycle envelope
+/// (`startedAtMs` / `completedAtMs`). Real servers emit the wall-clock instant;
+/// the fake uses a constant so scripted turns stay byte-deterministic (nothing
+/// asserts on the value — it exists to exercise the real envelope shape).
+const ENVELOPE_TS_MS: i64 = 1_784_272_338_000;
+
 /// Resolve the scenario and serve JSON-RPC frames until stdin closes.
 pub fn run() -> Result<(), String> {
     let scenario = Scenario::resolve()?;
@@ -167,13 +173,30 @@ impl Server<'_> {
     fn play_emits(&mut self, emits: &[Emit], thread_id: &str, turn_id: &str) -> Result<(), String> {
         for (i, emit) in emits.iter().enumerate() {
             match emit {
+                // Real `item/started` / `item/completed` wrap the item alongside
+                // the `threadId` / `turnId` / `startedAtMs`|`completedAtMs`
+                // envelope (see the vendored ItemStarted/ItemCompleted schemas).
                 Emit::ItemStarted { item } => self.emit_notification(
                     "item/started",
-                    with_thread_id(json!({ "item": item }), thread_id),
+                    with_thread_id(
+                        json!({ "item": item, "turnId": turn_id, "startedAtMs": ENVELOPE_TS_MS }),
+                        thread_id,
+                    ),
                 )?,
                 Emit::ItemCompleted { item } => self.emit_notification(
                     "item/completed",
-                    with_thread_id(json!({ "item": item }), thread_id),
+                    with_thread_id(
+                        json!({ "item": item, "turnId": turn_id, "completedAtMs": ENVELOPE_TS_MS }),
+                        thread_id,
+                    ),
+                )?,
+                // Real `item/agentMessage/delta`: `{ itemId, delta, turnId }`.
+                Emit::AgentMessageDelta { item_id, delta } => self.emit_notification(
+                    "item/agentMessage/delta",
+                    with_thread_id(
+                        json!({ "itemId": item_id, "delta": delta, "turnId": turn_id }),
+                        thread_id,
+                    ),
                 )?,
                 // Real `turn/started` / `turn/completed` wrap a `Turn` under
                 // `params.turn` (whose `id`/`status` the client reads).
@@ -231,14 +254,14 @@ impl Server<'_> {
         self.emit_notification(
             "item/started",
             with_thread_id(
-                json!({ "item": { "id": echo_id, "itemType": "agent_message" } }),
+                json!({ "item": { "id": echo_id, "type": "agentMessage" }, "turnId": turn_id, "startedAtMs": ENVELOPE_TS_MS }),
                 &thread_id,
             ),
         )?;
         self.emit_notification(
             "item/completed",
             with_thread_id(
-                json!({ "item": { "id": echo_id, "itemType": "agent_message", "text": decision } }),
+                json!({ "item": { "id": echo_id, "type": "agentMessage", "text": decision }, "turnId": turn_id, "completedAtMs": ENVELOPE_TS_MS }),
                 &thread_id,
             ),
         )?;

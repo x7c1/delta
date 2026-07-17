@@ -10,14 +10,19 @@
 //!   "turn": {
 //!     "turn_id": "turn_fake_0001",
 //!     "emit": [
-//!       { "type": "item_started",   "item": { "id": "item_1", "itemType": "agent_message" } },
-//!       { "type": "item_completed", "item": { "id": "item_1", "itemType": "agent_message", "text": "hi" } },
+//!       { "type": "item_started",   "item": { "id": "item_1", "type": "agentMessage" } },
+//!       { "type": "agent_message_delta", "item_id": "item_1", "delta": "hi" },
+//!       { "type": "item_completed", "item": { "id": "item_1", "type": "agentMessage", "text": "hi" } },
 //!       { "type": "request_approval", "method": "item/commandExecution/requestApproval", "params": { "itemId": "exec_1", "command": "date" } },
 //!       { "type": "turn_completed", "status": "completed" }
 //!     ]
 //!   }
 //! }
 //! ```
+//!
+//! The `item` payloads are the **real** v2 `ThreadItem` shapes (discriminated by
+//! `type`, e.g. `agentMessage` / `commandExecution`), and the item envelope /
+//! streaming-delta steps use the real notification method names.
 //!
 //! Top-level fields:
 //!
@@ -34,8 +39,9 @@
 //!
 //! | step | effect |
 //! |---|---|
-//! | `item_started { item }` | Emit an `item/started` notification carrying `item`. |
-//! | `item_completed { item }` | Emit an `item/completed` notification carrying `item`. |
+//! | `item_started { item }` | Emit an `item/started` notification carrying `item` (plus the real `turnId` / `startedAtMs` envelope). |
+//! | `item_completed { item }` | Emit an `item/completed` notification carrying `item` (plus the real `turnId` / `completedAtMs` envelope). |
+//! | `agent_message_delta { item_id, delta }` | Emit an `item/agentMessage/delta` notification (`{ itemId, delta, turnId }`) — a streaming fragment of an assistant message. |
 //! | `turn_started` | Emit a `turn/started` notification. |
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
 //! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
@@ -75,6 +81,12 @@ pub enum Emit {
     },
     ItemCompleted {
         item: Value,
+    },
+    /// A streaming fragment of an assistant message: emits the real
+    /// `item/agentMessage/delta` notification (`{ itemId, delta, turnId }`).
+    AgentMessageDelta {
+        item_id: String,
+        delta: String,
     },
     TurnStarted,
     TurnCompleted {
@@ -170,12 +182,16 @@ impl Scenario {
                 emit: vec![
                     Emit::TurnStarted,
                     Emit::ItemStarted {
-                        item: json!({ "id": "item_1", "itemType": "agent_message" }),
+                        item: json!({ "id": "item_1", "type": "agentMessage" }),
+                    },
+                    Emit::AgentMessageDelta {
+                        item_id: "item_1".to_owned(),
+                        delta: "fake-codex scripted reply".to_owned(),
                     },
                     Emit::ItemCompleted {
                         item: json!({
                             "id": "item_1",
-                            "itemType": "agent_message",
+                            "type": "agentMessage",
                             "text": "fake-codex scripted reply"
                         }),
                     },
@@ -202,8 +218,9 @@ mod tests {
                     "turn_id": "turn_x",
                     "emit": [
                         { "type": "turn_started" },
-                        { "type": "item_started", "item": { "id": "i1" } },
-                        { "type": "item_completed", "item": { "id": "i1", "text": "hi" } },
+                        { "type": "item_started", "item": { "id": "i1", "type": "agentMessage" } },
+                        { "type": "agent_message_delta", "item_id": "i1", "delta": "hi" },
+                        { "type": "item_completed", "item": { "id": "i1", "type": "agentMessage", "text": "hi" } },
                         { "type": "request_approval", "method": "item/fileChange/requestApproval", "params": { "itemId": "fc_1" } },
                         { "type": "request_approval" },
                         { "type": "notification", "method": "server/note", "params": { "n": 2 } },
@@ -216,10 +233,17 @@ mod tests {
         assert_eq!(scenario.thread_id, "thr_x");
         let turn = scenario.turn.unwrap();
         assert_eq!(turn.turn_id, "turn_x");
-        assert_eq!(turn.emit.len(), 7);
+        assert_eq!(turn.emit.len(), 8);
         assert_eq!(turn.emit[0], Emit::TurnStarted);
         assert_eq!(
-            turn.emit[4],
+            turn.emit[2],
+            Emit::AgentMessageDelta {
+                item_id: "i1".to_owned(),
+                delta: "hi".to_owned(),
+            }
+        );
+        assert_eq!(
+            turn.emit[5],
             Emit::RequestApproval {
                 method: DEFAULT_APPROVAL_METHOD.to_owned(),
                 params: Value::Null,
@@ -227,7 +251,7 @@ mod tests {
             }
         );
         assert_eq!(
-            turn.emit[6],
+            turn.emit[7],
             Emit::TurnCompleted {
                 status: "completed".to_owned()
             }
