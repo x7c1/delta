@@ -79,9 +79,6 @@ pub struct CodexConversationSource {
     /// (the turn/prompt group). `None` outside a turn or when the turn was
     /// announced without an id.
     current_turn: Option<PromptId>,
-    /// A per-source counter of user prompts, used only to synthesize a stable
-    /// message uuid when no turn id is available to key one from.
-    user_prompt_count: u64,
     /// Tool calls started but not yet completed, keyed by `provider_item_id`.
     pending_tools: HashMap<String, PendingTool>,
 }
@@ -99,7 +96,6 @@ impl CodexConversationSource {
             main_thread,
             next_seq: seed_seq,
             current_turn: None,
-            user_prompt_count: 0,
             pending_tools: HashMap::new(),
         }
     }
@@ -248,15 +244,21 @@ impl CodexConversationSource {
 
     /// Synthesize a stable uuid for the current turn's user prompt. Codex gives
     /// the accepted prompt no item id, so it is keyed from the turn id when one
-    /// is known (one user prompt per turn) and from a per-source counter
-    /// otherwise. Advances the counter either way so two prompt-less turns never
-    /// collide.
-    fn user_prompt_uuid(&mut self) -> MessageUuid {
-        let n = self.user_prompt_count;
-        self.user_prompt_count += 1;
+    /// is known (one user prompt per turn), and otherwise from the `seq` this
+    /// message will be minted with.
+    ///
+    /// Keying the fallback off `next_seq` — rather than a per-source counter —
+    /// makes it unique across the session's whole sequence space, including after
+    /// a **resume** that re-seeds `next_seq` at the persisted `MAX(seq) + 1`. A
+    /// counter would reset to 0 on the fresh post-resume source and collide its
+    /// first prompt's uuid with the pre-restart first prompt (`codex-user-0`),
+    /// silently overwriting that earlier message. For a fresh session (seeded at
+    /// 0) this yields the same `codex-user-0`, `codex-user-1`, … a bare counter
+    /// would, since consecutive prompt-less turns advance `next_seq` in lockstep.
+    fn user_prompt_uuid(&self) -> MessageUuid {
         match &self.current_turn {
             Some(turn) => MessageUuid::from(format!("codex-turn-{}-user", turn.as_str())),
-            None => MessageUuid::from(format!("codex-user-{n}")),
+            None => MessageUuid::from(format!("codex-user-{}", self.next_seq)),
         }
     }
 }
@@ -547,6 +549,41 @@ mod tests {
         assert_ne!(a[0].uuid, b[0].uuid);
         assert_eq!(a[0].uuid, MessageUuid::from("codex-user-0"));
         assert_eq!(b[0].uuid, MessageUuid::from("codex-user-1"));
+    }
+
+    #[test]
+    fn a_resumed_sources_first_prompt_does_not_collide_with_the_pre_restart_one() {
+        // A fresh source seeds at 0: its first prompt-less user prompt is
+        // `codex-user-0` at seq 0.
+        let fresh_uuid = source()
+            .ingest(&AgentEvent::UserPromptAccepted {
+                provider_message_id: None,
+                text: "first message".to_owned(),
+            })
+            .remove(0)
+            .uuid;
+        assert_eq!(fresh_uuid, MessageUuid::from("codex-user-0"));
+
+        // After a restart the source is re-seeded at the persisted count (2 here).
+        // Its first prompt-less user prompt must NOT reuse `codex-user-0` — that
+        // would overwrite the pre-restart message — so it is keyed off the seeded
+        // seq (2) instead, and lands at seq 2.
+        let mut resumed = CodexConversationSource::new(SessionId::from("sess-1"), ThreadId(1), 2);
+        let resumed_msg = resumed
+            .ingest(&AgentEvent::UserPromptAccepted {
+                provider_message_id: None,
+                text: "second message".to_owned(),
+            })
+            .remove(0);
+        assert_ne!(
+            resumed_msg.uuid, fresh_uuid,
+            "the resumed prompt must not collide with the pre-restart one"
+        );
+        assert_eq!(resumed_msg.uuid, MessageUuid::from("codex-user-2"));
+        assert_eq!(
+            resumed_msg.seq, 2,
+            "and it continues the persisted sequence"
+        );
     }
 
     #[test]

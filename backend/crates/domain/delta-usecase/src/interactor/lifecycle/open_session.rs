@@ -1,9 +1,10 @@
 use std::time::Instant;
 
+use delta_model::AgentProvider;
+
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{OpenHandle, ResumingSession};
-use crate::pane_token::PaneToken;
 use crate::ports::{pane_for, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
 
 use super::{RESUME_FLAG, SETTINGS_FLAG};
@@ -22,8 +23,11 @@ where
     /// token, re-writes the settings file (at Delta's own path, not the session
     /// cwd; the port is idempotent), launches `claude --settings <file> --resume
     /// <id>` in the stored cwd, and binds the new pane to the session
-    /// immediately. Resuming an already-open session is a no-op
-    /// that returns the existing handle's token (the double-open guard).
+    /// immediately. Resuming an already-open session is a no-op (the double-open
+    /// guard). A terminal-less **Codex** session takes a separate branch at the
+    /// top: it has no pane to open, so it resumes over the adapter
+    /// (`thread/resume`) when closed and no-ops when live, leaving the Claude
+    /// pane/`--resume` path below byte-for-byte unchanged.
     ///
     /// It does **not** dispatch the first prompt here. `claude --resume` needs a
     /// couple of seconds to replay the transcript before its TUI can accept input
@@ -53,7 +57,7 @@ where
     /// `claude --resume` can produce a new prompt hook, makes the user's actual
     /// last thread visible on that first prompt. The sync is cursor-based
     /// idempotent (and mailbox-ordered), so it never double-ingests.
-    pub(in crate::interactor) async fn open_session(&mut self) -> Result<PaneToken> {
+    pub(in crate::interactor) async fn open_session(&mut self) -> Result<()> {
         let id = self.id;
         let session = self
             .store
@@ -61,9 +65,21 @@ where
             .await?
             .ok_or_else(|| Error::SessionNotFound(id.as_str().to_owned()))?;
 
+        // Terminal-less (Codex): there is no pane to open. Reconnect the adapter
+        // by resuming its provider thread when the session is closed (its
+        // in-process binding was lost, e.g. across a server restart), and no-op
+        // when it is already live. The Claude pane/`--resume` path below is
+        // untouched — this only branches a structured provider away from it.
+        if session.provider == AgentProvider::Codex {
+            if self.state.open_agent().is_none() {
+                self.resume_codex_agent(&session).await?;
+            }
+            return Ok(());
+        }
+
         // Double-open guard: if already open, route to the existing pane.
-        if let Some(handle) = self.state.handle() {
-            return Ok(handle.token.clone());
+        if self.state.handle().is_some() {
+            return Ok(());
         }
 
         // Resume gate: `claude --resume <id>` replays from the local JSONL
@@ -145,6 +161,6 @@ where
         // last thread rather than a DB-behind `None`. The sync runs on this
         // same actor, so it is already ordered against the hooks.
         self.sync_transcript(&session).await?;
-        Ok(token)
+        Ok(())
     }
 }
