@@ -24,6 +24,7 @@ import type {
   ThreadsResponse,
   GitBranchesResponse,
   GitRepoResponse,
+  ProvidersResponse,
   PullRequestsResponse,
   RepositoriesResponse,
   WorkdirListResponse,
@@ -38,6 +39,7 @@ import {
   mockSpawnSessionId,
   recentWorkdirs,
   mockAuthorPullRequests,
+  mockProviders,
   mockRepositories,
   mockReviewerPullRequests,
   seedData,
@@ -610,6 +612,14 @@ export function createMockApi(): MockApi {
         gh_available: true,
         pull_requests,
       };
+      return HttpResponse.json(responseBody);
+    }),
+
+    // Per-provider launch availability for the new-session selector. Both
+    // providers are available by default so the selector is fully usable with no
+    // backend; a test overrides this handler to make a provider unavailable.
+    http.get('*/api/providers', () => {
+      const responseBody: ProvidersResponse = { providers: mockProviders() };
       return HttpResponse.json(responseBody);
     }),
 

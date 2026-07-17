@@ -98,6 +98,10 @@ pub fn router(state: AppState) -> Router {
         // `gh search prs` through the gh CLI gateway and tags each row
         // with whether Delta has a local clone of the PR's repo.
         .route("/api/prs", get(api::list_pull_requests))
+        // Provider availability for the new-session selector: whether each
+        // provider's launch binary is present on this host, so an un-installed
+        // provider is disabled with a reason instead of failing at spawn.
+        .route("/api/providers", get(api::list_providers))
         // Git detection for the worktree-at-start option (read-only): is the
         // selected directory a git repo, and what remote branches can a worktree
         // be based on.
@@ -413,6 +417,78 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Build a `test_state()` whose binary detector reports the Claude binary
+    /// present and every other (i.e. Codex) absent, so the `/api/providers`
+    /// route test is deterministic regardless of what is installed on the test
+    /// host.
+    async fn test_state_with_only_claude_present() -> AppState {
+        use std::sync::Arc;
+
+        struct ClaudeOnly;
+        #[async_trait::async_trait]
+        impl delta_usecase::BinaryDetector for ClaudeOnly {
+            async fn is_available(&self, bin: &str) -> bool {
+                bin == "claude"
+            }
+        }
+        let config = delta_bootstrap::Config {
+            database_path: ":memory:".into(),
+            session_workdir_base: "/tmp/delta-test-session".into(),
+            worktree_base: "/tmp/delta-test-worktrees".into(),
+            tmux_socket: "delta-test".into(),
+            port: 7878,
+            launch: delta_usecase::LaunchConfig::default(),
+        };
+        let interactor = delta_bootstrap::build(&config)
+            .await
+            .unwrap()
+            .with_codex_bin("codex")
+            .with_binary_detector(Arc::new(ClaudeOnly) as Arc<dyn delta_usecase::BinaryDetector>);
+        AppState::from_interactor(interactor, &config.tmux_socket)
+    }
+
+    #[tokio::test]
+    async fn providers_reports_availability_per_provider() {
+        // 200 with both providers listed; Claude available (binary present),
+        // Codex unavailable with a reason. This is the accident the endpoint
+        // guards against — picking a provider whose binary is missing.
+        let response = router(test_state_with_only_claude_present().await)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/providers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let providers = body["providers"].as_array().unwrap();
+        assert_eq!(providers.len(), 2, "both known providers are reported");
+
+        let claude = providers
+            .iter()
+            .find(|p| p["provider"] == "claude")
+            .expect("claude listed");
+        assert_eq!(claude["available"], true);
+        assert!(
+            claude["detail"].is_null(),
+            "available provider has no reason"
+        );
+
+        let codex = providers
+            .iter()
+            .find(|p| p["provider"] == "codex")
+            .expect("codex listed");
+        assert_eq!(codex["available"], false);
+        assert!(
+            codex["detail"].as_str().unwrap().contains("codex"),
+            "unavailable provider carries a reason naming the binary"
+        );
     }
 
     #[tokio::test]

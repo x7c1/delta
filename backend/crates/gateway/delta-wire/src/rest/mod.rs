@@ -26,6 +26,8 @@ mod open_cwd_request;
 pub use open_cwd_request::WireOpenCwdRequest;
 mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
+mod providers_response;
+pub use providers_response::{WireProviderAvailability, WireProvidersResponse};
 mod pull_requests_response;
 pub use pull_requests_response::{WirePullRequest, WirePullRequestsResponse};
 mod question_answer_request;

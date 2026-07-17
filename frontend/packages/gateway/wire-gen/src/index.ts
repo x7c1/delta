@@ -50,6 +50,8 @@ export type { RepositoryScanRootsResponse } from './generated/RepositoryScanRoot
 export type { CreateRepositoryScanRootRequest } from './generated/CreateRepositoryScanRootRequest';
 export type { PullRequest } from './generated/PullRequest';
 export type { PullRequestsResponse } from './generated/PullRequestsResponse';
+export type { ProviderAvailability } from './generated/ProviderAvailability';
+export type { ProvidersResponse } from './generated/ProvidersResponse';
 export type { GitRepoResponse } from './generated/GitRepoResponse';
 export type { GitBranchesResponse } from './generated/GitBranchesResponse';
 export type { WorktreeSpec } from './generated/WorktreeSpec';

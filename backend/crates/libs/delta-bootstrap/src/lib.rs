@@ -26,10 +26,13 @@ pub use delta_usecase::LaunchConfig;
 
 use std::sync::Arc;
 
+use binary_detector::PathBinaryDetector;
 use codex_agent::{CodexAdapterFactory, CodexLaunchConfig};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{AgentAdapterFactory, BoxedInteractor, ExternalOpener, GhCli, Interactor};
+use delta_usecase::{
+    AgentAdapterFactory, BinaryDetector, BoxedInteractor, ExternalOpener, GhCli, Interactor,
+};
 use external_opener::SystemOpener;
 use gh_cli::Gh;
 use git_worktree::Git;
@@ -142,8 +145,16 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     // spawns no `codex app-server` process at startup — a machine without Codex
     // still boots normally. Nothing consults it yet; provider dispatch that
     // calls `connect()` lands in a later change.
+    // Resolve the Codex launch config once and reuse its binary for both the
+    // adapter factory (what a Codex spawn launches) and the availability probe
+    // (what `/api/providers` reports), so the two can never diverge.
+    let codex_launch = codex_launch_from_env();
+    let codex_bin = codex_launch.codex_bin.clone();
     let codex_adapter_factory: Arc<dyn AgentAdapterFactory> =
-        Arc::new(CodexAdapterFactory::new(codex_launch_from_env()));
+        Arc::new(CodexAdapterFactory::new(codex_launch));
+    // Real PATH probe for the provider-availability endpoint. Constructing it
+    // touches no filesystem; the first probe per binary does, then memoises.
+    let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -158,7 +169,9 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     .with_launch_config(config.launch.clone())
     .with_gh_cli(gh_cli)
     .with_external_opener(external_opener)
-    .with_codex_adapter_factory(codex_adapter_factory))
+    .with_codex_adapter_factory(codex_adapter_factory)
+    .with_codex_bin(codex_bin)
+    .with_binary_detector(binary_detector))
 }
 
 /// The Codex launch configuration sourced from the environment.
