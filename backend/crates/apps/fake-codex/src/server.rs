@@ -92,6 +92,26 @@ impl Server<'_> {
     fn handle_request(&mut self, id: Value, method: &str, params: &Value) -> Result<(), String> {
         match method {
             "initialize" => {
+                // The real `codex app-server` validates `clientInfo`: its
+                // `ClientInfo` requires BOTH `name` and `version`, and it rejects
+                // an `initialize` missing either with `[-32600] Invalid request:
+                // missing field '<field>'`. Re-enact that here so the fake cannot
+                // drift green while the real server would reject the handshake
+                // (the gap the C4 real-codex canary caught).
+                for field in ["name", "version"] {
+                    let present = params
+                        .get("clientInfo")
+                        .and_then(|c| c.get(field))
+                        .and_then(Value::as_str)
+                        .is_some();
+                    if !present {
+                        return self.respond_error(
+                            id,
+                            -32600,
+                            &format!("Invalid request: missing field `{field}`"),
+                        );
+                    }
+                }
                 let server_info = self.scenario.server_info.clone();
                 self.respond(id, json!({ "serverInfo": server_info }))
             }

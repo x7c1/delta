@@ -39,7 +39,7 @@ async fn handshake_and_thread_start_round_trip_against_the_fake_binary() {
     // 1. initialize -> initialized handshake.
     let init = tokio::time::timeout(
         TIMEOUT,
-        conn.initialize(json!({ "clientInfo": { "name": "delta" } })),
+        conn.initialize(json!({ "clientInfo": { "name": "delta", "version": "0" } })),
     )
     .await
     .expect("initialize timed out")
@@ -126,7 +126,9 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
     )];
 
     let conn = AppServerConnection::spawn(&config).expect("spawn fake-codex");
-    conn.initialize(json!({})).await.expect("initialize failed");
+    conn.initialize(json!({ "clientInfo": { "name": "delta", "version": "0" } }))
+        .await
+        .expect("initialize failed");
     let mut started = conn.start_thread(None).await.expect("thread/start failed");
     assert_eq!(started.thread_id, "thr_script");
 
@@ -156,4 +158,27 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
     assert!(saw_turn_completed, "the turn completed");
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The fake re-enacts the real server's `clientInfo` validation: an `initialize`
+/// whose `clientInfo` is missing the required `version` is rejected, exactly as
+/// the real `codex app-server` does (`[-32600] Invalid request: missing field
+/// 'version'`). This is the guard that keeps the fake from drifting green while
+/// the real server would reject the handshake — the gap the C4 real-codex
+/// canary caught (Delta's factory used to send `clientInfo` without `version`).
+#[tokio::test]
+async fn initialize_missing_client_info_version_is_rejected_like_the_real_server() {
+    let conn = AppServerConnection::spawn(&fake_config()).expect("spawn fake-codex");
+    let err = tokio::time::timeout(
+        TIMEOUT,
+        conn.initialize(json!({ "clientInfo": { "name": "delta" } })),
+    )
+    .await
+    .expect("initialize timed out")
+    .expect_err("an initialize missing clientInfo.version must be rejected");
+    let message = err.to_string();
+    assert!(
+        message.contains("version"),
+        "the rejection names the missing field, got: {message}"
+    );
 }

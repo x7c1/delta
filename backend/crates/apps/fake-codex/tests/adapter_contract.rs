@@ -80,7 +80,7 @@ async fn adapter_with(scenario: &str) -> (CodexAppServerAdapter, ScenarioGuard) 
         )],
     };
     let conn = Arc::new(AppServerConnection::spawn(&config).expect("spawn fake-codex"));
-    conn.initialize(json!({ "clientInfo": { "name": "delta" } }))
+    conn.initialize(json!({ "clientInfo": { "name": "delta", "version": "0" } }))
         .await
         .expect("initialize");
     (CodexAppServerAdapter::new(conn), guard)
@@ -95,7 +95,9 @@ async fn default_adapter() -> CodexAppServerAdapter {
         env: vec![],
     };
     let conn = Arc::new(AppServerConnection::spawn(&config).expect("spawn fake-codex"));
-    conn.initialize(json!({})).await.expect("initialize");
+    conn.initialize(json!({ "clientInfo": { "name": "delta", "version": "0" } }))
+        .await
+        .expect("initialize");
     CodexAppServerAdapter::new(conn)
 }
 
