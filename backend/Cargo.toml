@@ -23,6 +23,7 @@ gh-cli = { path = "crates/gateway/gh-cli" }
 binary-detector = { path = "crates/gateway/binary-detector" }
 delta-wire = { path = "crates/gateway/delta-wire" }
 codex-agent = { path = "crates/gateway/codex-agent" }
+claude-agent = { path = "crates/gateway/claude-agent" }
 agent-contract = { path = "crates/libs/agent-contract" }
 delta-bootstrap = { path = "crates/libs/delta-bootstrap" }
 delta-server = { path = "crates/apps/delta-server" }

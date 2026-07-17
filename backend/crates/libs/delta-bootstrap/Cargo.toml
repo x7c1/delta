@@ -11,6 +11,7 @@ delta-usecase = { workspace = true }
 delta-sqlite = { workspace = true }
 delta-transcript = { workspace = true }
 codex-agent = { workspace = true }
+claude-agent = { workspace = true }
 external-opener = { workspace = true }
 tmux-driver = { workspace = true }
 workspace-fs = { workspace = true }

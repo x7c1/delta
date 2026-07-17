@@ -43,9 +43,14 @@ function useProvidersAvailability(
       HttpResponse.json({
         providers: (['claude', 'codex'] as const).map((provider) => {
           const detail = overrides[provider];
+          // Capabilities mirror the real backend so this override stays a
+          // faithful `/api/providers` shape: Claude has a terminal, Codex does
+          // not. The selector reads `available`, not capabilities, but the shape
+          // must remain complete.
+          const capabilities = { has_terminal: provider === 'claude' };
           return detail
-            ? { provider, available: false, detail }
-            : { provider, available: true, detail: null };
+            ? { provider, available: false, detail, capabilities }
+            : { provider, available: true, detail: null, capabilities };
         }),
       }),
     ),
