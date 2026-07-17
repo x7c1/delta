@@ -920,6 +920,7 @@ impl SessionStore for FakeStore {
         name: &str,
         value: Option<&str>,
         default_enabled: bool,
+        provider: AgentProvider,
     ) -> Result<LaunchOption> {
         let mut g = self.inner.lock().unwrap();
         g.next_launch_option_id += 1;
@@ -930,6 +931,7 @@ impl SessionStore for FakeStore {
             value: value.map(str::to_owned),
             default_enabled,
             created_at: "2026-01-01T00:00:00Z".into(),
+            provider,
         };
         g.launch_options.push(option.clone());
         Ok(option)

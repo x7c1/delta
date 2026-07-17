@@ -586,13 +586,16 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// Register a launch option and return the created row. `label` and `value`
     /// are optional (a valueless flag carries no `value`); `name` is the flag.
     /// `default_enabled` marks it to start pre-checked in the session-start
-    /// picker.
+    /// picker. `provider` is the provider the option applies to (the caller
+    /// defaults it to [`AgentProvider::Claude`] for a back-compat create that
+    /// omits it).
     async fn create_launch_option(
         &self,
         label: Option<&str>,
         name: &str,
         value: Option<&str>,
         default_enabled: bool,
+        provider: AgentProvider,
     ) -> Result<LaunchOption>;
 
     /// Set a launch option's `default_enabled` flag, returning the updated row,
@@ -920,9 +923,10 @@ impl SessionStore for Box<dyn SessionStore> {
         name: &str,
         value: Option<&str>,
         default_enabled: bool,
+        provider: AgentProvider,
     ) -> Result<LaunchOption> {
         (**self)
-            .create_launch_option(label, name, value, default_enabled)
+            .create_launch_option(label, name, value, default_enabled, provider)
             .await
     }
 

@@ -146,6 +146,41 @@ describe('SettingsView', () => {
     );
   });
 
+  it('shows a provider badge for each registered option', async () => {
+    renderSettings();
+    const list = await findList();
+    // The Codex fixture (`model gpt-5`) carries a Codex badge; the Claude
+    // fixtures carry Claude badges.
+    expect(within(list).getByText('model')).toBeInTheDocument();
+    expect(within(list).getAllByLabelText('Codex').length).toBeGreaterThan(0);
+    expect(within(list).getAllByLabelText('Claude Code').length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('registers a launch option for the selected provider', async () => {
+    renderSettings();
+    const list = await findList();
+
+    // Pick Codex in the create form's provider selector, then add an option.
+    fireEvent.click(
+      within(
+        screen.getByTestId('launch-option-provider-codex'),
+      ).getByRole('radio'),
+    );
+    fireEvent.change(screen.getByLabelText('Name (the flag)'), {
+      target: { value: 'reasoning-effort' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
+
+    // The new option appears; its row carries the Codex badge, proving the
+    // chosen provider was sent and round-tripped.
+    const row = await within(list).findByText('reasoning-effort');
+    const li = row.closest('li');
+    expect(li).not.toBeNull();
+    expect(within(li as HTMLElement).getByLabelText('Codex')).toBeInTheDocument();
+  });
+
   it('disables Add until a non-blank name is entered', async () => {
     renderSettings();
     await findList();

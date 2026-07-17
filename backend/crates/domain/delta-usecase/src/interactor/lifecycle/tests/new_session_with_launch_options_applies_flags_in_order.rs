@@ -14,17 +14,29 @@ async fn new_session_with_launch_options_applies_flags_in_order() {
     // Register three options; the picker would normally surface these.
     let permission_mode = ix
         .store()
-        .create_launch_option(None, "--permission-mode", Some("auto"), false)
+        .create_launch_option(
+            None,
+            "--permission-mode",
+            Some("auto"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
     let _plugin_dir = ix
         .store()
-        .create_launch_option(None, "--plugin-dir", Some("/plugins"), false)
+        .create_launch_option(
+            None,
+            "--plugin-dir",
+            Some("/plugins"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
     let verbose = ix
         .store()
-        .create_launch_option(None, "--verbose", None, false)
+        .create_launch_option(None, "--verbose", None, false, crate::AgentProvider::Claude)
         .await
         .unwrap();
 
