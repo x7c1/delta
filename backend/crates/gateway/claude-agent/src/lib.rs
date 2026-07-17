@@ -329,6 +329,9 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
             AgentEvent::UserPromptAccepted {
                 provider_message_id: None,
                 text: req.text,
+                // Claude's per-message time comes from its transcript fold, not
+                // this neutral field, so it is left unset here.
+                at_ms: None,
             },
         );
         Ok(SendReceipt {

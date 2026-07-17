@@ -112,8 +112,20 @@ pub fn translate_notification(n: &Notification) -> Vec<AgentEvent> {
         "turn/completed" => vec![AgentEvent::TurnCompleted {
             status: turn_status(notification_turn_status(&n.params).as_deref()),
         }],
-        "item/started" => item_event(item_of(&n.params), true),
-        "item/completed" => item_event(item_of(&n.params), false),
+        // `startedAtMs` / `completedAtMs` are siblings of `item` on the
+        // notification params (see the vendored `ItemStartedNotification` /
+        // `ItemCompletedNotification`), so they are read here and threaded into
+        // the projected event as its neutral `at_ms`.
+        "item/started" => item_event(
+            item_of(&n.params),
+            true,
+            int_field(&n.params, "startedAtMs"),
+        ),
+        "item/completed" => item_event(
+            item_of(&n.params),
+            false,
+            int_field(&n.params, "completedAtMs"),
+        ),
         METHOD_AGENT_MESSAGE_DELTA => agent_message_delta(&n.params),
         // Streaming deltas Delta does not model as neutral events are dropped
         // (they still arrive faithfully but project to nothing): reasoning has no
@@ -242,17 +254,27 @@ fn item_of(params: &Value) -> Option<&Value> {
 ///   would duplicate it);
 /// - `reasoning` → nothing (no faithful neutral mapping — see the module docs);
 /// - any other type → nothing (a safe skip, never a mis-filed tool call).
-fn item_event(item: Option<&Value>, started: bool) -> Vec<AgentEvent> {
+fn item_event(item: Option<&Value>, started: bool, at_ms: Option<i64>) -> Vec<AgentEvent> {
     let Some(item) = item else {
         return Vec::new();
     };
     let provider_item_id = string_field(item, "id").unwrap_or_default();
     match string_field(item, "type").unwrap_or_default().as_str() {
-        AGENT_MESSAGE_ITEM_TYPE => agent_message_event(item, provider_item_id, started),
-        COMMAND_EXECUTION_ITEM_TYPE => {
-            tool_event(item, provider_item_id, COMMAND_EXECUTION_TOOL_NAME, started)
-        }
-        FILE_CHANGE_ITEM_TYPE => tool_event(item, provider_item_id, FILE_CHANGE_TOOL_NAME, started),
+        AGENT_MESSAGE_ITEM_TYPE => agent_message_event(item, provider_item_id, started, at_ms),
+        COMMAND_EXECUTION_ITEM_TYPE => tool_event(
+            item,
+            provider_item_id,
+            COMMAND_EXECUTION_TOOL_NAME,
+            started,
+            at_ms,
+        ),
+        FILE_CHANGE_ITEM_TYPE => tool_event(
+            item,
+            provider_item_id,
+            FILE_CHANGE_TOOL_NAME,
+            started,
+            at_ms,
+        ),
         USER_MESSAGE_ITEM_TYPE | REASONING_ITEM_TYPE => Vec::new(),
         _ => Vec::new(),
     }
@@ -263,9 +285,16 @@ fn item_event(item: Option<&Value>, started: bool) -> Vec<AgentEvent> {
 /// [`AgentEvent::AssistantMessage`] once done. A started item with no text yet is
 /// just "the assistant is about to speak" — nothing to show — so it emits
 /// nothing rather than an empty delta.
-fn agent_message_event(item: &Value, provider_item_id: String, started: bool) -> Vec<AgentEvent> {
+fn agent_message_event(
+    item: &Value,
+    provider_item_id: String,
+    started: bool,
+    at_ms: Option<i64>,
+) -> Vec<AgentEvent> {
     let text = string_field(item, "text").unwrap_or_default();
     if started {
+        // A streaming fragment mints no persisted message (the completed item
+        // does), so it carries no `at_ms`.
         if text.is_empty() {
             Vec::new()
         } else {
@@ -278,6 +307,7 @@ fn agent_message_event(item: &Value, provider_item_id: String, started: bool) ->
         vec![AgentEvent::AssistantMessage {
             provider_item_id,
             text,
+            at_ms,
         }]
     }
 }
@@ -291,17 +321,20 @@ fn tool_event(
     provider_item_id: String,
     name: &str,
     started: bool,
+    at_ms: Option<i64>,
 ) -> Vec<AgentEvent> {
     if started {
         vec![AgentEvent::ToolStarted {
             provider_item_id,
             name: name.to_owned(),
             input_json: item.clone(),
+            at_ms,
         }]
     } else {
         vec![AgentEvent::ToolCompleted {
             provider_item_id,
             output_json: item.clone(),
+            at_ms,
         }]
     }
 }
@@ -339,6 +372,13 @@ fn turn_status(status: Option<&str>) -> TurnStatus {
 /// a string.
 fn string_field(value: &Value, key: &str) -> Option<String> {
     value.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+/// Read an integer field from a JSON object, returning `None` when absent or not
+/// an integer. Used for the item lifecycle timestamps (`startedAtMs` /
+/// `completedAtMs`, epoch milliseconds).
+fn int_field(value: &Value, key: &str) -> Option<i64> {
+    value.get(key).and_then(Value::as_i64)
 }
 
 #[cfg(test)]
@@ -452,6 +492,9 @@ mod tests {
             vec![AgentEvent::AssistantMessage {
                 provider_item_id: "item_1".to_owned(),
                 text: "hi".to_owned(),
+                // This notification carries no `completedAtMs`, so `at_ms`
+                // degrades to `None`.
+                at_ms: None,
             }]
         );
     }
@@ -521,6 +564,7 @@ mod tests {
                     "id": "t1", "type": "commandExecution",
                     "command": "ls", "cwd": "/tmp", "status": "inProgress", "commandActions": []
                 }),
+                at_ms: None,
             }],
             "the whole item rides input_json so every real field is preserved"
         );
@@ -537,6 +581,7 @@ mod tests {
             [AgentEvent::ToolCompleted {
                 provider_item_id,
                 output_json,
+                at_ms: _,
             }] => {
                 assert_eq!(provider_item_id, "t1");
                 assert_eq!(output_json["exitCode"], 0);
@@ -566,6 +611,46 @@ mod tests {
                     "id": "fc1", "type": "fileChange", "status": "inProgress",
                     "changes": [{ "path": "/x", "kind": "add" }]
                 }),
+                at_ms: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn item_lifecycle_timestamps_populate_the_events_at_ms() {
+        // `item/started` carries `startedAtMs` and `item/completed` carries
+        // `completedAtMs` as siblings of `item`; each is threaded onto the
+        // projected event's neutral `at_ms`.
+        let started = translate_notification(&notification(
+            "item/started",
+            json!({
+                "threadId": "thr_1", "turnId": "turn_1", "startedAtMs": 1_700_000_000_123_i64,
+                "item": { "id": "t1", "type": "commandExecution", "command": "ls", "status": "inProgress" }
+            }),
+        ));
+        assert_eq!(
+            started,
+            vec![AgentEvent::ToolStarted {
+                provider_item_id: "t1".to_owned(),
+                name: "command_execution".to_owned(),
+                input_json: json!({ "id": "t1", "type": "commandExecution", "command": "ls", "status": "inProgress" }),
+                at_ms: Some(1_700_000_000_123),
+            }]
+        );
+
+        let completed = translate_notification(&notification(
+            "item/completed",
+            json!({
+                "threadId": "thr_1", "turnId": "turn_1", "completedAtMs": 1_700_000_005_456_i64,
+                "item": { "id": "m1", "type": "agentMessage", "text": "done" }
+            }),
+        ));
+        assert_eq!(
+            completed,
+            vec![AgentEvent::AssistantMessage {
+                provider_item_id: "m1".to_owned(),
+                text: "done".to_owned(),
+                at_ms: Some(1_700_000_005_456),
             }]
         );
     }

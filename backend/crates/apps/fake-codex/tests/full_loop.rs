@@ -286,10 +286,23 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
         json!("item_1"),
         "the persisted message keeps the provider item id as its reconcile key"
     );
+    // The message time reached the persisted row: the item's `completedAtMs`
+    // envelope was carried onto the neutral event and folded into `created_at`
+    // as the canonical ISO-8601 UTC string (converted from `ENVELOPE_TS_MS`).
+    assert_eq!(
+        assistant["created_at"],
+        json!("2026-07-17T07:12:18.000Z"),
+        "the Codex item timestamp is persisted as an ISO-8601 created_at"
+    );
     // The user prompt persisted too, so the loop is a real conversation.
+    let user = messages
+        .iter()
+        .find(|m| m["role"] == json!("user"))
+        .expect("the user prompt was persisted as well");
     assert!(
-        messages.iter().any(|m| m["role"] == json!("user")),
-        "the user prompt was persisted as well"
+        user["created_at"].as_str().is_some_and(|s| !s.is_empty()),
+        "the persisted user prompt also carries a non-empty created_at, got {:?}",
+        user["created_at"]
     );
 }
 

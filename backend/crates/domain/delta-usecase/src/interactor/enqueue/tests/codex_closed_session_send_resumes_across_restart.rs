@@ -78,12 +78,14 @@ async fn codex_closed_session_send_resumes_across_restart() {
         .send(AgentEvent::UserPromptAccepted {
             provider_message_id: None,
             text: "first message".to_owned(),
+            at_ms: None,
         })
         .expect("the pump's stream is live");
     events
         .send(AgentEvent::AssistantMessage {
             provider_item_id: "a1".to_owned(),
             text: "reply one".to_owned(),
+            at_ms: None,
         })
         .expect("the pump's stream is live");
     events
@@ -170,12 +172,14 @@ async fn codex_closed_session_send_resumes_across_restart() {
         .send(AgentEvent::UserPromptAccepted {
             provider_message_id: None,
             text: "second message".to_owned(),
+            at_ms: None,
         })
         .expect("the reconnected pump's stream is live");
     events2
         .send(AgentEvent::AssistantMessage {
             provider_item_id: "a2".to_owned(),
             text: "reply two".to_owned(),
+            at_ms: None,
         })
         .expect("the reconnected pump's stream is live");
     events2

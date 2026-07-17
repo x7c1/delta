@@ -596,6 +596,7 @@ mod agent_event_mapping_tests {
             AgentEvent::UserPromptAccepted {
                 provider_message_id: None,
                 text: "hi".to_owned(),
+                at_ms: None,
             },
             AgentEvent::AssistantDelta {
                 provider_item_id: "item".to_owned(),
@@ -604,15 +605,18 @@ mod agent_event_mapping_tests {
             AgentEvent::AssistantMessage {
                 provider_item_id: "item".to_owned(),
                 text: "msg".to_owned(),
+                at_ms: None,
             },
             AgentEvent::ToolStarted {
                 provider_item_id: "item".to_owned(),
                 name: "tool".to_owned(),
                 input_json: json!({}),
+                at_ms: None,
             },
             AgentEvent::ToolCompleted {
                 provider_item_id: "item".to_owned(),
                 output_json: json!({}),
+                at_ms: None,
             },
             AgentEvent::PermissionRequested {
                 request: AgentPermissionRequest {

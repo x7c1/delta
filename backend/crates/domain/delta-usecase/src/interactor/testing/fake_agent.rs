@@ -240,6 +240,7 @@ impl AgentContentSource for FakeContentSource {
             AgentEvent::AssistantMessage {
                 provider_item_id,
                 text,
+                ..
             } => Some((
                 Role::Assistant,
                 text.clone(),

@@ -219,6 +219,7 @@ name = "codex-agent"
 version = "0.3.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "delta-model",
  "delta-usecase",
  "serde",
