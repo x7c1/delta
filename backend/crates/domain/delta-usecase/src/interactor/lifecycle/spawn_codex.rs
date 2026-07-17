@@ -25,9 +25,11 @@
 //! leaves the open/`dispatched` set immediately rather than lingering. Claude's
 //! FSM table is untouched.
 
-use delta_model::{AgentProvider, MessageUuid};
+use std::sync::Arc;
 
-use crate::agent::{LaunchRequest, SendRequest};
+use delta_model::{AgentProvider, MessageUuid, Send, ThreadId};
+
+use crate::agent::{AgentAdapter, AgentSessionHandle, LaunchRequest, SendRequest};
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::OpenAgentSession;
@@ -197,42 +199,14 @@ where
         );
 
         let first_send = match first_prompt {
-            Some(text) => {
-                // The send row names the real session + main thread, exactly
-                // like a Claude first send, so the REST response carries real
-                // ids. It is written `dispatched`; the `turn/start` ack below
-                // completes it.
-                let send = self
-                    .store
-                    .enqueue_send(&session_id, main_thread_id, None, &text, None)
-                    .await?;
-                let receipt = match adapter.send(&handle, SendRequest { text }).await {
-                    Ok(receipt) => receipt,
-                    Err(err) => {
-                        // The turn never started; drop the just-written send so
-                        // it does not linger in the open list.
-                        self.store.cancel_send(send.id).await?;
-                        return Err(err);
-                    }
-                };
-                // Track the turn ExternalPrompt-style (send_id: None): the FSM
-                // never references this send id, so `TurnCompleted → Stop`
-                // cannot cancel it. See the module docs.
-                self.apply_turn_input(crate::turn::TurnInput::ExternalPrompt)
-                    .await?;
-                // Complete the send row at the `turn/start` acknowledgement, not
-                // by echo: mark it matched to the provider's turn id (falling
-                // back to the thread id when the ack carried no turn id), so it
-                // leaves the open/`dispatched` set immediately.
-                let matched = receipt
-                    .provider_message_id
-                    .filter(|id| !id.is_empty())
-                    .unwrap_or_else(|| handle.provider_session_id.clone());
-                self.store
-                    .mark_send_matched(send.id, &MessageUuid::from(matched))
-                    .await?;
-                Some(send)
-            }
+            // The opening turn is dispatched exactly like every subsequent
+            // Codex turn (see [`Self::dispatch_agent_turn`]): the send row names
+            // the real session + main thread so the REST response carries real
+            // ids, and it is completed at the `turn/start` acknowledgement.
+            Some(text) => Some(
+                self.dispatch_agent_turn(&adapter, &handle, main_thread_id, text)
+                    .await?,
+            ),
             None => None,
         };
 
@@ -246,6 +220,60 @@ where
             token: None,
             first_send,
         })
+    }
+
+    /// Dispatch one turn to a terminal-less agent (Codex) over its bound
+    /// adapter, writing and completing the `send` row the same way the opening
+    /// turn does.
+    ///
+    /// This is the single Codex turn-dispatch path, shared by the opening turn
+    /// ([`Self::spawn_codex`]) and every subsequent send (`enqueue_to_thread`):
+    ///
+    /// 1. Write the `send` row against `thread_id`, `dispatched` (a Codex turn
+    ///    has no branch or locator quote in this slice, so both are `None`).
+    /// 2. `adapter.send` starts the turn synchronously; on error, cancel the
+    ///    just-written row so it does not linger in the open list, then
+    ///    propagate — the same rollback the opening turn used.
+    /// 3. Track the turn **`ExternalPrompt`-style** (`send_id: None`): the FSM
+    ///    never references this send id, so a later `TurnCompleted → Stop`
+    ///    transitions to `Idle` without cancelling the successful send. See the
+    ///    module docs for why Codex does not use Claude's echo correlation.
+    /// 4. Complete the `send` row at the `turn/start` acknowledgement, not by
+    ///    echo: mark it matched to the provider's turn id (falling back to the
+    ///    provider session id when the ack carried none), so it leaves the
+    ///    open/`dispatched` set immediately.
+    ///
+    /// The turn's assistant frames arrive asynchronously through the event pump
+    /// spawned once at session creation — this returns as soon as the turn has
+    /// started, exactly like the opening turn.
+    pub(in crate::interactor) async fn dispatch_agent_turn(
+        &mut self,
+        adapter: &Arc<dyn AgentAdapter>,
+        handle: &AgentSessionHandle,
+        thread_id: ThreadId,
+        text: String,
+    ) -> Result<Send> {
+        let send = self
+            .store
+            .enqueue_send(self.id, thread_id, None, &text, None)
+            .await?;
+        let receipt = match adapter.send(handle, SendRequest { text }).await {
+            Ok(receipt) => receipt,
+            Err(err) => {
+                self.store.cancel_send(send.id).await?;
+                return Err(err);
+            }
+        };
+        self.apply_turn_input(crate::turn::TurnInput::ExternalPrompt)
+            .await?;
+        let matched = receipt
+            .provider_message_id
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| handle.provider_session_id.clone());
+        self.store
+            .mark_send_matched(send.id, &MessageUuid::from(matched))
+            .await?;
+        Ok(send)
     }
 
     /// Roll back the eagerly-inserted Codex session row after a connect/launch
