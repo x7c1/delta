@@ -340,6 +340,20 @@ describe('SessionNode branch display', () => {
   });
 });
 
+describe('SessionNode card styling', () => {
+  it('applies no color transition to the card, so the hover highlight is instant', () => {
+    // Hover feedback is a "respond now" affordance: a `transition-colors` on
+    // the card would animate the hover-in/out border change over Tailwind's
+    // default 150 ms, making the highlight visibly lag the cursor (most
+    // noticeable on WebKitGTK). The card must carry no color transition so the
+    // hover and focused-state border/background changes apply immediately.
+    renderNode({});
+
+    const card = screen.getByTestId('session-card');
+    expect(card.className).not.toContain('transition-colors');
+  });
+});
+
 describe('SessionNode kebab menu', () => {
   // jsdom does not implement `navigator.clipboard`, so install a stub holding a
   // `vi.fn()` writeText. `configurable: true` lets afterAll restore the original

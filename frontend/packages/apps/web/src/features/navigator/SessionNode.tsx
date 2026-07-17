@@ -276,7 +276,7 @@ export const SessionNode = memo(function SessionNode({
       <div
         data-testid="session-card"
         className={cn(
-          'rounded-md border bg-surface shadow-[shadow:var(--delta-card-shadow)] transition-colors',
+          'rounded-md border bg-surface shadow-[shadow:var(--delta-card-shadow)]',
           isFocused
             ? 'border-accent-disabled bg-accent/10 ring-1 ring-accent-disabled'
             : 'border-border-default hover:border-border-strong',
