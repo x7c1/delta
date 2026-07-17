@@ -42,9 +42,15 @@ impl AgentAdapterFactory for CodexAdapterFactory {
 
     async fn connect(&self) -> UsecaseResult<Arc<dyn AgentAdapter>> {
         let conn = Arc::new(AppServerConnection::spawn(&self.config).map_err(to_usecase_err)?);
-        conn.initialize(json!({ "clientInfo": { "name": "delta" } }))
-            .await
-            .map_err(to_usecase_err)?;
+        // `ClientInfo` requires BOTH `name` and `version` (see the vendored
+        // schema); the real `codex app-server` rejects an `initialize` missing
+        // `version` with `[-32600] Invalid request: missing field 'version'`.
+        // The client version reported to Codex is Delta's own crate version.
+        conn.initialize(json!({
+            "clientInfo": { "name": "delta", "version": env!("CARGO_PKG_VERSION") }
+        }))
+        .await
+        .map_err(to_usecase_err)?;
         Ok(Arc::new(CodexAppServerAdapter::new(conn)))
     }
 }

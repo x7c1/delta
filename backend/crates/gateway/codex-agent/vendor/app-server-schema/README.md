@@ -21,6 +21,14 @@ constant and re-vendor these files in the same change.
 Regenerating is offline and needs no auth or network — the generator is a static
 dump of the compiled-in schema.
 
+Drift is guarded by the `#[ignore]` canary
+`vendored_schema_matches_the_real_generator` in
+`codex-agent/tests/real_codex_canary.rs` (run via `make e2e-real-codex`): it
+regenerates the schema with the installed `codex` and fails loudly if the
+generator's output — the definition sets and the definitions Delta reconciled
+against — diverges from these vendored files or from the pinned version. A
+failure is the signal to re-vendor and bump the constant.
+
 ## v1 vs v2 — why v2 is the base, plus the top-level server-request registry
 
 The generator emits two protocol versions:
