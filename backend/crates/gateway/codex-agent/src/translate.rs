@@ -24,12 +24,24 @@
 //! approvals, and anything a newer server adds — is surfaced as
 //! [`ServerRequestKind::Unsupported`] so the adapter can answer it and never hang.
 //!
-//! **Still inferred, not yet reconciled (R3):** the `item.itemType` vocabulary
-//! (`agent_message` vs. tool items) and the rich item-content notifications
-//! (`item/agentMessage/delta`, `item/reasoning/*`, …). The translation is
-//! deliberately lenient — an unknown notification maps to nothing rather than
-//! erroring, and an unknown item type is treated as a tool — so those later
-//! corrections stay localised to this file and the `wire` module.
+//! **Item content (R3, reconciled):** item shapes and the rich item-content
+//! notifications are now reconciled against the vendored v2 schema, replacing the
+//! earlier infer-itemType / unknown-is-tool heuristic with an explicit match on
+//! the real `item.type` vocabulary (`ThreadItem` oneOf: `agentMessage`,
+//! `commandExecution`, `fileChange`, `userMessage`, `reasoning`, …) and the real
+//! streaming-delta method names (`ServerNotification`: `item/agentMessage/delta`,
+//! `item/reasoning/*`, `item/commandExecution/outputDelta`, …). The translation
+//! stays deliberately lenient in one direction only — an item type or delta
+//! method this build does not model maps to *nothing* (a safe skip), never an
+//! error and never a mis-filed tool call.
+//!
+//! Reasoning has no faithful neutral home: [`AgentEvent`] carries no
+//! thinking-bearing variant, and inventing one is out of scope for this slice (a
+//! stop signal). Mapping a `reasoning` item to an `AssistantMessage` would
+//! misrepresent the model's internal reasoning as its reply text, so v1 **drops**
+//! reasoning items and every `item/reasoning/*` delta from the translated stream
+//! rather than corrupt the conversation. This matches the content accumulator's
+//! existing contract that `Thinking` blocks are not produced for Codex.
 
 use serde_json::Value;
 
@@ -37,11 +49,28 @@ use delta_usecase::{AgentEvent, AgentPermissionRequest, TurnStatus};
 
 use crate::wire::{Notification, ServerRequest};
 
-/// The item type (`item.itemType`) that carries an assistant message. Every
-/// other item type is treated as a tool call. Matched case- and
-/// separator-insensitively so both `agent_message` (the fake's shape) and a
-/// real server's `agentMessage` resolve to the same thing.
-const AGENT_MESSAGE_ITEM_TYPE: &str = "agentmessage";
+/// The `item.type` (see the vendored `ThreadItem` oneOf) that carries an
+/// assistant message: `AgentMessageThreadItem`, whose `text` is the reply and
+/// `id` the provider item id.
+const AGENT_MESSAGE_ITEM_TYPE: &str = "agentMessage";
+/// The `item.type` for a shell command execution (`CommandExecutionThreadItem`):
+/// a tool call carrying `command` / `cwd` / `status` / `aggregatedOutput` /
+/// `exitCode`.
+const COMMAND_EXECUTION_ITEM_TYPE: &str = "commandExecution";
+/// The `item.type` for a file change (`FileChangeThreadItem`): a tool call
+/// carrying `changes` / `status`.
+const FILE_CHANGE_ITEM_TYPE: &str = "fileChange";
+/// The `item.type` for the echoed user prompt (`UserMessageThreadItem`). The
+/// visible prompt is already surfaced as [`AgentEvent::UserPromptAccepted`] at
+/// send time, so this item is dropped to avoid double-emitting it.
+const USER_MESSAGE_ITEM_TYPE: &str = "userMessage";
+/// The `item.type` for the model's reasoning (`ReasoningThreadItem`). Dropped —
+/// see the module docs for why it has no faithful neutral mapping.
+const REASONING_ITEM_TYPE: &str = "reasoning";
+
+/// The streaming-delta method (`AgentMessageDeltaNotification`) that carries a
+/// fragment of an assistant message, under `params.itemId` / `params.delta`.
+const METHOD_AGENT_MESSAGE_DELTA: &str = "item/agentMessage/delta";
 
 /// The server → client approval request for a command execution (a `turn/start`
 /// turn). Response is a binary `{decision}`, so Delta models it.
@@ -85,8 +114,35 @@ pub fn translate_notification(n: &Notification) -> Vec<AgentEvent> {
         }],
         "item/started" => item_event(item_of(&n.params), true),
         "item/completed" => item_event(item_of(&n.params), false),
+        METHOD_AGENT_MESSAGE_DELTA => agent_message_delta(&n.params),
+        // Streaming deltas Delta does not model as neutral events are dropped
+        // (they still arrive faithfully but project to nothing): reasoning has no
+        // neutral variant (see the module docs), and plan / command-output / MCP
+        // progress have no neutral streaming counterpart. Listed explicitly so
+        // the intent is a documented skip, not an accidental fall-through.
+        "item/reasoning/textDelta"
+        | "item/reasoning/summaryTextDelta"
+        | "item/reasoning/summaryPartAdded"
+        | "item/plan/delta"
+        | "item/commandExecution/outputDelta"
+        | "item/mcpToolCall/progress" => Vec::new(),
         _ => Vec::new(),
     }
+}
+
+/// Project an `item/agentMessage/delta` notification into a streaming
+/// [`AgentEvent::AssistantDelta`]. The real params carry the fragment under
+/// `delta` and the item it extends under `itemId` (see
+/// `AgentMessageDeltaNotification`). An empty fragment yields nothing.
+fn agent_message_delta(params: &Value) -> Vec<AgentEvent> {
+    let text = string_field(params, "delta").unwrap_or_default();
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![AgentEvent::AssistantDelta {
+        provider_item_id: string_field(params, "itemId").unwrap_or_default(),
+        text,
+    }]
 }
 
 /// The id of the turn a `turn/started` notification announces — the id
@@ -172,76 +228,82 @@ fn item_of(params: &Value) -> Option<&Value> {
     params.get("item")
 }
 
-/// Project an `item/started` or `item/completed` into its neutral event(s).
+/// Project an `item/started` or `item/completed` into its neutral event(s) by an
+/// explicit match on the real `item.type` (see the vendored `ThreadItem` oneOf):
 ///
-/// An assistant-message item becomes an [`AgentEvent::AssistantDelta`] while it
-/// is streaming (a non-empty `started` fragment) and an
-/// [`AgentEvent::AssistantMessage`] once completed. Every other item type is a
-/// tool call: [`AgentEvent::ToolStarted`] then [`AgentEvent::ToolCompleted`].
+/// - `agentMessage` → [`AgentEvent::AssistantDelta`] while streaming (a
+///   non-empty `started` fragment) and [`AgentEvent::AssistantMessage`] once
+///   completed;
+/// - `commandExecution` / `fileChange` → [`AgentEvent::ToolStarted`] then
+///   [`AgentEvent::ToolCompleted`], the full item (its real `command` / `cwd` /
+///   `status` / `aggregatedOutput` / `exitCode` fields) riding the JSON payload;
+/// - `userMessage` → nothing (the visible prompt is already surfaced as
+///   [`AgentEvent::UserPromptAccepted`] at send time; re-emitting the echoed item
+///   would duplicate it);
+/// - `reasoning` → nothing (no faithful neutral mapping — see the module docs);
+/// - any other type → nothing (a safe skip, never a mis-filed tool call).
 fn item_event(item: Option<&Value>, started: bool) -> Vec<AgentEvent> {
     let Some(item) = item else {
         return Vec::new();
     };
     let provider_item_id = string_field(item, "id").unwrap_or_default();
-    if is_agent_message(item) {
-        let text = string_field(item, "text").unwrap_or_default();
-        if started {
-            // A started assistant item with no text yet is just "the assistant
-            // is about to speak" — nothing to show, so emit nothing rather than
-            // an empty delta.
-            if text.is_empty() {
-                Vec::new()
-            } else {
-                vec![AgentEvent::AssistantDelta {
-                    provider_item_id,
-                    text,
-                }]
-            }
+    match string_field(item, "type").unwrap_or_default().as_str() {
+        AGENT_MESSAGE_ITEM_TYPE => agent_message_event(item, provider_item_id, started),
+        COMMAND_EXECUTION_ITEM_TYPE => {
+            tool_event(item, provider_item_id, COMMAND_EXECUTION_TOOL_NAME, started)
+        }
+        FILE_CHANGE_ITEM_TYPE => tool_event(item, provider_item_id, FILE_CHANGE_TOOL_NAME, started),
+        USER_MESSAGE_ITEM_TYPE | REASONING_ITEM_TYPE => Vec::new(),
+        _ => Vec::new(),
+    }
+}
+
+/// Project an `agentMessage` item: a streaming [`AgentEvent::AssistantDelta`]
+/// while it is still open (a non-empty `started` fragment) and the completed
+/// [`AgentEvent::AssistantMessage`] once done. A started item with no text yet is
+/// just "the assistant is about to speak" — nothing to show — so it emits
+/// nothing rather than an empty delta.
+fn agent_message_event(item: &Value, provider_item_id: String, started: bool) -> Vec<AgentEvent> {
+    let text = string_field(item, "text").unwrap_or_default();
+    if started {
+        if text.is_empty() {
+            Vec::new()
         } else {
-            vec![AgentEvent::AssistantMessage {
+            vec![AgentEvent::AssistantDelta {
                 provider_item_id,
                 text,
             }]
         }
-    } else if started {
-        vec![AgentEvent::ToolStarted {
-            provider_item_id,
-            name: tool_name(item),
-            input_json: item.get("input").cloned().unwrap_or_else(|| item.clone()),
-        }]
     } else {
-        vec![AgentEvent::ToolCompleted {
+        vec![AgentEvent::AssistantMessage {
             provider_item_id,
-            output_json: item.get("output").cloned().unwrap_or_else(|| item.clone()),
+            text,
         }]
     }
 }
 
-/// Whether an item is an assistant message (as opposed to a tool call).
-fn is_agent_message(item: &Value) -> bool {
-    string_field(item, "itemType")
-        .map(|t| normalise_item_type(&t) == AGENT_MESSAGE_ITEM_TYPE)
-        .unwrap_or(false)
-}
-
-/// The tool name for a tool item: its explicit `toolName`/`name` when present,
-/// otherwise the raw `itemType` (so a `command_execution` item at least names
-/// its kind).
-fn tool_name(item: &Value) -> String {
-    string_field(item, "toolName")
-        .or_else(|| string_field(item, "name"))
-        .or_else(|| string_field(item, "itemType"))
-        .unwrap_or_default()
-}
-
-/// Lowercase and drop `_`/`-` so `agent_message`, `agentMessage`, and
-/// `agent-message` compare equal.
-fn normalise_item_type(item_type: &str) -> String {
-    item_type
-        .chars()
-        .filter(|c| *c != '_' && *c != '-')
-        .flat_map(char::to_lowercase)
-        .collect()
+/// Project a tool item (`commandExecution` / `fileChange`) into its start/finish
+/// events. `name` is the tool's stable *kind* label (the item type has no
+/// separate tool-name field); the full item — carrying every real field, so
+/// nothing is lost — rides the input (on start) / output (on finish) JSON.
+fn tool_event(
+    item: &Value,
+    provider_item_id: String,
+    name: &str,
+    started: bool,
+) -> Vec<AgentEvent> {
+    if started {
+        vec![AgentEvent::ToolStarted {
+            provider_item_id,
+            name: name.to_owned(),
+            input_json: item.clone(),
+        }]
+    } else {
+        vec![AgentEvent::ToolCompleted {
+            provider_item_id,
+            output_json: item.clone(),
+        }]
+    }
 }
 
 /// The turn id a `turn/*` notification carries under `params.turn.id`. Both
@@ -379,9 +441,11 @@ mod tests {
 
     #[test]
     fn agent_message_completed_is_an_assistant_message() {
+        // The real `AgentMessageThreadItem` shape: `type: "agentMessage"`, the
+        // reply under `text`, keyed by `id`.
         let events = translate_notification(&notification(
             "item/completed",
-            json!({ "item": { "id": "item_1", "itemType": "agent_message", "text": "hi" } }),
+            json!({ "item": { "id": "item_1", "type": "agentMessage", "text": "hi", "phase": "final_answer" } }),
         ));
         assert_eq!(
             events,
@@ -396,7 +460,7 @@ mod tests {
     fn agent_message_started_with_text_is_a_delta_and_empty_is_nothing() {
         let with_text = translate_notification(&notification(
             "item/started",
-            json!({ "item": { "id": "i1", "itemType": "agentMessage", "text": "partial" } }),
+            json!({ "item": { "id": "i1", "type": "agentMessage", "text": "partial" } }),
         ));
         assert_eq!(
             with_text,
@@ -406,39 +470,184 @@ mod tests {
             }]
         );
 
+        // A started `agentMessage` announcing the item before any text (the real
+        // server streams the body via `item/agentMessage/delta`) emits nothing.
         let empty = translate_notification(&notification(
             "item/started",
-            json!({ "item": { "id": "i1", "itemType": "agent_message" } }),
+            json!({ "item": { "id": "i1", "type": "agentMessage" } }),
         ));
         assert!(empty.is_empty(), "an empty started message emits nothing");
     }
 
     #[test]
-    fn a_non_message_item_is_a_tool_call() {
+    fn an_agent_message_delta_notification_is_an_assistant_delta() {
+        // The real `AgentMessageDeltaNotification`: the fragment under `delta`,
+        // the item it extends under `itemId`.
+        let events = translate_notification(&notification(
+            "item/agentMessage/delta",
+            json!({ "threadId": "thr_1", "turnId": "turn_1", "itemId": "i1", "delta": "chunk" }),
+        ));
+        assert_eq!(
+            events,
+            vec![AgentEvent::AssistantDelta {
+                provider_item_id: "i1".to_owned(),
+                text: "chunk".to_owned(),
+            }]
+        );
+        // An empty delta emits nothing.
+        assert!(translate_notification(&notification(
+            "item/agentMessage/delta",
+            json!({ "itemId": "i1", "delta": "" })
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn a_command_execution_item_is_a_tool_call_carrying_its_real_fields() {
+        // The real `CommandExecutionThreadItem` shape.
         let started = translate_notification(&notification(
             "item/started",
-            json!({ "item": { "id": "t1", "itemType": "command_execution", "input": { "command": "ls" } } }),
+            json!({ "item": {
+                "id": "t1", "type": "commandExecution",
+                "command": "ls", "cwd": "/tmp", "status": "inProgress", "commandActions": []
+            } }),
         ));
         assert_eq!(
             started,
             vec![AgentEvent::ToolStarted {
                 provider_item_id: "t1".to_owned(),
                 name: "command_execution".to_owned(),
-                input_json: json!({ "command": "ls" }),
-            }]
+                input_json: json!({
+                    "id": "t1", "type": "commandExecution",
+                    "command": "ls", "cwd": "/tmp", "status": "inProgress", "commandActions": []
+                }),
+            }],
+            "the whole item rides input_json so every real field is preserved"
         );
 
         let completed = translate_notification(&notification(
             "item/completed",
-            json!({ "item": { "id": "t1", "itemType": "command_execution", "output": { "exitCode": 0 } } }),
+            json!({ "item": {
+                "id": "t1", "type": "commandExecution",
+                "command": "ls", "cwd": "/tmp", "status": "completed",
+                "commandActions": [], "aggregatedOutput": "a\nb", "exitCode": 0, "durationMs": 5
+            } }),
+        ));
+        match &completed[..] {
+            [AgentEvent::ToolCompleted {
+                provider_item_id,
+                output_json,
+            }] => {
+                assert_eq!(provider_item_id, "t1");
+                assert_eq!(output_json["exitCode"], 0);
+                assert_eq!(output_json["aggregatedOutput"], "a\nb");
+                assert_eq!(output_json["status"], "completed");
+            }
+            other => panic!("expected one ToolCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_file_change_item_is_a_tool_call() {
+        // The real `FileChangeThreadItem` shape.
+        let started = translate_notification(&notification(
+            "item/started",
+            json!({ "item": {
+                "id": "fc1", "type": "fileChange", "status": "inProgress",
+                "changes": [{ "path": "/x", "kind": "add" }]
+            } }),
         ));
         assert_eq!(
-            completed,
-            vec![AgentEvent::ToolCompleted {
-                provider_item_id: "t1".to_owned(),
-                output_json: json!({ "exitCode": 0 }),
+            started,
+            vec![AgentEvent::ToolStarted {
+                provider_item_id: "fc1".to_owned(),
+                name: "file_change".to_owned(),
+                input_json: json!({
+                    "id": "fc1", "type": "fileChange", "status": "inProgress",
+                    "changes": [{ "path": "/x", "kind": "add" }]
+                }),
             }]
         );
+    }
+
+    #[test]
+    fn a_user_message_item_is_dropped_to_avoid_double_emitting_the_prompt() {
+        // The prompt is already surfaced as `UserPromptAccepted` at send time, so
+        // the echoed `UserMessageThreadItem` must not re-emit it.
+        assert!(translate_notification(&notification(
+            "item/started",
+            json!({ "item": { "id": "u1", "type": "userMessage", "content": [{ "type": "text", "text": "hi" }] } })
+        ))
+        .is_empty());
+        assert!(translate_notification(&notification(
+            "item/completed",
+            json!({ "item": { "id": "u1", "type": "userMessage", "content": [{ "type": "text", "text": "hi" }] } })
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn a_reasoning_item_and_its_deltas_are_dropped_not_misfiled() {
+        // Reasoning has no faithful neutral mapping (no thinking-bearing
+        // AgentEvent variant), so it is dropped — never a crash, never a tool.
+        assert!(translate_notification(&notification(
+            "item/started",
+            json!({ "item": { "id": "r1", "type": "reasoning", "summary": [], "content": [] } })
+        ))
+        .is_empty());
+        assert!(translate_notification(&notification(
+            "item/completed",
+            json!({ "item": { "id": "r1", "type": "reasoning", "summary": ["s"], "content": ["c"] } })
+        ))
+        .is_empty());
+        for method in [
+            "item/reasoning/textDelta",
+            "item/reasoning/summaryTextDelta",
+            "item/reasoning/summaryPartAdded",
+        ] {
+            assert!(
+                translate_notification(&notification(
+                    method,
+                    json!({ "itemId": "r1", "delta": "thinking", "contentIndex": 0 })
+                ))
+                .is_empty(),
+                "{method} must be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_item_type_is_skipped_not_treated_as_a_tool() {
+        // A type this build does not model (e.g. `mcpToolCall`, `plan`) is a safe
+        // skip — never mis-filed as a tool call, never a panic.
+        for item_type in ["mcpToolCall", "plan", "webSearch", "somethingBrandNew"] {
+            let started = translate_notification(&notification(
+                "item/started",
+                json!({ "item": { "id": "x1", "type": item_type, "status": "inProgress" } }),
+            ));
+            assert!(
+                started.is_empty(),
+                "an unknown item type `{item_type}` must not become a tool: {started:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unmodeled_item_deltas_are_dropped() {
+        for method in [
+            "item/plan/delta",
+            "item/commandExecution/outputDelta",
+            "item/mcpToolCall/progress",
+        ] {
+            assert!(
+                translate_notification(&notification(
+                    method,
+                    json!({ "itemId": "x", "delta": "y" })
+                ))
+                .is_empty(),
+                "{method} must be dropped"
+            );
+        }
     }
 
     #[test]

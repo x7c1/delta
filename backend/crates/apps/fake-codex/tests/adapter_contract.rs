@@ -137,9 +137,10 @@ fn turn_scenario(extra_emit: &str) -> String {
                 "turn_id": "turn_contract",
                 "emit": [
                     {{ "type": "turn_started" }},
-                    {{ "type": "item_started", "item": {{ "id": "m1", "itemType": "agent_message" }} }},
+                    {{ "type": "item_started", "item": {{ "id": "m1", "type": "agentMessage" }} }},
+                    {{ "type": "agent_message_delta", "item_id": "m1", "delta": "scripted reply" }},
                     {extra_emit}
-                    {{ "type": "item_completed", "item": {{ "id": "m1", "itemType": "agent_message", "text": "scripted reply" }} }},
+                    {{ "type": "item_completed", "item": {{ "id": "m1", "type": "agentMessage", "text": "scripted reply" }} }},
                     {{ "type": "turn_completed", "status": "completed" }}
                 ]
             }}
@@ -299,8 +300,8 @@ async fn tool_items_translate_to_tool_events() {
             "turn_id": "turn_tool",
             "emit": [
                 { "type": "turn_started" },
-                { "type": "item_started", "item": { "id": "t1", "itemType": "command_execution", "input": { "command": "ls" } } },
-                { "type": "item_completed", "item": { "id": "t1", "itemType": "command_execution", "output": { "exitCode": 0 } } },
+                { "type": "item_started", "item": { "id": "t1", "type": "commandExecution", "command": "ls", "cwd": "/tmp", "status": "inProgress", "commandActions": [] } },
+                { "type": "item_completed", "item": { "id": "t1", "type": "commandExecution", "command": "ls", "cwd": "/tmp", "status": "completed", "commandActions": [], "aggregatedOutput": "a\nb", "exitCode": 0 } },
                 { "type": "turn_completed", "status": "completed" }
             ]
         }

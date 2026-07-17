@@ -66,9 +66,10 @@ async fn handshake_and_thread_start_round_trip_against_the_fake_binary() {
     assert_eq!(turn["turn"]["id"], "turn_fake_0001");
 
     let mut methods = Vec::new();
-    // The default turn emits: turn/started, item/started, item/completed,
-    // turn/completed — four thread-scoped notifications.
-    for _ in 0..4 {
+    // The default turn emits: turn/started, item/started, the streaming
+    // item/agentMessage/delta, item/completed, turn/completed — five
+    // thread-scoped notifications.
+    for _ in 0..5 {
         match recv(&mut started.events).await {
             ThreadEvent::Notification(n) => {
                 assert_eq!(
@@ -85,6 +86,7 @@ async fn handshake_and_thread_start_round_trip_against_the_fake_binary() {
         vec![
             "turn/started".to_owned(),
             "item/started".to_owned(),
+            "item/agentMessage/delta".to_owned(),
             "item/completed".to_owned(),
             "turn/completed".to_owned(),
         ]
@@ -105,9 +107,9 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
                 "turn_id": "turn_script",
                 "emit": [
                     { "type": "turn_started" },
-                    { "type": "item_started", "item": { "id": "i1", "itemType": "command_execution" } },
+                    { "type": "item_started", "item": { "id": "i1", "type": "commandExecution", "command": "date", "cwd": "/tmp", "status": "inProgress", "commandActions": [] } },
                     { "type": "request_approval", "params": { "itemId": "i1", "command": "date", "cwd": "/tmp" } },
-                    { "type": "item_completed", "item": { "id": "i1" } },
+                    { "type": "item_completed", "item": { "id": "i1", "type": "commandExecution", "command": "date", "cwd": "/tmp", "status": "completed", "commandActions": [], "exitCode": 0 } },
                     { "type": "turn_completed", "status": "completed" }
                 ]
             }

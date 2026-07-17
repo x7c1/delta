@@ -309,18 +309,27 @@ fn text_block(text: &str) -> ContentBlock {
     }
 }
 
-/// Best-effort read of whether a tool's output frame reports an error.
+/// Whether a tool item's completed frame reports an error.
 ///
-/// **Provisional / inferred:** the real `codex app-server` tool-output shape is
-/// not yet vendored (that is C4), so this recognises the shapes the fake and the
-/// obvious conventions use — an explicit `is_error` / `error`, or a non-zero
-/// `exitCode` — and defaults to `false` (success). It is deliberately localised
-/// so a schema correction stays here.
+/// Reconciled (R3) against the vendored tool-item shapes: a `commandExecution` /
+/// `fileChange` item carries a terminal `status` (`CommandExecutionStatus` /
+/// `PatchApplyStatus`, one of `inProgress` / `completed` / `failed` /
+/// `declined`), and a command additionally an `exitCode`. A `failed` / `declined`
+/// status, a non-zero `exitCode`, or an explicit `is_error` / non-null `error`
+/// (kept for any provider convention that uses them) all mark an error;
+/// everything else defaults to `false` (success). Localised here so any later
+/// schema correction stays in one place.
 fn is_error_output(output: &Value) -> bool {
     if output.get("is_error").and_then(Value::as_bool) == Some(true) {
         return true;
     }
     if output.get("error").is_some_and(|e| !e.is_null()) {
+        return true;
+    }
+    if matches!(
+        output.get("status").and_then(Value::as_str),
+        Some("failed") | Some("declined")
+    ) {
         return true;
     }
     match output.get("exitCode").and_then(Value::as_i64) {
@@ -448,6 +457,37 @@ mod tests {
                 is_error: true,
             }]
         );
+    }
+
+    #[test]
+    fn a_tool_status_marks_the_result_error_state() {
+        // The real command/file-change item carries a terminal `status`; a
+        // `failed` / `declined` completion is an error even with no `exitCode`.
+        let mut src = source();
+        let msgs = src.ingest(&AgentEvent::ToolCompleted {
+            provider_item_id: "fc1".to_owned(),
+            output_json: json!({ "type": "fileChange", "status": "declined", "changes": [] }),
+        });
+        assert_eq!(
+            msgs[0].content,
+            vec![ContentBlock::ToolResult {
+                tool_use_id: "fc1".to_owned(),
+                content: json!({ "type": "fileChange", "status": "declined", "changes": [] }),
+                is_error: true,
+            }]
+        );
+        // A `completed` status with a zero exit code is a success.
+        let ok = src.ingest(&AgentEvent::ToolCompleted {
+            provider_item_id: "c1".to_owned(),
+            output_json: json!({ "type": "commandExecution", "status": "completed", "exitCode": 0 }),
+        });
+        assert!(matches!(
+            &ok[0].content[0],
+            ContentBlock::ToolResult {
+                is_error: false,
+                ..
+            }
+        ));
     }
 
     #[test]
