@@ -280,6 +280,10 @@ impl From<&AgentEvent> for GoldenEvent {
             AgentEvent::UserPromptAccepted {
                 provider_message_id,
                 text,
+                // Claude leaves the neutral `at_ms` unset (its `created_at` comes
+                // from the transcript fold), so it stays out of the golden shape
+                // and the projection remains byte-identical.
+                at_ms: _,
             } => GoldenEvent::UserPromptAccepted {
                 provider_message_id: provider_message_id.clone(),
                 text: text.clone(),
@@ -294,6 +298,7 @@ impl From<&AgentEvent> for GoldenEvent {
             AgentEvent::AssistantMessage {
                 provider_item_id,
                 text,
+                at_ms: _,
             } => GoldenEvent::AssistantMessage {
                 provider_item_id: provider_item_id.clone(),
                 text: text.clone(),
@@ -302,6 +307,7 @@ impl From<&AgentEvent> for GoldenEvent {
                 provider_item_id,
                 name,
                 input_json,
+                at_ms: _,
             } => GoldenEvent::ToolStarted {
                 provider_item_id: provider_item_id.clone(),
                 name: name.clone(),
@@ -310,6 +316,7 @@ impl From<&AgentEvent> for GoldenEvent {
             AgentEvent::ToolCompleted {
                 provider_item_id,
                 output_json,
+                at_ms: _,
             } => GoldenEvent::ToolCompleted {
                 provider_item_id: provider_item_id.clone(),
                 output_json: output_json.clone(),

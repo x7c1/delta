@@ -60,6 +60,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
+use chrono::Utc;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
@@ -249,6 +250,10 @@ impl CodexAppServerAdapter {
             AgentEvent::UserPromptAccepted {
                 provider_message_id: None,
                 text: text.clone(),
+                // The prompt is accepted client-side here, before `turn/start`
+                // is issued, so its message time is this send instant — the
+                // Codex server exposes no separate accepted-at for it.
+                at_ms: Some(Utc::now().timestamp_millis()),
             },
         );
         let params = json!({

@@ -58,6 +58,9 @@ use serde_json::Value;
 struct PendingTool {
     name: String,
     input: Value,
+    /// The `ToolStarted`'s `at_ms` (the item's `startedAtMs`), used as the
+    /// message time if the call is flushed without a completion frame.
+    at_ms: Option<i64>,
 }
 
 /// Accumulates the content-bearing subset of a Codex session's neutral
@@ -118,13 +121,14 @@ impl CodexConversationSource {
     /// - Streaming deltas and every control-only event → nothing.
     pub fn ingest(&mut self, event: &AgentEvent) -> Vec<Message> {
         match event {
-            AgentEvent::UserPromptAccepted { text, .. } => {
+            AgentEvent::UserPromptAccepted { text, at_ms, .. } => {
                 let uuid = self.user_prompt_uuid();
-                vec![self.build(uuid, Role::User, vec![text_block(text)], None)]
+                vec![self.build(uuid, Role::User, vec![text_block(text)], None, *at_ms)]
             }
             AgentEvent::AssistantMessage {
                 provider_item_id,
                 text,
+                at_ms,
             } => {
                 let uuid = item_uuid(provider_item_id);
                 vec![self.build(
@@ -132,18 +136,21 @@ impl CodexConversationSource {
                     Role::Assistant,
                     vec![text_block(text)],
                     Some(provider_item_id.clone()),
+                    *at_ms,
                 )]
             }
             AgentEvent::ToolStarted {
                 provider_item_id,
                 name,
                 input_json,
+                at_ms,
             } => {
                 self.pending_tools.insert(
                     provider_item_id.clone(),
                     PendingTool {
                         name: name.clone(),
                         input: input_json.clone(),
+                        at_ms: *at_ms,
                     },
                 );
                 Vec::new()
@@ -151,6 +158,7 @@ impl CodexConversationSource {
             AgentEvent::ToolCompleted {
                 provider_item_id,
                 output_json,
+                at_ms,
             } => {
                 let mut blocks = Vec::new();
                 if let Some(started) = self.pending_tools.remove(provider_item_id) {
@@ -171,6 +179,7 @@ impl CodexConversationSource {
                     Role::Assistant,
                     blocks,
                     Some(provider_item_id.clone()),
+                    *at_ms,
                 )]
             }
             AgentEvent::TurnStarted { provider_turn_id } => {
@@ -206,19 +215,27 @@ impl CodexConversationSource {
                 input: started.input,
             };
             let uuid = item_uuid(&id);
-            out.push(self.build(uuid, Role::Assistant, vec![block], Some(id)));
+            out.push(self.build(uuid, Role::Assistant, vec![block], Some(id), started.at_ms));
         }
         out
     }
 
     /// Assemble a canonical message, minting the next `seq` and degrading every
     /// provider fact Codex does not expose to `None`.
+    ///
+    /// `at_ms` is the item's lifecycle timestamp in epoch milliseconds (the
+    /// `startedAtMs` / `completedAtMs` the translation carried onto the event),
+    /// converted here to the canonical ISO-8601 UTC `created_at` string. It stays
+    /// `None` when the provider exposed no time, so `created_at` degrades rather
+    /// than being invented. `model` / `git_branch` / `cwd` remain unconditionally
+    /// `None` — those provider facts are a separate follow-up.
     fn build(
         &mut self,
         uuid: MessageUuid,
         role: Role,
         content: Vec<ContentBlock>,
         provider_item_id: Option<String>,
+        at_ms: Option<i64>,
     ) -> Message {
         let seq = self.next_seq;
         self.next_seq += 1;
@@ -234,7 +251,7 @@ impl CodexConversationSource {
             seq,
             content_text: Message::flatten_text(&content),
             content,
-            created_at: None,
+            created_at: at_ms.and_then(iso8601_from_epoch_ms),
             model: None,
             git_branch: None,
             cwd: None,
@@ -298,6 +315,15 @@ pub fn codex_content_source(
     ))
 }
 
+/// Convert an epoch-millisecond timestamp to the canonical ISO-8601 UTC string
+/// Delta stores in [`Message::created_at`] (the same RFC 3339 `…Z` shape Claude's
+/// transcript timestamps already use). An out-of-range value yields `None` rather
+/// than a bogus string.
+fn iso8601_from_epoch_ms(at_ms: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp_millis(at_ms)
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+}
+
 /// The uuid synthesized for a message reconstructed from a provider item. Stable
 /// across re-ingest because it is derived from the provider's own item id.
 fn item_uuid(provider_item_id: &str) -> MessageUuid {
@@ -355,6 +381,7 @@ mod tests {
         let msgs = src.ingest(&AgentEvent::AssistantMessage {
             provider_item_id: "item_1".to_owned(),
             text: "hi".to_owned(),
+            at_ms: None,
         });
         assert_eq!(msgs.len(), 1);
         let m = &msgs[0];
@@ -373,6 +400,66 @@ mod tests {
     }
 
     #[test]
+    fn an_events_at_ms_becomes_an_iso8601_created_at_and_absence_degrades_to_none() {
+        let mut src = source();
+        // A message built from an event carrying `at_ms` gets a canonical
+        // ISO-8601 UTC `created_at` (RFC 3339, `…Z`), converted from epoch ms.
+        let with_ts = src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "a1".to_owned(),
+            text: "hi".to_owned(),
+            at_ms: Some(1_700_000_000_123),
+        });
+        assert_eq!(
+            with_ts[0].created_at.as_deref(),
+            Some("2023-11-14T22:13:20.123Z")
+        );
+        // A missing `at_ms` still degrades `created_at` to None (never invented).
+        let without_ts = src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "a2".to_owned(),
+            text: "yo".to_owned(),
+            at_ms: None,
+        });
+        assert!(without_ts[0].created_at.is_none());
+    }
+
+    #[test]
+    fn a_completed_tools_created_at_comes_from_the_completion_and_a_flush_from_the_start() {
+        // A paired tool message is minted at completion, so its `created_at` is
+        // the completion's `at_ms`.
+        let mut src = source();
+        src.ingest(&AgentEvent::ToolStarted {
+            provider_item_id: "t1".to_owned(),
+            name: "Bash".to_owned(),
+            input_json: json!({ "command": "ls" }),
+            at_ms: Some(1_700_000_000_000),
+        });
+        let completed = src.ingest(&AgentEvent::ToolCompleted {
+            provider_item_id: "t1".to_owned(),
+            output_json: json!({ "exitCode": 0 }),
+            at_ms: Some(1_700_000_005_000),
+        });
+        assert_eq!(
+            completed[0].created_at.as_deref(),
+            Some("2023-11-14T22:13:25.000Z")
+        );
+
+        // A tool left open at turn end is flushed with its `ToolStarted` time.
+        src.ingest(&AgentEvent::ToolStarted {
+            provider_item_id: "t2".to_owned(),
+            name: "Bash".to_owned(),
+            input_json: json!({}),
+            at_ms: Some(1_700_000_000_000),
+        });
+        let flushed = src.ingest(&AgentEvent::TurnCompleted {
+            status: delta_usecase::TurnStatus::Completed,
+        });
+        assert_eq!(
+            flushed[0].created_at.as_deref(),
+            Some("2023-11-14T22:13:20.000Z")
+        );
+    }
+
+    #[test]
     fn a_turn_id_becomes_the_prompt_group_and_seq_is_monotonic() {
         let mut src = source();
         assert!(src
@@ -383,10 +470,12 @@ mod tests {
         let user = src.ingest(&AgentEvent::UserPromptAccepted {
             provider_message_id: None,
             text: "do it".to_owned(),
+            at_ms: None,
         });
         let asst = src.ingest(&AgentEvent::AssistantMessage {
             provider_item_id: "item_1".to_owned(),
             text: "done".to_owned(),
+            at_ms: None,
         });
         assert_eq!(user[0].role, Role::User);
         assert_eq!(user[0].uuid, MessageUuid::from("codex-turn-turn_9-user"));
@@ -402,6 +491,7 @@ mod tests {
         let msgs = src.ingest(&AgentEvent::AssistantMessage {
             provider_item_id: "i".to_owned(),
             text: "x".to_owned(),
+            at_ms: None,
         });
         assert_eq!(msgs[0].seq, 42);
     }
@@ -414,11 +504,13 @@ mod tests {
                 provider_item_id: "t1".to_owned(),
                 name: "Bash".to_owned(),
                 input_json: json!({ "command": "ls" }),
+                at_ms: None,
             })
             .is_empty());
         let msgs = src.ingest(&AgentEvent::ToolCompleted {
             provider_item_id: "t1".to_owned(),
             output_json: json!({ "exitCode": 0, "stdout": "a\nb" }),
+            at_ms: None,
         });
         assert_eq!(msgs.len(), 1);
         let m = &msgs[0];
@@ -449,6 +541,7 @@ mod tests {
         let msgs = src.ingest(&AgentEvent::ToolCompleted {
             provider_item_id: "t9".to_owned(),
             output_json: json!({ "is_error": true, "message": "boom" }),
+            at_ms: None,
         });
         assert_eq!(msgs.len(), 1);
         assert_eq!(
@@ -469,6 +562,7 @@ mod tests {
         let msgs = src.ingest(&AgentEvent::ToolCompleted {
             provider_item_id: "fc1".to_owned(),
             output_json: json!({ "type": "fileChange", "status": "declined", "changes": [] }),
+            at_ms: None,
         });
         assert_eq!(
             msgs[0].content,
@@ -482,6 +576,7 @@ mod tests {
         let ok = src.ingest(&AgentEvent::ToolCompleted {
             provider_item_id: "c1".to_owned(),
             output_json: json!({ "type": "commandExecution", "status": "completed", "exitCode": 0 }),
+            at_ms: None,
         });
         assert!(matches!(
             &ok[0].content[0],
@@ -499,6 +594,7 @@ mod tests {
             provider_item_id: "t1".to_owned(),
             name: "Bash".to_owned(),
             input_json: json!({ "command": "sleep 100" }),
+            at_ms: None,
         });
         let flushed = src.ingest(&AgentEvent::TurnCompleted {
             status: delta_usecase::TurnStatus::Completed,
@@ -541,10 +637,12 @@ mod tests {
         let a = src.ingest(&AgentEvent::UserPromptAccepted {
             provider_message_id: None,
             text: "one".to_owned(),
+            at_ms: None,
         });
         let b = src.ingest(&AgentEvent::UserPromptAccepted {
             provider_message_id: None,
             text: "two".to_owned(),
+            at_ms: None,
         });
         assert_ne!(a[0].uuid, b[0].uuid);
         assert_eq!(a[0].uuid, MessageUuid::from("codex-user-0"));
@@ -559,6 +657,7 @@ mod tests {
             .ingest(&AgentEvent::UserPromptAccepted {
                 provider_message_id: None,
                 text: "first message".to_owned(),
+                at_ms: None,
             })
             .remove(0)
             .uuid;
@@ -573,6 +672,7 @@ mod tests {
             .ingest(&AgentEvent::UserPromptAccepted {
                 provider_message_id: None,
                 text: "second message".to_owned(),
+                at_ms: None,
             })
             .remove(0);
         assert_ne!(
@@ -595,6 +695,7 @@ mod tests {
         let (messages, effects) = src.ingest(&AgentEvent::AssistantMessage {
             provider_item_id: "item_1".to_owned(),
             text: "hi".to_owned(),
+            at_ms: None,
         });
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].uuid, MessageUuid::from("codex-item-item_1"));

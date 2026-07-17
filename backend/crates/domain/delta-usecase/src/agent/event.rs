@@ -78,6 +78,12 @@ pub enum AgentEvent {
     UserPromptAccepted {
         provider_message_id: Option<String>,
         text: String,
+        /// When this message fact occurred, in epoch milliseconds, when the
+        /// provider exposes a per-message time (`None` otherwise). A neutral,
+        /// optional message fact — carried verbatim, not parsed. Codex fills it
+        /// from the item's `startedAtMs` / `completedAtMs`; Claude leaves it
+        /// `None` (its `created_at` comes from the transcript fold).
+        at_ms: Option<i64>,
     },
     /// A streaming fragment of an assistant message.
     AssistantDelta {
@@ -88,17 +94,35 @@ pub enum AgentEvent {
     AssistantMessage {
         provider_item_id: String,
         text: String,
+        /// When this message fact occurred, in epoch milliseconds, when the
+        /// provider exposes a per-message time (`None` otherwise). A neutral,
+        /// optional message fact — carried verbatim, not parsed. Codex fills it
+        /// from the item's `startedAtMs` / `completedAtMs`; Claude leaves it
+        /// `None` (its `created_at` comes from the transcript fold).
+        at_ms: Option<i64>,
     },
     /// A tool call started.
     ToolStarted {
         provider_item_id: String,
         name: String,
         input_json: Value,
+        /// When this message fact occurred, in epoch milliseconds, when the
+        /// provider exposes a per-message time (`None` otherwise). A neutral,
+        /// optional message fact — carried verbatim, not parsed. Codex fills it
+        /// from the item's `startedAtMs` / `completedAtMs`; Claude leaves it
+        /// `None` (its `created_at` comes from the transcript fold).
+        at_ms: Option<i64>,
     },
     /// A tool call completed.
     ToolCompleted {
         provider_item_id: String,
         output_json: Value,
+        /// When this message fact occurred, in epoch milliseconds, when the
+        /// provider exposes a per-message time (`None` otherwise). A neutral,
+        /// optional message fact — carried verbatim, not parsed. Codex fills it
+        /// from the item's `startedAtMs` / `completedAtMs`; Claude leaves it
+        /// `None` (its `created_at` comes from the transcript fold).
+        at_ms: Option<i64>,
     },
     /// The agent is asking for a permission decision.
     PermissionRequested { request: AgentPermissionRequest },
