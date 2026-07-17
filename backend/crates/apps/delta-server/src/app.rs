@@ -479,6 +479,11 @@ mod tests {
             claude["detail"].is_null(),
             "available provider has no reason"
         );
+        // Claude exposes an attachable terminal — the workspace shows its tab.
+        assert_eq!(
+            claude["capabilities"]["has_terminal"], true,
+            "Claude reports a terminal"
+        );
 
         let codex = providers
             .iter()
@@ -488,6 +493,12 @@ mod tests {
         assert!(
             codex["detail"].as_str().unwrap().contains("codex"),
             "unavailable provider carries a reason naming the binary"
+        );
+        // Codex is headless — no terminal to attach — and reports it even though
+        // its binary is absent (the profile is static, not launch-dependent).
+        assert_eq!(
+            codex["capabilities"]["has_terminal"], false,
+            "Codex reports no terminal"
         );
     }
 

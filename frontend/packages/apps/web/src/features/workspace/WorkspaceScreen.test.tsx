@@ -15,9 +15,11 @@ import { setupServer } from 'msw/node';
 import {
   SESSION_ID,
   SESSION_ID_2,
+  SESSION_ID_4,
   MAIN_THREAD_ID,
   SESSION_2_MAIN_THREAD_ID,
   SESSION_2_BRANCH_THREAD_ID,
+  SESSION_4_MAIN_THREAD_ID,
   createHandlers,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
@@ -524,6 +526,99 @@ describe('WorkspaceScreen multi-session', () => {
     const formattedTime = formatLocalDateTime(lastActivityAt);
     expect(formattedTime).not.toBeNull();
     expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
+  });
+
+  // A single-session `/api/sessions` override for a given provider, so the
+  // terminal-gating tests below do not depend on the shared mock store's mutated
+  // state or on pagination. The focused session's threads still resolve through
+  // the default handler (the store keeps every seed session's threads).
+  function useSingleSessionOfProvider(
+    id: string,
+    provider: 'claude' | 'codex',
+    mainThreadId: number,
+  ) {
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id,
+                cwd: '/work',
+                transcript_path: '/tmp/s.jsonl',
+                title: `${provider} session`,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
+                repository_display_name: null,
+                provider,
+                provider_session_id: null,
+                provider_thread_id: null,
+              },
+              open: true,
+              main_thread_id: mainThreadId,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+  }
+
+  it('shows the terminal toggle for a session whose provider has a terminal (Claude)', async () => {
+    // A focused open Claude session; the default `/api/providers` mock reports
+    // Claude with an attachable terminal. The workspace reads that capability
+    // (never `provider === 'claude'`) and offers the terminal toggle.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
+    expect(await screen.findByTestId('terminal-toggle')).toBeInTheDocument();
+  });
+
+  it('shows the terminal pane for a Claude session when terminalOpen is set', async () => {
+    // With the terminal open, the right pane mounts for a provider that has a
+    // terminal — the gating must not strip it from Claude.
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+  });
+
+  it('hides the terminal toggle and pane for a Codex session even with terminalOpen persisted', async () => {
+    // A focused Codex session: the default `/api/providers` mock reports Codex
+    // with no terminal. Even though `terminalOpen` was persisted `true` (e.g.
+    // from a previous Claude session), the capability gating must hide both the
+    // toggle and the pane — a Codex session can never open a terminal.
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_4,
+      terminalOpen: true,
+    });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // The transcript pane renders (its active thread reconciles), so the toggle
+    // would appear here if the gating keyed off anything but the capability.
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_4_MAIN_THREAD_ID,
+      ),
+    );
+    // Once the providers query settles (Codex → no terminal), the toggle and the
+    // pane are both gone.
+    await waitFor(() =>
+      expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
   });
 
   it("falls back to the cwd basename when a session has no launch repo_root", async () => {

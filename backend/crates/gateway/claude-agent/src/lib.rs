@@ -63,6 +63,31 @@ use delta_usecase::{
     TranscriptCapability,
 };
 
+/// Claude's static capability profile — the single source of truth returned by
+/// [`AgentAdapter::capabilities`] and read (without a live adapter) by the
+/// composition root's per-provider capability accessor. Declaring it once here,
+/// in the adapter that owns Claude's behaviour, keeps the two in lockstep: they
+/// cannot drift because both read this const.
+///
+/// Today's Claude reality: a tmux-hosted PTY, a Delta-pinned session id, resume
+/// via `--resume`, events reconstructed from hooks + the JSONL transcript,
+/// hook-carried permission decisions, hidden per-turn context via the
+/// `UserPromptSubmit` hook, interrupt by injecting the `Escape` keystroke, and
+/// an attachable pane. Fork/steer are unused in v1.
+pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
+    launch: LaunchCapability::PtyCommand,
+    session_identity: SessionIdentityCapability::DeltaCanSetId,
+    resume: ResumeCapability::Supported,
+    events: EventCapability::HookAndTranscript,
+    transcript: TranscriptCapability::JsonlFile,
+    permission: PermissionCapability::HookDecision,
+    context_injection: ContextInjectionCapability::HiddenPerTurn,
+    interrupt: InterruptCapability::PaneKeystroke,
+    terminal: TerminalCapability::AttachablePty,
+    fork: ForkCapability::None,
+    steer: SteerCapability::None,
+};
+
 /// The `claude` flag that loads Delta's session settings (hooks + theme) from a
 /// Delta-owned file. Mirrors the core's spawn path.
 const SETTINGS_FLAG: &str = "--settings";
@@ -252,25 +277,7 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
     }
 
     fn capabilities(&self) -> AgentCapabilities {
-        // Today's Claude reality: a tmux-hosted PTY, a Delta-pinned session id,
-        // resume via `--resume`, events reconstructed from hooks + the JSONL
-        // transcript, hook-carried permission decisions, hidden per-turn
-        // context via the `UserPromptSubmit` hook, interrupt by injecting the
-        // `Escape` keystroke, and an attachable pane. Fork/steer are unused in
-        // v1.
-        AgentCapabilities {
-            launch: LaunchCapability::PtyCommand,
-            session_identity: SessionIdentityCapability::DeltaCanSetId,
-            resume: ResumeCapability::Supported,
-            events: EventCapability::HookAndTranscript,
-            transcript: TranscriptCapability::JsonlFile,
-            permission: PermissionCapability::HookDecision,
-            context_injection: ContextInjectionCapability::HiddenPerTurn,
-            interrupt: InterruptCapability::PaneKeystroke,
-            terminal: TerminalCapability::AttachablePty,
-            fork: ForkCapability::None,
-            steer: SteerCapability::None,
-        }
+        CLAUDE_CAPABILITIES
     }
 
     async fn launch(&self, req: LaunchRequest) -> Result<AgentSessionHandle> {

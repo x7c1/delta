@@ -34,7 +34,7 @@ mod factory;
 mod translate;
 pub mod wire;
 
-pub use adapter::CodexAppServerAdapter;
+pub use adapter::{CodexAppServerAdapter, CODEX_CAPABILITIES};
 pub use content::{codex_content_source, CodexConversationSource};
 pub use factory::CodexAdapterFactory;
 

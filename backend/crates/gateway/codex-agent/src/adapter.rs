@@ -64,6 +64,31 @@ use delta_usecase::{
 use crate::translate::{classify_server_request, translate_notification, ServerRequestKind};
 use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEvent};
 
+/// Codex's static capability profile — the single source of truth returned by
+/// [`AgentAdapter::capabilities`] and read (without a live adapter) by the
+/// composition root's per-provider capability accessor. Declaring it once here,
+/// in the adapter that owns Codex's behaviour, keeps the two in lockstep: they
+/// cannot drift because both read this const.
+///
+/// Codex reality: a JSON-RPC app-server, a provider-assigned thread id, resume
+/// via `thread/resume`, structured pushed turn/item events, a transcript that is
+/// only the pushed stream, permission decisions answered over the wire, hidden
+/// per-turn context via `thread/inject_items`, interrupt via `turn/interrupt`,
+/// and no terminal to attach. Fork/steer are unused in v1.
+pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
+    launch: LaunchCapability::JsonRpcAppServer,
+    session_identity: SessionIdentityCapability::ProviderReturnsId,
+    resume: ResumeCapability::Supported,
+    events: EventCapability::StructuredTurnEvents,
+    transcript: TranscriptCapability::EventStreamOnly,
+    permission: PermissionCapability::AdapterDecision,
+    context_injection: ContextInjectionCapability::HiddenPerTurn,
+    interrupt: InterruptCapability::Rpc,
+    terminal: TerminalCapability::NoTerminal,
+    fork: ForkCapability::None,
+    steer: SteerCapability::None,
+};
+
 /// The Codex decision wire value for an allow.
 const DECISION_ACCEPT: &str = "accept";
 /// The Codex decision wire value for a deny.
@@ -204,25 +229,7 @@ impl AgentAdapter for CodexAppServerAdapter {
     }
 
     fn capabilities(&self) -> AgentCapabilities {
-        // Codex reality: a JSON-RPC app-server, a provider-assigned thread id,
-        // resume via `thread/resume`, structured pushed turn/item events, a
-        // transcript that is only the pushed stream, permission decisions
-        // answered over the wire, hidden per-turn context via
-        // `thread/inject_items`, interrupt via `turn/interrupt`, and no terminal
-        // to attach. Fork/steer are unused in v1.
-        AgentCapabilities {
-            launch: LaunchCapability::JsonRpcAppServer,
-            session_identity: SessionIdentityCapability::ProviderReturnsId,
-            resume: ResumeCapability::Supported,
-            events: EventCapability::StructuredTurnEvents,
-            transcript: TranscriptCapability::EventStreamOnly,
-            permission: PermissionCapability::AdapterDecision,
-            context_injection: ContextInjectionCapability::HiddenPerTurn,
-            interrupt: InterruptCapability::Rpc,
-            terminal: TerminalCapability::NoTerminal,
-            fork: ForkCapability::None,
-            steer: SteerCapability::None,
-        }
+        CODEX_CAPABILITIES
     }
 
     async fn launch(&self, req: LaunchRequest) -> UsecaseResult<AgentSessionHandle> {

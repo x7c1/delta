@@ -51,6 +51,7 @@ export type { CreateRepositoryScanRootRequest } from './generated/CreateReposito
 export type { PullRequest } from './generated/PullRequest';
 export type { PullRequestsResponse } from './generated/PullRequestsResponse';
 export type { ProviderAvailability } from './generated/ProviderAvailability';
+export type { ProviderCapabilities } from './generated/ProviderCapabilities';
 export type { ProvidersResponse } from './generated/ProvidersResponse';
 export type { GitRepoResponse } from './generated/GitRepoResponse';
 export type { GitBranchesResponse } from './generated/GitBranchesResponse';
