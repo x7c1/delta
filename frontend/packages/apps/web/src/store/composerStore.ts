@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { MessageUuid, ThreadId } from '@delta/model';
-import type { WorktreeStartPoint } from '@delta/wire-gen';
+import type { AgentProvider, WorktreeStartPoint } from '@delta/wire-gen';
 
 /**
  * Stable DRAFT key for the new-session composer state, which has no real
@@ -109,6 +109,16 @@ export interface ComposerState {
    * Restored on rehydration; an unknown value falls back to the default.
    */
   newSessionTab: NewSessionTab;
+  /**
+   * Which AI-agent provider the next new session launches on — the top-level
+   * axis of the new-session form, since it changes the backend binary and gates
+   * capability-dependent controls. Session-only, like the other `newSession*`
+   * ephemerals: reset to {@link DEFAULT_NEW_SESSION_PROVIDER} whenever the
+   * new-session compose state is left. Attached to the send as `provider`; the
+   * composer omits it for the Claude default so a Claude send stays byte-for-
+   * byte identical to today's.
+   */
+  newSessionProvider: AgentProvider;
 
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
@@ -138,6 +148,7 @@ export interface ComposerState {
   closeWorkdirDialog: () => void;
   setNewSessionTab: (tab: NewSessionTab) => void;
   setNewSessionSelectedPrUrl: (url: string | null) => void;
+  setNewSessionProvider: (provider: AgentProvider) => void;
 }
 
 /** The new-session screen's three tabs. */
@@ -157,6 +168,14 @@ const NEW_SESSION_TABS: readonly NewSessionTab[] = ['pr', 'repository', 'directo
  * so the picker leads with that lens.
  */
 export const DEFAULT_NEW_SESSION_TAB: NewSessionTab = 'repository';
+
+/**
+ * The provider a fresh new-session compose starts on, and the value it resets
+ * to when the new-session state is left. Claude for this slice; a later slice
+ * will seed it from a persisted default-provider setting. Kept as a single
+ * named constant so that swap has exactly one place to change.
+ */
+export const DEFAULT_NEW_SESSION_PROVIDER: AgentProvider = 'claude';
 
 /**
  * Selection state for the worktree start-point: the wire union plus a
@@ -198,6 +217,7 @@ export const useComposerStore = create<ComposerState>()(
       workdirDialogOpen: false,
       newSessionTab: DEFAULT_NEW_SESSION_TAB,
       newSessionSelectedPrUrl: null,
+      newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
 
       setDraft: (threadId, text) =>
         set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
@@ -256,6 +276,9 @@ export const useComposerStore = create<ComposerState>()(
       setNewSessionTab: (tab) => set({ newSessionTab: tab }),
 
       setNewSessionSelectedPrUrl: (url) => set({ newSessionSelectedPrUrl: url }),
+
+      setNewSessionProvider: (provider) =>
+        set({ newSessionProvider: provider }),
     }),
     {
       name: COMPOSER_STORAGE_KEY,
