@@ -44,9 +44,10 @@ struct Server<'a> {
 }
 
 /// A turn suspended on a `blocking` approval: the emits still to play once the
-/// client answers, plus the thread they belong to.
+/// client answers, plus the thread and turn they belong to.
 struct PendingTurn {
     thread_id: String,
+    turn_id: String,
     remaining: Vec<Emit>,
 }
 
@@ -89,8 +90,10 @@ impl Server<'_> {
                 self.respond(id, json!({ "serverInfo": server_info }))
             }
             "thread/start" => {
+                // Real `thread/start` returns the started thread under
+                // `result.thread` (a `Thread`, whose `id` is the thread id).
                 let thread_id = self.scenario.thread_id.clone();
-                self.respond(id, json!({ "threadId": thread_id }))
+                self.respond(id, json!({ "thread": { "id": thread_id } }))
             }
             "thread/resume" => {
                 // Resume echoes back the requested thread id (a real server
@@ -101,7 +104,7 @@ impl Server<'_> {
                     .and_then(Value::as_str)
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
-                self.respond(id, json!({ "threadId": thread_id }))
+                self.respond(id, json!({ "thread": { "id": thread_id } }))
             }
             "turn/start" => {
                 // The turn is scoped to the thread the client named, falling
@@ -112,10 +115,15 @@ impl Server<'_> {
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
                 let turn = self.scenario.turn.clone();
-                let turn_id = turn.as_ref().map(|t| t.turn_id.clone()).unwrap_or_default();
-                self.respond(id, json!({ "turnId": turn_id }))?;
+                let turn_id = turn
+                    .as_ref()
+                    .map(|t| t.turn_id.clone())
+                    .unwrap_or_else(|| "turn_fake_0001".to_owned());
+                // Real `turn/start` returns the started turn under `result.turn`
+                // (a `Turn`, whose `id` is the turn id).
+                self.respond(id, json!({ "turn": turn_object(&turn_id, "inProgress") }))?;
                 if let Some(turn) = turn {
-                    self.play_emits(&turn.emit, &thread_id)?;
+                    self.play_emits(&turn.emit, &thread_id, &turn_id)?;
                 }
                 Ok(())
             }
@@ -125,12 +133,23 @@ impl Server<'_> {
                     .and_then(Value::as_str)
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
+                // Real `turn/interrupt` requires `{threadId, turnId}`. Asserting
+                // the turn id here is how the fake proves the client sends it: a
+                // client that omits it gets a JSON-RPC error, failing the loop
+                // rather than silently "interrupting" nothing.
+                let Some(turn_id) = params.get("turnId").and_then(Value::as_str) else {
+                    return self.respond_error(id, -32602, "turn/interrupt requires a turnId");
+                };
+                let turn_id = turn_id.to_owned();
                 self.respond(id, json!({}))?;
                 // An interrupted turn ends with a `turn/completed` carrying the
-                // interrupted status.
+                // interrupted status, echoing the interrupted turn's id back.
                 self.emit_notification(
                     "turn/completed",
-                    with_thread_id(json!({ "status": "interrupted" }), &thread_id),
+                    with_thread_id(
+                        json!({ "turn": turn_object(&turn_id, "interrupted") }),
+                        &thread_id,
+                    ),
                 )
             }
             other => {
@@ -145,7 +164,7 @@ impl Server<'_> {
     /// early (suspending the turn) when a `blocking` approval is emitted: the
     /// emits after it are parked in [`Self::pending`] and replayed by
     /// [`Self::resume_pending_turn`] once the client answers.
-    fn play_emits(&mut self, emits: &[Emit], thread_id: &str) -> Result<(), String> {
+    fn play_emits(&mut self, emits: &[Emit], thread_id: &str, turn_id: &str) -> Result<(), String> {
         for (i, emit) in emits.iter().enumerate() {
             match emit {
                 Emit::ItemStarted { item } => self.emit_notification(
@@ -156,12 +175,18 @@ impl Server<'_> {
                     "item/completed",
                     with_thread_id(json!({ "item": item }), thread_id),
                 )?,
-                Emit::TurnStarted => {
-                    self.emit_notification("turn/started", with_thread_id(json!({}), thread_id))?
-                }
+                // Real `turn/started` / `turn/completed` wrap a `Turn` under
+                // `params.turn` (whose `id`/`status` the client reads).
+                Emit::TurnStarted => self.emit_notification(
+                    "turn/started",
+                    with_thread_id(
+                        json!({ "turn": turn_object(turn_id, "inProgress") }),
+                        thread_id,
+                    ),
+                )?,
                 Emit::TurnCompleted { status } => self.emit_notification(
                     "turn/completed",
-                    with_thread_id(json!({ "status": status }), thread_id),
+                    with_thread_id(json!({ "turn": turn_object(turn_id, status) }), thread_id),
                 )?,
                 Emit::RequestApproval {
                     method,
@@ -175,6 +200,7 @@ impl Server<'_> {
                         // client's decision (resumed in `resume_pending_turn`).
                         self.pending = Some(PendingTurn {
                             thread_id: thread_id.to_owned(),
+                            turn_id: turn_id.to_owned(),
                             remaining: emits[i + 1..].to_vec(),
                         });
                         return Ok(());
@@ -198,6 +224,7 @@ impl Server<'_> {
             return Ok(());
         };
         let thread_id = pending.thread_id;
+        let turn_id = pending.turn_id;
         // Echo the decision as an assistant message, on a dedicated item id so it
         // never collides with the turn's own items.
         let echo_id = format!("approval_echo_{}", self.server_request_seq);
@@ -215,7 +242,7 @@ impl Server<'_> {
                 &thread_id,
             ),
         )?;
-        self.play_emits(&pending.remaining, &thread_id)
+        self.play_emits(&pending.remaining, &thread_id, &turn_id)
     }
 
     fn respond(&mut self, id: Value, result: Value) -> Result<(), String> {
@@ -246,6 +273,14 @@ impl Server<'_> {
             .map_err(|e| format!("write frame: {e}"))?;
         self.out.flush().map_err(|e| format!("flush frame: {e}"))
     }
+}
+
+/// A minimal `Turn` object as the real schema shapes it: the `id`, a `status`,
+/// and an (empty) `items` array — the three fields the `Turn` definition marks
+/// required. Carried under `result.turn` (on `turn/start`) and `params.turn` (on
+/// `turn/started` / `turn/completed`).
+fn turn_object(turn_id: &str, status: &str) -> Value {
+    json!({ "id": turn_id, "status": status, "items": [] })
 }
 
 /// Ensure `params` is a JSON object and stamp `threadId` into it, so every
