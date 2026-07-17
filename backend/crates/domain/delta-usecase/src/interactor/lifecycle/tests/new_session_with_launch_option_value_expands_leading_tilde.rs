@@ -22,7 +22,13 @@ async fn new_session_with_launch_option_value_expands_leading_tilde() {
 
     let plugin_dir = ix
         .store()
-        .create_launch_option(None, "--plugin-dir", Some("~/repos/x/plugins"), false)
+        .create_launch_option(
+            None,
+            "--plugin-dir",
+            Some("~/repos/x/plugins"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
 

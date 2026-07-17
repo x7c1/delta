@@ -680,6 +680,9 @@ export function createMockApi(): MockApi {
         value: trimmedValue ? trimmedValue : null,
         default_enabled: payload.default_enabled === true,
         created_at: new Date().toISOString(),
+        // Omitted `provider` defaults to Claude, matching the real server's
+        // back-compat behavior.
+        provider: payload.provider ?? 'claude',
       };
       store.launchOptions.push(option);
       return HttpResponse.json(option, { status: 201 });

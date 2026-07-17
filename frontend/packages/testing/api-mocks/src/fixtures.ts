@@ -718,9 +718,20 @@ export function seedData(): MockStore {
     nextThreadId: FIRST_FILLER_THREAD_ID + FILLER_SESSION_COUNT,
     nextSendId: 1,
     nextSpawnOrdinal: 1,
-    // Two seeded options so the settings screen is developable with no backend:
-    // a flag with a value and a valueless flag. Newest first (descending id).
+    // Seeded options so the settings screen is developable with no backend:
+    // two Claude flags (a valued flag and a valueless-value flag) plus one Codex
+    // option so the per-provider picker filter is exercisable without a backend.
+    // Newest first (descending id).
     launchOptions: [
+      {
+        id: 3,
+        label: 'Codex model',
+        name: 'model',
+        value: 'gpt-5',
+        default_enabled: false,
+        created_at: '2026-01-03T00:00:00Z',
+        provider: 'codex',
+      },
       {
         id: 2,
         label: null,
@@ -728,6 +739,7 @@ export function seedData(): MockStore {
         value: 'auto',
         default_enabled: false,
         created_at: '2026-01-02T00:00:00Z',
+        provider: 'claude',
       },
       {
         id: 1,
@@ -736,9 +748,10 @@ export function seedData(): MockStore {
         value: '/home/dev/plugins',
         default_enabled: true,
         created_at: '2026-01-01T00:00:00Z',
+        provider: 'claude',
       },
     ],
-    nextLaunchOptionId: 3,
+    nextLaunchOptionId: 4,
     // Empty by default — the Settings dialog's "Repository scan roots" section
     // renders its zero-state, and tests that need a seeded root call
     // `insertRepositoryScanRoot` directly on the store.

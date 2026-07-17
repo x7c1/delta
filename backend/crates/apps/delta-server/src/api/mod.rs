@@ -28,7 +28,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use delta_usecase::{PullRequestLens, SessionId, ThreadId};
+use delta_usecase::{AgentProvider, PullRequestLens, SessionId, ThreadId};
 use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
     WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
@@ -508,9 +508,15 @@ pub(crate) async fn create_launch_option(
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    // A create that omits `provider` is a Claude option, keeping clients that
+    // predate per-provider launch options working unchanged.
+    let provider = req
+        .provider
+        .map(AgentProvider::from)
+        .unwrap_or(AgentProvider::Claude);
     let option = state
         .interactor()
-        .create_launch_option(label, name, value, req.default_enabled)
+        .create_launch_option(label, name, value, req.default_enabled, provider)
         .await?;
     Ok((StatusCode::CREATED, Json(WireLaunchOption::from(option))))
 }

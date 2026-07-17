@@ -1886,6 +1886,7 @@ async fn launch_options_round_trip_create_list_delete() {
             "--plugin-dir",
             Some("/opt/plugins"),
             true,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -1893,12 +1894,19 @@ async fn launch_options_round_trip_create_list_delete() {
     assert_eq!(plugin.name, "--plugin-dir");
     assert_eq!(plugin.value.as_deref(), Some("/opt/plugins"));
     assert!(plugin.default_enabled);
+    assert_eq!(plugin.provider, AgentProvider::Claude);
     assert!(!plugin.created_at.is_empty());
 
     // A valueless, unlabeled flag stores NULL for both — never a sentinel — and
     // `default_enabled` defaults to off.
     let valueless = store
-        .create_launch_option(None, "--dangerously-skip-permissions", None, false)
+        .create_launch_option(
+            None,
+            "--dangerously-skip-permissions",
+            None,
+            false,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
     assert_eq!(valueless.label, None);
@@ -1932,11 +1940,73 @@ async fn launch_options_round_trip_create_list_delete() {
     assert_eq!(store.list_launch_options().await.unwrap().len(), 1);
 }
 
+/// A Codex option persists and reads back with its provider preserved (not
+/// coerced to the Claude default), while a Claude option keeps Claude — so the
+/// registry holds both providers' options and the picker can filter them.
+#[tokio::test]
+async fn launch_option_provider_round_trips_per_provider() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    let claude = store
+        .create_launch_option(
+            None,
+            "--permission-mode",
+            Some("auto"),
+            false,
+            AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let codex = store
+        .create_launch_option(None, "model", Some("gpt-5"), false, AgentProvider::Codex)
+        .await
+        .unwrap();
+    assert_eq!(codex.provider, AgentProvider::Codex);
+
+    let listed = store.list_launch_options().await.unwrap();
+    assert_eq!(
+        listed.iter().find(|o| o.id == claude.id).unwrap().provider,
+        AgentProvider::Claude,
+    );
+    assert_eq!(
+        listed.iter().find(|o| o.id == codex.id).unwrap().provider,
+        AgentProvider::Codex,
+    );
+}
+
+/// A legacy row — inserted directly with no `provider`, exercising the column's
+/// `DEFAULT 'claude'` exactly as a pre-multi-provider database would — reads
+/// back as `AgentProvider::Claude`, so existing installs keep working.
+#[tokio::test]
+async fn legacy_launch_option_row_reads_as_claude() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    {
+        let conn = store.conn.lock().await;
+        conn.execute(
+            "INSERT INTO launch_option (label, name, value, default_enabled, created_at)
+             VALUES (NULL, '--verbose', NULL, 0, '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let listed = store.list_launch_options().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "--verbose");
+    assert_eq!(listed[0].provider, AgentProvider::Claude);
+}
+
 #[tokio::test]
 async fn set_launch_option_default_enabled_toggles_in_place() {
     let store = SqliteStore::open_in_memory().unwrap();
     let option = store
-        .create_launch_option(None, "--plugin-dir", Some("/opt/plugins"), false)
+        .create_launch_option(
+            None,
+            "--plugin-dir",
+            Some("/opt/plugins"),
+            false,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
     assert!(!option.default_enabled);

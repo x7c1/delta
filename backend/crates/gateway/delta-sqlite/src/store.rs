@@ -284,6 +284,15 @@ fn permission_request_from_row(row: &Row<'_>) -> Result<PermissionRequest> {
 /// directly to its domain field (no fallible status/enum parse), so this mirrors
 /// [`map_session`] and returns the raw `rusqlite::Result`.
 fn launch_option_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchOption> {
+    // `provider` is a persisted enum token (`'claude'`/`'codex'`); parse it into
+    // the domain variant, surfacing an unknown token as a column-conversion
+    // failure (the same shape rusqlite raises for a bad column read) rather than
+    // silently defaulting. Legacy rows carry `'claude'` from the column default,
+    // so they map to `AgentProvider::Claude`.
+    let provider_token: String = row.get(6)?;
+    let provider = AgentProvider::parse(&provider_token).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(err))
+    })?;
     Ok(LaunchOption {
         id: row.get(0)?,
         label: row.get(1)?,
@@ -292,6 +301,7 @@ fn launch_option_from_row(row: &Row<'_>) -> rusqlite::Result<LaunchOption> {
         // SQLite stores the bool as INTEGER 0/1; `rusqlite` maps it back to `bool`.
         default_enabled: row.get(4)?,
         created_at: row.get(5)?,
+        provider,
     })
 }
 
@@ -358,7 +368,7 @@ const THREAD_COLS: &str = "id, session_id, title, parent_thread_id, \
 const SEND_COLS: &str =
     "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at, restored_at";
 const MESSAGE_COLS: &str = "uuid, session_id, thread_id, role, linear_parent_uuid, semantic_parent_uuid, prompt_id, seq, content_text, content_json, created_at, model, git_branch, cwd, response_time_ms, provider_item_id";
-const LAUNCH_OPTION_COLS: &str = "id, label, name, value, default_enabled, created_at";
+const LAUNCH_OPTION_COLS: &str = "id, label, name, value, default_enabled, created_at, provider";
 
 /// Ensure the session's `main` thread exists, returning its id.
 fn ensure_main_thread(conn: &Connection, id: &SessionId, now: &str) -> Result<ThreadId> {
@@ -1558,13 +1568,14 @@ impl SessionStore for SqliteStore {
         name: &str,
         value: Option<&str>,
         default_enabled: bool,
+        provider: AgentProvider,
     ) -> std::result::Result<LaunchOption, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         conn.execute(
-            "INSERT INTO launch_option (label, name, value, default_enabled, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![label, name, value, default_enabled, now],
+            "INSERT INTO launch_option (label, name, value, default_enabled, created_at, provider)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![label, name, value, default_enabled, now, provider.as_str()],
         )
         .map_err(Error::from)?;
         let id = conn.last_insert_rowid();
@@ -1575,6 +1586,7 @@ impl SessionStore for SqliteStore {
             value: value.map(str::to_owned),
             default_enabled,
             created_at: now,
+            provider,
         })
     }
 

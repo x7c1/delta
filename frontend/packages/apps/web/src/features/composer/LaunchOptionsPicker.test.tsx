@@ -7,7 +7,7 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -39,8 +39,10 @@ function renderPicker() {
 
 describe('LaunchOptionsPicker', () => {
   beforeEach(() => {
-    // A fresh, not-yet-seeded new-session compose state.
+    // A fresh, not-yet-seeded new-session compose state on the Claude default.
     useComposerStore.setState({
+      newSessionProvider: 'claude',
+      newSessionProviderSeeded: false,
       newSessionLaunchOptionIds: [],
       newSessionLaunchOptionsSeeded: false,
     });
@@ -126,5 +128,57 @@ describe('LaunchOptionsPicker', () => {
       );
     });
     expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
+  });
+
+  it('shows only the selected provider\'s options', async () => {
+    // Default provider is Claude: the two Claude fixtures (ids 1, 2) show; the
+    // Codex fixture (id 3, `model gpt-5`) is filtered out.
+    renderPicker();
+    await screen.findByTestId('launch-option-1');
+    expect(screen.getByTestId('launch-option-2')).toBeInTheDocument();
+    expect(screen.queryByTestId('launch-option-3')).not.toBeInTheDocument();
+  });
+
+  it('seeds default_enabled only from the selected provider', async () => {
+    // Start on Codex: no Codex fixture is default_enabled, so nothing is
+    // pre-checked even though a Claude option (id 1) is default_enabled.
+    useComposerStore.setState({
+      newSessionProvider: 'codex',
+      newSessionProviderSeeded: true,
+      newSessionLaunchOptionIds: [],
+      newSessionLaunchOptionsSeeded: false,
+    });
+    renderPicker();
+    await screen.findByTestId('launch-option-3');
+    await waitFor(() => {
+      expect(
+        useComposerStore.getState().newSessionLaunchOptionsSeeded,
+      ).toBe(true);
+    });
+    expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
+  });
+
+  it('re-filters and drops cross-provider selections when the provider switches', async () => {
+    // Seeded on Claude: id 1 (default_enabled) is pre-selected.
+    renderPicker();
+    await screen.findByTestId('launch-option-1');
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([1]);
+    });
+
+    // Switch to Codex mid-compose (as the provider selector would).
+    act(() => {
+      useComposerStore.getState().setNewSessionProvider('codex');
+    });
+
+    // The Claude options disappear, the Codex option appears, and the Claude
+    // selection (id 1) is dropped — reset to the Codex provider's defaults
+    // (none default_enabled → empty), so a Codex send never carries a Claude id.
+    await screen.findByTestId('launch-option-3');
+    expect(screen.queryByTestId('launch-option-1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('launch-option-2')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionLaunchOptionIds).toEqual([]);
+    });
   });
 });
