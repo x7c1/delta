@@ -4,7 +4,10 @@ import { Badge, Collapsible } from '@delta/ui-kit';
 import { formatLocalDateTime } from '../../utils/formatLocalDateTime';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { blockSummary, stringifyContent } from './blockSummary';
-import { isTaskNotificationMessage } from './claudeFormat';
+import {
+  isTaskNotificationMessage,
+  isUnknownCommandNoticeMessage,
+} from './claudeFormat';
 import { MessageMeta } from './MessageMeta';
 import { MessageTimestamp } from './MessageTimestamp';
 import { messageRendersNothing, type ToolPairing } from './toolPairs';
@@ -150,6 +153,42 @@ export const MessageItem = memo(function MessageItem({
         >
           <pre className="whitespace-pre-wrap text-fg-muted">{text}</pre>
         </Collapsible>
+        {timestamp && (
+          <MessageTimestamp
+            timestamp={timestamp}
+            className="mt-1 block text-right"
+          />
+        )}
+      </article>
+    );
+  }
+
+  // The unknown-command notice Claude Code writes when the user types a slash
+  // command it does not recognize (e.g. `/review-pr`). The backend surfaces it
+  // as a `role: "system"` line carrying `Unknown command: <command>`; it is the
+  // only user-facing system row. Render it as a short, warning-toned notice —
+  // not a bubble and never Markdown — so it reads as a system message, not the
+  // agent's reply. The text is a single stable line, so no collapsing is needed.
+  if (isUnknownCommandNoticeMessage(message)) {
+    const text = message.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('\n');
+    return (
+      <article
+        className="px-3 text-secondary"
+        data-role={message.role}
+        data-message-uuid={message.uuid}
+        data-testid="message-item"
+      >
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Badge tone="warning" className="shrink-0">
+            system
+          </Badge>
+          <span className="min-w-0 whitespace-pre-wrap text-fg-muted">
+            {text}
+          </span>
+        </div>
         {timestamp && (
           <MessageTimestamp
             timestamp={timestamp}

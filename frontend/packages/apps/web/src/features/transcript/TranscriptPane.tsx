@@ -29,7 +29,10 @@ import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
 import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import { isTaskNotificationMessage } from './claudeFormat';
+import {
+  isTaskNotificationMessage,
+  isUnknownCommandNoticeMessage,
+} from './claudeFormat';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
@@ -293,13 +296,18 @@ export function TranscriptPane({
   );
   const allMessages: Message[] = messagesQuery.data?.messages ?? [];
 
-  // Render user and assistant turns, plus meta lines (shown collapsed);
-  // system/other rows are ingest-only.
+  // Render user and assistant turns, plus meta lines (shown collapsed) and the
+  // one user-facing system row — the unknown-command notice. Every other
+  // system/other row is ingest-only (content-empty or internal), so it is
+  // skipped here.
   const messages = useMemo(
     () =>
       allMessages.filter(
         (m) =>
-          m.role === 'user' || m.role === 'assistant' || m.role === 'meta',
+          m.role === 'user' ||
+          m.role === 'assistant' ||
+          m.role === 'meta' ||
+          isUnknownCommandNoticeMessage(m),
       ),
     [allMessages],
   );
