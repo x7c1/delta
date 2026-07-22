@@ -39,6 +39,10 @@ pub(crate) struct FakeAgentLog {
     pub content_seeds: Vec<i64>,
     /// The visible send texts the adapter received, in order.
     pub sends: Vec<String>,
+    /// The hidden-context texts `inject_context` received, in order. Proves a
+    /// branch send delivered the branched-from passage over the trait before its
+    /// turn dispatched (the Codex `thread/inject_items` path).
+    pub injects: Vec<String>,
     /// The number of `close` calls.
     pub closes: usize,
     /// The number of `interrupt` calls. Proves an interrupt reached the adapter
@@ -137,6 +141,14 @@ impl AgentAdapter for FakeAgentAdapter {
         Ok(SendReceipt {
             provider_message_id: self.turn_id.clone(),
         })
+    }
+
+    async fn inject_context(&self, _handle: &AgentSessionHandle, text: &str) -> Result<()> {
+        // Record the injected passage so a branch test can prove the hidden
+        // context reached the adapter over the trait (the real Codex adapter
+        // sends it as `thread/inject_items`).
+        self.log.lock().unwrap().injects.push(text.to_owned());
+        Ok(())
     }
 
     async fn interrupt(&self, _handle: &AgentSessionHandle) -> Result<()> {

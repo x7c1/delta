@@ -276,6 +276,18 @@ impl CodexAppServerAdapter {
     }
 }
 
+/// Build a Responses API user-message item carrying `text`, the shape
+/// `thread/inject_items` appends to the thread's model-visible history (a
+/// `MessageResponseItem` with a single `input_text` content item — see the
+/// vendored `ResponseItem`/`ContentItem` schema).
+fn inject_message_item(text: &str) -> Value {
+    json!({
+        "type": "message",
+        "role": "user",
+        "content": [{ "type": "input_text", "text": text }],
+    })
+}
+
 /// The id of the turn a `turn/start` response announces, read from the `Turn`
 /// object it carries under `result.turn` (see the vendored `TurnStartResponse`
 /// schema: `{ turn: Turn }`, `Turn.id`).
@@ -332,6 +344,29 @@ impl AgentAdapter for CodexAppServerAdapter {
         req: SendRequest,
     ) -> UsecaseResult<SendReceipt> {
         self.start_turn(handle, req.text).await
+    }
+
+    /// Inject hidden per-turn context via `thread/inject_items`: append one
+    /// Responses API user-message item to the thread's model-visible history, so
+    /// the next `turn/start` runs with the branched-from passage in context
+    /// without it ever appearing in the visible prompt.
+    ///
+    /// `ThreadInjectItemsParams` (vendored schema) is `{ threadId, items }`,
+    /// where `items` are raw Responses API items; a user message is a
+    /// `MessageResponseItem` — `{ type: "message", role: "user", content: [{
+    /// type: "input_text", text }] }` (see `ResponseItem` / `ContentItem` in the
+    /// vendored v2 schema). The response (`ThreadInjectItemsResponse`) is an
+    /// empty object, so nothing is read off it.
+    async fn inject_context(&self, handle: &AgentSessionHandle, text: &str) -> UsecaseResult<()> {
+        let params = json!({
+            "threadId": handle.provider_session_id,
+            "items": [inject_message_item(text)],
+        });
+        self.conn
+            .request("thread/inject_items", Some(params))
+            .await
+            .map_err(to_usecase_err)?;
+        Ok(())
     }
 
     /// Interrupt the turn currently in flight on this thread.

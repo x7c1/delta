@@ -2,6 +2,7 @@
 //! response/notification/server-request frames on stdout.
 
 use std::io::{BufRead, StdoutLock, Write};
+use std::path::PathBuf;
 
 use serde_json::{json, Map, Value};
 
@@ -23,6 +24,10 @@ pub fn run() -> Result<(), String> {
         out: stdout.lock(),
         server_request_seq: 0,
         pending: None,
+        // A sidecar record of the items each `thread/inject_items` carried, so a
+        // full-loop branch test can prove the hidden context reached the server.
+        // Off unless the client hands the fake a path via this env var.
+        inject_log: std::env::var_os("FAKE_CODEX_INJECT_LOG").map(PathBuf::from),
     };
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| format!("read stdin: {e}"))?;
@@ -47,6 +52,10 @@ struct Server<'a> {
     /// emitted and awaiting the client's decision. Resumed (and cleared) when the
     /// client's response frame arrives. `None` when no turn is gated.
     pending: Option<PendingTurn>,
+    /// Where to append each `thread/inject_items` payload (one JSON line per
+    /// call), when the client set `FAKE_CODEX_INJECT_LOG`. `None` disables the
+    /// record.
+    inject_log: Option<PathBuf>,
 }
 
 /// A turn suspended on a `blocking` approval: the emits still to play once the
@@ -131,6 +140,17 @@ impl Server<'_> {
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
                 self.respond(id, json!({ "thread": { "id": thread_id } }))
+            }
+            "thread/inject_items" => {
+                // Hidden per-turn context: the client appends Responses API
+                // items to the thread's model-visible history before a branch
+                // turn. Record what arrived (for the branch test to assert) and
+                // reply with the empty object the real `ThreadInjectItemsResponse`
+                // is. A missing `items` is recorded as `null` rather than failing,
+                // so the record shape is always a value.
+                let items = params.get("items").cloned().unwrap_or(Value::Null);
+                self.record_injected_items(&items)?;
+                self.respond(id, json!({}))
             }
             "turn/start" => {
                 // The turn is scoped to the thread the client named, falling
@@ -286,6 +306,26 @@ impl Server<'_> {
             ),
         )?;
         self.play_emits(&pending.remaining, &thread_id, &turn_id)
+    }
+
+    /// Append one `thread/inject_items` payload to the sidecar record, when the
+    /// client enabled it via `FAKE_CODEX_INJECT_LOG`. A no-op otherwise. Each
+    /// call writes one JSON line, so a test can read back every injection in
+    /// order.
+    fn record_injected_items(&mut self, items: &Value) -> Result<(), String> {
+        let Some(path) = self.inject_log.as_ref() else {
+            return Ok(());
+        };
+        let mut line = serde_json::to_string(items).map_err(|e| format!("encode items: {e}"))?;
+        line.push('\n');
+        use std::io::Write as _;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|e| format!("open inject log `{}`: {e}", path.display()))?;
+        file.write_all(line.as_bytes())
+            .map_err(|e| format!("write inject log: {e}"))
     }
 
     fn respond(&mut self, id: Value, result: Value) -> Result<(), String> {

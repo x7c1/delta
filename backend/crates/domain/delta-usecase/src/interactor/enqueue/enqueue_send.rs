@@ -1,5 +1,6 @@
 use delta_model::{AgentProvider, MessageUuid, Send, ThreadId};
 
+use crate::agent::ContextInjectionCapability;
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
@@ -66,24 +67,54 @@ where
         if let Some(agent) = self.state.open_agent() {
             let adapter = agent.adapter.clone();
             let handle = agent.handle.clone();
-            // Codex is `ForkCapability::None`: it cannot branch. The UI must not
-            // offer branching for a no-fork provider, so a `branch_from` here is
-            // never expected — reject it cleanly rather than silently dropping
-            // the branch intent and sending a plain turn the caller did not ask
-            // for. `locator_quote` (a quoted-context marker for branching) is
-            // moot for a plain Codex send and is deliberately not carried onto
-            // the send row in this slice — Codex needs no hidden-context
-            // injection.
-            if branch_from.is_some() {
-                return Err(Error::Agent(
-                    "branching is not supported for a Codex session".to_owned(),
-                ));
+
+            // Branch-from-selected-text is enabled by hidden-context injection,
+            // NOT by native provider fork (`ForkCapability` is `None` for every
+            // v1 provider). Gate a branch send on `ContextInjectionCapability`:
+            // a provider that cannot inject hidden context (`None`) genuinely
+            // cannot branch, so reject it cleanly rather than silently dropping
+            // the branch intent. Codex is `HiddenPerTurn` (via
+            // `thread/inject_items`), so it passes and branches like Claude.
+            if branch_from.is_some()
+                && adapter.capabilities().context_injection == ContextInjectionCapability::None
+            {
+                return Err(Error::Agent(format!(
+                    "branching is not supported for a {:?} session: it cannot inject hidden context",
+                    adapter.provider()
+                )));
             }
+
+            // Create the same delta-side branch structure Claude uses — a new
+            // thread lane + semantic parent — through the shared
+            // `resolve_branch_target`. A plain send leaves the target thread
+            // unchanged with no semantic parent.
+            let (target_thread, semantic_parent) = self
+                .resolve_branch_target(thread_id, branch_from, locator_quote)
+                .await?;
+
+            // Deliver the branched-from passage as hidden context BEFORE the
+            // turn dispatches, so the model sees it on this turn without it
+            // polluting the visible prompt (Codex: `thread/inject_items`). Only
+            // a branch send carries a quote to inject; a plain send injects
+            // nothing.
+            if branch_from.is_some() {
+                if let Some(quote) = locator_quote {
+                    adapter.inject_context(&handle, quote).await?;
+                }
+            }
+
             // A Codex dispatch produces no `SessionEvent`s synchronously: the
             // turn's frames arrive asynchronously through the already-running
             // event pump, just like the opening turn.
             let send = self
-                .dispatch_agent_turn(&adapter, &handle, thread_id, text.to_owned())
+                .dispatch_agent_turn(
+                    &adapter,
+                    &handle,
+                    target_thread,
+                    semantic_parent.as_ref(),
+                    text.to_owned(),
+                    locator_quote,
+                )
                 .await?;
             return Ok((send, Vec::new()));
         }
