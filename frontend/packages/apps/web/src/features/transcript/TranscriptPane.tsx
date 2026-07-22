@@ -29,7 +29,10 @@ import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
 import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import { isTaskNotificationMessage } from './claudeFormat';
+import {
+  isTaskNotificationMessage,
+  isUnknownCommandNoticeMessage,
+} from './claudeFormat';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
@@ -293,13 +296,18 @@ export function TranscriptPane({
   );
   const allMessages: Message[] = messagesQuery.data?.messages ?? [];
 
-  // Render user and assistant turns, plus meta lines (shown collapsed);
-  // system/other rows are ingest-only.
+  // Render user and assistant turns, plus meta lines (shown collapsed) and the
+  // one user-facing system row — the unknown-command notice. Every other
+  // system/other row is ingest-only (content-empty or internal), so it is
+  // skipped here.
   const messages = useMemo(
     () =>
       allMessages.filter(
         (m) =>
-          m.role === 'user' || m.role === 'assistant' || m.role === 'meta',
+          m.role === 'user' ||
+          m.role === 'assistant' ||
+          m.role === 'meta' ||
+          isUnknownCommandNoticeMessage(m),
       ),
     [allMessages],
   );
@@ -1500,11 +1508,15 @@ export function TranscriptPane({
           (block) => block.type === 'tool_use' || block.type === 'tool_result',
         );
         // Tool rows, the harness-injected task-notification card (a collapsed
-        // `<task-notification>` user turn), and meta lines all render as nested
-        // aside cards: they are tightened and left-indented so they read as
-        // nested steps, distinct from prose.
+        // `<task-notification>` user turn), meta lines, and the unknown-command
+        // system notice all render as nested aside cards: they are tightened and
+        // left-indented so they read as nested steps, distinct from prose — the
+        // notice is a system aside, not the agent's reply.
         const isNestedCard =
-          isToolTurn || isTaskNotificationMessage(message) || message.role === 'meta';
+          isToolTurn ||
+          isTaskNotificationMessage(message) ||
+          message.role === 'meta' ||
+          isUnknownCommandNoticeMessage(message);
         const topGap = isNestedCard
           ? 'pt-0.5'
           : message.role === 'user'

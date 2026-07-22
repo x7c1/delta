@@ -41,3 +41,35 @@ export function isTaskNotificationMessage(message: Message): boolean {
   const firstText = message.content.find((block) => block.type === 'text');
   return firstText !== undefined && isTaskNotificationText(firstText.text);
 }
+
+/**
+ * Prefix Claude Code writes on the `type: "system"` / `subtype: "informational"`
+ * notice it emits when the user types a slash command it does not recognize
+ * (e.g. `/review-pr` when no such command exists). Mirrors the backend
+ * `UNKNOWN_COMMAND_NOTICE_PREFIX`.
+ */
+const UNKNOWN_COMMAND_NOTICE_PREFIX = 'Unknown command:';
+
+/**
+ * Whether a (trimmed) system-line content is the unknown-command notice.
+ * Mirrors the backend `is_unknown_command_notice`.
+ */
+export function isUnknownCommandNoticeText(text: string): boolean {
+  return text.trim().startsWith(UNKNOWN_COMMAND_NOTICE_PREFIX);
+}
+
+/**
+ * Whether a message is the unknown-command notice Claude Code writes for an
+ * unrecognized slash command. The backend surfaces it as a `role: "system"`
+ * line carrying `Unknown command: <command>` (every other system row stays
+ * content-empty and ingest-only). The conversation pane shows this one — it is
+ * the only user-facing system row — so the user learns the command was rejected
+ * instead of seeing nothing. Backend role/attribution is unchanged.
+ */
+export function isUnknownCommandNoticeMessage(message: Message): boolean {
+  if (message.role !== 'system') {
+    return false;
+  }
+  const firstText = message.content.find((block) => block.type === 'text');
+  return firstText !== undefined && isUnknownCommandNoticeText(firstText.text);
+}
