@@ -35,7 +35,7 @@
 /// applied on open to an existing DB.
 ///
 /// See the compatibility policy doc for the full rule set.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// All `CREATE TABLE`/`CREATE INDEX`/`CREATE TRIGGER` statements, idempotent
 /// via `IF NOT EXISTS`.
@@ -96,7 +96,27 @@ CREATE TABLE IF NOT EXISTS session (
   -- `repo_root` because `repo_root` is the working-tree path (different per
   -- linked worktree) while this label is the cross-worktree repository
   -- identity. Additive; see `ADDITIVE_COLUMNS`.
-  repository_display_name TEXT
+  repository_display_name TEXT,
+  -- Which AI agent backs this session. `'claude'` for every session Delta has
+  -- launched to date (Claude Code in a tmux PTY); other providers (e.g.
+  -- `'codex'`, driven via the `codex app-server` JSON-RPC transport) select a
+  -- different adapter. `NOT NULL DEFAULT 'claude'` so a pre-existing row and
+  -- any insert that does not name a provider keep the historical meaning.
+  -- Additive (see `ADDITIVE_COLUMNS`): an existing database gains it with the
+  -- constant default on every row, no backfill needed.
+  provider TEXT NOT NULL DEFAULT 'claude',
+  -- The provider's own identifier for the underlying conversation, when the
+  -- provider (not Delta) mints it — e.g. Codex's `thr_...` returned from
+  -- `thread/start`. NULL for a Claude session, whose conversation id IS the
+  -- Delta-minted `session.id` (pinned via `--session-id`), and for any session
+  -- that predates this column. Additive; see `ADDITIVE_COLUMNS`.
+  provider_session_id TEXT,
+  -- The provider's thread identifier. A Delta session maps 1:1 onto a Codex
+  -- thread, so for Codex this currently equals `provider_session_id`; kept as a
+  -- distinct column so a future many-threads-per-session provider has a home
+  -- for it. NULL for Claude and for rows that predate this column. Additive;
+  -- see `ADDITIVE_COLUMNS`.
+  provider_thread_id TEXT
 ) STRICT;
 
 -- The transcript-ingestion cursor, split out of `session`: how many lines of
@@ -128,8 +148,18 @@ CREATE TABLE IF NOT EXISTS message (
   session_id           TEXT NOT NULL REFERENCES session(id) ON DELETE CASCADE,
   uuid                 TEXT NOT NULL,
   thread_id            INTEGER NOT NULL REFERENCES thread(id),
+  -- The role vocabulary is pinned to `delta_model::Role::as_str` (and its wire
+  -- twin `WireRole`). `compact_summary` is the synthetic line Claude Code
+  -- writes when `/compact` runs; the attribution fold produces and persists it,
+  -- so it must be an accepted value here. Widening this constraint is a schema
+  -- change SQLite cannot apply to an existing table in place (a CHECK edit
+  -- needs a full table rebuild), so it ships behind a `SCHEMA_VERSION` bump —
+  -- a fresh database gets the widened CHECK from this statement, and an
+  -- existing dev database is caught by the startup gate and rebuilt via
+  -- `make reset`.
   role                 TEXT NOT NULL
-                         CHECK (role IN ('user','assistant','system','meta','other')),
+                         CHECK (role IN
+                           ('user','assistant','system','meta','compact_summary','other')),
   linear_parent_uuid   TEXT,
   semantic_parent_uuid TEXT,
   prompt_id            TEXT,
@@ -145,6 +175,10 @@ CREATE TABLE IF NOT EXISTS message (
   git_branch           TEXT,
   cwd                  TEXT,
   response_time_ms     REAL,
+  -- The provider's own id for the source item (Codex's `item.id`), carried so a
+  -- streaming delta and its final message id-join in place. NULL for Claude and
+  -- for any message with no provider item. Additive; see `ADDITIVE_COLUMNS`.
+  provider_item_id     TEXT,
   PRIMARY KEY (session_id, uuid)
 ) STRICT;
 
@@ -223,7 +257,13 @@ CREATE TABLE IF NOT EXISTS launch_option (
   name            TEXT NOT NULL,
   value           TEXT,
   default_enabled INTEGER NOT NULL DEFAULT 0 CHECK (default_enabled IN (0, 1)),
-  created_at      TEXT NOT NULL
+  created_at      TEXT NOT NULL,
+  -- Which provider this launch option applies to. Claude options are argv
+  -- flags (`--plugin-dir`, `--permission-mode`, …); other providers register
+  -- their own option set (e.g. Codex `thread/start` fields). `NOT NULL DEFAULT
+  -- 'claude'` so every pre-existing row and any insert that omits it stays a
+  -- Claude option. Additive (see `ADDITIVE_COLUMNS`).
+  provider        TEXT NOT NULL DEFAULT 'claude'
 ) STRICT;
 
 -- Outstanding background-task launches: the launching thread of each
@@ -358,6 +398,15 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         column: "response_time_ms",
         add_column_sql: "ALTER TABLE message ADD COLUMN response_time_ms REAL",
     },
+    // The provider's source-item id (Codex's `item.id`), added to `message`
+    // after it first shipped. Nullable with no default: an existing database
+    // gains it as NULL on every pre-existing row, which is exactly the "no
+    // provider item" meaning Claude messages carry.
+    AdditiveColumn {
+        table: "message",
+        column: "provider_item_id",
+        add_column_sql: "ALTER TABLE message ADD COLUMN provider_item_id TEXT",
+    },
     // Spawn-time git snapshot, added to `session` after it first shipped. Both
     // are nullable with no default: an existing database gains them as NULL on
     // every pre-existing row, so a session launched before this change stays
@@ -415,6 +464,35 @@ pub const ADDITIVE_COLUMNS: &[AdditiveColumn] = &[
         table: "send",
         column: "restored_at",
         add_column_sql: "ALTER TABLE send ADD COLUMN restored_at TEXT",
+    },
+    // Multi-provider columns, added to `session`/`launch_option` after they
+    // first shipped. `provider` is `NOT NULL` with a *constant* `'claude'`
+    // default — no backfill needed, every pre-existing row simply takes the
+    // constant, which is exactly its historical meaning (all prior sessions
+    // and launch options are Claude). `provider_session_id`/`provider_thread_id`
+    // are nullable with no default: an existing database gains them as NULL on
+    // every pre-existing row (a Claude session has no provider-minted id — its
+    // conversation id is the Delta-minted `session.id`).
+    AdditiveColumn {
+        table: "session",
+        column: "provider",
+        add_column_sql: "ALTER TABLE session ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'",
+    },
+    AdditiveColumn {
+        table: "session",
+        column: "provider_session_id",
+        add_column_sql: "ALTER TABLE session ADD COLUMN provider_session_id TEXT",
+    },
+    AdditiveColumn {
+        table: "session",
+        column: "provider_thread_id",
+        add_column_sql: "ALTER TABLE session ADD COLUMN provider_thread_id TEXT",
+    },
+    AdditiveColumn {
+        table: "launch_option",
+        column: "provider",
+        add_column_sql:
+            "ALTER TABLE launch_option ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'",
     },
 ];
 

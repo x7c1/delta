@@ -1,6 +1,6 @@
-use delta_model::{MessageUuid, Send, ThreadId};
+use delta_model::{AgentProvider, MessageUuid, Send, ThreadId};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -37,9 +37,60 @@ where
         text: &str,
         locator_quote: Option<&str>,
     ) -> Result<(Send, Vec<SessionEvent>)> {
-        // Ensure the session is open: resume it if it is known but closed (no
-        // live pane). Once open we have a pane to dispatch to and the normal
-        // pre-dispatch path applies.
+        // A closed Codex session — its in-process adapter binding lost (e.g.
+        // across a server restart) but its persisted row + provider ids intact —
+        // must be reconnected before it can dispatch, NOT sent down Claude's
+        // `claude --resume` path (which a terminal-less session cannot take: no
+        // pane, no transcript, so it would fail with `ResumeUnavailable`).
+        // Reattach to its provider thread via `thread/resume` here, so the
+        // `open_agent()` branch below then dispatches over the freshly-bound
+        // adapter exactly like the opening turn. A closed **Claude** session is
+        // left alone (its provider differs) and takes the pane path unchanged.
+        if self.state.open_agent().is_none() {
+            if let Some(session) = self.store.session(self.id).await? {
+                if session.provider == AgentProvider::Codex {
+                    self.resume_codex_agent(&session).await?;
+                }
+            }
+        }
+
+        // A terminal-less (adapter-backed) session — Codex — has no tmux pane
+        // and no resumable transcript, so it cannot take Claude's
+        // `ensure_open()` → `open_session()` (`claude --resume`) path: that
+        // would fail with `ResumeUnavailable` on every send after the first.
+        // Dispatch it through its bound adapter instead, exactly like the
+        // opening turn does (see [`Self::dispatch_agent_turn`]). The
+        // non-destructive `open_agent()` accessor tells the two providers apart:
+        // it is `Some` only while an adapter session is live (either never
+        // closed, or just reconnected above).
+        if let Some(agent) = self.state.open_agent() {
+            let adapter = agent.adapter.clone();
+            let handle = agent.handle.clone();
+            // Codex is `ForkCapability::None`: it cannot branch. The UI must not
+            // offer branching for a no-fork provider, so a `branch_from` here is
+            // never expected — reject it cleanly rather than silently dropping
+            // the branch intent and sending a plain turn the caller did not ask
+            // for. `locator_quote` (a quoted-context marker for branching) is
+            // moot for a plain Codex send and is deliberately not carried onto
+            // the send row in this slice — Codex needs no hidden-context
+            // injection.
+            if branch_from.is_some() {
+                return Err(Error::Agent(
+                    "branching is not supported for a Codex session".to_owned(),
+                ));
+            }
+            // A Codex dispatch produces no `SessionEvent`s synchronously: the
+            // turn's frames arrive asynchronously through the already-running
+            // event pump, just like the opening turn.
+            let send = self
+                .dispatch_agent_turn(&adapter, &handle, thread_id, text.to_owned())
+                .await?;
+            return Ok((send, Vec::new()));
+        }
+
+        // Claude (pane-backed): ensure the session is open — resume it if it is
+        // known but closed (no live pane). Once open we have a pane to dispatch
+        // to and the normal pre-dispatch path applies.
         let pane = self.ensure_open().await?;
         self.enqueue_into_open(&pane, thread_id, text, locator_quote, branch_from)
             .await

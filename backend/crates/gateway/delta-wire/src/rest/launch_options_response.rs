@@ -4,10 +4,14 @@ use delta_usecase::LaunchOption;
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::session::WireAgentProvider;
+
 /// One registered launch option: a flat `(label?, name, value?)` record for a
 /// custom `claude` CLI flag. `name` is the flag (e.g. `--plugin-dir`), `value`
 /// its argument (`null` for a valueless flag), and `label` an optional note.
 /// `default_enabled` marks it to start pre-checked in the session-start picker.
+/// `provider` is the provider the option applies to; the session-start picker
+/// only offers options matching the new session's provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[ts(rename = "LaunchOption")]
 pub struct WireLaunchOption {
@@ -17,6 +21,7 @@ pub struct WireLaunchOption {
     pub value: Option<String>,
     pub default_enabled: bool,
     pub created_at: String,
+    pub provider: WireAgentProvider,
 }
 
 impl From<LaunchOption> for WireLaunchOption {
@@ -28,6 +33,7 @@ impl From<LaunchOption> for WireLaunchOption {
             value: option.value,
             default_enabled: option.default_enabled,
             created_at: option.created_at,
+            provider: option.provider.into(),
         }
     }
 }
@@ -43,6 +49,7 @@ pub struct WireLaunchOptionsResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use delta_model::AgentProvider;
 
     #[test]
     fn launch_options_serialize_with_the_rest_field_names() {
@@ -55,6 +62,7 @@ mod tests {
                     value: Some("/opt/p".to_owned()),
                     default_enabled: true,
                     created_at: "2026-01-01T00:00:00Z".to_owned(),
+                    provider: AgentProvider::Claude,
                 })],
             })
             .unwrap(),
@@ -66,6 +74,7 @@ mod tests {
                     "value": "/opt/p",
                     "default_enabled": true,
                     "created_at": "2026-01-01T00:00:00Z",
+                    "provider": "claude",
                 }],
             }),
         );
@@ -81,6 +90,7 @@ mod tests {
                 value: None,
                 default_enabled: false,
                 created_at: "2026-01-01T00:00:00Z".to_owned(),
+                provider: AgentProvider::Claude,
             }))
             .unwrap(),
             serde_json::json!({
@@ -90,7 +100,25 @@ mod tests {
                 "value": null,
                 "default_enabled": false,
                 "created_at": "2026-01-01T00:00:00Z",
+                "provider": "claude",
             }),
+        );
+    }
+
+    #[test]
+    fn a_codex_option_serializes_its_provider_token() {
+        assert_eq!(
+            serde_json::to_value(WireLaunchOption::from(LaunchOption {
+                id: 3,
+                label: None,
+                name: "model".to_owned(),
+                value: Some("gpt-5".to_owned()),
+                default_enabled: false,
+                created_at: "2026-01-01T00:00:00Z".to_owned(),
+                provider: AgentProvider::Codex,
+            }))
+            .unwrap()["provider"],
+            serde_json::json!("codex"),
         );
     }
 }

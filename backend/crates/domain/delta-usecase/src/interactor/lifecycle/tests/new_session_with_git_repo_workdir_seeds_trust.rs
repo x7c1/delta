@@ -18,6 +18,7 @@ async fn new_session_with_git_repo_workdir_seeds_trust() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            provider: crate::AgentProvider::Claude,
             workdir: Some("/projects/app".to_owned()),
             launch_option_ids: Vec::new(),
             worktree: None,

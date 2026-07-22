@@ -50,4 +50,10 @@ cwd: string | null,
  * The turn's response time in milliseconds, or `null` when no duration was
  * recorded for the turn.
  */
-response_time_ms: number | null, };
+response_time_ms: number | null, 
+/**
+ * The provider's own id for the source item (Codex's `item.id`), or `null`
+ * for Claude and any message with no provider item. The browser uses it as
+ * the reconcile key that id-joins a streaming preview to its final message.
+ */
+provider_item_id: string | null, };

@@ -12,6 +12,7 @@ import type {
   OpenCwdRequest,
   PermissionDecision,
   PermissionDecisionRequest,
+  ProvidersResponse,
   PullRequestsResponse,
   QuestionAnswerRequest,
   QuestionCancelRequest,
@@ -567,6 +568,17 @@ export class ApiClient {
    */
   getVersion(): Promise<VersionResponse> {
     return this.request<VersionResponse>('/api/version');
+  }
+
+  /**
+   * `GET /api/providers` — per-provider launch availability for the new-session
+   * selector. Each entry reports whether that provider's launch binary is
+   * present on the server host (`available`), with a `detail` reason when it is
+   * not. Always 200: a missing binary is reported in-band as `available: false`,
+   * never as an error.
+   */
+  getProviders(): Promise<ProvidersResponse> {
+    return this.request<ProvidersResponse>('/api/providers');
   }
 }
 

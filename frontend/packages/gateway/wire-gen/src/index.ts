@@ -11,6 +11,7 @@ export type { RateLimitWindow } from './generated/RateLimitWindow';
 
 export type { Session } from './generated/Session';
 export type { SessionStatus } from './generated/SessionStatus';
+export type { AgentProvider } from './generated/AgentProvider';
 export type { Thread } from './generated/Thread';
 export type { Message } from './generated/Message';
 export type { MessageRole } from './generated/MessageRole';
@@ -49,6 +50,9 @@ export type { RepositoryScanRootsResponse } from './generated/RepositoryScanRoot
 export type { CreateRepositoryScanRootRequest } from './generated/CreateRepositoryScanRootRequest';
 export type { PullRequest } from './generated/PullRequest';
 export type { PullRequestsResponse } from './generated/PullRequestsResponse';
+export type { ProviderAvailability } from './generated/ProviderAvailability';
+export type { ProviderCapabilities } from './generated/ProviderCapabilities';
+export type { ProvidersResponse } from './generated/ProvidersResponse';
 export type { GitRepoResponse } from './generated/GitRepoResponse';
 export type { GitBranchesResponse } from './generated/GitBranchesResponse';
 export type { WorktreeSpec } from './generated/WorktreeSpec';

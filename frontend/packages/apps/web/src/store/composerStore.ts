@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { MessageUuid, ThreadId } from '@delta/model';
-import type { WorktreeStartPoint } from '@delta/wire-gen';
+import type { AgentProvider, WorktreeStartPoint } from '@delta/wire-gen';
 
 /**
  * Stable DRAFT key for the new-session composer state, which has no real
@@ -109,6 +109,31 @@ export interface ComposerState {
    * Restored on rehydration; an unknown value falls back to the default.
    */
   newSessionTab: NewSessionTab;
+  /**
+   * Which AI-agent provider the next new session launches on — the top-level
+   * axis of the new-session form, since it changes the backend binary and gates
+   * capability-dependent controls. Session-only, like the other `newSession*`
+   * ephemerals: reset to {@link DEFAULT_NEW_SESSION_PROVIDER} whenever the
+   * new-session compose state is left. Attached to the send as `provider`; the
+   * composer omits it for the Claude default so a Claude send stays byte-for-
+   * byte identical to today's.
+   */
+  newSessionProvider: AgentProvider;
+  /**
+   * Whether `newSessionProvider` has been seeded from the persisted
+   * default-provider setting (or explicitly set by the user) yet for the
+   * current new-session compose state.
+   *
+   * The provider selector seeds the initial value from the Settings
+   * `defaultProvider` exactly once when a fresh new-session compose is entered.
+   * This flag distinguishes "not seeded yet" (seed from the default) from "user
+   * has since picked a provider" (leave their choice alone) — mirroring the
+   * launch-options seed guard so a later re-seed (e.g. the default changing
+   * mid-compose) never clobbers an explicit per-session choice. Reset to
+   * `false` together with `newSessionProvider` whenever the new-session compose
+   * state is (re)entered or cleared, so the next fresh compose reseeds.
+   */
+  newSessionProviderSeeded: boolean;
 
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
@@ -138,6 +163,25 @@ export interface ComposerState {
   closeWorkdirDialog: () => void;
   setNewSessionTab: (tab: NewSessionTab) => void;
   setNewSessionSelectedPrUrl: (url: string | null) => void;
+  /**
+   * Set the selected provider from a user interaction in the selector. Marks
+   * the selection as seeded, so a later seed will not overwrite an explicit
+   * per-session choice with the persisted default.
+   */
+  setNewSessionProvider: (provider: AgentProvider) => void;
+  /**
+   * Seed the initial provider from the persisted default-provider setting.
+   * A no-op once the provider has already been seeded (or the user has picked
+   * one), so it only ever supplies the initial value. Marks the selection
+   * seeded.
+   */
+  seedNewSessionProvider: (provider: AgentProvider) => void;
+  /**
+   * Reset the provider to {@link DEFAULT_NEW_SESSION_PROVIDER} and clear the
+   * seeded flag, so the next new-session compose reseeds from the persisted
+   * default. Used wherever the new-session compose state is left.
+   */
+  resetNewSessionProvider: () => void;
 }
 
 /** The new-session screen's three tabs. */
@@ -157,6 +201,14 @@ const NEW_SESSION_TABS: readonly NewSessionTab[] = ['pr', 'repository', 'directo
  * so the picker leads with that lens.
  */
 export const DEFAULT_NEW_SESSION_TAB: NewSessionTab = 'repository';
+
+/**
+ * The provider a fresh new-session compose starts on, and the value it resets
+ * to when the new-session state is left. Claude for this slice; a later slice
+ * will seed it from a persisted default-provider setting. Kept as a single
+ * named constant so that swap has exactly one place to change.
+ */
+export const DEFAULT_NEW_SESSION_PROVIDER: AgentProvider = 'claude';
 
 /**
  * Selection state for the worktree start-point: the wire union plus a
@@ -198,6 +250,8 @@ export const useComposerStore = create<ComposerState>()(
       workdirDialogOpen: false,
       newSessionTab: DEFAULT_NEW_SESSION_TAB,
       newSessionSelectedPrUrl: null,
+      newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
+      newSessionProviderSeeded: false,
 
       setDraft: (threadId, text) =>
         set((state) => ({ drafts: { ...state.drafts, [threadId]: text } })),
@@ -256,6 +310,22 @@ export const useComposerStore = create<ComposerState>()(
       setNewSessionTab: (tab) => set({ newSessionTab: tab }),
 
       setNewSessionSelectedPrUrl: (url) => set({ newSessionSelectedPrUrl: url }),
+
+      setNewSessionProvider: (provider) =>
+        set({ newSessionProvider: provider, newSessionProviderSeeded: true }),
+
+      seedNewSessionProvider: (provider) =>
+        set((state) =>
+          state.newSessionProviderSeeded
+            ? state
+            : { newSessionProvider: provider, newSessionProviderSeeded: true },
+        ),
+
+      resetNewSessionProvider: () =>
+        set({
+          newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
+          newSessionProviderSeeded: false,
+        }),
     }),
     {
       name: COMPOSER_STORAGE_KEY,

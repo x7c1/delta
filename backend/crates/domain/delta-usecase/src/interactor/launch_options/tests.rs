@@ -64,11 +64,23 @@ async fn create_then_list_returns_registered_options_newest_first() {
     let ix = interactor();
 
     let first = ix
-        .create_launch_option(Some("plugins"), "--plugin-dir", Some("/opt/p"), true)
+        .create_launch_option(
+            Some("plugins"),
+            "--plugin-dir",
+            Some("/opt/p"),
+            true,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
     let second = ix
-        .create_launch_option(None, "--permission-mode", Some("auto"), false)
+        .create_launch_option(
+            None,
+            "--permission-mode",
+            Some("auto"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
 
@@ -81,6 +93,45 @@ async fn create_then_list_returns_registered_options_newest_first() {
     assert_eq!(plugins.name, "--plugin-dir");
     assert_eq!(plugins.value.as_deref(), Some("/opt/p"));
     assert!(plugins.default_enabled);
+    assert_eq!(plugins.provider, crate::AgentProvider::Claude);
+}
+
+/// The registry holds options for every provider (the list is not filtered
+/// server-side); each option round-trips with its own provider preserved.
+#[tokio::test]
+async fn create_preserves_each_options_provider() {
+    let ix = interactor();
+
+    let claude = ix
+        .create_launch_option(
+            None,
+            "--permission-mode",
+            Some("auto"),
+            false,
+            crate::AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let codex = ix
+        .create_launch_option(
+            None,
+            "model",
+            Some("gpt-5"),
+            false,
+            crate::AgentProvider::Codex,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(claude.provider, crate::AgentProvider::Claude);
+    assert_eq!(codex.provider, crate::AgentProvider::Codex);
+
+    let listed = ix.list_launch_options().await.unwrap();
+    assert_eq!(listed.len(), 2, "the list carries both providers' options");
+    assert_eq!(
+        listed.iter().find(|o| o.id == codex.id).unwrap().provider,
+        crate::AgentProvider::Codex,
+    );
 }
 
 /// Setting `default_enabled` toggles it in place and returns the updated row;
@@ -89,7 +140,13 @@ async fn create_then_list_returns_registered_options_newest_first() {
 async fn set_default_enabled_toggles_in_place() {
     let ix = interactor();
     let option = ix
-        .create_launch_option(None, "--plugin-dir", Some("/opt/p"), false)
+        .create_launch_option(
+            None,
+            "--plugin-dir",
+            Some("/opt/p"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
     assert!(!option.default_enabled);
@@ -123,7 +180,13 @@ async fn set_default_enabled_toggles_in_place() {
 async fn create_valueless_flag_keeps_label_and_value_none() {
     let ix = interactor();
     let option = ix
-        .create_launch_option(None, "--dangerously-skip-permissions", None, false)
+        .create_launch_option(
+            None,
+            "--dangerously-skip-permissions",
+            None,
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
     assert_eq!(option.label, None);
@@ -137,11 +200,23 @@ async fn create_valueless_flag_keeps_label_and_value_none() {
 async fn delete_removes_only_the_named_option() {
     let ix = interactor();
     let keep = ix
-        .create_launch_option(None, "--model", Some("opus"), false)
+        .create_launch_option(
+            None,
+            "--model",
+            Some("opus"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
     let drop = ix
-        .create_launch_option(None, "--model", Some("sonnet"), false)
+        .create_launch_option(
+            None,
+            "--model",
+            Some("sonnet"),
+            false,
+            crate::AgentProvider::Claude,
+        )
         .await
         .unwrap();
 

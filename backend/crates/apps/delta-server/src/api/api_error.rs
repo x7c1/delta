@@ -186,6 +186,7 @@ impl IntoResponse for ApiError {
                     ),
                     // Everything else is an internal failure.
                     Error::Tmux(_)
+                    | Error::Agent(_)
                     | Error::Git(_)
                     | Error::Gh(_)
                     | Error::Transcript(_)

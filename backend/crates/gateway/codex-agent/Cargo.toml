@@ -1,0 +1,22 @@
+[package]
+name = "codex-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+delta-model = { workspace = true }
+delta-usecase = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "process", "sync", "rt", "macros"] }
+
+[dev-dependencies]
+# The real-codex canary (`tests/real_codex_canary.rs`) drives the adapter on a
+# multi-threaded runtime (`#[tokio::test(flavor = "multi_thread")]`), so it needs
+# `rt-multi-thread` on top of the transport's own runtime features.
+tokio = { workspace = true, features = ["io-util", "process", "sync", "rt", "rt-multi-thread", "macros", "time"] }

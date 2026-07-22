@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use delta_bootstrap::{AppInteractor, Config};
-use delta_usecase::{SessionEvent, SessionLifecycle};
+use delta_usecase::{AsyncEventReceiver, AsyncEventSink, SessionEvent, SessionLifecycle};
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -26,6 +26,12 @@ const TRANSCRIPT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub struct AppState {
     interactor: Arc<AppInteractor>,
     events: broadcast::Sender<SessionEvent>,
+    /// The receiving half of the interactor's async event seam, drained once by
+    /// [`Self::spawn_async_event_drain`] into [`Self::events`]. Held behind a
+    /// `Mutex<Option<..>>` because a receiver cannot be cloned (this state is
+    /// `Clone`) and is consumed by exactly one drain task; `take()` hands it out
+    /// once and later calls (or clones) get `None`.
+    async_events: Arc<std::sync::Mutex<Option<AsyncEventReceiver>>>,
     /// Delta's dedicated tmux socket, so the PTY bridge attaches on the same
     /// server the sessions live on (`tmux -L <socket> attach-session`).
     tmux_socket: Arc<str>,
@@ -51,9 +57,18 @@ impl AppState {
     /// configuration (base workdir, hook settings) lives inside the Interactor.
     pub fn from_interactor(interactor: AppInteractor, tmux_socket: &str) -> Self {
         let (events, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
+        // Wire the interactor's async event seam here — before the interactor is
+        // shared (`Arc`-wrapped) and any session actor spawns, which
+        // `with_event_sink` requires. The interactor side pushes on the sink;
+        // this state keeps the receiver for `spawn_async_event_drain` to forward
+        // into the broadcast above. Every `AppState` — production and test — gets
+        // the seam wired uniformly this way.
+        let (sink, async_rx) = AsyncEventSink::channel();
+        let interactor = interactor.with_event_sink(sink);
         Self {
             interactor: Arc::new(interactor),
             events,
+            async_events: Arc::new(std::sync::Mutex::new(Some(async_rx))),
             tmux_socket: Arc::from(tmux_socket),
         }
     }
@@ -109,6 +124,34 @@ impl AppState {
         for event in events {
             let _ = self.events.send(event);
         }
+    }
+
+    /// Drain the interactor's async event seam into the broadcast.
+    ///
+    /// The synchronous return path — hook handlers and ticks handing their
+    /// `Vec<SessionEvent>` back for the caller to broadcast — is untouched. This
+    /// is its asynchronous complement: a producer that emits *after* its driving
+    /// call returned pushes onto the interactor's [`AsyncEventSink`], and this
+    /// background task pulls each event off the matching receiver and forwards
+    /// it to the same broadcast (via the raw sender clone, since `&self` is not
+    /// available inside the task). The loop ends when the last sink is dropped
+    /// (the interactor is gone), i.e. at shutdown.
+    ///
+    /// Returns `None` if the receiver was already taken (this must be called at
+    /// most once per state); production calls it once at boot alongside
+    /// [`Self::spawn_transcript_tail`].
+    pub fn spawn_async_event_drain(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let mut rx = self
+            .async_events
+            .lock()
+            .expect("async event mutex poisoned")
+            .take()?;
+        let events = self.events.clone();
+        Some(tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                let _ = events.send(event);
+            }
+        }))
     }
 
     /// Spawn the continuous transcript tail.

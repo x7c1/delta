@@ -166,6 +166,15 @@ export default {
         warning: 'rgb(var(--delta-color-warning) / <alpha-value>)',
         info: 'rgb(var(--delta-color-info) / <alpha-value>)',
         success: 'rgb(var(--delta-color-success) / <alpha-value>)',
+        // Per-provider accent hues consumed by ProviderBadge (ui-kit). Like the
+        // status colors the value comes from the active theme block, so the
+        // badge follows a theme switch; the badge pairs `text-provider-*` with a
+        // low-alpha `bg-provider-*` wash, which the `<alpha-value>` placeholder
+        // enables.
+        'provider-claude':
+          'rgb(var(--delta-color-provider-claude) / <alpha-value>)',
+        'provider-codex':
+          'rgb(var(--delta-color-provider-codex) / <alpha-value>)',
         scrim: 'rgb(var(--delta-color-scrim) / <alpha-value>)',
       },
       keyframes: {

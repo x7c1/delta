@@ -1,0 +1,119 @@
+//! Pin + accessors for the vendored `codex app-server` protocol schema.
+//!
+//! The schema itself lives under `vendor/app-server-schema/` (see that
+//! directory's `README.md` for provenance and the v1-vs-v2 distinction). This
+//! module records the exact Codex version it was generated from and points at
+//! the authoritative combined v2 document, so future drift detection has a
+//! single programmatic baseline.
+
+/// The Codex CLI version the vendored schema was generated from.
+///
+/// Drift detection regenerates the schema at this version and compares it
+/// against the vendored copy; when re-vendoring against a newer Codex, bump this
+/// and replace the files under `vendor/app-server-schema/` in the same change.
+pub const VENDORED_CODEX_VERSION: &str = "0.144.4";
+
+/// Path, relative to this crate's manifest directory, of the combined v2 schema
+/// document — the client-request + notification surface Delta pins. v1 is a
+/// legacy `initialize`-only stub and is not vendored (see the vendor directory's
+/// `README.md`).
+pub const V2_COMBINED_SCHEMA_RELATIVE_PATH: &str =
+    "vendor/app-server-schema/codex_app_server_protocol.v2.schemas.json";
+
+/// Path, relative to this crate's manifest directory, of the combined
+/// **non-versioned** schema document. Unlike the v2 combined document, this one
+/// carries the `ServerRequest` registry — the server → client request surface,
+/// including the `*RequestApproval` approval methods empirically confirmed to
+/// drive `turn/start` turns. It is the ground-truth reference the approval
+/// fan-out in [`crate::translate`] is reconciled against (see the vendor
+/// directory's `README.md` for why v2 alone is insufficient).
+pub const COMBINED_SERVER_REQUEST_SCHEMA_RELATIVE_PATH: &str =
+    "vendor/app-server-schema/codex_app_server_protocol.schemas.json";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Smoke test for the vendored artifact: the combined v2 schema is present,
+    /// is well-formed JSON, and carries the expected top-level shape.
+    ///
+    /// NOTE: this is deliberately only a presence/well-formedness check. A
+    /// strict "Delta's wire types match this schema" conformance/drift test is
+    /// **not** written here yet: Delta's current Codex wire types are known to
+    /// diverge from the real protocol, so such a test would fail today. It
+    /// lands with the wire-reconciliation slices, once the types are aligned.
+    #[test]
+    fn vendored_v2_schema_is_present_and_well_formed() {
+        let path = format!(
+            "{}/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            V2_COMBINED_SCHEMA_RELATIVE_PATH
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("vendored v2 schema missing at {path}: {err}"));
+        assert!(!raw.trim().is_empty(), "vendored v2 schema is empty");
+
+        let doc: serde_json::Value =
+            serde_json::from_str(&raw).expect("vendored v2 schema is not valid JSON");
+
+        // The generator emits a JSON Schema with a `definitions` map; a
+        // non-empty map is the cheapest proof the dump is the real protocol
+        // rather than a stub.
+        let definitions = doc
+            .get("definitions")
+            .and_then(serde_json::Value::as_object)
+            .expect("vendored v2 schema has no `definitions` object");
+        assert!(
+            !definitions.is_empty(),
+            "vendored v2 schema has an empty `definitions` map"
+        );
+    }
+
+    /// The combined non-versioned schema is present and carries the
+    /// `ServerRequest` registry with the three approval methods — the artifact
+    /// PR #267 omitted. This is the proof the server → client request surface is
+    /// now vendored, so the approval fan-out has a ground-truth reference.
+    #[test]
+    fn vendored_server_request_schema_carries_the_approval_registry() {
+        let path = format!(
+            "{}/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            COMBINED_SERVER_REQUEST_SCHEMA_RELATIVE_PATH
+        );
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+            panic!("vendored combined server-request schema missing at {path}: {err}")
+        });
+        let doc: serde_json::Value = serde_json::from_str(&raw)
+            .expect("vendored combined server-request schema is not valid JSON");
+
+        // The `ServerRequest` type is the server → client request registry the
+        // v2 combined document omits; its presence is the cheapest proof the gap
+        // is closed.
+        assert!(
+            doc.pointer("/definitions/ServerRequest").is_some(),
+            "vendored combined schema has no `ServerRequest` definition"
+        );
+
+        // Every approval method Delta reconciles against must appear in the
+        // vendored registry, so the fan-out cannot silently drift from ground
+        // truth.
+        for method in [
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/permissions/requestApproval",
+        ] {
+            assert!(
+                raw.contains(method),
+                "vendored server-request schema is missing approval method `{method}`"
+            );
+        }
+    }
+
+    #[test]
+    fn vendored_codex_version_is_pinned() {
+        assert!(
+            !VENDORED_CODEX_VERSION.is_empty(),
+            "the vendored Codex version must be pinned"
+        );
+    }
+}

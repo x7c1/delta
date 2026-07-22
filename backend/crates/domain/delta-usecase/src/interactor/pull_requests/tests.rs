@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use delta_model::SessionId;
+use delta_model::{AgentProvider, SessionId};
 
 use crate::interactor::testing::*;
 use crate::pull_request::{PullRequest, PullRequestLens};
@@ -78,6 +78,7 @@ async fn has_local_clone_is_set_only_for_registered_repos() {
             Some(EXISTING_DIR),
             Some(EXISTING_DIR),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -224,6 +225,7 @@ async fn path_keyed_repos_do_not_satisfy_the_local_clone_check() {
             Some(EXISTING_DIR_2),
             Some(EXISTING_DIR_2),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();

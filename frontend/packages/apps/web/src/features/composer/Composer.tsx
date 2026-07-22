@@ -91,6 +91,9 @@ export function Composer({ mode }: ComposerProps) {
   const newSessionWorktreeStartPoint = useComposerStore(
     (state) => state.newSessionWorktreeStartPoint,
   );
+  const newSessionProvider = useComposerStore(
+    (state) => state.newSessionProvider,
+  );
 
   const sendInFlight = useLiveStore((state) =>
     state.sending.some((item) => item.status === 'sending'),
@@ -157,6 +160,12 @@ export function Composer({ mode }: ComposerProps) {
           newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
             ? { worktree: { start_point: newSessionWorktreeStartPoint } }
             : {}),
+          // Attach the provider only when it is not the Claude default: the
+          // backend defaults an omitted `provider` to Claude, so omitting it
+          // keeps a Claude send byte-for-byte identical to today's.
+          ...(newSessionProvider !== 'claude'
+            ? { provider: newSessionProvider }
+            : {}),
         };
       } else if (branching) {
         body = {
@@ -211,6 +220,7 @@ export function Composer({ mode }: ComposerProps) {
       newSessionLaunchOptionIds,
       newSessionWorktreeEnabled,
       newSessionWorktreeStartPoint,
+      newSessionProvider,
       clearDraft,
       submitSend,
       setBranchOrigin,

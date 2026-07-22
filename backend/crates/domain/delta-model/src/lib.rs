@@ -11,6 +11,8 @@
 //! gateway crates' wire/record twins (`delta-transcript`, `delta-sqlite`,
 //! `delta-wire`).
 
+mod agent_provider;
+pub use agent_provider::AgentProvider;
 mod content;
 pub use content::ContentBlock;
 mod error;
@@ -28,6 +30,8 @@ mod permission_request;
 pub use permission_request::PermissionRequest;
 mod permission_status;
 pub use permission_status::PermissionStatus;
+mod provider_availability;
+pub use provider_availability::ProviderAvailability;
 mod role;
 pub use role::Role;
 mod session;

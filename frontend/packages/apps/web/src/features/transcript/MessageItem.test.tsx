@@ -54,6 +54,7 @@ function makeMessageWithContent(
     git_branch: null,
     cwd: null,
     response_time_ms: null,
+    provider_item_id: null,
   };
 }
 
@@ -322,6 +323,7 @@ describe('MessageItem', () => {
       cwd: '/home/dev/repo',
       git_branch: 'feature/meta',
       response_time_ms: 9400,
+      provider_item_id: null,
     };
   }
 
@@ -372,6 +374,7 @@ describe('MessageItem', () => {
     const message: Message = {
       ...assistantWithMeta(),
       response_time_ms: null,
+      provider_item_id: null,
     };
     render(<MessageItem message={message} isLatest />);
 

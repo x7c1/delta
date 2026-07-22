@@ -67,16 +67,22 @@ vi.mock('@xterm/addon-unicode11', () => {
   return { Unicode11Addon };
 });
 
+// A spy for `connectPty` so tests can assert whether the PTY bridge was opened.
+// Hoisted so it is defined before the (hoisted) `vi.mock` factory references it.
+const { connectPtyMock } = vi.hoisted(() => ({
+  connectPtyMock: vi.fn(() => ({
+    close: () => {},
+    send: () => {},
+    resize: () => {},
+  })),
+}));
+
 vi.mock('@delta/api-client', async () => {
   const actual =
     await vi.importActual<typeof import('@delta/api-client')>('@delta/api-client');
   return {
     ...actual,
-    connectPty: () => ({
-      close: () => {},
-      send: () => {},
-      resize: () => {},
-    }),
+    connectPty: connectPtyMock,
   };
 });
 
@@ -117,12 +123,13 @@ let capturedSetPreference: (next: ThemePreference) => void = () => {};
 function ThemeHarness({ sessionId }: { sessionId: SessionId }) {
   const { setPreference } = useThemeContext();
   capturedSetPreference = setPreference;
-  return <TerminalPane sessionId={sessionId} attachable={true} />;
+  return <TerminalPane sessionId={sessionId} attachable={true} hasTerminal />;
 }
 
 describe('TerminalPane xterm theme bridge', () => {
   beforeEach(() => {
     fakeTerminals.length = 0;
+    connectPtyMock.mockClear();
     capturedSetPreference = () => {};
     localStorage.removeItem(THEME_PREFERENCE_STORAGE_KEY);
     delete document.documentElement.dataset.theme;
@@ -177,5 +184,54 @@ describe('TerminalPane xterm theme bridge', () => {
     });
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(fakeTerminals[0].options.theme?.background).toBe('#ffffff');
+  });
+});
+
+describe('TerminalPane capability gate on the PTY bridge', () => {
+  beforeEach(() => {
+    fakeTerminals.length = 0;
+    connectPtyMock.mockClear();
+    installMatchMediaStub(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('opens the PTY bridge for an open session whose provider has a terminal', () => {
+    // Claude's case: an open, attachable session with a terminal capability.
+    // The pane builds its xterm instance and connects the `/pty` bridge — the
+    // behaviour must stay byte-identical to before the Codex gate landed.
+    render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          attachable={true}
+          hasTerminal={true}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(fakeTerminals).toHaveLength(1);
+    expect(connectPtyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('never opens the PTY bridge for a terminal-less provider', () => {
+    // Codex's case: an open, attachable session, but its provider reports no
+    // terminal. The capability gate must be authoritative for the connect — no
+    // xterm is built and, crucially, no `/pty` websocket is opened (which would
+    // trip the backend's "session is not open" warning).
+    render(
+      <ThemeProvider>
+        <TerminalPane
+          sessionId={'s1' as SessionId}
+          attachable={true}
+          hasTerminal={false}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(fakeTerminals).toHaveLength(0);
+    expect(connectPtyMock).not.toHaveBeenCalled();
   });
 });

@@ -4,6 +4,10 @@
 //! crates implement them; the [`crate::Interactor`] consumes them. Everything
 //! here is expressed in terms of [`delta_model`] types only.
 
+mod async_event_sink;
+pub use async_event_sink::{AsyncEventReceiver, AsyncEventSink};
+mod binary_detector;
+pub use binary_detector::BinaryDetector;
 mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
 mod external_opener;

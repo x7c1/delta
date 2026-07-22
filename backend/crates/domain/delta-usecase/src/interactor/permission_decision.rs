@@ -12,7 +12,9 @@
 //! and posts here, so a decision, an abandonment, and the hook registration
 //! can never interleave for one session.
 
+use crate::agent::AgentEvent;
 use crate::error::{Error, Result};
+use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -47,14 +49,24 @@ where
         request_id: i64,
         decision: PermissionDecision,
     ) -> Result<Vec<SessionEvent>> {
+        // An adapter-backed (Codex) permission carries no hook waiter: its
+        // decision is answered over the provider's wire, not by waking a blocked
+        // hook. The presence of a row → provider-token correlation is what marks
+        // it, so branch here before the Claude waiter path.
+        if let Some(token) = self
+            .state
+            .agent_permission_token(request_id)
+            .map(str::to_owned)
+        {
+            return self
+                .decide_agent_permission(request_id, &token, decision)
+                .await;
+        }
+
         let sender = self
             .state
             .take_permission_waiter(request_id)
             .ok_or(Error::PermissionNotPending(request_id))?;
-
-        // The dialog is being answered: drop its queryable runtime mirror
-        // (keyed, so a stale id cannot wipe a newer dialog's state).
-        self.state.resolve_pending_permission(request_id);
 
         let allowed = decision == PermissionDecision::Allow;
         let Some(request) = self
@@ -65,7 +77,10 @@ where
             // The waiter existed but the row is not `pending` — it was already
             // resolved out from under us (e.g. a tool_result ingested in the
             // same instant). The hook handler still gets the answer; a decided
-            // row is left untouched.
+            // row is left untouched, and its resolution already cleared the
+            // mirror, so this path emits no further broadcast. Clear the mirror
+            // defensively (keyed, so it cannot wipe a newer dialog).
+            self.state.resolve_pending_permission(request_id);
             tracing::warn!(
                 request_id,
                 "permission decision arrived for a row that is no longer pending; \
@@ -86,10 +101,57 @@ where
             );
         }
 
-        Ok(vec![SessionEvent::PermissionResolved {
-            session_id: request.session_id,
-            request_id,
-        }])
+        // Route the resolution through the permission reducer: it drops the
+        // queryable dialog mirror (keyed, so a stale id cannot wipe a newer
+        // dialog) and produces the `PermissionResolved` broadcast that settles
+        // the browser notice.
+        let event = AgentEvent::PermissionResolved {
+            request_id: request_id.to_string(),
+            decision,
+        };
+        Ok(reduce_permission_event(
+            self.state,
+            &request.session_id,
+            &event,
+        ))
+    }
+
+    /// Answer an adapter-backed (Codex) permission decision.
+    ///
+    /// Records the disposition on the request row (the audit trail the sends
+    /// envelope reports), then hands the decision to the adapter over the trait —
+    /// translating the Delta row id back to the adapter-scoped provider `token`
+    /// it was correlated with. The adapter answers the provider's wire and emits
+    /// an [`AgentEvent::PermissionResolved`] on the session's stream; the event
+    /// pump ingests that and drives the mirror-clear + settle broadcast (and
+    /// drops the correlation). So this returns no synchronous events — the
+    /// browser notice settles through the same async seam every other Codex
+    /// signal takes.
+    async fn decide_agent_permission(
+        &mut self,
+        request_id: i64,
+        token: &str,
+        decision: PermissionDecision,
+    ) -> Result<Vec<SessionEvent>> {
+        let agent = self
+            .state
+            .open_agent()
+            .cloned()
+            .ok_or(Error::PermissionNotPending(request_id))?;
+
+        // Record the row disposition. A row that is no longer `pending` (resolved
+        // out from under us) is left untouched — the decision still reaches the
+        // provider below, which is what actually gates the tool.
+        let allowed = decision == PermissionDecision::Allow;
+        self.store
+            .decide_permission_request(request_id, allowed)
+            .await?;
+
+        agent
+            .adapter
+            .resolve_permission(&agent.handle, token, decision)
+            .await?;
+        Ok(Vec::new())
     }
 
     /// Abandon the waiter for a permission request whose hook wait timed out.

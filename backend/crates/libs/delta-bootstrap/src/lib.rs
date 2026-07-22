@@ -26,9 +26,15 @@ pub use delta_usecase::LaunchConfig;
 
 use std::sync::Arc;
 
+use binary_detector::PathBinaryDetector;
+use claude_agent::CLAUDE_CAPABILITIES;
+use codex_agent::{CodexAdapterFactory, CodexLaunchConfig, CODEX_CAPABILITIES};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
-use delta_usecase::{BoxedInteractor, ExternalOpener, GhCli, Interactor};
+use delta_usecase::{
+    AgentAdapterFactory, AgentCapabilities, AgentProvider, BinaryDetector, BoxedInteractor,
+    ExternalOpener, GhCli, Interactor,
+};
 use external_opener::SystemOpener;
 use gh_cli::Gh;
 use git_worktree::Git;
@@ -41,6 +47,29 @@ use workspace_fs::FsWorkspace;
 /// shared state is a single non-generic type, shared between this production
 /// wiring and the integration tests that substitute fakes.
 pub type AppInteractor = BoxedInteractor;
+
+/// The static capability profile for a provider, resolved *without* a live
+/// adapter instance.
+///
+/// Each provider's profile is declared once in its gateway adapter (the
+/// `*_CAPABILITIES` const its [`AgentAdapter::capabilities`] returns) and read
+/// back here through the same const, so the value the REST layer surfaces can
+/// never drift from what a running adapter reports. The composition root is the
+/// natural home: it is the one layer that already knows every gateway adapter,
+/// and callers (e.g. `GET /api/providers`) need a provider's profile before —
+/// or entirely without — an adapter being spawned.
+///
+/// Adding a provider is a new [`AgentProvider`] variant plus its capability
+/// profile in the gateway layer plus a new arm here — the same fan-out the
+/// availability probe documents.
+///
+/// [`AgentAdapter::capabilities`]: delta_usecase::AgentAdapter::capabilities
+pub fn provider_capabilities(provider: AgentProvider) -> AgentCapabilities {
+    match provider {
+        AgentProvider::Claude => CLAUDE_CAPABILITIES,
+        AgentProvider::Codex => CODEX_CAPABILITIES,
+    }
+}
 
 /// Default name of Delta's dedicated tmux socket (`tmux -L <socket>`).
 ///
@@ -137,6 +166,20 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     let git_worktree = Git::new();
     let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
     let external_opener: Arc<dyn ExternalOpener> = Arc::new(SystemOpener::new());
+    // Held but dormant: the factory carries only Codex launch config, so this
+    // spawns no `codex app-server` process at startup — a machine without Codex
+    // still boots normally. Nothing consults it yet; provider dispatch that
+    // calls `connect()` lands in a later change.
+    // Resolve the Codex launch config once and reuse its binary for both the
+    // adapter factory (what a Codex spawn launches) and the availability probe
+    // (what `/api/providers` reports), so the two can never diverge.
+    let codex_launch = codex_launch_from_env();
+    let codex_bin = codex_launch.codex_bin.clone();
+    let codex_adapter_factory: Arc<dyn AgentAdapterFactory> =
+        Arc::new(CodexAdapterFactory::new(codex_launch));
+    // Real PATH probe for the provider-availability endpoint. Constructing it
+    // touches no filesystem; the first probe per binary does, then memoises.
+    let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
     Ok(Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
@@ -150,7 +193,31 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     )
     .with_launch_config(config.launch.clone())
     .with_gh_cli(gh_cli)
-    .with_external_opener(external_opener))
+    .with_external_opener(external_opener)
+    .with_codex_adapter_factory(codex_adapter_factory)
+    .with_codex_bin(codex_bin)
+    .with_binary_detector(binary_detector))
+}
+
+/// The Codex launch configuration sourced from the environment.
+///
+/// `DELTA_CODEX_BIN` substitutes the `codex` command the shared app-server is
+/// spawned from (default the bare `codex`, resolved via `PATH`), mirroring
+/// `DELTA_CLAUDE_BIN` for the Claude launch. Only the binary is configurable in
+/// this slice; the default `app-server` argument is kept.
+///
+/// Read here in the composition root — rather than threaded through [`Config`]
+/// — so every existing `Config` construction stays untouched. Reading the
+/// variable has no side effect: the resulting config is only stored on the
+/// factory and no process is spawned until a Codex session needs one.
+fn codex_launch_from_env() -> CodexLaunchConfig {
+    let mut codex = CodexLaunchConfig::default();
+    if let Ok(bin) = std::env::var("DELTA_CODEX_BIN") {
+        if !bin.is_empty() {
+            codex.codex_bin = bin;
+        }
+    }
+    codex
 }
 
 #[cfg(test)]
@@ -171,6 +238,40 @@ mod tests {
     #[tokio::test]
     async fn build_wires_an_interactor_with_in_memory_store() {
         assert!(build(&test_config()).await.is_ok());
+    }
+
+    /// The static accessor resolves each provider's terminal capability without
+    /// a live adapter: Claude offers an attachable PTY, Codex has no terminal.
+    /// This is the fact the workspace's terminal gating hangs on — a Codex
+    /// session must never show a terminal tab.
+    #[test]
+    fn provider_capabilities_report_the_terminal_surface_per_provider() {
+        use delta_usecase::TerminalCapability;
+
+        assert_eq!(
+            provider_capabilities(AgentProvider::Claude).terminal,
+            TerminalCapability::AttachablePty,
+        );
+        assert_eq!(
+            provider_capabilities(AgentProvider::Codex).terminal,
+            TerminalCapability::NoTerminal,
+        );
+    }
+
+    /// The accessor returns exactly what each adapter's `capabilities()` returns
+    /// — the guarantee that the REST-surfaced profile can never drift from a
+    /// running adapter's. Asserted against the adapter consts directly (both are
+    /// the single source of truth the accessor reads).
+    #[test]
+    fn provider_capabilities_match_the_adapter_source_of_truth() {
+        assert_eq!(
+            provider_capabilities(AgentProvider::Claude),
+            CLAUDE_CAPABILITIES,
+        );
+        assert_eq!(
+            provider_capabilities(AgentProvider::Codex),
+            CODEX_CAPABILITIES,
+        );
     }
 
     /// The boot-time send reconcile is wired into [`build`] itself, not just

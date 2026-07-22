@@ -20,11 +20,11 @@ use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
     WireErrorBody, WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOptionsResponse,
     WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WirePullRequestsResponse, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRepositoriesResponse, WireRepositoryScanRootsResponse,
-    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WirePermissionDecisionRequest, WireProvidersResponse, WirePullRequestsResponse,
+    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRepositoriesResponse,
+    WireRepositoryScanRootsResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
+    WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireSessionEvent};
 use ts_rs::TS;
@@ -64,6 +64,7 @@ fn main() {
     WireCreateRepositoryScanRootRequest::export_all(&config)
         .expect("export CreateRepositoryScanRootRequest.ts");
     WirePullRequestsResponse::export_all(&config).expect("export PullRequestsResponse.ts");
+    WireProvidersResponse::export_all(&config).expect("export ProvidersResponse.ts");
     WireGitRepoResponse::export_all(&config).expect("export GitRepoResponse.ts");
     WireGitBranchesResponse::export_all(&config).expect("export GitBranchesResponse.ts");
     WireLaunchOptionsResponse::export_all(&config).expect("export LaunchOptionsResponse.ts");

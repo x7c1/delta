@@ -1,10 +1,11 @@
 use tokio::sync::oneshot;
 
+use crate::agent::{AgentEvent, AgentPermissionRequest};
 use crate::error::Result;
+use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::hooks::ASK_USER_QUESTION;
 use crate::interactor::permission_decision::PermissionDecision;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::interactor::session_actor::runtime::PendingPermission;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
 /// What `on_permission_request` hands the transport: the request row's id, a
@@ -97,26 +98,39 @@ where
             .record_permission_request(self.id, tool_name, tool_input_json, None)
             .await?;
 
+        // The oneshot and the request-id → session index are Delta-internal
+        // correlation/transport plumbing (they carry the browser decision back
+        // to the blocked hook), so they stay here rather than in the neutral
+        // event: the reducer only owns the core-loop effect.
         let (sender, receiver) = oneshot::channel();
         self.state.insert_permission_waiter(request.id, sender);
-        // Mirror the broadcast below into queryable runtime state, so a client
-        // that misses the event (socket down) can rebuild the notice from the
-        // sends envelope. Cleared on resolution or when the turn ends.
-        self.state.set_pending_permission(PendingPermission {
-            request_id: request.id,
-            tool_name: tool_name.to_owned(),
-            tool_input_json: tool_input_json.to_owned(),
-        });
+
+        // Express the request as the provider-neutral fact and let the
+        // permission reducer raise the queryable mirror and produce the notice
+        // broadcast. The `tool_use_id` is `None`: the `PermissionRequest` hook
+        // payload carries none (the row records none too).
+        let event = AgentEvent::PermissionRequested {
+            request: AgentPermissionRequest {
+                request_id: request.id.to_string(),
+                tool_name: tool_name.to_owned(),
+                input_json: parse_tool_input(tool_input_json),
+                tool_use_id: None,
+            },
+        };
+        let events = reduce_permission_event(self.state, self.id, &event);
 
         Ok(PermissionWait {
             request_id: request.id,
             decision: receiver,
-            events: vec![SessionEvent::PermissionRequested {
-                session_id: self.id.clone(),
-                request_id: request.id,
-                tool_name: tool_name.to_owned(),
-                tool_input_json: tool_input_json.to_owned(),
-            }],
+            events,
         })
     }
+}
+
+/// Parse the hook's tool-input JSON text into the structured value the neutral
+/// event carries. Delta's hook boundary already deserialised the payload
+/// through `serde_json::Value`, so this text is well-formed JSON in production;
+/// the fallback keeps the function total for any hand-built caller.
+fn parse_tool_input(tool_input_json: &str) -> serde_json::Value {
+    serde_json::from_str(tool_input_json).unwrap_or(serde_json::Value::Null)
 }

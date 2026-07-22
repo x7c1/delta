@@ -2,6 +2,7 @@
 
 use delta_model::{MessageUuid, ThreadId};
 
+use crate::agent::AgentProvider;
 use crate::ports::WorktreeStartPoint;
 
 /// An opt-in request to start a fresh session inside a git worktree.
@@ -61,5 +62,11 @@ pub enum SendTarget {
         /// instead of in the directory itself. When `None`, the session starts
         /// directly in `workdir` (the unchanged behavior).
         worktree: Option<WorktreeSpec>,
+        /// The AI-agent backend to launch this session on. Defaults to
+        /// [`AgentProvider::Claude`] at the wire boundary, so an omitted
+        /// provider reproduces the historical (Claude, tmux + hooks) behavior
+        /// byte-for-byte. A [`AgentProvider::Codex`] session is launched
+        /// terminal-less over `codex app-server` instead of a tmux pane.
+        provider: AgentProvider,
     },
 }

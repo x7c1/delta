@@ -1,9 +1,9 @@
+use crate::agent::TurnStatus;
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{
     GitWorktree, SessionEvent, SessionStore, StopHook, TmuxDriver, Transcript, Workspace,
 };
-use crate::turn::TurnInput;
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -39,11 +39,13 @@ where
         } else {
             None
         };
-        // The turn ended: feed `Stop` into the turn machine (back to `Idle`),
-        // then release the next queued send — one at a time, the
-        // single-outstanding rule — now that the session is idle. Dispatching
-        // it moves the machine to `AwaitingEcho` for its own turn.
-        self.apply_turn_input(TurnInput::Stop).await?;
+        // The turn ended: the `Stop` hook is Claude's honest turn-completion
+        // signal, so route it as a `TurnCompleted(Completed)` fact (which maps
+        // to the machine's `Stop` input, back to `Idle`), then release the next
+        // queued send — one at a time, the single-outstanding rule — now that
+        // the session is idle. Dispatching it moves the machine to
+        // `AwaitingEcho` for its own turn.
+        self.apply_turn_end(TurnStatus::Completed).await?;
         if let Some(event) = self.dispatch_queued_send().await? {
             events.push(event);
         }
