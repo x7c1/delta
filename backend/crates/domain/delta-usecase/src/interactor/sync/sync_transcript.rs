@@ -1,10 +1,15 @@
-use delta_attribution::{attribute_lines, AttributionState, Effect, OutstandingSend};
-use delta_model::{Message, Session};
+use delta_attribution::Effect;
+use delta_model::{Message, Session, SessionId};
 
+use crate::agent::AgentEvent;
 use crate::error::Result;
+use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::RunningSubagent;
+use crate::interactor::PermissionDecision;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+
+use super::conversation_source::{ClaudeConversationSource, ConversationSource};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -25,13 +30,17 @@ where
     /// parallel, which the old global sync lock forbade. The cursor is
     /// per-session state, so per-session serialization is exactly enough.
     ///
-    /// This method is only the I/O shell. The attribution decisions — which
-    /// thread each line lands on, which send is consumed, which permission
-    /// rows a tool_result settles, whether the turn was interrupted — are
-    /// made by the pure fold [`delta_attribution::attribute_lines`], seeded
-    /// here from the store (the latest persisted user thread as
-    /// `carry_thread`, plus the at-most-one outstanding `dispatched` send)
-    /// and executed afterwards as [`Effect`]s.
+    /// This method is only the I/O shell. It pulls a batch of canonical
+    /// conversation content from the provider's
+    /// [`ConversationSource`](super::conversation_source::ConversationSource)
+    /// — for Claude, the JSONL transcript read plus the pure attribution fold,
+    /// seeded from the store *inside* that source — and then runs the
+    /// provider-neutral persistence pipeline
+    /// ([`Self::persist_conversation_batch`]) over the resulting
+    /// `(messages, effects)`. The attribution decisions — which thread each
+    /// line lands on, which send is consumed, which permission rows a
+    /// tool_result settles, whether the turn was interrupted — are made by the
+    /// source and surfaced as [`Effect`]s the pipeline executes.
     ///
     /// Returns the newly-ingested messages and any [`SessionEvent`]s that the
     /// ingest produced. Two events can arise here:
@@ -53,62 +62,51 @@ where
         &mut self,
         session: &Session,
     ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
-        // A still-`spawning` session has no transcript path yet (the first hook
-        // never bound it), so there is nothing to sync.
-        let Some(transcript_path) = session.transcript_path.as_deref() else {
-            return Ok((Vec::new(), Vec::new()));
-        };
-        let main_thread = self.store.main_thread_id(&session.id).await?;
-
-        // Resume from the line-based cursor so each transcript line is read
-        // exactly once. This is the file line index, not a message count: lines
-        // that parse to nothing (blank, no-uuid such as Claude Code's
-        // `file-history-snapshot`, or unparsable) still advance it, so the
-        // cursor never lags behind the file and already-ingested lines are never
-        // reprocessed.
-        let from = self.store.transcript_lines_read(&session.id).await?;
-        let read = self.transcript.read_from(transcript_path, from).await?;
-
-        // Always advance the cursor to the file's true line count, even when no
-        // new messages parsed, so skipped trailing lines are not re-read next
-        // time.
-        self.store
-            .set_transcript_lines_read(&session.id, read.total_lines)
+        // Pull the next batch of canonical conversation content from the
+        // provider's source. For Claude this reads new transcript lines and
+        // folds them; all of the fold's Claude-specific seeding stays inside
+        // the source.
+        let (messages, effects) = ClaudeConversationSource::new(&self.transcript, &self.store)
+            .next_batch(session)
             .await?;
 
-        if read.messages.is_empty() {
+        // No new provider content this window: skip the pipeline entirely (and
+        // its empty write transaction), exactly as the pre-seam path returned
+        // early on a missing transcript path or an empty read.
+        if messages.is_empty() && effects.is_empty() {
             return Ok((Vec::new(), Vec::new()));
         }
 
-        // Seed the fold: the turn in progress when this batch starts (the
-        // thread of the most recent persisted user message, defaulting to
-        // `main`) plus the one outstanding dispatched send, if any.
-        let carry_thread = self
-            .store
-            .latest_user_thread(&session.id)
-            .await?
-            .unwrap_or(main_thread);
-        let outstanding = self
-            .store
-            .head_dispatched_send(&session.id)
-            .await?
-            .as_ref()
-            .map(OutstandingSend::from);
-        // Reseed the outstanding background-task launches: a `run_in_background`
-        // Agent/Task/Bash launched in an earlier sync window, whose completion
-        // notification may land in this one. Without this the notification would
-        // not find its launching thread and fall back to `carry_thread`.
-        let launches = self
-            .store
-            .outstanding_subagent_launches(&session.id)
-            .await?;
-        let state = AttributionState::with_launches(carry_thread, outstanding, launches);
+        self.persist_conversation_batch(&session.id, messages, effects)
+            .await
+    }
 
-        let outcome = attribute_lines(&session.id, main_thread, state, read.messages);
-
-        // Execute the fold's effects in decision order, then persist.
+    /// The provider-neutral persistence pipeline: execute the batch's effects
+    /// in decision order, persist its messages, and return them alongside any
+    /// [`SessionEvent`]s the effects produced.
+    ///
+    /// This is the shared body every provider's content source flows through —
+    /// the Claude transcript sync above, and the Codex event pump
+    /// ([`SessionContext::on_agent_event`]) — nothing here is Claude-specific. It
+    /// executes each [`Effect`] the source decided on (permission resolution,
+    /// turn-end signals, send matching, subagent indicator/launch bookkeeping)
+    /// and then upserts the messages with the overlay-preserving `ON CONFLICT`
+    /// rule the store owns. The caller broadcasts the returned events.
+    ///
+    /// Keyed by [`SessionId`] rather than the full [`Session`] row because only
+    /// the id is ever needed here — the Codex pump holds no `Session` row to
+    /// pass, so taking the id keeps both callers on the same signature.
+    ///
+    /// [`SessionContext::on_agent_event`]: crate::interactor::session_actor::actor::SessionContext::on_agent_event
+    pub(in crate::interactor) async fn persist_conversation_batch(
+        &mut self,
+        session_id: &SessionId,
+        messages: Vec<Message>,
+        effects: Vec<Effect>,
+    ) -> Result<(Vec<Message>, Vec<SessionEvent>)> {
+        // Execute the source's effects in decision order, then persist.
         let mut events = Vec::new();
-        for effect in outcome.effects {
+        for effect in effects {
             match effect {
                 Effect::ResolvePermission {
                     tool_use_id,
@@ -118,83 +116,95 @@ where
                     // `tool_use_id`, plus any pending dialog row the
                     // `PermissionRequest` hook owns (answered in the TUI after
                     // the browser-decision wait timed out).
+                    // The `tool_use_id` → row correlation is projection-owned
+                    // and stays here; each resolved row then flows through the
+                    // permission reducer as a clean neutral event, which keeps
+                    // the queryable mirror in step with the broadcast (clearing
+                    // both the dialog and any question — their row ids are
+                    // disjoint, so resolving both is safe) and emits the
+                    // `PermissionResolved` that settles the browser notice.
+                    let decision = if allowed {
+                        PermissionDecision::Allow
+                    } else {
+                        PermissionDecision::Deny
+                    };
                     for request_id in self
                         .store
-                        .resolve_permission_by_tool_use_id(&session.id, &tool_use_id, allowed)
+                        .resolve_permission_by_tool_use_id(session_id, &tool_use_id, allowed)
                         .await?
                     {
-                        // Keep the queryable runtime mirror in step with the
-                        // broadcast, so the sends envelope never reports a
-                        // dialog (or question) that already resolved. The same
-                        // `PermissionResolved` event clears either notice in
-                        // the browser; a question's row id and a permission's
-                        // row id are disjoint, so resolving both here is safe.
-                        self.state.resolve_pending_permission(request_id);
-                        self.state.resolve_pending_question(request_id);
-                        events.push(SessionEvent::PermissionResolved {
-                            session_id: session.id.clone(),
-                            request_id,
-                        });
+                        let event = AgentEvent::PermissionResolved {
+                            request_id: request_id.to_string(),
+                            decision,
+                        };
+                        events.extend(reduce_permission_event(self.state, session_id, &event));
                     }
                 }
                 Effect::TurnInterrupted => {
                     // Recover the interrupted turn's thread BEFORE the machine
                     // runs: `apply_turn_input` can sweep the head dispatched
                     // send (the authoritative thread source).
-                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-                    // The interrupt ends the turn: feed `Interrupt` into the
-                    // turn machine (back to `Idle`). Dispatching any queued
-                    // send is left to the caller (which acts on the returned
-                    // `TurnInterrupted` after this sync returns), so no
+                    let thread_id = self.store.in_progress_turn_thread(session_id).await?;
+                    // The interrupt ends the turn: route it as a
+                    // `TurnCompleted(Interrupted)` fact (which maps to the
+                    // machine's `Interrupt` input, back to `Idle`). Dispatching
+                    // any queued send is left to the caller (which acts on the
+                    // returned `TurnInterrupted` after this sync returns), so no
                     // keystrokes are sent from inside the ingestion path.
-                    self.apply_turn_input(crate::turn::TurnInput::Interrupt)
+                    self.apply_turn_end(crate::agent::TurnStatus::Interrupted)
                         .await?;
                     events.push(SessionEvent::TurnInterrupted {
-                        session_id: session.id.clone(),
+                        session_id: session_id.clone(),
                         thread_id: Some(thread_id),
                     });
                 }
                 Effect::TurnAborted => {
                     // A synthetic `isApiErrorMessage` line ended the turn on an
                     // API error (usage/session limit, rate limit, ...). The turn
-                    // genuinely ended, so feed `Stop` into the turn machine (back
-                    // to `Idle`) — this is the honest turn-end signal and gives
-                    // the same orphan-send disposition the missing `Stop` hook
-                    // would have. We reuse `TurnInterrupted` as the browser
-                    // signal: like an interrupt, no `Stop` hook fired, so the
-                    // browser must clear the stuck pending chip and drop any
-                    // orphaned streaming preview (which may never get a persisted
-                    // message). The caller releases the queued send after this
-                    // sync returns (it keys on `TurnInterrupted`), so no
-                    // keystrokes are sent from inside the ingestion path.
-                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-                    self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
+                    // genuinely ended in failure, so route it as a
+                    // `TurnCompleted(Failed)` fact — which maps to the machine's
+                    // `Stop` input (back to `Idle`), giving the same honest
+                    // turn-end disposition the missing `Stop` hook would have.
+                    // We reuse `TurnInterrupted` as the browser signal: like an
+                    // interrupt, no `Stop` hook fired, so the browser must clear
+                    // the stuck pending chip and drop any orphaned streaming
+                    // preview (which may never get a persisted message). The
+                    // caller releases the queued send after this sync returns (it
+                    // keys on `TurnInterrupted`), so no keystrokes are sent from
+                    // inside the ingestion path.
+                    let thread_id = self.store.in_progress_turn_thread(session_id).await?;
+                    self.apply_turn_end(crate::agent::TurnStatus::Failed)
+                        .await?;
                     events.push(SessionEvent::TurnInterrupted {
-                        session_id: session.id.clone(),
+                        session_id: session_id.clone(),
                         thread_id: Some(thread_id),
                     });
                 }
                 Effect::LocalCommandTurnEnded => {
-                    // A dispatched send was consumed by a slash/local command
-                    // (e.g. `/review-pr`), not by a model turn. A local command
-                    // is handled entirely client-side: it fires no
-                    // `UserPromptSubmit` echo and no `Stop` hook, so without this
-                    // the turn machine stays in `AwaitingEcho` forever and every
-                    // later send defers to `queued` and never dispatches. The
+                    // A dispatched send was consumed by a client-side slash
+                    // command, not by a model turn: either a KNOWN local command
+                    // (e.g. `/review-pr`) or an UNKNOWN command Claude rejected
+                    // with an "Unknown command: …" notice. Both are handled
+                    // entirely client-side: they fire no `UserPromptSubmit` echo
+                    // and no `Stop` hook, so without this the turn machine stays
+                    // in `AwaitingEcho` forever and every later send defers to
+                    // `queued` and never dispatches. The
                     // `SendMatched` effect emitted alongside this one already
-                    // consumed the send (it left `dispatched`), so feeding `Stop`
-                    // here returns the machine to `Idle` cleanly: its defensive
-                    // requeue/sweep is a no-op against the now-matched row. Reuse
-                    // `TurnInterrupted` as the browser signal — like an interrupt
-                    // or an API-error abort, no `Stop` hook fired, so the browser
-                    // must clear the stuck pending chip. The caller releases any
-                    // queued send after this sync returns (it keys on
-                    // `TurnInterrupted`), so no keystrokes are sent from inside
-                    // the ingestion path.
-                    let thread_id = self.store.in_progress_turn_thread(&session.id).await?;
-                    self.apply_turn_input(crate::turn::TurnInput::Stop).await?;
+                    // consumed the send (it left `dispatched`), so a
+                    // `TurnCompleted(Completed)` fact here (which maps to the
+                    // machine's `Stop` input) returns the machine to `Idle`
+                    // cleanly: its defensive requeue/sweep is a no-op against the
+                    // now-matched row. Reuse `TurnInterrupted` as the browser
+                    // signal — like an interrupt or an API-error abort, no `Stop`
+                    // hook fired, so the browser must clear the stuck pending
+                    // chip. The caller releases any queued send after this sync
+                    // returns (it keys on `TurnInterrupted`), so no keystrokes are
+                    // sent from inside the ingestion path.
+                    let thread_id = self.store.in_progress_turn_thread(session_id).await?;
+                    self.apply_turn_end(crate::agent::TurnStatus::Completed)
+                        .await?;
                     events.push(SessionEvent::TurnInterrupted {
-                        session_id: session.id.clone(),
+                        session_id: session_id.clone(),
                         thread_id: Some(thread_id),
                     });
                 }
@@ -211,7 +221,7 @@ where
                     // Persist the launching thread so a completion notification
                     // landing in a later sync window can be attributed to it.
                     self.store
-                        .record_subagent_launch(&session.id, &tool_use_id, thread_id)
+                        .record_subagent_launch(session_id, &tool_use_id, thread_id)
                         .await?;
                     // For a background subagent the immediate `PostToolUse`
                     // hook may have ALREADY arrived (and likely has — the call
@@ -228,7 +238,7 @@ where
                         .map(str::to_owned)
                     {
                         self.store
-                            .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                            .upgrade_subagent_task_id(session_id, &tool_use_id, &task_id)
                             .await?;
                     }
                 }
@@ -278,13 +288,13 @@ where
                     {
                         if self.state.upgrade_subagent_task_id(&tool_use_id, &task_id) {
                             self.store
-                                .upgrade_subagent_task_id(&session.id, &tool_use_id, &task_id)
+                                .upgrade_subagent_task_id(session_id, &tool_use_id, &task_id)
                                 .await?;
                         }
                     }
                     if newly {
                         events.push(SessionEvent::SubagentStarted {
-                            session_id: session.id.clone(),
+                            session_id: session_id.clone(),
                             thread_id,
                             tool_use_id,
                             subagent_type,
@@ -305,7 +315,7 @@ where
                     // The notification was folded and matched its launch: the
                     // correlation is consumed, so clear the persisted row.
                     self.store
-                        .clear_subagent_launch(&session.id, &tool_use_id)
+                        .clear_subagent_launch(session_id, &tool_use_id)
                         .await?;
                     // This is the BACKGROUND subagent's end signal. A background
                     // `Agent`/`Task` was started by `PreToolUse` and survived its
@@ -318,7 +328,7 @@ where
                     // indicator) is a harmless no-op here.
                     if self.state.finish_subagent(&tool_use_id) {
                         events.push(SessionEvent::SubagentFinished {
-                            session_id: session.id.clone(),
+                            session_id: session_id.clone(),
                             tool_use_id,
                         });
                     }
@@ -326,7 +336,7 @@ where
             }
         }
 
-        self.store.upsert_messages(&outcome.messages).await?;
-        Ok((outcome.messages, events))
+        self.store.upsert_messages(&messages).await?;
+        Ok((messages, events))
     }
 }

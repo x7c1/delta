@@ -1,6 +1,7 @@
-use delta_model::{MessageUuid, Send, ThreadId};
+use delta_model::{AgentProvider, MessageUuid, Send, ThreadId};
 
-use crate::error::Result;
+use crate::agent::ContextInjectionCapability;
+use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -37,9 +38,90 @@ where
         text: &str,
         locator_quote: Option<&str>,
     ) -> Result<(Send, Vec<SessionEvent>)> {
-        // Ensure the session is open: resume it if it is known but closed (no
-        // live pane). Once open we have a pane to dispatch to and the normal
-        // pre-dispatch path applies.
+        // A closed Codex session — its in-process adapter binding lost (e.g.
+        // across a server restart) but its persisted row + provider ids intact —
+        // must be reconnected before it can dispatch, NOT sent down Claude's
+        // `claude --resume` path (which a terminal-less session cannot take: no
+        // pane, no transcript, so it would fail with `ResumeUnavailable`).
+        // Reattach to its provider thread via `thread/resume` here, so the
+        // `open_agent()` branch below then dispatches over the freshly-bound
+        // adapter exactly like the opening turn. A closed **Claude** session is
+        // left alone (its provider differs) and takes the pane path unchanged.
+        if self.state.open_agent().is_none() {
+            if let Some(session) = self.store.session(self.id).await? {
+                if session.provider == AgentProvider::Codex {
+                    self.resume_codex_agent(&session).await?;
+                }
+            }
+        }
+
+        // A terminal-less (adapter-backed) session — Codex — has no tmux pane
+        // and no resumable transcript, so it cannot take Claude's
+        // `ensure_open()` → `open_session()` (`claude --resume`) path: that
+        // would fail with `ResumeUnavailable` on every send after the first.
+        // Dispatch it through its bound adapter instead, exactly like the
+        // opening turn does (see [`Self::dispatch_agent_turn`]). The
+        // non-destructive `open_agent()` accessor tells the two providers apart:
+        // it is `Some` only while an adapter session is live (either never
+        // closed, or just reconnected above).
+        if let Some(agent) = self.state.open_agent() {
+            let adapter = agent.adapter.clone();
+            let handle = agent.handle.clone();
+
+            // Branch-from-selected-text is enabled by hidden-context injection,
+            // NOT by native provider fork (`ForkCapability` is `None` for every
+            // v1 provider). Gate a branch send on `ContextInjectionCapability`:
+            // a provider that cannot inject hidden context (`None`) genuinely
+            // cannot branch, so reject it cleanly rather than silently dropping
+            // the branch intent. Codex is `HiddenPerTurn` (via
+            // `thread/inject_items`), so it passes and branches like Claude.
+            if branch_from.is_some()
+                && adapter.capabilities().context_injection == ContextInjectionCapability::None
+            {
+                return Err(Error::Agent(format!(
+                    "branching is not supported for a {:?} session: it cannot inject hidden context",
+                    adapter.provider()
+                )));
+            }
+
+            // Create the same delta-side branch structure Claude uses — a new
+            // thread lane + semantic parent — through the shared
+            // `resolve_branch_target`. A plain send leaves the target thread
+            // unchanged with no semantic parent.
+            let (target_thread, semantic_parent) = self
+                .resolve_branch_target(thread_id, branch_from, locator_quote)
+                .await?;
+
+            // Deliver the branched-from passage as hidden context BEFORE the
+            // turn dispatches, so the model sees it on this turn without it
+            // polluting the visible prompt (Codex: `thread/inject_items`). Only
+            // a branch send carries a quote to inject; a plain send injects
+            // nothing.
+            if branch_from.is_some() {
+                if let Some(quote) = locator_quote {
+                    adapter.inject_context(&handle, quote).await?;
+                }
+            }
+
+            // A Codex dispatch produces no `SessionEvent`s synchronously: the
+            // turn's frames arrive asynchronously through the already-running
+            // event pump, just like the opening turn.
+            let send = self
+                .dispatch_agent_turn(
+                    &adapter,
+                    &handle,
+                    target_thread,
+                    semantic_parent.as_ref(),
+                    text.to_owned(),
+                    locator_quote,
+                )
+                .await?;
+            return Ok((send, Vec::new()));
+        }
+
+        // Claude (pane-backed): ensure the session is open — resume it if it is
+        // known but closed (no live pane). Once open we have a pane to dispatch
+        // to and the normal pre-dispatch path applies.
         let pane = self.ensure_open().await?;
         self.enqueue_into_open(&pane, thread_id, text, locator_quote, branch_from)
             .await

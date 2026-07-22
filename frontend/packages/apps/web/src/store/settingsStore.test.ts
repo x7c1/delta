@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_PROVIDER,
   DEFAULT_SETTINGS_CATEGORY,
   DEFAULT_VISUAL_EFFECTS_SETTING,
   SETTINGS_STORAGE_KEY,
@@ -11,6 +12,7 @@ describe('settingsStore', () => {
     useSettingsStore.setState({
       activeCategory: DEFAULT_SETTINGS_CATEGORY,
       visualEffects: DEFAULT_VISUAL_EFFECTS_SETTING,
+      defaultProvider: DEFAULT_PROVIDER,
     });
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
   });
@@ -98,5 +100,39 @@ describe('settingsStore', () => {
       await useSettingsStore.persist.rehydrate();
       expect(useSettingsStore.getState().visualEffects).toBe('on');
     });
+  });
+
+  it('defaults to Claude as the default provider on a fresh state', () => {
+    expect(useSettingsStore.getState().defaultProvider).toBe(DEFAULT_PROVIDER);
+    expect(DEFAULT_PROVIDER).toBe('claude');
+  });
+
+  it('setDefaultProvider updates and persists the default provider', () => {
+    useSettingsStore.getState().setDefaultProvider('codex');
+    expect(useSettingsStore.getState().defaultProvider).toBe('codex');
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw ?? '{}');
+    expect(parsed.state.defaultProvider).toBe('codex');
+  });
+
+  it('falls back to Claude when a foreign default provider is rehydrated', async () => {
+    // A stale/foreign provider token from a different build normalizes to the
+    // default so the provider selector never seeds from an unknown value.
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ state: { defaultProvider: 'mystery' }, version: 0 }),
+    );
+    await useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().defaultProvider).toBe(DEFAULT_PROVIDER);
+  });
+
+  it('preserves a valid persisted default provider across rehydration', async () => {
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify({ state: { defaultProvider: 'codex' }, version: 0 }),
+    );
+    await useSettingsStore.persist.rehydrate();
+    expect(useSettingsStore.getState().defaultProvider).toBe('codex');
   });
 });

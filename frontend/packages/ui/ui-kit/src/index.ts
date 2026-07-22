@@ -1,6 +1,11 @@
 export { cn } from './cn';
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button';
 export { Badge, type BadgeProps, type BadgeTone } from './Badge';
+export {
+  ProviderBadge,
+  type ProviderBadgeProps,
+  type Provider,
+} from './ProviderBadge';
 export { Panel, type PanelProps } from './Panel';
 export { Collapsible, type CollapsibleProps } from './Collapsible';
 export { ErrorBoundary, type ErrorBoundaryProps } from './ErrorBoundary';

@@ -1,0 +1,37 @@
+[package]
+name = "fake-codex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+# The fake impersonates the real `codex app-server`, so it speaks the raw
+# JSON-RPC wire directly (serde_json) and shares no code with the client under
+# test — a wire bug then cannot hide behind a shared helper.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# The end-to-end round-trip test drives the real client transport against this
+# fake binary; the adapter contract suite drives `CodexAppServerAdapter` (which
+# needs the neutral domain types) against it through the shared cases.
+codex-agent = { workspace = true }
+delta-usecase = { workspace = true }
+agent-contract = { workspace = true }
+# The full-loop e2e (`full_loop.rs`) drives the whole backend — the real
+# `router`/`AppState` with real gateways — against this fake binary, so it needs
+# the server and the concrete gateways the composition root wires. The gateways
+# are inert on the Codex path (no tmux pane, no transcript file, no workdir
+# resolution), so wiring the real ones is lighter than reimplementing every port
+# as a stub.
+delta-server = { workspace = true }
+delta-sqlite = { workspace = true }
+delta-transcript = { workspace = true }
+tmux-driver = { workspace = true }
+workspace-fs = { workspace = true }
+git-worktree = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "process", "sync", "rt", "rt-multi-thread", "macros", "time"] }
+serde_json = { workspace = true }

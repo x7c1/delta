@@ -6,8 +6,8 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use delta_attribution::SubagentLaunch;
 use delta_model::{
-    LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, Role, Send,
-    SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
+    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, Role,
+    Send, SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
 use crate::error::{Error, Result};
@@ -102,6 +102,11 @@ impl SessionStore for FakeStore {
             // here because external sessions don't go through worktree spawn.
             requested_workdir: None,
             repository_display_name: new.repository_display_name,
+            // The hook-activation path is Claude Code only; a structured
+            // provider never enters the store this way.
+            provider: AgentProvider::Claude,
+            provider_session_id: None,
+            provider_thread_id: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -117,6 +122,7 @@ impl SessionStore for FakeStore {
         Ok((session, main_id))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn insert_spawning_session(
         &self,
         id: &SessionId,
@@ -125,6 +131,7 @@ impl SessionStore for FakeStore {
         repo_root: Option<&str>,
         requested_workdir: Option<&str>,
         repository_display_name: Option<&str>,
+        provider: AgentProvider,
     ) -> Result<(Session, ThreadId)> {
         let mut g = self.inner.lock().unwrap();
         assert!(
@@ -142,6 +149,9 @@ impl SessionStore for FakeStore {
             repo_root: repo_root.map(str::to_owned),
             requested_workdir: requested_workdir.map(str::to_owned),
             repository_display_name: repository_display_name.map(str::to_owned),
+            provider,
+            provider_session_id: None,
+            provider_thread_id: None,
         };
         g.sessions.push(session.clone());
         g.next_thread_id += 1;
@@ -155,6 +165,25 @@ impl SessionStore for FakeStore {
             created_at: "2026-01-01T00:00:00Z".into(),
         });
         Ok((session, main_id))
+    }
+
+    async fn set_provider_ids(
+        &self,
+        id: &SessionId,
+        provider_session_id: Option<&str>,
+        provider_thread_id: Option<&str>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(session) = g.sessions.iter_mut().find(|s| &s.id == id) {
+            session.provider_session_id = provider_session_id.map(str::to_owned);
+            session.provider_thread_id = provider_thread_id.map(str::to_owned);
+            // Mirror the real store: recording the ids activates a still-spawning
+            // row (the structured-provider analogue of first-hook activation).
+            if session.status == SessionStatus::Spawning {
+                session.status = SessionStatus::Active;
+            }
+        }
+        Ok(())
     }
 
     async fn delete_session(&self, id: &SessionId) -> Result<()> {
@@ -891,6 +920,7 @@ impl SessionStore for FakeStore {
         name: &str,
         value: Option<&str>,
         default_enabled: bool,
+        provider: AgentProvider,
     ) -> Result<LaunchOption> {
         let mut g = self.inner.lock().unwrap();
         g.next_launch_option_id += 1;
@@ -901,6 +931,7 @@ impl SessionStore for FakeStore {
             value: value.map(str::to_owned),
             default_enabled,
             created_at: "2026-01-01T00:00:00Z".into(),
+            provider,
         };
         g.launch_options.push(option.clone());
         Ok(option)

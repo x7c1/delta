@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  DEFAULT_NEW_SESSION_PROVIDER,
   DEFAULT_NEW_SESSION_TAB,
   DEFAULT_WORKTREE_START_POINT,
   useComposerStore,
@@ -14,6 +15,8 @@ const RESET_STATE = {
   workdirDialogOpen: false,
   newSessionTab: DEFAULT_NEW_SESSION_TAB,
   newSessionSelectedPrUrl: null,
+  newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
+  newSessionProviderSeeded: false,
 } as const;
 
 beforeEach(() => {
@@ -136,6 +139,44 @@ describe('composerStore newSessionTab', () => {
 
     useComposerStore.getState().setNewSessionTab('pr');
     expect(useComposerStore.getState().newSessionTab).toBe('pr');
+  });
+});
+
+describe('composerStore newSessionProvider seed guard', () => {
+  it('defaults to the Claude constant, not yet seeded', () => {
+    const state = useComposerStore.getState();
+    expect(state.newSessionProvider).toBe(DEFAULT_NEW_SESSION_PROVIDER);
+    expect(DEFAULT_NEW_SESSION_PROVIDER).toBe('claude');
+    expect(state.newSessionProviderSeeded).toBe(false);
+  });
+
+  it('seedNewSessionProvider supplies the initial value and marks it seeded', () => {
+    useComposerStore.getState().seedNewSessionProvider('codex');
+    expect(useComposerStore.getState().newSessionProvider).toBe('codex');
+    expect(useComposerStore.getState().newSessionProviderSeeded).toBe(true);
+  });
+
+  it('seedNewSessionProvider is a no-op once the provider is seeded', () => {
+    // An explicit pick seeds the selection...
+    useComposerStore.getState().setNewSessionProvider('claude');
+    expect(useComposerStore.getState().newSessionProviderSeeded).toBe(true);
+    // ...so a later seed (e.g. the default changing) must not overwrite it.
+    useComposerStore.getState().seedNewSessionProvider('codex');
+    expect(useComposerStore.getState().newSessionProvider).toBe('claude');
+  });
+
+  it('setNewSessionProvider marks the selection seeded', () => {
+    useComposerStore.getState().setNewSessionProvider('codex');
+    expect(useComposerStore.getState().newSessionProvider).toBe('codex');
+    expect(useComposerStore.getState().newSessionProviderSeeded).toBe(true);
+  });
+
+  it('resetNewSessionProvider clears the provider and the seeded flag', () => {
+    useComposerStore.getState().setNewSessionProvider('codex');
+    useComposerStore.getState().resetNewSessionProvider();
+    const state = useComposerStore.getState();
+    expect(state.newSessionProvider).toBe(DEFAULT_NEW_SESSION_PROVIDER);
+    expect(state.newSessionProviderSeeded).toBe(false);
   });
 });
 

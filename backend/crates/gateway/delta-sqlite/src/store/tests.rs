@@ -1,6 +1,6 @@
 use delta_model::{
-    ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus, SessionId,
-    SessionStatus, ThreadId,
+    AgentProvider, ContentBlock, Message, MessageUuid, PermissionStatus, Role, SendStatus,
+    SessionId, SessionStatus, ThreadId,
 };
 use delta_usecase::{NewSession, SessionPageCursor, SessionStore};
 
@@ -383,6 +383,7 @@ async fn message_upsert_and_thread_view() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -403,6 +404,46 @@ async fn message_upsert_and_thread_view() {
     assert_eq!(view.len(), 1);
     assert_eq!(view[0].content_text.as_deref(), Some("hello again"));
     assert_eq!(view[0].content.len(), 1);
+}
+
+/// A `compact_summary` role must persist: the attribution fold produces it for
+/// the synthetic line Claude Code writes on `/compact`, and the STRICT `message`
+/// table's role CHECK has to accept it (it previously omitted the value, so a
+/// real `/compact` write would fail the constraint — the fake store used by the
+/// usecase tests hid it).
+#[tokio::test]
+async fn compact_summary_role_persists_and_round_trips() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let msg = Message {
+        uuid: MessageUuid::from("cs-1"),
+        session_id: session.id.clone(),
+        thread_id: main,
+        role: Role::CompactSummary,
+        linear_parent_uuid: None,
+        semantic_parent_uuid: None,
+        prompt_id: None,
+        seq: 0,
+        content_text: Some("previous conversation summary".into()),
+        content: vec![ContentBlock::Text {
+            text: "previous conversation summary".into(),
+        }],
+        created_at: Some("2026-01-01T00:00:00Z".into()),
+        model: None,
+        git_branch: None,
+        cwd: None,
+        response_time_ms: None,
+        provider_item_id: None,
+    };
+    store
+        .upsert_messages(std::slice::from_ref(&msg))
+        .await
+        .unwrap();
+
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].role, Role::CompactSummary);
 }
 
 #[tokio::test]
@@ -434,6 +475,7 @@ async fn message_metadata_round_trips_through_upsert_and_read() {
         git_branch: Some("feature/meta".into()),
         cwd: Some("/home/dev/repo".into()),
         response_time_ms: Some(9400.5),
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -486,6 +528,7 @@ async fn last_activity_at_returns_latest_message_timestamp() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(&[
@@ -522,6 +565,7 @@ async fn last_activity_at_is_stored_on_session_and_recomputed_on_reingest() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
 
     // The recency lives on the `session` row as a denormalized column, written
@@ -642,6 +686,7 @@ async fn opening_a_pre_column_database_migrates_and_backfills() {
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         };
         legacy
             .upsert_messages(&[
@@ -735,6 +780,7 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
                 git_branch: Some("will-be-stripped".into()),
                 cwd: Some("will-be-stripped".into()),
                 response_time_ms: Some(9400.0),
+                provider_item_id: None,
             }])
             .await
             .unwrap();
@@ -785,6 +831,7 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
             git_branch: None,
             cwd: None,
             response_time_ms: Some(1234.0),
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -793,6 +840,65 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
     assert_eq!(view[0].response_time_ms, Some(1234.0));
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A freshly inserted session round-trips its provider, and the
+/// provider-minted conversation ids written later via `set_provider_ids`.
+#[tokio::test]
+async fn a_spawning_session_round_trips_provider_fields() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    // A Claude spawn (every existing caller) reads back as Claude with no
+    // provider ids — the behaviour before this change.
+    store
+        .insert_spawning_session(
+            &SessionId::from("claude-1"),
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let claude = store
+        .session(&SessionId::from("claude-1"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(claude.provider, AgentProvider::Claude);
+    assert_eq!(claude.provider_session_id, None);
+    assert_eq!(claude.provider_thread_id, None);
+
+    // A Codex spawn records its provider; the provider-minted ids are unknown
+    // at spawn (NULL) and are filled in later via `set_provider_ids`.
+    let codex_id = SessionId::from("codex-1");
+    store
+        .insert_spawning_session(
+            &codex_id,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Codex,
+        )
+        .await
+        .unwrap();
+    let spawned = store.session(&codex_id).await.unwrap().unwrap();
+    assert_eq!(spawned.provider, AgentProvider::Codex);
+    assert_eq!(spawned.provider_session_id, None);
+    assert_eq!(spawned.provider_thread_id, None);
+
+    store
+        .set_provider_ids(&codex_id, Some("thr_abc"), Some("thr_abc"))
+        .await
+        .unwrap();
+    let resolved = store.session(&codex_id).await.unwrap().unwrap();
+    assert_eq!(resolved.provider, AgentProvider::Codex);
+    assert_eq!(resolved.provider_session_id.as_deref(), Some("thr_abc"));
+    assert_eq!(resolved.provider_thread_id.as_deref(), Some("thr_abc"));
 }
 
 /// The session-list page query is index-backed: its plan must walk
@@ -875,6 +981,7 @@ async fn recent_workdirs_returns_distinct_cwds_in_recency_order() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
 
     // `/projects/a` had its latest activity at 00:10; `/projects/b`'s most
@@ -951,6 +1058,7 @@ async fn recent_workdirs_returns_requested_workdir_not_worktree_cwd() {
             Some("/user-chosen"),
             Some("/user-chosen"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -995,6 +1103,7 @@ async fn upsert_preserves_thread_overlay_on_reingest() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -1082,6 +1191,7 @@ async fn upsert_keeps_missing_created_at_null() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store.upsert_messages(&[msg]).await.unwrap();
 
@@ -1136,6 +1246,7 @@ async fn branch_thread_derives_root_from_send_then_message() {
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -1165,6 +1276,7 @@ async fn session_active_at(store: &SqliteStore, id: &str, activity_at: &str) -> 
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -1258,7 +1370,15 @@ async fn list_sessions_page_excludes_message_less_spawning_sessions() {
     session_active_at(&store, "sess-live", "2026-01-01T00:00:00Z").await;
     let spawning = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&spawning, "/work", None, None, None, None)
+        .insert_spawning_session(
+            &spawning,
+            "/work",
+            None,
+            None,
+            None,
+            None,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
 
@@ -1583,7 +1703,7 @@ async fn spawning_session_inserts_then_activates_on_register() {
     // The eager insert: status `spawning`, no transcript path yet, and the
     // main thread already created so a first send can target real ids.
     let (session, main) = store
-        .insert_spawning_session(&id, "/work", None, None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None, AgentProvider::Claude)
         .await
         .unwrap();
     assert_eq!(session.status, SessionStatus::Spawning);
@@ -1654,6 +1774,7 @@ async fn delete_session_cascades_to_children() {
             git_branch: None,
             cwd: None,
             response_time_ms: None,
+            provider_item_id: None,
         }])
         .await
         .unwrap();
@@ -1683,7 +1804,7 @@ async fn mark_session_failed_flips_only_a_spawning_session() {
     // A spawning session fails.
     let id = SessionId::from("sess-spawn");
     store
-        .insert_spawning_session(&id, "/work", None, None, None, None)
+        .insert_spawning_session(&id, "/work", None, None, None, None, AgentProvider::Claude)
         .await
         .unwrap();
     store.mark_session_failed(&id).await.unwrap();
@@ -1730,6 +1851,7 @@ async fn message_fts_indexes_inserts_and_updates() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     store
         .upsert_messages(std::slice::from_ref(&msg))
@@ -1764,6 +1886,7 @@ async fn launch_options_round_trip_create_list_delete() {
             "--plugin-dir",
             Some("/opt/plugins"),
             true,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -1771,12 +1894,19 @@ async fn launch_options_round_trip_create_list_delete() {
     assert_eq!(plugin.name, "--plugin-dir");
     assert_eq!(plugin.value.as_deref(), Some("/opt/plugins"));
     assert!(plugin.default_enabled);
+    assert_eq!(plugin.provider, AgentProvider::Claude);
     assert!(!plugin.created_at.is_empty());
 
     // A valueless, unlabeled flag stores NULL for both — never a sentinel — and
     // `default_enabled` defaults to off.
     let valueless = store
-        .create_launch_option(None, "--dangerously-skip-permissions", None, false)
+        .create_launch_option(
+            None,
+            "--dangerously-skip-permissions",
+            None,
+            false,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
     assert_eq!(valueless.label, None);
@@ -1810,11 +1940,73 @@ async fn launch_options_round_trip_create_list_delete() {
     assert_eq!(store.list_launch_options().await.unwrap().len(), 1);
 }
 
+/// A Codex option persists and reads back with its provider preserved (not
+/// coerced to the Claude default), while a Claude option keeps Claude — so the
+/// registry holds both providers' options and the picker can filter them.
+#[tokio::test]
+async fn launch_option_provider_round_trips_per_provider() {
+    let store = SqliteStore::open_in_memory().unwrap();
+
+    let claude = store
+        .create_launch_option(
+            None,
+            "--permission-mode",
+            Some("auto"),
+            false,
+            AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let codex = store
+        .create_launch_option(None, "model", Some("gpt-5"), false, AgentProvider::Codex)
+        .await
+        .unwrap();
+    assert_eq!(codex.provider, AgentProvider::Codex);
+
+    let listed = store.list_launch_options().await.unwrap();
+    assert_eq!(
+        listed.iter().find(|o| o.id == claude.id).unwrap().provider,
+        AgentProvider::Claude,
+    );
+    assert_eq!(
+        listed.iter().find(|o| o.id == codex.id).unwrap().provider,
+        AgentProvider::Codex,
+    );
+}
+
+/// A legacy row — inserted directly with no `provider`, exercising the column's
+/// `DEFAULT 'claude'` exactly as a pre-multi-provider database would — reads
+/// back as `AgentProvider::Claude`, so existing installs keep working.
+#[tokio::test]
+async fn legacy_launch_option_row_reads_as_claude() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    {
+        let conn = store.conn.lock().await;
+        conn.execute(
+            "INSERT INTO launch_option (label, name, value, default_enabled, created_at)
+             VALUES (NULL, '--verbose', NULL, 0, '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let listed = store.list_launch_options().await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "--verbose");
+    assert_eq!(listed[0].provider, AgentProvider::Claude);
+}
+
 #[tokio::test]
 async fn set_launch_option_default_enabled_toggles_in_place() {
     let store = SqliteStore::open_in_memory().unwrap();
     let option = store
-        .create_launch_option(None, "--plugin-dir", Some("/opt/plugins"), false)
+        .create_launch_option(
+            None,
+            "--plugin-dir",
+            Some("/opt/plugins"),
+            false,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
     assert!(!option.default_enabled);
@@ -2023,6 +2215,123 @@ async fn opening_a_pre_subagent_task_id_database_migrates_and_loads_old_rows_as_
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// An existing database created before the multi-provider columns
+/// (`session.provider`/`provider_session_id`/`provider_thread_id` and
+/// `launch_option.provider`) existed must gain them on open, with every
+/// pre-existing row reading back as a Claude row: `provider = 'claude'` and the
+/// nullable provider-minted ids NULL. These columns are additive and unused by
+/// the C1 runtime — this test pins that an already-deployed database opens
+/// cleanly and its rows keep their historical (Claude) meaning after migration.
+///
+/// The "legacy" file is built by hand with the original pre-additive table
+/// shapes (`session`/`launch_option` carrying only their base columns) and
+/// `user_version = 0`, then opened through the store: the guarded
+/// `ADDITIVE_COLUMNS` steps add every additive column — the provider ones under
+/// test plus the earlier ones (`last_activity_at`, `default_enabled`, …) — so
+/// this exercises the real recovery path a genuinely old database takes.
+/// (`DROP COLUMN` cannot faithfully undo the columns here: SQLite's schema
+/// re-parse chokes on the `--plugin-dir` token already present in the
+/// `launch_option` comment.)
+#[tokio::test]
+async fn opening_a_pre_provider_database_migrates_and_loads_old_rows_as_claude() {
+    let dir = std::env::temp_dir().join(format!("delta-provider-migrate-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a faithful pre-additive database directly: only the base columns,
+    // `user_version = 0` (untouched), one session and one launch-option row.
+    {
+        let conn = rusqlite::Connection::open(path_str).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (
+               id              TEXT PRIMARY KEY,
+               cwd             TEXT NOT NULL,
+               transcript_path TEXT,
+               title           TEXT,
+               status          TEXT NOT NULL
+                                 CHECK (status IN ('spawning','active','ended','failed')),
+               created_at      TEXT NOT NULL
+             ) STRICT;
+             CREATE TABLE launch_option (
+               id         INTEGER PRIMARY KEY,
+               label      TEXT,
+               name       TEXT NOT NULL,
+               value      TEXT,
+               created_at TEXT NOT NULL
+             ) STRICT;
+             INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
+               VALUES ('sess-1', '/work', '/tmp/t.jsonl', NULL, 'active', '2026-01-01T00:00:00Z');
+             INSERT INTO launch_option (label, name, value, created_at)
+               VALUES ('plugins', '--plugin-dir', '/plug', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    }
+
+    // Opening through the store applies the guarded ALTERs; it must open cleanly.
+    let store = SqliteStore::open(path_str).unwrap();
+
+    // The domain read now surfaces the provider fields (added to `Session` in
+    // C3a): a pre-migration row loads as a Claude session with no
+    // provider-minted ids, and `map_session` does not choke on the now-wider
+    // column set.
+    let session = store
+        .session(&SessionId::from("sess-1"))
+        .await
+        .unwrap()
+        .expect("pre-provider session still loads");
+    assert_eq!(session.provider, AgentProvider::Claude);
+    assert_eq!(session.provider_session_id, None);
+    assert_eq!(session.provider_thread_id, None);
+
+    // Also confirm the migrated values straight from SQLite, including
+    // `launch_option.provider`, which has no domain read path yet.
+    let conn = store.conn.lock().await;
+    let (provider, provider_session_id, provider_thread_id): (
+        String,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT provider, provider_session_id, provider_thread_id \
+             FROM session WHERE id = 'sess-1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        provider, "claude",
+        "a pre-migration session is a Claude row"
+    );
+    assert_eq!(
+        provider_session_id, None,
+        "a pre-migration Claude session has no provider-minted session id"
+    );
+    assert_eq!(
+        provider_thread_id, None,
+        "a pre-migration Claude session has no provider-minted thread id"
+    );
+
+    let option_provider: String = conn
+        .query_row(
+            "SELECT provider FROM launch_option WHERE name = '--plugin-dir'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        option_provider, "claude",
+        "a pre-migration launch option is a Claude option"
+    );
+    drop(conn);
+
+    // Re-opening the now-migrated database is a clean no-op (the columns already
+    // exist, so the guarded ALTERs do not run again).
+    SqliteStore::open(path_str).unwrap();
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // SCHEMA_VERSION startup gate. The four cases below are the contract from the
 // compatibility policy doc (subdomain 1): a fresh DB stamps current; a pre-gate
 // v0.1.0 DB is silently rescued; any other non-matching version is refused with
@@ -2185,6 +2494,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             Some("/repo-a"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -2197,6 +2507,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             Some("/repo-a"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
@@ -2209,12 +2520,21 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
             Some("/repo-a"),
             Some("/repo-a-mirror"),
             None,
+            AgentProvider::Claude,
         )
         .await
         .unwrap();
     let s4 = SessionId::from("sess-4");
     store
-        .insert_spawning_session(&s4, "/scratch", None, None, Some("/scratch"), None)
+        .insert_spawning_session(
+            &s4,
+            "/scratch",
+            None,
+            None,
+            Some("/scratch"),
+            None,
+            AgentProvider::Claude,
+        )
         .await
         .unwrap();
 
@@ -2239,6 +2559,7 @@ async fn repository_clone_rows_aggregates_by_repo_root_and_requested_workdir() {
         git_branch: None,
         cwd: None,
         response_time_ms: None,
+        provider_item_id: None,
     };
     let s1_thread = store.main_thread_id(&s1).await.unwrap();
     let s2_thread = store.main_thread_id(&s2).await.unwrap();

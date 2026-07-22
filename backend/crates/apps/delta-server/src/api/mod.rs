@@ -28,17 +28,17 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use delta_usecase::{PullRequestLens, SessionId, ThreadId};
+use delta_usecase::{AgentProvider, PullRequestLens, SessionId, ThreadId};
 use delta_wire::rest::{
     WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
     WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
     WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WirePullRequestsResponse, WireQuestionAnswerRequest,
-    WireQuestionCancelRequest, WireRecentWorkdirItem, WireRepositoriesResponse,
-    WireRepositoryEntry, WireRepositoryScanRoot, WireRepositoryScanRootsResponse, WireSendResponse,
-    WireSendsResponse, WireSessionListItem, WireSessionsResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WirePermissionDecisionRequest, WireProvidersResponse, WirePullRequestsResponse,
+    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRecentWorkdirItem,
+    WireRepositoriesResponse, WireRepositoryEntry, WireRepositoryScanRoot,
+    WireRepositoryScanRootsResponse, WireSendResponse, WireSendsResponse, WireSessionListItem,
+    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 
 use crate::state::AppState;
@@ -114,8 +114,10 @@ pub(crate) async fn create_session(
 
 /// `POST /api/sessions/{id}/open` — resume a closed, known session.
 ///
-/// Re-launches `claude --resume <id>` and binds the new pane, broadcasting
-/// `SessionOpened`. Re-opening an already-open session is a no-op.
+/// For a Claude session this re-launches `claude --resume <id>` and binds the
+/// new pane; for a terminal-less Codex session it reconnects the adapter via
+/// `thread/resume` (there is no pane). Either way it broadcasts `SessionOpened`,
+/// and re-opening an already-open session is a no-op.
 pub(crate) async fn open_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -141,6 +143,23 @@ pub(crate) async fn close_session(
     let subagent_finished = state.interactor().close_session(&id).await?;
     state.broadcast(subagent_finished);
     state.broadcast([delta_usecase::SessionEvent::SessionClosed { session_id: id }]);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/sessions/{id}/interrupt` — abort a session's in-flight turn.
+///
+/// For a terminal-less agent (Codex) this drives the adapter's `interrupt`
+/// without closing the session; the resulting `TurnInterrupted` settles over
+/// the async event seam (the WebSocket broadcast), so — like a permission
+/// decision or a question answer on a Codex session — no event is broadcast
+/// synchronously here. For a pane-backed (Claude) or closed session it is a
+/// well-defined no-op: Claude's turn interrupt is TUI-driven (Escape in the
+/// pane).
+pub(crate) async fn interrupt(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.interactor().interrupt(&SessionId::from(id)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -367,6 +386,35 @@ pub(crate) async fn list_pull_requests(
     Ok(Json(WirePullRequestsResponse::from(list)))
 }
 
+/// `GET /api/providers` — launch availability and capability profile for every
+/// known agent provider.
+///
+/// For each provider (Claude, Codex) reports whether its configured launch
+/// binary is present on the server host, with a reason string when it is not,
+/// plus the provider's UI-relevant capability profile (e.g. whether it offers an
+/// attachable terminal). The new-session provider selector disables an
+/// unavailable provider and shows the reason, so a user cannot pick a provider
+/// that would fail at spawn; the workspace reads the capability profile to gate
+/// provider-specific surfaces (the terminal tab is hidden for a provider with no
+/// terminal). Always `200`: a missing binary is data (`available: false`), never
+/// an error.
+pub(crate) async fn list_providers(State(state): State<AppState>) -> Json<WireProvidersResponse> {
+    let availability = state.interactor().provider_availability().await;
+    // Pair each provider's runtime launch availability with its static
+    // capability profile. The profile comes from the composition root's
+    // per-provider accessor (which reads the same const each adapter's
+    // `capabilities()` returns), so it is resolved without a live adapter and
+    // can never drift from what a running adapter reports.
+    let entries = availability
+        .into_iter()
+        .map(|availability| {
+            let capabilities = delta_bootstrap::provider_capabilities(availability.provider);
+            (availability, capabilities)
+        })
+        .collect::<Vec<_>>();
+    Json(WireProvidersResponse::from(entries))
+}
+
 /// Query parameters for the git-detection endpoints: the directory to inspect.
 #[derive(Debug, Deserialize)]
 pub(crate) struct WorkdirGitQuery {
@@ -462,9 +510,15 @@ pub(crate) async fn create_launch_option(
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
+    // A create that omits `provider` is a Claude option, keeping clients that
+    // predate per-provider launch options working unchanged.
+    let provider = req
+        .provider
+        .map(AgentProvider::from)
+        .unwrap_or(AgentProvider::Claude);
     let option = state
         .interactor()
-        .create_launch_option(label, name, value, req.default_enabled)
+        .create_launch_option(label, name, value, req.default_enabled, provider)
         .await?;
     Ok((StatusCode::CREATED, Json(WireLaunchOption::from(option))))
 }

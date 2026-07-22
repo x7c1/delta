@@ -1,0 +1,10 @@
+# Host-specific make overrides — copy to `local.mk` (gitignored) and edit.
+#
+# The root Makefile does `-include local.mk`, so anything you `export` here is
+# inherited by every target's recipes (and the processes they spawn, e.g. cargo).
+#
+# Example: on hosts where the `cc` first on PATH cannot link macOS binaries
+# (e.g. a Nix-provided gcc that fails with `ld: library not found for -liconv`),
+# force cargo to use the system linker for the Apple-silicon target:
+#
+# export CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER = /usr/bin/cc

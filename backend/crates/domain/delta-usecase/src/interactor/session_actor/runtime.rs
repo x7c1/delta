@@ -8,12 +8,15 @@
 //! retirement (see the `actor` module) safe.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::oneshot;
 
-use delta_model::ThreadId;
+use delta_attribution::Effect;
+use delta_model::{Message, ThreadId};
 
+use crate::agent::{AgentAdapter, AgentContentSource, AgentEvent, AgentSessionHandle};
 use crate::interactor::PermissionDecision;
 use crate::pane_token::PaneToken;
 use crate::turn::{transition, Transition, TurnInput, TurnState};
@@ -89,6 +92,41 @@ pub struct OpenHandle {
     pub token: PaneToken,
     /// The pane keystrokes are sent to and the PTY attaches to (`<token>:0.0`).
     pub pane: String,
+}
+
+/// A live, terminal-less agent session (e.g. Codex over `codex app-server`).
+///
+/// The parallel of [`OpenHandle`] for a provider that has no tmux pane: it
+/// carries the live [`AgentAdapter`] and the provider's session handle instead
+/// of a pane token. Holding the adapter here is what keeps the underlying
+/// `codex app-server` connection alive for the session's lifetime — dropping it
+/// (e.g. on actor retirement) would tear the connection down — so a session
+/// with an `open_agent` reads as *open* and its actor never retires while it
+/// exists (see [`SessionRuntime::is_empty`]).
+///
+/// There is deliberately no [`OpenHandle`] for such a session, so Claude's
+/// pane-bound path is untouched: [`SessionRuntime::handle`] (the PTY routing
+/// key) stays `None`, and the PTY bridge therefore refuses to attach — a Codex
+/// session has nothing to attach to ([`crate::agent::TerminalCapability::NoTerminal`]).
+#[derive(Clone)]
+pub struct OpenAgentSession {
+    /// The live adapter driving the provider. Kept alive here for the session's
+    /// lifetime so its backing connection is not dropped underneath it.
+    pub adapter: Arc<dyn AgentAdapter>,
+    /// The provider's handle for this session (its provider session id + the
+    /// adapter-local key), used to address the session on the adapter.
+    pub handle: AgentSessionHandle,
+}
+
+impl std::fmt::Debug for OpenAgentSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The adapter is a trait object with no `Debug`; print the handle and
+        // the provider it drives, which is the identifying state anyway.
+        f.debug_struct("OpenAgentSession")
+            .field("provider", &self.adapter.provider())
+            .field("handle", &self.handle)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A freshly-spawned pane awaiting its first `UserPromptSubmit`.
@@ -337,7 +375,15 @@ impl StreamingMessage {
 #[derive(Debug, Default)]
 pub struct SessionRuntime {
     /// The live pane once the session is bound (open). `None` means closed.
+    /// Only ever set for a pane-backed provider (Claude); a terminal-less
+    /// provider uses [`Self::open_agent`] instead, so this stays `None` for it.
     open: Option<OpenHandle>,
+    /// The live terminal-less agent session (Codex), when open. Mutually
+    /// exclusive with [`Self::open`] in practice: a session is pane-backed
+    /// (Claude) or adapter-backed (Codex), never both. Kept separate so
+    /// Claude's `OpenHandle { token, pane }` path is byte-identical and only
+    /// the open-state predicates learn about the new shape.
+    open_agent: Option<OpenAgentSession>,
     /// The fresh spawn awaiting its first `UserPromptSubmit`/`SessionStart`.
     /// At most one exists per session: each spawn mints a fresh session id.
     pending_spawn: Option<PendingSpawn>,
@@ -413,6 +459,35 @@ pub struct SessionRuntime {
     /// nested `Agent` launches per session — small in practice — but a sweep
     /// keyed off `SubagentCompleted` or session close would tighten the bound.
     pending_post_tool_use_agent_ids: HashMap<String, String>,
+    /// The push-based content accumulator for a terminal-less agent session
+    /// (Codex): the event pump folds every [`AgentEvent`] from the session's
+    /// stream through this to produce the canonical messages each event
+    /// completed. `Some` only while a Codex session is open — built at spawn from
+    /// the adapter ([`AgentAdapter::content_source`]) and dropped when the agent
+    /// session is removed ([`Self::remove_open_agent`]). `None` for a Claude
+    /// session (which pulls its content from a transcript, not this push seam)
+    /// and between sessions. Not part of [`Self::is_empty`]: it only ever exists
+    /// alongside [`Self::open_agent`], which already pins the actor alive.
+    ///
+    /// [`AgentAdapter::content_source`]: crate::agent::AgentAdapter::content_source
+    agent_content_source: Option<Box<dyn AgentContentSource>>,
+    /// Correlation between a Delta permission-row id and the adapter-scoped
+    /// provider token for a terminal-less agent session (Codex), keyed by the
+    /// `i64` row id.
+    ///
+    /// The event pump allocates a row when it ingests a
+    /// [`AgentEvent::PermissionRequested`] and records the row → token pairing
+    /// here; the browser-decision path reads it back to translate the row id to
+    /// the token it hands [`AgentAdapter::resolve_permission`], and the pump
+    /// removes it when the request resolves. The token is opaque to the domain —
+    /// stored and forwarded, never interpreted. `None`-valued in effect (empty)
+    /// for a Claude session, whose permission decisions never cross the adapter.
+    /// Not part of [`Self::is_empty`]: an entry only ever exists alongside
+    /// [`Self::open_agent`], which already pins the actor alive.
+    ///
+    /// [`AgentEvent::PermissionRequested`]: crate::agent::AgentEvent::PermissionRequested
+    /// [`AgentAdapter::resolve_permission`]: crate::agent::AgentAdapter::resolve_permission
+    agent_permission_tokens: HashMap<i64, String>,
     /// When the most recent auto-compact re-dispatch ran for this session.
     ///
     /// Two paths can drive that re-dispatch — the live
@@ -437,6 +512,7 @@ impl SessionRuntime {
     /// exactly the same thing.
     pub fn is_empty(&self) -> bool {
         self.open.is_none()
+            && self.open_agent.is_none()
             && self.pending_spawn.is_none()
             && self.resuming.is_none()
             && self.turn == TurnState::Idle
@@ -448,19 +524,133 @@ impl SessionRuntime {
 
     /// Whether a pane is live: bound to the session, or spawned and awaiting
     /// its first `UserPromptSubmit`. Used to keep the single-session cold
-    /// start idempotent.
+    /// start idempotent. A terminal-less agent session also counts as live so
+    /// the cold-start idempotence check does not spawn a second pane alongside
+    /// an open Codex session.
     pub fn has_live_pane(&self) -> bool {
-        self.open.is_some() || self.pending_spawn.is_some()
+        self.open.is_some() || self.pending_spawn.is_some() || self.open_agent.is_some()
     }
 
-    /// The open handle, if the session is currently open.
+    /// The open **pane** handle, if the session is currently open on a
+    /// pane-backed provider. Always `None` for a terminal-less agent session,
+    /// which is exactly what makes the PTY bridge refuse to attach to a Codex
+    /// session (it has no pane).
     pub fn handle(&self) -> Option<&OpenHandle> {
         self.open.as_ref()
     }
 
-    /// Whether the session is currently open (has a live, bound pane).
+    /// Whether the session is currently open — a live, bound pane (Claude) or a
+    /// live terminal-less agent session (Codex).
     pub fn is_open(&self) -> bool {
-        self.open.is_some()
+        self.open.is_some() || self.open_agent.is_some()
+    }
+
+    /// Mark the session open on a terminal-less agent (Codex), holding its live
+    /// adapter and handle. The pane-backed [`Self::open`] slot is left `None`.
+    pub fn bind_agent(&mut self, agent: OpenAgentSession) {
+        self.open_agent = Some(agent);
+    }
+
+    /// The live terminal-less agent session (Codex), when open — its adapter and
+    /// provider handle. `None` for a pane-backed (Claude) or closed session.
+    /// Read by the browser-decision path to reach [`AgentAdapter::resolve_permission`].
+    ///
+    /// [`AgentAdapter::resolve_permission`]: crate::agent::AgentAdapter::resolve_permission
+    pub fn open_agent(&self) -> Option<&OpenAgentSession> {
+        self.open_agent.as_ref()
+    }
+
+    /// Remove the terminal-less agent session (closing it), returning it so the
+    /// caller can drive the adapter's `close`.
+    ///
+    /// Also drops the session's content accumulator and any permission
+    /// correlations: both only have meaning while the agent session is open (its
+    /// event pump ends when the adapter closes), so keeping them past the close
+    /// would leak per-session state.
+    pub fn remove_open_agent(&mut self) -> Option<OpenAgentSession> {
+        self.agent_content_source = None;
+        self.agent_permission_tokens.clear();
+        self.open_agent.take()
+    }
+
+    /// Record the correlation between a Delta permission-row id and the
+    /// adapter-scoped provider token, for the event pump's `PermissionRequested`
+    /// ingestion. The token is stored verbatim and never interpreted.
+    pub fn correlate_agent_permission(&mut self, request_id: i64, token: String) {
+        self.agent_permission_tokens.insert(request_id, token);
+    }
+
+    /// The adapter-scoped provider token correlated with a permission-row id, if
+    /// this is an adapter-backed permission awaiting a decision. Read by the
+    /// browser-decision path to translate the row id back to the token
+    /// [`AgentAdapter::resolve_permission`] answers by; its presence is also what
+    /// distinguishes an adapter permission from a Claude (hook-path) one.
+    ///
+    /// [`AgentAdapter::resolve_permission`]: crate::agent::AgentAdapter::resolve_permission
+    pub fn agent_permission_token(&self, request_id: i64) -> Option<&str> {
+        self.agent_permission_tokens
+            .get(&request_id)
+            .map(String::as_str)
+    }
+
+    /// Resolve an adapter-scoped provider token back to its permission-row id,
+    /// removing the correlation. The event pump calls this when the adapter
+    /// emits a `PermissionResolved` (which carries the provider token) so it can
+    /// route the resolution to the reducer under the `i64` id the runtime mirror
+    /// and browser speak. `None` when the token is unknown (already resolved).
+    pub fn resolve_agent_permission_token(&mut self, token: &str) -> Option<i64> {
+        let request_id = self
+            .agent_permission_tokens
+            .iter()
+            .find(|(_, t)| t.as_str() == token)
+            .map(|(id, _)| *id)?;
+        self.agent_permission_tokens.remove(&request_id);
+        Some(request_id)
+    }
+
+    /// Install the push-based content accumulator for the open agent session.
+    ///
+    /// Called at Codex spawn with the source the adapter built. Replaces any
+    /// previous one (a fresh open builds a fresh accumulator seeded from the
+    /// store's current sequence).
+    pub fn set_agent_content_source(&mut self, source: Box<dyn AgentContentSource>) {
+        self.agent_content_source = Some(source);
+    }
+
+    /// Set the per-turn routing context on the session's content accumulator,
+    /// before the turn's frames arrive through the pump.
+    ///
+    /// Forwards to [`AgentContentSource::begin_turn`]: the turn's messages land on
+    /// `thread_id` (the branch child thread for a branch send, `main` otherwise)
+    /// and, for a branch, the root user message is stamped with `semantic_parent`
+    /// — so a Codex branch turn's content follows the same lane the `send` row
+    /// records, instead of every message falling back onto `main`. A no-op when
+    /// the session has no accumulator (not a Codex session), so the Claude path is
+    /// untouched.
+    ///
+    /// [`AgentContentSource::begin_turn`]: crate::agent::AgentContentSource::begin_turn
+    pub fn begin_agent_turn(
+        &mut self,
+        thread_id: ThreadId,
+        semantic_parent: Option<delta_model::MessageUuid>,
+    ) {
+        if let Some(source) = self.agent_content_source.as_mut() {
+            source.begin_turn(thread_id, semantic_parent);
+        }
+    }
+
+    /// Fold one neutral [`AgentEvent`] through the session's content accumulator,
+    /// returning the canonical content it completed — the messages plus the
+    /// ordered [`Effect`]s the persistence pipeline must run. `None` when the
+    /// session has no accumulator (not a Codex session, or already closed), so
+    /// the caller skips the persistence step entirely.
+    pub fn fold_agent_content(
+        &mut self,
+        event: &AgentEvent,
+    ) -> Option<(Vec<Message>, Vec<Effect>)> {
+        self.agent_content_source
+            .as_mut()
+            .map(|source| source.ingest(event))
     }
 
     /// Bind a pane to the session (the session is now open).
@@ -806,6 +996,32 @@ impl SessionRuntime {
             buffer.chunks.push((index, delta));
         }
         buffer.final_ = buffer.final_ || final_;
+    }
+
+    /// Accumulate one streaming fragment whose transport carries no explicit
+    /// chunk index (Codex's `AssistantDelta`), auto-assigning the next index and
+    /// returning it so the caller can broadcast the increment.
+    ///
+    /// Where Claude's `MessageDisplay` hook numbers its chunks, Codex deltas
+    /// arrive un-indexed; the next index is the count of fragments already held
+    /// for this `message_id` (0 when a different message id starts a fresh
+    /// preview), so repeated deltas for one item append in arrival order rather
+    /// than overwriting. Delegates to [`Self::accumulate_streaming`] for the
+    /// actual buffering, so the per-turn reconciliation (cleared at turn end) is
+    /// identical to the hook path.
+    pub fn accumulate_streaming_delta(
+        &mut self,
+        message_id: &str,
+        thread_id: ThreadId,
+        final_: bool,
+        delta: String,
+    ) -> u32 {
+        let index = match &self.streaming_message {
+            Some(existing) if existing.message_id == message_id => existing.chunks.len() as u32,
+            _ => 0,
+        };
+        self.accumulate_streaming(message_id, thread_id, index, final_, delta);
+        index
     }
 
     /// The current live preview, if a message is streaming.

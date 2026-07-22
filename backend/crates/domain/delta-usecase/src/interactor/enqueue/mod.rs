@@ -7,6 +7,7 @@ mod enqueue_send;
 mod ensure_open;
 mod provisional_branch_title;
 mod redispatch_stuck;
+mod resolve_branch_target;
 
 #[cfg(test)]
 mod tests;

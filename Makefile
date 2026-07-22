@@ -8,6 +8,11 @@
 # its own default (.tmp/session). Override per-invocation: `make dev WORKDIR=~/scratch`.
 WORKDIR ?=
 
+# Optional host-specific overrides (gitignored). Use it to `export` env vars every
+# target should inherit — e.g. a linker override on hosts where the default `cc`
+# cannot link macOS binaries. See local.mk.example. Missing file is fine (`-`).
+-include local.mk
+
 .DEFAULT_GOAL := help
 
 ## help: list available targets
@@ -102,3 +107,8 @@ e2e-real:
 .PHONY: e2e-real-auto
 e2e-real-auto:
 	scripts/e2e-real-auto.sh
+
+## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + schema drift detection (local only; the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
+.PHONY: e2e-real-codex
+e2e-real-codex:
+	cd backend && cargo test -p codex-agent --test real_codex_canary -- --ignored --test-threads=1 --nocapture

@@ -3,6 +3,7 @@ import type {
   Message,
   PendingPermission,
   PendingQuestion,
+  ProviderAvailability,
   RunningSubagent,
   Send,
   Session,
@@ -29,16 +30,23 @@ import type {
  *   "this session cannot be resumed" UI is developable with no backend. It sorts
  *   just after the two detailed sessions (top of page 2), leaving page 1 and the
  *   auto-focus unchanged.
+ * - `sess-mock-4` — **closed, Codex provider**. The other three run on Claude;
+ *   this one carries `provider: 'codex'` so the navigator's provider badge is
+ *   exercisable for both providers with no backend. It has an empty main thread
+ *   (no messages) and sorts just below `sess-mock-3` (still on page 2), again
+ *   leaving page 1 and the auto-focus unchanged.
  */
 
 export const SESSION_ID = 'sess-mock-1';
 export const SESSION_ID_2 = 'sess-mock-2';
 export const SESSION_ID_3 = 'sess-mock-3';
+export const SESSION_ID_4 = 'sess-mock-4';
 export const MAIN_THREAD_ID = 1;
 export const BRANCH_THREAD_ID = 2;
 export const SESSION_2_MAIN_THREAD_ID = 3;
 export const SESSION_2_BRANCH_THREAD_ID = 4;
 export const SESSION_3_MAIN_THREAD_ID = 5;
+export const SESSION_4_MAIN_THREAD_ID = 6;
 
 /**
  * Number of sessions returned per page by the mock `GET /api/sessions`. Small on
@@ -63,8 +71,8 @@ export const SESSIONS_PAGE_SIZE = 2;
 export const FILLER_SESSION_COUNT = 40;
 const FIRST_FILLER_THREAD_ID = 100;
 
-/** Total seeded sessions: the three detailed ones plus the filler. */
-export const TOTAL_SEEDED_SESSIONS = 3 + FILLER_SESSION_COUNT;
+/** Total seeded sessions: the four detailed ones plus the filler. */
+export const TOTAL_SEEDED_SESSIONS = 4 + FILLER_SESSION_COUNT;
 
 export const mockSession: Session = {
   id: SESSION_ID,
@@ -76,6 +84,9 @@ export const mockSession: Session = {
   branch_at_launch: 'main',
   repo_root: '/home/dev/projects/delta',
   repository_display_name: 'dev/delta',
+  provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
 };
 
 export const mockSession2: Session = {
@@ -88,6 +99,9 @@ export const mockSession2: Session = {
   branch_at_launch: 'feat/scratch-ideas',
   repo_root: '/home/dev/projects/scratch',
   repository_display_name: 'dev/scratch',
+  provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
 };
 
 export const mockSession3: Session = {
@@ -102,6 +116,31 @@ export const mockSession3: Session = {
   // `null` exercises the legacy/non-git fallback path on the navigator
   // (renders the cwd basename instead of an `org/repo` label).
   repository_display_name: null,
+  provider: 'claude',
+  provider_session_id: null,
+  provider_thread_id: null,
+};
+
+export const mockSession4: Session = {
+  id: SESSION_ID_4,
+  cwd: '/home/dev/projects/codex-lab',
+  transcript_path: '/tmp/transcript-4.jsonl',
+  title: 'codex refactor',
+  status: 'ended',
+  // Sorts just below sess-mock-3 (2025-12-31) yet above every filler (which
+  // start at 2025-12-30T00:00:00Z and go older), so this Codex session lands at
+  // the top-of-page-2 region and page 1 / the auto-focus stay unchanged.
+  created_at: '2025-12-30T12:00:00Z',
+  branch_at_launch: 'feat/codex-adapter',
+  repo_root: '/home/dev/projects/codex-lab',
+  repository_display_name: 'dev/codex-lab',
+  // The one non-Claude seed: exercises the navigator provider badge's Codex
+  // path (the other three sessions run on Claude). Its repository name is kept
+  // distinct from the Claude seeds so text-based session-node locators in the
+  // e2e specs (e.g. filter by `dev/delta`) still resolve to a single card.
+  provider: 'codex',
+  provider_session_id: null,
+  provider_thread_id: null,
 };
 
 export const mockThreads: Thread[] = [
@@ -153,6 +192,17 @@ export const mockThreads3: Thread[] = [
   },
 ];
 
+export const mockThreads4: Thread[] = [
+  {
+    id: SESSION_4_MAIN_THREAD_ID,
+    session_id: SESSION_ID_4,
+    title: 'main',
+    parent_thread_id: null,
+    root_message_uuid: null,
+    created_at: '2025-12-30T12:00:00Z',
+  },
+];
+
 export const mockMessagesByThread: Record<number, Message[]> = {
   [MAIN_THREAD_ID]: [
     {
@@ -171,6 +221,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-a1',
@@ -195,6 +246,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-u2',
@@ -212,6 +264,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-a2',
@@ -243,6 +296,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
   ],
   [BRANCH_THREAD_ID]: [
@@ -262,6 +316,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-b2',
@@ -285,6 +340,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     // A paired tool call / tool result split across two messages, as Claude's
     // transcript records them: the `tool_use` lives in an assistant message
@@ -320,6 +376,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     {
       // A large (prose) turn between the tool_use and its result carrier. Its
@@ -349,6 +406,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-b4',
@@ -373,6 +431,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
   ],
   [SESSION_2_MAIN_THREAD_ID]: [
@@ -392,6 +451,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-s2-a1',
@@ -414,6 +474,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
   ],
   [SESSION_2_BRANCH_THREAD_ID]: [
@@ -433,6 +494,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
   ],
   [SESSION_3_MAIN_THREAD_ID]: [
@@ -454,6 +516,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: null,
+      provider_item_id: null,
     },
     {
       uuid: 'uuid-s3-a1',
@@ -477,6 +540,7 @@ export const mockMessagesByThread: Record<number, Message[]> = {
       git_branch: 'main',
       cwd: '/home/dev/repo',
       response_time_ms: 9400,
+      provider_item_id: null,
     },
   ],
 };
@@ -597,6 +661,9 @@ function buildFillerSessions(): MockStore['sessions'] {
         branch_at_launch: null,
         repo_root: null,
         repository_display_name: null,
+        provider: 'claude',
+        provider_session_id: null,
+        provider_thread_id: null,
       },
       open: false,
       mainThreadId: threadId,
@@ -638,6 +705,12 @@ export function seedData(): MockStore {
         threads: structuredClone(mockThreads3),
         resumable: false,
       },
+      {
+        session: structuredClone(mockSession4),
+        open: false,
+        mainThreadId: SESSION_4_MAIN_THREAD_ID,
+        threads: structuredClone(mockThreads4),
+      },
       ...structuredClone(filler),
     ],
     messagesByThread: structuredClone(mockMessagesByThread),
@@ -645,9 +718,20 @@ export function seedData(): MockStore {
     nextThreadId: FIRST_FILLER_THREAD_ID + FILLER_SESSION_COUNT,
     nextSendId: 1,
     nextSpawnOrdinal: 1,
-    // Two seeded options so the settings screen is developable with no backend:
-    // a flag with a value and a valueless flag. Newest first (descending id).
+    // Seeded options so the settings screen is developable with no backend:
+    // two Claude flags (a valued flag and a valueless-value flag) plus one Codex
+    // option so the per-provider picker filter is exercisable without a backend.
+    // Newest first (descending id).
     launchOptions: [
+      {
+        id: 3,
+        label: 'Codex model',
+        name: 'model',
+        value: 'gpt-5',
+        default_enabled: false,
+        created_at: '2026-01-03T00:00:00Z',
+        provider: 'codex',
+      },
       {
         id: 2,
         label: null,
@@ -655,6 +739,7 @@ export function seedData(): MockStore {
         value: 'auto',
         default_enabled: false,
         created_at: '2026-01-02T00:00:00Z',
+        provider: 'claude',
       },
       {
         id: 1,
@@ -663,9 +748,10 @@ export function seedData(): MockStore {
         value: '/home/dev/plugins',
         default_enabled: true,
         created_at: '2026-01-01T00:00:00Z',
+        provider: 'claude',
       },
     ],
-    nextLaunchOptionId: 3,
+    nextLaunchOptionId: 4,
     // Empty by default — the Settings dialog's "Repository scan roots" section
     // renders its zero-state, and tests that need a seeded root call
     // `insertRepositoryScanRoot` directly on the store.
@@ -924,6 +1010,33 @@ export function mockRepositories(): {
           last_worktree_start_point: null,
         },
       ],
+    },
+  ];
+}
+
+/**
+ * Per-provider launch availability and capability profile for
+ * `GET /api/providers`. Both providers are available by default so the
+ * new-session provider selector is fully usable with no backend and existing
+ * tests / e2e are unaffected. Capabilities mirror the real backend: Claude
+ * offers an attachable terminal (`has_terminal: true`), Codex is headless
+ * (`has_terminal: false`) — the workspace hides the terminal tab for the latter.
+ * A test that needs an unavailable provider overrides this handler (see
+ * `createHandlers`).
+ */
+export function mockProviders(): ProviderAvailability[] {
+  return [
+    {
+      provider: 'claude',
+      available: true,
+      detail: null,
+      capabilities: { has_terminal: true },
+    },
+    {
+      provider: 'codex',
+      available: true,
+      detail: null,
+      capabilities: { has_terminal: false },
     },
   ];
 }

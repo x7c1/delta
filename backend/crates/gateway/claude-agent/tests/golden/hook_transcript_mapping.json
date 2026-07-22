@@ -1,0 +1,90 @@
+[
+  {
+    "name": "permission_allowed_turn",
+    "events": [
+      {
+        "event": "session_started",
+        "provider_session_id": "01920000-0000-7000-8000-000000000001"
+      },
+      {
+        "event": "turn_started",
+        "provider_turn_id": null
+      },
+      {
+        "event": "permission_requested",
+        "request_id": "delta-1-perm-1",
+        "tool_name": "Bash",
+        "input_json": {
+          "command": "ls"
+        },
+        "tool_use_id": "tu-allow"
+      },
+      {
+        "event": "permission_resolved",
+        "request_id": "delta-1-perm-1",
+        "decision": "allow"
+      },
+      {
+        "event": "turn_completed",
+        "status": "completed"
+      }
+    ]
+  },
+  {
+    "name": "permission_denied_turn",
+    "events": [
+      {
+        "event": "session_started",
+        "provider_session_id": "01920000-0000-7000-8000-000000000001"
+      },
+      {
+        "event": "turn_started",
+        "provider_turn_id": null
+      },
+      {
+        "event": "permission_requested",
+        "request_id": "delta-1-perm-1",
+        "tool_name": "Bash",
+        "input_json": {
+          "command": "rm -rf /"
+        },
+        "tool_use_id": "tu-deny"
+      },
+      {
+        "event": "permission_resolved",
+        "request_id": "delta-1-perm-1",
+        "decision": "deny"
+      },
+      {
+        "event": "turn_completed",
+        "status": "completed"
+      }
+    ]
+  },
+  {
+    "name": "interrupted_turn",
+    "events": [
+      {
+        "event": "session_started",
+        "provider_session_id": "01920000-0000-7000-8000-000000000001"
+      },
+      {
+        "event": "turn_started",
+        "provider_turn_id": null
+      },
+      {
+        "event": "turn_completed",
+        "status": "interrupted"
+      }
+    ]
+  },
+  {
+    "name": "unmodeled_wire_is_skipped",
+    "events": [
+      {
+        "event": "session_started",
+        "provider_session_id": "01920000-0000-7000-8000-000000000001"
+      }
+    ]
+  }
+]

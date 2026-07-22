@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { AgentProvider } from '@delta/wire-gen';
 
 /**
  * The Settings dialog category ids — each one corresponds to a left-rail entry
@@ -7,7 +8,11 @@ import { createJSONStorage, persist } from 'zustand/middleware';
  * new top-level category is a single entry in both this union and the
  * registry that drives the rail (see {@link SettingsView}).
  */
-export type SettingsCategoryId = 'launch-options' | 'scan-roots' | 'appearance';
+export type SettingsCategoryId =
+  | 'launch-options'
+  | 'scan-roots'
+  | 'appearance'
+  | 'default-provider';
 
 /**
  * The default category on a fresh install: Launch options. It is the older,
@@ -26,6 +31,7 @@ const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'launch-options',
   'scan-roots',
   'appearance',
+  'default-provider',
 ];
 
 /**
@@ -61,6 +67,23 @@ const VISUAL_EFFECTS_SETTINGS: readonly VisualEffectsSetting[] = [
   'off',
 ];
 
+/**
+ * The valid {@link AgentProvider} values, used by the persistence hydration
+ * step to fall back to {@link DEFAULT_PROVIDER} when a foreign value lands in
+ * localStorage (a stale build, a typo, a value from another workspace). Kept in
+ * sync with the wire `AgentProvider` union by construction: the `satisfies`
+ * clause makes TypeScript reject the tuple if it drifts from the union.
+ */
+const AGENT_PROVIDERS = ['claude', 'codex'] as const satisfies readonly AgentProvider[];
+
+/**
+ * The provider a new session defaults to before the user picks one for a given
+ * session. Claude on a fresh install; the new-session provider selector seeds
+ * its initial value from the persisted {@link SettingsState.defaultProvider},
+ * which starts here.
+ */
+export const DEFAULT_PROVIDER: AgentProvider = 'claude';
+
 export interface SettingsState {
   /**
    * Which Settings category the dialog shows in its right pane. Persisted to
@@ -79,6 +102,15 @@ export interface SettingsState {
    */
   visualEffects: VisualEffectsSetting;
   setVisualEffects: (visualEffects: VisualEffectsSetting) => void;
+  /**
+   * The AI-agent provider a new session starts on by default. It seeds the
+   * new-session provider selector's initial value (still per-session
+   * overridable via that selector). Persisted to localStorage so the choice
+   * survives reloads; an unknown value falls back to {@link DEFAULT_PROVIDER}
+   * on rehydration.
+   */
+  defaultProvider: AgentProvider;
+  setDefaultProvider: (provider: AgentProvider) => void;
 }
 
 /** localStorage key for the persisted settings dialog state slice. */
@@ -91,16 +123,24 @@ export const useSettingsStore = create<SettingsState>()(
       setActiveCategory: (activeCategory) => set({ activeCategory }),
       visualEffects: DEFAULT_VISUAL_EFFECTS_SETTING,
       setVisualEffects: (visualEffects) => set({ visualEffects }),
+      defaultProvider: DEFAULT_PROVIDER,
+      setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
     }),
     {
       name: SETTINGS_STORAGE_KEY,
       storage: createJSONStorage(() => localStorage),
       onRehydrateStorage: () => (state) => {
-        if (state && !SETTINGS_CATEGORY_IDS.includes(state.activeCategory)) {
+        if (!state) {
+          return;
+        }
+        if (!SETTINGS_CATEGORY_IDS.includes(state.activeCategory)) {
           state.activeCategory = DEFAULT_SETTINGS_CATEGORY;
         }
-        if (state && !VISUAL_EFFECTS_SETTINGS.includes(state.visualEffects)) {
+        if (!VISUAL_EFFECTS_SETTINGS.includes(state.visualEffects)) {
           state.visualEffects = DEFAULT_VISUAL_EFFECTS_SETTING;
+        }
+        if (!AGENT_PROVIDERS.includes(state.defaultProvider)) {
+          state.defaultProvider = DEFAULT_PROVIDER;
         }
       },
     },

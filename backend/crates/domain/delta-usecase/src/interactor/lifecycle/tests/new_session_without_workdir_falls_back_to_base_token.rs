@@ -9,6 +9,7 @@ async fn new_session_without_workdir_falls_back_to_base_token() {
 
     ix.enqueue_send(
         SendTarget::NewSession {
+            provider: crate::AgentProvider::Claude,
             workdir: None,
             launch_option_ids: Vec::new(),
             worktree: None,

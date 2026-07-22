@@ -134,6 +134,7 @@ where
                 workdir,
                 launch_option_ids,
                 worktree,
+                provider,
             } => {
                 // `locator_quote` is intentionally dropped here, not forwarded
                 // to the spawn: a brand-new session has no earlier passage to
@@ -147,6 +148,7 @@ where
                         workdir,
                         launch_option_ids,
                         worktree,
+                        provider,
                         reply,
                     })
                     .await?;
@@ -172,10 +174,16 @@ where
                 // no first prompt); the worktree path rides only on a
                 // composer-initiated new session.
                 worktree: None,
+                // Cold start is the Claude tmux path; a Codex session is only
+                // ever created from a composer-initiated new session (which
+                // carries a first prompt and its own provider selection).
+                provider: delta_model::AgentProvider::Claude,
                 reply,
             })
             .await?;
-        Ok(spawn.token)
+        Ok(spawn
+            .token
+            .expect("a Claude cold-start spawn always mints a pane token"))
     }
 
     /// Ensure at least one Claude Code session is up, spawning one if absent.
@@ -197,8 +205,9 @@ where
         Ok(SessionLifecycle::Starting)
     }
 
-    /// Resume a closed but known session under a fresh tmux session.
-    pub async fn open_session(&self, id: &SessionId) -> Result<PaneToken> {
+    /// Resume a closed but known session: a fresh tmux session for Claude, or a
+    /// `thread/resume` adapter reconnect for a terminal-less Codex session.
+    pub async fn open_session(&self, id: &SessionId) -> Result<()> {
         self.request(id, |reply| SessionInput::OpenSession { reply })
             .await
     }
@@ -213,6 +222,33 @@ where
     pub async fn close_session(&self, id: &SessionId) -> Result<Vec<SessionEvent>> {
         self.request(id, |reply| SessionInput::CloseSession { reply })
             .await
+    }
+
+    /// Interrupt a session's in-flight turn, keeping the session open.
+    ///
+    /// For a terminal-less agent (Codex) this drives the adapter's `interrupt`
+    /// (sending `turn/interrupt` on the provider's wire) without tearing the
+    /// session down, so the provider's `turn/completed{interrupted}` still
+    /// arrives on the session's event pump and settles the turn — the resulting
+    /// [`SessionEvent::TurnInterrupted`] reaches the browser over the async
+    /// event seam, so there is nothing to return here.
+    ///
+    /// A no-op (returning `Ok`) when the session has no actor — a session with
+    /// no actor is closed by definition, and a closed or pane-backed (Claude)
+    /// session carries no open agent to interrupt. Claude's turn interrupt is
+    /// TUI-driven (Escape in the pane) with its own transcript-marker path,
+    /// which this REST route deliberately does not duplicate.
+    ///
+    /// [`SessionEvent::TurnInterrupted`]: crate::ports::SessionEvent::TurnInterrupted
+    pub async fn interrupt(&self, id: &SessionId) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        if !self
+            .sessions
+            .post_existing(id, SessionInput::Interrupt { reply: tx })
+        {
+            return Ok(());
+        }
+        rx.await.unwrap_or(Ok(()))
     }
 
     /// Wipe the residual input of a session's pane, if it is open. A no-op

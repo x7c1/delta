@@ -8,17 +8,21 @@
 //! interactor. Per-session runtime state lives in the `session_actor` module
 //! (one actor task per session), reached through the `routing` impl.
 
+mod agent_event;
+mod agent_permission;
 mod answer_question;
 mod cancel_question;
 mod cancel_send;
 mod context;
 mod enqueue;
 mod hooks;
+mod interrupt;
 mod launch_options;
 mod lifecycle;
 mod listing;
 mod open_cwd;
 mod permission_decision;
+mod provider_availability;
 mod pull_requests;
 mod question_keys;
 mod release_send;
@@ -47,10 +51,12 @@ use std::time::{Duration, Instant};
 
 use delta_model::SessionId;
 
+use crate::agent::AgentAdapterFactory;
 use crate::launch_config::LaunchConfig;
 use crate::pane_token::PaneTokenMinter;
 use crate::ports::{
-    ExternalOpener, GhCli, GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace,
+    AsyncEventSink, BinaryDetector, ExternalOpener, GhCli, GitWorktree, SessionEvent, SessionStore,
+    TmuxDriver, Transcript, Workspace,
 };
 use crate::pull_request::{PullRequest, PullRequestLens};
 
@@ -60,6 +66,14 @@ use session_actor::registry::SessionRegistry;
 /// re-shells out. Short enough that a refresh on the user's timescale wins,
 /// long enough that flipping tabs in the panel does not spam `gh`.
 pub(crate) const PR_SEARCH_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// The default Codex launch binary, used by the default/test interactor when no
+/// Codex binary has been wired. Mirrors `codex-agent`'s `CodexLaunchConfig`
+/// default (`codex`, resolved via `PATH`); the domain cannot depend on that
+/// gateway crate, so the fallback name is kept in sync here. Production always
+/// overrides it via [`Interactor::with_codex_bin`] with the same value handed to
+/// the Codex adapter factory.
+pub(crate) const DEFAULT_CODEX_COMMAND: &str = "codex";
 
 /// Per-process memo for `gh search prs <lens>`.
 ///
@@ -143,12 +157,66 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// non-generic field keeps the interactor's five type parameters
     /// untouched.
     pub(in crate::interactor) external_opener: Arc<dyn ExternalOpener>,
+    /// The factory that lazily builds the Codex [`AgentAdapter`] when a Codex
+    /// session first needs it. Held as a trait object for the same reason as
+    /// [`Self::gh_cli`] — it is not routed through the session actors, so a
+    /// non-generic field keeps the interactor's five type parameters untouched.
+    ///
+    /// A factory (rather than a live adapter) is held because standing a Codex
+    /// adapter up spawns `codex app-server` and runs its `initialize`
+    /// handshake; doing that at startup would break a machine without Codex
+    /// installed. The factory carries only launch configuration, so
+    /// construction has no side effects and the spawn is deferred to
+    /// [`AgentAdapterFactory::connect`].
+    ///
+    /// `None` when no Codex factory has been wired (the default constructor,
+    /// tests). Currently held but never consulted — provider dispatch is a
+    /// later change.
+    pub(in crate::interactor) codex_adapter_factory: Option<Arc<dyn AgentAdapterFactory>>,
+    /// Resolves whether a provider's launch binary is present on this host, for
+    /// the `/api/providers` availability endpoint. Held as a trait object for
+    /// the same reason as [`Self::gh_cli`] — it is not routed through the
+    /// session actors, so a non-generic field keeps the interactor's five type
+    /// parameters untouched. The default constructor wires a stub reporting
+    /// every binary as absent; production wiring installs the real PATH probe.
+    pub(in crate::interactor) binary_detector: Arc<dyn BinaryDetector>,
+    /// The Codex launch binary this server would spawn (`codex` by default,
+    /// overridden by `DELTA_CODEX_BIN`). Stored so the availability endpoint
+    /// probes the *same* binary a Codex spawn would use, rather than a divergent
+    /// hardcoded path. Sourced from the same value handed to the Codex adapter
+    /// factory at the composition root. The Claude launch binary is not
+    /// duplicated here — it already lives on [`Self::launch`] as `claude_bin`.
+    pub(in crate::interactor) codex_bin: String,
+    /// The async event-emission seam: the sending half a producer that emits
+    /// events *after* its driving call returned pushes on (see
+    /// [`AsyncEventSink`]). The server owns the matching receiver and forwards
+    /// each drained event to its broadcast.
+    ///
+    /// `None` by default — the synchronous return path (every hook handler and
+    /// tick returning its `Vec<SessionEvent>`) is untouched, and a
+    /// configuration that never wires the seam (the default constructor, the
+    /// domain tests) simply drops any async emit. Production wiring installs the
+    /// sink through [`Interactor::with_event_sink`]. Currently a dormant seam:
+    /// no live path emits on it yet — the push-based producer (the Codex event
+    /// pump) that does lands in a later change.
+    pub(in crate::interactor) event_sink: Option<AsyncEventSink>,
     /// Per-lens memo of the latest `gh search prs` result, keeping a focus
     /// flip between the two lenses cheap. Bounded by
     /// [`PR_SEARCH_CACHE_TTL`] so the picker still picks up newly-opened
     /// PRs on the user's timescale.
     pub(in crate::interactor) pr_search_cache:
         tokio::sync::Mutex<std::collections::HashMap<PullRequestLens, PrSearchCacheEntry>>,
+    /// request-row id → owning session, so a permission decision (which only
+    /// carries the request id) can be routed to the right actor. Entries are
+    /// claimed atomically by `decide_permission`/`abandon_permission_decision`,
+    /// mirroring the waiter lifecycle inside the actor.
+    ///
+    /// Held on the core (not the outer [`Interactor`]) so both the routing layer
+    /// and a session actor can reach it: the Claude path seeds it from the
+    /// routing layer after the `PermissionRequest` hook returns, while the Codex
+    /// event pump — which allocates the permission row inside the actor — seeds
+    /// it there through the actor's [`Deref`](std::ops::Deref) to the core.
+    pub(in crate::interactor) permission_index: std::sync::Mutex<HashMap<i64, SessionId>>,
 }
 
 /// The public entry point: wraps the shared [`InteractorCore`] and routes
@@ -164,11 +232,6 @@ pub struct Interactor<T, X, S, W, G> {
     core: Arc<InteractorCore<T, X, S, W, G>>,
     /// session_id → actor mailbox; actors spawn on first contact.
     pub(in crate::interactor) sessions: SessionRegistry<T, X, S, W, G>,
-    /// request-row id → owning session, so a permission decision (which only
-    /// carries the request id) can be routed to the right actor. Entries are
-    /// claimed atomically by `decide_permission`/`abandon_permission_decision`,
-    /// mirroring the waiter lifecycle inside the actor.
-    pub(in crate::interactor) permission_index: std::sync::Mutex<HashMap<i64, SessionId>>,
 }
 
 impl<T, X, S, W, G> std::ops::Deref for Interactor<T, X, S, W, G> {
@@ -231,14 +294,15 @@ where
             repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             gh_cli: Arc::new(UnavailableGhCli),
             external_opener: Arc::new(UnwiredExternalOpener),
+            codex_adapter_factory: None,
+            binary_detector: Arc::new(UnwiredBinaryDetector),
+            codex_bin: DEFAULT_CODEX_COMMAND.to_owned(),
+            event_sink: None,
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            permission_index: std::sync::Mutex::new(HashMap::new()),
         });
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: std::sync::Mutex::new(HashMap::new()),
-        }
+        Self { core, sessions }
     }
 
     /// Replace the launch configuration (binary to spawn, watchdog deadlines).
@@ -255,11 +319,7 @@ where
         core.launch = launch;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 
     /// Inject the `gh` CLI driver for the PR tab.
@@ -278,11 +338,7 @@ where
         core.gh_cli = gh_cli;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
     }
 
     /// Inject the [`ExternalOpener`] driver for the `open cwd` endpoint.
@@ -301,11 +357,80 @@ where
         core.external_opener = opener;
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
-        Self {
-            core,
-            sessions,
-            permission_index: self.permission_index,
-        }
+        Self { core, sessions }
+    }
+
+    /// Inject the factory that lazily builds the Codex [`AgentAdapter`].
+    ///
+    /// The default constructor holds no factory (`None`), so a configuration
+    /// that does not drive Codex — the existing call sites, tests — is
+    /// unaffected. Production wiring installs a factory carrying the Codex
+    /// launch configuration; no `codex app-server` process is spawned here (the
+    /// factory only holds config), so a machine without Codex still starts
+    /// normally. Same constraint as [`Self::with_launch_config`]: must run
+    /// before any session actor is spawned.
+    pub fn with_codex_adapter_factory(self, factory: Arc<dyn AgentAdapterFactory>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_codex_adapter_factory must be called before any session actor is spawned");
+        };
+        core.codex_adapter_factory = Some(factory);
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self { core, sessions }
+    }
+
+    /// Inject the [`BinaryDetector`] used by the `/api/providers` availability
+    /// endpoint.
+    ///
+    /// The default constructor wires a stub that reports every binary as absent,
+    /// so a configuration that has not wired the real probe (existing tests, dev
+    /// harnesses) is safe by default. Production wiring replaces it with the
+    /// PATH probe. Same constraint as [`Self::with_launch_config`]: must run
+    /// before any session actor is spawned.
+    pub fn with_binary_detector(self, detector: Arc<dyn BinaryDetector>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_binary_detector must be called before any session actor is spawned");
+        };
+        core.binary_detector = detector;
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self { core, sessions }
+    }
+
+    /// Set the Codex launch binary the availability endpoint probes.
+    ///
+    /// A builder-style override sibling of [`Self::with_launch_config`] (which
+    /// carries the Claude binary): the composition root passes the same value it
+    /// hands the Codex adapter factory, so availability probes exactly the
+    /// binary a Codex spawn would use. Defaults to `codex` when not set. Same
+    /// constraint as [`Self::with_launch_config`]: must run before any session
+    /// actor is spawned.
+    pub fn with_codex_bin(self, codex_bin: impl Into<String>) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_codex_bin must be called before any session actor is spawned");
+        };
+        core.codex_bin = codex_bin.into();
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self { core, sessions }
+    }
+
+    /// Inject the async event-emission [`AsyncEventSink`].
+    ///
+    /// The default constructor holds no sink (`None`), so a configuration that
+    /// never drives an async producer — the existing call sites, the domain
+    /// tests — is unaffected and any async emit is silently dropped. The server
+    /// wires the sink whose receiver its drain task forwards to the broadcast.
+    /// Same constraint as [`Self::with_launch_config`]: must run before any
+    /// session actor is spawned.
+    pub fn with_event_sink(self, sink: AsyncEventSink) -> Self {
+        let Ok(mut core) = Arc::try_unwrap(self.core) else {
+            panic!("with_event_sink must be called before any session actor is spawned");
+        };
+        core.event_sink = Some(sink);
+        let core = Arc::new(core);
+        let sessions = SessionRegistry::new(&core);
+        Self { core, sessions }
     }
 }
 
@@ -347,6 +472,22 @@ impl ExternalOpener for UnwiredExternalOpener {
     }
 }
 
+/// Stub [`BinaryDetector`] wired by [`Interactor::new`] when no real probe has
+/// been injected yet.
+///
+/// Reports every binary as absent, so a configuration that has not wired the
+/// real PATH probe (existing tests, dev harnesses) reports providers as
+/// unavailable rather than falsely claiming a binary is present. Production
+/// wiring replaces this through [`Interactor::with_binary_detector`].
+struct UnwiredBinaryDetector;
+
+#[async_trait::async_trait]
+impl BinaryDetector for UnwiredBinaryDetector {
+    async fn is_available(&self, _bin: &str) -> bool {
+        false
+    }
+}
+
 impl<T, X, S, W, G> InteractorCore<T, X, S, W, G>
 where
     T: TmuxDriver,
@@ -359,5 +500,20 @@ where
     /// browser decision before falling back to the TUI prompt.
     pub fn permission_decision_deadline(&self) -> std::time::Duration {
         self.launch.permission_decision_deadline
+    }
+
+    /// Emit an event onto the async event seam, if one is wired.
+    ///
+    /// The complement of the synchronous return path: where a hook handler or
+    /// tick hands its `Vec<SessionEvent>` back to a caller that broadcasts them,
+    /// this pushes a single event onto the [`AsyncEventSink`] the server drains
+    /// — for a producer that emits after its driving call has already returned.
+    /// A no-op when no sink is wired (the default), so it is always safe to
+    /// call. Currently dormant: the push-based producer that emits through it
+    /// (the Codex event pump) lands in a later change.
+    pub fn emit_async_event(&self, event: SessionEvent) {
+        if let Some(sink) = &self.event_sink {
+            sink.emit(event);
+        }
     }
 }

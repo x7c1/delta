@@ -110,6 +110,9 @@ const item: SessionListItem = {
     branch_at_launch: 'main',
     repo_root: '/home/dev/project',
     repository_display_name: 'dev/project',
+    provider: 'claude',
+    provider_session_id: null,
+    provider_thread_id: null,
   },
   open: true,
   main_thread_id: 1,
@@ -351,6 +354,31 @@ describe('SessionNode card styling', () => {
 
     const card = screen.getByTestId('session-card');
     expect(card.className).not.toContain('transition-colors');
+  });
+});
+
+describe('SessionNode provider badge', () => {
+  it('shows the Claude monogram for a Claude session', () => {
+    // The shared `item` fixture runs on Claude.
+    renderNode({});
+
+    const badge = screen.getByTestId('session-provider-badge');
+    expect(badge).toHaveTextContent('CL');
+    // The full product name is the tooltip / accessible name.
+    expect(screen.getByTitle('Claude Code')).toBeInTheDocument();
+  });
+
+  it('shows the Codex monogram for a Codex session', () => {
+    renderNode({
+      item: {
+        ...item,
+        session: { ...item.session, provider: 'codex' },
+      },
+    });
+
+    const badge = screen.getByTestId('session-provider-badge');
+    expect(badge).toHaveTextContent('CX');
+    expect(screen.getByTitle('Codex')).toBeInTheDocument();
   });
 });
 

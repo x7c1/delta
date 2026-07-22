@@ -17,6 +17,7 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
+import { ProviderSelector } from '../composer/ProviderSelector';
 import { PendingQueue } from '../composer/PendingQueue';
 import {
   usePendingSends,
@@ -28,7 +29,10 @@ import { NewSessionTabBar } from '../new-session/NewSessionTabBar';
 import { WorktreeOptions } from '../composer/WorktreeOptions';
 import { LaunchOptionsPicker } from '../composer/LaunchOptionsPicker';
 import { AssistantMarkdown } from './AssistantMarkdown';
-import { isTaskNotificationMessage } from './claudeFormat';
+import {
+  isTaskNotificationMessage,
+  isUnknownCommandNoticeMessage,
+} from './claudeFormat';
 import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
@@ -175,6 +179,9 @@ export function TranscriptPane({
   const setNewSessionSelectedPrUrl = useComposerStore(
     (state) => state.setNewSessionSelectedPrUrl,
   );
+  const resetNewSessionProvider = useComposerStore(
+    (state) => state.resetNewSessionProvider,
+  );
   // The picker's open state lives in the store (not local component state) so
   // the navigator's "New" button can (re)open it without a focus transition.
   const workdirDialogOpen = useComposerStore(
@@ -294,13 +301,18 @@ export function TranscriptPane({
   );
   const allMessages: Message[] = messagesQuery.data?.messages ?? [];
 
-  // Render user and assistant turns, plus meta lines (shown collapsed);
-  // system/other rows are ingest-only.
+  // Render user and assistant turns, plus meta lines (shown collapsed) and the
+  // one user-facing system row — the unknown-command notice. Every other
+  // system/other row is ingest-only (content-empty or internal), so it is
+  // skipped here.
   const messages = useMemo(
     () =>
       allMessages.filter(
         (m) =>
-          m.role === 'user' || m.role === 'assistant' || m.role === 'meta',
+          m.role === 'user' ||
+          m.role === 'assistant' ||
+          m.role === 'meta' ||
+          isUnknownCommandNoticeMessage(m),
       ),
     [allMessages],
   );
@@ -616,6 +628,7 @@ export function TranscriptPane({
       setNewSessionWorkdir(null);
       resetNewSessionLaunchOptions();
       setNewSessionSelectedPrUrl(null);
+      resetNewSessionProvider();
       closeWorkdirDialog();
     }
   }, [
@@ -623,6 +636,7 @@ export function TranscriptPane({
     setNewSessionWorkdir,
     resetNewSessionLaunchOptions,
     setNewSessionSelectedPrUrl,
+    resetNewSessionProvider,
     closeWorkdirDialog,
   ]);
 
@@ -1029,6 +1043,10 @@ export function TranscriptPane({
               context bar above is not counted as a spacing sibling (which would
               push the composer down by a row gap). */}
           <div className="space-y-2">
+            {/* The provider axis leads the new-session card: it selects the
+                backend the session launches on and (in later slices) gates the
+                capability-dependent controls below it. */}
+            {newSession && <ProviderSelector />}
             {/* A directory is chosen: show it as a chip with a ✎ to change it
                 (the ✎ reopens the picker without resetting the selection). The
                 chip renders nothing when no directory is selected, so there is
@@ -1495,11 +1513,15 @@ export function TranscriptPane({
           (block) => block.type === 'tool_use' || block.type === 'tool_result',
         );
         // Tool rows, the harness-injected task-notification card (a collapsed
-        // `<task-notification>` user turn), and meta lines all render as nested
-        // aside cards: they are tightened and left-indented so they read as
-        // nested steps, distinct from prose.
+        // `<task-notification>` user turn), meta lines, and the unknown-command
+        // system notice all render as nested aside cards: they are tightened and
+        // left-indented so they read as nested steps, distinct from prose — the
+        // notice is a system aside, not the agent's reply.
         const isNestedCard =
-          isToolTurn || isTaskNotificationMessage(message) || message.role === 'meta';
+          isToolTurn ||
+          isTaskNotificationMessage(message) ||
+          message.role === 'meta' ||
+          isUnknownCommandNoticeMessage(message);
         const topGap = isNestedCard
           ? 'pt-0.5'
           : message.role === 'user'

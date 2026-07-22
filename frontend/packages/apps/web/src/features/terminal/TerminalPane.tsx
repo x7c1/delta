@@ -23,6 +23,15 @@ export interface TerminalPaneProps {
   sessionId: SessionId | null;
   /** Whether the focused session is open (its pane is attachable). */
   attachable: boolean;
+  /**
+   * Whether the focused session's provider offers an attachable terminal, read
+   * from its capability profile (`GET /api/providers`) — never from the provider
+   * id. A terminal-less provider (Codex's headless app-server) must NEVER open a
+   * `/pty` bridge, so this gates the attach as authoritatively as `attachable`:
+   * the enclosing pane is already withheld for such a provider, and this keeps
+   * the connect itself capability-driven even if the pane is ever mounted.
+   */
+  hasTerminal: boolean;
 }
 
 /** A live xterm instance bound to one session's `/pty` pane, kept alive while
@@ -55,7 +64,11 @@ interface PaneEntry {
  * input clean. The one exception is a session that gets **closed**: its entry is
  * disposed so a later resume rebuilds against the fresh pane (see the effect).
  */
-export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
+export function TerminalPane({
+  sessionId,
+  attachable,
+  hasTerminal,
+}: TerminalPaneProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const entriesRef = useRef<Map<SessionId, PaneEntry>>(new Map());
   const pendingTeardownRef = useRef<number | null>(null);
@@ -64,7 +77,8 @@ export function TerminalPane({ sessionId, attachable }: TerminalPaneProps) {
   // xterm instance below without requiring a session detach + reattach.
   const { resolved: resolvedTheme } = useThemeContext();
 
-  const canAttach = !isMockMode() && attachable && sessionId !== null;
+  const canAttach =
+    !isMockMode() && attachable && hasTerminal && sessionId !== null;
 
   // Show the focused session's pane, keeping the others attached but hidden.
   useEffect(() => {

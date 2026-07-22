@@ -5,8 +5,6 @@ use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{TurnInput, TurnState};
 
-use super::provisional_branch_title;
-
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
     T: TmuxDriver,
@@ -49,22 +47,12 @@ where
 
         // The target thread was already loaded by the routing layer to derive
         // the session, so its existence is established here (a stale/wrong id
-        // surfaced as `ThreadNotFound` before reaching this point).
-        let (target_thread, semantic_parent) = match branch_from {
-            Some(parent) => {
-                // Give the new branch child a provisional title derived from the
-                // locator quote so the navigator shows something meaningful
-                // until it is renamed. Fall back to "untitled" when there is no
-                // quote.
-                let title = provisional_branch_title(locator_quote);
-                let thread = self
-                    .store
-                    .create_thread(self.id, &title, Some(thread_id))
-                    .await?;
-                (thread.id, Some(parent.clone()))
-            }
-            None => (thread_id, None),
-        };
+        // surfaced as `ThreadNotFound` before reaching this point). Branch
+        // bookkeeping (the new thread lane + semantic parent) is shared with the
+        // Codex adapter path via `resolve_branch_target`.
+        let (target_thread, semantic_parent) = self
+            .resolve_branch_target(thread_id, branch_from, locator_quote)
+            .await?;
 
         // Defer this send when the turn is not idle (single-outstanding
         // dispatch): only one send may be out per turn, so anything composed

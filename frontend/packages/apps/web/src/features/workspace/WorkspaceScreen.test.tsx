@@ -15,10 +15,13 @@ import { setupServer } from 'msw/node';
 import {
   SESSION_ID,
   SESSION_ID_2,
+  SESSION_ID_4,
   MAIN_THREAD_ID,
   SESSION_2_MAIN_THREAD_ID,
   SESSION_2_BRANCH_THREAD_ID,
+  SESSION_4_MAIN_THREAD_ID,
   createHandlers,
+  mockProviders,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
@@ -252,6 +255,9 @@ describe('WorkspaceScreen multi-session', () => {
                 branch_at_launch: null,
                 repo_root: null,
                 repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
               },
               open: false,
               main_thread_id: SESSION_2_MAIN_THREAD_ID,
@@ -268,6 +274,9 @@ describe('WorkspaceScreen multi-session', () => {
                 branch_at_launch: null,
                 repo_root: null,
                 repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
               },
               open: false,
               main_thread_id: 1,
@@ -338,6 +347,9 @@ describe('WorkspaceScreen multi-session', () => {
                 branch_at_launch: null,
                 repo_root: null,
                 repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
               },
               open: true,
               main_thread_id: MAIN_THREAD_ID,
@@ -483,6 +495,9 @@ describe('WorkspaceScreen multi-session', () => {
                 branch_at_launch: 'feat/example',
                 repo_root: '/home/dev/projects/delta',
                 repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
               },
               open: true,
               main_thread_id: 1,
@@ -514,6 +529,177 @@ describe('WorkspaceScreen multi-session', () => {
     expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
   });
 
+  // A single-session `/api/sessions` override for a given provider, so the
+  // terminal-gating tests below do not depend on the shared mock store's mutated
+  // state or on pagination. The focused session's threads still resolve through
+  // the default handler (the store keeps every seed session's threads).
+  function useSingleSessionOfProvider(
+    id: string,
+    provider: 'claude' | 'codex',
+    mainThreadId: number,
+  ) {
+    server.use(
+      http.get('*/api/sessions', () =>
+        HttpResponse.json({
+          sessions: [
+            {
+              session: {
+                id,
+                cwd: '/work',
+                transcript_path: '/tmp/s.jsonl',
+                title: `${provider} session`,
+                status: 'active',
+                created_at: '2026-01-01T00:00:00Z',
+                branch_at_launch: null,
+                repo_root: null,
+                repository_display_name: null,
+                provider,
+                provider_session_id: null,
+                provider_thread_id: null,
+              },
+              open: true,
+              main_thread_id: mainThreadId,
+              last_activity_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    );
+  }
+
+  it('shows the terminal toggle for a session whose provider has a terminal (Claude)', async () => {
+    // A focused open Claude session; the default `/api/providers` mock reports
+    // Claude with an attachable terminal. The workspace reads that capability
+    // (never `provider === 'claude'`) and offers the terminal toggle.
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
+    expect(await screen.findByTestId('terminal-toggle')).toBeInTheDocument();
+  });
+
+  it('shows the terminal pane for a Claude session when terminalOpen is set', async () => {
+    // With the terminal open, the right pane mounts for a provider that has a
+    // terminal — the gating must not strip it from Claude.
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+  });
+
+  it('hides the terminal toggle and pane for a Codex session even with terminalOpen persisted', async () => {
+    // A focused Codex session: the default `/api/providers` mock reports Codex
+    // with no terminal. Even though `terminalOpen` was persisted `true` (e.g.
+    // from a previous Claude session), the capability gating must hide both the
+    // toggle and the pane — a Codex session can never open a terminal.
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_4,
+      terminalOpen: true,
+    });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // The transcript pane renders (its active thread reconciles), so the toggle
+    // would appear here if the gating keyed off anything but the capability.
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_4_MAIN_THREAD_ID,
+      ),
+    );
+    // Once the providers query settles (Codex → no terminal), the toggle and the
+    // pane are both gone.
+    await waitFor(() =>
+      expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('withholds the terminal pane for a Claude session until the providers query resolves', async () => {
+    // The providers-loading window. `terminalOpen` is persisted `true`, so the
+    // pane's mount hinges entirely on the capability gate. Until the profile is
+    // known the gate must NOT fail open — otherwise the pane would mount and open
+    // its `/pty` bridge before the capability resolves, which for a terminal-less
+    // provider (Codex) fires the exact websocket the backend warns about. Here we
+    // gate the `/api/providers` response on a manual promise and prove the pane
+    // stays unmounted while the query is pending, then mounts once Claude's
+    // terminal capability resolves — attaching only when the capability is known.
+    let resolveProviders: () => void = () => {};
+    const providersGate = new Promise<void>((resolve) => {
+      resolveProviders = resolve;
+    });
+    server.use(
+      http.get('*/api/providers', async () => {
+        await providersGate;
+        return HttpResponse.json({ providers: mockProviders() });
+      }),
+    );
+    useNavStore.setState({ focusedSessionId: SESSION_ID, terminalOpen: true });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // The session list resolves and its main thread reconciles, so the workspace
+    // is fully rendered — but the providers query is still pending, so the pane
+    // must be absent (the gate withholds it rather than failing open).
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+
+    // Once the capability is known (Claude → has terminal), the pane mounts and
+    // attaches — the historical behaviour, just deferred to when it is safe.
+    resolveProviders();
+    expect(await screen.findByTestId('terminal-pane')).toBeInTheDocument();
+  });
+
+  it('never mounts the terminal pane for a Codex session across the providers-loading window', async () => {
+    // The Codex leak this fix targets: with `terminalOpen` persisted `true` and a
+    // Codex session focused on reload, the pane must never mount — not during the
+    // loading window (gate withholds) and not after (Codex reports no terminal).
+    // Since the pane is what opens the `/pty` bridge, a never-mounted pane is a
+    // never-requested websocket.
+    let resolveProviders: () => void = () => {};
+    const providersGate = new Promise<void>((resolve) => {
+      resolveProviders = resolve;
+    });
+    server.use(
+      http.get('*/api/providers', async () => {
+        await providersGate;
+        return HttpResponse.json({ providers: mockProviders() });
+      }),
+    );
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_4,
+      terminalOpen: true,
+    });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // Workspace fully rendered, providers still pending → pane withheld.
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_4_MAIN_THREAD_ID,
+      ),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+
+    // Providers resolve (Codex → no terminal): the pane stays absent.
+    resolveProviders();
+    await waitFor(() =>
+      expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
   it("falls back to the cwd basename when a session has no launch repo_root", async () => {
     // A session launched outside any git repo (or one that predates the
     // spawn-time snapshot — older databases store NULL on both) still
@@ -534,6 +720,9 @@ describe('WorkspaceScreen multi-session', () => {
                 branch_at_launch: null,
                 repo_root: null,
                 repository_display_name: null,
+                provider: 'claude',
+                provider_session_id: null,
+                provider_thread_id: null,
               },
               open: true,
               main_thread_id: 1,

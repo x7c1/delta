@@ -54,6 +54,7 @@ function makeMessageWithContent(
     git_branch: null,
     cwd: null,
     response_time_ms: null,
+    provider_item_id: null,
   };
 }
 
@@ -309,6 +310,23 @@ describe('MessageItem', () => {
     expect(screen.queryByRole('button')).toBeNull();
   });
 
+  it('renders an unknown-command system notice as a warning-toned line', () => {
+    // Claude Code rejects an unrecognized slash command with a `role: "system"`
+    // line carrying `Unknown command: <command>`. It must be shown (it is the
+    // one user-facing system row), plainly and not as the agent's reply.
+    render(
+      <MessageItem message={makeMessage('system', 'Unknown command: /review-pr')} />,
+    );
+    const item = screen.getByTestId('message-item');
+    expect(item).toHaveAttribute('data-role', 'system');
+    // The notice text is shown verbatim (not Markdown-rendered), next to a badge.
+    const node = screen.getByText('Unknown command: /review-pr');
+    expect(node).toHaveClass('whitespace-pre-wrap');
+    expect(node.querySelector('em')).toBeNull();
+    // It is not a right-aligned user bubble.
+    expect(item).not.toHaveClass('items-end');
+  });
+
   it('renders no timestamp when created_at is unparseable', () => {
     const message = { ...makeMessage('user', 'hi'), created_at: 'not-a-date' };
     render(<MessageItem message={message} />);
@@ -322,6 +340,7 @@ describe('MessageItem', () => {
       cwd: '/home/dev/repo',
       git_branch: 'feature/meta',
       response_time_ms: 9400,
+      provider_item_id: null,
     };
   }
 
@@ -372,6 +391,7 @@ describe('MessageItem', () => {
     const message: Message = {
       ...assistantWithMeta(),
       response_time_ms: null,
+      provider_item_id: null,
     };
     render(<MessageItem message={message} isLatest />);
 

@@ -24,6 +24,7 @@ import type {
   ThreadsResponse,
   GitBranchesResponse,
   GitRepoResponse,
+  ProvidersResponse,
   PullRequestsResponse,
   RepositoriesResponse,
   WorkdirListResponse,
@@ -38,6 +39,7 @@ import {
   mockSpawnSessionId,
   recentWorkdirs,
   mockAuthorPullRequests,
+  mockProviders,
   mockRepositories,
   mockReviewerPullRequests,
   seedData,
@@ -469,6 +471,11 @@ export function createMockApi(): MockApi {
             branch_at_launch: null,
             repo_root: null,
             repository_display_name: null,
+            // A mock spawn always stands in for a Claude session; Codex
+            // provider ids are only minted by the real backend.
+            provider: 'claude',
+            provider_session_id: null,
+            provider_thread_id: null,
           },
           open: false,
           spawning: true,
@@ -608,6 +615,14 @@ export function createMockApi(): MockApi {
       return HttpResponse.json(responseBody);
     }),
 
+    // Per-provider launch availability for the new-session selector. Both
+    // providers are available by default so the selector is fully usable with no
+    // backend; a test overrides this handler to make a provider unavailable.
+    http.get('*/api/providers', () => {
+      const responseBody: ProvidersResponse = { providers: mockProviders() };
+      return HttpResponse.json(responseBody);
+    }),
+
     // Whether the queried directory is a git repository, for the new-session
     // worktree option. Like the real endpoint this never errors: a non-git path
     // reports `repo_root: null`. A path under the mock repo reports its root and
@@ -665,6 +680,9 @@ export function createMockApi(): MockApi {
         value: trimmedValue ? trimmedValue : null,
         default_enabled: payload.default_enabled === true,
         created_at: new Date().toISOString(),
+        // Omitted `provider` defaults to Claude, matching the real server's
+        // back-compat behavior.
+        provider: payload.provider ?? 'claude',
       };
       store.launchOptions.push(option);
       return HttpResponse.json(option, { status: 201 });

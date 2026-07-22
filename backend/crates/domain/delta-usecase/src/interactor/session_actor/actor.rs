@@ -46,6 +46,13 @@ pub(in crate::interactor) struct SessionContext<'a, T, X, S, W, G> {
     /// the routing layer guarantees they match.
     pub(in crate::interactor) id: &'a SessionId,
     pub(in crate::interactor) state: &'a mut SessionRuntime,
+    /// A weak handle to this actor's own mailbox, so a use case running here
+    /// can spawn a background task (the Codex event pump) that posts more
+    /// inputs *back to this same actor* — keeping every signal on one ordered
+    /// mailbox. Weak so the spawned task never keeps the actor alive: when the
+    /// registry drops the strong sender (actor retired / interactor gone), the
+    /// upgrade fails and the task stops.
+    pub(in crate::interactor) self_sender: &'a mpsc::WeakUnboundedSender<SessionInput>,
 }
 
 impl<T, X, S, W, G> std::ops::Deref for SessionContext<'_, T, X, S, W, G> {
@@ -62,6 +69,7 @@ pub(in crate::interactor) async fn run<T, X, S, W, G>(
     core: Arc<InteractorCore<T, X, S, W, G>>,
     id: SessionId,
     mut mailbox: mpsc::UnboundedReceiver<SessionInput>,
+    self_sender: mpsc::WeakUnboundedSender<SessionInput>,
     registry: Weak<Mutex<ActorMap>>,
 ) where
     T: TmuxDriver,
@@ -84,6 +92,7 @@ pub(in crate::interactor) async fn run<T, X, S, W, G>(
             core: &core,
             id: &id,
             state: &mut state,
+            self_sender: &self_sender,
         };
         handle(&mut ctx, input).await;
 
@@ -142,18 +151,34 @@ where
             workdir,
             launch_option_ids,
             worktree,
+            provider,
             reply,
         } => {
-            let _ = reply.send(
-                ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
-                    .await,
-            );
+            // Provider dispatch lives in composition, never in the core's turn
+            // or attribution logic: Claude keeps the tmux + hooks spawn path
+            // byte-for-byte, while a structured provider takes the terminal-less
+            // adapter path. This `match` is the only place the provider is
+            // branched on for launch.
+            let result = match provider {
+                delta_model::AgentProvider::Claude => {
+                    ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
+                        .await
+                }
+                delta_model::AgentProvider::Codex => {
+                    ctx.spawn_codex(first_prompt, workdir, launch_option_ids, worktree)
+                        .await
+                }
+            };
+            let _ = reply.send(result);
         }
         SessionInput::OpenSession { reply } => {
             let _ = reply.send(ctx.open_session().await);
         }
         SessionInput::CloseSession { reply } => {
             let _ = reply.send(ctx.close_session().await);
+        }
+        SessionInput::Interrupt { reply } => {
+            let _ = reply.send(ctx.interrupt().await);
         }
         SessionInput::ClearInput { reply } => {
             let _ = reply.send(ctx.clear_session_input().await);
@@ -238,6 +263,9 @@ where
         }
         SessionInput::ReleaseSend { send_id, reply } => {
             let _ = reply.send(ctx.release_send(send_id).await);
+        }
+        SessionInput::IngestAgentEvent { event } => {
+            ctx.on_agent_event(event).await;
         }
         SessionInput::SyncTick { reply } => {
             let _ = reply.send(ctx.sync_tick().await);

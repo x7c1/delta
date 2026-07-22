@@ -53,4 +53,9 @@ export const queryKeys = {
   repositoryScanRoots: ['repository-scan-roots'] as const,
   /** The Delta workspace version (`GET /api/version`) for the navigator footer. */
   version: ['version'] as const,
+  /**
+   * Per-provider launch availability (`GET /api/providers`) for the new-session
+   * selector. A single cache entry: the answer is host-level, not per-session.
+   */
+  providers: ['providers'] as const,
 };

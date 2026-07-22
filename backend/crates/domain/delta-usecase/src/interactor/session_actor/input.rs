@@ -11,15 +11,15 @@
 
 use std::time::Instant;
 
-use delta_model::{Message, MessageUuid, Send, ThreadId};
+use delta_model::{AgentProvider, Message, MessageUuid, Send, ThreadId};
 use tokio::sync::oneshot;
 
 use super::runtime::SessionLiveState;
+use crate::agent::AgentEvent;
 use crate::error::Result;
 use crate::interactor::hooks::PermissionWait;
 use crate::interactor::lifecycle::FreshSpawn;
 use crate::interactor::PermissionDecision;
-use crate::pane_token::PaneToken;
 use crate::ports::{
     MessageDisplayHook, SessionEndHook, SessionEvent, SessionStartHook, StopHook,
     UserPromptSubmitHook,
@@ -53,14 +53,27 @@ pub(in crate::interactor) enum SessionInput {
         /// selected `workdir`. Only meaningful when `workdir` is `Some` and that
         /// directory is a git repository.
         worktree: Option<WorktreeSpec>,
+        /// The AI-agent backend to launch on. [`AgentProvider::Claude`] takes
+        /// the historical tmux + hooks path (`spawn_fresh`); a structured
+        /// provider such as [`AgentProvider::Codex`] takes the terminal-less
+        /// adapter path (`spawn_codex`).
+        provider: AgentProvider,
         reply: Reply<FreshSpawn>,
     },
     /// Resume the (closed but known) session.
-    OpenSession { reply: Reply<PaneToken> },
+    OpenSession { reply: Reply<()> },
     /// Close the session: final sync, kill the pane, drop the binding. Replies
     /// with the [`SessionEvent::SubagentFinished`]s the process-gone sweep
     /// produced, for the transport to broadcast.
     CloseSession { reply: Reply<Vec<SessionEvent>> },
+    /// Interrupt the session's in-flight turn without closing it: reach the open
+    /// agent and drive [`AgentAdapter::interrupt`], leaving the open agent (and
+    /// its event pump) in place so the provider's `turn/completed{interrupted}`
+    /// can arrive and settle the turn. A well-defined no-op for a pane-backed
+    /// (Claude) or closed session — those carry no open agent.
+    ///
+    /// [`AgentAdapter::interrupt`]: crate::agent::AgentAdapter::interrupt
+    Interrupt { reply: Reply<()> },
     /// Wipe the residual input of the session's pane, if open.
     ClearInput { reply: Reply<()> },
 
@@ -179,6 +192,24 @@ pub(in crate::interactor) enum SessionInput {
         send_id: i64,
         reply: Reply<Option<SessionEvent>>,
     },
+
+    // ---- Agent event pump --------------------------------------------------
+    /// One neutral [`AgentEvent`] from a terminal-less agent session's event
+    /// stream (Codex), delivered by that session's event pump.
+    ///
+    /// Routed through the same mailbox as every other signal so it is ordered
+    /// against this session's other work — content persistence and the turn
+    /// machine mutate in event-arrival order, and a `TurnCompleted` lands after
+    /// the messages of the turn it ends. Fire-and-forget: the pump is a
+    /// background drain with no caller to reply to. The handler folds the event
+    /// through the session's content accumulator (persisting any completed
+    /// messages), advances the turn machine on turn-end, and emits the resulting
+    /// browser events on the async seam ([`InteractorCore::emit_async_event`]) —
+    /// the event arrives after the driving `enqueue`/spawn call already returned,
+    /// so there is no synchronous `Vec<SessionEvent>` to fold it into.
+    ///
+    /// [`InteractorCore::emit_async_event`]: crate::interactor::InteractorCore::emit_async_event
+    IngestAgentEvent { event: AgentEvent },
 
     // ---- Background ticks --------------------------------------------------
     /// Poll this session's transcript for newly-written lines (the continuous

@@ -31,6 +31,12 @@ string_newtype! {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub uuid: MessageUuid,
+    /// The provider's own id for the item this message was reconstructed from,
+    /// when the provider exposes one — Codex's `item.id`, carried so a streaming
+    /// delta and its final message can be id-joined in place. `None` for Claude
+    /// (whose streaming preview is dropped and replaced, needing no join key)
+    /// and for any message not sourced from a provider item.
+    pub provider_item_id: Option<String>,
     pub session_id: SessionId,
     /// The thread active at send time. Stored, never re-derived.
     pub thread_id: ThreadId,

@@ -5,7 +5,7 @@ import {
   useCloseSessionMutation,
   useSessionThreadsQuery,
 } from '@delta/api-client';
-import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
+import { Badge, Menu, ProviderBadge, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import {
   DEFAULT_OPEN_CWD_HANDLER_LABEL,
@@ -301,6 +301,13 @@ export const SessionNode = memo(function SessionNode({
                 tone={item.open ? 'green' : 'slate'}
                 title={item.open ? 'Open' : 'Closed'}
               />
+              {/* Which AI-agent provider this session runs on (Claude / Codex).
+                  A session-identity attribute like the status dot, so it sits at
+                  the head of the line; shrink-0 (Badge is inline-flex) keeps it
+                  from being clipped when the branch name truncates. */}
+              <span className="shrink-0" data-testid="session-provider-badge">
+                <ProviderBadge provider={item.session.provider} />
+              </span>
               {/* Line 1: the *launch-time* local git branch, captured once on
                   spawn and never updated on resume or a later `git checkout`.
                   Distinct from the per-message `git_branch` carried on each

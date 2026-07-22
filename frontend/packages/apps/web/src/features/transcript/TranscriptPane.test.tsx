@@ -665,6 +665,63 @@ describe('TranscriptPane', () => {
     expect(metaItem?.parentElement?.className).toContain('ml-6');
   });
 
+  it('renders the unknown-command system notice (the one user-facing system row)', async () => {
+    // Claude Code rejects an unrecognized slash command with a `role: "system"`
+    // line carrying `Unknown command: <command>`. Unlike a generic system row
+    // (see the test above), this one is surfaced so the user learns the command
+    // was rejected instead of seeing nothing.
+    server.use(
+      http.get('*/api/threads/:id/messages', () => {
+        const body: MessagesResponse = {
+          messages: [
+            {
+              uuid: 'm-user',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'user',
+              linear_parent_uuid: null,
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 0,
+              content_text: '/review-pr',
+              content: [{ type: 'text', text: '/review-pr' }],
+              created_at: '2026-01-01T00:00:01Z',
+            },
+            {
+              uuid: 'm-unknown-cmd',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'system',
+              linear_parent_uuid: 'm-user',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 1,
+              content_text: 'Unknown command: /review-pr',
+              content: [{ type: 'text', text: 'Unknown command: /review-pr' }],
+              created_at: '2026-01-01T00:00:02Z',
+            },
+          ],
+        };
+        return HttpResponse.json(body);
+      }),
+    );
+
+    renderPane();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('Unknown command: /review-pr'),
+      ).toBeInTheDocument(),
+    );
+    const noticeItem = screen
+      .getByText('Unknown command: /review-pr')
+      .closest('[data-testid="message-item"]');
+    expect(noticeItem).toHaveAttribute('data-role', 'system');
+    // It reads as a nested system aside, not prose: its block wrapper carries
+    // the same `ml-6` left indent as meta lines and tool rows.
+    expect(noticeItem?.parentElement?.className).toContain('ml-6');
+  });
+
   it('left-indents the task-notification card like a tool row, but not ordinary user prose', async () => {
     // The harness-injected task-notification card is a nested aside (like a
     // tool-execution row), so its block wrapper carries the same `ml-6` left

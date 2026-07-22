@@ -12,6 +12,7 @@ async fn new_session_with_worktree_but_no_workdir_is_rejected() {
     let err = ix
         .enqueue_send(
             SendTarget::NewSession {
+                provider: crate::AgentProvider::Claude,
                 workdir: None,
                 launch_option_ids: Vec::new(),
                 worktree: Some(WorktreeSpec {

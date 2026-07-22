@@ -94,6 +94,7 @@ describe('SettingsView', () => {
     useSettingsStore.setState({
       activeCategory: DEFAULT_SETTINGS_CATEGORY,
       visualEffects: DEFAULT_VISUAL_EFFECTS_SETTING,
+      defaultProvider: 'claude',
     });
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
     // The ThemeProvider reads matchMedia + localStorage at mount; default to
@@ -145,6 +146,41 @@ describe('SettingsView', () => {
     await waitFor(() =>
       expect(within(list).getByText('--model')).toBeInTheDocument(),
     );
+  });
+
+  it('shows a provider badge for each registered option', async () => {
+    renderSettings();
+    const list = await findList();
+    // The Codex fixture (`model gpt-5`) carries a Codex badge; the Claude
+    // fixtures carry Claude badges.
+    expect(within(list).getByText('model')).toBeInTheDocument();
+    expect(within(list).getAllByLabelText('Codex').length).toBeGreaterThan(0);
+    expect(within(list).getAllByLabelText('Claude Code').length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it('registers a launch option for the selected provider', async () => {
+    renderSettings();
+    const list = await findList();
+
+    // Pick Codex in the create form's provider selector, then add an option.
+    fireEvent.click(
+      within(
+        screen.getByTestId('launch-option-provider-codex'),
+      ).getByRole('radio'),
+    );
+    fireEvent.change(screen.getByLabelText('Name (the flag)'), {
+      target: { value: 'reasoning-effort' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
+
+    // The new option appears; its row carries the Codex badge, proving the
+    // chosen provider was sent and round-tripped.
+    const row = await within(list).findByText('reasoning-effort');
+    const li = row.closest('li');
+    expect(li).not.toBeNull();
+    expect(within(li as HTMLElement).getByLabelText('Codex')).toBeInTheDocument();
   });
 
   it('disables Add until a non-blank name is entered', async () => {
@@ -255,6 +291,7 @@ describe('SettingsView', () => {
         'Launch options',
         'Repository scan roots',
         'Appearance',
+        'Default provider',
       ]);
       expect(
         screen.getByTestId('settings-category-launch-options'),
@@ -265,8 +302,66 @@ describe('SettingsView', () => {
       expect(
         screen.getByTestId('settings-category-appearance'),
       ).toHaveAttribute('aria-selected', 'false');
+      expect(
+        screen.getByTestId('settings-category-default-provider'),
+      ).toHaveAttribute('aria-selected', 'false');
     });
 
+  });
+
+  describe('Default provider section', () => {
+    function switchToDefaultProvider() {
+      fireEvent.click(screen.getByTestId('settings-category-default-provider'));
+    }
+
+    it('lists both providers with their badges and full names', () => {
+      renderSettings();
+      switchToDefaultProvider();
+      const group = screen.getByTestId('default-provider-options');
+      const radios = within(group).getAllByRole('radio');
+      expect(radios.map((r) => (r as HTMLInputElement).value)).toEqual([
+        'claude',
+        'codex',
+      ]);
+      // Each option pairs the shared ProviderBadge (accessible name = product
+      // name) with its spelled-out label.
+      const claude = screen.getByTestId('default-provider-option-claude');
+      const codex = screen.getByTestId('default-provider-option-codex');
+      expect(within(claude).getByLabelText('Claude Code')).toBeInTheDocument();
+      expect(within(claude).getByText('Claude Code')).toBeInTheDocument();
+      expect(within(codex).getByLabelText('Codex')).toBeInTheDocument();
+      expect(within(codex).getByText('Codex')).toBeInTheDocument();
+    });
+
+    it('highlights the current default (Claude on a fresh install)', () => {
+      renderSettings();
+      switchToDefaultProvider();
+      const claudeRadio = within(
+        screen.getByTestId('default-provider-option-claude'),
+      ).getByRole('radio');
+      const codexRadio = within(
+        screen.getByTestId('default-provider-option-codex'),
+      ).getByRole('radio');
+      expect(claudeRadio).toBeChecked();
+      expect(codexRadio).not.toBeChecked();
+    });
+
+    it('changes the default provider and persists it to localStorage', () => {
+      renderSettings();
+      switchToDefaultProvider();
+      const codexRadio = within(
+        screen.getByTestId('default-provider-option-codex'),
+      ).getByRole('radio');
+      fireEvent.click(codexRadio);
+
+      expect(codexRadio).toBeChecked();
+      expect(useSettingsStore.getState().defaultProvider).toBe('codex');
+      // The persist middleware wraps state under `{ state, version }`.
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw ?? '{}');
+      expect(parsed.state.defaultProvider).toBe('codex');
+    });
   });
 
   describe('Appearance section', () => {

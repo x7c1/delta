@@ -17,8 +17,12 @@ import {
   useRepositoryScanRootsQuery,
   useUpdateLaunchOptionMutation,
 } from '@delta/api-client';
-import type { LaunchOption, RepositoryScanRoot } from '@delta/wire-gen';
-import { Button, cn, Dialog, Spinner } from '@delta/ui-kit';
+import type {
+  AgentProvider,
+  LaunchOption,
+  RepositoryScanRoot,
+} from '@delta/wire-gen';
+import { Button, cn, Dialog, ProviderBadge, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
@@ -80,6 +84,13 @@ export function SettingsView() {
       // The Appearance section has no data fetch of its own; the `active`
       // prop is ignored.
       render: () => <AppearanceSection />,
+    },
+    {
+      id: 'default-provider',
+      label: 'Default provider',
+      // The Default provider section reads a persisted preference only; no data
+      // fetch, so the `active` prop is ignored.
+      render: () => <DefaultProviderSection />,
     },
   ];
 
@@ -210,6 +221,11 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [defaultEnabled, setDefaultEnabled] = useState(false);
+  // Which provider the new option is being registered for. Claude's flags mean
+  // nothing to Codex and vice-versa, so every option belongs to one provider;
+  // the session-start picker only offers options matching the session's
+  // provider. Defaults to Claude (the historical default).
+  const [provider, setProvider] = useState<AgentProvider>('claude');
 
   const options = launchOptionsQuery.data?.launch_options ?? [];
   // `name` is the only required field; trim so an all-whitespace entry cannot
@@ -231,6 +247,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
         name: name.trim(),
         value: trimmedValue.length > 0 ? trimmedValue : undefined,
         default_enabled: defaultEnabled,
+        provider,
       },
       {
         onSuccess: () => {
@@ -238,6 +255,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           setName('');
           setValue('');
           setDefaultEnabled(false);
+          setProvider('claude');
         },
       },
     );
@@ -260,6 +278,42 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
         className="mb-6 flex flex-col gap-3 rounded-lg border border-border-default bg-surface-elevated p-3"
         aria-label="Add launch option"
       >
+        <div className="flex flex-col gap-1">
+          <span className="text-caption font-medium text-fg-muted">Provider</span>
+          <div
+            role="radiogroup"
+            aria-label="Launch option provider"
+            className="flex gap-1 rounded border border-border-default bg-surface p-1"
+            data-testid="launch-option-provider-selector"
+          >
+            {DEFAULT_PROVIDER_OPTIONS.map((option) => {
+              const selected = provider === option.value;
+              return (
+                <label
+                  key={option.value}
+                  className={cn(
+                    'flex flex-1 cursor-pointer items-center justify-center gap-2 rounded px-3 py-1.5 text-secondary transition',
+                    selected
+                      ? 'bg-accent/10 text-fg ring-1 ring-accent/30'
+                      : 'text-fg-muted hover:bg-surface-elevated',
+                  )}
+                  data-testid={`launch-option-provider-${option.value}`}
+                >
+                  <input
+                    type="radio"
+                    name="launch-option-provider"
+                    value={option.value}
+                    checked={selected}
+                    onChange={() => setProvider(option.value)}
+                    className="sr-only"
+                  />
+                  <ProviderBadge provider={option.value} />
+                  <span className="font-medium">{option.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
         <div className="flex flex-col gap-1">
           <label className="text-caption font-medium text-fg-muted" htmlFor="lo-label">
             Label (optional)
@@ -714,6 +768,89 @@ function AppearanceSection() {
   );
 }
 
+/**
+ * The AI-agent providers a new session can default to, in display order, with
+ * the full product name shown beside the shared {@link ProviderBadge} — matching
+ * the new-session provider selector so the two controls read the same way.
+ */
+const DEFAULT_PROVIDER_OPTIONS: {
+  value: AgentProvider;
+  label: string;
+  hint: string;
+}[] = [
+  { value: 'claude', label: 'Claude Code', hint: 'Anthropic Claude Code CLI' },
+  { value: 'codex', label: 'Codex', hint: 'OpenAI Codex CLI' },
+];
+
+/**
+ * Default provider category content: pick which AI-agent provider a new session
+ * starts on. The choice is a persisted preference
+ * ({@link useSettingsStore}'s `defaultProvider`) that seeds the new-session
+ * provider selector's initial value; each session can still override it there.
+ *
+ * The control is a radio group so each option is independently focusable for
+ * keyboard navigation and screen readers announce the role correctly, following
+ * the same pattern as the Appearance picker and the new-session selector.
+ */
+function DefaultProviderSection() {
+  const defaultProvider = useSettingsStore((state) => state.defaultProvider);
+  const setDefaultProvider = useSettingsStore(
+    (state) => state.setDefaultProvider,
+  );
+
+  return (
+    <section className="w-full" data-testid="default-provider-section">
+      <h3 className="mb-1 text-secondary font-semibold text-fg">
+        Default provider
+      </h3>
+      <p className="mb-4 text-caption text-fg-muted">
+        Choose which AI-agent provider a new session starts on. This seeds the
+        provider selector when you start a session; you can still switch it for
+        an individual session.
+      </p>
+      <div
+        role="radiogroup"
+        aria-labelledby="default-provider-section-heading"
+        className="flex flex-col gap-2 rounded-lg border border-border-default bg-surface-elevated p-3"
+        data-testid="default-provider-options"
+      >
+        <span id="default-provider-section-heading" className="sr-only">
+          Default provider
+        </span>
+        {DEFAULT_PROVIDER_OPTIONS.map((option) => {
+          const selected = defaultProvider === option.value;
+          return (
+            <label
+              key={option.value}
+              className={cn(
+                'flex cursor-pointer items-center gap-3 rounded border px-3 py-2 text-secondary transition',
+                selected
+                  ? 'border-accent bg-accent/10 text-fg ring-1 ring-accent/30'
+                  : 'border-border-default text-fg hover:bg-surface',
+              )}
+              data-testid={`default-provider-option-${option.value}`}
+            >
+              <input
+                type="radio"
+                name="default-provider"
+                value={option.value}
+                checked={selected}
+                onChange={() => setDefaultProvider(option.value)}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              <ProviderBadge provider={option.value} />
+              <span className="flex flex-1 flex-col">
+                <span className="font-medium">{option.label}</span>
+                <span className="text-caption text-fg-muted">{option.hint}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 interface LaunchOptionRowProps {
   option: LaunchOption;
   onToggleDefault: (next: boolean) => void;
@@ -731,17 +868,20 @@ function LaunchOptionRow({
 }: LaunchOptionRowProps) {
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
-      <div className="min-w-0">
-        {option.label && (
-          <div className="truncate text-caption font-medium text-fg-muted">
-            {option.label}
-          </div>
-        )}
-        <div className="truncate font-mono text-code text-fg">
-          <span>{option.name}</span>
-          {option.value !== null && (
-            <span className="text-fg-muted"> {option.value}</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <ProviderBadge provider={option.provider} />
+        <div className="min-w-0">
+          {option.label && (
+            <div className="truncate text-caption font-medium text-fg-muted">
+              {option.label}
+            </div>
           )}
+          <div className="truncate font-mono text-code text-fg">
+            <span>{option.name}</span>
+            {option.value !== null && (
+              <span className="text-fg-muted"> {option.value}</span>
+            )}
+          </div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">

@@ -2,10 +2,15 @@ import { useEffect, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   invalidateThreadMessages,
+  useProvidersQuery,
   useSessionsQuery,
   useSessionThreadsQuery,
 } from '@delta/api-client';
-import type { SessionListItem } from '@delta/wire-gen';
+import type {
+  AgentProvider,
+  ProviderCapabilities,
+  SessionListItem,
+} from '@delta/wire-gen';
 import { Button, ErrorBoundary } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useSessionEvents } from '../../data/useSessionEvents';
@@ -112,6 +117,19 @@ export function WorkspaceScreen() {
     [sessionsQuery.isSuccess, sessionsQuery.hasNextPage, sessions],
   );
   useGarbageCollectSessionScopedStorage(gcSessionIds);
+
+  // Provider capability profiles (`GET /api/providers`), indexed by provider id
+  // so a focused session's terminal surface can be resolved from its provider.
+  // This is the same query the new-session selector uses for launch
+  // availability; consuming it here reads the capability side of the response.
+  const providersQuery = useProvidersQuery(client);
+  const capabilitiesByProvider = useMemo(() => {
+    const map = new Map<AgentProvider, ProviderCapabilities>();
+    for (const entry of providersQuery.data?.providers ?? []) {
+      map.set(entry.provider, entry.capabilities);
+    }
+    return map;
+  }, [providersQuery.data]);
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const activeThreadId = useNavStore((state) => state.activeThreadId);
@@ -299,6 +317,36 @@ export function WorkspaceScreen() {
 
   const focusedOpen = focusedItem?.open ?? false;
 
+  // Whether the focused session's provider offers an attachable terminal, read
+  // from its capability profile — never from `provider === 'claude'`. A provider
+  // with no terminal (Codex's headless app-server) hides the terminal toggle and
+  // pane entirely, and — because the pane is what opens the `/pty` bridge — must
+  // never mount it in the first place.
+  //
+  // The providers-loading window is the subtle case. Failing OPEN to `true` while
+  // the query is still in flight would briefly mount the pane for the focused
+  // session and open its `/pty` bridge before the capability is known: with
+  // `terminalOpen` persisted `true` (from a previous Claude session) and a Codex
+  // session focused on reload, that fires a PTY websocket the backend rejects
+  // with a "session is not open" warning. So while the profile is unresolved we
+  // WITHHOLD the terminal rather than fail open; a real terminal provider
+  // (Claude) attaches the instant the query resolves, and the `/pty` behaviour it
+  // then drives is byte-identical to before. Fail open only in the two cases
+  // where there is genuinely nothing to wait for: the new-session screen (no
+  // focused session), and a query that has SUCCEEDED but does not list the
+  // focused provider (an unrecognised provider — keep the historical default).
+  const focusedProvider = focusedItem?.session.provider ?? null;
+  const focusedCapabilities =
+    focusedProvider === null
+      ? undefined
+      : capabilitiesByProvider.get(focusedProvider);
+  const focusedHasTerminal =
+    focusedProvider === null
+      ? true
+      : focusedCapabilities !== undefined
+        ? focusedCapabilities.has_terminal
+        : providersQuery.isSuccess;
+
   // Fence the embedded terminal behind an error boundary: its attach runs in an
   // effect that can throw (e.g. an xterm addon failing to load), and without a
   // boundary that exception would unmount the whole app. Isolating it here keeps
@@ -310,7 +358,11 @@ export function WorkspaceScreen() {
       resetKey={focusedRealSessionId}
       fallback={() => <TerminalFallback onClose={toggleTerminal} />}
     >
-      <TerminalPane sessionId={focusedRealSessionId} attachable={focusedOpen} />
+      <TerminalPane
+        sessionId={focusedRealSessionId}
+        attachable={focusedOpen}
+        hasTerminal={focusedHasTerminal}
+      />
     </ErrorBoundary>
   );
 
@@ -321,17 +373,18 @@ export function WorkspaceScreen() {
   // pane drops the slot entirely and the top region centers on whatever is
   // left (timeline toggle alone, or nothing at all on the new-session
   // screen).
-  const terminalToggleButton = !terminalOpen ? (
-    <button
-      type="button"
-      onClick={toggleTerminal}
-      data-testid="terminal-toggle"
-      className={TERMINAL_TOGGLE_BUTTON_CLASS}
-    >
-      <TerminalIcon className="h-3.5 w-3.5" />
-      Terminal
-    </button>
-  ) : null;
+  const terminalToggleButton =
+    focusedHasTerminal && !terminalOpen ? (
+      <button
+        type="button"
+        onClick={toggleTerminal}
+        data-testid="terminal-toggle"
+        className={TERMINAL_TOGGLE_BUTTON_CLASS}
+      >
+        <TerminalIcon className="h-3.5 w-3.5" />
+        Terminal
+      </button>
+    ) : null;
 
   return (
     <div className="relative flex h-full overflow-hidden">
@@ -373,8 +426,12 @@ export function WorkspaceScreen() {
         )}
       </div>
 
-      {/* Right: terminal — attaches to the focused session's pane. */}
+      {/* Right: terminal — attaches to the focused session's pane. Gated on the
+          focused provider's terminal capability as well as `terminalOpen`, so a
+          provider with no terminal (Codex) never shows a pane even if
+          `terminalOpen` was persisted true from a previous Claude session. */}
       {terminalOpen &&
+        focusedHasTerminal &&
         (isLargeScreen ? (
           <div
             className="relative z-20 shrink-0"

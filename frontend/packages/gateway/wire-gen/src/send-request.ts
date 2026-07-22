@@ -7,6 +7,7 @@
 // construct a conflicting body. `SendRequestIsWireCompatible` (below) makes the
 // compiler reject any narrowing that drifts from the generated wire shape.
 
+import type { AgentProvider } from './generated/AgentProvider';
 import type { CreateSendRequest } from './generated/CreateSendRequest';
 import type { WorktreeSpec } from './generated/WorktreeSpec';
 
@@ -48,6 +49,13 @@ export interface SendToNewSession {
    * unchanged behavior).
    */
   worktree?: WorktreeSpec;
+  /**
+   * Which AI-agent backend the fresh session launches on. Honored only for a
+   * new-session send; when omitted the server defaults to Claude, reproducing
+   * the historical behavior. The composer omits it for the Claude default and
+   * sends it only for a non-default provider.
+   */
+  provider?: AgentProvider;
 }
 
 /** Request body for `POST /api/sends` — a discriminated send target. */

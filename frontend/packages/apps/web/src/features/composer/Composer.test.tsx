@@ -71,6 +71,7 @@ describe('Composer', () => {
       newSessionLaunchOptionIds: [],
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: { kind: 'head' },
+      newSessionProvider: 'claude',
     });
   });
 
@@ -764,6 +765,50 @@ describe('Composer', () => {
       expect(read()).toEqual({
         new_session: true,
         text: 'no options',
+        workdir: '/home/dev/projects/delta',
+      });
+    });
+  });
+
+  it('sends provider: "codex" on a new-session send when Codex is selected', async () => {
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionProvider: 'codex',
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start on codex' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'start on codex',
+        workdir: '/home/dev/projects/delta',
+        provider: 'codex',
+      });
+    });
+  });
+
+  it('omits provider on a new-session send for the Claude default', async () => {
+    // The backend defaults an omitted provider to Claude, so the composer omits
+    // it for the default to keep the Claude send byte-for-byte identical to
+    // today's — this test pins that intentional omission.
+    useComposerStore.setState({
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionProvider: 'claude',
+    });
+    const { read } = renderNewSessionAndCaptureBody();
+
+    const textarea = screen.getByRole('textbox');
+    fireEvent.change(textarea, { target: { value: 'start on claude' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(read()).toEqual({
+        new_session: true,
+        text: 'start on claude',
         workdir: '/home/dev/projects/delta',
       });
     });

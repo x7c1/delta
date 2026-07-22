@@ -163,6 +163,15 @@
   --delta-color-warning: 217 119 6;
   --delta-color-info: 2 132 199;
   --delta-color-success: 5 150 105;
+  /* Provider accent colors — one hue per AI-agent provider, used by the
+   * ProviderBadge monogram chip (see ui-kit) to reinforce which provider a
+   * session runs on. Claude reads as a burnt orange, Codex as a green; the
+   * two-letter monogram distinguishes them on its own, so these are a
+   * redundant reinforcement rather than the sole signal. The chip pairs the
+   * base token as its foreground with a low-alpha wash of the same token as
+   * its background, so each value must read as text on the theme's surface. */
+  --delta-color-provider-claude: 194 84 30;
+  --delta-color-provider-codex: 21 128 61;
   /* scrim: dark backdrop for modals/popovers; expected to be used with a
    * transparency suffix (e.g. `bg-scrim/40`). Theme-dependent, but both
    * themes resolve to a dark enough value to preserve contrast under the
@@ -214,6 +223,9 @@
   --delta-color-warning: 251 191 36;
   --delta-color-info: 56 189 248;
   --delta-color-success: 52 211 153;
+  /* Provider accents brightened for the dark chrome so the monogram reads. */
+  --delta-color-provider-claude: 251 146 60;
+  --delta-color-provider-codex: 74 222 128;
   --delta-color-scrim: 9 9 11;
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;
@@ -251,6 +263,10 @@
   --delta-color-warning: 217 119 6;
   --delta-color-info: 2 132 199;
   --delta-color-success: 5 150 105;
+  /* Provider accents — mirror of the `:root` defaults (this block is the
+   * light theme). */
+  --delta-color-provider-claude: 194 84 30;
+  --delta-color-provider-codex: 21 128 61;
   --delta-color-scrim: 15 23 42;
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;
@@ -295,6 +311,10 @@
   --delta-color-warning: 161 84 8;
   --delta-color-info: 25 110 142;
   --delta-color-success: 75 124 65;
+  /* Provider accents deepened so both hues read against the warm beige
+   * surface (a bright orange/green would wash out on this ground). */
+  --delta-color-provider-claude: 154 52 18;
+  --delta-color-provider-codex: 61 92 41;
   --delta-color-scrim: 67 41 11;
   --delta-color-terminal-bg: 15 23 42;
   --delta-color-terminal-fg: 203 213 225;

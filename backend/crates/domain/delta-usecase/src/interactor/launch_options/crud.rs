@@ -1,4 +1,4 @@
-use delta_model::LaunchOption;
+use delta_model::{AgentProvider, LaunchOption};
 
 use crate::error::Result;
 use crate::interactor::InteractorCore;
@@ -20,16 +20,17 @@ where
     /// Register a new launch option. `label` and `value` are optional (a
     /// valueless flag carries no `value`); `name` is the flag itself.
     /// `default_enabled` marks it to start pre-checked in the session-start
-    /// picker.
+    /// picker. `provider` is the provider the option applies to.
     pub async fn create_launch_option(
         &self,
         label: Option<&str>,
         name: &str,
         value: Option<&str>,
         default_enabled: bool,
+        provider: AgentProvider,
     ) -> Result<LaunchOption> {
         self.store
-            .create_launch_option(label, name, value, default_enabled)
+            .create_launch_option(label, name, value, default_enabled, provider)
             .await
     }
 

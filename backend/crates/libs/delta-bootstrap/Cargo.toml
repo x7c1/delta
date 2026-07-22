@@ -10,11 +10,14 @@ delta-model = { workspace = true }
 delta-usecase = { workspace = true }
 delta-sqlite = { workspace = true }
 delta-transcript = { workspace = true }
+codex-agent = { workspace = true }
+claude-agent = { workspace = true }
 external-opener = { workspace = true }
 tmux-driver = { workspace = true }
 workspace-fs = { workspace = true }
 git-worktree = { workspace = true }
 gh-cli = { workspace = true }
+binary-detector = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
