@@ -281,6 +281,20 @@ pub(crate) fn local_command_stdout_line(uuid: &str, prompt_id: &str) -> Transcri
     }
 }
 
+/// The unknown-command notice Claude Code writes when the user types a slash
+/// command it does not recognize (e.g. `/review-pr` when no such command
+/// exists): a `type: "system"` / `subtype: "informational"` line whose top-level
+/// content the gateway parser surfaces as `Unknown command: <command>`, so the
+/// parsed role is `Role::System`. Like a known local command it fires NO
+/// `UserPromptSubmit` echo and NO `Stop`, so it must unstick the send Delta
+/// dispatched for the command.
+pub(crate) fn unknown_command_notice_line(uuid: &str, command: &str) -> TranscriptMessage {
+    TranscriptMessage {
+        role: Role::System,
+        ..user_line(uuid, &format!("Unknown command: {command}"))
+    }
+}
+
 /// A harness-injected `<task-notification>` background-task completion, in the
 /// real shape: a plain `role: user` line whose `<tool-use-id>` correlates back
 /// to the launching tool call.

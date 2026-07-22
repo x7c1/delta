@@ -181,12 +181,14 @@ where
                     });
                 }
                 Effect::LocalCommandTurnEnded => {
-                    // A dispatched send was consumed by a slash/local command
-                    // (e.g. `/review-pr`), not by a model turn. A local command
-                    // is handled entirely client-side: it fires no
-                    // `UserPromptSubmit` echo and no `Stop` hook, so without this
-                    // the turn machine stays in `AwaitingEcho` forever and every
-                    // later send defers to `queued` and never dispatches. The
+                    // A dispatched send was consumed by a client-side slash
+                    // command, not by a model turn: either a KNOWN local command
+                    // (e.g. `/review-pr`) or an UNKNOWN command Claude rejected
+                    // with an "Unknown command: …" notice. Both are handled
+                    // entirely client-side: they fire no `UserPromptSubmit` echo
+                    // and no `Stop` hook, so without this the turn machine stays
+                    // in `AwaitingEcho` forever and every later send defers to
+                    // `queued` and never dispatches. The
                     // `SendMatched` effect emitted alongside this one already
                     // consumed the send (it left `dispatched`), so a
                     // `TurnCompleted(Completed)` fact here (which maps to the

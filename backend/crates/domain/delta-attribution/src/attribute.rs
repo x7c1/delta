@@ -190,17 +190,25 @@ pub enum Effect {
     /// clears. Detected from the structural flag, never the error text, so it
     /// covers every synthetic API-error turn-end and is locale-independent.
     TurnAborted,
-    /// A dispatched send was consumed by a slash/local command (e.g. the user
-    /// ran `/review-pr`), not by a model turn. A local command is handled
-    /// entirely client-side: it fires **no** `UserPromptSubmit` echo and **no**
-    /// `Stop` hook, yet Delta dispatched it as a send and moved the turn machine
-    /// to `AwaitingEcho`. Without a turn-end signal that send stays outstanding
-    /// forever — wedging the single-outstanding rule so no later send dispatches.
-    /// This effect is emitted alongside the [`Effect::SendMatched`] that
-    /// consumes the send (the command-name line equals the send text inside a
-    /// recognized local-command `promptId` group): feed the turn machine back to
-    /// idle and notify the browser so the stuck send clears, exactly like
-    /// [`Effect::TurnAborted`] does for an API-error turn-end.
+    /// A dispatched send was consumed by a client-side slash command rather than
+    /// by a model turn, so the turn ended without a `Stop` hook. Two shapes reach
+    /// here, both handled by Claude Code entirely client-side (**no**
+    /// `UserPromptSubmit` echo, **no** `Stop` hook), yet both were dispatched by
+    /// Delta as a send that moved the turn machine to `AwaitingEcho`:
+    ///
+    /// - a KNOWN local command (e.g. the user ran `/review-pr`): the bare
+    ///   command-name line equals the send text inside a recognized
+    ///   local-command `promptId` group; and
+    /// - an UNKNOWN command (e.g. the user typed `/revew-pr`): Claude rejects it
+    ///   with a `type: "system"` / `informational` "Unknown command: …" notice
+    ///   and writes no command group at all.
+    ///
+    /// Without a turn-end signal the dispatched send stays outstanding forever —
+    /// wedging the single-outstanding rule so no later send dispatches. This
+    /// effect is emitted alongside the [`Effect::SendMatched`] that consumes the
+    /// send: feed the turn machine back to idle and notify the browser so the
+    /// stuck send clears, exactly like [`Effect::TurnAborted`] does for an
+    /// API-error turn-end.
     LocalCommandTurnEnded,
     /// A human user line matched the head outstanding send: mark the send row
     /// matched to this transcript uuid.
@@ -537,6 +545,12 @@ pub fn attribute_lines(
             matches!(role, Role::User) && claude_format::is_interrupt_marker(trimmed);
         let is_task_notification =
             matches!(role, Role::User) && claude_format::is_task_notification(trimmed);
+        // The unknown-command notice Claude Code writes for an unrecognized slash
+        // command. The parser surfaces it as a `Role::System` line carrying
+        // `Unknown command: <command>` (see the gateway's informational-subtype
+        // handling). Like a known local command it fires no echo and no `Stop`.
+        let is_unknown_command_notice =
+            matches!(role, Role::System) && claude_format::is_unknown_command_notice(trimmed);
         let is_human_turn = matches!(role, Role::User)
             && !trimmed.is_empty()
             && !is_interrupt_marker
@@ -587,6 +601,41 @@ pub fn attribute_lines(
                 .outstanding
                 .front()
                 .is_some_and(|send| send.text.trim() == trimmed);
+            if let Some(pending) = head_matches
+                .then(|| state.outstanding.pop_front())
+                .flatten()
+            {
+                effects.push(Effect::SendMatched {
+                    send_id: pending.id,
+                    matched_uuid: line.uuid.clone(),
+                });
+                effects.push(Effect::LocalCommandTurnEnded);
+            }
+            (state.carry_thread, None)
+        } else if is_unknown_command_notice {
+            // The unknown-command notice (e.g. the user typed `/revew-pr`). Delta
+            // dispatched the command as a send and the turn machine is
+            // `AwaitingEcho`, but Claude rejects an unknown command client-side —
+            // no `UserPromptSubmit` echo, no `Stop`, and no command group — so
+            // left alone the send wedges the queue forever, exactly like a known
+            // local command. Treat it as a degenerate completed turn: when the
+            // notice's command matches the head outstanding send, consume the send
+            // (`SendMatched`) and end the turn (`LocalCommandTurnEnded`, which the
+            // caller feeds into the turn machine as a `Stop`). Correlate robustly:
+            // the send may carry args (`/review-pr 123`) while the notice names
+            // only the command (`/review-pr`), so match the notice's command
+            // against the send's FIRST whitespace-delimited token. The notice is
+            // machinery, so it inherits `carry_thread` and never resets to `main`.
+            // (If it matches no outstanding send — an unknown command typed
+            // straight into the pane, never dispatched by Delta — there is nothing
+            // to resolve; it simply surfaces as a `Role::System` notice.)
+            let notice_command = claude_format::unknown_command_from_notice(trimmed);
+            let head_matches = notice_command.is_some_and(|command| {
+                state
+                    .outstanding
+                    .front()
+                    .is_some_and(|send| send.text.split_whitespace().next() == Some(command))
+            });
             if let Some(pending) = head_matches
                 .then(|| state.outstanding.pop_front())
                 .flatten()

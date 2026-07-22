@@ -44,6 +44,22 @@ fn is_local_command_output_marker(text: &str) -> bool {
         .any(|marker| text.starts_with(marker))
 }
 
+/// Prefix Claude Code writes on the `type: "system"` / `subtype: "informational"`
+/// notice it emits when the user types a slash command it does not recognize
+/// (e.g. `/review-pr` when no such command exists). Unlike a KNOWN local command,
+/// an unknown command fires NEITHER a `UserPromptSubmit` echo NOR a `Stop` hook
+/// and writes no `user`/`assistant` line — only this one warning, whose text is a
+/// TOP-LEVEL `content` string. Delta surfaces that content (so the warning renders
+/// and attribution can correlate it against the stuck send) whereas it drops the
+/// top-level `content` of every OTHER informational subtype.
+const UNKNOWN_COMMAND_NOTICE_PREFIX: &str = "Unknown command:";
+
+/// Whether an `informational` system line's leading text is the unknown-command
+/// notice Claude Code writes for an unrecognized slash command.
+fn is_unknown_command_notice_marker(text: &str) -> bool {
+    text.starts_with(UNKNOWN_COMMAND_NOTICE_PREFIX)
+}
+
 /// Parse one JSONL line into a message, ignoring non-message outcomes.
 ///
 /// Thin wrapper over [`parse_line_outcome`] kept for callers (and tests) that
@@ -124,22 +140,40 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     let is_local_command_subtype = raw.line_type.as_deref() == Some("system")
         && raw.subtype.as_deref() == Some("local_command");
 
+    // The unknown-command notice: Claude Code emits a `type: "system"` /
+    // `subtype: "informational"` line whose TOP-LEVEL `content` is
+    // `Unknown command: <command>` when the user types a slash command it does
+    // not recognize. Like a known local command it fires no echo and no `Stop`,
+    // so its content must be surfaced — both to render the "Unknown command: …"
+    // warning and to let attribution correlate it against the send that was
+    // dispatched for the command and is now stuck `AwaitingEcho`. Every OTHER
+    // informational subtype (`away_summary`, `scheduled_task_fire`, …) keeps
+    // dropping its top-level content, as today.
+    let is_unknown_command_notice = raw.line_type.as_deref() == Some("system")
+        && raw.subtype.as_deref() == Some("informational")
+        && matches!(
+            &raw.content,
+            Some(RawContent::Text(text)) if is_unknown_command_notice_marker(text.trim_start())
+        );
+
     // The model that produced this line lives on the embedded message
     // (`message.model`), present on assistant lines only. Take it before the
     // message is moved out for content below.
     let model = raw.message.as_ref().and_then(|m| m.model.clone());
 
     // Resolve the line's effective content: prefer the embedded
-    // `message.content`, and fall back to the top-level `content` ONLY for the
-    // local_command subtype. Other `type: "system"` subtypes (`away_summary`,
-    // `informational`, `scheduled_task_fire`, …) carry a top-level `content`
-    // Delta does not render, so they keep producing empty content, as today.
+    // `message.content`, and fall back to the top-level `content` for the
+    // `local_command` subtype and the unknown-command notice — the two
+    // `type: "system"` shapes Delta renders. Every other subtype (`away_summary`,
+    // other `informational` lines, `scheduled_task_fire`, …) carries a top-level
+    // `content` Delta does not render, so they keep producing empty content.
     let message_content = raw.message.and_then(|m| m.content);
-    let effective_content = message_content.or(if is_local_command_subtype {
-        raw.content
-    } else {
-        None
-    });
+    let effective_content =
+        message_content.or(if is_local_command_subtype || is_unknown_command_notice {
+            raw.content
+        } else {
+            None
+        });
 
     // A slash/local command (e.g. `/review-pr`) records its captured output
     // WITHOUT `isMeta` — only the leading caveat line of the group is flagged.
@@ -445,17 +479,38 @@ mod tests {
     }
 
     #[test]
-    fn non_local_command_system_subtype_with_top_level_content_stays_contentless() {
-        // Guard against surfacing noise: a `type: "system"` line of some OTHER
-        // subtype (e.g. `away_summary`) also carries a top-level `content`, but
-        // Delta does not render it. Only the `local_command` subtype falls back
-        // to the top-level `content`; every other system subtype keeps producing
-        // empty content and rendering nothing, exactly as before.
-        let line = r#"{"uuid":"s2","type":"system","subtype":"away_summary","content":"you were away","level":"info"}"#;
+    fn non_unknown_command_informational_subtype_with_top_level_content_stays_contentless() {
+        // Guard against surfacing noise: a `type: "system"` / `informational`
+        // line whose content is NOT the unknown-command notice (e.g. an
+        // `away_summary`-style informational line) also carries a top-level
+        // `content`, but Delta does not render it. Only the `local_command`
+        // subtype and the unknown-command notice fall back to the top-level
+        // `content`; every other system subtype keeps producing empty content and
+        // rendering nothing, exactly as before.
+        let line = r#"{"uuid":"s2","type":"system","subtype":"informational","content":"you were away","level":"info"}"#;
         let msg = parse_line(line).unwrap().unwrap();
         assert_eq!(msg.role, Role::System);
         assert!(msg.content.is_empty());
         assert_eq!(msg.flatten_text(), None);
+    }
+
+    #[test]
+    fn unknown_command_notice_surfaces_its_top_level_content_as_a_system_line() {
+        // When the user types a slash command Claude Code does not recognize, it
+        // writes a single `type: "system"` / `subtype: "informational"` line whose
+        // payload is a TOP-LEVEL `content` string `Unknown command: <command>` —
+        // no embedded `message`, no `promptId`. Like a known local command it
+        // fires no echo and no `Stop`, so Delta must surface this content (both to
+        // render the warning and to let attribution correlate it against the stuck
+        // send). The role stays `Role::System`.
+        let line = r#"{"uuid":"s3","type":"system","subtype":"informational","content":"Unknown command: /review-pr","level":"warning"}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::System);
+        assert_eq!(
+            msg.flatten_text().as_deref(),
+            Some("Unknown command: /review-pr"),
+            "the unknown-command notice's top-level content must be surfaced, not dropped"
+        );
     }
 
     #[test]
