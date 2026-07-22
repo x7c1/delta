@@ -23,5 +23,8 @@ playwright-report/
 .env
 .env.local
 
+# Host-specific make overrides (see local.mk.example)
+local.mk
+
 # OS / editor
 .DS_Store
