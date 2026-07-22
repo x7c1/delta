@@ -132,6 +132,27 @@ pub trait AgentAdapter: Send + Sync {
     /// Send a user prompt into an open session.
     async fn send(&self, handle: &AgentSessionHandle, req: SendRequest) -> Result<SendReceipt>;
 
+    /// Inject hidden per-turn context into an open session — text the model
+    /// sees on its next turn without it appearing in the visible prompt
+    /// (capability [`super::ContextInjectionCapability::HiddenPerTurn`]).
+    ///
+    /// The core calls this before dispatching a **branch send** (branch from
+    /// selected text): the branched-from passage is delivered here as hidden
+    /// context so the branch turn is anchored to it, while the visible prompt
+    /// stays exactly what the user typed.
+    ///
+    /// The default is an error, so reaching it is a wiring mistake surfaced
+    /// rather than silently dropped. Claude does **not** route here: it injects
+    /// hidden context through its own `UserPromptSubmit` hook `additionalContext`
+    /// path, unchanged by this method. Codex overrides this with
+    /// `thread/inject_items`.
+    async fn inject_context(&self, _handle: &AgentSessionHandle, _text: &str) -> Result<()> {
+        Err(Error::Agent(format!(
+            "the {:?} adapter does not inject hidden context over this trait method",
+            self.provider()
+        )))
+    }
+
     /// Interrupt the session's in-flight turn.
     async fn interrupt(&self, handle: &AgentSessionHandle) -> Result<()>;
 

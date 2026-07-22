@@ -1,6 +1,5 @@
 use delta_model::{AgentProvider, MessageUuid, SendStatus};
 
-use crate::error::Error;
 use crate::interactor::testing::*;
 use crate::turn::{TurnInput, TurnState};
 use crate::SendTarget;
@@ -104,15 +103,25 @@ async fn codex_second_send_dispatches_over_the_adapter() {
     );
 }
 
-/// Codex is `ForkCapability::None`, so a branch send into a Codex session is
-/// rejected cleanly rather than silently degraded to a plain send. The UI must
-/// not offer branching for a no-fork provider, so this is a guard against a
-/// caller that ignores that — it returns a clear error and dispatches nothing.
+/// "Branch from selected text" works on a Codex session: it is enabled by
+/// hidden-context injection (`ContextInjectionCapability::HiddenPerTurn` via
+/// `thread/inject_items`), NOT by native fork, so it is no longer rejected.
+///
+/// A branch send must (a) create the SAME delta-side branch structure Claude
+/// builds — a new thread lane with the branched-from message as its semantic
+/// parent, via the shared `resolve_branch_target` — (b) deliver the selected
+/// passage as hidden context over the adapter's `inject_context` BEFORE the
+/// turn dispatches, and (c) dispatch the branch turn over the same adapter send
+/// path as any other Codex turn. This is the regression proof that Codex branch
+/// send routes through inject-context + shared branch bookkeeping rather than
+/// the removed `ForkCapability::None` rejection.
 #[tokio::test]
-async fn codex_branch_send_is_rejected() {
-    let factory = FakeAgentFactory::new("thr_nofork", Some("turn_1"));
+async fn codex_branch_send_injects_context_and_reuses_branch_bookkeeping() {
+    let factory = FakeAgentFactory::new("thr_branch", Some("turn_2"));
     let ix = interactor_with_codex_factory(factory.clone());
 
+    // Turn 1: open the Codex session with a first prompt, then let it settle to
+    // idle — the state a real branch send arrives in.
     let (first, _) = ix
         .enqueue_send(
             SendTarget::NewSession {
@@ -127,38 +136,82 @@ async fn codex_branch_send_is_rejected() {
         .await
         .unwrap();
     let session_id = first.session_id.clone();
-    let thread_id = first.thread_id;
-
+    let main_thread = first.thread_id;
     ix.apply_turn_input(&session_id, TurnInput::Stop)
         .await
         .unwrap();
 
-    // A branch send names a message to branch from. Codex cannot fork, so this
-    // is rejected before any dispatch.
-    let result = ix
-        .enqueue_send(
-            SendTarget::Thread {
-                thread_id,
-                branch_from: Some(MessageUuid::from("some-message".to_owned())),
-            },
-            "branch off this",
-            None,
-        )
-        .await;
+    // Branch from a selected passage of an earlier message.
+    let parent = MessageUuid::from("uuid-parent");
+    let quote = "the selected passage";
+    let (branch, events) = ix
+        .enqueue_send(branch_off(main_thread, &parent), "branch text", Some(quote))
+        .await
+        .expect("the Codex branch send is accepted (no ForkCapability rejection)");
 
-    match result {
-        Err(Error::Agent(msg)) => assert!(
-            msg.contains("branching is not supported"),
-            "the error explains branching is unsupported for Codex, got: {msg}"
-        ),
-        other => panic!("expected a clean Agent error rejecting the branch, got {other:?}"),
-    }
+    // (a) Same delta-side branch structure Claude builds: a new thread lane with
+    // the branched-from message as its semantic parent, parented to the source
+    // thread and rooted at the branched-from message.
+    assert_eq!(branch.session_id, session_id, "same session");
+    assert_ne!(
+        branch.thread_id, main_thread,
+        "the branch send lands on a new thread lane, not the source thread"
+    );
+    assert_eq!(
+        branch.semantic_parent_uuid,
+        Some(parent.clone()),
+        "the branch send carries the branched-from message as its semantic parent"
+    );
+    let child = ix.store().thread(branch.thread_id).await.unwrap().unwrap();
+    assert_eq!(
+        child.parent_thread_id,
+        Some(main_thread),
+        "the branch child thread is parented to the source thread"
+    );
+    assert_eq!(
+        child.root_message_uuid,
+        Some(parent),
+        "the branch child thread is rooted at the branched-from message"
+    );
+    assert_eq!(
+        child.title, quote,
+        "the branch child is titled provisionally from the selected passage"
+    );
 
-    // Nothing was dispatched for the rejected branch send: only the opening
-    // prompt ever reached the adapter.
+    // (b) The selected passage was delivered as hidden context over the adapter
+    // (the real Codex `thread/inject_items` path), exactly once.
+    assert_eq!(
+        factory.log().lock().unwrap().injects,
+        vec![quote.to_owned()],
+        "the branched-from passage was injected as hidden context before dispatch"
+    );
+
+    // (c) The branch turn dispatched over the same adapter send path as any
+    // other Codex turn — both the opening prompt and the branch prompt reached
+    // the adapter, in order.
     assert_eq!(
         factory.log().lock().unwrap().sends,
-        vec!["first message".to_owned()],
-        "the rejected branch send dispatched nothing over the adapter"
+        vec!["first message".to_owned(), "branch text".to_owned()],
+        "the branch turn dispatched over the adapter after the opening turn"
+    );
+
+    // The branch turn is tracked ExternalPrompt-style and its send row completes
+    // at the `turn/start` acknowledgement, like every Codex turn.
+    assert_eq!(
+        ix.live_state_for(&session_id).await.turn,
+        TurnState::InFlight { send_id: None },
+        "the branch turn is tracked ExternalPrompt-style"
+    );
+    assert_eq!(
+        ix.store().send(branch.id).await.unwrap().unwrap().status,
+        SendStatus::Matched,
+        "the branch send completes at the turn/start ack"
+    );
+
+    // A Codex dispatch produces no synchronous `SessionEvent`s: the branch
+    // turn's frames arrive asynchronously over the running pump.
+    assert!(
+        events.is_empty(),
+        "the adapter dispatch returns no synchronous session events"
     );
 }

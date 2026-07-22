@@ -215,7 +215,7 @@ where
             // the real session + main thread so the REST response carries real
             // ids, and it is completed at the `turn/start` acknowledgement.
             Some(text) => Some(
-                self.dispatch_agent_turn(&adapter, &handle, main_thread_id, text)
+                self.dispatch_agent_turn(&adapter, &handle, main_thread_id, None, text, None)
                     .await?,
             ),
             None => None,
@@ -240,8 +240,11 @@ where
     /// This is the single Codex turn-dispatch path, shared by the opening turn
     /// ([`Self::spawn_codex`]) and every subsequent send (`enqueue_to_thread`):
     ///
-    /// 1. Write the `send` row against `thread_id`, `dispatched` (a Codex turn
-    ///    has no branch or locator quote in this slice, so both are `None`).
+    /// 1. Write the `send` row against `thread_id`, `dispatched`, carrying the
+    ///    `semantic_parent` and `locator_quote` the caller resolved (both `None`
+    ///    for a plain turn; a branch send passes the branch child thread as
+    ///    `thread_id`, the branched-from message as `semantic_parent`, and the
+    ///    selected passage as `locator_quote`).
     /// 2. `adapter.send` starts the turn synchronously; on error, cancel the
     ///    just-written row so it does not linger in the open list, then
     ///    propagate — the same rollback the opening turn used.
@@ -262,11 +265,13 @@ where
         adapter: &Arc<dyn AgentAdapter>,
         handle: &AgentSessionHandle,
         thread_id: ThreadId,
+        semantic_parent: Option<&MessageUuid>,
         text: String,
+        locator_quote: Option<&str>,
     ) -> Result<Send> {
         let send = self
             .store
-            .enqueue_send(self.id, thread_id, None, &text, None)
+            .enqueue_send(self.id, thread_id, semantic_parent, &text, locator_quote)
             .await?;
         let receipt = match adapter.send(handle, SendRequest { text }).await {
             Ok(receipt) => receipt,
