@@ -273,6 +273,17 @@ where
             .store
             .enqueue_send(self.id, thread_id, semantic_parent, &text, locator_quote)
             .await?;
+        // Route this turn's pushed content onto the same lane the `send` row just
+        // recorded: a branch send folds its messages onto the branch child thread
+        // and stamps the branched-from message on the root user prompt, a plain
+        // send stays on `main` with no semantic parent. Set here — on the content
+        // source the pump folds through, before `adapter.send` starts the turn —
+        // so it is in place before any of the turn's item frames are ingested
+        // (the pump posts them to this same actor mailbox, after this dispatch
+        // returns). A Claude/non-Codex session has no content source, so this is a
+        // no-op there.
+        self.state
+            .begin_agent_turn(thread_id, semantic_parent.cloned());
         let receipt = match adapter.send(handle, SendRequest { text }).await {
             Ok(receipt) => receipt,
             Err(err) => {

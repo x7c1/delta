@@ -142,9 +142,19 @@ pub struct Scenario {
     /// The id returned from `thread/start` and stamped into notifications.
     #[serde(default = "default_thread_id")]
     pub thread_id: String,
-    /// What a `turn/start` plays (nothing beyond a response when absent).
+    /// What a `turn/start` plays (nothing beyond a response when absent). Used
+    /// when [`Self::turns`] is empty; the same turn is replayed on every
+    /// `turn/start` (its ids are therefore reused across turns).
     #[serde(default)]
     pub turn: Option<Turn>,
+    /// A sequence of turns played one per `turn/start`, in order, when non-empty
+    /// — so successive turns of one session can carry DISTINCT turn/item ids,
+    /// mirroring a real `codex app-server` (which mints a fresh turn per prompt).
+    /// The last entry is replayed once the sequence is exhausted. When empty the
+    /// fake falls back to the single [`Self::turn`], so every existing
+    /// single-turn scenario is unchanged.
+    #[serde(default)]
+    pub turns: Vec<Turn>,
 }
 
 fn default_server_info() -> Value {
@@ -163,6 +173,20 @@ impl Scenario {
             Ok(path) => Self::load(&path),
             Err(_) => Ok(Self::default_scenario()),
         }
+    }
+
+    /// The turn to play for the `turn/start` at zero-based `index` within one
+    /// session's process.
+    ///
+    /// When [`Self::turns`] is provided, turns play in order and the last entry
+    /// is replayed once exhausted; otherwise the single [`Self::turn`] is used
+    /// (and thus replayed on every turn). Cloned so the caller can play it
+    /// without holding a borrow of the scenario.
+    pub fn turn_at(&self, index: usize) -> Option<Turn> {
+        if !self.turns.is_empty() {
+            return self.turns.get(index).or_else(|| self.turns.last()).cloned();
+        }
+        self.turn.clone()
     }
 
     /// Load and parse a scenario file.
@@ -200,6 +224,7 @@ impl Scenario {
                     },
                 ],
             }),
+            turns: Vec::new(),
         }
     }
 }

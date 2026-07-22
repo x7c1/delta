@@ -23,6 +23,7 @@ pub fn run() -> Result<(), String> {
         scenario,
         out: stdout.lock(),
         server_request_seq: 0,
+        turn_index: 0,
         pending: None,
         // A sidecar record of the items each `thread/inject_items` carried, so a
         // full-loop branch test can prove the hidden context reached the server.
@@ -48,6 +49,10 @@ struct Server<'a> {
     out: StdoutLock<'a>,
     /// Mints ids for server → client requests (`*/requestApproval`).
     server_request_seq: u64,
+    /// How many `turn/start` requests this session has served, used to pick the
+    /// turn from a scenario's `turns` sequence so successive turns can carry
+    /// distinct ids. Ignored when the scenario uses the single `turn`.
+    turn_index: usize,
     /// The suspended remainder of a turn, set when a `blocking` approval was
     /// emitted and awaiting the client's decision. Resumed (and cleared) when the
     /// client's response frame arrives. `None` when no turn is gated.
@@ -160,7 +165,11 @@ impl Server<'_> {
                     .and_then(Value::as_str)
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
-                let turn = self.scenario.turn.clone();
+                // Pick this session's next turn from the scenario: the `turns`
+                // sequence (one per `turn/start`, distinct ids) when provided, or
+                // the single `turn` replayed otherwise.
+                let turn = self.scenario.turn_at(self.turn_index);
+                self.turn_index += 1;
                 let turn_id = turn
                     .as_ref()
                     .map(|t| t.turn_id.clone())

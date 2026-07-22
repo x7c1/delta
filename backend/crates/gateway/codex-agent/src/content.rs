@@ -27,11 +27,16 @@
 //! Reproduced faithfully: role (user / assistant), text, tool use ↔ result
 //! pairing, and the turn group (`prompt_id` from the provider turn id). Absent
 //! provider facts degrade to `None` rather than being invented — `created_at`,
-//! `model`, `git_branch`, `cwd`, `response_time_ms`, and both parent links.
+//! `model`, `git_branch`, `cwd`, `response_time_ms`, and the linear parent link.
 //! `Thinking` / `Meta` / `CompactSummary` blocks are simply not produced (Codex
-//! does not expose them). Codex v1 is single-thread (decision D:
-//! [`ForkCapability::None`]), so every message lands on the session's `main`
-//! thread the source is constructed with.
+//! does not expose them). A plain turn's messages land on the session's `main`
+//! thread the source is constructed with; a *branch* turn (Delta's
+//! branch-from-selected-text, delivered as hidden-context injection rather than a
+//! native provider fork — Codex is still [`ForkCapability::None`]) is routed onto
+//! its branch child thread by [`AgentContentSource::begin_turn`] before its frames
+//! arrive, and its root user message carries the branched-from message as its
+//! semantic parent — matching the `send` row's own lane + parent, so branch
+//! content lives on the branch lane exactly like Claude's.
 //!
 //! ## Dormant in this slice
 //!
@@ -73,8 +78,18 @@ struct PendingTool {
 #[derive(Debug)]
 pub struct CodexConversationSource {
     session_id: SessionId,
-    /// Codex v1 is single-thread (decision D), so every message lands here.
-    main_thread: ThreadId,
+    /// The thread the *current* turn's messages land on. Seeded at construction
+    /// from the session's `main` thread and reset to it for a plain turn; set to
+    /// the resolved branch child thread by [`AgentContentSource::begin_turn`] when
+    /// a branch turn dispatches, so the turn's content follows the same lane the
+    /// `send` row already recorded rather than falling back onto `main`.
+    turn_thread: ThreadId,
+    /// The branched-from message to stamp on the current branch turn's *root*
+    /// user message (its first message), mirroring the `send` row's
+    /// `semantic_parent`. Set by [`AgentContentSource::begin_turn`] and consumed
+    /// (taken) when that root user prompt is built, so only it — not the turn's
+    /// later messages — carries the semantic parent. `None` for a plain turn.
+    pending_semantic_parent: Option<MessageUuid>,
     /// The next `seq` to mint. Monotonic per session; seeded from the store's
     /// current `MAX(seq) + 1` so it never collides with a persisted message.
     next_seq: i64,
@@ -89,14 +104,21 @@ pub struct CodexConversationSource {
 impl CodexConversationSource {
     /// Build a source for one session.
     ///
-    /// `main_thread` is the session's `main` thread (Codex v1 lands every
-    /// message there). `seed_seq` is the next `seq` to mint — the store's
-    /// current `MAX(seq) + 1`, or `0` for a fresh session — so the minted
-    /// ordering continues past whatever is already persisted.
+    /// `main_thread` is the session's `main` thread: a plain turn's messages land
+    /// there, and it is where each turn's routing resets to. A branch turn instead
+    /// routes onto its branch child thread via
+    /// [`AgentContentSource::begin_turn`], set before the turn's frames arrive.
+    /// `seed_seq` is the next `seq` to mint — the store's current `MAX(seq) + 1`,
+    /// or `0` for a fresh session — so the minted ordering continues past whatever
+    /// is already persisted.
     pub fn new(session_id: SessionId, main_thread: ThreadId, seed_seq: i64) -> Self {
         Self {
             session_id,
-            main_thread,
+            // A turn defaults to the main thread with no semantic parent, so a
+            // session that never branches behaves exactly as before; a branch
+            // turn overrides both via `begin_turn` before its frames arrive.
+            turn_thread: main_thread,
+            pending_semantic_parent: None,
             next_seq: seed_seq,
             current_turn: None,
             pending_tools: HashMap::new(),
@@ -123,7 +145,19 @@ impl CodexConversationSource {
         match event {
             AgentEvent::UserPromptAccepted { text, at_ms, .. } => {
                 let uuid = self.user_prompt_uuid();
-                vec![self.build(uuid, Role::User, vec![text_block(text)], None, *at_ms)]
+                // This is the turn's root user message: consume the pending
+                // semantic parent so the branch root — and only it — carries the
+                // branched-from link, matching the `send` row. A plain turn has
+                // none, so this stays `None`.
+                let semantic_parent = self.pending_semantic_parent.take();
+                vec![self.build(
+                    uuid,
+                    Role::User,
+                    vec![text_block(text)],
+                    None,
+                    semantic_parent,
+                    *at_ms,
+                )]
             }
             AgentEvent::AssistantMessage {
                 provider_item_id,
@@ -136,6 +170,7 @@ impl CodexConversationSource {
                     Role::Assistant,
                     vec![text_block(text)],
                     Some(provider_item_id.clone()),
+                    None,
                     *at_ms,
                 )]
             }
@@ -179,6 +214,7 @@ impl CodexConversationSource {
                     Role::Assistant,
                     blocks,
                     Some(provider_item_id.clone()),
+                    None,
                     *at_ms,
                 )]
             }
@@ -215,7 +251,14 @@ impl CodexConversationSource {
                 input: started.input,
             };
             let uuid = item_uuid(&id);
-            out.push(self.build(uuid, Role::Assistant, vec![block], Some(id), started.at_ms));
+            out.push(self.build(
+                uuid,
+                Role::Assistant,
+                vec![block],
+                Some(id),
+                None,
+                started.at_ms,
+            ));
         }
         out
     }
@@ -235,6 +278,7 @@ impl CodexConversationSource {
         role: Role,
         content: Vec<ContentBlock>,
         provider_item_id: Option<String>,
+        semantic_parent_uuid: Option<MessageUuid>,
         at_ms: Option<i64>,
     ) -> Message {
         let seq = self.next_seq;
@@ -243,10 +287,13 @@ impl CodexConversationSource {
             uuid,
             provider_item_id,
             session_id: self.session_id.clone(),
-            thread_id: self.main_thread,
+            // The current turn's thread: `main` for a plain turn, or the branch
+            // child thread `begin_turn` set for a branch turn — so branch content
+            // lands on the branch lane, not `main`.
+            thread_id: self.turn_thread,
             role,
             linear_parent_uuid: None,
-            semantic_parent_uuid: None,
+            semantic_parent_uuid,
             prompt_id: self.current_turn.clone(),
             seq,
             content_text: Message::flatten_text(&content),
@@ -292,6 +339,17 @@ impl AgentContentSource for CodexConversationSource {
     /// so the batch is messages-only — the effect list is always empty.
     fn ingest(&mut self, event: &AgentEvent) -> (Vec<Message>, Vec<Effect>) {
         (CodexConversationSource::ingest(self, event), Vec::new())
+    }
+
+    /// Route the turn about to dispatch: land its messages on `thread_id` (the
+    /// branch child thread for a branch send, `main` otherwise) and, for a branch
+    /// send, stamp `semantic_parent` on the turn's root user message so the branch
+    /// content matches the `send` row's own lane + parent. Set on the mailbox
+    /// before the turn's frames are pumped in, so every message this turn folds
+    /// uses it.
+    fn begin_turn(&mut self, thread_id: ThreadId, semantic_parent: Option<MessageUuid>) {
+        self.turn_thread = thread_id;
+        self.pending_semantic_parent = semantic_parent;
     }
 }
 
@@ -704,6 +762,105 @@ mod tests {
         assert!(
             effects.is_empty(),
             "Codex emits no neutral effects through the content seam"
+        );
+    }
+
+    #[test]
+    fn a_branch_turn_routes_its_messages_to_the_branch_thread_and_stamps_the_semantic_parent() {
+        // `begin_turn` sets the branch child thread + the branched-from message
+        // before the turn's frames arrive (as the dispatch does on the mailbox).
+        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(8), 0);
+        src.begin_turn(
+            ThreadId(9),
+            Some(MessageUuid::from("codex-item-msg_parent")),
+        );
+
+        // The root user prompt lands on the branch thread AND carries the
+        // semantic parent — reproducing (as the fix) the DB symptom, where these
+        // rows wrongly landed on main (thread 8) with no semantic parent.
+        let user = src.ingest(&AgentEvent::UserPromptAccepted {
+            provider_message_id: None,
+            text: "branch text".to_owned(),
+            at_ms: None,
+        });
+        assert_eq!(user[0].role, Role::User);
+        assert_eq!(
+            user[0].thread_id,
+            ThreadId(9),
+            "the branch root user message lands on the branch thread, not main"
+        );
+        assert_eq!(
+            user[0].semantic_parent_uuid,
+            Some(MessageUuid::from("codex-item-msg_parent")),
+            "the branch root user message is stamped with the branched-from message"
+        );
+
+        // The turn's subsequent assistant message also lands on the branch
+        // thread, but does NOT re-carry the semantic parent (only the root does).
+        let asst = src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "item_1".to_owned(),
+            text: "reply".to_owned(),
+            at_ms: None,
+        });
+        assert_eq!(
+            asst[0].thread_id,
+            ThreadId(9),
+            "the branch turn's assistant reply also lands on the branch thread"
+        );
+        assert!(
+            asst[0].semantic_parent_uuid.is_none(),
+            "only the branch root carries the semantic parent, not later messages"
+        );
+    }
+
+    #[test]
+    fn a_plain_turn_stays_on_main_with_no_semantic_parent() {
+        // With no `begin_turn`, or `begin_turn(main, None)`, every message stays
+        // on the main thread with no semantic parent — the pre-fix behaviour a
+        // non-branching session must keep byte-for-byte.
+        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(8), 0);
+        src.begin_turn(ThreadId(8), None);
+        let user = src.ingest(&AgentEvent::UserPromptAccepted {
+            provider_message_id: None,
+            text: "hi".to_owned(),
+            at_ms: None,
+        });
+        let asst = src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "item_1".to_owned(),
+            text: "yo".to_owned(),
+            at_ms: None,
+        });
+        assert_eq!(user[0].thread_id, ThreadId(8));
+        assert!(user[0].semantic_parent_uuid.is_none());
+        assert_eq!(asst[0].thread_id, ThreadId(8));
+        assert!(asst[0].semantic_parent_uuid.is_none());
+    }
+
+    #[test]
+    fn a_plain_turn_after_a_branch_turn_resets_back_to_main() {
+        // A branch turn overrides the routing; the following plain turn's
+        // `begin_turn(main, None)` must reset it, so late/next-turn content does
+        // not leak onto the branch lane.
+        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(8), 0);
+        src.begin_turn(
+            ThreadId(9),
+            Some(MessageUuid::from("codex-item-msg_parent")),
+        );
+        let _ = src.ingest(&AgentEvent::UserPromptAccepted {
+            provider_message_id: None,
+            text: "branch".to_owned(),
+            at_ms: None,
+        });
+        src.begin_turn(ThreadId(8), None);
+        let user = src.ingest(&AgentEvent::UserPromptAccepted {
+            provider_message_id: None,
+            text: "plain again".to_owned(),
+            at_ms: None,
+        });
+        assert_eq!(user[0].thread_id, ThreadId(8), "reset back to main");
+        assert!(
+            user[0].semantic_parent_uuid.is_none(),
+            "the reset turn carries no semantic parent"
         );
     }
 
