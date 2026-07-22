@@ -35,6 +35,39 @@ const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
 ];
 
 /**
+ * The user's decorative-rendering preference. Some rich rendering (card
+ * drop-shadows, the timeline landing wash) is cheap on Chromium/Safari but
+ * costs WebKitGTK (Linux) a full raster/paint on every repaint, which reads as
+ * input lag. This three-way setting lets the user keep the rich look, force
+ * the flat look, or defer to a platform-aware default (see the resolver in
+ * `hooks/visualEffects.ts`).
+ *
+ * - `auto` — resolve from the environment: flat on Linux WebKit, rich anywhere
+ *   else.
+ * - `on`   — always rich, regardless of platform.
+ * - `off`  — always flat, regardless of platform.
+ */
+export type VisualEffectsSetting = 'auto' | 'on' | 'off';
+
+/**
+ * The default on a fresh install: defer to the platform. Every non-Linux-WebKit
+ * environment resolves this to the rich look, so today's users see no change;
+ * only Linux WebKit (Epiphany / a WebKitGTK shell) flips to flat automatically.
+ */
+export const DEFAULT_VISUAL_EFFECTS_SETTING: VisualEffectsSetting = 'auto';
+
+/**
+ * The valid {@link VisualEffectsSetting} values, used by the persistence
+ * hydration step to fall back to the default when a foreign value lands in
+ * localStorage (a different build, a typo, an experiment that left a trail).
+ */
+const VISUAL_EFFECTS_SETTINGS: readonly VisualEffectsSetting[] = [
+  'auto',
+  'on',
+  'off',
+];
+
+/**
  * The valid {@link AgentProvider} values, used by the persistence hydration
  * step to fall back to {@link DEFAULT_PROVIDER} when a foreign value lands in
  * localStorage (a stale build, a typo, a value from another workspace). Kept in
@@ -61,6 +94,15 @@ export interface SettingsState {
   activeCategory: SettingsCategoryId;
   setActiveCategory: (category: SettingsCategoryId) => void;
   /**
+   * Decorative-rendering preference. Persisted to localStorage; restored on
+   * rehydration with an unknown value falling back to the default (see
+   * {@link DEFAULT_VISUAL_EFFECTS_SETTING}). The effective `rich`/`flat` value
+   * is derived from this plus the environment by the resolver in
+   * `hooks/visualEffects.ts` and stamped onto `<html data-effects="…">`.
+   */
+  visualEffects: VisualEffectsSetting;
+  setVisualEffects: (visualEffects: VisualEffectsSetting) => void;
+  /**
    * The AI-agent provider a new session starts on by default. It seeds the
    * new-session provider selector's initial value (still per-session
    * overridable via that selector). Persisted to localStorage so the choice
@@ -79,6 +121,8 @@ export const useSettingsStore = create<SettingsState>()(
     (set) => ({
       activeCategory: DEFAULT_SETTINGS_CATEGORY,
       setActiveCategory: (activeCategory) => set({ activeCategory }),
+      visualEffects: DEFAULT_VISUAL_EFFECTS_SETTING,
+      setVisualEffects: (visualEffects) => set({ visualEffects }),
       defaultProvider: DEFAULT_PROVIDER,
       setDefaultProvider: (defaultProvider) => set({ defaultProvider }),
     }),
@@ -91,6 +135,9 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (!SETTINGS_CATEGORY_IDS.includes(state.activeCategory)) {
           state.activeCategory = DEFAULT_SETTINGS_CATEGORY;
+        }
+        if (!VISUAL_EFFECTS_SETTINGS.includes(state.visualEffects)) {
+          state.visualEffects = DEFAULT_VISUAL_EFFECTS_SETTING;
         }
         if (!AGENT_PROVIDERS.includes(state.defaultProvider)) {
           state.defaultProvider = DEFAULT_PROVIDER;

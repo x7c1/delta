@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_PROVIDER,
   DEFAULT_SETTINGS_CATEGORY,
+  DEFAULT_VISUAL_EFFECTS_SETTING,
   SETTINGS_STORAGE_KEY,
   useSettingsStore,
 } from './settingsStore';
@@ -10,6 +11,7 @@ describe('settingsStore', () => {
   beforeEach(() => {
     useSettingsStore.setState({
       activeCategory: DEFAULT_SETTINGS_CATEGORY,
+      visualEffects: DEFAULT_VISUAL_EFFECTS_SETTING,
       defaultProvider: DEFAULT_PROVIDER,
     });
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
@@ -59,6 +61,45 @@ describe('settingsStore', () => {
     );
     await useSettingsStore.persist.rehydrate();
     expect(useSettingsStore.getState().activeCategory).toBe('scan-roots');
+  });
+
+  describe('visualEffects', () => {
+    it('defaults to auto on a fresh state', () => {
+      expect(useSettingsStore.getState().visualEffects).toBe(
+        DEFAULT_VISUAL_EFFECTS_SETTING,
+      );
+      expect(DEFAULT_VISUAL_EFFECTS_SETTING).toBe('auto');
+    });
+
+    it('setVisualEffects updates and persists the setting', () => {
+      useSettingsStore.getState().setVisualEffects('off');
+      expect(useSettingsStore.getState().visualEffects).toBe('off');
+
+      const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      expect(raw).not.toBeNull();
+      const parsed = JSON.parse(raw ?? '{}');
+      expect(parsed.state.visualEffects).toBe('off');
+    });
+
+    it('falls back to auto when a foreign value is rehydrated', async () => {
+      localStorage.setItem(
+        SETTINGS_STORAGE_KEY,
+        JSON.stringify({ state: { visualEffects: 'sparkles' }, version: 0 }),
+      );
+      await useSettingsStore.persist.rehydrate();
+      expect(useSettingsStore.getState().visualEffects).toBe(
+        DEFAULT_VISUAL_EFFECTS_SETTING,
+      );
+    });
+
+    it('preserves a valid persisted value across rehydration', async () => {
+      localStorage.setItem(
+        SETTINGS_STORAGE_KEY,
+        JSON.stringify({ state: { visualEffects: 'on' }, version: 0 }),
+      );
+      await useSettingsStore.persist.rehydrate();
+      expect(useSettingsStore.getState().visualEffects).toBe('on');
+    });
   });
 
   it('defaults to Claude as the default provider on a fresh state', () => {
