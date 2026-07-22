@@ -8,6 +8,11 @@
 # its own default (.tmp/session). Override per-invocation: `make dev WORKDIR=~/scratch`.
 WORKDIR ?=
 
+# Optional host-specific overrides (gitignored). Use it to `export` env vars every
+# target should inherit — e.g. a linker override on hosts where the default `cc`
+# cannot link macOS binaries. See local.mk.example. Missing file is fine (`-`).
+-include local.mk
+
 .DEFAULT_GOAL := help
 
 ## help: list available targets
