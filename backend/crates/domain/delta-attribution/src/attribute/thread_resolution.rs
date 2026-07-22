@@ -34,18 +34,22 @@ pub(super) fn resolve_line_thread(
         // `/review-pr`). Delta dispatched it as a send and the turn machine
         // is `AwaitingEcho`, but a local command fires no `UserPromptSubmit`
         // echo and no `Stop` — so left alone the send wedges the queue
-        // forever. When this line's text equals the head outstanding send,
+        // forever. When this line correlates to the head outstanding send,
         // treat it as a degenerate completed turn: consume the send
         // (`SendMatched`) and end the turn (`LocalCommandTurnEnded`, which the
-        // caller feeds into the turn machine as a `Stop`). The line is
-        // command machinery, so it inherits `carry_thread` and never resets
+        // caller feeds into the turn machine as a `Stop`). The correlation is
+        // namespace-tolerant: Claude Code may record the command-name line in
+        // its fully-qualified `/<namespace>:<command>` form (e.g.
+        // `/dev-workflow:review-pr`) even when the user — and thus the
+        // dispatched send — used the short `/<command>` form (`/review-pr`), so
+        // matching compares BARE command names rather than raw text. The line
+        // is command machinery, so it inherits `carry_thread` and never resets
         // to `main`. (If it does NOT match an outstanding send — e.g. a
         // local command typed straight into the pane, never dispatched by
         // Delta — there is nothing to resolve; it simply folds as `Meta`.)
-        let head_matches = state
-            .outstanding
-            .front()
-            .is_some_and(|send| send.text.trim() == trimmed);
+        let head_matches = state.outstanding.front().is_some_and(|send| {
+            claude_format::local_command_name_line_matches_send(&send.text, trimmed)
+        });
         if let Some(pending) = head_matches
             .then(|| state.outstanding.pop_front())
             .flatten()

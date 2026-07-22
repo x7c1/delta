@@ -113,3 +113,95 @@ async fn local_command_unsticks_turn_and_folds_to_meta() {
     assert_eq!(head.text, "now actually review it");
     assert_eq!(head.status, SendStatus::Dispatched);
 }
+
+/// Namespace variant of the above: the user typed the SHORT form `/review-pr`
+/// (so Delta dispatched a send with that exact text), but Claude Code expands it
+/// to its fully-qualified namespaced form `/dev-workflow:review-pr` in the
+/// transcript command-name line. A raw-text correlation would never match, so
+/// the send would wedge the single-outstanding queue forever. The
+/// bare-command-name correlation must still consume the send, release the queued
+/// follow-up, return the turn to idle, and fold the group to meta.
+#[tokio::test]
+async fn namespaced_local_command_unsticks_short_form_send_and_folds_to_meta() {
+    let ix = interactor();
+    let session = SessionId::from("sess-1");
+    ix.seed_session().await;
+    let main = ix.store().main_thread_id(&session).await.unwrap();
+
+    // The user runs the short form `/review-pr`; Delta dispatches it and the
+    // turn machine is `AwaitingEcho` for that send.
+    ix.enqueue_send(to(main), "/review-pr", None).await.unwrap();
+    ix.enqueue_send(to(main), "now actually review it", None)
+        .await
+        .unwrap();
+    assert_eq!(
+        ix.tmux_fake().sent.lock().unwrap().len(),
+        1,
+        "the follow-up send is held queued while the local command is outstanding"
+    );
+
+    // Claude writes the local-command group, but records the command-name line
+    // in its fully-qualified namespaced form.
+    ix.transcript_fake()
+        .push(local_command_caveat_line("caveat", "pcmd"));
+    ix.transcript_fake().push(local_command_name_line(
+        "cmdname",
+        "pcmd",
+        "/dev-workflow:review-pr",
+    ));
+    ix.transcript_fake()
+        .push(local_command_stdout_line("stdout", "pcmd"));
+    let (_groups, events) = ix.poll_transcript().await.unwrap();
+
+    // (a) The group folds to meta despite the namespace mismatch.
+    let view = ix.thread_view(main).await.unwrap();
+    let role_of = |uuid: &str| {
+        view.iter()
+            .find(|m| m.uuid.as_str() == uuid)
+            .map(|m| m.role)
+    };
+    assert_eq!(role_of("caveat"), Some(Role::Meta));
+    assert_eq!(
+        role_of("cmdname"),
+        Some(Role::Meta),
+        "the namespaced command-name line must fold to meta, not render as a user turn"
+    );
+    assert_eq!(role_of("stdout"), Some(Role::Meta));
+
+    // (c) A `TurnInterrupted` is emitted so the browser clears the stuck chip.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::TurnInterrupted { session_id, .. } if *session_id == session
+        )),
+        "ingesting the namespaced local command emits TurnInterrupted, got {events:?}"
+    );
+
+    // (b) + (d) The short-form send was consumed and the turn returned to idle,
+    // so the held follow-up dispatched.
+    let (count, second) = {
+        let sent = ix.tmux_fake().sent.lock().unwrap();
+        (sent.len(), sent.get(1).map(|p| p.1.clone()))
+    };
+    assert_eq!(
+        count, 2,
+        "the queued follow-up dispatches once the namespaced local command is tailed"
+    );
+    assert_eq!(second.as_deref(), Some("now actually review it"));
+    assert!(
+        ix.store()
+            .next_queued_send(&session)
+            .await
+            .unwrap()
+            .is_none(),
+        "no send remains queued: the follow-up left `queued` and dispatched"
+    );
+    let head = ix
+        .store()
+        .head_dispatched_send(&session)
+        .await
+        .unwrap()
+        .expect("the follow-up is the lone dispatched send after the local command ends");
+    assert_eq!(head.text, "now actually review it");
+    assert_eq!(head.status, SendStatus::Dispatched);
+}
