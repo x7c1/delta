@@ -30,7 +30,7 @@
 //! [`Effect`]: crate::Effect
 
 use delta_attribution::Effect;
-use delta_model::Message;
+use delta_model::{Message, MessageUuid, ThreadId};
 
 use crate::agent::AgentEvent;
 
@@ -56,6 +56,27 @@ pub trait AgentContentSource: Send + Sync + std::fmt::Debug {
     /// [`Effect`]s the persistence pipeline must execute for them. Empty when
     /// the event carried no content (control-only or streaming).
     fn ingest(&mut self, event: &AgentEvent) -> (Vec<Message>, Vec<Effect>);
+
+    /// Set the per-turn routing context for the turn that is about to dispatch,
+    /// *before* its content frames arrive through the pump.
+    ///
+    /// - `thread_id` is the delta thread the turn's messages land on: the
+    ///   session's `main` thread for a plain turn, or the resolved branch child
+    ///   thread for a branch send (from
+    ///   [`resolve_branch_target`](crate::interactor::session_actor::actor::SessionContext)).
+    /// - `semantic_parent` is the branched-from message stamped onto the branch
+    ///   *root* user message (the turn's first message) — mirroring the `send`
+    ///   row's own `semantic_parent` — so a Codex branch's content lives on the
+    ///   branch lane exactly like Claude's. `None` for a plain turn.
+    ///
+    /// Called on the same content-source object the pump folds through, on the
+    /// session's mailbox, before the dispatch returns — so it is in place before
+    /// any of the turn's item frames are ingested. The default is a no-op: a
+    /// provider that pulls its content elsewhere (Claude's transcript,
+    /// [`NullContentSource`]) has no per-turn push context to set.
+    fn begin_turn(&mut self, thread_id: ThreadId, semantic_parent: Option<MessageUuid>) {
+        let _ = (thread_id, semantic_parent);
+    }
 }
 
 /// A content source that produces nothing.

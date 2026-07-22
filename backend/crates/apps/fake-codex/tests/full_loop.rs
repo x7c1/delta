@@ -358,6 +358,38 @@ fn streaming_turn_scenario() -> ScenarioGuard {
     ))
 }
 
+/// A two-turn scenario for the branch loop: the opening turn and the branch turn
+/// carry DISTINCT turn/item ids (played from the `turns` sequence, one per
+/// `turn/start`), mirroring a real `codex app-server`. This is what lets the
+/// branch turn's persisted messages be told apart from the opening turn's — the
+/// single-turn [`streaming_turn_scenario`] reuses one id set across turns, so
+/// its rows would reconcile onto each other by uuid and the per-thread routing
+/// could not be observed.
+fn branching_turns_scenario() -> ScenarioGuard {
+    let turn = |turn_id: &str, item_id: &str| {
+        format!(
+            r#"{{
+                "turn_id": "{turn_id}",
+                "emit": [
+                    {{ "type": "turn_started" }},
+                    {{ "type": "item_started",   "item": {{ "id": "{item_id}", "type": "agentMessage" }} }},
+                    {{ "type": "agent_message_delta", "item_id": "{item_id}", "delta": "{REPLY_FRAGMENT}" }},
+                    {{ "type": "item_completed", "item": {{ "id": "{item_id}", "type": "agentMessage", "text": "{REPLY}" }} }},
+                    {{ "type": "turn_completed", "status": "completed" }}
+                ]
+            }}"#
+        )
+    };
+    ScenarioGuard::write(&format!(
+        r#"{{
+            "thread_id": "thr_branch_loop",
+            "turns": [ {open}, {branch} ]
+        }}"#,
+        open = turn("turn_open", "item_open"),
+        branch = turn("turn_branch", "item_branch"),
+    ))
+}
+
 /// Drain the broadcast until the named session's turn completes, accumulating its
 /// streamed assistant deltas and returning the streamed text. Fails the test on
 /// timeout rather than hanging.
@@ -509,7 +541,7 @@ async fn codex_branch_from_selected_text_injects_context_and_completes_over_the_
     const QUOTE: &str = "the selected passage to branch from";
     const PARENT_UUID: &str = "msg-branch-parent";
 
-    let scenario = streaming_turn_scenario();
+    let scenario = branching_turns_scenario();
     let (app, state) = build_app(&scenario);
     let mut events = state.subscribe();
     state
@@ -628,6 +660,106 @@ async fn codex_branch_from_selected_text_injects_context_and_completes_over_the_
     assert_eq!(
         streamed, REPLY_FRAGMENT,
         "the branch turn streamed its reply live before completing"
+    );
+
+    // (5) The regression this fix targets: the branch turn's persisted content
+    // lands on the BRANCH thread, not main. From the live dev DB, the branch was
+    // created and the `send` row routed correctly, yet `CodexConversationSource`
+    // hardcoded the main thread + a null semantic parent, so the branch turn's
+    // user prompt and assistant reply were written to main — leaving the branch
+    // thread empty (the "no thread was created" symptom). These assertions fail
+    // before the fix (the branch thread has no messages) and pass after it.
+    let (status, body) = get(&app, &format!("/api/threads/{branch_thread}/messages")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "branch thread messages fetched: {body:?}"
+    );
+    let branch_messages = body["messages"]
+        .as_array()
+        .expect("the branch thread's messages response carries a messages array");
+    let branch_user = branch_messages
+        .iter()
+        .find(|m| m["role"] == json!("user"))
+        .expect(
+            "the branch turn's user prompt persisted ON THE BRANCH THREAD (empty before the fix)",
+        );
+    assert_eq!(
+        branch_user["content_text"],
+        json!("branch text"),
+        "the branch user prompt carries the branch turn's text"
+    );
+    assert_eq!(
+        branch_user["thread_id"].as_i64(),
+        Some(branch_thread),
+        "the branch user prompt is stored on the branch thread, not main"
+    );
+    assert_eq!(
+        branch_user["semantic_parent_uuid"].as_str(),
+        Some(PARENT_UUID),
+        "the branch-ROOT user message carries the branched-from message as its \
+         semantic parent, matching the send row"
+    );
+    let branch_assistant = branch_messages
+        .iter()
+        .find(|m| m["role"] == json!("assistant"))
+        .expect("the branch turn's assistant reply persisted on the branch thread");
+    assert_eq!(
+        branch_assistant["content_text"],
+        json!(REPLY),
+        "the branch assistant reply persisted on the branch thread"
+    );
+    assert_eq!(
+        branch_assistant["thread_id"].as_i64(),
+        Some(branch_thread),
+        "the branch assistant reply is stored on the branch thread"
+    );
+    assert!(
+        branch_assistant["semantic_parent_uuid"].is_null(),
+        "only the branch root carries the semantic parent, not the assistant reply"
+    );
+
+    // ...and the MAIN thread did NOT gain the branch turn's messages: it still
+    // shows exactly turn 1's user+assistant pair. Before the fix the branch
+    // turn's rows leaked onto main here.
+    let (status, body) = get(&app, &format!("/api/threads/{main_thread}/messages")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "main thread messages fetched: {body:?}"
+    );
+    let main_messages = body["messages"]
+        .as_array()
+        .expect("the main thread's messages response carries a messages array");
+    assert!(
+        main_messages
+            .iter()
+            .all(|m| m["thread_id"].as_i64() == Some(main_thread)),
+        "every message on the main thread stays on main: {main_messages:?}"
+    );
+    assert!(
+        main_messages
+            .iter()
+            .all(|m| m["content_text"] != json!("branch text")),
+        "the branch prompt must NOT appear on the main thread: {main_messages:?}"
+    );
+    assert_eq!(
+        main_messages
+            .iter()
+            .filter(|m| m["role"] == json!("user"))
+            .count(),
+        1,
+        "main keeps only turn 1's single user prompt (the branch prompt did not \
+         leak onto main): {main_messages:?}"
+    );
+    let main_user = main_messages
+        .iter()
+        .find(|m| m["role"] == json!("user"))
+        .expect("turn 1's user prompt is on main");
+    assert_eq!(
+        main_user["content_text"],
+        json!("first message"),
+        "main's only user prompt is turn 1's opening message"
     );
 }
 

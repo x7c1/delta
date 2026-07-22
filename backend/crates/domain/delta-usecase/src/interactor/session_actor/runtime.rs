@@ -617,6 +617,28 @@ impl SessionRuntime {
         self.agent_content_source = Some(source);
     }
 
+    /// Set the per-turn routing context on the session's content accumulator,
+    /// before the turn's frames arrive through the pump.
+    ///
+    /// Forwards to [`AgentContentSource::begin_turn`]: the turn's messages land on
+    /// `thread_id` (the branch child thread for a branch send, `main` otherwise)
+    /// and, for a branch, the root user message is stamped with `semantic_parent`
+    /// — so a Codex branch turn's content follows the same lane the `send` row
+    /// records, instead of every message falling back onto `main`. A no-op when
+    /// the session has no accumulator (not a Codex session), so the Claude path is
+    /// untouched.
+    ///
+    /// [`AgentContentSource::begin_turn`]: crate::agent::AgentContentSource::begin_turn
+    pub fn begin_agent_turn(
+        &mut self,
+        thread_id: ThreadId,
+        semantic_parent: Option<delta_model::MessageUuid>,
+    ) {
+        if let Some(source) = self.agent_content_source.as_mut() {
+            source.begin_turn(thread_id, semantic_parent);
+        }
+    }
+
     /// Fold one neutral [`AgentEvent`] through the session's content accumulator,
     /// returning the canonical content it completed — the messages plus the
     /// ordered [`Effect`]s the persistence pipeline must run. `None` when the
