@@ -1508,11 +1508,15 @@ export function TranscriptPane({
           (block) => block.type === 'tool_use' || block.type === 'tool_result',
         );
         // Tool rows, the harness-injected task-notification card (a collapsed
-        // `<task-notification>` user turn), and meta lines all render as nested
-        // aside cards: they are tightened and left-indented so they read as
-        // nested steps, distinct from prose.
+        // `<task-notification>` user turn), meta lines, and the unknown-command
+        // system notice all render as nested aside cards: they are tightened and
+        // left-indented so they read as nested steps, distinct from prose — the
+        // notice is a system aside, not the agent's reply.
         const isNestedCard =
-          isToolTurn || isTaskNotificationMessage(message) || message.role === 'meta';
+          isToolTurn ||
+          isTaskNotificationMessage(message) ||
+          message.role === 'meta' ||
+          isUnknownCommandNoticeMessage(message);
         const topGap = isNestedCard
           ? 'pt-0.5'
           : message.role === 'user'

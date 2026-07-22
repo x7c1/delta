@@ -717,6 +717,9 @@ describe('TranscriptPane', () => {
       .getByText('Unknown command: /review-pr')
       .closest('[data-testid="message-item"]');
     expect(noticeItem).toHaveAttribute('data-role', 'system');
+    // It reads as a nested system aside, not prose: its block wrapper carries
+    // the same `ml-6` left indent as meta lines and tool rows.
+    expect(noticeItem?.parentElement?.className).toContain('ml-6');
   });
 
   it('left-indents the task-notification card like a tool row, but not ordinary user prose', async () => {
