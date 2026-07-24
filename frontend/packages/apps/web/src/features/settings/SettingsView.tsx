@@ -34,6 +34,7 @@ import {
 import { SYSTEM_PREFERENCE, type ThemePreference } from '../../hooks/useTheme';
 import { THEMES } from '../../themes/registry';
 import { displayPath } from '../../utils/displayPath';
+import { DEFAULT_PROVIDER, PROVIDER_OPTIONS } from '../../providers';
 import { WorkdirPickerBody } from '../composer/WorkdirPickerBody';
 
 /**
@@ -224,8 +225,8 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   // Which provider the new option is being registered for. Claude's flags mean
   // nothing to Codex and vice-versa, so every option belongs to one provider;
   // the session-start picker only offers options matching the session's
-  // provider. Defaults to Claude (the historical default).
-  const [provider, setProvider] = useState<AgentProvider>('claude');
+  // provider. Starts on the app-wide default provider.
+  const [provider, setProvider] = useState<AgentProvider>(DEFAULT_PROVIDER);
 
   const options = launchOptionsQuery.data?.launch_options ?? [];
   // `name` is the only required field; trim so an all-whitespace entry cannot
@@ -255,7 +256,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           setName('');
           setValue('');
           setDefaultEnabled(false);
-          setProvider('claude');
+          setProvider(DEFAULT_PROVIDER);
         },
       },
     );
@@ -286,7 +287,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             className="flex gap-1 rounded border border-border-default bg-surface p-1"
             data-testid="launch-option-provider-selector"
           >
-            {DEFAULT_PROVIDER_OPTIONS.map((option) => {
+            {PROVIDER_OPTIONS.map((option) => {
               const selected = provider === option.value;
               return (
                 <label
@@ -769,20 +770,6 @@ function AppearanceSection() {
 }
 
 /**
- * The AI-agent providers a new session can default to, in display order, with
- * the full product name shown beside the shared {@link ProviderBadge} — matching
- * the new-session provider selector so the two controls read the same way.
- */
-const DEFAULT_PROVIDER_OPTIONS: {
-  value: AgentProvider;
-  label: string;
-  hint: string;
-}[] = [
-  { value: 'claude', label: 'Claude Code', hint: 'Anthropic Claude Code CLI' },
-  { value: 'codex', label: 'Codex', hint: 'OpenAI Codex CLI' },
-];
-
-/**
  * Default provider category content: pick which AI-agent provider a new session
  * starts on. The choice is a persisted preference
  * ({@link useSettingsStore}'s `defaultProvider`) that seeds the new-session
@@ -817,7 +804,7 @@ function DefaultProviderSection() {
         <span id="default-provider-section-heading" className="sr-only">
           Default provider
         </span>
-        {DEFAULT_PROVIDER_OPTIONS.map((option) => {
+        {PROVIDER_OPTIONS.map((option) => {
           const selected = defaultProvider === option.value;
           return (
             <label

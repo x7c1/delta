@@ -1,8 +1,9 @@
 // TypeScript bindings generated from the backend's wire contract (the
 // `delta-wire` crate). Everything under `generated/` is written by
 // `make gen`; the barrel and the small hand-maintained helpers next to it
-// (`content-block.ts`, `send-request.ts`) only narrow the generated types,
-// never restate the wire shapes.
+// (`content-block.ts`, `send-request.ts`) only narrow the generated types
+// and record contract facts ts-rs cannot express (a serde field default) —
+// they never restate the wire shapes.
 
 export type { SessionEvent } from './generated/SessionEvent';
 export { EVENT_KINDS, type SessionEventKind } from './generated/event-kinds';
@@ -76,3 +77,4 @@ export type {
   SendToNewSession,
   SendRequest,
 } from './send-request';
+export { PROVIDER_WIRE_DEFAULT } from './send-request';

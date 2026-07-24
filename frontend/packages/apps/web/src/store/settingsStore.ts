@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { AgentProvider } from '@delta/wire-gen';
+import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from '../providers';
 
 /**
  * The Settings dialog category ids — each one corresponds to a left-rail entry
@@ -67,23 +68,6 @@ const VISUAL_EFFECTS_SETTINGS: readonly VisualEffectsSetting[] = [
   'off',
 ];
 
-/**
- * The valid {@link AgentProvider} values, used by the persistence hydration
- * step to fall back to {@link DEFAULT_PROVIDER} when a foreign value lands in
- * localStorage (a stale build, a typo, a value from another workspace). Kept in
- * sync with the wire `AgentProvider` union by construction: the `satisfies`
- * clause makes TypeScript reject the tuple if it drifts from the union.
- */
-const AGENT_PROVIDERS = ['claude', 'codex'] as const satisfies readonly AgentProvider[];
-
-/**
- * The provider a new session defaults to before the user picks one for a given
- * session. Claude on a fresh install; the new-session provider selector seeds
- * its initial value from the persisted {@link SettingsState.defaultProvider},
- * which starts here.
- */
-export const DEFAULT_PROVIDER: AgentProvider = 'claude';
-
 export interface SettingsState {
   /**
    * Which Settings category the dialog shows in its right pane. Persisted to
@@ -139,6 +123,9 @@ export const useSettingsStore = create<SettingsState>()(
         if (!VISUAL_EFFECTS_SETTINGS.includes(state.visualEffects)) {
           state.visualEffects = DEFAULT_VISUAL_EFFECTS_SETTING;
         }
+        // `AGENT_PROVIDERS` (src/providers.ts) is derived from the exhaustive
+        // provider-metadata record, so a provider added to the wire union can
+        // never be missing here and get silently rejected by this check.
         if (!AGENT_PROVIDERS.includes(state.defaultProvider)) {
           state.defaultProvider = DEFAULT_PROVIDER;
         }
