@@ -58,8 +58,16 @@ test('Settings visual-effects control gates card shadows live without a reload',
 
   // Baseline: no explicit setting yet. The Chromium project resolves `auto`
   // to the rich look, so both cards carry the drop-shadow.
-  expect(await boxShadow(composerCard)).toContain(CARD_SHADOW_COLOR);
-  expect(await boxShadow(sessionCard)).toContain(CARD_SHADOW_COLOR);
+  //
+  // `data-effects` is stamped by a post-paint effect (and the setting hydrates
+  // from persisted state), so a card can be visible for a tick before the rich
+  // look resolves onto it. Gate on the resolved attribute, then poll the
+  // shadow — a single-shot read here raced that resolution and flaked in CI
+  // (empty box-shadow), matching the poll-based assertions used after each
+  // toggle below.
+  await expect.poll(() => readDataEffects(page)).toBe('rich');
+  await expect.poll(() => boxShadow(composerCard)).toContain(CARD_SHADOW_COLOR);
+  await expect.poll(() => boxShadow(sessionCard)).toContain(CARD_SHADOW_COLOR);
 
   // Open Settings → Appearance.
   await page.getByTestId('settings-entry').click();
