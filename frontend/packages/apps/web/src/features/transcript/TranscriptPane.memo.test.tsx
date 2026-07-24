@@ -22,7 +22,7 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useLiveStore } from '../../store/liveStore';
 import { useComposerStore } from '../../store/composerStore';
 import type { MessageItemProps } from './MessageItem';
-import { resetTimelineExpandedForTests } from './ThreadTimelineOverlay';
+import { resetTimelineExpandedForTests } from './useTimelineExpanded';
 import { TranscriptPane } from './TranscriptPane';
 
 // Capture every onSelectQuote reference TranscriptPane hands the message rows.

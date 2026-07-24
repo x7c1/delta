@@ -37,10 +37,8 @@ import { MessageItem } from './MessageItem';
 import { PermissionNoticeCard } from './PermissionNotice';
 import { QuestionCard } from './QuestionCard';
 import { SubagentRunningIndicator } from './SubagentRunningIndicator';
-import {
-  ThreadTimelineOverlay,
-  useTimelineExpanded,
-} from './ThreadTimelineOverlay';
+import { ThreadTimelineOverlay } from './ThreadTimelineOverlay';
+import { useTimelineExpanded } from './useTimelineExpanded';
 import { childThreadsByMessage } from './branches';
 import { buildToolPairing, messageRendersNothing } from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
