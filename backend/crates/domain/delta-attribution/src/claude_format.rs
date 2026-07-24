@@ -70,6 +70,51 @@ pub fn is_local_command_output(trimmed_text: &str) -> bool {
         .any(|prefix| trimmed_text.starts_with(prefix))
 }
 
+/// Normalize a slash-command token to its bare command name: strip a single
+/// leading `/`, then — if a namespace prefix is present — drop everything up to
+/// and including the LAST `:` (so `dev-workflow:` is discarded). The remainder
+/// is returned unchanged when there is no `:`.
+///
+/// Examples: `/dev-workflow:review-pr` -> `review-pr`; `/review-pr` ->
+/// `review-pr`; `review-pr` -> `review-pr`.
+fn bare_command_name(token: &str) -> &str {
+    let without_slash = token.strip_prefix('/').unwrap_or(token);
+    match without_slash.rfind(':') {
+        Some(idx) => &without_slash[idx + 1..],
+        None => without_slash,
+    }
+}
+
+/// Whether a local-command command-name line correlates to a dispatched send,
+/// tolerating the namespace prefix Claude Code adds to the transcript.
+///
+/// When a user types a short command such as `/review-pr`, Delta dispatches the
+/// send with exactly that text, but Claude Code expands the short form to its
+/// fully-qualified namespaced form (e.g. `/dev-workflow:review-pr`) in the
+/// transcript's bare command-name line. A raw `send.text == name_line` equality
+/// therefore never matches, leaving the outstanding send wedged in the
+/// single-outstanding queue and the turn stuck in `AwaitingEcho` forever. So the
+/// correlation must compare BARE command names, not raw text — that way it
+/// matches regardless of which side (send or transcript line) carries the
+/// namespace prefix, i.e. the comparison is symmetric.
+///
+/// Only the FIRST whitespace-delimited token of each side is considered;
+/// trailing args are ignored. This is safe under the single-outstanding-send
+/// rule (there is at most one send to correlate against) and mirrors the
+/// unknown-command notice correlation, which likewise matches on the first
+/// token. Returns `false` when either side has no first token.
+pub fn local_command_name_line_matches_send(send_text: &str, name_line: &str) -> bool {
+    match (
+        send_text.split_whitespace().next(),
+        name_line.split_whitespace().next(),
+    ) {
+        (Some(send_token), Some(line_token)) => {
+            bare_command_name(send_token) == bare_command_name(line_token)
+        }
+        _ => false,
+    }
+}
+
 /// Prefix of the notice Claude Code writes when the user types a slash command
 /// it does not recognize (e.g. `/review-pr` when no such command exists). Claude
 /// records it as a single `type: "system"` / `subtype: "informational"` line
@@ -407,6 +452,52 @@ mod tests {
         assert!(!is_local_command_output("/review-pr"));
         assert!(!is_local_command_output("a normal prompt"));
         assert!(!is_local_command_output(""));
+    }
+
+    #[test]
+    fn bare_command_name_strips_slash_and_namespace_prefix() {
+        assert_eq!(bare_command_name("/dev-workflow:review-pr"), "review-pr");
+        assert_eq!(bare_command_name("/review-pr"), "review-pr");
+        assert_eq!(bare_command_name("review-pr"), "review-pr");
+    }
+
+    #[test]
+    fn local_command_name_line_matches_send_tolerates_namespace() {
+        // The motivating case: Claude expands the short form the user typed
+        // (and thus the dispatched send) to its fully-qualified namespaced form
+        // in the transcript command-name line.
+        assert!(local_command_name_line_matches_send(
+            "/review-pr",
+            "/dev-workflow:review-pr"
+        ));
+        // Identical short-vs-short and full-vs-full both match.
+        assert!(local_command_name_line_matches_send(
+            "/review-pr",
+            "/review-pr"
+        ));
+        assert!(local_command_name_line_matches_send(
+            "/dev-workflow:review-pr",
+            "/dev-workflow:review-pr"
+        ));
+        // Symmetry: a fully-qualified send against a short line matches too.
+        assert!(local_command_name_line_matches_send(
+            "/dev-workflow:review-pr",
+            "/review-pr"
+        ));
+        // Different commands do NOT match even under a shared namespace.
+        assert!(!local_command_name_line_matches_send(
+            "/review-pr",
+            "/dev-workflow:other"
+        ));
+        // Args after the command are ignored (single-outstanding-send rule).
+        assert!(local_command_name_line_matches_send(
+            "/review-pr 123",
+            "/dev-workflow:review-pr"
+        ));
+        // Empty / no-first-token inputs return false.
+        assert!(!local_command_name_line_matches_send("", "/review-pr"));
+        assert!(!local_command_name_line_matches_send("/review-pr", ""));
+        assert!(!local_command_name_line_matches_send("   ", "/review-pr"));
     }
 
     #[test]
