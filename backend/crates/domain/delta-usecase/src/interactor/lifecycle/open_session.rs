@@ -1,7 +1,5 @@
 use std::time::Instant;
 
-use delta_model::AgentProvider;
-
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::{OpenHandle, ResumingSession};
@@ -24,10 +22,10 @@ where
     /// cwd; the port is idempotent), launches `claude --settings <file> --resume
     /// <id>` in the stored cwd, and binds the new pane to the session
     /// immediately. Resuming an already-open session is a no-op (the double-open
-    /// guard). A terminal-less **Codex** session takes a separate branch at the
-    /// top: it has no pane to open, so it resumes over the adapter
-    /// (`thread/resume`) when closed and no-ops when live, leaving the Claude
-    /// pane/`--resume` path below byte-for-byte unchanged.
+    /// guard). A terminal-less **adapter-backed** session (e.g. Codex) takes a
+    /// separate branch at the top: it has no pane to open, so it resumes over
+    /// the adapter (`thread/resume`) when closed and no-ops when live, leaving
+    /// the Claude pane/`--resume` path below byte-for-byte unchanged.
     ///
     /// It does **not** dispatch the first prompt here. `claude --resume` needs a
     /// couple of seconds to replay the transcript before its TUI can accept input
@@ -65,14 +63,17 @@ where
             .await?
             .ok_or_else(|| Error::SessionNotFound(id.as_str().to_owned()))?;
 
-        // Terminal-less (Codex): there is no pane to open. Reconnect the adapter
-        // by resuming its provider thread when the session is closed (its
-        // in-process binding was lost, e.g. across a server restart), and no-op
-        // when it is already live. The Claude pane/`--resume` path below is
-        // untouched — this only branches a structured provider away from it.
-        if session.provider == AgentProvider::Codex {
+        // Terminal-less (adapter-backed, e.g. Codex): there is no pane to open.
+        // The registry predicate — not the provider's identity — decides the
+        // branch, so any provider whose registered factory declares an
+        // adapter-backed launch takes it. Reconnect the adapter by resuming its
+        // provider thread when the session is closed (its in-process binding
+        // was lost, e.g. across a server restart), and no-op when it is already
+        // live. The Claude pane/`--resume` path below is untouched — this only
+        // branches a structured provider away from it.
+        if let Some(factory) = self.adapter_backed_factory(session.provider) {
             if self.state.open_agent().is_none() {
-                self.resume_codex_agent(&session).await?;
+                self.resume_adapter_agent(&factory, &session).await?;
             }
             return Ok(());
         }

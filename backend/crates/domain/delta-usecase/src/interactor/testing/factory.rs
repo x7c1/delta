@@ -80,7 +80,7 @@ pub(crate) fn interactor_with_git_and_gh(
 /// the terminal-less Codex session-creation tests. Everything else is the
 /// default fake set.
 pub(crate) fn interactor_with_codex_factory(factory: Arc<FakeAgentFactory>) -> TestInteractor {
-    interactor().with_codex_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
+    interactor().with_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
 }
 
 /// Build a test interactor with both a specific [`FakeGitWorktree`] and a Codex
@@ -91,8 +91,7 @@ pub(crate) fn interactor_with_git_and_codex_factory(
     git_worktree: FakeGitWorktree,
     factory: Arc<FakeAgentFactory>,
 ) -> TestInteractor {
-    interactor_with_git(git_worktree)
-        .with_codex_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
+    interactor_with_git(git_worktree).with_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
 }
 
 /// An interactor whose tmux dispatch always fails.

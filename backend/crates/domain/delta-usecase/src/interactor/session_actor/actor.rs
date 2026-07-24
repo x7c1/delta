@@ -156,17 +156,27 @@ where
         } => {
             // Provider dispatch lives in composition, never in the core's turn
             // or attribution logic: Claude keeps the tmux + hooks spawn path
-            // byte-for-byte, while a structured provider takes the terminal-less
-            // adapter path. This `match` is the only place the provider is
-            // branched on for launch.
+            // byte-for-byte, while every other provider takes the terminal-less
+            // adapter path, resolving its adapter through the factory registry
+            // (`adapter_backed_factory`). This `match` is the only place the
+            // provider is branched on for launch, and only to split the one
+            // PTY-native provider from the adapter-backed rest — a new
+            // adapter-backed provider lands in the catch-all arm with no change
+            // here.
             let result = match provider {
                 delta_model::AgentProvider::Claude => {
                     ctx.spawn_fresh(first_prompt, workdir, launch_option_ids, worktree)
                         .await
                 }
-                delta_model::AgentProvider::Codex => {
-                    ctx.spawn_codex(first_prompt, workdir, launch_option_ids, worktree)
-                        .await
+                provider => {
+                    ctx.spawn_adapter_session(
+                        provider,
+                        first_prompt,
+                        workdir,
+                        launch_option_ids,
+                        worktree,
+                    )
+                    .await
                 }
             };
             let _ = reply.send(result);

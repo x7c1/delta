@@ -166,10 +166,11 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     let git_worktree = Git::new();
     let gh_cli: Arc<dyn GhCli> = Arc::new(Gh::new());
     let external_opener: Arc<dyn ExternalOpener> = Arc::new(SystemOpener::new());
-    // Held but dormant: the factory carries only Codex launch config, so this
-    // spawns no `codex app-server` process at startup — a machine without Codex
-    // still boots normally. Nothing consults it yet; provider dispatch that
-    // calls `connect()` lands in a later change.
+    // The factory carries only Codex launch config, so this spawns no `codex
+    // app-server` process at startup — a machine without Codex still boots
+    // normally; the spawn is deferred to the first Codex session's `connect()`.
+    // Registered into the interactor's adapter-factory registry below, which is
+    // what dispatches a Codex session onto the terminal-less adapter path.
     // Resolve the Codex launch config once and reuse its binary for both the
     // adapter factory (what a Codex spawn launches) and the availability probe
     // (what `/api/providers` reports), so the two can never diverge.
@@ -194,7 +195,7 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     .with_launch_config(config.launch.clone())
     .with_gh_cli(gh_cli)
     .with_external_opener(external_opener)
-    .with_codex_adapter_factory(codex_adapter_factory)
+    .with_adapter_factory(codex_adapter_factory)
     .with_codex_bin(codex_bin)
     .with_binary_detector(binary_detector))
 }

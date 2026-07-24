@@ -9,7 +9,7 @@ use crate::{SendTarget, WorktreeSpec};
 /// PR tab pre-fills) together with `provider: Codex`, and the Codex launch path
 /// now honors it instead of rejecting the worktree.
 ///
-/// This is the regression the branch fixes — before, `spawn_codex` returned
+/// This is the regression the branch fixes — before, the Codex spawn path returned
 /// `Error::Agent("a git worktree is not supported for a Codex session")` for
 /// any worktree spec, so a Codex + PR-origin start failed outright. The
 /// worktree is just a working directory, so the fix resolves it through the

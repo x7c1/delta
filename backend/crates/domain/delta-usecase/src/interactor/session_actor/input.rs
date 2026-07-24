@@ -54,9 +54,9 @@ pub(in crate::interactor) enum SessionInput {
         /// directory is a git repository.
         worktree: Option<WorktreeSpec>,
         /// The AI-agent backend to launch on. [`AgentProvider::Claude`] takes
-        /// the historical tmux + hooks path (`spawn_fresh`); a structured
-        /// provider such as [`AgentProvider::Codex`] takes the terminal-less
-        /// adapter path (`spawn_codex`).
+        /// the historical tmux + hooks path (`spawn_fresh`); every other
+        /// provider (e.g. [`AgentProvider::Codex`]) takes the terminal-less
+        /// adapter path (`spawn_adapter_session`).
         provider: AgentProvider,
         reply: Reply<FreshSpawn>,
     },

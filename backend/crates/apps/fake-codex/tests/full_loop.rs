@@ -156,7 +156,7 @@ fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (Router, AppS
         "{}",
         "/tmp/delta-codex-full-loop-settings.json",
     )
-    .with_codex_adapter_factory(factory);
+    .with_adapter_factory(factory);
 
     let state = AppState::from_interactor(interactor, "delta-codex-full-loop");
     (router(state.clone()), state)

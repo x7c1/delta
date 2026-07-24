@@ -49,7 +49,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use delta_model::SessionId;
+use delta_model::{AgentProvider, SessionId};
 
 use crate::agent::AgentAdapterFactory;
 use crate::launch_config::LaunchConfig;
@@ -157,22 +157,26 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// non-generic field keeps the interactor's five type parameters
     /// untouched.
     pub(in crate::interactor) external_opener: Arc<dyn ExternalOpener>,
-    /// The factory that lazily builds the Codex [`AgentAdapter`] when a Codex
-    /// session first needs it. Held as a trait object for the same reason as
-    /// [`Self::gh_cli`] — it is not routed through the session actors, so a
-    /// non-generic field keeps the interactor's five type parameters untouched.
+    /// The registry of adapter factories, keyed by the provider each one
+    /// drives ([`AgentAdapterFactory::provider`]). Held as trait objects for
+    /// the same reason as [`Self::gh_cli`] — they are not routed through the
+    /// session actors, so a non-generic field keeps the interactor's five type
+    /// parameters untouched.
     ///
-    /// A factory (rather than a live adapter) is held because standing a Codex
-    /// adapter up spawns `codex app-server` and runs its `initialize`
-    /// handshake; doing that at startup would break a machine without Codex
-    /// installed. The factory carries only launch configuration, so
-    /// construction has no side effects and the spawn is deferred to
-    /// [`AgentAdapterFactory::connect`].
+    /// Factories (rather than live adapters) are held because standing an
+    /// adapter up may spawn a process — Codex spawns `codex app-server` and
+    /// runs its `initialize` handshake; doing that at startup would break a
+    /// machine without the provider installed. A factory carries only launch
+    /// configuration, so construction has no side effects and the spawn is
+    /// deferred to [`AgentAdapterFactory::connect`].
     ///
-    /// `None` when no Codex factory has been wired (the default constructor,
-    /// tests). Currently held but never consulted — provider dispatch is a
-    /// later change.
-    pub(in crate::interactor) codex_adapter_factory: Option<Arc<dyn AgentAdapterFactory>>,
+    /// A provider with a registered factory whose declared launch capability
+    /// is adapter-backed dispatches its sessions over the adapter (see
+    /// [`InteractorCore::adapter_backed_factory`]); every other provider takes
+    /// the native PTY path. Empty when no factory has been wired (the default
+    /// constructor, tests).
+    pub(in crate::interactor) adapter_factories:
+        HashMap<AgentProvider, Arc<dyn AgentAdapterFactory>>,
     /// Resolves whether a provider's launch binary is present on this host, for
     /// the `/api/providers` availability endpoint. Held as a trait object for
     /// the same reason as [`Self::gh_cli`] — it is not routed through the
@@ -294,7 +298,7 @@ where
             repository_origin_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             gh_cli: Arc::new(UnavailableGhCli),
             external_opener: Arc::new(UnwiredExternalOpener),
-            codex_adapter_factory: None,
+            adapter_factories: HashMap::new(),
             binary_detector: Arc::new(UnwiredBinaryDetector),
             codex_bin: DEFAULT_CODEX_COMMAND.to_owned(),
             event_sink: None,
@@ -360,20 +364,23 @@ where
         Self { core, sessions }
     }
 
-    /// Inject the factory that lazily builds the Codex [`AgentAdapter`].
+    /// Register the factory that lazily builds a provider's [`AgentAdapter`],
+    /// keyed by the provider it drives ([`AgentAdapterFactory::provider`]).
     ///
-    /// The default constructor holds no factory (`None`), so a configuration
-    /// that does not drive Codex — the existing call sites, tests — is
-    /// unaffected. Production wiring installs a factory carrying the Codex
-    /// launch configuration; no `codex app-server` process is spawned here (the
-    /// factory only holds config), so a machine without Codex still starts
-    /// normally. Same constraint as [`Self::with_launch_config`]: must run
-    /// before any session actor is spawned.
-    pub fn with_codex_adapter_factory(self, factory: Arc<dyn AgentAdapterFactory>) -> Self {
+    /// The default constructor registers no factory, so a configuration that
+    /// does not drive an adapter-backed provider — the existing call sites,
+    /// tests — is unaffected. Production wiring registers one factory per
+    /// adapter-backed provider (currently Codex), each carrying only its
+    /// launch configuration; no provider process is spawned here, so a machine
+    /// without the provider installed still starts normally. Registering a
+    /// second factory for the same provider replaces the first. Same
+    /// constraint as [`Self::with_launch_config`]: must run before any session
+    /// actor is spawned.
+    pub fn with_adapter_factory(self, factory: Arc<dyn AgentAdapterFactory>) -> Self {
         let Ok(mut core) = Arc::try_unwrap(self.core) else {
-            panic!("with_codex_adapter_factory must be called before any session actor is spawned");
+            panic!("with_adapter_factory must be called before any session actor is spawned");
         };
-        core.codex_adapter_factory = Some(factory);
+        core.adapter_factories.insert(factory.provider(), factory);
         let core = Arc::new(core);
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }
@@ -502,6 +509,29 @@ where
         self.launch.permission_decision_deadline
     }
 
+    /// The registered adapter factory for `provider`, when that provider's
+    /// sessions are adapter-backed — i.e. driven through an
+    /// [`crate::agent::AgentAdapter`] binding (terminal-less) rather than the
+    /// native PTY path.
+    ///
+    /// This is the single provider-dispatch predicate the session paths use:
+    /// `Some` iff a factory is registered for the provider *and* its declared
+    /// launch capability is adapter-backed (see
+    /// [`crate::agent::LaunchCapability::is_adapter_backed`]). `None` sends
+    /// the session down the native pane path (Claude, which never registers a
+    /// factory) — so a new adapter-backed provider is dispatched correctly by
+    /// registering its factory, with no new provider-identity `match` arm in
+    /// the session paths.
+    pub(in crate::interactor) fn adapter_backed_factory(
+        &self,
+        provider: AgentProvider,
+    ) -> Option<Arc<dyn AgentAdapterFactory>> {
+        self.adapter_factories
+            .get(&provider)
+            .filter(|factory| factory.capabilities().is_adapter_backed())
+            .cloned()
+    }
+
     /// Emit an event onto the async event seam, if one is wired.
     ///
     /// The complement of the synchronous return path: where a hook handler or
@@ -515,5 +545,40 @@ where
         if let Some(sink) = &self.event_sink {
             sink.emit(event);
         }
+    }
+}
+
+#[cfg(test)]
+mod interactor_tests {
+    use delta_model::AgentProvider;
+
+    use crate::interactor::testing::{interactor, FakeAgentFactory};
+
+    /// The provider-dispatch predicate resolves through the factory registry:
+    /// a provider with a registered, adapter-backed factory gets it back; a
+    /// provider with no factory (Claude — the native pane path) gets `None`.
+    #[test]
+    fn adapter_backed_factory_resolves_only_registered_providers() {
+        let ix = interactor().with_adapter_factory(FakeAgentFactory::new("thr_1", None));
+
+        let codex = ix.adapter_backed_factory(AgentProvider::Codex);
+        assert!(
+            codex.is_some_and(|f| f.provider() == AgentProvider::Codex),
+            "the registered Codex factory is resolved by its provider key"
+        );
+        assert!(
+            ix.adapter_backed_factory(AgentProvider::Claude).is_none(),
+            "Claude registers no factory, so it stays on the native pane path"
+        );
+    }
+
+    /// An unwired configuration (the default constructor) reports every
+    /// provider as not adapter-backed, so no session is sent down an adapter
+    /// path that cannot connect.
+    #[test]
+    fn adapter_backed_factory_is_none_when_nothing_is_wired() {
+        let ix = interactor();
+        assert!(ix.adapter_backed_factory(AgentProvider::Codex).is_none());
+        assert!(ix.adapter_backed_factory(AgentProvider::Claude).is_none());
     }
 }
