@@ -1,23 +1,30 @@
-//! Terminal-less session creation for a structured provider (Codex).
+//! Terminal-less session creation for an adapter-backed provider (currently
+//! Codex).
 //!
-//! The Codex counterpart of [`spawn_fresh`](super::spawn_fresh): where a Claude
-//! spawn mints a tmux pane, launches `claude`, and waits for the first
-//! `UserPromptSubmit` hook to bind it, a Codex session is created entirely over
-//! the `codex app-server` connection — there is no pane, no hook, and no
-//! transcript file. This is the composition-layer half of provider dispatch;
-//! the actor's `SpawnFresh` handler routes here on [`AgentProvider::Codex`] and
-//! keeps the Claude path byte-for-byte unchanged.
+//! The adapter-backed counterpart of [`spawn_fresh`](super::spawn_fresh): where
+//! a Claude spawn mints a tmux pane, launches `claude`, and waits for the first
+//! `UserPromptSubmit` hook to bind it, an adapter-backed session is created
+//! entirely over the provider's adapter connection (Codex: `codex app-server`)
+//! — there is no pane, no hook, and no transcript file. This is the
+//! composition-layer half of provider dispatch; the actor's `SpawnFresh`
+//! handler routes every non-Claude provider here and keeps the Claude path
+//! byte-for-byte unchanged. Which adapter drives the session is resolved
+//! through the factory registry
+//! ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory)),
+//! so a new adapter-backed provider is a new registered factory, not a new
+//! spawn path.
 //!
 //! ## Turn-start / send-row model (the C3e-2 decision)
 //!
-//! Codex does **not** use Claude's `Dispatch → AwaitingEcho → EchoMatched`
-//! correlation: `turn/start` returns synchronously and is the authoritative
-//! confirmation that the turn started, so there is no echo to match. Routing a
-//! Codex send through the Claude path would leave it `AwaitingEcho` and then
-//! `CancelIfUnmatched` at turn end — cancelling a *successful* send, because
-//! Codex never calls `mark_send_matched` from an echo.
+//! An adapter-backed turn does **not** use Claude's `Dispatch → AwaitingEcho →
+//! EchoMatched` correlation: the adapter's `send` (Codex: `turn/start`) returns
+//! synchronously and is the authoritative confirmation that the turn started,
+//! so there is no echo to match. Routing such a send through the Claude path
+//! would leave it `AwaitingEcho` and then `CancelIfUnmatched` at turn end —
+//! cancelling a *successful* send, because the adapter never calls
+//! `mark_send_matched` from an echo.
 //!
-//! So a Codex turn is tracked **`ExternalPrompt`-style** ([`TurnInput::ExternalPrompt`]
+//! So an adapter-backed turn is tracked **`ExternalPrompt`-style** ([`TurnInput::ExternalPrompt`]
 //! → `InFlight { send_id: None }`): the FSM never references the send id, so a
 //! later `TurnCompleted → Stop` transitions straight to `Idle` and orphans
 //! nothing. The send **row** is completed out of band, at the `turn/start`
@@ -42,11 +49,11 @@ use crate::send_target::WorktreeSpec;
 
 use super::FreshSpawn;
 
-/// How to obtain the provider handle when standing up a Codex agent binding: a
+/// How to obtain the provider handle when standing up an agent binding: a
 /// fresh `thread/start` (launch) or a `thread/resume` reattach to an existing
 /// provider thread. The single difference the shared
-/// [`SessionContext::bind_codex_agent`] branches on.
-enum CodexBind {
+/// [`SessionContext::bind_adapter_agent`] branches on.
+enum AdapterBind {
     /// A fresh spawn: start a new provider thread (`adapter.launch`).
     Launch,
     /// A resume: reattach to the persisted provider thread (`adapter.resume`),
@@ -62,23 +69,24 @@ where
     W: Workspace,
     G: GitWorktree,
 {
-    /// Create a terminal-less Codex session, optionally delivering a first
-    /// prompt as its opening turn.
+    /// Create a terminal-less session for an adapter-backed provider,
+    /// optionally delivering a first prompt as its opening turn.
     ///
-    /// Connects the Codex adapter via the injected factory (which stands up the
-    /// shared `codex app-server` and completes its handshake), starts a thread
-    /// (`launch` → `thread/start`), persists the provider-minted conversation
-    /// ids and activates the eager session row, and represents the running
-    /// session as **open without a pane** in the runtime state. When a first
-    /// prompt is given it starts the opening turn and completes the send row at
-    /// the `turn/start` acknowledgement (see the module docs for the FSM
-    /// decision).
+    /// Connects the provider's adapter via its registered factory (which stands
+    /// up the backing connection — Codex: the shared `codex app-server` and its
+    /// handshake), starts a thread (`launch` → `thread/start`), persists the
+    /// provider-minted conversation ids and activates the eager session row,
+    /// and represents the running session as **open without a pane** in the
+    /// runtime state. When a first prompt is given it starts the opening turn
+    /// and completes the send row at the `turn/start` acknowledgement (see the
+    /// module docs for the FSM decision).
     ///
     /// Rolls the eager session row back on any connect/launch failure, so a
     /// provider that is unavailable leaves no orphan row behind — mirroring
     /// `spawn_fresh`'s rollback on a failed tmux launch.
-    pub(in crate::interactor) async fn spawn_codex(
+    pub(in crate::interactor) async fn spawn_adapter_session(
         &mut self,
+        provider: AgentProvider,
         first_prompt: Option<String>,
         workdir: Option<String>,
         launch_option_ids: Vec<i64>,
@@ -86,23 +94,27 @@ where
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
 
-        // Per-provider launch options are not yet modeled for Codex (they map to
-        // `thread/start` fields, not argv flags), so reject a request carrying
-        // any rather than silently dropping it. A git worktree, by contrast, is
-        // just a working directory: it is resolved below exactly like the Claude
-        // path, so a session started from a PR (which always arrives as a
-        // `UseRemoteBranch` worktree request) lands in that PR's worktree.
+        // Per-provider launch options are not yet modeled for adapter-backed
+        // providers (Codex's map to `thread/start` fields, not argv flags), so
+        // reject a request carrying any rather than silently dropping it. A git
+        // worktree, by contrast, is just a working directory: it is resolved
+        // below exactly like the Claude path, so a session started from a PR
+        // (which always arrives as a `UseRemoteBranch` worktree request) lands
+        // in that PR's worktree.
         if !launch_option_ids.is_empty() {
-            return Err(Error::Agent(
-                "launch options are not supported for a Codex session yet".to_owned(),
-            ));
+            return Err(Error::Agent(format!(
+                "launch options are not supported for a {provider:?} session yet"
+            )));
         }
 
-        // The factory lazily stands up the Codex adapter (spawns `codex
-        // app-server` + handshake). Absent means Codex was never wired into
-        // this interactor — surface it rather than proceeding into a null path.
-        let factory = self.codex_adapter_factory.clone().ok_or_else(|| {
-            Error::Agent("no Codex adapter factory is wired into the interactor".to_owned())
+        // The registered factory lazily stands up the provider's adapter
+        // (Codex: spawns `codex app-server` + handshake). Absent means the
+        // provider was never wired into this interactor — surface it rather
+        // than proceeding into a null path.
+        let factory = self.adapter_backed_factory(provider).ok_or_else(|| {
+            Error::Agent(format!(
+                "no {provider:?} adapter factory is wired into the interactor"
+            ))
         })?;
 
         // Validate a user-selected workdir before anything is created, so an
@@ -121,8 +133,8 @@ where
         // rejected before any side effect), and the effective launch directory
         // becomes the per-session worktree under `$DELTA_WORKTREE_BASE`. A
         // PR-origin start always arrives as a `UseRemoteBranch(<pr-head>)`
-        // worktree request, so this is the path a "start a Codex session from a
-        // PR" click takes. `launch_repo_root` / `repository_display_name` feed
+        // worktree request, so this is the path a "start a session from a PR"
+        // click takes. `launch_repo_root` / `repository_display_name` feed
         // the navigator's repo line (a worktree is always a git working tree),
         // and `branch_at_launch` records the branch the conversation started on
         // — the same columns `spawn_fresh` fills. Without a worktree the cwd is
@@ -162,7 +174,7 @@ where
             }
         };
 
-        // Eagerly insert the `spawning` session row (provider = Codex). The
+        // Eagerly insert the `spawning` session row for this provider. The
         // provider-minted ids are unknown until `launch` returns, so they stay
         // NULL here and are filled — and the row activated — via
         // `set_provider_ids` below. The git snapshot columns carry the worktree
@@ -177,24 +189,30 @@ where
                 launch_repo_root.as_deref(),
                 requested_workdir.as_deref(),
                 repository_display_name.as_deref(),
-                AgentProvider::Codex,
+                provider,
             )
             .await?;
 
         // Stand up the adapter, start the thread (`launch` → `thread/start`),
         // bind it as the session's open agent, seed the content source at 0 (a
-        // fresh Codex session has nothing persisted yet), and spawn the event
-        // pump — the shared connect/bind/pump/content-source sequence a resume
-        // reuses (see [`Self::bind_codex_agent`]). Any failure here spawned a
-        // process / issued an RPC that did not complete, so roll the eager row
-        // back (its main thread goes by cascade) so nothing dangles.
+        // fresh adapter-backed session has nothing persisted yet), and spawn
+        // the event pump — the shared connect/bind/pump/content-source sequence
+        // a resume reuses (see [`Self::bind_adapter_agent`]). Any failure here
+        // spawned a process / issued an RPC that did not complete, so roll the
+        // eager row back (its main thread goes by cascade) so nothing dangles.
         let (adapter, handle) = match self
-            .bind_codex_agent(&factory, CodexBind::Launch, cwd.clone(), main_thread_id, 0)
+            .bind_adapter_agent(
+                &factory,
+                AdapterBind::Launch,
+                cwd.clone(),
+                main_thread_id,
+                0,
+            )
             .await
         {
             Ok(pair) => pair,
             Err(err) => {
-                self.rollback_codex_spawn().await;
+                self.rollback_adapter_spawn().await;
                 return Err(err);
             }
         };
@@ -211,9 +229,10 @@ where
 
         let first_send = match first_prompt {
             // The opening turn is dispatched exactly like every subsequent
-            // Codex turn (see [`Self::dispatch_agent_turn`]): the send row names
-            // the real session + main thread so the REST response carries real
-            // ids, and it is completed at the `turn/start` acknowledgement.
+            // adapter-backed turn (see [`Self::dispatch_agent_turn`]): the send
+            // row names the real session + main thread so the REST response
+            // carries real ids, and it is completed at the `turn/start`
+            // acknowledgement.
             Some(text) => Some(
                 self.dispatch_agent_turn(&adapter, &handle, main_thread_id, None, text, None)
                     .await?,
@@ -223,9 +242,10 @@ where
 
         tracing::info!(
             session_id = %session_id,
+            provider = provider.as_str(),
             provider_session_id = %handle.provider_session_id,
             has_first_prompt = first_send.is_some(),
-            "codex session created (terminal-less); provider ids persisted"
+            "adapter-backed session created (terminal-less); provider ids persisted"
         );
         Ok(FreshSpawn {
             token: None,
@@ -233,12 +253,13 @@ where
         })
     }
 
-    /// Dispatch one turn to a terminal-less agent (Codex) over its bound
-    /// adapter, writing and completing the `send` row the same way the opening
-    /// turn does.
+    /// Dispatch one turn to a terminal-less agent over its bound adapter,
+    /// writing and completing the `send` row the same way the opening turn
+    /// does.
     ///
-    /// This is the single Codex turn-dispatch path, shared by the opening turn
-    /// ([`Self::spawn_codex`]) and every subsequent send (`enqueue_to_thread`):
+    /// This is the single adapter-backed turn-dispatch path, shared by the
+    /// opening turn ([`Self::spawn_adapter_session`]) and every subsequent send
+    /// (`enqueue_to_thread`):
     ///
     /// 1. Write the `send` row against `thread_id`, `dispatched`, carrying the
     ///    `semantic_parent` and `locator_quote` the caller resolved (both `None`
@@ -251,7 +272,8 @@ where
     /// 3. Track the turn **`ExternalPrompt`-style** (`send_id: None`): the FSM
     ///    never references this send id, so a later `TurnCompleted → Stop`
     ///    transitions to `Idle` without cancelling the successful send. See the
-    ///    module docs for why Codex does not use Claude's echo correlation.
+    ///    module docs for why an adapter-backed turn does not use Claude's echo
+    ///    correlation.
     /// 4. Complete the `send` row at the `turn/start` acknowledgement, not by
     ///    echo: mark it matched to the provider's turn id (falling back to the
     ///    provider session id when the ack carried none), so it leaves the
@@ -280,8 +302,8 @@ where
         // source the pump folds through, before `adapter.send` starts the turn —
         // so it is in place before any of the turn's item frames are ingested
         // (the pump posts them to this same actor mailbox, after this dispatch
-        // returns). A Claude/non-Codex session has no content source, so this is a
-        // no-op there.
+        // returns). A Claude (pane-backed) session has no content source, so this
+        // is a no-op there.
         self.state
             .begin_agent_turn(thread_id, semantic_parent.cloned());
         let receipt = match adapter.send(handle, SendRequest { text }).await {
@@ -303,16 +325,17 @@ where
         Ok(send)
     }
 
-    /// Connect the Codex adapter and bind it as this session's open agent — the
-    /// shared connect → (`launch`|`resume`) → bind → content-source → event-pump
-    /// sequence used by BOTH a fresh spawn ([`Self::spawn_codex`]) and a resume
-    /// ([`Self::resume_codex_agent`]).
+    /// Connect the provider's adapter and bind it as this session's open agent
+    /// — the shared connect → (`launch`|`resume`) → bind → content-source →
+    /// event-pump sequence used by BOTH a fresh spawn
+    /// ([`Self::spawn_adapter_session`]) and a resume
+    /// ([`Self::resume_adapter_agent`]).
     ///
     /// The only two things that differ between the callers are passed in:
     ///
-    /// - `bind` selects the provider handle — [`CodexBind::Launch`] starts a new
-    ///   thread, [`CodexBind::Resume`] reattaches to the persisted one (no new
-    ///   thread is minted);
+    /// - `bind` selects the provider handle — [`AdapterBind::Launch`] starts a
+    ///   new thread, [`AdapterBind::Resume`] reattaches to the persisted one (no
+    ///   new thread is minted);
     /// - `seed_seq` is where the content accumulator begins numbering — `0` for a
     ///   fresh session, the session's persisted `MAX(seq) + 1` on a resume so
     ///   replayed/continued frames extend the existing history instead of
@@ -329,10 +352,10 @@ where
     /// Returns the live adapter + handle now bound. It performs no rollback: a
     /// fresh spawn deletes its eager row on failure, while a resume leaves the
     /// already-persisted row untouched — so the caller owns that decision.
-    async fn bind_codex_agent(
+    async fn bind_adapter_agent(
         &mut self,
         factory: &Arc<dyn AgentAdapterFactory>,
-        bind: CodexBind,
+        bind: AdapterBind,
         cwd: String,
         main_thread_id: ThreadId,
         seed_seq: i64,
@@ -340,7 +363,7 @@ where
         let session_id = self.id.clone();
         let adapter = factory.connect().await?;
         let handle = match bind {
-            CodexBind::Launch => {
+            AdapterBind::Launch => {
                 adapter
                     .launch(LaunchRequest {
                         session_id: session_id.as_str().to_owned(),
@@ -353,7 +376,7 @@ where
                     })
                     .await?
             }
-            CodexBind::Resume {
+            AdapterBind::Resume {
                 provider_session_id,
             } => {
                 adapter
@@ -382,10 +405,11 @@ where
             seed_seq,
         ));
 
-        // Spawn the event pump. Codex frames arrive after the send that started
-        // the work has already returned to the browser — exactly why they reach
-        // the browser through the async seam rather than a synchronous return.
-        crate::interactor::agent_event::spawn_codex_event_pump(
+        // Spawn the event pump. Adapter frames arrive after the send that
+        // started the work has already returned to the browser — exactly why
+        // they reach the browser through the async seam rather than a
+        // synchronous return.
+        crate::interactor::agent_event::spawn_agent_event_pump(
             self.self_sender.clone(),
             adapter.events(&handle),
         );
@@ -393,45 +417,47 @@ where
         Ok((adapter, handle))
     }
 
-    /// Reconnect a **closed** Codex session by resuming its provider thread, so a
-    /// send that arrives after the in-process binding was lost (e.g. across a
-    /// server restart) can dispatch over the adapter instead of falling into
-    /// Claude's `claude --resume` path (which a terminal-less session cannot
-    /// take — it has no pane and no transcript).
+    /// Reconnect a **closed** adapter-backed session by resuming its provider
+    /// thread, so a send that arrives after the in-process binding was lost
+    /// (e.g. across a server restart) can dispatch over the adapter instead of
+    /// falling into Claude's `claude --resume` path (which a terminal-less
+    /// session cannot take — it has no pane and no transcript).
     ///
-    /// This is the Codex mirror of a fresh spawn: it runs the same
-    /// [`Self::bind_codex_agent`] sequence, but with `adapter.resume` against the
-    /// session's **persisted** provider id (reattaching to the same thread) and
-    /// the content source **seeded at the session's persisted message count** —
-    /// which, for a single-thread Codex session whose seqs are minted densely
-    /// from 0, is exactly `MAX(seq) + 1`. Seeding at 0 (as a fresh spawn does)
-    /// would renumber/duplicate the existing history.
+    /// This is the adapter-backed mirror of a fresh spawn: it runs the same
+    /// [`Self::bind_adapter_agent`] sequence, but with `adapter.resume` against
+    /// the session's **persisted** provider id (reattaching to the same thread)
+    /// and the content source **seeded at the session's persisted message
+    /// count** — which, for a single-thread adapter-backed session whose seqs
+    /// are minted densely from 0, is exactly `MAX(seq) + 1`. Seeding at 0 (as a
+    /// fresh spawn does) would renumber/duplicate the existing history.
     ///
+    /// The caller resolves `factory` through the registry
+    /// ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory))
+    /// — the same predicate that decided the session is adapter-backed at all.
     /// The persisted provider ids and session row are the source of truth that
     /// survives the restart; on failure the row is left as-is (unlike a fresh
     /// spawn there is nothing eager to roll back).
-    pub(in crate::interactor) async fn resume_codex_agent(
+    pub(in crate::interactor) async fn resume_adapter_agent(
         &mut self,
+        factory: &Arc<dyn AgentAdapterFactory>,
         session: &Session,
     ) -> Result<()> {
-        let factory = self.codex_adapter_factory.clone().ok_or_else(|| {
-            Error::Agent("no Codex adapter factory is wired into the interactor".to_owned())
-        })?;
         let provider_session_id = session.provider_session_id.clone().ok_or_else(|| {
             Error::Agent(format!(
-                "Codex session `{}` has no persisted provider id to resume",
-                session.id
+                "{:?} session `{}` has no persisted provider id to resume",
+                session.provider, session.id
             ))
         })?;
         let main_thread_id = self.store.main_thread_id(self.id).await?;
-        // The store's current message count is the next `seq` to mint: a Codex
-        // session lands every message on its main thread with seqs minted densely
-        // from 0, so `message_count == MAX(seq) + 1`. Continuing from here is what
-        // keeps resumed history from being renumbered or duplicated.
+        // The store's current message count is the next `seq` to mint: an
+        // adapter-backed session lands every message on its main thread with
+        // seqs minted densely from 0, so `message_count == MAX(seq) + 1`.
+        // Continuing from here is what keeps resumed history from being
+        // renumbered or duplicated.
         let seed_seq = self.store.message_count(self.id).await? as i64;
-        self.bind_codex_agent(
-            &factory,
-            CodexBind::Resume {
+        self.bind_adapter_agent(
+            factory,
+            AdapterBind::Resume {
                 provider_session_id,
             },
             session.cwd.clone(),
@@ -442,15 +468,15 @@ where
         Ok(())
     }
 
-    /// Roll back the eagerly-inserted Codex session row after a connect/launch
-    /// failure. Best-effort: a delete failure is logged, not surfaced, so the
-    /// original launch error is what the caller sees.
-    async fn rollback_codex_spawn(&mut self) {
+    /// Roll back the eagerly-inserted adapter-backed session row after a
+    /// connect/launch failure. Best-effort: a delete failure is logged, not
+    /// surfaced, so the original launch error is what the caller sees.
+    async fn rollback_adapter_spawn(&mut self) {
         if let Err(err) = self.store.delete_session(self.id).await {
             tracing::error!(
                 session_id = %self.id,
                 error = %err,
-                "failed to roll back the eager Codex session row after a launch failure"
+                "failed to roll back the eager adapter-backed session row after a launch failure"
             );
         }
     }

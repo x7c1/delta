@@ -8,7 +8,7 @@ mod dispatch_ready_resumes;
 mod mint_free_token;
 mod open_session;
 mod reap_stale_spawns;
-mod spawn_codex;
+mod spawn_adapter_session;
 mod spawn_fresh;
 mod workdir_for;
 
