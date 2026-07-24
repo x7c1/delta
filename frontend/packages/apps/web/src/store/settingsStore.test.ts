@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PROVIDER,
   DEFAULT_SETTINGS_CATEGORY,
   DEFAULT_VISUAL_EFFECTS_SETTING,
   SETTINGS_STORAGE_KEY,
   useSettingsStore,
 } from './settingsStore';
+import { DEFAULT_PROVIDER } from '../providers';
 
 describe('settingsStore', () => {
   beforeEach(() => {

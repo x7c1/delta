@@ -62,6 +62,17 @@ export interface SendToNewSession {
 export type SendRequest = SendToThread | SendToNewSession;
 
 /**
+ * The provider the server assumes when a new-session send omits `provider`
+ * (see {@link SendToNewSession.provider}): the backend's serde default on
+ * `CreateSendRequest`. A caller that wants a send on this provider to stay
+ * byte-for-byte identical to a historical (pre-provider) send compares
+ * against this constant and omits the field on a match. This is a fixed wire
+ * contract, not a UI preference — the app-level default provider lives in
+ * the web app and is free to drift from it.
+ */
+export const PROVIDER_WIRE_DEFAULT: AgentProvider = 'claude';
+
+/**
  * Compile-time guard: every {@link SendRequest} form must stay assignable to
  * the generated wire shape. If the Rust contract changes (`make gen`), this
  * conditional type becomes `never` and the exported assertion below fails to

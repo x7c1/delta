@@ -1,6 +1,10 @@
 import { useCallback, useRef, type FormEvent } from 'react';
 import type { ThreadId } from '@delta/model';
-import type { SendRequest, Thread } from '@delta/wire-gen';
+import {
+  PROVIDER_WIRE_DEFAULT,
+  type SendRequest,
+  type Thread,
+} from '@delta/wire-gen';
 import { Button } from '@delta/ui-kit';
 import {
   NEW_SESSION_DRAFT_KEY,
@@ -160,10 +164,11 @@ export function Composer({ mode }: ComposerProps) {
           newSessionWorktreeStartPoint.kind !== 'pending_remote_branch'
             ? { worktree: { start_point: newSessionWorktreeStartPoint } }
             : {}),
-          // Attach the provider only when it is not the Claude default: the
-          // backend defaults an omitted `provider` to Claude, so omitting it
-          // keeps a Claude send byte-for-byte identical to today's.
-          ...(newSessionProvider !== 'claude'
+          // Attach the provider only when it differs from the wire omit
+          // default: the backend resolves an omitted `provider` to
+          // `PROVIDER_WIRE_DEFAULT`, so omitting it keeps a send on that
+          // provider byte-for-byte identical to a pre-provider send.
+          ...(newSessionProvider !== PROVIDER_WIRE_DEFAULT
             ? { provider: newSessionProvider }
             : {}),
         };

@@ -5,17 +5,7 @@ import { useProvidersQuery } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
 import { useSettingsStore } from '../../store/settingsStore';
-
-/**
- * The AI-agent providers a new session can launch on, in display order, with
- * the full product name shown beside the shared {@link ProviderBadge}. The
- * badge already carries the accent hue and the accessible name; the label here
- * spells the name out so the segmented control reads at a glance.
- */
-const PROVIDER_OPTIONS: { value: AgentProvider; label: string }[] = [
-  { value: 'claude', label: 'Claude Code' },
-  { value: 'codex', label: 'Codex' },
-];
+import { PROVIDER_OPTIONS } from '../../providers';
 
 /**
  * The top-level axis of the new-session form: which AI-agent provider the next

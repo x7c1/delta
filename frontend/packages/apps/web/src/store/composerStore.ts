@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { MessageUuid, ThreadId } from '@delta/model';
 import type { AgentProvider, WorktreeStartPoint } from '@delta/wire-gen';
+import { DEFAULT_PROVIDER } from '../providers';
 
 /**
  * Stable DRAFT key for the new-session composer state, which has no real
@@ -203,12 +204,13 @@ const NEW_SESSION_TABS: readonly NewSessionTab[] = ['pr', 'repository', 'directo
 export const DEFAULT_NEW_SESSION_TAB: NewSessionTab = 'repository';
 
 /**
- * The provider a fresh new-session compose starts on, and the value it resets
- * to when the new-session state is left. Claude for this slice; a later slice
- * will seed it from a persisted default-provider setting. Kept as a single
- * named constant so that swap has exactly one place to change.
+ * The provider a fresh new-session compose starts on before the persisted
+ * default-provider setting seeds it, and the value it resets to when the
+ * new-session state is left. Aliases the app-wide {@link DEFAULT_PROVIDER}
+ * so the pre-seed placeholder can never drift from the fresh-install default
+ * the selector seeds it with.
  */
-export const DEFAULT_NEW_SESSION_PROVIDER: AgentProvider = 'claude';
+export const DEFAULT_NEW_SESSION_PROVIDER: AgentProvider = DEFAULT_PROVIDER;
 
 /**
  * Selection state for the worktree start-point: the wire union plus a
