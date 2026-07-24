@@ -36,7 +36,7 @@ import { findAllQuoteRanges } from './branchHighlight';
 import {
   TIMELINE_EXPANDED_SUBKEY,
   resetTimelineExpandedForTests,
-} from './ThreadTimelineOverlay';
+} from './useTimelineExpanded';
 import { sessionScopedKey } from '../../store/sessionScopedStorage';
 
 /**
