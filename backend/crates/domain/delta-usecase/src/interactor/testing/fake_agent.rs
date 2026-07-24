@@ -89,6 +89,23 @@ impl FakeAgentAdapter {
     }
 }
 
+/// The Codex-shaped capability profile both the fake adapter and the fake
+/// factory report — one declaration, mirroring how the real gateway's adapter
+/// and factory read one `CODEX_CAPABILITIES` const.
+const FAKE_AGENT_CAPABILITIES: AgentCapabilities = AgentCapabilities {
+    launch: LaunchCapability::JsonRpcAppServer,
+    session_identity: SessionIdentityCapability::ProviderReturnsId,
+    resume: ResumeCapability::Supported,
+    events: EventCapability::StructuredTurnEvents,
+    transcript: TranscriptCapability::EventStreamOnly,
+    permission: PermissionCapability::AdapterDecision,
+    context_injection: ContextInjectionCapability::HiddenPerTurn,
+    interrupt: InterruptCapability::Rpc,
+    terminal: TerminalCapability::NoTerminal,
+    fork: ForkCapability::None,
+    steer: SteerCapability::None,
+};
+
 #[async_trait]
 impl AgentAdapter for FakeAgentAdapter {
     fn provider(&self) -> AgentProvider {
@@ -96,19 +113,7 @@ impl AgentAdapter for FakeAgentAdapter {
     }
 
     fn capabilities(&self) -> AgentCapabilities {
-        AgentCapabilities {
-            launch: LaunchCapability::JsonRpcAppServer,
-            session_identity: SessionIdentityCapability::ProviderReturnsId,
-            resume: ResumeCapability::Supported,
-            events: EventCapability::StructuredTurnEvents,
-            transcript: TranscriptCapability::EventStreamOnly,
-            permission: PermissionCapability::AdapterDecision,
-            context_injection: ContextInjectionCapability::HiddenPerTurn,
-            interrupt: InterruptCapability::Rpc,
-            terminal: TerminalCapability::NoTerminal,
-            fork: ForkCapability::None,
-            steer: SteerCapability::None,
-        }
+        FAKE_AGENT_CAPABILITIES
     }
 
     async fn launch(&self, req: LaunchRequest) -> Result<AgentSessionHandle> {
@@ -365,6 +370,10 @@ impl FakeAgentFactory {
 impl AgentAdapterFactory for FakeAgentFactory {
     fn provider(&self) -> AgentProvider {
         AgentProvider::Codex
+    }
+
+    fn capabilities(&self) -> AgentCapabilities {
+        FAKE_AGENT_CAPABILITIES
     }
 
     async fn connect(&self) -> Result<Arc<dyn AgentAdapter>> {

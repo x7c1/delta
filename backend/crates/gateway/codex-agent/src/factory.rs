@@ -13,11 +13,11 @@ use async_trait::async_trait;
 use serde_json::json;
 
 use delta_usecase::{
-    AgentAdapter, AgentAdapterFactory, AgentProvider, Error as UsecaseError,
+    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentProvider, Error as UsecaseError,
     Result as UsecaseResult,
 };
 
-use crate::{AppServerConnection, CodexAppServerAdapter, CodexLaunchConfig};
+use crate::{AppServerConnection, CodexAppServerAdapter, CodexLaunchConfig, CODEX_CAPABILITIES};
 
 /// Builds the Codex [`AgentAdapter`] on demand from a held launch config.
 #[derive(Debug, Clone)]
@@ -38,6 +38,12 @@ impl CodexAdapterFactory {
 impl AgentAdapterFactory for CodexAdapterFactory {
     fn provider(&self) -> AgentProvider {
         AgentProvider::Codex
+    }
+
+    fn capabilities(&self) -> AgentCapabilities {
+        // The same const the built adapter's `capabilities()` returns, so the
+        // pre-connect profile can never drift from a running adapter's.
+        CODEX_CAPABILITIES
     }
 
     async fn connect(&self) -> UsecaseResult<Arc<dyn AgentAdapter>> {

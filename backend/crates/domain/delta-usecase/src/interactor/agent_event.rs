@@ -5,7 +5,7 @@
 //! A push-based provider surfaces its turn/content frames *after* the
 //! `enqueue`/spawn call that started the work has already returned, so there is
 //! no synchronous `Vec<SessionEvent>` left to fold them into. The pump
-//! ([`spawn_codex_event_pump`]) drains the adapter's `events()` stream on a
+//! ([`spawn_agent_event_pump`]) drains the adapter's `events()` stream on a
 //! background task and posts each event back to the *same* actor as a
 //! [`SessionInput::IngestAgentEvent`]; this handler runs there, in mailbox
 //! order, so content persistence and the turn machine mutate in event-arrival
@@ -283,7 +283,7 @@ where
     }
 }
 
-/// Spawn the event pump for a terminal-less agent session (Codex).
+/// Spawn the event pump for a terminal-less (adapter-backed) agent session.
 ///
 /// Drains the adapter's `events()` stream on a background task and posts each
 /// event back to the owning actor as a [`SessionInput::IngestAgentEvent`], so
@@ -293,7 +293,7 @@ where
 /// shutting down) the upgrade fails and the pump exits. It also exits when the
 /// adapter closes the session's stream (the sender end is dropped), which is
 /// what stops it on a normal session close.
-pub(in crate::interactor) fn spawn_codex_event_pump(
+pub(in crate::interactor) fn spawn_agent_event_pump(
     self_sender: mpsc::WeakUnboundedSender<SessionInput>,
     mut stream: AgentEventStream,
 ) {

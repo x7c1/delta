@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::agent::{AgentAdapter, AgentProvider};
+use crate::agent::{AgentAdapter, AgentCapabilities, AgentProvider};
 use crate::error::Result;
 
 /// Builds a live [`AgentAdapter`] on demand, deferring any process spawn or
@@ -30,6 +30,15 @@ use crate::error::Result;
 pub trait AgentAdapterFactory: Send + Sync {
     /// Which provider the built adapter drives.
     fn provider(&self) -> AgentProvider;
+
+    /// The provider's static capability profile, resolved *without* connecting.
+    ///
+    /// Returns the same profile the built adapter's
+    /// [`AgentAdapter::capabilities`] reports (both read one declaration in the
+    /// gateway layer), so dispatch decisions made before [`Self::connect`] —
+    /// notably whether a session is adapter-backed at all — can never drift
+    /// from what a running adapter would say. No process is spawned here.
+    fn capabilities(&self) -> AgentCapabilities;
 
     /// Stand up the backing connection and return a live adapter.
     ///

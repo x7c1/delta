@@ -15,6 +15,24 @@ pub enum LaunchCapability {
     JsonRpcAppServer,
 }
 
+impl LaunchCapability {
+    /// Whether a provider with this launch capability runs its sessions through
+    /// an [`AgentAdapter`] binding — terminal-less, no tmux pane, no hooks, no
+    /// transcript file — rather than the native PTY path (Claude's tmux pane +
+    /// HTTP hooks + JSONL transcript tail).
+    ///
+    /// This is the single dispatch predicate the session paths branch on:
+    /// [`PtyCommand`](Self::PtyCommand) is the native path, every other launch
+    /// capability is adapter-backed. A new structured provider therefore takes
+    /// the adapter path by declaring its (non-PTY) launch capability, with no
+    /// new `match` arm in the core.
+    ///
+    /// [`AgentAdapter`]: super::AgentAdapter
+    pub fn is_adapter_backed(self) -> bool {
+        !matches!(self, LaunchCapability::PtyCommand)
+    }
+}
+
 /// Who assigns the provider's session identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionIdentityCapability {
@@ -141,4 +159,53 @@ pub struct AgentCapabilities {
     pub fork: ForkCapability,
     /// Unused in v1 (always [`SteerCapability::None`]); carried for the future.
     pub steer: SteerCapability,
+}
+
+impl AgentCapabilities {
+    /// Whether this provider's sessions are adapter-backed (terminal-less)
+    /// rather than PTY-native. Forwards to
+    /// [`LaunchCapability::is_adapter_backed`] — the launch capability is what
+    /// determines which session paths (spawn, resume, dispatch) apply.
+    pub fn is_adapter_backed(&self) -> bool {
+        self.launch.is_adapter_backed()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The dispatch predicate: a PTY-launched provider (Claude) is native,
+    /// every other launch capability is adapter-backed. This is the single bit
+    /// the session paths key provider dispatch on, so pin both sides.
+    #[test]
+    fn pty_command_is_the_only_native_launch_capability() {
+        assert!(!LaunchCapability::PtyCommand.is_adapter_backed());
+        assert!(LaunchCapability::JsonRpcAppServer.is_adapter_backed());
+    }
+
+    /// The profile-level predicate forwards to the launch capability, ignoring
+    /// every other field — two profiles differing only in `launch` disagree.
+    #[test]
+    fn profile_predicate_follows_the_launch_capability() {
+        let base = AgentCapabilities {
+            launch: LaunchCapability::PtyCommand,
+            session_identity: SessionIdentityCapability::DeltaCanSetId,
+            resume: ResumeCapability::Supported,
+            events: EventCapability::HookAndTranscript,
+            transcript: TranscriptCapability::JsonlFile,
+            permission: PermissionCapability::HookDecision,
+            context_injection: ContextInjectionCapability::HiddenPerTurn,
+            interrupt: InterruptCapability::PaneKeystroke,
+            terminal: TerminalCapability::AttachablePty,
+            fork: ForkCapability::None,
+            steer: SteerCapability::None,
+        };
+        assert!(!base.is_adapter_backed());
+        let adapter_backed = AgentCapabilities {
+            launch: LaunchCapability::JsonRpcAppServer,
+            ..base
+        };
+        assert!(adapter_backed.is_adapter_backed());
+    }
 }

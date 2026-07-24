@@ -453,8 +453,8 @@ where
 
     /// Build (or reuse) the git worktree for an opt-in worktree request and
     /// return its path — the effective launch directory. Shared by the Claude
-    /// ([`Self::spawn_fresh`]) and Codex
-    /// ([`spawn_codex`](super::super::session_actor::actor::SessionContext::spawn_codex))
+    /// ([`Self::spawn_fresh`]) and adapter-backed
+    /// ([`spawn_adapter_session`](super::super::session_actor::actor::SessionContext::spawn_adapter_session))
     /// launch paths, so a session started from a PR (which always arrives as a
     /// [`WorktreeStartPoint::UseRemoteBranch`] request) lands in the same
     /// worktree regardless of the chosen provider.
