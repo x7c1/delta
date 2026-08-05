@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0805-1200-feat-provider-icon-session-meta
 created_at: 2026-08-05T12:00:41Z
-updated_at: 2026-08-06T01:20:00Z
+updated_at: 2026-08-06T02:05:00Z
 ---
 
 # feat(web): replace the CL/CX provider badge with hue-based provider markers
@@ -91,7 +91,7 @@ Frontend-only; no wire or backend change of any kind.
       provider's hue; the two hues are distinguishable at a glance on
       light, dark, and sepia themes, and hover still gives the usual
       interactive feedback.
-- [ ] Settings' default-provider picker, the launch-option form and rows,
+- [x] Settings' default-provider picker, the launch-option form and rows,
       and the new-session provider selector show the product name written
       in the provider hue, with no dot-like glyph that could be mistaken
       for the session list's open/closed status dot.
