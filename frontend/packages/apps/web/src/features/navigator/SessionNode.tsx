@@ -73,8 +73,8 @@ function basename(path: string): string {
  * short `repository_display_name` label, e.g. `org/repo`, and falling back to
  * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
  * `org/repo` keeps its repo name and a long local path keeps its meaningful
- * tail; omitted entirely when both yield no name) led by the monochrome
- * provider mark, with the last-activity time on the right) plus the kebab
+ * tail; omitted entirely when both yield no name) and, on the right, the
+ * last-activity time closed by the monochrome provider mark) plus the kebab
  * actions menu in a fixed-width slot at the right end. The menu always offers
  * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
  * feed `claude --resume`, does not require the session to be running) and
@@ -356,31 +356,20 @@ export const SessionNode = memo(function SessionNode({
                 </span>
               )}
             </span>
-            {/* Line 2: the provider mark leading the launch-time repository
-                identity on the left, and the last-activity time on the right.
+            {/* Line 2: the launch-time repository identity on the left, and
+                on the right the last-activity time closed by the provider
+                mark at the line's end.
                 Both the primary (the backend's short `repository_display_name`)
                 and the fallback (cwd basename) paths RTL-truncate ("left-end
                 truncate") so the meaningful tail is preserved — `org/repo`
                 clips the org and keeps the repo, a long local path keeps
                 `…/projects/delta`. The repo span is omitted entirely when
                 neither yields a usable label. */}
-            {/* Spacing is per-pair margins, not a uniform flex gap: the mark
-                couples tightly (4px) to the repo label it annotates, while
-                the time keeps a wider 8px minimum from the truncating
-                label. */}
+            {/* Spacing is per-pair paddings, not a uniform flex gap: the mark
+                couples tightly (4px) to the time beside it, while the time
+                keeps a wider 8px minimum from the truncating repo label —
+                the two pairs want different distances. */}
             <span className="flex items-baseline text-caption text-fg-subtle">
-              {/* Which AI-agent provider this session runs on (Claude /
-                  Codex). Leads the meta line, marking the repo identity next
-                  to it; kept on the quieter line 2 so that line 1's width
-                  stays with the branch name. Sized down from the caption so
-                  the mark reads as a prefix annotation, not a character of
-                  the label. */}
-              <span className="mr-1" data-testid="session-provider-icon">
-                <ProviderIcon
-                  provider={item.session.provider}
-                  className="text-[0.85em]"
-                />
-              </span>
               {repoLabel && (
                 <span
                   className="min-w-0 flex-1 truncate text-left [direction:rtl]"
@@ -390,14 +379,32 @@ export const SessionNode = memo(function SessionNode({
                   {repoLabel}
                 </span>
               )}
-              {lastActivity && (
-                <span
-                  className="ml-auto shrink-0 pl-2 tabular-nums [font-stretch:condensed]"
-                  data-testid="session-last-activity"
-                >
-                  {lastActivity}
+              {/* The right-hand group: time + provider mark. Grouped so one
+                  `ml-auto` pins the pair to the right edge whether or not
+                  the repo label is there to push against. */}
+              <span className="ml-auto flex shrink-0 items-baseline pl-2">
+                {lastActivity && (
+                  <span
+                    className="tabular-nums [font-stretch:condensed]"
+                    data-testid="session-last-activity"
+                  >
+                    {lastActivity}
+                  </span>
+                )}
+                {/* Which AI-agent provider this session runs on (Claude /
+                    Codex). Anchors the far right end of the quieter line 2 —
+                    away from line 1's status dot, which it would visually
+                    column with at the line start — so line 1's width stays
+                    with the branch name. Sized down from the caption so the
+                    mark reads as an annotation, not a character of the
+                    text. */}
+                <span className="pl-1" data-testid="session-provider-icon">
+                  <ProviderIcon
+                    provider={item.session.provider}
+                    className="text-[0.85em]"
+                  />
                 </span>
-              )}
+              </span>
             </span>
           </button>
           {/* Fixed-width slot, vertically centered against the two-line block. */}

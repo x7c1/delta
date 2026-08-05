@@ -370,10 +370,11 @@ describe('SessionNode provider icon', () => {
     expect(icon.parentElement).toContainElement(
       screen.getByTestId('session-last-activity'),
     );
-    // The mark leads the line: it comes before the repo label in DOM order.
+    // The mark closes the line: it comes after the time in DOM order.
     expect(
-      icon.compareDocumentPosition(screen.getByTestId('session-repo')) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+      screen
+        .getByTestId('session-last-activity')
+        .compareDocumentPosition(icon) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     // The branch line (line 1) carries no provider marker of its own.
     const branchLine = screen.getByTestId('session-branch').parentElement;

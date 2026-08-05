@@ -62,13 +62,14 @@ it as a small monochrome brand icon instead of a colored pill:
   `title` and `aria-label` with the full product name ("Claude Code" /
   "Codex") exactly as `ProviderBadge` does today, with the glyph itself
   `aria-hidden`.
-- **Placement**: leading the meta line, to the left of the repo label, with
-  the last-activity time alone on the right (placement revised from
-  "before the time" after on-hardware review); `shrink-0`, sized slightly
-  below the caption (`0.85em`, revised down from `1em` in the same review)
-  with a tight 4px gap to the repo label it annotates, inheriting
-  `text-fg-subtle`, nudged down `0.125em` so the baseline-aligned square
-  sits on the text's optical middle. Line 1 drops the badge entirely: StatusDot, branch name,
+- **Placement**: at the far right end of the meta line, after the
+  last-activity time (placement iterated during on-hardware review:
+  before-the-time → leading the line → far right, the leading position
+  having visually columned with line 1's status dot); `shrink-0`, sized
+  slightly below the caption (`0.85em`, revised down from `1em` in the same
+  review) with a tight 4px gap to the time and an 8px minimum from the
+  truncating repo label, inheriting `text-fg-subtle`, nudged down `0.125em`
+  so the baseline-aligned square sits on the text's optical middle. Line 1 drops the badge entirely: StatusDot, branch name,
   spinner/unread/permission markers only. Move the `data-testid` to the new
   element as `session-provider-icon` (the old `session-provider-badge`
   testid disappears with the badge).
@@ -111,7 +112,7 @@ Frontend-only; no wire or backend change of any kind.
 ### Manual / on-hardware (verified by a human before merge)
 
 - [ ] In the running app, session cards read: line 1 = status dot + branch
-      (+ activity markers), line 2 = icon + repo … time; the icon is quiet
+      (+ activity markers), line 2 = repo … time + icon; the icon is quiet
       (subtle foreground tone, no colored chip), vertically aligned with the
       neighboring text, and the two marks are distinguishable at a glance.
 - [ ] The icon tooltip shows the full product name, and the glyph renders
