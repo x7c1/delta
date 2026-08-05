@@ -163,13 +163,14 @@
   --delta-color-warning: 217 119 6;
   --delta-color-info: 2 132 199;
   --delta-color-success: 5 150 105;
-  /* Provider accent colors — one hue per AI-agent provider, used by the
-   * ProviderBadge monogram chip (see ui-kit) to reinforce which provider the
-   * chip names. Claude reads as a burnt orange, Codex as a green; the
-   * two-letter monogram distinguishes them on its own, so these are a
-   * redundant reinforcement rather than the sole signal. The chip pairs the
-   * base token as its foreground with a low-alpha wash of the same token as
-   * its background, so each value must read as text on the theme's surface. */
+  /* Provider accent colors — one hue per AI-agent provider: Claude reads as
+   * a burnt orange, Codex as a green. The hue is the shared provider
+   * vocabulary across the UI: the session card's kebab trigger rests in it
+   * (as text color) and ProviderDot fills with it (as background), each
+   * paired with the full product name in its accessible name so the hue is
+   * a reinforcement rather than the sole signal. Used both as text on the
+   * theme's surface and as a small filled dot, so each value must hold
+   * contrast in both roles. */
   --delta-color-provider-claude: 194 84 30;
   --delta-color-provider-codex: 21 128 61;
   /* scrim: dark backdrop for modals/popovers; expected to be used with a

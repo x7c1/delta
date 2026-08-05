@@ -323,7 +323,7 @@ describe('SettingsView', () => {
         'claude',
         'codex',
       ]);
-      // Each option pairs the shared ProviderBadge (accessible name = product
+      // Each option pairs the shared ProviderDot (accessible name = product
       // name) with its spelled-out label.
       const claude = screen.getByTestId('default-provider-option-claude');
       const codex = screen.getByTestId('default-provider-option-codex');

@@ -1,11 +1,8 @@
 export { cn } from './cn';
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button';
 export { Badge, type BadgeProps, type BadgeTone } from './Badge';
-export {
-  ProviderBadge,
-  type ProviderBadgeProps,
-  type Provider,
-} from './ProviderBadge';
+export { type Provider, PROVIDER_DISPLAY_NAMES } from './provider';
+export { ProviderDot, type ProviderDotProps } from './ProviderDot';
 export { ProviderIcon, type ProviderIconProps } from './ProviderIcon';
 export { Panel, type PanelProps } from './Panel';
 export { Collapsible, type CollapsibleProps } from './Collapsible';

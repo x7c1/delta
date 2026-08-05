@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { ProviderBadge, cn } from '@delta/ui-kit';
+import { ProviderDot, cn } from '@delta/ui-kit';
 import type { AgentProvider, ProviderAvailability } from '@delta/wire-gen';
 import { useProvidersQuery } from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
@@ -149,7 +149,7 @@ export function ProviderSelector() {
                 onChange={() => setProvider(option.value)}
                 className="sr-only"
               />
-              <ProviderBadge provider={option.value} />
+              <ProviderDot provider={option.value} />
               <span className="font-medium">{option.label}</span>
             </label>
           );

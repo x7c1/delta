@@ -6,18 +6,12 @@ import type { CSSProperties } from 'react';
 import claudeMark from '@lobehub/icons-static-svg/icons/claude.svg';
 import codexMark from '@lobehub/icons-static-svg/icons/codex.svg';
 import { cn } from './cn';
-import type { Provider } from './ProviderBadge';
+import { PROVIDER_DISPLAY_NAMES, type Provider } from './provider';
 
-interface ProviderMark {
-  /** URL of the brand mark's SVG, used as the element's CSS mask. */
-  url: string;
-  /** Full product name, surfaced as the tooltip and accessible name. */
-  displayName: string;
-}
-
-const MARKS: Record<Provider, ProviderMark> = {
-  claude: { url: claudeMark, displayName: 'Claude Code' },
-  codex: { url: codexMark, displayName: 'Codex' },
+/** URL of each provider's brand-mark SVG, used as the element's CSS mask. */
+const MARKS: Record<Provider, string> = {
+  claude: claudeMark,
+  codex: codexMark,
 };
 
 /**
@@ -54,7 +48,7 @@ export interface ProviderIconProps {
  * A small monochrome brand mark identifying a session's AI-agent provider: the
  * Claude spark for Claude Code, the Codex mark for Codex. Sized to `1em` and
  * painted in `currentColor`, it takes the font size and color of whatever line
- * it sits on. That makes it the quiet counterpart to {@link ProviderBadge},
+ * it sits on. That makes it the quiet counterpart to {@link ProviderDot},
  * for dense rows (the navigator session card's meta line) where a colored chip
  * would shout. The full product name is the tooltip and the accessible name.
  *
@@ -62,7 +56,7 @@ export interface ProviderIconProps {
  * `<img>`, which cannot inherit `currentColor`.
  */
 export function ProviderIcon({ provider, className }: ProviderIconProps) {
-  const mark = MARKS[provider];
+  const name = PROVIDER_DISPLAY_NAMES[provider];
   return (
     <span
       role="img"
@@ -77,8 +71,8 @@ export function ProviderIcon({ provider, className }: ProviderIconProps) {
         'inline-flex h-[1em] w-[1em] shrink-0 translate-y-[0.125em]',
         className,
       )}
-      title={mark.displayName}
-      aria-label={mark.displayName}
+      title={name}
+      aria-label={name}
     >
       {/* aria-hidden: the glyph is decorative — the accessible name is carried
           by the wrapper's aria-label above. The mask cuts the mark out of
@@ -87,7 +81,7 @@ export function ProviderIcon({ provider, className }: ProviderIconProps) {
       <span
         aria-hidden
         className="h-full w-full bg-current"
-        style={maskStyle(mark.url)}
+        style={maskStyle(MARKS[provider])}
       />
     </span>
   );

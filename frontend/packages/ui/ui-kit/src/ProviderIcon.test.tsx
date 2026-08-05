@@ -63,7 +63,7 @@ describe('ProviderIcon', () => {
   });
 
   it('inherits the surrounding text color, with no provider accent', () => {
-    // Unlike ProviderBadge, this icon is deliberately colorless: it paints in
+    // Unlike ProviderDot, this icon is deliberately colorless: it paints in
     // `currentColor` so a caller's `text-*` utility (e.g. the session card's
     // `text-fg-subtle` meta line) decides the tone. Any `text-provider-*` /
     // `bg-provider-*` utility would break that.
