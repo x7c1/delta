@@ -73,8 +73,8 @@ function basename(path: string): string {
  * short `repository_display_name` label, e.g. `org/repo`, and falling back to
  * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
  * `org/repo` keeps its repo name and a long local path keeps its meaningful
- * tail; omitted entirely when both yield no name) and, on the right, the
- * monochrome provider mark followed by the last-activity time) plus the kebab
+ * tail; omitted entirely when both yield no name) led by the monochrome
+ * provider mark, with the last-activity time on the right) plus the kebab
  * actions menu in a fixed-width slot at the right end. The menu always offers
  * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
  * feed `claude --resume`, does not require the session to be running) and
@@ -356,8 +356,8 @@ export const SessionNode = memo(function SessionNode({
                 </span>
               )}
             </span>
-            {/* Line 2: the launch-time repository identity on the left, and on
-                the right the provider mark followed by the last-activity time.
+            {/* Line 2: the provider mark leading the launch-time repository
+                identity on the left, and the last-activity time on the right.
                 Both the primary (the backend's short `repository_display_name`)
                 and the fallback (cwd basename) paths RTL-truncate ("left-end
                 truncate") so the meaningful tail is preserved — `org/repo`
@@ -365,6 +365,13 @@ export const SessionNode = memo(function SessionNode({
                 `…/projects/delta`. The repo span is omitted entirely when
                 neither yields a usable label. */}
             <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
+              {/* Which AI-agent provider this session runs on (Claude /
+                  Codex). Leads the meta line, marking the repo identity next
+                  to it; kept on the quieter line 2 so that line 1's width
+                  stays with the branch name. */}
+              <span data-testid="session-provider-icon">
+                <ProviderIcon provider={item.session.provider} />
+              </span>
               {repoLabel && (
                 <span
                   className="min-w-0 flex-1 truncate text-left [direction:rtl]"
@@ -374,26 +381,14 @@ export const SessionNode = memo(function SessionNode({
                   {repoLabel}
                 </span>
               )}
-              {/* The right-hand group: provider mark + time. Grouped so
-                  `ml-auto` pins the pair to the right edge even when the repo
-                  label is absent and there is nothing on the left to push
-                  against. */}
-              <span className="ml-auto flex shrink-0 items-baseline gap-1.5">
-                {/* Which AI-agent provider this session runs on (Claude /
-                    Codex). Kept on the quieter line 2 so that line 1's width
-                    stays with the branch name. */}
-                <span data-testid="session-provider-icon">
-                  <ProviderIcon provider={item.session.provider} />
+              {lastActivity && (
+                <span
+                  className="ml-auto shrink-0 tabular-nums [font-stretch:condensed]"
+                  data-testid="session-last-activity"
+                >
+                  {lastActivity}
                 </span>
-                {lastActivity && (
-                  <span
-                    className="tabular-nums [font-stretch:condensed]"
-                    data-testid="session-last-activity"
-                  >
-                    {lastActivity}
-                  </span>
-                )}
-              </span>
+              )}
             </span>
           </button>
           {/* Fixed-width slot, vertically centered against the two-line block. */}

@@ -365,12 +365,16 @@ describe('SessionNode provider icon', () => {
     const icon = screen.getByTestId('session-provider-icon');
     // The full product name is the tooltip / accessible name.
     expect(icon).toContainElement(screen.getByTitle('Claude Code'));
-    // The mark shares the meta line (line 2) with the last-activity time, and
-    // sits in the same right-hand group — hence the time being reachable from
-    // the icon's parent.
+    // The mark shares the meta line (line 2) with the last-activity time —
+    // hence the time being reachable from the icon's parent.
     expect(icon.parentElement).toContainElement(
       screen.getByTestId('session-last-activity'),
     );
+    // The mark leads the line: it comes before the repo label in DOM order.
+    expect(
+      icon.compareDocumentPosition(screen.getByTestId('session-repo')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     // The branch line (line 1) carries no provider marker of its own.
     const branchLine = screen.getByTestId('session-branch').parentElement;
     expect(branchLine).not.toContainElement(icon);

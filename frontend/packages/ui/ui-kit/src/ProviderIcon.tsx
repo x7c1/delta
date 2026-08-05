@@ -66,7 +66,17 @@ export function ProviderIcon({ provider, className }: ProviderIconProps) {
   return (
     <span
       role="img"
-      className={cn('inline-flex h-[1em] w-[1em] shrink-0', className)}
+      // translate-y: a box with no text synthesizes its baseline at its
+      // bottom edge, so in a baseline-aligned row the full 1em square would
+      // sit entirely above the baseline — a head taller than neighboring
+      // digits (cap height ≈ 0.7em) and optically ~2px high. Nudging down
+      // 0.125em recenters the mark on the text's optical middle (the same
+      // correction icon fonts apply via `vertical-align: -0.125em`); a
+      // transform also works where vertical-align does not (flex items).
+      className={cn(
+        'inline-flex h-[1em] w-[1em] shrink-0 translate-y-[0.125em]',
+        className,
+      )}
       title={mark.displayName}
       aria-label={mark.displayName}
     >

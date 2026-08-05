@@ -62,12 +62,15 @@ it as a small monochrome brand icon instead of a colored pill:
   `title` and `aria-label` with the full product name ("Claude Code" /
   "Codex") exactly as `ProviderBadge` does today, with the glyph itself
   `aria-hidden`.
-- **Placement**: in the meta line, immediately before the last-activity time
-  on the right side, `shrink-0`, sized to the caption line (the icons are
-  `1em`), inheriting `text-fg-subtle`. Line 1 drops the badge entirely:
-  StatusDot, branch name, spinner/unread/permission markers only. Move the
-  `data-testid` to the new element as `session-provider-icon` (the old
-  `session-provider-badge` testid disappears with the badge).
+- **Placement**: leading the meta line, to the left of the repo label, with
+  the last-activity time alone on the right (placement revised from
+  "before the time" after on-hardware review); `shrink-0`, sized to the
+  caption line (the icons are `1em`), inheriting `text-fg-subtle`, nudged
+  down `0.125em` so the baseline-aligned square sits on the text's optical
+  middle. Line 1 drops the badge entirely: StatusDot, branch name,
+  spinner/unread/permission markers only. Move the `data-testid` to the new
+  element as `session-provider-icon` (the old `session-provider-badge`
+  testid disappears with the badge).
 - **`ProviderBadge` stays**: the provider selector
   (`features/composer/ProviderSelector.tsx`), Settings' default-provider
   picker, and the launch-option form keep the existing pill — those surfaces
@@ -107,9 +110,9 @@ Frontend-only; no wire or backend change of any kind.
 ### Manual / on-hardware (verified by a human before merge)
 
 - [ ] In the running app, session cards read: line 1 = status dot + branch
-      (+ activity markers), line 2 = repo … icon + time; the icon is quiet
-      (subtle foreground tone, no colored chip) but the two marks are
-      distinguishable at a glance.
+      (+ activity markers), line 2 = icon + repo … time; the icon is quiet
+      (subtle foreground tone, no colored chip), vertically aligned with the
+      neighboring text, and the two marks are distinguishable at a glance.
 - [ ] The icon tooltip shows the full product name, and the glyph renders
       correctly on light, dark, and sepia themes.
 
