@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ApiError,
   useHomeDirQuery,
@@ -107,20 +107,40 @@ export function WorkdirPickerBody({
       ? recentQuery.data.workdirs
       : null;
 
+  // Whether any gesture in this picker has chosen a directory. Written
+  // synchronously by {@link pick}, so — unlike the `candidate` prop, which is
+  // only as fresh as the render that scheduled a given effect — it is accurate
+  // at passive-flush time. The pre-select effect below needs that: React
+  // defers its passive flush to a later task whenever a commit overruns the
+  // scheduler's frame budget, so on a loaded machine the Recent rows are on
+  // screen and clickable while the pre-select is still queued, and a
+  // snapshot-based `candidate === null` test would overwrite the click with
+  // the most-recent directory.
+  const userPickedRef = useRef(false);
+
+  /** Choose `path` as the candidate. Every picking gesture routes through it. */
+  const pick = (path: string | null) => {
+    userPickedRef.current = true;
+    setCandidate(path);
+  };
+
   // Reset the browse position whenever the picker goes inactive, so a
   // re-mount starts fresh rather than carrying an in-flight pick.
   useEffect(() => {
     if (!active) {
       setBrowsePath(null);
+      // Deliberate: a re-activation is a fresh picking session and must be
+      // free to pre-select again.
+      userPickedRef.current = false;
     }
   }, [active]);
 
   // On activation, pre-select the most-recent directory so the user can
   // confirm immediately. The recent list arrives async after activation, so
-  // this keys on it too. The `candidate === null` guard seeds only once and
-  // never clobbers a user pick.
+  // this keys on it too. It only ever fills an untouched picker: `candidate`
+  // covers a selection the caller brought in, `userPickedRef` one made here.
   useEffect(() => {
-    if (active && recent && candidate === null) {
+    if (active && recent && candidate === null && !userPickedRef.current) {
       setCandidate(recent[0].path);
     }
   }, [active, recent, candidate, setCandidate]);
@@ -129,7 +149,7 @@ export function WorkdirPickerBody({
   // selection follows where you are in Browse.
   const navigateTo = (path: string | null) => {
     setBrowsePath(path);
-    setCandidate(path);
+    pick(path);
   };
 
   return (
@@ -161,7 +181,7 @@ export function WorkdirPickerBody({
               <li key={item.path}>
                 <button
                   type="button"
-                  onClick={() => setCandidate(item.path)}
+                  onClick={() => pick(item.path)}
                   aria-pressed={candidate === item.path}
                   className={cn(
                     'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',
@@ -219,7 +239,7 @@ export function WorkdirPickerBody({
           <>
             <button
               type="button"
-              onClick={() => setCandidate(listing.path)}
+              onClick={() => pick(listing.path)}
               aria-pressed={candidate === listing.path}
               className={cn(
                 'w-full truncate rounded px-2 py-1 text-left font-mono text-code hover:bg-surface-elevated-hover',

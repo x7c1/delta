@@ -94,11 +94,27 @@ export interface NavState {
   terminalWidth: number;
 
   /**
-   * Focus a session. Switching to a different session clears the active thread
-   * (the workspace reconciles it to that session's main); re-focusing the same
-   * session leaves the active thread untouched.
+   * Focus a session from a USER navigation (a navigator row or sub-thread
+   * click). Switching to a different session clears the active thread (the
+   * workspace reconciles it to that session's main) and dismisses the settings
+   * overlay — picking a conversation closes the modal layered over it.
+   * Re-focusing the same session is a true no-op.
+   *
+   * Programmatic focus resolution must use {@link reconcileFocusedSession}
+   * instead.
    */
   setFocusedSession: (sessionId: FocusedSession) => void;
+  /**
+   * Focus a session because the WORKSPACE resolved what focus should be — a
+   * tracked spawn registering, or a persisted/absent focus being reconciled
+   * against the loaded session list. Identical to
+   * {@link setFocusedSession} except that it never touches the settings
+   * overlay: these calls land asynchronously (whenever the session list
+   * refetch resolves), so letting them dismiss the overlay would tear down a
+   * dialog the user opened moments earlier, at a moment nothing about the
+   * user's own actions predicts.
+   */
+  reconcileFocusedSession: (sessionId: FocusedSession) => void;
   /**
    * Enter the new-session state, stashing the current focus so it can be
    * restored on cancel. Only stashes when not already in new-session, so
@@ -150,6 +166,21 @@ export interface NavState {
 export const NAV_STORAGE_KEY = 'delta-nav';
 
 /**
+ * The session-scoped state a real focus change drops: the active thread (the
+ * workspace reconciles it to the newly focused session's main) and any pending
+ * cross-lane jump intent, which only ever describes the session being left.
+ * Shared by the user-driven and workspace-driven focus setters, which differ
+ * only in whether they also dismiss the settings overlay.
+ */
+function focusChange(sessionId: FocusedSession) {
+  return {
+    focusedSessionId: sessionId,
+    activeThreadId: null,
+    activeThreadJumpTarget: null,
+  };
+}
+
+/**
  * Navigation/layout store. The focused session, active thread, terminal
  * visibility, and terminal width are **persisted to localStorage** so a browser
  * reload restores the same layout instead of snapping back to a closed terminal
@@ -170,16 +201,16 @@ export const useNavStore = create<NavState>()(
 
       setFocusedSession: (sessionId) =>
         set((state) =>
-          state.focusedSessionId === sessionId && !state.settingsOpen
+          state.focusedSessionId === sessionId
             ? state
-            : // Focusing a session always closes the settings overlay — picking
-              // a conversation dismisses the modal layered over the workspace.
-              {
-                focusedSessionId: sessionId,
-                activeThreadId: null,
-                activeThreadJumpTarget: null,
-                settingsOpen: false,
-              },
+            : // A user-driven focus change dismisses the settings overlay —
+              // picking a conversation closes the modal layered over the
+              // workspace.
+              { ...focusChange(sessionId), settingsOpen: false },
+        ),
+      reconcileFocusedSession: (sessionId) =>
+        set((state) =>
+          state.focusedSessionId === sessionId ? state : focusChange(sessionId),
         ),
       startNewSession: () =>
         set((state) => ({

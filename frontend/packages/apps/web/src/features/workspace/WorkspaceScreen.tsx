@@ -133,7 +133,12 @@ export function WorkspaceScreen() {
 
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
   const activeThreadId = useNavStore((state) => state.activeThreadId);
-  const setFocusedSession = useNavStore((state) => state.setFocusedSession);
+  // Both focus writes below are the workspace resolving focus against the
+  // loaded session list, never a user navigation, so they use the reconciling
+  // setter — it leaves any overlay the user opened in the meantime standing.
+  const reconcileFocusedSession = useNavStore(
+    (state) => state.reconcileFocusedSession,
+  );
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
@@ -179,7 +184,7 @@ export function WorkspaceScreen() {
     if (isNewSessionFocus) {
       // Several spawns can only pile up via quick Retry cycles; the newest is
       // the one the user is waiting on.
-      setFocusedSession(listed[listed.length - 1].sessionId);
+      reconcileFocusedSession(listed[listed.length - 1].sessionId);
     }
     for (const spawn of listed) {
       clearSpawn(spawn.sessionId);
@@ -189,7 +194,7 @@ export function WorkspaceScreen() {
     sessions,
     spawns,
     isNewSessionFocus,
-    setFocusedSession,
+    reconcileFocusedSession,
     clearSpawn,
   ]);
 
@@ -221,7 +226,7 @@ export function WorkspaceScreen() {
       if (focusedSessionId !== null && sessionsQuery.hasNextPage) {
         return;
       }
-      setFocusedSession(pickInitialFocus(sessions));
+      reconcileFocusedSession(pickInitialFocus(sessions));
     }
   }, [
     sessionsQuery.isSuccess,
@@ -229,7 +234,7 @@ export function WorkspaceScreen() {
     sessions,
     focusedSessionId,
     isNewSessionFocus,
-    setFocusedSession,
+    reconcileFocusedSession,
   ]);
 
   // Reconcile the active thread against the focused session's threads. Default

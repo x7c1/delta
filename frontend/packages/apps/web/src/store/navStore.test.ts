@@ -86,6 +86,44 @@ describe('navStore.setFocusedSession', () => {
     useNavStore.getState().setFocusedSession('sess-a');
     expect(useNavStore.getState().activeThreadId).toBe(7);
   });
+
+  it('is a true no-op when re-focusing the same session with settings open', () => {
+    // Re-asserting an unchanged focus is not navigation, so it carries none of
+    // navigation's side effects — not even while the settings overlay is up.
+    useNavStore.getState().setFocusedSession('sess-a');
+    useNavStore.getState().setActiveThread(7);
+    useNavStore.getState().openSettings();
+
+    useNavStore.getState().setFocusedSession('sess-a');
+
+    expect(useNavStore.getState().activeThreadId).toBe(7);
+    expect(useNavStore.getState().settingsOpen).toBe(true);
+  });
+});
+
+describe('navStore.reconcileFocusedSession', () => {
+  it('moves focus and clears the active thread like a navigation', () => {
+    useNavStore.getState().setFocusedSession('sess-a');
+    useNavStore.getState().setActiveThread(7);
+
+    useNavStore.getState().reconcileFocusedSession('sess-b');
+
+    expect(useNavStore.getState().focusedSessionId).toBe('sess-b');
+    expect(useNavStore.getState().activeThreadId).toBeNull();
+  });
+
+  it('leaves the settings overlay open', () => {
+    // The workspace reconciles focus asynchronously (a spawn registering, a
+    // stale persisted focus resolving). That is the app catching up with the
+    // server, never the user navigating, so it must not dismiss a dialog the
+    // user opened in the meantime.
+    useNavStore.getState().openSettings();
+
+    useNavStore.getState().reconcileFocusedSession('sess-a');
+
+    expect(useNavStore.getState().focusedSessionId).toBe('sess-a');
+    expect(useNavStore.getState().settingsOpen).toBe(true);
+  });
 });
 
 describe('navStore.startNewSession', () => {

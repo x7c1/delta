@@ -42,7 +42,12 @@ export function RepositoryTab() {
   // the absolute path.
   const home = useHomeDirQuery(client, true).data?.path ?? null;
 
-  const repositories = repositoriesQuery.data?.repositories ?? [];
+  // Memoised so the empty fallback does not hand a fresh array identity to
+  // the effects and memos below on every render while the query is pending.
+  const repositories = useMemo(
+    () => repositoriesQuery.data?.repositories ?? [],
+    [repositoriesQuery.data],
+  );
 
   // Selected repo, by identity_key — drives the expanded clone list.
   // Defaults to the first (most-recent) repo so the panel reads as "pick a
@@ -50,13 +55,19 @@ export function RepositoryTab() {
   // clone".
   const [selectedRepoKey, setSelectedRepoKey] = useState<string | null>(null);
   useEffect(() => {
-    if (
-      selectedRepoKey === null &&
-      repositories.length > 0
-    ) {
-      setSelectedRepoKey(repositories[0].identity_key);
+    if (repositories.length === 0) {
+      return;
     }
-  }, [selectedRepoKey, repositories]);
+    const firstKey = repositories[0].identity_key;
+    // Updater form on purpose: React evaluates it against the state as of the
+    // flush, not as of the render that queued this effect. The repo rows are
+    // clickable the moment they paint, while this seeding effect may still be
+    // queued (React defers its passive flush past a commit that overruns the
+    // frame budget), so a snapshot-based `selectedRepoKey === null` test would
+    // see the pre-click value and snap the selection back to the first repo.
+    // Returning `current` unchanged makes the seed a no-op with no re-render.
+    setSelectedRepoKey((current) => current ?? firstKey);
+  }, [repositories]);
 
   const selectedRepo = useMemo(
     () =>
@@ -71,13 +82,25 @@ export function RepositoryTab() {
   // means the user explicitly picked a different clone of the same repo and
   // we must not stomp it (e.g. re-clicking the same Repo row, or the
   // mount-time effect firing after a clone was already picked).
+  //
+  // That guard reads the live store rather than the render-time `selectedPath`
+  // snapshot, because this also runs from a passive effect. React defers its
+  // passive flush to a later task whenever a commit overruns the scheduler's
+  // frame budget, so the clone rows can already be on screen and clicked while
+  // the effect that seeds the default is still queued. A captured
+  // `selectedPath` would then be evaluated as it stood *before* that click and
+  // overwrite the explicit pick with the repo default. Reading at call time
+  // makes the outcome independent of when the flush lands, and keeps this
+  // callback identity-stable so the seeding effect stops re-running on every
+  // selection change.
   const autoPickClone = useCallback(
     (repo: RepositoryEntry) => {
       if (repo.clones.length === 0) {
         return;
       }
+      const currentPath = useComposerStore.getState().newSessionWorkdir;
       const alreadyPicked = repo.clones.some(
-        (clone) => clone.path === selectedPath,
+        (clone) => clone.path === currentPath,
       );
       if (alreadyPicked) {
         return;
@@ -87,7 +110,7 @@ export function RepositoryTab() {
       const next = recentMatches ? recent : repo.clones[0].path;
       setSelected(next);
     },
-    [selectedPath, setSelected],
+    [setSelected],
   );
 
   // Mount-time (and selected-repo-change) auto-pick. When the Repository tab
