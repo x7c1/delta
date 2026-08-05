@@ -98,7 +98,7 @@ Frontend-only; no wire or backend change of any kind.
 
 ## Out of scope
 
-- A third provider; both the trigger-tint map and `ProviderDot`'s hue map
+- A third provider; both the trigger-tint map and `ProviderName`'s hue map
   extend the same way `PROVIDER_METADATA`
   (`frontend/packages/apps/web/src/providers.ts`) does, with compile-time
   exhaustiveness.
