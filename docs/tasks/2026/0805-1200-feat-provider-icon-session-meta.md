@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0805-1200-feat-provider-icon-session-meta
 created_at: 2026-08-05T12:00:41Z
-updated_at: 2026-08-06T00:20:00Z
+updated_at: 2026-08-06T00:45:00Z
 ---
 
 # feat(web): replace the CL/CX provider badge with hue-based provider markers
@@ -85,11 +85,11 @@ Frontend-only; no wire or backend change of any kind.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In the running app, each session card's kebab dots rest in its
+- [x] In the running app, each session card's kebab dots rest in its
       provider's hue; the two hues are distinguishable at a glance on
       light, dark, and sepia themes, and hover still gives the usual
       interactive feedback.
-- [ ] Settings' default-provider picker, the launch-option form and rows,
+- [x] Settings' default-provider picker, the launch-option form and rows,
       and the new-session provider selector show the provider dot beside
       the full product name; the dot's tooltip names the provider.
 
