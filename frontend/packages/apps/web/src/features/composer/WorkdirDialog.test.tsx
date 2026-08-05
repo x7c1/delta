@@ -33,6 +33,19 @@ afterAll(() => server.close());
 /** The most-recent recent workdir (first row), which is pre-selected on open. */
 const MOST_RECENT = '/home/dev/projects/delta';
 
+/**
+ * Resolves once the pre-selection has actually landed, i.e. the most-recent
+ * row reads as pressed. The pre-select runs in a passive effect, whose flush
+ * React defers to a later task whenever a commit overruns the scheduler's
+ * frame budget — so "the row is on screen" does not imply "it is the
+ * candidate", and a test that clicks Select on that basis commits nothing.
+ */
+async function findPreselectedRow(): Promise<HTMLElement> {
+  const row = await screen.findByTitle(MOST_RECENT);
+  await waitFor(() => expect(row).toHaveAttribute('aria-pressed', 'true'));
+  return row;
+}
+
 function renderDialog(onClose = vi.fn(), { dismissable = true } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -75,8 +88,7 @@ describe('WorkdirDialog', () => {
     // The first Recent row is highlighted (aria-pressed) without any click, and
     // Select is enabled so the user can confirm immediately. Looked up by its
     // stable `title` (full path); the visible label is abbreviated.
-    const firstRow = await screen.findByTitle(MOST_RECENT);
-    await waitFor(() => expect(firstRow).toHaveAttribute('aria-pressed', 'true'));
+    await findPreselectedRow();
     expect(screen.getByTestId('workdir-confirm')).toBeEnabled();
   });
 
@@ -95,7 +107,7 @@ describe('WorkdirDialog', () => {
 
     // The most-recent row's title stays the absolute path, but its visible
     // label collapses the home directory (`/home/dev`) to `~`.
-    const firstRow = await screen.findByTitle(MOST_RECENT);
+    const firstRow = await findPreselectedRow();
     expect(firstRow).toHaveTextContent('~/projects/delta');
     expect(firstRow).not.toHaveTextContent('/home/dev');
 
@@ -109,7 +121,7 @@ describe('WorkdirDialog', () => {
     const { onClose } = renderDialog();
 
     // recent[0] is pre-selected; Select commits it.
-    await screen.findByTitle(MOST_RECENT);
+    await findPreselectedRow();
     fireEvent.click(screen.getByTestId('workdir-confirm'));
 
     expect(useComposerStore.getState().newSessionWorkdir).toBe(MOST_RECENT);
@@ -143,7 +155,7 @@ describe('WorkdirDialog', () => {
     const { onClose } = renderDialog(vi.fn(), { dismissable: false });
 
     // The only way out is to choose a directory: Cancel is absent.
-    await screen.findByTitle(MOST_RECENT);
+    await findPreselectedRow();
     expect(screen.queryByTestId('workdir-cancel')).not.toBeInTheDocument();
 
     // Select still commits the pre-selected candidate and closes.

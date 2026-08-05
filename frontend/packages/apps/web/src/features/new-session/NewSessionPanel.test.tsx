@@ -18,6 +18,7 @@ import {
   DEFAULT_NEW_SESSION_TAB,
   useComposerStore,
 } from '../../store/composerStore';
+import { OnCommit, clickDuringCommit } from '../../test/commitPhase';
 import { NewSessionPanel } from './NewSessionPanel';
 
 const server = setupServer(...createHandlers());
@@ -26,7 +27,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderPanel() {
+function renderPanel(onCommit?: () => void) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -34,7 +35,9 @@ function renderPanel() {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <NewSessionPanel />
+        <OnCommit onCommit={onCommit}>
+          <NewSessionPanel />
+        </OnCommit>
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -170,6 +173,28 @@ describe('DirectoryTab', () => {
       expect(useComposerStore.getState().newSessionWorkdir).toBe(
         '/home/dev/projects/delta',
       ),
+    );
+  });
+
+  it('a Recent pick made before the pre-select effect flushes survives that flush', async () => {
+    // Same deferred-passive-flush window as the Repository tab: the Recent
+    // rows are clickable as soon as they paint, while the effect that
+    // pre-selects the most-recent directory may still be queued. That
+    // pre-select must only ever fill an untouched picker, never reinstate
+    // the most-recent directory over a row the user has already clicked.
+    // `/home/dev/projects/website` is deliberately not the most-recent entry,
+    // so a stomp is visible.
+    renderPanel(
+      clickDuringCommit('[data-testid="workdir-recent"] button', 'website'),
+    );
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBe(
+        '/home/dev/projects/website',
+      );
+    });
+    expect(await screen.findByTitle('/home/dev/projects/website')).toHaveAttribute(
+      'aria-pressed',
+      'true',
     );
   });
 
