@@ -5,8 +5,9 @@ import {
   useCloseSessionMutation,
   useSessionThreadsQuery,
 } from '@delta/api-client';
-import { Badge, Menu, ProviderIcon, Spinner, StatusDot, cn } from '@delta/ui-kit';
+import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
+import { PROVIDER_METADATA } from '../../providers';
 import {
   DEFAULT_OPEN_CWD_HANDLER_LABEL,
   useOpenCwd,
@@ -64,6 +65,18 @@ function basename(path: string): string {
 }
 
 /**
+ * The kebab trigger's resting text color per provider — the session card's
+ * provider marker (see the comment at the {@link Menu} call site). The
+ * `satisfies` clause keeps the map exhaustive: a new wire provider fails to
+ * typecheck here until it gets a hue, instead of silently rendering the
+ * default subtle gray.
+ */
+const PROVIDER_TRIGGER_TINT = {
+  claude: 'text-provider-claude',
+  codex: 'text-provider-codex',
+} as const satisfies Record<keyof typeof PROVIDER_METADATA, string>;
+
+/**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
  * indicator plus the session's *launch-time* local git branch (the primary
@@ -74,8 +87,9 @@ function basename(path: string): string {
  * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
  * `org/repo` keeps its repo name and a long local path keeps its meaningful
  * tail; omitted entirely when both yield no name) and, on the right, the
- * last-activity time closed by the monochrome provider mark) plus the kebab
- * actions menu in a fixed-width slot at the right end. The menu always offers
+ * last-activity time) plus the kebab actions menu in a fixed-width slot at
+ * the right end — its dots tinted in the session's provider hue, doubling as
+ * the card's provider marker. The menu always offers
  * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
  * feed `claude --resume`, does not require the session to be running) and
  * additionally exposes `Close` while the session is open. The focused card is
@@ -356,20 +370,15 @@ export const SessionNode = memo(function SessionNode({
                 </span>
               )}
             </span>
-            {/* Line 2: the launch-time repository identity on the left, and
-                on the right the last-activity time closed by the provider
-                mark at the line's end.
+            {/* Line 2: the launch-time repository identity on the left and
+                the last-activity time on the right.
                 Both the primary (the backend's short `repository_display_name`)
                 and the fallback (cwd basename) paths RTL-truncate ("left-end
                 truncate") so the meaningful tail is preserved — `org/repo`
                 clips the org and keeps the repo, a long local path keeps
                 `…/projects/delta`. The repo span is omitted entirely when
                 neither yields a usable label. */}
-            {/* Spacing is per-pair paddings, not a uniform flex gap: the mark
-                couples tightly (4px) to the time beside it, while the time
-                keeps a wider 8px minimum from the truncating repo label —
-                the two pairs want different distances. */}
-            <span className="flex items-baseline text-caption text-fg-subtle">
+            <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
               {repoLabel && (
                 <span
                   className="min-w-0 flex-1 truncate text-left [direction:rtl]"
@@ -379,37 +388,26 @@ export const SessionNode = memo(function SessionNode({
                   {repoLabel}
                 </span>
               )}
-              {/* The right-hand group: time + provider mark. Grouped so one
-                  `ml-auto` pins the pair to the right edge whether or not
-                  the repo label is there to push against. */}
-              <span className="ml-auto flex shrink-0 items-baseline pl-2">
-                {lastActivity && (
-                  <span
-                    className="tabular-nums [font-stretch:condensed]"
-                    data-testid="session-last-activity"
-                  >
-                    {lastActivity}
-                  </span>
-                )}
-                {/* Which AI-agent provider this session runs on (Claude /
-                    Codex). Anchors the far right end of the quieter line 2 —
-                    away from line 1's status dot, which it would visually
-                    column with at the line start — so line 1's width stays
-                    with the branch name. Sized down from the caption so the
-                    mark reads as an annotation, not a character of the
-                    text. */}
-                <span className="pl-1" data-testid="session-provider-icon">
-                  <ProviderIcon
-                    provider={item.session.provider}
-                    className="text-[0.85em]"
-                  />
+              {lastActivity && (
+                <span
+                  className="ml-auto shrink-0 tabular-nums [font-stretch:condensed]"
+                  data-testid="session-last-activity"
+                >
+                  {lastActivity}
                 </span>
-              </span>
+              )}
             </span>
           </button>
-          {/* Fixed-width slot, vertically centered against the two-line block. */}
+          {/* Fixed-width slot, vertically centered against the two-line block.
+              The trigger's dots are tinted in the provider hue — this IS the
+              card's provider marker (an inline mark disturbed whichever text
+              line it sat on, and colored the existing glyph instead). Color
+              alone is not readable by everyone, so the trigger's accessible
+              name carries the provider, and the two hues stay distinguishable
+              from the resting text tone. */}
           <Menu
-            label={`Session actions for ${label}`}
+            label={`Session actions for ${label} (${PROVIDER_METADATA[item.session.provider].label} session)`}
+            triggerClassName={PROVIDER_TRIGGER_TINT[item.session.provider]}
             onOpenChange={setMenuOpen}
             // Item order is fixed top-to-bottom:
             //   1. Open in VS Code — the primary "act on this session"

@@ -357,31 +357,21 @@ describe('SessionNode card styling', () => {
   });
 });
 
-describe('SessionNode provider icon', () => {
-  it('shows the Claude mark on the meta line, not on the branch line', () => {
+describe('SessionNode provider marker', () => {
+  it('tints the kebab trigger in the Claude hue and names the provider', () => {
     // The shared `item` fixture runs on Claude.
     renderNode({});
 
-    const icon = screen.getByTestId('session-provider-icon');
-    // The full product name is the tooltip / accessible name.
-    expect(icon).toContainElement(screen.getByTitle('Claude Code'));
-    // The mark shares the meta line (line 2) with the last-activity time —
-    // hence the time being reachable from the icon's parent.
-    expect(icon.parentElement).toContainElement(
-      screen.getByTestId('session-last-activity'),
-    );
-    // The mark closes the line: it comes after the time in DOM order.
-    expect(
-      screen
-        .getByTestId('session-last-activity')
-        .compareDocumentPosition(icon) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    // The branch line (line 1) carries no provider marker of its own.
-    const branchLine = screen.getByTestId('session-branch').parentElement;
-    expect(branchLine).not.toContainElement(icon);
+    // The kebab trigger doubles as the card's provider marker: its resting
+    // text color is the provider hue instead of the default subtle gray.
+    const trigger = screen.getByRole('button', {
+      name: /^Session actions for .* \(Claude Code session\)$/,
+    });
+    expect(trigger.className).toContain('text-provider-claude');
+    expect(trigger.className).not.toContain('text-provider-codex');
   });
 
-  it('shows the Codex mark for a Codex session', () => {
+  it('tints the kebab trigger in the Codex hue for a Codex session', () => {
     renderNode({
       item: {
         ...item,
@@ -389,8 +379,11 @@ describe('SessionNode provider icon', () => {
       },
     });
 
-    const icon = screen.getByTestId('session-provider-icon');
-    expect(icon).toContainElement(screen.getByTitle('Codex'));
+    const trigger = screen.getByRole('button', {
+      name: /^Session actions for .* \(Codex session\)$/,
+    });
+    expect(trigger.className).toContain('text-provider-codex');
+    expect(trigger.className).not.toContain('text-provider-claude');
   });
 });
 
