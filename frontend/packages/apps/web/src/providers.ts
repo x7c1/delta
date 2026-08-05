@@ -8,8 +8,8 @@ import type { AgentProvider } from '@delta/wire-gen';
  */
 export interface ProviderMetadata {
   /**
-   * The full product name shown beside the shared `ProviderBadge` (which
-   * carries the accent hue and the short accessible name).
+   * The full product name, written in the provider hue by the shared
+   * `ProviderName` wherever a picker or row names a provider.
    */
   label: string;
   /**

@@ -357,18 +357,21 @@ describe('SessionNode card styling', () => {
   });
 });
 
-describe('SessionNode provider badge', () => {
-  it('shows the Claude monogram for a Claude session', () => {
+describe('SessionNode provider marker', () => {
+  it('tints the kebab trigger in the Claude hue and names the provider', () => {
     // The shared `item` fixture runs on Claude.
     renderNode({});
 
-    const badge = screen.getByTestId('session-provider-badge');
-    expect(badge).toHaveTextContent('CL');
-    // The full product name is the tooltip / accessible name.
-    expect(screen.getByTitle('Claude Code')).toBeInTheDocument();
+    // The kebab trigger doubles as the card's provider marker: its resting
+    // text color is the provider hue instead of the default subtle gray.
+    const trigger = screen.getByRole('button', {
+      name: /^Session actions for .* \(Claude Code session\)$/,
+    });
+    expect(trigger.className).toContain('text-provider-claude');
+    expect(trigger.className).not.toContain('text-provider-codex');
   });
 
-  it('shows the Codex monogram for a Codex session', () => {
+  it('tints the kebab trigger in the Codex hue for a Codex session', () => {
     renderNode({
       item: {
         ...item,
@@ -376,9 +379,11 @@ describe('SessionNode provider badge', () => {
       },
     });
 
-    const badge = screen.getByTestId('session-provider-badge');
-    expect(badge).toHaveTextContent('CX');
-    expect(screen.getByTitle('Codex')).toBeInTheDocument();
+    const trigger = screen.getByRole('button', {
+      name: /^Session actions for .* \(Codex session\)$/,
+    });
+    expect(trigger.className).toContain('text-provider-codex');
+    expect(trigger.className).not.toContain('text-provider-claude');
   });
 });
 

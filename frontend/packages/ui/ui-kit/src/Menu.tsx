@@ -27,6 +27,14 @@ export interface MenuProps {
   disabled?: boolean;
   className?: string;
   /**
+   * Extra classes for the trigger button itself (the outer `className` lands
+   * on the positioning wrapper, which the trigger's own text color does not
+   * inherit through). Merged last, so a consumer's utility — e.g. a text
+   * color replacing the resting `text-fg-subtle` — wins per the {@link cn}
+   * contract.
+   */
+  triggerClassName?: string;
+  /**
    * Notified whenever the panel opens or closes. Lets an enclosing row react to
    * the open state — e.g. lift its stacking order so the dropdown is not painted
    * under a sibling row (needed inside a windowed list, where each row is a
@@ -79,6 +87,7 @@ export function Menu({
   items,
   disabled = false,
   className,
+  triggerClassName,
   onOpenChange,
 }: MenuProps) {
   const [open, setOpen] = useState(false);
@@ -176,6 +185,7 @@ export function Menu({
           'inline-flex h-6 w-6 items-center justify-center rounded text-fg-subtle transition-colors',
           'hover:bg-surface-sunken hover:text-fg',
           'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-fg-subtle',
+          triggerClassName,
         )}
       >
         <KebabIcon />

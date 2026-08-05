@@ -5,8 +5,9 @@ import {
   useCloseSessionMutation,
   useSessionThreadsQuery,
 } from '@delta/api-client';
-import { Badge, Menu, ProviderBadge, Spinner, StatusDot, cn } from '@delta/ui-kit';
+import { Badge, Menu, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
+import { PROVIDER_METADATA } from '../../providers';
 import {
   DEFAULT_OPEN_CWD_HANDLER_LABEL,
   useOpenCwd,
@@ -64,6 +65,18 @@ function basename(path: string): string {
 }
 
 /**
+ * The kebab trigger's resting text color per provider — the session card's
+ * provider marker (see the comment at the {@link Menu} call site). The
+ * `satisfies` clause keeps the map exhaustive: a new wire provider fails to
+ * typecheck here until it gets a hue, instead of silently rendering the
+ * default subtle gray.
+ */
+const PROVIDER_TRIGGER_TINT = {
+  claude: 'text-provider-claude',
+  codex: 'text-provider-codex',
+} as const satisfies Record<keyof typeof PROVIDER_METADATA, string>;
+
+/**
  * One top-level navigator node: a session, rendered as a card. The card holds a
  * header row — the focus button (a two-line block: line 1 is the open/closed
  * indicator plus the session's *launch-time* local git branch (the primary
@@ -73,11 +86,12 @@ function basename(path: string): string {
  * short `repository_display_name` label, e.g. `org/repo`, and falling back to
  * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
  * `org/repo` keeps its repo name and a long local path keeps its meaningful
- * tail; omitted entirely when both yield no name) and the last-activity time
- * on the right) plus the kebab actions menu in a fixed-width slot at the
- * right end. The menu always offers `Copy session ID`
- * (useful even for a closed session — copying its id, e.g. to feed
- * `claude --resume`, does not require the session to be running) and
+ * tail; omitted entirely when both yield no name) and, on the right, the
+ * last-activity time) plus the kebab actions menu in a fixed-width slot at
+ * the right end — its dots tinted in the session's provider hue, doubling as
+ * the card's provider marker. The menu always offers
+ * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
+ * feed `claude --resume`, does not require the session to be running) and
  * additionally exposes `Close` while the session is open. The focused card is
  * lifted with an indigo border, tint, and ring.
  *
@@ -301,13 +315,6 @@ export const SessionNode = memo(function SessionNode({
                 tone={item.open ? 'green' : 'slate'}
                 title={item.open ? 'Open' : 'Closed'}
               />
-              {/* Which AI-agent provider this session runs on (Claude / Codex).
-                  A session-identity attribute like the status dot, so it sits at
-                  the head of the line; shrink-0 (Badge is inline-flex) keeps it
-                  from being clipped when the branch name truncates. */}
-              <span className="shrink-0" data-testid="session-provider-badge">
-                <ProviderBadge provider={item.session.provider} />
-              </span>
               {/* Line 1: the *launch-time* local git branch, captured once on
                   spawn and never updated on resume or a later `git checkout`.
                   Distinct from the per-message `git_branch` carried on each
@@ -364,13 +371,13 @@ export const SessionNode = memo(function SessionNode({
               )}
             </span>
             {/* Line 2: the launch-time repository identity on the left and
-                the last-activity time on the right. Both the primary (the
-                backend's short `repository_display_name`) and the fallback
-                (cwd basename) paths RTL-truncate ("left-end truncate") so the
-                meaningful tail is preserved — `org/repo` clips the org and
-                keeps the repo, a long local path keeps `…/projects/delta`.
-                The repo span is omitted entirely when neither yields a usable
-                label. */}
+                the last-activity time on the right.
+                Both the primary (the backend's short `repository_display_name`)
+                and the fallback (cwd basename) paths RTL-truncate ("left-end
+                truncate") so the meaningful tail is preserved — `org/repo`
+                clips the org and keeps the repo, a long local path keeps
+                `…/projects/delta`. The repo span is omitted entirely when
+                neither yields a usable label. */}
             <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
               {repoLabel && (
                 <span
@@ -391,9 +398,16 @@ export const SessionNode = memo(function SessionNode({
               )}
             </span>
           </button>
-          {/* Fixed-width slot, vertically centered against the two-line block. */}
+          {/* Fixed-width slot, vertically centered against the two-line block.
+              The trigger's dots are tinted in the provider hue — this IS the
+              card's provider marker (an inline mark disturbed whichever text
+              line it sat on, and colored the existing glyph instead). Color
+              alone is not readable by everyone, so the trigger's accessible
+              name carries the provider, and the two hues stay distinguishable
+              from the resting text tone. */}
           <Menu
-            label={`Session actions for ${label}`}
+            label={`Session actions for ${label} (${PROVIDER_METADATA[item.session.provider].label} session)`}
+            triggerClassName={PROVIDER_TRIGGER_TINT[item.session.provider]}
             onOpenChange={setMenuOpen}
             // Item order is fixed top-to-bottom:
             //   1. Open in VS Code — the primary "act on this session"

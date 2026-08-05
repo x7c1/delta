@@ -82,7 +82,7 @@ describe('ProviderSelector', () => {
     useSettingsStore.setState({ defaultProvider: 'claude' });
   });
 
-  it('renders both providers as radios with their badges and names', () => {
+  it('renders both providers as radios with their hue-tinted names', () => {
     renderSelector();
 
     const radios = screen.getAllByRole('radio');
@@ -90,12 +90,13 @@ describe('ProviderSelector', () => {
 
     const claude = screen.getByTestId('provider-option-claude');
     const codex = screen.getByTestId('provider-option-codex');
-    // Each option carries the shared ProviderBadge (accessible name = product
-    // name) plus its spelled-out label.
-    expect(within(claude).getByLabelText('Claude Code')).toBeInTheDocument();
-    expect(within(claude).getByText('Claude Code')).toBeInTheDocument();
-    expect(within(codex).getByLabelText('Codex')).toBeInTheDocument();
-    expect(within(codex).getByText('Codex')).toBeInTheDocument();
+    // Each option writes its product name through the shared ProviderName,
+    // which tints the words in the provider hue — the same hue channel as the
+    // session card's kebab trigger.
+    const claudeName = within(claude).getByText('Claude Code');
+    expect(claudeName.className).toContain('text-provider-claude');
+    const codexName = within(codex).getByText('Codex');
+    expect(codexName.className).toContain('text-provider-codex');
   });
 
   it('reflects the store selection: Claude checked by default', () => {
