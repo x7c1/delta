@@ -84,6 +84,7 @@ describe('WorkspaceScreen multi-session', () => {
       focusedSessionId: null,
       activeThreadId: null,
       preNewSessionFocus: null,
+      settingsOpen: false,
       terminalOpen: false,
     });
     useComposerStore.setState({
@@ -182,6 +183,52 @@ describe('WorkspaceScreen multi-session', () => {
       expect(useLiveStore.getState().spawns).toHaveLength(0),
     );
     expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID);
+  });
+
+  it('keeps the settings overlay open when a registering spawn takes focus', async () => {
+    // The user sent the first message and opened Settings while the spawn was
+    // still registering. The handover that follows is the WORKSPACE resolving
+    // focus on its own — not the user navigating — so it must leave the modal
+    // the user just opened alone. Dismissing it here made the Settings dialog
+    // vanish milliseconds after it appeared, an order-dependent flake: only a
+    // server that already holds sessions from earlier specs renders a session
+    // card immediately, letting the click land before the handover.
+    useNavStore.setState({
+      focusedSessionId: NEW_SESSION_FOCUS,
+      settingsOpen: true,
+    });
+    useLiveStore.setState({
+      spawns: [
+        {
+          sessionId: SESSION_ID_2,
+          threadId: SESSION_2_MAIN_THREAD_ID,
+          text: 'first message',
+          workdir: null,
+          status: 'spawning' as const,
+        },
+      ],
+    });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID_2),
+    );
+    expect(useNavStore.getState().settingsOpen).toBe(true);
+  });
+
+  it('keeps the settings overlay open when cold-start focus resolution runs', async () => {
+    // Settings is persisted open across reloads, so the cold-start focus
+    // reconciliation runs underneath an already-visible dialog. Resolving the
+    // initial focus is not navigation either — the dialog stays.
+    useNavStore.setState({ focusedSessionId: null, settingsOpen: true });
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(useNavStore.getState().focusedSessionId).toBe(SESSION_ID),
+    );
+    expect(useNavStore.getState().settingsOpen).toBe(true);
   });
 
   it('shows the first page of sessions when more remain', async () => {
