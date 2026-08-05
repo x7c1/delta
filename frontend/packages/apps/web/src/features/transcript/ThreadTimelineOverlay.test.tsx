@@ -241,6 +241,30 @@ function playheadLeftPx(el: HTMLElement): string {
   return `${match[1]}px`;
 }
 
+/**
+ * Wait until the first lane's playhead has settled at `expectedPx`.
+ *
+ * Rendering a mark is not the same event as landing the playhead on it: the
+ * marks appear in the commit that brings the messages in, while the mount
+ * auto-anchor that positions the playhead runs in that commit's effects. React
+ * defers effects to a later task whenever a commit overruns the scheduler's
+ * frame budget, so on a loaded machine `await findAllByTestId('…-dot')` can
+ * return while the playhead is still at its pre-anchor x=0. A single-shot read
+ * there samples that intermediate state and the whole test then measures a
+ * step from the wrong origin.
+ *
+ * Tests therefore establish the anchored starting position through this
+ * condition-based wait instead. The asserted coordinate is unchanged — only
+ * the "first value seen" is replaced by "the value it settles on".
+ */
+async function waitForPlayheadAt(expectedPx: string): Promise<void> {
+  await waitFor(() => {
+    expect(
+      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+    ).toBe(expectedPx);
+  });
+}
+
 describe('ThreadTimelineOverlay collapse toggle', () => {
   beforeEach(() => {
     resetGlobals();
@@ -392,9 +416,7 @@ describe('ThreadTimelineOverlay jump-to-edge buttons', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial playhead anchors to the active lane’s latest large turn
     // (msg-c, x=1 → 240px).
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
 
     // Click jump-start: the playhead snaps to msg-a (x=0).
     fireEvent.click(screen.getByTestId('thread-timeline-jump-start'));
@@ -847,9 +869,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead anchors to the active lane’s latest large turn
       // (msg-c, x=1 → 240px).
-      expect(
-        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
       // A single full-notch wheel-up event (|deltaY| = 100, the canonical
       // mouse-wheel notch on Linux/Chrome) lands the playhead on the
       // immediate previous large turn (msg-b at x=0.5 → 120px), NOT msg-a.
@@ -896,9 +916,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial playhead anchors to the active lane’s latest large turn
     // (msg-c, x=1 → 240px).
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     // A single sub-notch wheel-up event (cumulative |delta| under the
     // first staircase threshold) lands in the slowest bucket → exactly
     // one step back. preventDefault is also called so the page scroll
@@ -942,9 +960,7 @@ describe('ThreadTimelineOverlay playhead', () => {
     });
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial position is the last message (msg-b, x=1 → 240px).
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
       body.dispatchEvent(
@@ -1166,9 +1182,7 @@ describe('ThreadTimelineOverlay playhead', () => {
       });
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial active = m4 (x=1 → 240px).
-      expect(
-        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
       const body = screen.getByTestId('thread-timeline-axis-column');
       act(() => {
         body.dispatchEvent(
@@ -1868,9 +1882,15 @@ describe('ThreadTimelineOverlay active lane highlight', () => {
       conversationArticles: [{ uuid: 'a' }, { uuid: 'b' }],
     });
     const lanes = await screen.findAllByTestId('thread-timeline-lane');
-    await waitFor(() => {
-      expect(lanes[1]).toHaveAttribute('data-active', 'true');
-    });
+    // The lanes render from the `threads` prop alone, and lane 2's highlight
+    // is satisfied by the `activeThreadId` prop fallback before a single
+    // message has loaded — so neither is evidence that the wheel step below
+    // has anything to walk. Wait for the state the step actually needs: both
+    // lanes' marks present and the playhead settled on msg-b's x (which is
+    // the right end of the axis only once msg-a defines its left end).
+    expect(await screen.findAllByTestId('thread-timeline-dot')).toHaveLength(2);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
+    expect(lanes[1]).toHaveAttribute('data-active', 'true');
     // Wheel-up one step jumps the playhead back to msg-a on lane 1 (a
     // cross-lane step). `setActiveThread` fires, but the overlay's
     // `activeThreadId` PROP stays 2 here — so the lane-1 highlight can only
@@ -1996,9 +2016,7 @@ describe('ThreadTimelineOverlay wheel skips small marks', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial playhead anchors to the active lane’s latest large turn
     // (large-c, x=1 → 240px).
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     // Wheel up (sub-notch event → one step): the previous LARGE turn is
     // large-b (x=2/3 → 160px), NOT the small tool call between them. The
     // sub-notch keeps the staircase at one step so the assertion targets
@@ -2136,7 +2154,7 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     // Initial playhead anchors to the active lane’s latest large turn
     // (msg-c, x=1 → 240px).
-    expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     // ArrowLeft → one large message towards the older end (msg-b), the
     // same playhead move a single wheel-up step produces. The handled key
     // is preventDefault-ed so it cannot leak into page scrolling.
@@ -2183,7 +2201,7 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
       ],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     pressKey('ArrowLeft');
     expect(playheadPx()).toBe(`${160 + LANE_LEFT_PAD_PX}px`);
   });
@@ -2197,7 +2215,7 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
     try {
       renderThreeLargeTurns();
       await screen.findAllByTestId('thread-timeline-dot');
-      expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
       // Two held-key repeats advance two large messages: msg-c → msg-a.
       pressKey('ArrowLeft', { repeat: true });
       pressKey('ArrowLeft', { repeat: true });
@@ -2224,7 +2242,7 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
   it('ignores keydowns from editable targets (input / textarea / select / contentEditable) without preventDefault', async () => {
     renderThreeLargeTurns();
     await screen.findAllByTestId('thread-timeline-dot');
-    expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     const editables: HTMLElement[] = [
       document.createElement('input'),
       document.createElement('textarea'),
@@ -2255,7 +2273,7 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
   it('ignores modified arrows (Ctrl / Meta / Alt) and already-defaultPrevented keydowns', async () => {
     renderThreeLargeTurns();
     await screen.findAllByTestId('thread-timeline-dot');
-    expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     for (const init of [
       { ctrlKey: true },
       { metaKey: true },
@@ -2309,6 +2327,9 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
   it('detaches the listener when the timeline is collapsed mid-session and reattaches on re-expand', async () => {
     renderThreeLargeTurns();
     await screen.findAllByTestId('thread-timeline-dot');
+    // Step from the settled mount anchor (msg-c), not from whatever the
+    // playhead happens to read the moment the marks appear.
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     // Sanity: while expanded the timeline owns the arrows.
     expect(pressKey('ArrowLeft').defaultPrevented).toBe(true);
     expect(playheadPx()).toBe(`${120 + LANE_LEFT_PAD_PX}px`);
@@ -2331,6 +2352,49 @@ describe('ThreadTimelineOverlay keyboard navigation', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     expect(pressKey('ArrowRight').defaultPrevented).toBe(true);
     expect(playheadPx()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+  });
+
+  it('binds the keydown listener once for the expanded session, not once per message-list identity', async () => {
+    // The step handlers read the sorted lists through refs precisely so the
+    // listener does NOT have to be re-bound as messages load and refetch.
+    // That only holds if the commit callback they close over is stable too:
+    // a listener re-bound in a later commit is, until that commit's effects
+    // flush, still the PREVIOUS commit's closure — and React defers effect
+    // flushes to a separate task whenever a commit overruns the scheduler's
+    // frame budget, which is routine under load. A keypress landing in that
+    // window would then be resolved against one message list and committed
+    // against another (or against the empty pre-load list, dropping the step
+    // silently). Binding once removes the window by construction.
+    const bindings: string[] = [];
+    const realAdd = window.addEventListener.bind(window);
+    const realRemove = window.removeEventListener.bind(window);
+    const addSpy = vi
+      .spyOn(window, 'addEventListener')
+      .mockImplementation(((type: string, ...rest: unknown[]) => {
+        if (type === 'keydown') {
+          bindings.push('add');
+        }
+        return (realAdd as (...args: unknown[]) => void)(type, ...rest);
+      }) as typeof window.addEventListener);
+    const removeSpy = vi
+      .spyOn(window, 'removeEventListener')
+      .mockImplementation(((type: string, ...rest: unknown[]) => {
+        if (type === 'keydown') {
+          bindings.push('remove');
+        }
+        return (realRemove as (...args: unknown[]) => void)(type, ...rest);
+      }) as typeof window.removeEventListener);
+    try {
+      renderThreeLargeTurns();
+      await screen.findAllByTestId('thread-timeline-dot');
+      // Settle the mount anchor: every render the message load produces has
+      // happened by now, so any per-identity re-binding would be recorded.
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
+      expect(bindings).toEqual(['add']);
+    } finally {
+      addSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
   });
 });
 
@@ -3125,9 +3189,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     // Wheel originating on a label cell has no effect — the wheel
     // bubbles to the axis-column wrapper but the handler returns early
     // when the target sits inside a label cell.
@@ -3194,9 +3256,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
       conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
     });
     await screen.findAllByTestId('thread-timeline-dot');
-    expect(
-      playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-    ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
     // A click on a label cell with clientX=0 (where msg-a would land if
     // the axis click handler picked it up) must NOT move the playhead.
     fireEvent.click(screen.getAllByTestId('thread-timeline-lane-label')[0], {
@@ -3567,13 +3627,19 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
-      const io = await getLiveIO(fake, articles.length);
-      expect(io.options?.threshold).toBe(PANE_SCROLL_OBSERVER_THRESHOLD);
-      // Every article in the conversation body is observed by the live
-      // observer.
-      for (const a of articles) {
-        expect(io.observed.has(a)).toBe(true);
-      }
+      // Re-read the live observer on every poll rather than asserting against
+      // a snapshot: a re-run of the effect between the capture and the
+      // assertion disconnects the captured instance (clearing its `observed`
+      // set) and installs a fresh one, so a snapshot can go empty under the
+      // test's feet. The claims are unchanged — the live observer carries the
+      // production threshold and observes every article in the body.
+      await waitFor(() => {
+        const io = fake.instances.at(-1);
+        expect(io?.options?.threshold).toBe(PANE_SCROLL_OBSERVER_THRESHOLD);
+        for (const a of articles) {
+          expect(io?.observed.has(a)).toBe(true);
+        }
+      });
     } finally {
       fake.restore();
     }
@@ -3610,9 +3676,7 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
       });
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead sits on the last message (msg-c at x=240).
-      expect(
-        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
       const articles = within(
         screen.getByTestId('conversation-body'),
       ).getAllByText(/msg-/);
@@ -3692,41 +3756,54 @@ describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement
         conversationArticles: [{ uuid: 'msg-a' }, { uuid: 'msg-b' }],
       });
       await screen.findAllByTestId('thread-timeline-dot');
-      // Click at x=0: timeline jumps to msg-a (programmatic scroll fires).
-      act(() => {
-        fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
-          clientX: 0,
-        });
-      });
-      // Playhead now at msg-a (x=0).
-      await waitFor(() => {
-        expect(
-          playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-        ).toBe(`${LANE_LEFT_PAD_PX}px`);
-      });
-      // While inside the guard window, emit an IO entry claiming
-      // msg-b is topmost-visible — exactly what the jump's own scroll
-      // would produce as it animates past msg-b. The playhead must NOT
-      // jump to msg-b.
-      const articles = within(
-        screen.getByTestId('conversation-body'),
-      ).getAllByText(/msg-/);
-      const io = await getLiveIO(fake, articles.length);
-      vi.useFakeTimers();
+      // "Inside the guard window" has to be a fact the test controls, not a
+      // bet on how much wall-clock time the steps below consume: the guard is
+      // `performance.now() - lastProgrammaticScrollAt < 200 ms`, and the
+      // awaits between the click and the emit are unbounded on a loaded
+      // machine. Freeze the clock (the same idiom the wheel-cadence tests use)
+      // so the emit provably lands inside the window.
+      const nowSpy = vi
+        .spyOn(performance, 'now')
+        .mockImplementation(() => 10_000);
       try {
+        // Click at x=0: timeline jumps to msg-a (programmatic scroll fires).
         act(() => {
-          io.emit([
-            {
-              target: articles[1],
-              isIntersecting: true,
-              boundingClientRect: { top: 5 } as DOMRect,
-            },
-          ]);
-          // Debounce shorter than the guard window: still inside guard.
-          vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+          fireEvent.click(screen.getByTestId('thread-timeline-axis-column'), {
+            clientX: 0,
+          });
         });
+        // Playhead now at msg-a (x=0).
+        await waitFor(() => {
+          expect(
+            playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
+          ).toBe(`${LANE_LEFT_PAD_PX}px`);
+        });
+        // While inside the guard window, emit an IO entry claiming
+        // msg-b is topmost-visible — exactly what the jump's own scroll
+        // would produce as it animates past msg-b. The playhead must NOT
+        // jump to msg-b.
+        const articles = within(
+          screen.getByTestId('conversation-body'),
+        ).getAllByText(/msg-/);
+        const io = await getLiveIO(fake, articles.length);
+        vi.useFakeTimers();
+        try {
+          act(() => {
+            io.emit([
+              {
+                target: articles[1],
+                isIntersecting: true,
+                boundingClientRect: { top: 5 } as DOMRect,
+              },
+            ]);
+            // Debounce shorter than the guard window: still inside guard.
+            vi.advanceTimersByTime(PANE_SCROLL_DEBOUNCE_MS + 1);
+          });
+        } finally {
+          vi.useRealTimers();
+        }
       } finally {
-        vi.useRealTimers();
+        nowSpy.mockRestore();
       }
       expect(
         playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
@@ -3903,9 +3980,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
       });
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead anchors to lane 2’s latest large turn (msg-b, x=240).
-      expect(
-        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Wheel-up: one sub-notch step back → cross-lane jump to msg-a on lane 1.
       const body = screen.getByTestId('thread-timeline-axis-column');
@@ -4367,9 +4442,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
       });
       await screen.findAllByTestId('thread-timeline-dot');
       // Initial playhead is on msg-c (the latest, x=240).
-      expect(
-        playheadLeftPx(screen.getAllByTestId('thread-timeline-playhead')[0]),
-      ).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Wheel-up: one sub-notch step back → cross-lane jump child → parent.
       // The global sorted order is by (created_at, seq), so backwards from
@@ -5578,12 +5651,16 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
         </ApiProvider>
       </QueryClientProvider>,
     );
-    await screen.findAllByTestId('thread-timeline-dot');
+    // Both lanes' queries have to have landed before the external switch
+    // means anything — one mark per message across the two lanes.
+    await waitFor(() => {
+      expect(screen.getAllByTestId('thread-timeline-dot')).toHaveLength(3);
+    });
     // Sanity: the initial playhead sits on lane 1's latest large turn
     // (msg-a at x=0 = LANE_LEFT_PAD_PX). The mount anchors to the ACTIVE
     // lane, not whichever lane holds the global tail.
     const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
-    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${LANE_LEFT_PAD_PX}px`);
     // Now flip activeThreadId to lane 2 from the outside, mirroring a
     // Navigator click. Re-render the pane with lane 2's articles so the
     // DOM matches what the live app shows after the switch.
@@ -5692,10 +5769,14 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
       </QueryClientProvider>
     );
     const { rerender } = render(tree(1, ['msg-a']));
-    await screen.findAllByTestId('thread-timeline-dot');
+    // Both lanes' queries have to have landed before the external switch
+    // means anything — one mark per message across the two lanes.
+    await waitFor(() => {
+      expect(screen.getAllByTestId('thread-timeline-dot')).toHaveLength(3);
+    });
     const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
     // Mount anchor: lane 1's latest large turn (msg-a at x=0).
-    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX}px`);
+    await waitForPlayheadAt(`${LANE_LEFT_PAD_PX}px`);
     // External selection of lane 2: the reposition commits onto msg-c.
     rerender(tree(2, ['msg-b', 'msg-c']));
     await waitFor(() => {
@@ -5778,7 +5859,7 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
     await screen.findAllByTestId('thread-timeline-dot');
     const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
     // Mount anchor: lane 1's latest large turn (msg-b at x=120).
-    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 120}px`);
+    await waitForPlayheadAt(`${LANE_LEFT_PAD_PX + 120}px`);
     // Wheel-up one step: the user picks msg-a (x=0), a same-lane jump.
     const body = screen.getByTestId('thread-timeline-axis-column');
     act(() => {
@@ -6291,7 +6372,7 @@ describe('ThreadTimelineOverlay external active-thread change', () => {
     const playheads = () => screen.getAllByTestId('thread-timeline-playhead');
     // The auto-anchor lands on the active lane’s latest large turn (msg-d,
     // x=240 — also the global tail here).
-    expect(playheadLeftPx(playheads()[0])).toBe(`${LANE_LEFT_PAD_PX + 240}px`);
+    await waitForPlayheadAt(`${LANE_LEFT_PAD_PX + 240}px`);
     // Switch to lane 2 externally while its timeline messages are still
     // absent — the effect must bail without consuming the change.
     rerender(tree(2, []));
@@ -6674,7 +6755,7 @@ describe('ThreadTimelineOverlay pane scroll follower reserve-line selection', ()
         `${RESERVE}px`,
       );
       // Playhead starts on the tail (msg-c, x=240).
-      expect(playheadLeft()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
 
       // Same-lane wheel-up: msg-c → msg-b. This bumps scrubTick, which stamps
       // the programmatic-scroll guard and (in production) parks msg-b at the
@@ -6767,7 +6848,7 @@ describe('ThreadTimelineOverlay pane scroll follower reserve-line selection', ()
         `${RESERVE}px`,
       );
       // Playhead starts on the tail (msg-c, x=240).
-      expect(playheadLeft()).toBe(`${240 + LANE_LEFT_PAD_PX}px`);
+      await waitForPlayheadAt(`${240 + LANE_LEFT_PAD_PX}px`);
 
       const articles = articlesInBody();
       const io = await getLiveIO(fake, articles.length);
