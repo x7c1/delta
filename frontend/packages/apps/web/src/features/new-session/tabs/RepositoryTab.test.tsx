@@ -14,6 +14,7 @@ import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../../data/apiContext';
 import { useComposerStore } from '../../../store/composerStore';
+import { OnCommit, clickDuringCommit } from '../../../test/commitPhase';
 import { RepositoryTab } from './RepositoryTab';
 
 const server = setupServer(...createHandlers());
@@ -22,7 +23,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function renderTab() {
+function renderTab(onCommit?: () => void) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -30,7 +31,9 @@ function renderTab() {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <RepositoryTab />
+        <OnCommit onCommit={onCommit}>
+          <RepositoryTab />
+        </OnCommit>
       </ApiProvider>
     </QueryClientProvider>,
   );
@@ -123,5 +126,50 @@ describe('RepositoryTab', () => {
     expect(useComposerStore.getState().newSessionWorkdir).toBe(
       '/home/dev/projects/delta-fork',
     );
+  });
+
+  it('a clone pick made before the auto-pick effect flushes survives that flush', async () => {
+    // Regression for the deferred-passive-flush stomp: the mount-time
+    // auto-pick used to test its "already picked a clone of this repo?"
+    // guard against the selection captured when the effect was scheduled.
+    // A pick landing in between — routine on a loaded machine, where React
+    // defers the passive flush past the click — was therefore invisible to
+    // the guard, and the repo default overwrote it.
+    renderTab(
+      clickDuringCommit(
+        '[data-testid="repository-tab-clone-row"]',
+        'delta-fork',
+      ),
+    );
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBe(
+        '/home/dev/projects/delta-fork',
+      );
+    });
+    const cloneRows = await screen.findAllByTestId('repository-tab-clone-row');
+    const forkRow = cloneRows.find((row) =>
+      row.textContent?.includes('delta-fork'),
+    );
+    expect(forkRow).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('a repo pick made before the default-repo effect flushes survives that flush', async () => {
+    // Same window, one level up: the repo rows are clickable as soon as the
+    // list paints, while the effect that highlights the most-recent repo may
+    // still be queued. That effect must seed only an empty selection, never
+    // reinstate the first repo over one the user has already clicked.
+    renderTab(
+      clickDuringCommit('[data-testid="repository-tab-repo-row"]', 'website'),
+    );
+    await waitFor(() => {
+      expect(useComposerStore.getState().newSessionWorkdir).toBe(
+        '/home/dev/projects/website',
+      );
+    });
+    const repoRows = await screen.findAllByTestId('repository-tab-repo-row');
+    const websiteRow = repoRows.find((row) =>
+      row.textContent?.includes('website'),
+    );
+    expect(websiteRow).toHaveAttribute('aria-pressed', 'true');
   });
 });
