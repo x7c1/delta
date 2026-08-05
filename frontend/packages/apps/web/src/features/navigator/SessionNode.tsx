@@ -5,7 +5,7 @@ import {
   useCloseSessionMutation,
   useSessionThreadsQuery,
 } from '@delta/api-client';
-import { Badge, Menu, ProviderBadge, Spinner, StatusDot, cn } from '@delta/ui-kit';
+import { Badge, Menu, ProviderIcon, Spinner, StatusDot, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import {
   DEFAULT_OPEN_CWD_HANDLER_LABEL,
@@ -73,11 +73,11 @@ function basename(path: string): string {
  * short `repository_display_name` label, e.g. `org/repo`, and falling back to
  * the cwd basename — both paths RTL-truncate ("left-end truncate") so a long
  * `org/repo` keeps its repo name and a long local path keeps its meaningful
- * tail; omitted entirely when both yield no name) and the last-activity time
- * on the right) plus the kebab actions menu in a fixed-width slot at the
- * right end. The menu always offers `Copy session ID`
- * (useful even for a closed session — copying its id, e.g. to feed
- * `claude --resume`, does not require the session to be running) and
+ * tail; omitted entirely when both yield no name) and, on the right, the
+ * monochrome provider mark followed by the last-activity time) plus the kebab
+ * actions menu in a fixed-width slot at the right end. The menu always offers
+ * `Copy session ID` (useful even for a closed session — copying its id, e.g. to
+ * feed `claude --resume`, does not require the session to be running) and
  * additionally exposes `Close` while the session is open. The focused card is
  * lifted with an indigo border, tint, and ring.
  *
@@ -301,13 +301,6 @@ export const SessionNode = memo(function SessionNode({
                 tone={item.open ? 'green' : 'slate'}
                 title={item.open ? 'Open' : 'Closed'}
               />
-              {/* Which AI-agent provider this session runs on (Claude / Codex).
-                  A session-identity attribute like the status dot, so it sits at
-                  the head of the line; shrink-0 (Badge is inline-flex) keeps it
-                  from being clipped when the branch name truncates. */}
-              <span className="shrink-0" data-testid="session-provider-badge">
-                <ProviderBadge provider={item.session.provider} />
-              </span>
               {/* Line 1: the *launch-time* local git branch, captured once on
                   spawn and never updated on resume or a later `git checkout`.
                   Distinct from the per-message `git_branch` carried on each
@@ -363,14 +356,14 @@ export const SessionNode = memo(function SessionNode({
                 </span>
               )}
             </span>
-            {/* Line 2: the launch-time repository identity on the left and
-                the last-activity time on the right. Both the primary (the
-                backend's short `repository_display_name`) and the fallback
-                (cwd basename) paths RTL-truncate ("left-end truncate") so the
-                meaningful tail is preserved — `org/repo` clips the org and
-                keeps the repo, a long local path keeps `…/projects/delta`.
-                The repo span is omitted entirely when neither yields a usable
-                label. */}
+            {/* Line 2: the launch-time repository identity on the left, and on
+                the right the provider mark followed by the last-activity time.
+                Both the primary (the backend's short `repository_display_name`)
+                and the fallback (cwd basename) paths RTL-truncate ("left-end
+                truncate") so the meaningful tail is preserved — `org/repo`
+                clips the org and keeps the repo, a long local path keeps
+                `…/projects/delta`. The repo span is omitted entirely when
+                neither yields a usable label. */}
             <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
               {repoLabel && (
                 <span
@@ -381,14 +374,26 @@ export const SessionNode = memo(function SessionNode({
                   {repoLabel}
                 </span>
               )}
-              {lastActivity && (
-                <span
-                  className="ml-auto shrink-0 tabular-nums [font-stretch:condensed]"
-                  data-testid="session-last-activity"
-                >
-                  {lastActivity}
+              {/* The right-hand group: provider mark + time. Grouped so
+                  `ml-auto` pins the pair to the right edge even when the repo
+                  label is absent and there is nothing on the left to push
+                  against. */}
+              <span className="ml-auto flex shrink-0 items-baseline gap-1.5">
+                {/* Which AI-agent provider this session runs on (Claude /
+                    Codex). Kept on the quieter line 2 so that line 1's width
+                    stays with the branch name. */}
+                <span data-testid="session-provider-icon">
+                  <ProviderIcon provider={item.session.provider} />
                 </span>
-              )}
+                {lastActivity && (
+                  <span
+                    className="tabular-nums [font-stretch:condensed]"
+                    data-testid="session-last-activity"
+                  >
+                    {lastActivity}
+                  </span>
+                )}
+              </span>
             </span>
           </button>
           {/* Fixed-width slot, vertically centered against the two-line block. */}

@@ -47,8 +47,8 @@ export interface ProviderBadgeProps {
  * full product name is the tooltip and the accessible name.
  *
  * Built on {@link Badge} and living in ui-kit so every feature can share one
- * definition — the navigator session card today, the provider selector and
- * capability UI later.
+ * definition. For a dense row, where the colored chip would shout, reach for
+ * the quiet {@link ProviderIcon} instead.
  */
 export function ProviderBadge({ provider, className }: ProviderBadgeProps) {
   const meta = PROVIDERS[provider];

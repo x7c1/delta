@@ -6,6 +6,7 @@ export {
   type ProviderBadgeProps,
   type Provider,
 } from './ProviderBadge';
+export { ProviderIcon, type ProviderIconProps } from './ProviderIcon';
 export { Panel, type PanelProps } from './Panel';
 export { Collapsible, type CollapsibleProps } from './Collapsible';
 export { ErrorBoundary, type ErrorBoundaryProps } from './ErrorBoundary';

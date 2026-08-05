@@ -164,8 +164,8 @@
   --delta-color-info: 2 132 199;
   --delta-color-success: 5 150 105;
   /* Provider accent colors — one hue per AI-agent provider, used by the
-   * ProviderBadge monogram chip (see ui-kit) to reinforce which provider a
-   * session runs on. Claude reads as a burnt orange, Codex as a green; the
+   * ProviderBadge monogram chip (see ui-kit) to reinforce which provider the
+   * chip names. Claude reads as a burnt orange, Codex as a green; the
    * two-letter monogram distinguishes them on its own, so these are a
    * redundant reinforcement rather than the sole signal. The chip pairs the
    * base token as its foreground with a low-alpha wash of the same token as

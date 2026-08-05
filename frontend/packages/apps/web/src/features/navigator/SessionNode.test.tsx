@@ -357,18 +357,26 @@ describe('SessionNode card styling', () => {
   });
 });
 
-describe('SessionNode provider badge', () => {
-  it('shows the Claude monogram for a Claude session', () => {
+describe('SessionNode provider icon', () => {
+  it('shows the Claude mark on the meta line, not on the branch line', () => {
     // The shared `item` fixture runs on Claude.
     renderNode({});
 
-    const badge = screen.getByTestId('session-provider-badge');
-    expect(badge).toHaveTextContent('CL');
+    const icon = screen.getByTestId('session-provider-icon');
     // The full product name is the tooltip / accessible name.
-    expect(screen.getByTitle('Claude Code')).toBeInTheDocument();
+    expect(icon).toContainElement(screen.getByTitle('Claude Code'));
+    // The mark shares the meta line (line 2) with the last-activity time, and
+    // sits in the same right-hand group — hence the time being reachable from
+    // the icon's parent.
+    expect(icon.parentElement).toContainElement(
+      screen.getByTestId('session-last-activity'),
+    );
+    // The branch line (line 1) carries no provider marker of its own.
+    const branchLine = screen.getByTestId('session-branch').parentElement;
+    expect(branchLine).not.toContainElement(icon);
   });
 
-  it('shows the Codex monogram for a Codex session', () => {
+  it('shows the Codex mark for a Codex session', () => {
     renderNode({
       item: {
         ...item,
@@ -376,9 +384,8 @@ describe('SessionNode provider badge', () => {
       },
     });
 
-    const badge = screen.getByTestId('session-provider-badge');
-    expect(badge).toHaveTextContent('CX');
-    expect(screen.getByTitle('Codex')).toBeInTheDocument();
+    const icon = screen.getByTestId('session-provider-icon');
+    expect(icon).toContainElement(screen.getByTitle('Codex'));
   });
 });
 
