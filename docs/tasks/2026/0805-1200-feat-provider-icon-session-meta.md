@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0805-1200-feat-provider-icon-session-meta
 created_at: 2026-08-05T12:00:41Z
-updated_at: 2026-08-06T00:45:00Z
+updated_at: 2026-08-06T01:20:00Z
 ---
 
 # feat(web): replace the CL/CX provider badge with hue-based provider markers
@@ -42,17 +42,19 @@ alone**, applied to things the UI already has:
   fails to typecheck until it gets a hue. The trigger's accessible name
   gains the provider ("Session actions for … (Claude Code session)") so
   the marker never relies on color alone.
-- **Pickers and rows**: a new ui-kit `ProviderDot` — a small round dot
-  filled with the provider hue, with the full product name as tooltip and
-  accessible name — replaces `ProviderBadge` in Settings'
+- **Pickers and rows**: a new ui-kit `ProviderName` — the full product
+  name written in the provider hue — replaces `ProviderBadge` in Settings'
   default-provider picker, the launch-option form and rows, and the
-  new-session provider selector. Every one of those surfaces already
-  spells out the full product name next to the marker.
+  new-session provider selector. Deliberately shape-free: an interim
+  hue-filled dot was tried first and read as a status indicator next to
+  `StatusDot`'s open/closed vocabulary (a green provider dot beside a
+  green "open" dot invites misreading), so these surfaces color the words
+  instead of adding any glyph.
 - **Retired**: `ProviderBadge` (the CL/CX monogram no longer appears
-  anywhere a user could learn it) and the interim `ProviderIcon` brand-mark
-  component with its `@lobehub/icons-static-svg` dependency. The
-  `Provider` union and display names move to a shared ui-kit module
-  (`provider.ts`).
+  anywhere a user could learn it), the interim `ProviderIcon` brand-mark
+  component with its `@lobehub/icons-static-svg` dependency, and the
+  interim `ProviderDot`. The `Provider` union and display names move to a
+  shared ui-kit module (`provider.ts`).
 
 Frontend-only; no wire or backend change of any kind.
 
@@ -65,21 +67,21 @@ Frontend-only; no wire or backend change of any kind.
       `text-provider-codex` matching the session's provider, and its
       accessible name names the provider (component tests in
       `SessionNode.test.tsx`).
-- [x] `ProviderDot` renders the provider's hue class and the full product
-      name ("Claude Code" / "Codex") as tooltip and accessible name, and
-      merges a caller `className` (ui-kit component test).
-- [x] `ProviderSelector` and the Settings default-provider picker render
-      `ProviderDot` alongside the spelled-out product name (their component
-      tests).
+- [x] `ProviderName` writes the full product name ("Claude Code" /
+      "Codex") in the provider's hue class and merges a caller `className`
+      (ui-kit component test).
+- [x] `ProviderSelector`, the Settings default-provider picker, and the
+      launch-option rows render the hue-tinted product name via
+      `ProviderName` (their component tests).
 - [x] Playwright e2e (`e2e/provider-marker.spec.ts`): with the real
       stylesheet, the Claude and Codex cards' kebab triggers resolve to
       different computed colors, both different from the meta line's
       resting text tone, and each trigger's accessible name carries its
       provider.
-- [x] `ProviderBadge`, `ProviderIcon`, and the `@lobehub/icons-static-svg`
-      dependency are fully removed — no source references remain and the
-      lockfile no longer records the package (`make check` compiles and
-      lints the tree; a stale import fails it).
+- [x] `ProviderBadge`, `ProviderIcon`, `ProviderDot`, and the
+      `@lobehub/icons-static-svg` dependency are fully removed — no source
+      references remain and the lockfile no longer records the package
+      (`make check` compiles and lints the tree; a stale import fails it).
 - [x] `make check` passes, including dependency-cruiser (ui-kit gains no
       dependency on wire/gateway packages).
 
@@ -89,9 +91,10 @@ Frontend-only; no wire or backend change of any kind.
       provider's hue; the two hues are distinguishable at a glance on
       light, dark, and sepia themes, and hover still gives the usual
       interactive feedback.
-- [x] Settings' default-provider picker, the launch-option form and rows,
-      and the new-session provider selector show the provider dot beside
-      the full product name; the dot's tooltip names the provider.
+- [ ] Settings' default-provider picker, the launch-option form and rows,
+      and the new-session provider selector show the product name written
+      in the provider hue, with no dot-like glyph that could be mistaken
+      for the session list's open/closed status dot.
 
 ## Out of scope
 

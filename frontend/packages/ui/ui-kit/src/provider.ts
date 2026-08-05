@@ -7,8 +7,8 @@
 export type Provider = 'claude' | 'codex';
 
 /**
- * Full product name per provider, surfaced as the tooltip and accessible name
- * of every provider marker (today {@link ProviderDot}).
+ * Full product name per provider, written out by {@link ProviderName} and
+ * spoken by the session card's kebab-trigger accessible name.
  */
 export const PROVIDER_DISPLAY_NAMES: Record<Provider, string> = {
   claude: 'Claude Code',

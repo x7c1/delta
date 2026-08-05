@@ -148,16 +148,15 @@ describe('SettingsView', () => {
     );
   });
 
-  it('shows a provider badge for each registered option', async () => {
+  it('names the provider on each registered option', async () => {
     renderSettings();
     const list = await findList();
-    // The Codex fixture (`model gpt-5`) carries a Codex badge; the Claude
-    // fixtures carry Claude badges.
+    // The Codex fixture (`model gpt-5`) carries the written Codex name; the
+    // Claude fixtures carry the written Claude Code name (each hue-tinted by
+    // ProviderName).
     expect(within(list).getByText('model')).toBeInTheDocument();
-    expect(within(list).getAllByLabelText('Codex').length).toBeGreaterThan(0);
-    expect(within(list).getAllByLabelText('Claude Code').length).toBeGreaterThan(
-      0,
-    );
+    expect(within(list).getAllByText('Codex').length).toBeGreaterThan(0);
+    expect(within(list).getAllByText('Claude Code').length).toBeGreaterThan(0);
   });
 
   it('registers a launch option for the selected provider', async () => {
@@ -175,12 +174,14 @@ describe('SettingsView', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
 
-    // The new option appears; its row carries the Codex badge, proving the
-    // chosen provider was sent and round-tripped.
+    // The new option appears; its row carries the written, hue-tinted Codex
+    // name, proving the chosen provider was sent and round-tripped.
     const row = await within(list).findByText('reasoning-effort');
     const li = row.closest('li');
     expect(li).not.toBeNull();
-    expect(within(li as HTMLElement).getByLabelText('Codex')).toBeInTheDocument();
+    expect(
+      within(li as HTMLElement).getByText('Codex').className,
+    ).toContain('text-provider-codex');
   });
 
   it('disables Add until a non-blank name is entered', async () => {
@@ -314,7 +315,7 @@ describe('SettingsView', () => {
       fireEvent.click(screen.getByTestId('settings-category-default-provider'));
     }
 
-    it('lists both providers with their badges and full names', () => {
+    it('lists both providers with their hue-tinted names', () => {
       renderSettings();
       switchToDefaultProvider();
       const group = screen.getByTestId('default-provider-options');
@@ -323,14 +324,16 @@ describe('SettingsView', () => {
         'claude',
         'codex',
       ]);
-      // Each option pairs the shared ProviderDot (accessible name = product
-      // name) with its spelled-out label.
+      // Each option writes its product name through the shared ProviderName,
+      // which tints the words in the provider hue.
       const claude = screen.getByTestId('default-provider-option-claude');
       const codex = screen.getByTestId('default-provider-option-codex');
-      expect(within(claude).getByLabelText('Claude Code')).toBeInTheDocument();
-      expect(within(claude).getByText('Claude Code')).toBeInTheDocument();
-      expect(within(codex).getByLabelText('Codex')).toBeInTheDocument();
-      expect(within(codex).getByText('Codex')).toBeInTheDocument();
+      expect(
+        within(claude).getByText('Claude Code').className,
+      ).toContain('text-provider-claude');
+      expect(within(codex).getByText('Codex').className).toContain(
+        'text-provider-codex',
+      );
     });
 
     it('highlights the current default (Claude on a fresh install)', () => {

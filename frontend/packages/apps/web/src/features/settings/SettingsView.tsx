@@ -22,7 +22,7 @@ import type {
   LaunchOption,
   RepositoryScanRoot,
 } from '@delta/wire-gen';
-import { Button, cn, Dialog, ProviderDot, Spinner } from '@delta/ui-kit';
+import { Button, cn, Dialog, ProviderName, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
@@ -308,8 +308,10 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
                     onChange={() => setProvider(option.value)}
                     className="sr-only"
                   />
-                  <ProviderDot provider={option.value} />
-                  <span className="font-medium">{option.label}</span>
+                  <ProviderName
+                    provider={option.value}
+                    className="font-medium"
+                  />
                 </label>
               );
             })}
@@ -825,9 +827,8 @@ function DefaultProviderSection() {
                 onChange={() => setDefaultProvider(option.value)}
                 className="h-3.5 w-3.5 accent-accent"
               />
-              <ProviderDot provider={option.value} />
               <span className="flex flex-1 flex-col">
-                <span className="font-medium">{option.label}</span>
+                <ProviderName provider={option.value} className="font-medium" />
                 <span className="text-caption text-fg-muted">{option.hint}</span>
               </span>
             </label>
@@ -856,7 +857,10 @@ function LaunchOptionRow({
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        <ProviderDot provider={option.provider} />
+        <ProviderName
+          provider={option.provider}
+          className="shrink-0 text-caption font-medium"
+        />
         <div className="min-w-0">
           {option.label && (
             <div className="truncate text-caption font-medium text-fg-muted">

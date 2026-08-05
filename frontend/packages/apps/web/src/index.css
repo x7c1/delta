@@ -166,11 +166,10 @@
   /* Provider accent colors — one hue per AI-agent provider: Claude reads as
    * a burnt orange, Codex as a green. The hue is the shared provider
    * vocabulary across the UI: the session card's kebab trigger rests in it
-   * (as text color) and ProviderDot fills with it (as background), each
-   * paired with the full product name in its accessible name so the hue is
-   * a reinforcement rather than the sole signal. Used both as text on the
-   * theme's surface and as a small filled dot, so each value must hold
-   * contrast in both roles. */
+   * and ProviderName writes the product name in it — both as text color,
+   * always alongside the written or spoken product name so the hue is a
+   * reinforcement rather than the sole signal. Each value must read as text
+   * on the theme's surface. */
   --delta-color-provider-claude: 194 84 30;
   --delta-color-provider-codex: 21 128 61;
   /* scrim: dark backdrop for modals/popovers; expected to be used with a
