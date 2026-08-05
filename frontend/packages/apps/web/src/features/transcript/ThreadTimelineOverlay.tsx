@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -333,8 +334,16 @@ export function ThreadTimelineOverlay({
   // (the navigation jump effect, the wheel/arrow handlers, the cross-lane
   // timeout fallback) can reach it. Declared here — above the first consumer —
   // so those closures never reference it before initialization.
+  //
+  // Synced in the LAYOUT phase, not the passive one: the wheel / keyboard
+  // handlers are native listeners that can fire the instant the marks are on
+  // screen, and passive effects are deferred to a later task whenever a commit
+  // overruns the scheduler's frame budget. A passive sync would leave those
+  // handlers reading the pre-commit list while the user is already looking at
+  // (and scrubbing over) the new one. Layout effects run inside the commit, so
+  // the mirror is never behind the DOM it describes.
   const sortedMessagesRef = useRef(sortedMessages);
-  useEffect(() => {
+  useLayoutEffect(() => {
     sortedMessagesRef.current = sortedMessages;
   }, [sortedMessages]);
 
@@ -418,7 +427,21 @@ export function ThreadTimelineOverlay({
   // immediately reset it to the tail message, swallowing the follower's
   // update.
   const [userActedTick, setUserActedTick] = useState(0);
+  // The same gate as a ref, written SYNCHRONOUSLY at the instant the user
+  // acts. The auto-anchor effect reads this ref rather than the state:
+  // `userActedTick` is captured in each render's closure, so an auto-anchor
+  // effect that was queued while the tick still read 0 keeps that stale value
+  // even if the user acts before it flushes. React defers passive effects to
+  // a later task whenever a commit overruns the scheduler's frame budget, so
+  // that window is real — a wheel/arrow step landing in it would be committed
+  // and then silently reverted by the late anchor. The ref closes the window
+  // by construction: whenever the anchor effect actually runs, it sees the
+  // latest intent, not the intent of the render it was scheduled from. The
+  // state counter stays because the horizontal scroll catch-up effect needs a
+  // value that CHANGES per action to re-fire.
+  const userActedRef = useRef(false);
   const bumpUserActedTick = useCallback(() => {
+    userActedRef.current = true;
     setUserActedTick((t) => t + 1);
   }, []);
 
@@ -427,21 +450,31 @@ export function ThreadTimelineOverlay({
    * commit it together with a tick bump that re-fires the navigation
    * effect. Centralising the clamp + tick here keeps the wheel and click
    * handlers from duplicating the same boilerplate.
+   *
+   * The list is read from {@link sortedMessagesRef} — the same list the wheel
+   * / keyboard handlers resolved `next` against — rather than from the render
+   * closure. Those handlers are native listeners bound in an earlier commit,
+   * so a closure-held array would let an index computed in one list space be
+   * resolved in another (a wrong message, or a dropped step when the closure
+   * still holds the empty pre-load list). Reading the ref also keeps this
+   * callback identity-stable, which is what lets those listeners bind once
+   * instead of re-binding on every background-refetch array-identity change.
    */
   const setActiveMessageIndex = useCallback(
     (next: number) => {
-      if (sortedMessages.length === 0) {
+      const list = sortedMessagesRef.current;
+      if (list.length === 0) {
         return;
       }
-      const clamped = Math.max(0, Math.min(sortedMessages.length - 1, next));
+      const clamped = Math.max(0, Math.min(list.length - 1, next));
       setScrubTick((tick) => tick + 1);
       bumpUserActedTick();
       // Resolve the index to its message's UUID at commit time — the UUID is
       // the canonical state, so a later array-identity change re-derives the
       // index and keeps the playhead on the exact message the user picked.
-      setActiveMessageUuidState(sortedMessages[clamped].uuid);
+      setActiveMessageUuidState(list[clamped].uuid);
     },
-    [sortedMessages, bumpUserActedTick],
+    [bumpUserActedTick],
   );
 
   /**
@@ -459,6 +492,12 @@ export function ThreadTimelineOverlay({
    * is one wasted render). The active thread is intentionally left alone
    * too: a pane scroll never switches lanes, because by definition the
    * pane is already inside the active subthread.
+   *
+   * Unlike {@link setActiveMessageIndex} this one resolves the index against
+   * the render closure's list, which is correct here: both callers (the
+   * external-thread effect and the observer's debounced flush) derive `next`
+   * from the very same render's `sortedMessages`, so the closure and the index
+   * always share one list space.
    */
   const setActiveMessageIndexFromPaneScroll = useCallback(
     (next: number) => {
@@ -520,14 +559,17 @@ export function ThreadTimelineOverlay({
   // dep while the lane's messages are still loading, with the global tail as
   // the fallback only when `activeThreadId` is null.
   //
-  // Gated on {@link userActedTick} (not {@link scrubTick}) so any user action —
+  // Gated on {@link userActedRef} (not {@link scrubTick}) so any user action —
   // wheel/click jump OR pane-scroll follow OR external-thread reposition —
-  // pins the pick and switches this effect off. There is no companion "realign
-  // the index across an array-identity change" effect: the canonical-state
-  // note above explains why deriving the index from the UUID makes one
-  // unnecessary.
+  // pins the pick and switches this effect off. The gate is read from the ref
+  // rather than the `userActedTick` state so it is evaluated at FLUSH time:
+  // see the ref's declaration for why a render-time read would let this effect
+  // revert a step the user took while it was still queued. There is no
+  // companion "realign the index across an array-identity change" effect: the
+  // canonical-state note above explains why deriving the index from the UUID
+  // makes one unnecessary.
   useEffect(() => {
-    if (userActedTick !== 0) {
+    if (userActedRef.current) {
       return;
     }
     setActiveMessageUuidState((prev) =>
@@ -538,7 +580,7 @@ export function ThreadTimelineOverlay({
         prev,
       ),
     );
-  }, [sortedMessages, largeSortedMessages, activeThreadId, userActedTick]);
+  }, [sortedMessages, largeSortedMessages, activeThreadId]);
 
   const activeThreadRef = useRef<ThreadId | null>(activeThreadId);
   useEffect(() => {
@@ -976,12 +1018,16 @@ export function ThreadTimelineOverlay({
   // and suppress the page scroll while scrubbing.
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const axisScrollRef = useRef<HTMLDivElement | null>(null);
+  // Both mirrors feed the native wheel / keyboard handlers, so they follow the
+  // same layout-phase discipline as `sortedMessagesRef` above: a step must be
+  // computed from the playhead position and the mark list the user can
+  // actually see, never from the commit before it.
   const activeMessageIndexRef = useRef(activeMessageIndex);
-  useEffect(() => {
+  useLayoutEffect(() => {
     activeMessageIndexRef.current = activeMessageIndex;
   }, [activeMessageIndex]);
   const largeSortedMessagesRef = useRef(largeSortedMessages);
-  useEffect(() => {
+  useLayoutEffect(() => {
     largeSortedMessagesRef.current = largeSortedMessages;
   }, [largeSortedMessages]);
 
