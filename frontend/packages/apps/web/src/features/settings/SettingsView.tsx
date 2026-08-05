@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -34,11 +35,11 @@ import {
 import { SYSTEM_PREFERENCE, type ThemePreference } from '../../hooks/useTheme';
 import { THEMES } from '../../themes/registry';
 import { displayPath } from '../../utils/displayPath';
-import { DEFAULT_PROVIDER, PROVIDER_OPTIONS } from '../../providers';
+import { PROVIDER_OPTIONS } from '../../providers';
 import { WorkdirPickerBody } from '../composer/WorkdirPickerBody';
 
 /**
- * The settings modal: hosts the registry of custom `claude` CLI launch options
+ * The settings modal: hosts the registry of per-provider CLI launch options
  * and the registry of repository scan roots, each a top-level category in a
  * VS Code-style 2-pane layout. The left rail lists categories; the right pane
  * renders the active category's content. The categories are conceptually
@@ -201,11 +202,18 @@ export function SettingsView() {
 }
 
 /**
- * Launch options category content: manage the registry of custom `claude` CLI
+ * Launch options category content: manage the registry of custom agent-CLI
  * launch options (flat `(label?, name, value?)` flag records). Lists the
  * registered options and lets the user add one (label and value optional,
  * name required) and delete one. Selecting which options to apply when
  * starting a session is a separate concern handled elsewhere.
+ *
+ * Launch options belong to one provider each (Claude's flags mean nothing to
+ * Codex and vice-versa), so the provider selector at the top of the section
+ * scopes everything below it: new options are registered under the selected
+ * provider, and only that provider's options are listed. The list endpoint
+ * returns every provider's options, so filtering happens client-side, as in
+ * `LaunchOptionsPicker`.
  *
  * `active` mirrors the dialog's `settingsOpen` AND the category being the
  * visible one, so the query only runs while this section is mounted in the
@@ -222,13 +230,19 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [defaultEnabled, setDefaultEnabled] = useState(false);
-  // Which provider the new option is being registered for. Claude's flags mean
-  // nothing to Codex and vice-versa, so every option belongs to one provider;
-  // the session-start picker only offers options matching the session's
-  // provider. Starts on the app-wide default provider.
-  const [provider, setProvider] = useState<AgentProvider>(DEFAULT_PROVIDER);
+  // Seeded from the persisted default-provider setting, the same source the
+  // new-session provider selector reads: a Codex-first user would otherwise
+  // land on Claude's (for them, likely empty) list every time they open
+  // Settings. Seeded only, never synced — the section unmounts when its
+  // category is left, so the next visit picks up the current setting.
+  const defaultProvider = useSettingsStore((state) => state.defaultProvider);
+  const [provider, setProvider] = useState<AgentProvider>(defaultProvider);
 
   const options = launchOptionsQuery.data?.launch_options ?? [];
+  const providerOptions = useMemo(
+    () => options.filter((option) => option.provider === provider),
+    [options, provider],
+  );
   // `name` is the only required field; trim so an all-whitespace entry cannot
   // be submitted (the server rejects it too, but gating here avoids a round-trip
   // and keeps the button state honest).
@@ -256,7 +270,8 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           setName('');
           setValue('');
           setDefaultEnabled(false);
-          setProvider(DEFAULT_PROVIDER);
+          // The provider is deliberately NOT reset: it scopes the list too, so
+          // resetting it would yank the view away from the option just added.
         },
       },
     );
@@ -266,12 +281,48 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
     <section className="w-full" data-testid="launch-options-section">
       <h3 className="mb-1 text-secondary font-semibold text-fg">Launch options</h3>
       <p className="mb-4 text-caption text-fg-muted">
-        Register custom <code>claude</code> CLI flags to apply when starting a
-        session. <span className="font-medium">Name</span> is the flag (e.g.{' '}
+        Register custom CLI flags to apply when starting a session with the
+        selected agent. <span className="font-medium">Name</span> is the flag (e.g.{' '}
         <code>--permission-mode</code>); <span className="font-medium">value</span>{' '}
         is its argument (e.g. <code>auto</code>) and is optional for valueless
         flags. <span className="font-medium">Label</span> is an optional note.
       </p>
+
+      <div className="mb-4 flex flex-col gap-1">
+        <span className="text-caption font-medium text-fg-muted">Provider</span>
+        <div
+          role="radiogroup"
+          aria-label="Launch options provider"
+          className="flex gap-1 rounded border border-border-default bg-surface p-1"
+          data-testid="launch-option-provider-selector"
+        >
+          {PROVIDER_OPTIONS.map((option) => {
+            const selected = provider === option.value;
+            return (
+              <label
+                key={option.value}
+                className={cn(
+                  'flex flex-1 cursor-pointer items-center justify-center gap-2 rounded px-3 py-1.5 text-secondary transition',
+                  selected
+                    ? 'bg-accent/10 text-fg ring-1 ring-accent/30'
+                    : 'text-fg-muted hover:bg-surface-elevated',
+                )}
+                data-testid={`launch-option-provider-${option.value}`}
+              >
+                <input
+                  type="radio"
+                  name="launch-option-provider"
+                  value={option.value}
+                  checked={selected}
+                  onChange={() => setProvider(option.value)}
+                  className="sr-only"
+                />
+                <ProviderName provider={option.value} className="font-medium" />
+              </label>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Add form */}
       <form
@@ -279,44 +330,6 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
         className="mb-6 flex flex-col gap-3 rounded-lg border border-border-default bg-surface-elevated p-3"
         aria-label="Add launch option"
       >
-        <div className="flex flex-col gap-1">
-          <span className="text-caption font-medium text-fg-muted">Provider</span>
-          <div
-            role="radiogroup"
-            aria-label="Launch option provider"
-            className="flex gap-1 rounded border border-border-default bg-surface p-1"
-            data-testid="launch-option-provider-selector"
-          >
-            {PROVIDER_OPTIONS.map((option) => {
-              const selected = provider === option.value;
-              return (
-                <label
-                  key={option.value}
-                  className={cn(
-                    'flex flex-1 cursor-pointer items-center justify-center gap-2 rounded px-3 py-1.5 text-secondary transition',
-                    selected
-                      ? 'bg-accent/10 text-fg ring-1 ring-accent/30'
-                      : 'text-fg-muted hover:bg-surface-elevated',
-                  )}
-                  data-testid={`launch-option-provider-${option.value}`}
-                >
-                  <input
-                    type="radio"
-                    name="launch-option-provider"
-                    value={option.value}
-                    checked={selected}
-                    onChange={() => setProvider(option.value)}
-                    className="sr-only"
-                  />
-                  <ProviderName
-                    provider={option.value}
-                    className="font-medium"
-                  />
-                </label>
-              );
-            })}
-          </div>
-        </div>
         <div className="flex flex-col gap-1">
           <label className="text-caption font-medium text-fg-muted" htmlFor="lo-label">
             Label (optional)
@@ -394,13 +407,19 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             Retry
           </Button>
         </div>
-      ) : options.length === 0 ? (
-        <p className="py-6 text-center text-secondary text-fg-subtle">
-          No launch options registered yet.
+      ) : providerOptions.length === 0 ? (
+        // Names the provider: the other one may well have options, so this
+        // must not read as an empty registry.
+        <p
+          className="py-6 text-center text-secondary text-fg-subtle"
+          data-testid="launch-options-empty"
+        >
+          No launch options registered for{' '}
+          <ProviderName provider={provider} className="font-medium" /> yet.
         </p>
       ) : (
         <ul className="flex flex-col gap-2" data-testid="launch-options-list">
-          {options.map((option) => (
+          {providerOptions.map((option) => (
             <LaunchOptionRow
               key={option.id}
               option={option}
@@ -776,6 +795,7 @@ function AppearanceSection() {
  * starts on. The choice is a persisted preference
  * ({@link useSettingsStore}'s `defaultProvider`) that seeds the new-session
  * provider selector's initial value; each session can still override it there.
+ * It also seeds which provider {@link LaunchOptionsSection} opens scoped to.
  *
  * The control is a radio group so each option is independently focusable for
  * keyboard navigation and screen readers announce the role correctly, following
@@ -856,23 +876,19 @@ function LaunchOptionRow({
 }: LaunchOptionRowProps) {
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
-      <div className="flex min-w-0 items-center gap-2">
-        <ProviderName
-          provider={option.provider}
-          className="shrink-0 text-caption font-medium"
-        />
-        <div className="min-w-0">
-          {option.label && (
-            <div className="truncate text-caption font-medium text-fg-muted">
-              {option.label}
-            </div>
-          )}
-          <div className="truncate font-mono text-code text-fg">
-            <span>{option.name}</span>
-            {option.value !== null && (
-              <span className="text-fg-muted"> {option.value}</span>
-            )}
+      {/* No provider name here: the list is already scoped to one, so a
+          per-row repeat is noise. */}
+      <div className="min-w-0">
+        {option.label && (
+          <div className="truncate text-caption font-medium text-fg-muted">
+            {option.label}
           </div>
+        )}
+        <div className="truncate font-mono text-code text-fg">
+          <span>{option.name}</span>
+          {option.value !== null && (
+            <span className="text-fg-muted"> {option.value}</span>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">
