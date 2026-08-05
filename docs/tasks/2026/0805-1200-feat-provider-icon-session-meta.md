@@ -64,10 +64,11 @@ it as a small monochrome brand icon instead of a colored pill:
   `aria-hidden`.
 - **Placement**: leading the meta line, to the left of the repo label, with
   the last-activity time alone on the right (placement revised from
-  "before the time" after on-hardware review); `shrink-0`, sized to the
-  caption line (the icons are `1em`), inheriting `text-fg-subtle`, nudged
-  down `0.125em` so the baseline-aligned square sits on the text's optical
-  middle. Line 1 drops the badge entirely: StatusDot, branch name,
+  "before the time" after on-hardware review); `shrink-0`, sized slightly
+  below the caption (`0.85em`, revised down from `1em` in the same review)
+  with a tight 4px gap to the repo label it annotates, inheriting
+  `text-fg-subtle`, nudged down `0.125em` so the baseline-aligned square
+  sits on the text's optical middle. Line 1 drops the badge entirely: StatusDot, branch name,
   spinner/unread/permission markers only. Move the `data-testid` to the new
   element as `session-provider-icon` (the old `session-provider-badge`
   testid disappears with the badge).

@@ -364,13 +364,22 @@ export const SessionNode = memo(function SessionNode({
                 clips the org and keeps the repo, a long local path keeps
                 `…/projects/delta`. The repo span is omitted entirely when
                 neither yields a usable label. */}
-            <span className="flex items-baseline gap-2 text-caption text-fg-subtle">
+            {/* Spacing is per-pair margins, not a uniform flex gap: the mark
+                couples tightly (4px) to the repo label it annotates, while
+                the time keeps a wider 8px minimum from the truncating
+                label. */}
+            <span className="flex items-baseline text-caption text-fg-subtle">
               {/* Which AI-agent provider this session runs on (Claude /
                   Codex). Leads the meta line, marking the repo identity next
                   to it; kept on the quieter line 2 so that line 1's width
-                  stays with the branch name. */}
-              <span data-testid="session-provider-icon">
-                <ProviderIcon provider={item.session.provider} />
+                  stays with the branch name. Sized down from the caption so
+                  the mark reads as a prefix annotation, not a character of
+                  the label. */}
+              <span className="mr-1" data-testid="session-provider-icon">
+                <ProviderIcon
+                  provider={item.session.provider}
+                  className="text-[0.85em]"
+                />
               </span>
               {repoLabel && (
                 <span
@@ -383,7 +392,7 @@ export const SessionNode = memo(function SessionNode({
               )}
               {lastActivity && (
                 <span
-                  className="ml-auto shrink-0 tabular-nums [font-stretch:condensed]"
+                  className="ml-auto shrink-0 pl-2 tabular-nums [font-stretch:condensed]"
                   data-testid="session-last-activity"
                 >
                   {lastActivity}
