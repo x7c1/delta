@@ -149,9 +149,6 @@ importers:
 
   packages/ui/ui-kit:
     dependencies:
-      '@lobehub/icons-static-svg':
-        specifier: 1.94.0
-        version: 1.94.0
       tailwind-merge:
         specifier: ^2.6.1
         version: 2.6.1
@@ -707,9 +704,6 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
-
-  '@lobehub/icons-static-svg@1.94.0':
-    resolution: {integrity: sha512-Inx1TYkjLH6YeHOIHeVW9+OM/xxRnk8TmcQVKquFUDBmE3X9sUuRGt7kALrrDBNNAbrWz7Qq6fAiFj9E9Mmw9Q==}
 
   '@mswjs/interceptors@0.41.9':
     resolution: {integrity: sha512-VVPPgHyQ6ShqnrmDWuxjmUIsO9gWyOZFmuOfLd9LfBGQJwZfy0gvv9pbHSJuoFNIYC7ZDX9aoFwowjcdSC4E8w==}
@@ -3170,8 +3164,6 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
-
-  '@lobehub/icons-static-svg@1.94.0': {}
 
   '@mswjs/interceptors@0.41.9':
     dependencies:

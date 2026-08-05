@@ -8,7 +8,7 @@ export type Provider = 'claude' | 'codex';
 
 /**
  * Full product name per provider, surfaced as the tooltip and accessible name
- * of every provider marker ({@link ProviderDot}, {@link ProviderIcon}).
+ * of every provider marker (today {@link ProviderDot}).
  */
 export const PROVIDER_DISPLAY_NAMES: Record<Provider, string> = {
   claude: 'Claude Code',
