@@ -201,7 +201,7 @@ export function SettingsView() {
           aria-labelledby={`settings-tab-${active.id}`}
           // The right pane scrolls independently of the rail so a long
           // launch-options list never pushes the rail out of view.
-          className="min-w-0 flex-1 overflow-y-auto"
+          className="min-w-0 flex-1 overflow-y-auto scrollbar-none"
           data-testid={`settings-panel-${active.id}`}
         >
           {active.render(settingsOpen)}

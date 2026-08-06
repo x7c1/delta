@@ -113,7 +113,13 @@ export function Dialog({
             {title}
           </h2>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {/*
+          `scrollbar-none` keeps the body scrollable without a visible bar,
+          matching the app-wide treatment (transcript/navigator panes) instead
+          of exposing the engine's native scrollbar, which is heavy under
+          WebKitGTK.
+        */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 scrollbar-none">
           {children}
         </div>
         {footer !== undefined && (
