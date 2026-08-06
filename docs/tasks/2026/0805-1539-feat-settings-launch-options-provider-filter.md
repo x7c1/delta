@@ -8,7 +8,7 @@ check_command: "make check && make e2e"
 assignee: null
 branch: task/0805-1539-feat-settings-launch-options-provider-filter
 created_at: 2026-08-05T15:39:35Z
-updated_at: 2026-08-05T17:01:47Z
+updated_at: 2026-08-06T06:39:07Z
 ---
 
 # feat(web): scope the Settings launch-options list to the selected provider
@@ -87,12 +87,12 @@ Frontend-only; no wire or backend change.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In the running app, Settings → Launch options reads as one
+- [x] In the running app, Settings → Launch options reads as one
       provider-scoped view: the selector at the top of the section switches
       both the form target and the list contents, and the placement/visual
       hierarchy feels natural (selector above the add form, no per-row
       provider name).
-- [ ] Registering a Codex option while the selector is on Codex leaves the
+- [x] Registering a Codex option while the selector is on Codex leaves the
       view on Codex with the new option visible; the list rows read cleanly
       without the provider prefix on light, dark, and sepia themes.
 
