@@ -140,14 +140,24 @@ export function SettingsView() {
       // Wider than the single-pane prompt: the 2-pane layout needs room for a
       // ~180px left rail plus the right pane's option rows (label + monospace
       // flag/value) without truncating either column.
-      className="max-w-4xl"
+      //
+      // The height is a fixed frame rather than content-derived, because the
+      // categories differ wildly in natural height (a two-option radio group
+      // vs. a form plus an unbounded list). Sizing to the content made the
+      // panel resize on every category switch, and since the backdrop centers
+      // it, both edges moved — including the rail button the user had just
+      // clicked. The frame belongs to the dialog, not to whichever category
+      // happens to be showing; overflow is the right pane's business. `min()`
+      // keeps it viewport-bound on short screens, where it degrades to the
+      // `max-h-full` behavior it would have had anyway.
+      className="h-[min(42rem,100%)] max-w-4xl"
       footer={
         <Button variant="ghost" onClick={closeSettings} data-testid="settings-close">
           Close
         </Button>
       }
     >
-      <div className="flex min-h-[24rem] w-full gap-4">
+      <div className="flex h-full w-full gap-4">
         <div
           ref={railRef}
           role="tablist"
