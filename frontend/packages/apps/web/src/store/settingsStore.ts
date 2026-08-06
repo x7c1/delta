@@ -89,7 +89,8 @@ export interface SettingsState {
   /**
    * The AI-agent provider a new session starts on by default. It seeds the
    * new-session provider selector's initial value (still per-session
-   * overridable via that selector). Persisted to localStorage so the choice
+   * overridable via that selector) and which provider Settings' Launch
+   * options section opens scoped to. Persisted to localStorage so the choice
    * survives reloads; an unknown value falls back to {@link DEFAULT_PROVIDER}
    * on rehydration.
    */

@@ -57,8 +57,8 @@ export const PROVIDER_OPTIONS: readonly {
 /**
  * The provider the app defaults to wherever a provider choice needs a value
  * before the user has made one: the fresh-install default-provider setting,
- * the new-session selection before the persisted setting seeds it, and the
- * launch-option form's initial provider. Distinct from the wire-level omit
+ * and the new-session selection before the persisted setting seeds it.
+ * Distinct from the wire-level omit
  * default (`PROVIDER_WIRE_DEFAULT` in `@delta/wire-gen`): the two coincide
  * today, but this one is a product choice that may move, while the wire
  * default is a fixed backend contract.

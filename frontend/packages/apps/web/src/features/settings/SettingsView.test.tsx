@@ -16,6 +16,7 @@ import {
   within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
@@ -80,6 +81,22 @@ async function findList() {
   return screen.findByTestId('launch-options-list');
 }
 
+/** The full visible label of the add form's default-enabled checkbox. */
+const DEFAULT_ENABLED_LABEL =
+  'Enabled by default (pre-checked when starting a session)';
+
+/** The radio button for one provider in the section's provider selector. */
+function providerRadio(provider: 'claude' | 'codex') {
+  return within(
+    screen.getByTestId(`launch-option-provider-${provider}`),
+  ).getByRole('radio');
+}
+
+/** Scope the launch-options section (form target + list) to one provider. */
+function selectProvider(provider: 'claude' | 'codex') {
+  fireEvent.click(providerRadio(provider));
+}
+
 /** Switch the right pane to the Repository scan roots category. */
 function switchToScanRoots() {
   fireEvent.click(screen.getByTestId('settings-category-scan-roots'));
@@ -122,11 +139,26 @@ describe('SettingsView', () => {
     expect(within(dialog).getByTestId('launch-options-list')).toBeInTheDocument();
   });
 
-  it('lists the seeded launch options', async () => {
+  it('lists the seeded launch options of the selected provider', async () => {
     renderSettings();
     const list = await findList();
+    // The section opens on the configured default provider (Claude, per the
+    // beforeEach), so only the two Claude fixtures are listed — the Codex one
+    // (`model`) is filtered out.
     expect(within(list).getByText('--permission-mode')).toBeInTheDocument();
     expect(within(list).getByText('--plugin-dir')).toBeInTheDocument();
+    expect(within(list).queryByText('model')).toBeNull();
+  });
+
+  it('opens scoped to the configured default provider', async () => {
+    // A Codex-first user (Settings → Default provider = Codex) must land on
+    // their own options, not on Claude's list.
+    useSettingsStore.setState({ defaultProvider: 'codex' });
+    renderSettings();
+    const list = await findList();
+    expect(providerRadio('codex')).toBeChecked();
+    expect(within(list).getByText('model')).toBeInTheDocument();
+    expect(within(list).queryByText('--permission-mode')).toBeNull();
   });
 
   it('adds a launch option through the form', async () => {
@@ -148,40 +180,93 @@ describe('SettingsView', () => {
     );
   });
 
-  it('names the provider on each registered option', async () => {
+  it('omits the provider name from the option rows', async () => {
     renderSettings();
     const list = await findList();
-    // The Codex fixture (`model gpt-5`) carries the written Codex name; the
-    // Claude fixtures carry the written Claude Code name (each hue-tinted by
-    // ProviderName).
-    expect(within(list).getByText('model')).toBeInTheDocument();
-    expect(within(list).getAllByText('Codex').length).toBeGreaterThan(0);
-    expect(within(list).getAllByText('Claude Code').length).toBeGreaterThan(0);
+    expect(within(list).queryByText('Claude Code')).toBeNull();
+    expect(within(list).queryByText('Codex')).toBeNull();
   });
 
-  it('registers a launch option for the selected provider', async () => {
+  it('swaps the listed options when the provider selector changes', async () => {
     renderSettings();
-    const list = await findList();
+    await findList();
 
-    // Pick Codex in the create form's provider selector, then add an option.
-    fireEvent.click(
-      within(
-        screen.getByTestId('launch-option-provider-codex'),
-      ).getByRole('radio'),
+    selectProvider('codex');
+
+    // Only the Codex fixture (`model gpt-5`) remains listed.
+    const codexList = await findList();
+    expect(within(codexList).getByText('model')).toBeInTheDocument();
+    expect(within(codexList).queryByText('--permission-mode')).toBeNull();
+    expect(within(codexList).queryByText('--plugin-dir')).toBeNull();
+
+    // And back: the Claude options return.
+    selectProvider('claude');
+    const claudeList = await findList();
+    expect(within(claudeList).getByText('--permission-mode')).toBeInTheDocument();
+    expect(within(claudeList).queryByText('model')).toBeNull();
+  });
+
+  it('shows a provider-scoped empty state when only the other provider has options', async () => {
+    // A registry holding Claude options only: on Codex the list must not claim
+    // the whole registry is empty, nor leak the Claude rows.
+    server.use(
+      http.get('*/api/launch-options', () =>
+        HttpResponse.json({
+          launch_options: [
+            {
+              id: 1,
+              label: 'My plugins',
+              name: '--plugin-dir',
+              value: '/home/dev/plugins',
+              default_enabled: true,
+              created_at: '2026-01-01T00:00:00Z',
+              provider: 'claude',
+            },
+          ],
+        }),
+      ),
     );
+    renderSettings();
+    await findList();
+
+    selectProvider('codex');
+
+    const empty = await screen.findByTestId('launch-options-empty');
+    expect(empty.textContent).toBe('No launch options registered for Codex yet.');
+    expect(screen.queryByTestId('launch-options-list')).toBeNull();
+  });
+
+  it('registers a launch option for the selected provider and stays scoped to it', async () => {
+    renderSettings();
+    await findList();
+
+    // Pick Codex in the section's provider selector, then add an option.
+    selectProvider('codex');
+    fireEvent.change(screen.getByLabelText('Label (optional)'), {
+      target: { value: 'Reasoning' },
+    });
     fireEvent.change(screen.getByLabelText('Name (the flag)'), {
       target: { value: 'reasoning-effort' },
     });
+    fireEvent.change(screen.getByLabelText('Value (optional)'), {
+      target: { value: 'high' },
+    });
+    fireEvent.click(screen.getByLabelText(DEFAULT_ENABLED_LABEL));
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
 
-    // The new option appears; its row carries the written, hue-tinted Codex
-    // name, proving the chosen provider was sent and round-tripped.
-    const row = await within(list).findByText('reasoning-effort');
-    const li = row.closest('li');
-    expect(li).not.toBeNull();
-    expect(
-      within(li as HTMLElement).getByText('Codex').className,
-    ).toContain('text-provider-codex');
+    // The new option appears in the still-Codex-scoped list, proving the chosen
+    // provider was sent and round-tripped.
+    const list = await findList();
+    await within(list).findByText('reasoning-effort');
+    expect(within(list).queryByText('--permission-mode')).toBeNull();
+
+    // The selector stays on Codex while the other fields are cleared.
+    expect(providerRadio('codex')).toBeChecked();
+    expect(providerRadio('claude')).not.toBeChecked();
+    expect(screen.getByLabelText('Label (optional)')).toHaveValue('');
+    expect(screen.getByLabelText('Name (the flag)')).toHaveValue('');
+    expect(screen.getByLabelText('Value (optional)')).toHaveValue('');
+    expect(screen.getByLabelText(DEFAULT_ENABLED_LABEL)).not.toBeChecked();
   });
 
   it('disables Add until a non-blank name is entered', async () => {
