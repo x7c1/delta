@@ -392,7 +392,7 @@ function RemoteBranchPicker({
       )}
 
       {!query.isLoading && !query.isError && branches.length > 0 && (
-        <ul className="max-h-32 space-y-0.5 overflow-y-auto">
+        <ul className="max-h-32 space-y-0.5 overflow-y-auto scrollbar-none">
           {branches.map((name) => (
             <li key={name}>
               <button

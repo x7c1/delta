@@ -201,7 +201,10 @@ export function SettingsView() {
           aria-labelledby={`settings-tab-${active.id}`}
           // The right pane scrolls independently of the rail so a long
           // launch-options list never pushes the rail out of view.
-          className="min-w-0 flex-1 overflow-y-auto"
+          // `scrollbar-hover` (not `scrollbar-none`): the fixed-frame dialog
+          // clips overflowing categories with no other cue that more content
+          // exists, so keep a hover-revealed thumb as a position indicator.
+          className="min-w-0 flex-1 overflow-y-auto scrollbar-hover"
           data-testid={`settings-panel-${active.id}`}
         >
           {active.render(settingsOpen)}
