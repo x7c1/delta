@@ -5309,13 +5309,24 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
     // Re-install the mock so this test owns the call log (the suite-level
     // `beforeEach` ran before this test body started, but its mock is shared
     // with any earlier assertions; capturing a fresh reference makes the
-    // assertion local to this test).
+    // assertion local to this test). Capture the global setup.ts stub first
+    // so the `finally` below can put it back — `vi.restoreAllMocks` does not
+    // undo a `defineProperty`, and leaving this mock installed poisons every
+    // later test that relies on the global stub's scrollTop/scrollLeft
+    // mirroring (the vertical scroll-follow suite does).
+    const originalScrollTo = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      'scrollTo',
+    );
     const scrollToMock = vi.fn(function (
       this: HTMLElement,
       options: ScrollToOptions,
     ) {
       if (typeof options.left === 'number') {
         this.scrollLeft = options.left;
+      }
+      if (typeof options.top === 'number') {
+        this.scrollTop = options.top;
       }
     });
     Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
@@ -5363,16 +5374,38 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
         }),
       );
     });
-    await waitFor(() => {
-      expect(scrollToMock).toHaveBeenCalled();
-    });
-    // Every call must use the smooth animation API, not a positional or
-    // behavior-less form. Without `behavior: 'smooth'` the auto-scroll
-    // snaps and the user sees a visible jump as the playhead approaches
-    // the viewport edge.
-    for (const call of scrollToMock.mock.calls) {
-      expect(call[0]).toMatchObject({ behavior: 'smooth' });
-      expect(typeof (call[0] as ScrollToOptions).left).toBe('number');
+    try {
+      await waitFor(() => {
+        expect(scrollToMock).toHaveBeenCalled();
+      });
+      // Every call must use the smooth animation API, not a positional or
+      // behavior-less form. Without `behavior: 'smooth'` the auto-scroll
+      // snaps and the user sees a visible jump as the playhead approaches
+      // the viewport edge. The prototype-level mock also catches the
+      // VERTICAL lane catch-up's `scrollTo({ top })` on the body wrapper,
+      // so the per-call coordinate check accepts either axis; the
+      // horizontal re-centre this test is about is asserted separately
+      // below.
+      for (const call of scrollToMock.mock.calls) {
+        const options = call[0] as ScrollToOptions;
+        expect(options).toMatchObject({ behavior: 'smooth' });
+        expect(
+          typeof options.left === 'number' || typeof options.top === 'number',
+        ).toBe(true);
+      }
+      expect(
+        scrollToMock.mock.calls.some(
+          (call) => typeof (call[0] as ScrollToOptions).left === 'number',
+        ),
+      ).toBe(true);
+    } finally {
+      if (originalScrollTo) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          'scrollTo',
+          originalScrollTo,
+        );
+      }
     }
   });
 
@@ -5580,6 +5613,219 @@ describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
     // And the axis cells live inside it too.
     const axisCells = wrapper.querySelectorAll('[data-timeline-axis]');
     expect(axisCells.length).toBe(labels.length);
+  });
+});
+
+/**
+ * Vertical counterpart of the horizontal scroll-follow suite above: the
+ * body wrapper (`thread-timeline-body`, `max-h-64 overflow-y-auto`) is the
+ * vertical viewport, and a navigation that lands the playhead on a lane
+ * row outside that viewport must scroll the row into view — otherwise the
+ * playhead moves onto a row the user cannot see (the original dogfooding
+ * bug: enough lanes to overflow the 16 rem cap, wheel/keyboard step onto
+ * an off-screen lane, timeline keeps showing the old rows).
+ *
+ * jsdom runs no layout, so the lane-row geometry is stubbed per element:
+ * each `[data-timeline-axis]` cell reports a rect derived from a
+ * test-supplied content-space top minus the body's live `scrollTop`
+ * (matching how a real browser's viewport-space rect moves as the
+ * container scrolls), and the body reports a stubbed `clientHeight`.
+ */
+describe('ThreadTimelineOverlay vertical scroll-follow', () => {
+  beforeEach(() => {
+    resetGlobals();
+    window.localStorage.setItem(timelineExpandedKey(), 'true');
+  });
+
+  /** Override a layout property on a single DOM element. */
+  function defineLayoutProp(
+    el: HTMLElement,
+    prop: 'clientHeight',
+    value: number,
+  ): void {
+    Object.defineProperty(el, prop, {
+      configurable: true,
+      get: () => value,
+    });
+  }
+
+  /**
+   * Stub `getBoundingClientRect` so each lane's axis cell reports a
+   * viewport-space rect consistent with the body's current `scrollTop`.
+   * `laneTopByThreadId` holds each lane's CONTENT-space top; the stub
+   * subtracts the live `scrollTop` at call time, which is exactly the
+   * conversion the effect must undo — so the effect's
+   * `rect.top - bodyRect.top + scrollTop` round-trips back to the
+   * content-space value regardless of the scroll position when it fires.
+   */
+  function stubVerticalRects(
+    body: HTMLElement,
+    laneTopByThreadId: Map<string, number>,
+    laneHeightPx = 18,
+  ): void {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(
+      HTMLElement.prototype,
+      'getBoundingClientRect',
+    ).mockImplementation(function (this: HTMLElement) {
+      const base = {
+        left: 0,
+        right: 240,
+        width: 240,
+        x: 0,
+        toJSON: () => ({}),
+      };
+      if (this === body) {
+        return {
+          ...base,
+          top: 0,
+          y: 0,
+          bottom: body.clientHeight,
+          height: body.clientHeight,
+        } as DOMRect;
+      }
+      if (this.hasAttribute('data-timeline-axis')) {
+        const contentTop =
+          laneTopByThreadId.get(this.getAttribute('data-thread-id') ?? '') ??
+          0;
+        const top = contentTop - body.scrollTop;
+        return {
+          ...base,
+          top,
+          y: top,
+          bottom: top + laneHeightPx,
+          height: laneHeightPx,
+        } as DOMRect;
+      }
+      return original.call(this);
+    });
+  }
+
+  /**
+   * Two-lane fixture where a wheel-up crosses lanes: sorted large
+   * messages are [msg-a (th1), msg-b (th2), msg-c (th1)], the playhead
+   * starts on the last message (msg-c, lane 1), and one wheel-up step
+   * lands on msg-b — lane 2. The lane the step targets is the one whose
+   * row visibility drives the vertical catch-up.
+   */
+  function renderCrossLaneFixture() {
+    const threads = [
+      makeThread(1, { created_at: '2026-01-01T00:00:00Z' }),
+      makeThread(2, {
+        parent_thread_id: 1,
+        created_at: '2026-01-01T00:00:30Z',
+      }),
+    ];
+    const messages = new Map([
+      [
+        1,
+        [
+          makeUserText(1, 0, 'msg-a', '2026-01-01T00:00:00Z'),
+          makeUserText(1, 1, 'msg-c', '2026-01-01T00:02:00Z'),
+        ],
+      ],
+      [2, [makeUserText(2, 0, 'msg-b', '2026-01-01T00:01:00Z')]],
+    ]);
+    return renderOverlay({
+      threads,
+      messagesByThread: messages,
+      activeThreadId: 1,
+      conversationArticles: [
+        { uuid: 'msg-a' },
+        { uuid: 'msg-b' },
+        { uuid: 'msg-c' },
+      ],
+    });
+  }
+
+  /** Wheel-up on the axis column: steps msg-c → msg-b (lane 1 → lane 2). */
+  function wheelUpOntoLane2(): void {
+    const wrapper = screen.getByTestId('thread-timeline-axis-column');
+    act(() => {
+      wrapper.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -100,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+  }
+
+  it('scrolls the body down to centre the lane row when a cross-lane step lands below the vertical viewport', async () => {
+    renderCrossLaneFixture();
+    await screen.findAllByTestId('thread-timeline-dot');
+    const body = screen.getByTestId('thread-timeline-body');
+    // Viewport shows 2 rows (36 px). Lane 1 sits at content top 0
+    // (visible), lane 2 at content top 90 (below the 36 px fold).
+    defineLayoutProp(body, 'clientHeight', 36);
+    stubVerticalRects(
+      body,
+      new Map([
+        ['1', 0],
+        ['2', 90],
+      ]),
+    );
+    body.scrollTop = 0;
+    wheelUpOntoLane2();
+    // Lane 2's band [90, 108] overflows viewBottom (36) → re-centre:
+    // scrollTop = laneTop + laneHeight/2 - clientHeight/2 = 90 + 9 - 18 = 81.
+    await waitFor(() => {
+      expect(body.scrollTop).toBe(81);
+    });
+  });
+
+  it('scrolls the body up when the target lane row is hidden above the vertical viewport', async () => {
+    renderCrossLaneFixture();
+    await screen.findAllByTestId('thread-timeline-dot');
+    const body = screen.getByTestId('thread-timeline-body');
+    // Lane 2 sits ABOVE lane 1 in content space this time (the stub is
+    // free to place rows arbitrarily — the effect only reads rects).
+    // Start scrolled down so lane 1 [90, 108] is visible in [90, 126]
+    // and lane 2 [0, 18] is hidden above the fold.
+    defineLayoutProp(body, 'clientHeight', 36);
+    stubVerticalRects(
+      body,
+      new Map([
+        ['1', 90],
+        ['2', 0],
+      ]),
+    );
+    body.scrollTop = 90;
+    wheelUpOntoLane2();
+    // Lane 2's top (0) < viewTop (90) → re-centre: max(0, 0 + 9 - 18) = 0.
+    await waitFor(() => {
+      expect(body.scrollTop).toBe(0);
+    });
+  });
+
+  it('leaves scrollTop untouched when the target lane row is already fully visible', async () => {
+    renderCrossLaneFixture();
+    await screen.findAllByTestId('thread-timeline-dot');
+    const body = screen.getByTestId('thread-timeline-body');
+    // Both rows fit the 36 px viewport: lane 1 at [0, 18], lane 2 at
+    // [18, 36]. The cross-lane step must NOT trigger any scroll — a
+    // re-centre here would visibly yank rows around on every step in the
+    // (common) short-session case where all lanes fit the cap.
+    defineLayoutProp(body, 'clientHeight', 36);
+    stubVerticalRects(
+      body,
+      new Map([
+        ['1', 0],
+        ['2', 18],
+      ]),
+    );
+    body.scrollTop = 0;
+    wheelUpOntoLane2();
+    // Wait for the step to land (lane 2 becomes the active lane) so the
+    // effect has fired before the no-scroll assertion.
+    await waitFor(() => {
+      const lane2 = body.querySelector<HTMLElement>(
+        '[data-timeline-axis][data-thread-id="2"]',
+      );
+      expect(lane2?.getAttribute('data-active')).toBe('true');
+    });
+    expect(body.scrollTop).toBe(0);
   });
 });
 

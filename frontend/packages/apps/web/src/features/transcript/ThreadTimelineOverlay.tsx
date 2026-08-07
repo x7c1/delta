@@ -1208,6 +1208,77 @@ export function ThreadTimelineOverlay({
     }
   }, [userActedTick, activeMessage, laneAxisWidth, messagePxByUuid]);
 
+  // Vertical counterpart of the horizontal catch-up above: keep the ACTIVE
+  // LANE ROW visible inside the body wrapper's vertical viewport (the
+  // `max-h-64 overflow-y-auto` outer wrapper). With enough lanes the lane
+  // grid overflows that cap, and a navigation that lands on a lane outside
+  // the visible band — a wheel/keyboard step across lanes, a Navigator
+  // switch, a pane-scroll follow — would otherwise move the playhead onto a
+  // row the user cannot see.
+  //
+  // Two deliberate asymmetries against the horizontal effect:
+  //
+  //  1. No edge-margin band. The playhead's x moves continuously through
+  //     the horizontal viewport, so the horizontal catch-up needs a margin
+  //     to fire BEFORE the bar visually reaches the edge. Vertically the
+  //     active lane changes in whole-row steps, and the trigger below
+  //     checks the ACTIVE row's own visibility — the moment a navigation
+  //     lands on a clipped or hidden row, the effect fires. There is no
+  //     intermediate "sliding toward the edge" state for a margin to
+  //     anticipate.
+  //
+  //  2. The geometry comes from `getBoundingClientRect` deltas rather than
+  //     content-space math. The horizontal effect has to reconstruct the
+  //     playhead's content x from `messagePxByUuid` (the playhead is a
+  //     painted offset, not an element with its own scroll geometry); the
+  //     lane row IS an element, so measuring rect-vs-rect against the
+  //     scroll container is both simpler and immune to the label-offset
+  //     coordinate bug the horizontal math had to fix (v31 fix 2).
+  //
+  // The measured element is the active lane's AXIS CELL, not its `<li>`:
+  // the `<li>` is `display: contents` and generates no box, so its rect is
+  // empty. The axis cell spans the grid row's full stretched height (see
+  // `align-items: stretch` on the lane `<ul>`), so its rect IS the row band
+  // the user needs to see.
+  useEffect(() => {
+    if (userActedTick === 0) {
+      return;
+    }
+    const bodyEl = bodyRef.current;
+    if (!bodyEl || activeMessage === null) {
+      return;
+    }
+    const laneEl = bodyEl.querySelector<HTMLElement>(
+      '[data-timeline-axis][data-active="true"]',
+    );
+    if (!laneEl) {
+      return;
+    }
+    const bodyRect = bodyEl.getBoundingClientRect();
+    const laneRect = laneEl.getBoundingClientRect();
+    // Rect tops are viewport-space; adding the current scrollTop converts
+    // the lane's offset-within-viewport into scroll-content space, the
+    // same coordinate system `scrollTo({ top })` expects.
+    const laneTop = laneRect.top - bodyRect.top + bodyEl.scrollTop;
+    const laneBottom = laneTop + laneRect.height;
+    const viewTop = bodyEl.scrollTop;
+    const viewBottom = viewTop + bodyEl.clientHeight;
+    if (laneTop < viewTop || laneBottom > viewBottom) {
+      // Centre the row for the same reason the horizontal effect centres
+      // the playhead: it maximises the distance to either edge before the
+      // next cross-lane step can trigger another scroll. Same smooth-scroll
+      // rationale too — the browser animates the catch-up and honours
+      // `prefers-reduced-motion` with no explicit branch on our side.
+      bodyEl.scrollTo({
+        top: Math.max(
+          0,
+          laneTop + laneRect.height / 2 - bodyEl.clientHeight / 2,
+        ),
+        behavior: 'smooth',
+      });
+    }
+  }, [userActedTick, activeMessage]);
+
   // Pane scroll → playhead follow (Improvement 3). Observe each rendered
   // message article in the conversation pane; whichever one sits closest to
   // the viewport TOP is the "current" message and drives the playhead.
