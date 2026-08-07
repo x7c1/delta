@@ -354,7 +354,7 @@ pub(crate) fn thread_start_params(
 ///   `{"granular":{…}}` and `["a","b"]` all reach the server with their real
 ///   types;
 /// - **anything else** → the value as a JSON string. This is the common case:
-///   `gpt-5-codex`, `read-only` and `on-request` are not valid JSON documents,
+///   `gpt-5.6-sol`, `read-only` and `on-request` are not valid JSON documents,
 ///   so they arrive as the strings they are.
 ///
 /// The consequence of that ordering is that a string value which *happens* to

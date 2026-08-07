@@ -488,7 +488,7 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
         .expect("the async drain is taken exactly once");
 
     // A plain string value, a JSON-object value, and a valueless option.
-    let model = register_launch_option(&app, "model", Some("gpt-5-codex"), "codex").await;
+    let model = register_launch_option(&app, "model", Some("gpt-5.6-sol"), "codex").await;
     let config = register_launch_option(
         &app,
         "config",
@@ -532,7 +532,7 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
     );
     assert_eq!(
         params["model"],
-        json!("gpt-5-codex"),
+        json!("gpt-5.6-sol"),
         "a non-JSON value arrives as the string it looks like"
     );
     assert_eq!(

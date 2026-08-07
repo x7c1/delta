@@ -10,7 +10,7 @@ use crate::SendTarget;
 /// user's selection order.
 ///
 /// The pairs reach the adapter un-rendered on purpose: turning `model` /
-/// `gpt-5-codex` into a `thread/start` field is the Codex adapter's job, so the
+/// `gpt-5.6-sol` into a `thread/start` field is the Codex adapter's job, so the
 /// core stays free of any provider's launch wire shape. A valueless option
 /// keeps its `None`, and a selected id that is no longer registered is skipped
 /// rather than aborting the launch — the same rules the Claude path follows.
@@ -24,7 +24,7 @@ async fn new_session_with_codex_launch_options_reaches_the_adapter() {
         .create_launch_option(
             None,
             "model",
-            Some("gpt-5-codex"),
+            Some("gpt-5.6-sol"),
             false,
             AgentProvider::Codex,
         )

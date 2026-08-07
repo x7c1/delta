@@ -50,7 +50,7 @@ pub enum WireLaunchOptionStyle {
     /// (`--permission-mode auto`). A valueless option is a bare flag.
     CliFlag,
     /// `name` is a field of the provider's session-start request and `value`
-    /// that field's value (Codex's `thread/start`: `model` → `gpt-5-codex`). A
+    /// that field's value (Codex's `thread/start`: `model` → `gpt-5.6-sol`). A
     /// valueless option sets a bare boolean field.
     RequestField,
 }

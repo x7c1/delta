@@ -10,7 +10,7 @@
 //!   and a repeatable flag is stored as several separate records.
 //! - **Codex** starts a thread over its app-server, so `name` is a
 //!   `thread/start` field (`model`, `sandbox`, `config`) and `value` that
-//!   field's value (`gpt-5-codex`, `read-only`, a JSON object). A record with
+//!   field's value (`gpt-5.6-sol`, `read-only`, a JSON object). A record with
 //!   no `value` sets a bare boolean field.
 //!
 //! Delta validates neither the names nor the values: the agent that receives

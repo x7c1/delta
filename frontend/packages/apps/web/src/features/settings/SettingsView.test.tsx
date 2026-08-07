@@ -298,7 +298,7 @@ describe('SettingsView', () => {
     );
     expect(screen.getByLabelText('Value (optional)')).toHaveAttribute(
       'placeholder',
-      'gpt-5-codex',
+      'gpt-5.6-sol',
     );
     const section = screen.getByTestId('launch-options-section');
     expect(section.textContent).toContain('Register custom session-start settings');

@@ -11,7 +11,7 @@ use crate::session::WireAgentProvider;
 /// value?)` record. `name` is required and is read in the vocabulary of the
 /// option's `provider` — a CLI flag for Claude (`--plugin-dir`), a
 /// `thread/start` field for Codex (`model`); `value` is its argument/value
-/// (e.g. `/path/to/plugins`, `gpt-5-codex`) and is omitted for a valueless
+/// (e.g. `/path/to/plugins`, `gpt-5.6-sol`) and is omitted for a valueless
 /// option; `label` is an optional human-friendly note. The optional fields
 /// default to absent, matching what serde accepts.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, TS)]

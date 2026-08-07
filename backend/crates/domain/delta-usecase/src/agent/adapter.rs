@@ -30,7 +30,7 @@ use crate::interactor::PermissionDecision;
 /// provider concern, and rendering it is the adapter's job. Claude reads the
 /// pair as a CLI flag and its argument (`--model opus`, see [`Self::to_argv`]);
 /// Codex reads it as a `thread/start` field name and its value (`model` →
-/// `"gpt-5-codex"`). Keeping the pair neutral is what lets the core hand every
+/// `"gpt-5.6-sol"`). Keeping the pair neutral is what lets the core hand every
 /// provider the same list instead of branching on which provider it is talking
 /// to.
 ///

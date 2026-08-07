@@ -396,7 +396,7 @@ fn launch_options_map_onto_thread_start_fields_by_name() {
     let params = thread_start_params(
         "/work",
         &[
-            option("model", Some("gpt-5-codex")),
+            option("model", Some("gpt-5.6-sol")),
             option("sandbox", Some("read-only")),
             option("ephemeral", None),
             option("config", Some(r#"{"tools":{"web_search":true}}"#)),
@@ -411,7 +411,7 @@ fn launch_options_map_onto_thread_start_fields_by_name() {
             // Delta's own field is always present.
             "cwd": "/work",
             // Not valid JSON → the string itself.
-            "model": "gpt-5-codex",
+            "model": "gpt-5.6-sol",
             "sandbox": "read-only",
             // Valueless → the field is switched on.
             "ephemeral": true,
@@ -462,7 +462,7 @@ fn two_launch_options_naming_the_same_field_are_rejected() {
     let err = thread_start_params(
         "/work",
         &[
-            option("model", Some("gpt-5-codex")),
+            option("model", Some("gpt-5.6-sol")),
             option("model", Some("o3")),
         ],
     )

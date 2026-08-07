@@ -237,11 +237,25 @@ interface LaunchOptionCopy {
   intro: string;
   /** How the paragraph describes what `name` is ("is the flag"). */
   nameRole: string;
-  /** A real name for this style, used as both the example and the placeholder. */
+  /**
+   * An example `name` in this style's vocabulary, shown both in the helper
+   * text and as the name input's placeholder.
+   */
   nameExample: string;
   /** How the paragraph describes what `value` is ("is its argument"). */
   valueRole: string;
-  /** A real value for this style, used as both the example and the placeholder. */
+  /**
+   * An example value for {@link nameExample}, shown both in the helper text and
+   * as the value input's placeholder.
+   *
+   * Illustrative of the *shape* a value takes in this style rather than
+   * authoritative — but where the shape means naming something from the
+   * provider's own catalog (a model slug), it must be one that actually exists
+   * at the time of writing. Delta passes launch-option values straight through
+   * without validating them, so a user who copies an invented placeholder gets
+   * no feedback from Delta at all: the session-start request just fails at the
+   * agent. Expect to revisit these as provider catalogs move.
+   */
   valueExample: string;
   /** What omitting `value` means for this style. */
   valueOptionalNote: string;
@@ -265,7 +279,7 @@ const LAUNCH_OPTION_COPY = {
     nameRole: 'is the field',
     nameExample: 'model',
     valueRole: "is that field's value",
-    valueExample: 'gpt-5-codex',
+    valueExample: 'gpt-5.6-sol',
     valueOptionalNote: 'and is optional for boolean fields, which are switched on when left empty',
     nameLabel: 'Name (the field)',
   },
