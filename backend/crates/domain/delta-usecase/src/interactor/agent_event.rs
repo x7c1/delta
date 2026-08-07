@@ -74,6 +74,13 @@ where
             // control-only with no browser signal in this slice (session
             // start/end, turn start — already applied at send — and
             // unsupported-interaction handling lands in a later slice).
+            //
+            // `ThinkingDelta` is deliberately NOT streamed: the only live
+            // preview the browser has is `AssistantStreaming`, which is reply
+            // text, and pushing reasoning through it would put the model's
+            // thinking on screen as its answer. Thinking therefore appears once
+            // the completed `ThinkingMessage` persists — the same way Claude's
+            // does, which also has no live thinking preview.
             _ => {}
         }
     }

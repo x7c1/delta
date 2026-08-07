@@ -24,13 +24,17 @@
 //!
 //! ## Faithful vs. degraded (never faked)
 //!
-//! Reproduced faithfully: role (user / assistant), text, tool use ↔ result
-//! pairing, and the turn group (`prompt_id` from the provider turn id). Absent
-//! provider facts degrade to `None` rather than being invented — `created_at`,
-//! `model`, `git_branch`, `cwd`, `response_time_ms`, and the linear parent link.
-//! `Thinking` / `Meta` / `CompactSummary` blocks are simply not produced (Codex
-//! does not expose them). A plain turn's messages land on the session's `main`
-//! thread the source is constructed with; a *branch* turn (Delta's
+//! Reproduced faithfully: role (user / assistant), text, the model's extended
+//! thinking, tool use ↔ result pairing, and the turn group (`prompt_id` from the
+//! provider turn id). Absent provider facts degrade to `None` rather than being
+//! invented — `created_at`, `model`, `git_branch`, `cwd`, `response_time_ms`,
+//! and the linear parent link. `Meta` / `CompactSummary` blocks are simply not
+//! produced (Codex does not expose them); a `Thinking` block *is*, folded from
+//! the neutral [`AgentEvent::ThinkingMessage`] a `reasoning` item projects to, so
+//! a Codex session shows the model's thinking exactly as a Claude one does.
+//!
+//! A plain turn's messages land on the session's `main` thread the source is
+//! constructed with; a *branch* turn (Delta's
 //! branch-from-selected-text, delivered as hidden-context injection rather than a
 //! native provider fork — Codex is still [`ForkCapability::None`]) is routed onto
 //! its branch child thread by [`AgentContentSource::begin_turn`] before its frames
@@ -133,6 +137,9 @@ impl CodexConversationSource {
     ///   prompt text.
     /// - [`AgentEvent::AssistantMessage`] → one `Assistant` message carrying the
     ///   reply text.
+    /// - [`AgentEvent::ThinkingMessage`] → one `Assistant` message carrying a
+    ///   [`ContentBlock::Thinking`] — the model's reasoning as its own block,
+    ///   never folded into reply text.
     /// - [`AgentEvent::ToolStarted`] → nothing yet; the call is held until its
     ///   completion.
     /// - [`AgentEvent::ToolCompleted`] → one `Assistant` message pairing the
@@ -169,6 +176,21 @@ impl CodexConversationSource {
                     uuid,
                     Role::Assistant,
                     vec![text_block(text)],
+                    Some(provider_item_id.clone()),
+                    None,
+                    *at_ms,
+                )]
+            }
+            AgentEvent::ThinkingMessage {
+                provider_item_id,
+                text,
+                at_ms,
+            } => {
+                let uuid = item_uuid(provider_item_id);
+                vec![self.build(
+                    uuid,
+                    Role::Assistant,
+                    vec![thinking_block(text)],
                     Some(provider_item_id.clone()),
                     None,
                     *at_ms,
@@ -395,6 +417,14 @@ fn text_block(text: &str) -> ContentBlock {
     }
 }
 
+/// An extended-thinking content block: the model's reasoning, kept as its own
+/// block kind so it is never displayed as the model's reply.
+fn thinking_block(thinking: &str) -> ContentBlock {
+    ContentBlock::Thinking {
+        thinking: thinking.to_owned(),
+    }
+}
+
 /// Whether a tool item's completed frame reports an error.
 ///
 /// Reconciled (R3) against the vendored tool-item shapes: a `commandExecution` /
@@ -455,6 +485,29 @@ mod tests {
         assert!(m.model.is_none());
         assert!(m.linear_parent_uuid.is_none());
         assert!(m.response_time_ms.is_none());
+    }
+
+    #[test]
+    fn a_thinking_message_folds_to_a_thinking_block_never_reply_text() {
+        let mut src = source();
+        let msgs = src.ingest(&AgentEvent::ThinkingMessage {
+            provider_item_id: "r1".to_owned(),
+            text: "weighing the options".to_owned(),
+            at_ms: Some(1_700_000_000_123),
+        });
+        assert_eq!(msgs.len(), 1);
+        let m = &msgs[0];
+        assert_eq!(m.role, Role::Assistant);
+        assert_eq!(m.uuid, MessageUuid::from("codex-item-r1"));
+        assert_eq!(m.provider_item_id.as_deref(), Some("r1"));
+        assert_eq!(
+            m.content,
+            vec![ContentBlock::Thinking {
+                thinking: "weighing the options".to_owned()
+            }],
+            "reasoning is its own block kind, never a Text block"
+        );
+        assert_eq!(m.created_at.as_deref(), Some("2023-11-14T22:13:20.123Z"));
     }
 
     #[test]
@@ -675,6 +728,12 @@ mod tests {
             .ingest(&AgentEvent::AssistantDelta {
                 provider_item_id: "item_1".to_owned(),
                 text: "partial".to_owned(),
+            })
+            .is_empty());
+        assert!(src
+            .ingest(&AgentEvent::ThinkingDelta {
+                provider_item_id: "r1".to_owned(),
+                text: "half a thought".to_owned(),
             })
             .is_empty());
         assert!(src

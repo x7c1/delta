@@ -101,6 +101,29 @@ pub enum AgentEvent {
         /// `None` (its `created_at` comes from the transcript fold).
         at_ms: Option<i64>,
     },
+    /// A streaming fragment of the model's extended thinking (its internal
+    /// reasoning, not its reply). Deliberately distinct from
+    /// [`AgentEvent::AssistantDelta`] so reasoning is never mistaken for reply
+    /// text. Claude never emits it (its thinking arrives already folded into the
+    /// transcript's message content).
+    ThinkingDelta {
+        provider_item_id: String,
+        text: String,
+    },
+    /// A completed block of the model's extended thinking, folded into a
+    /// `Thinking` content block rather than reply text. Claude never emits it
+    /// (its thinking arrives already folded into the transcript's message
+    /// content).
+    ThinkingMessage {
+        provider_item_id: String,
+        text: String,
+        /// When this message fact occurred, in epoch milliseconds, when the
+        /// provider exposes a per-message time (`None` otherwise). A neutral,
+        /// optional message fact — carried verbatim, not parsed. Codex fills it
+        /// from the item's `startedAtMs` / `completedAtMs`; Claude leaves it
+        /// `None` (its `created_at` comes from the transcript fold).
+        at_ms: Option<i64>,
+    },
     /// A tool call started.
     ToolStarted {
         provider_item_id: String,

@@ -336,6 +336,118 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
     );
 }
 
+/// The Codex **reasoning** full loop: a turn whose model reasons before replying
+/// must persist that reasoning as a `thinking` content block, so a Codex session
+/// shows the model's thinking exactly as a Claude one does.
+///
+/// The scripted turn plays the real reasoning shapes: the `reasoning` item opens
+/// empty, streams a summary fragment (`item/reasoning/summaryTextDelta`), and
+/// completes with its `summary` parts; the assistant reply follows as its own
+/// `agentMessage` item. The test asserts the reasoning landed as its own
+/// `thinking` block on its own message AND — the invariant the earlier drop
+/// existed to protect — that it was never mis-filed as reply text, neither in the
+/// persisted assistant message nor in the live `AssistantStreaming` preview.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_reasoning_persists_as_a_thinking_block_and_is_never_reply_text() {
+    let scenario = ScenarioGuard::write(&format!(
+        r#"{{
+            "thread_id": "thr_reasoning",
+            "turn": {{
+                "turn_id": "turn_reasoning",
+                "emit": [
+                    {{ "type": "turn_started" }},
+                    {{ "type": "item_started",   "item": {{ "id": "reason_1", "type": "reasoning", "content": [], "summary": [] }} }},
+                    {{ "type": "notification", "method": "item/reasoning/summaryTextDelta",
+                       "params": {{ "itemId": "reason_1", "summaryIndex": 0, "delta": "Weighing" }} }},
+                    {{ "type": "item_completed", "item": {{ "id": "reason_1", "type": "reasoning", "content": [],
+                       "summary": ["Weighing the options.", "Picking the simplest."] }} }},
+                    {{ "type": "item_started",   "item": {{ "id": "item_1", "type": "agentMessage" }} }},
+                    {{ "type": "agent_message_delta", "item_id": "item_1", "delta": "{REPLY_FRAGMENT}" }},
+                    {{ "type": "item_completed", "item": {{ "id": "item_1", "type": "agentMessage", "text": "{REPLY}" }} }},
+                    {{ "type": "turn_completed", "status": "completed" }}
+                ]
+            }}
+        }}"#
+    ));
+
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({ "new_session": true, "provider": "codex", "text": "think it through" }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the send was created: {body:?}"
+    );
+    let session_id = body["send"]["session_id"]
+        .as_str()
+        .expect("the send response carries its session id")
+        .to_owned();
+    let thread_id = body["send"]["thread_id"]
+        .as_i64()
+        .expect("the send response carries its main thread id");
+
+    let streamed_reply = drain_one_turn(&mut events, &session_id).await;
+    assert_eq!(
+        streamed_reply, REPLY_FRAGMENT,
+        "only the reply streams live; the reasoning fragment must not reach the \
+         assistant preview, which would show the model's thinking as its answer"
+    );
+
+    let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
+    assert_eq!(status, StatusCode::OK, "messages fetched: {body:?}");
+    let messages = body["messages"]
+        .as_array()
+        .expect("the messages response carries a messages array");
+
+    // The reasoning persisted as its own message, carrying a single `thinking`
+    // block whose parts joined into one text.
+    let reasoning = messages
+        .iter()
+        .find(|m| m["provider_item_id"] == json!("reason_1"))
+        .expect("the reasoning item was persisted");
+    assert_eq!(reasoning["role"], json!("assistant"));
+    assert_eq!(
+        reasoning["content"],
+        json!([{
+            "type": "thinking",
+            "thinking": "Weighing the options.\n\nPicking the simplest.",
+        }]),
+        "the reasoning is a thinking block, not a text block"
+    );
+
+    // The reply is a separate message and carries only the reply — the reasoning
+    // never leaked into it.
+    let reply = messages
+        .iter()
+        .find(|m| m["provider_item_id"] == json!("item_1"))
+        .expect("the assistant reply was persisted");
+    assert_eq!(
+        reply["content"],
+        json!([{ "type": "text", "text": REPLY }]),
+        "the reply carries only its own text"
+    );
+    assert!(
+        !messages.iter().any(|m| {
+            m["content"].as_array().is_some_and(|blocks| {
+                blocks.iter().any(|b| {
+                    b["type"] == json!("text")
+                        && b["text"].as_str().is_some_and(|t| t.contains("Weighing"))
+                })
+            })
+        }),
+        "no persisted text block may carry the reasoning: {messages:?}"
+    );
+}
+
 /// A scenario whose `turn/start` plays one streamed assistant reply then
 /// completes — the same shape the first full-loop test uses. The fake replays it
 /// on **every** `turn/start`, so it drives both the opening turn and every

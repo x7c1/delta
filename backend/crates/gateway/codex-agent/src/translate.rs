@@ -35,13 +35,25 @@
 //! method this build does not model maps to *nothing* (a safe skip), never an
 //! error and never a mis-filed tool call.
 //!
-//! Reasoning has no faithful neutral home: [`AgentEvent`] carries no
-//! thinking-bearing variant, and inventing one is out of scope for this slice (a
-//! stop signal). Mapping a `reasoning` item to an `AssistantMessage` would
-//! misrepresent the model's internal reasoning as its reply text, so v1 **drops**
-//! reasoning items and every `item/reasoning/*` delta from the translated stream
-//! rather than corrupt the conversation. This matches the content accumulator's
-//! existing contract that `Thinking` blocks are not produced for Codex.
+//! **Reasoning.** [`AgentEvent`] carries a thinking-bearing pair
+//! ([`AgentEvent::ThinkingDelta`] / [`AgentEvent::ThinkingMessage`]) distinct
+//! from the assistant-reply pair, so the model's internal reasoning is surfaced
+//! *as reasoning* — it becomes a `Thinking` content block, exactly like Claude's,
+//! and is never folded into reply text. A `reasoning` item and the text-bearing
+//! `item/reasoning/*` deltas therefore map onto that pair instead of being
+//! dropped.
+//!
+//! Which reasoning text: the vendored `ReasoningThreadItem` carries two string
+//! arrays, `content` (the model's raw reasoning parts) and `summary` (the
+//! summarised parts). Delta surfaces `content` when the server provides it and
+//! falls back to `summary` otherwise — never both, since the summary is a
+//! condensation of the same reasoning and emitting both would show it twice.
+//! The fallback is what makes this useful in practice: hosted reasoning models
+//! normally withhold raw chain-of-thought and return summaries only, so a
+//! `content`-only mapping would yield an empty thinking block on most turns.
+//! Parts are joined with a blank line, since each array element is a separate
+//! reasoning part. An item with neither maps to nothing, so an empty thinking
+//! block is never minted.
 
 use serde_json::Value;
 
@@ -64,13 +76,40 @@ const FILE_CHANGE_ITEM_TYPE: &str = "fileChange";
 /// visible prompt is already surfaced as [`AgentEvent::UserPromptAccepted`] at
 /// send time, so this item is dropped to avoid double-emitting it.
 const USER_MESSAGE_ITEM_TYPE: &str = "userMessage";
-/// The `item.type` for the model's reasoning (`ReasoningThreadItem`). Dropped —
-/// see the module docs for why it has no faithful neutral mapping.
+/// The `item.type` for the model's reasoning (`ReasoningThreadItem`), carrying
+/// its `content` / `summary` string arrays. Mapped onto the thinking-bearing
+/// events — see the module docs for which of the two fields wins.
 const REASONING_ITEM_TYPE: &str = "reasoning";
+
+/// The `ReasoningThreadItem` field holding the model's raw reasoning parts.
+/// Preferred over [`REASONING_SUMMARY_FIELD`] when the server provides it.
+const REASONING_CONTENT_FIELD: &str = "content";
+/// The `ReasoningThreadItem` field holding the summarised reasoning parts. The
+/// fallback when the raw `content` is absent — which is the usual case for
+/// hosted reasoning models.
+const REASONING_SUMMARY_FIELD: &str = "summary";
+/// How the parts of a reasoning array are joined into one thinking text. A blank
+/// line, because each element is a separate reasoning part (the same boundary
+/// `item/reasoning/summaryPartAdded` announces while streaming).
+const REASONING_PART_SEPARATOR: &str = "\n\n";
 
 /// The streaming-delta method (`AgentMessageDeltaNotification`) that carries a
 /// fragment of an assistant message, under `params.itemId` / `params.delta`.
 const METHOD_AGENT_MESSAGE_DELTA: &str = "item/agentMessage/delta";
+
+/// The streaming-delta method (`ReasoningTextDeltaNotification`) carrying a
+/// fragment of the model's raw reasoning, under `params.itemId` /
+/// `params.delta`.
+const METHOD_REASONING_TEXT_DELTA: &str = "item/reasoning/textDelta";
+/// The streaming-delta method (`ReasoningSummaryTextDeltaNotification`) carrying
+/// a fragment of the model's summarised reasoning, under the same
+/// `params.itemId` / `params.delta` shape.
+const METHOD_REASONING_SUMMARY_TEXT_DELTA: &str = "item/reasoning/summaryTextDelta";
+/// The notification (`ReasoningSummaryPartAddedNotification`) announcing that a
+/// new summary part opened. Its params carry only indices — no text — so it
+/// projects to nothing; the part boundary it marks is reproduced by
+/// [`REASONING_PART_SEPARATOR`] when the completed item is translated.
+const METHOD_REASONING_SUMMARY_PART_ADDED: &str = "item/reasoning/summaryPartAdded";
 
 /// The server → client approval request for a command execution (a `turn/start`
 /// turn). Response is a binary `{decision}`, so Delta models it.
@@ -127,14 +166,19 @@ pub fn translate_notification(n: &Notification) -> Vec<AgentEvent> {
             int_field(&n.params, "completedAtMs"),
         ),
         METHOD_AGENT_MESSAGE_DELTA => agent_message_delta(&n.params),
+        // Both text-bearing reasoning deltas share the `{itemId, delta}` shape
+        // and both are fragments of the same item's thinking, so they project to
+        // the same neutral fragment.
+        METHOD_REASONING_TEXT_DELTA | METHOD_REASONING_SUMMARY_TEXT_DELTA => {
+            reasoning_delta(&n.params)
+        }
         // Streaming deltas Delta does not model as neutral events are dropped
-        // (they still arrive faithfully but project to nothing): reasoning has no
-        // neutral variant (see the module docs), and plan / command-output / MCP
-        // progress have no neutral streaming counterpart. Listed explicitly so
-        // the intent is a documented skip, not an accidental fall-through.
-        "item/reasoning/textDelta"
-        | "item/reasoning/summaryTextDelta"
-        | "item/reasoning/summaryPartAdded"
+        // (they still arrive faithfully but project to nothing): the
+        // summary-part boundary carries no text of its own, and plan /
+        // command-output / MCP progress have no neutral streaming counterpart.
+        // Listed explicitly so the intent is a documented skip, not an
+        // accidental fall-through.
+        METHOD_REASONING_SUMMARY_PART_ADDED
         | "item/plan/delta"
         | "item/commandExecution/outputDelta"
         | "item/mcpToolCall/progress" => Vec::new(),
@@ -152,6 +196,24 @@ fn agent_message_delta(params: &Value) -> Vec<AgentEvent> {
         return Vec::new();
     }
     vec![AgentEvent::AssistantDelta {
+        provider_item_id: string_field(params, "itemId").unwrap_or_default(),
+        text,
+    }]
+}
+
+/// Project an `item/reasoning/textDelta` or `item/reasoning/summaryTextDelta`
+/// into a streaming [`AgentEvent::ThinkingDelta`]. Both notifications carry the
+/// fragment under `delta` and the item it extends under `itemId` (see the
+/// vendored `ReasoningTextDeltaNotification` /
+/// `ReasoningSummaryTextDeltaNotification`; they differ only in the
+/// `contentIndex` / `summaryIndex` the fragment belongs to, which the neutral
+/// event does not model). An empty fragment yields nothing.
+fn reasoning_delta(params: &Value) -> Vec<AgentEvent> {
+    let text = string_field(params, "delta").unwrap_or_default();
+    if text.is_empty() {
+        return Vec::new();
+    }
+    vec![AgentEvent::ThinkingDelta {
         provider_item_id: string_field(params, "itemId").unwrap_or_default(),
         text,
     }]
@@ -252,7 +314,10 @@ fn item_of(params: &Value) -> Option<&Value> {
 /// - `userMessage` → nothing (the visible prompt is already surfaced as
 ///   [`AgentEvent::UserPromptAccepted`] at send time; re-emitting the echoed item
 ///   would duplicate it);
-/// - `reasoning` → nothing (no faithful neutral mapping — see the module docs);
+/// - `reasoning` → [`AgentEvent::ThinkingDelta`] while streaming and
+///   [`AgentEvent::ThinkingMessage`] once completed — never an assistant
+///   message, so reasoning is not mis-filed as reply text (see the module docs
+///   for which of `content` / `summary` supplies the text);
 /// - any other type → nothing (a safe skip, never a mis-filed tool call).
 fn item_event(item: Option<&Value>, started: bool, at_ms: Option<i64>) -> Vec<AgentEvent> {
     let Some(item) = item else {
@@ -275,7 +340,8 @@ fn item_event(item: Option<&Value>, started: bool, at_ms: Option<i64>) -> Vec<Ag
             started,
             at_ms,
         ),
-        USER_MESSAGE_ITEM_TYPE | REASONING_ITEM_TYPE => Vec::new(),
+        REASONING_ITEM_TYPE => reasoning_event(item, provider_item_id, started, at_ms),
+        USER_MESSAGE_ITEM_TYPE => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -310,6 +376,70 @@ fn agent_message_event(
             at_ms,
         }]
     }
+}
+
+/// Project a `reasoning` item: a streaming [`AgentEvent::ThinkingDelta`] while
+/// it is still open and the completed [`AgentEvent::ThinkingMessage`] once done —
+/// the same started/completed split an `agentMessage` gets, on the
+/// thinking-bearing pair so the model's reasoning is never mis-filed as its
+/// reply.
+///
+/// An item with no reasoning text emits nothing. That covers both the `started`
+/// frame (which announces the item before any reasoning has arrived) and a
+/// completed item whose `content` and `summary` are both empty — the model
+/// reasoned without exposing any of it, and an empty thinking block is noise
+/// rather than a fact worth persisting.
+fn reasoning_event(
+    item: &Value,
+    provider_item_id: String,
+    started: bool,
+    at_ms: Option<i64>,
+) -> Vec<AgentEvent> {
+    let text = reasoning_text(item);
+    if text.is_empty() {
+        return Vec::new();
+    }
+    if started {
+        // A streaming fragment mints no persisted message (the completed item
+        // does), so it carries no `at_ms`.
+        vec![AgentEvent::ThinkingDelta {
+            provider_item_id,
+            text,
+        }]
+    } else {
+        vec![AgentEvent::ThinkingMessage {
+            provider_item_id,
+            text,
+            at_ms,
+        }]
+    }
+}
+
+/// The thinking text a `reasoning` item exposes: its raw `content` parts when
+/// the server provides them, else its summarised `summary` parts. See the module
+/// docs for why the raw text wins and why the fallback is the common case.
+fn reasoning_text(item: &Value) -> String {
+    let content = reasoning_parts(item, REASONING_CONTENT_FIELD);
+    if !content.is_empty() {
+        return content.join(REASONING_PART_SEPARATOR);
+    }
+    reasoning_parts(item, REASONING_SUMMARY_FIELD).join(REASONING_PART_SEPARATOR)
+}
+
+/// The non-empty string parts of a `reasoning` item's `content` / `summary`
+/// array. Both are arrays of strings in the vendored `ReasoningThreadItem`;
+/// anything else in the array is skipped rather than rendered, and blank parts
+/// are dropped so joining them cannot leave a stray separator.
+fn reasoning_parts(item: &Value, key: &str) -> Vec<String> {
+    let Some(parts) = item.get(key).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    parts
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Project a tool item (`commandExecution` / `fileChange`) into its start/finish
@@ -672,33 +802,128 @@ mod tests {
     }
 
     #[test]
-    fn a_reasoning_item_and_its_deltas_are_dropped_not_misfiled() {
-        // Reasoning has no faithful neutral mapping (no thinking-bearing
-        // AgentEvent variant), so it is dropped — never a crash, never a tool.
+    fn a_reasoning_item_and_its_deltas_become_thinking_not_misfiled() {
+        // A reasoning item announced before any reasoning arrived has nothing to
+        // show yet, so it emits nothing rather than an empty thinking block.
         assert!(translate_notification(&notification(
             "item/started",
             json!({ "item": { "id": "r1", "type": "reasoning", "summary": [], "content": [] } })
         ))
         .is_empty());
-        assert!(translate_notification(&notification(
+
+        // The completed item becomes a thinking-bearing event — never an
+        // assistant message, which would misrepresent the model's internal
+        // reasoning as its reply text.
+        let completed = translate_notification(&notification(
             "item/completed",
-            json!({ "item": { "id": "r1", "type": "reasoning", "summary": ["s"], "content": ["c"] } })
-        ))
-        .is_empty());
+            json!({
+                "completedAtMs": 1_700_000_000_123_i64,
+                "item": { "id": "r1", "type": "reasoning", "summary": ["s"], "content": ["c"] }
+            }),
+        ));
+        assert_eq!(
+            completed,
+            vec![AgentEvent::ThinkingMessage {
+                provider_item_id: "r1".to_owned(),
+                text: "c".to_owned(),
+                at_ms: Some(1_700_000_000_123),
+            }]
+        );
+
+        // Both text-bearing reasoning deltas are streaming thinking fragments.
         for method in [
             "item/reasoning/textDelta",
             "item/reasoning/summaryTextDelta",
-            "item/reasoning/summaryPartAdded",
         ] {
-            assert!(
+            assert_eq!(
                 translate_notification(&notification(
                     method,
                     json!({ "itemId": "r1", "delta": "thinking", "contentIndex": 0 })
-                ))
-                .is_empty(),
-                "{method} must be dropped"
+                )),
+                vec![AgentEvent::ThinkingDelta {
+                    provider_item_id: "r1".to_owned(),
+                    text: "thinking".to_owned(),
+                }],
+                "{method} must become a thinking fragment"
             );
         }
+        // The part-added boundary carries no text of its own, so it emits
+        // nothing; an empty fragment does not either.
+        assert!(translate_notification(&notification(
+            "item/reasoning/summaryPartAdded",
+            json!({ "itemId": "r1", "summaryIndex": 1 })
+        ))
+        .is_empty());
+        assert!(translate_notification(&notification(
+            "item/reasoning/textDelta",
+            json!({ "itemId": "r1", "delta": "", "contentIndex": 0 })
+        ))
+        .is_empty());
+
+        // Nothing on the reasoning path is ever an assistant message or a tool.
+        assert!(
+            !completed.iter().any(|e| matches!(
+                e,
+                AgentEvent::AssistantMessage { .. }
+                    | AgentEvent::AssistantDelta { .. }
+                    | AgentEvent::ToolStarted { .. }
+                    | AgentEvent::ToolCompleted { .. }
+            )),
+            "reasoning must never be mis-filed: {completed:?}"
+        );
+    }
+
+    #[test]
+    fn reasoning_prefers_raw_content_and_falls_back_to_the_summary() {
+        let thinking_of = |item: Value| match translate_notification(&notification(
+            "item/completed",
+            json!({ "item": item }),
+        ))
+        .as_slice()
+        {
+            [AgentEvent::ThinkingMessage { text, .. }] => Some(text.clone()),
+            [] => None,
+            other => panic!("expected one thinking message, got {other:?}"),
+        };
+
+        // Raw reasoning wins when present: the summary condenses the same
+        // reasoning, so showing both would show it twice.
+        assert_eq!(
+            thinking_of(json!({
+                "id": "r1", "type": "reasoning",
+                "content": ["raw one", "raw two"], "summary": ["condensed"]
+            })),
+            Some("raw one\n\nraw two".to_owned()),
+            "parts join as separate paragraphs"
+        );
+        // Summary-only is the usual case for a hosted reasoning model, which
+        // withholds its raw chain-of-thought — the fallback is what keeps the
+        // thinking block non-empty in practice.
+        assert_eq!(
+            thinking_of(json!({
+                "id": "r1", "type": "reasoning", "content": [], "summary": ["a", "b"]
+            })),
+            Some("a\n\nb".to_owned())
+        );
+        // Absent fields (both default to `[]` in the schema) and blank parts
+        // degrade to nothing rather than an empty thinking block.
+        assert_eq!(
+            thinking_of(json!({ "id": "r1", "type": "reasoning" })),
+            None
+        );
+        assert_eq!(
+            thinking_of(json!({
+                "id": "r1", "type": "reasoning", "content": ["", ""], "summary": [""]
+            })),
+            None
+        );
+        // A non-string part is skipped, never rendered as JSON.
+        assert_eq!(
+            thinking_of(json!({
+                "id": "r1", "type": "reasoning", "summary": [{ "text": "x" }, "kept"]
+            })),
+            Some("kept".to_owned())
+        );
     }
 
     #[test]
