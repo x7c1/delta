@@ -50,7 +50,7 @@ import {
   waitForPlayheadAt,
 } from './ThreadTimelineOverlay.testkit';
 
-describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
+describe('ThreadTimelineOverlay cross-lane jump in-flight guard', () => {
   // Regression suite for the tail-jump race: a cross-lane wheel-scrub near
   // the left edge occasionally snapped the playhead to the right-edge (tail)
   // message. Root cause: markProgrammaticScroll was called at jump-trigger
@@ -494,7 +494,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v12)', () => {
   });
 });
 
-describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
+describe('ThreadTimelineOverlay cross-lane jump guard hand-off and stacked jumps', () => {
   // Regression suite for the residual tail-jump race that survived v12.
   //
   // Symptom (user dogfooding): a fast wheel chain that crossed lanes —
@@ -1052,7 +1052,7 @@ describe('ThreadTimelineOverlay cross-lane jump IO guard (v13)', () => {
   });
 });
 
-describe('ThreadTimelineOverlay article-anchored uuid selector (v16)', () => {
+describe('ThreadTimelineOverlay article-anchored uuid selector', () => {
   // v14 pt.2 moved the timeline into the conversation pane's scroll
   // container; v15 then sticky-pinned that container to the top of the
   // scroll viewport. Both `TimelineDotMark` and `TimelineClusterMark`

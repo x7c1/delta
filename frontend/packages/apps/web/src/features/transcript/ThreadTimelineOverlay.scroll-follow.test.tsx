@@ -53,7 +53,7 @@ import {
  * per-element basis (using `Object.defineProperty` rather than spying on
  * the prototype, so each test scopes its overrides cleanly).
  */
-describe('ThreadTimelineOverlay horizontal scroll-follow (v31)', () => {
+describe('ThreadTimelineOverlay horizontal scroll-follow', () => {
   beforeEach(() => {
     resetGlobals();
     window.localStorage.setItem(timelineExpandedKey(), 'true');

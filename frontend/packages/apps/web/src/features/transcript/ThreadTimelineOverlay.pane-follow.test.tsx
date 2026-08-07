@@ -36,7 +36,7 @@ import {
   waitForPlayheadAt,
 } from './ThreadTimelineOverlay.testkit';
 
-describe('ThreadTimelineOverlay pane scroll → playhead follow (v11 Improvement 3)', () => {
+describe('ThreadTimelineOverlay pane scroll → playhead follow', () => {
   // Pane-scroll → playhead is the bidirectional half of the sync: when
   // the user manually scrolls the conversation pane, an IntersectionObserver
   // on each message article picks the topmost-visible message and drives
