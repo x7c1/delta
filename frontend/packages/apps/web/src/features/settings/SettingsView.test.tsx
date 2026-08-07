@@ -240,12 +240,13 @@ describe('SettingsView', () => {
     renderSettings();
     await findList();
 
-    // Pick Codex in the section's provider selector, then add an option.
+    // Pick Codex in the section's provider selector, then add an option. Codex
+    // takes field-style options, so the name input is labelled for a field.
     selectProvider('codex');
     fireEvent.change(screen.getByLabelText('Label (optional)'), {
       target: { value: 'Reasoning' },
     });
-    fireEvent.change(screen.getByLabelText('Name (the flag)'), {
+    fireEvent.change(screen.getByLabelText('Name (the field)'), {
       target: { value: 'reasoning-effort' },
     });
     fireEvent.change(screen.getByLabelText('Value (optional)'), {
@@ -264,9 +265,44 @@ describe('SettingsView', () => {
     expect(providerRadio('codex')).toBeChecked();
     expect(providerRadio('claude')).not.toBeChecked();
     expect(screen.getByLabelText('Label (optional)')).toHaveValue('');
-    expect(screen.getByLabelText('Name (the flag)')).toHaveValue('');
+    expect(screen.getByLabelText('Name (the field)')).toHaveValue('');
     expect(screen.getByLabelText('Value (optional)')).toHaveValue('');
     expect(screen.getByLabelText(DEFAULT_ENABLED_LABEL)).not.toBeChecked();
+  });
+
+  it('words the add form for the selected provider launch-option style', async () => {
+    renderSettings();
+    await findList();
+
+    // Claude takes CLI flags: the name input is labelled and exemplified as one.
+    const flagName = screen.getByLabelText('Name (the flag)');
+    expect(flagName).toHaveAttribute('placeholder', '--permission-mode');
+    expect(screen.getByLabelText('Value (optional)')).toHaveAttribute(
+      'placeholder',
+      'auto',
+    );
+    expect(screen.getByTestId('launch-options-section').textContent).toContain(
+      'Register custom CLI flags',
+    );
+
+    selectProvider('codex');
+
+    // Codex takes session-start request fields: a user must write `model`, not
+    // `--model`, so nothing in the form may still say "flag".
+    await waitFor(() =>
+      expect(screen.queryByLabelText('Name (the flag)')).toBeNull(),
+    );
+    expect(screen.getByLabelText('Name (the field)')).toHaveAttribute(
+      'placeholder',
+      'model',
+    );
+    expect(screen.getByLabelText('Value (optional)')).toHaveAttribute(
+      'placeholder',
+      'gpt-5-codex',
+    );
+    const section = screen.getByTestId('launch-options-section');
+    expect(section.textContent).toContain('Register custom session-start settings');
+    expect(section.textContent).not.toContain('CLI flags');
   });
 
   it('disables Add until a non-blank name is entered', async () => {

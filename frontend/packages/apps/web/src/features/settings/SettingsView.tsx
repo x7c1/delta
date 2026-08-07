@@ -15,12 +15,14 @@ import {
   useHomeDirQuery,
   useLaunchOptionsQuery,
   useRemoveRepositoryScanRootMutation,
+  useProvidersQuery,
   useRepositoryScanRootsQuery,
   useUpdateLaunchOptionMutation,
 } from '@delta/api-client';
 import type {
   AgentProvider,
   LaunchOption,
+  LaunchOptionStyle,
   RepositoryScanRoot,
 } from '@delta/wire-gen';
 import { Button, cn, Dialog, ProviderName, Spinner } from '@delta/ui-kit';
@@ -215,11 +217,75 @@ export function SettingsView() {
 }
 
 /**
- * Launch options category content: manage the registry of custom agent-CLI
- * launch options (flat `(label?, name, value?)` flag records). Lists the
- * registered options and lets the user add one (label and value optional,
- * name required) and delete one. Selecting which options to apply when
- * starting a session is a separate concern handled elsewhere.
+ * Wording for the launch-option form, one variant per {@link LaunchOptionStyle}.
+ *
+ * A launch option is a provider-neutral `(name, value?)` pair, but what the
+ * pair *means* differs: an argv-launched agent reads `name` as a CLI flag, a
+ * request-driven one reads it as a field of its session-start request. The
+ * server never validates either — it passes the pair through to the agent — so
+ * this copy is the only thing telling a user which vocabulary to write in.
+ * Getting it wrong is not cosmetic: registering `--model` for a field-style
+ * provider produces a request field literally named `--model`, which fails at
+ * the agent with no useful feedback.
+ *
+ * Keyed by the style the server reports (never by provider name), so a new
+ * provider inherits the right wording from its declared capability rather than
+ * needing a case added here.
+ */
+interface LaunchOptionCopy {
+  /** Opening sentence of the section's helper paragraph. */
+  intro: string;
+  /** How the paragraph describes what `name` is ("is the flag"). */
+  nameRole: string;
+  /** A real name for this style, used as both the example and the placeholder. */
+  nameExample: string;
+  /** How the paragraph describes what `value` is ("is its argument"). */
+  valueRole: string;
+  /** A real value for this style, used as both the example and the placeholder. */
+  valueExample: string;
+  /** What omitting `value` means for this style. */
+  valueOptionalNote: string;
+  /** The name input's visible label. */
+  nameLabel: string;
+}
+
+const LAUNCH_OPTION_COPY = {
+  cli_flag: {
+    intro: 'Register custom CLI flags to apply when starting a session with the selected agent.',
+    nameRole: 'is the flag',
+    nameExample: '--permission-mode',
+    valueRole: 'is its argument',
+    valueExample: 'auto',
+    valueOptionalNote: 'and is optional for valueless flags',
+    nameLabel: 'Name (the flag)',
+  },
+  request_field: {
+    intro:
+      'Register custom session-start settings to apply when starting a session with the selected agent.',
+    nameRole: 'is the field',
+    nameExample: 'model',
+    valueRole: "is that field's value",
+    valueExample: 'gpt-5-codex',
+    valueOptionalNote: 'and is optional for boolean fields, which are switched on when left empty',
+    nameLabel: 'Name (the field)',
+  },
+} as const satisfies Record<LaunchOptionStyle, LaunchOptionCopy>;
+
+/**
+ * The launch-option style to word the form in until the server's capability
+ * profile has landed. Flags are what the form has always described, and
+ * `GET /api/providers` is already warm by the time Settings can be opened (the
+ * workspace fetches it on mount), so this only covers a cold-start blink rather
+ * than a state a user reads and acts on.
+ */
+const FALLBACK_LAUNCH_OPTION_STYLE: LaunchOptionStyle = 'cli_flag';
+
+/**
+ * Launch options category content: manage the registry of custom agent launch
+ * options (flat `(label?, name, value?)` records). Lists the registered options
+ * and lets the user add one (label and value optional, name required) and
+ * delete one. Selecting which options to apply when starting a session is a
+ * separate concern handled elsewhere.
  *
  * Launch options belong to one provider each (Claude's flags mean nothing to
  * Codex and vice-versa), so the provider selector at the top of the section
@@ -227,6 +293,11 @@ export function SettingsView() {
  * provider, and only that provider's options are listed. The list endpoint
  * returns every provider's options, so filtering happens client-side, as in
  * `LaunchOptionsPicker`.
+ *
+ * The form's wording follows the selected provider's `launch_option_style`
+ * capability from `GET /api/providers` — read as a capability, never branched
+ * on the provider name — so the labels, examples and placeholders describe the
+ * vocabulary that provider actually accepts (see {@link LAUNCH_OPTION_COPY}).
  *
  * `active` mirrors the dialog's `settingsOpen` AND the category being the
  * visible one, so the query only runs while this section is mounted in the
@@ -250,6 +321,17 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   // category is left, so the next visit picks up the current setting.
   const defaultProvider = useSettingsStore((state) => state.defaultProvider);
   const [provider, setProvider] = useState<AgentProvider>(defaultProvider);
+
+  // How the selected provider reads a launch option's `(name, value?)` pair.
+  // Server-declared, so the form's wording follows the provider's capability
+  // rather than its name.
+  const providersQuery = useProvidersQuery(client);
+  const copy = useMemo(() => {
+    const style =
+      providersQuery.data?.providers.find((entry) => entry.provider === provider)
+        ?.capabilities.launch_option_style ?? FALLBACK_LAUNCH_OPTION_STYLE;
+    return LAUNCH_OPTION_COPY[style];
+  }, [providersQuery.data, provider]);
 
   const options = launchOptionsQuery.data?.launch_options ?? [];
   const providerOptions = useMemo(
@@ -294,11 +376,11 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
     <section className="w-full" data-testid="launch-options-section">
       <h3 className="mb-1 text-secondary font-semibold text-fg">Launch options</h3>
       <p className="mb-4 text-caption text-fg-muted">
-        Register custom CLI flags to apply when starting a session with the
-        selected agent. <span className="font-medium">Name</span> is the flag (e.g.{' '}
-        <code>--permission-mode</code>); <span className="font-medium">value</span>{' '}
-        is its argument (e.g. <code>auto</code>) and is optional for valueless
-        flags. <span className="font-medium">Label</span> is an optional note.
+        {copy.intro} <span className="font-medium">Name</span> {copy.nameRole} (e.g.{' '}
+        <code>{copy.nameExample}</code>); <span className="font-medium">value</span>{' '}
+        {copy.valueRole} (e.g. <code>{copy.valueExample}</code>){' '}
+        {copy.valueOptionalNote}. <span className="font-medium">Label</span> is an
+        optional note.
       </p>
 
       <div className="mb-4 flex flex-col gap-1">
@@ -358,14 +440,14 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-caption font-medium text-fg-muted" htmlFor="lo-name">
-            Name (the flag)
+            {copy.nameLabel}
           </label>
           <input
             id="lo-name"
             type="text"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="--permission-mode"
+            placeholder={copy.nameExample}
             required
             className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
@@ -379,7 +461,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
             type="text"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder="auto"
+            placeholder={copy.valueExample}
             className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
