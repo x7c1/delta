@@ -80,6 +80,19 @@ struct PendingTurn {
 }
 
 impl Server<'_> {
+    /// The body a `thread/start` / `thread/resume` response shares: the thread
+    /// (its id plus the scenario's `gitInfo`, when it names one) alongside the
+    /// resolved `model`. `gitInfo` is omitted entirely when the scenario names
+    /// none — the shape a thread outside a git working tree gets.
+    fn thread_response(&self, thread_id: &str) -> Value {
+        let mut thread = Map::new();
+        thread.insert("id".to_owned(), json!(thread_id));
+        if let Some(git_info) = &self.scenario.git_info {
+            thread.insert("gitInfo".to_owned(), git_info.clone());
+        }
+        json!({ "thread": Value::Object(thread), "model": self.scenario.model })
+    }
+
     /// Dispatch one incoming frame by its JSON-RPC shape.
     fn handle(&mut self, frame: Value) -> Result<(), String> {
         let id = frame.get("id").cloned();
@@ -143,14 +156,14 @@ impl Server<'_> {
                 // answer. Real `thread/start` returns the started thread under
                 // `result.thread` (a `Thread`, whose `id` is the thread id).
                 append_record(self.thread_start_log.as_deref(), params, "thread start log")?;
-                let thread_id = self.scenario.thread_id.clone();
-                // The response also announces the thread's resolved config — the
-                // real `ThreadStartResponse` requires a top-level `model`. The
-                // scenario's model is answered verbatim, *ignoring* any `model`
-                // the client sent, which is how a real server behaves when the
-                // user's config or its own default wins.
-                let model = self.scenario.model.clone();
-                self.respond(id, json!({ "thread": { "id": thread_id }, "model": model }))
+                // The response also announces what the server decided and saw:
+                // the real `ThreadStartResponse` requires a top-level `model`,
+                // and its `Thread` carries the `gitInfo` captured from the
+                // thread's working directory. The scenario's model is answered
+                // verbatim, *ignoring* any `model` the client sent — which is how
+                // a real server behaves when the user's config or its own default
+                // wins.
+                self.respond(id, self.thread_response(&self.scenario.thread_id.clone()))
             }
             "thread/resume" => {
                 // Resume echoes back the requested thread id (a real server
@@ -161,11 +174,10 @@ impl Server<'_> {
                     .and_then(Value::as_str)
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
-                // `ThreadResumeResponse` carries the same required top-level
-                // `model` as the start response, so a resumed thread reports
-                // what it is running just like a fresh one.
-                let model = self.scenario.model.clone();
-                self.respond(id, json!({ "thread": { "id": thread_id }, "model": model }))
+                // `ThreadResumeResponse` carries the same top-level `model` and
+                // `thread.gitInfo` as the start response, so a resumed thread
+                // reports what it is running, and where, just like a fresh one.
+                self.respond(id, self.thread_response(&thread_id))
             }
             "thread/inject_items" => {
                 // Hidden per-turn context: the client appends Responses API

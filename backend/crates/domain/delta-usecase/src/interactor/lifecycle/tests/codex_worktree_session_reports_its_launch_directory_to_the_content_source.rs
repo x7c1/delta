@@ -4,21 +4,25 @@ use crate::interactor::testing::*;
 use crate::ports::WorktreeStartPoint;
 use crate::{SendTarget, WorktreeSpec};
 
-/// A Codex session started in a git worktree hands its recorded launch site —
-/// the worktree directory AND the branch it was created on — to the content
-/// accumulator, which stamps both onto every message it folds.
+/// A Codex session started in a git worktree hands the **worktree** directory to
+/// the content accumulator, which stamps it onto every message it folds.
 ///
-/// The branch is the fact that can only come from Delta's own record: the Codex
-/// app-server reports the thread's `cwd` but says nothing about git, and
-/// re-deriving the branch later would drift from the `branch_at_launch` column
-/// the session card already shows. So this asserts the two agree, at the seam
-/// where the metadata leaves the core.
+/// The distinction this pins is between the two directories a worktree spawn
+/// holds: the dir the user picked (recorded as `requested_workdir`) and the
+/// worktree the agent was actually launched in (recorded as `cwd`). Messages
+/// must report the latter — it is where the agent's edits land and where the
+/// transcript's "open this directory" action should go.
+///
+/// The branch is deliberately NOT asserted here: it does not travel through the
+/// core at all. The Codex server reports the branch it observed in the thread's
+/// working directory, so it is read off the `thread/start` response by the
+/// adapter and covered by the adapter/full-loop tests instead.
 ///
 /// The worktree is resolved through the "branch already checked out" reuse path
 /// so the launch directory is a fixed, scriptable path (a freshly created
 /// worktree is named after the session id, which is minted mid-call).
 #[tokio::test]
-async fn codex_worktree_session_reports_its_branch_to_the_content_source() {
+async fn codex_worktree_session_reports_its_launch_directory_to_the_content_source() {
     let canonical = FakeWorkspace::canonical("/projects/app");
     let repo_root = "/projects/app/.git/..";
     // `pr-head` is already checked out at this path, so the spawn reuses it as
@@ -53,20 +57,21 @@ async fn codex_worktree_session_reports_its_branch_to_the_content_source() {
         .await
         .expect("a Codex session starts in the reused worktree");
 
-    // The session row recorded the worktree as its launch site.
+    // The session row recorded the worktree as its launch directory, distinct
+    // from the dir the user selected.
     let session = ix.store().session(&send.session_id).await.unwrap().unwrap();
     assert_eq!(
         session.cwd, existing,
         "the session launched in the worktree"
     );
     assert_eq!(
-        session.branch_at_launch.as_deref(),
-        Some("pr-head"),
-        "the worktree's branch was recorded on the session row"
+        session.requested_workdir.as_deref(),
+        Some(canonical.as_str()),
+        "the user-selected dir is recorded separately, and is NOT the launch dir"
     );
 
-    // …and exactly that launch site reached the content accumulator, which is
-    // what puts it on every message the session persists.
+    // …and exactly that launch directory reached the content accumulator, which
+    // is what puts it on every message the session persists.
     let request = {
         let log = factory.log();
         let log = log.lock().unwrap();
@@ -80,9 +85,5 @@ async fn codex_worktree_session_reports_its_branch_to_the_content_source() {
     assert_eq!(
         request.cwd, session.cwd,
         "the content source stamps the same cwd the session row records"
-    );
-    assert_eq!(
-        request.git_branch, session.branch_at_launch,
-        "the content source stamps the same branch the session row records"
     );
 }

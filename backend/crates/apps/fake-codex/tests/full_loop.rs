@@ -348,6 +348,14 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
         json!("2026-07-17T07:12:18.000Z"),
         "the Codex item timestamp is persisted as an ISO-8601 created_at"
     );
+    // This scenario's app-server reports no git metadata at all — the shape a
+    // thread outside a git working tree gets — so the branch degrades to null
+    // rather than being invented, all the way through to the persisted row.
+    assert_eq!(
+        assistant["git_branch"],
+        Value::Null,
+        "no gitInfo in the thread/start response means no branch on the message"
+    );
     // The user prompt persisted too, so the loop is a real conversation.
     let user = messages
         .iter()
@@ -548,8 +556,9 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
 }
 
 /// The Codex **message-metadata** full loop: a persisted Codex message reports
-/// the model the server resolved for the thread and the directory the session is
-/// running in — the feedback channel for a user-selectable model.
+/// the model the server resolved for the thread, the branch the server observed,
+/// and the directory the session is running in — the feedback channel for a
+/// user-selectable model.
 ///
 /// The session selects `model=requested-by-delta` as a launch option while the
 /// fake app-server answers `thread/start` with a *different* top-level `model`.
@@ -558,16 +567,23 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
 /// others), so only the response says what is actually running. Asserting the
 /// **server's** value proves the metadata is read back rather than echoed.
 ///
+/// The branch comes from the same response, under `thread.gitInfo.branch`. This
+/// session is started with **no git worktree**, which is exactly the case Delta
+/// records no branch for on its own — so a persisted branch here can only have
+/// come from the provider's report.
+///
 /// `cwd` is checked against the `cwd` Delta itself sent on `thread/start`, so the
 /// message reports the same launch directory the agent was started in — not a
 /// separately re-derived path that could drift from it.
 #[tokio::test(flavor = "multi_thread")]
-async fn codex_messages_report_the_resolved_model_and_the_launch_directory() {
+async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_launch_dir() {
     const RESOLVED_MODEL: &str = "gpt-5.6-sol";
+    const OBSERVED_BRANCH: &str = "feature/observed-by-the-server";
     let scenario = ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_metadata",
             "model": "{RESOLVED_MODEL}",
+            "git_info": {{ "branch": "{OBSERVED_BRANCH}" }},
             "turn": {{
                 "turn_id": "turn_metadata",
                 "emit": [
@@ -640,9 +656,10 @@ async fn codex_messages_report_the_resolved_model_and_the_launch_directory() {
         );
         assert_eq!(
             message["git_branch"],
-            Value::Null,
-            "a session started without a worktree recorded no branch, so none is \
-             reported rather than invented: {message:?}"
+            json!(OBSERVED_BRANCH),
+            "the persisted message reports the branch the server observed — even \
+             though this session has no worktree, so Delta recorded none itself: \
+             {message:?}"
         );
     }
 }
@@ -1078,15 +1095,22 @@ impl Drop for DbGuard {
 /// non-colliding provider items. The provider thread id is fixed to `thr_restart`
 /// across both, so the resume reattaches to the same thread.
 ///
-/// `model` is what this backend's app-server reports for the thread. The two
-/// halves of the restart test give distinct values, so the post-restart messages
-/// prove the metadata came from the **resume** response rather than from
-/// anything cached before the restart.
-fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str, model: &str) -> ScenarioGuard {
+/// `model` and `branch` are what this backend's app-server reports for the
+/// thread. The two halves of the restart test give distinct values, so the
+/// post-restart messages prove the metadata came from the **resume** response
+/// rather than from anything cached before the restart.
+fn restart_turn_scenario(
+    turn_id: &str,
+    item_id: &str,
+    reply: &str,
+    model: &str,
+    branch: &str,
+) -> ScenarioGuard {
     ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_restart",
             "model": "{model}",
+            "git_info": {{ "branch": "{branch}" }},
             "turn": {{
                 "turn_id": "{turn_id}",
                 "emit": [
@@ -1119,14 +1143,16 @@ fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str, model: &str)
 async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     const REPLY_ONE: &str = "reply from turn one";
     const REPLY_TWO: &str = "reply from turn two";
-    // Distinct per backend, so a post-restart message reporting `MODEL_TWO`
-    // can only have learned it from the `thread/resume` response.
+    // Distinct per backend, so a post-restart message reporting `MODEL_TWO` /
+    // `BRANCH_TWO` can only have learned them from the `thread/resume` response.
     const MODEL_ONE: &str = "model-before-restart";
     const MODEL_TWO: &str = "model-after-restart";
+    const BRANCH_ONE: &str = "branch-before-restart";
+    const BRANCH_TWO: &str = "branch-after-restart";
     let db = DbGuard::new();
 
     // ---- Before the restart: create the session, complete turn 1. ----
-    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE, MODEL_ONE);
+    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE, MODEL_ONE, BRANCH_ONE);
     let (thread_id, session_id) = {
         let (app, state) = build_app_with(db.open(), &scenario1);
         let mut events = state.subscribe();
@@ -1166,7 +1192,7 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     };
 
     // ---- After the restart: a brand-new backend over the SAME database. ----
-    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO, MODEL_TWO);
+    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO, MODEL_TWO, BRANCH_TWO);
     let (app, state) = build_app_with(db.open(), &scenario2);
     let mut events = state.subscribe();
     state
@@ -1238,27 +1264,37 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     );
 
     // A resumed session still reports its provider metadata: `thread/resume`
-    // carries the same required top-level `model` as `thread/start`, so the
-    // post-restart turn's messages are stamped from the resume response — the
-    // second backend's model, never left blank and never the pre-restart one.
-    // The pre-restart messages keep the model that was running when they were
+    // carries the same top-level `model` and `thread.gitInfo` as `thread/start`,
+    // so the post-restart turn's messages are stamped from the resume response —
+    // the second backend's values, never left blank and never the pre-restart
+    // ones. The pre-restart messages keep what was reported when they were
     // folded, since each row records what produced it.
-    let model_of = |text: &str| {
+    let fact_of = |text: &str, field: &str| {
         messages
             .iter()
             .find(|m| m["content_text"] == json!(text))
-            .unwrap_or_else(|| panic!("`{text}` is present"))["model"]
+            .unwrap_or_else(|| panic!("`{text}` is present"))[field]
             .clone()
     };
     assert_eq!(
-        model_of(REPLY_TWO),
+        fact_of(REPLY_TWO, "model"),
         json!(MODEL_TWO),
         "the resumed turn reports the model its `thread/resume` announced: {messages:?}"
     );
     assert_eq!(
-        model_of(REPLY_ONE),
+        fact_of(REPLY_TWO, "git_branch"),
+        json!(BRANCH_TWO),
+        "the resumed turn reports the branch its `thread/resume` announced: {messages:?}"
+    );
+    assert_eq!(
+        fact_of(REPLY_ONE, "model"),
         json!(MODEL_ONE),
         "the pre-restart turn keeps the model that produced it: {messages:?}"
+    );
+    assert_eq!(
+        fact_of(REPLY_ONE, "git_branch"),
+        json!(BRANCH_ONE),
+        "the pre-restart turn keeps the branch reported when it was folded: {messages:?}"
     );
 }
 

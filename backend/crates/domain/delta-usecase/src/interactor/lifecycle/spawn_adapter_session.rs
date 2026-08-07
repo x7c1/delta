@@ -217,7 +217,6 @@ where
                 &factory,
                 AdapterBind::Launch { launch_options },
                 cwd.clone(),
-                branch_at_launch.clone(),
                 main_thread_id,
                 0,
             )
@@ -354,13 +353,12 @@ where
     ///   replayed/continued frames extend the existing history instead of
     ///   renumbering or duplicating it.
     ///
-    /// `cwd` and `git_branch` are the session's launch site as Delta *recorded*
-    /// it (the resolved launch directory and, for a worktree spawn, the branch
-    /// it was created on): the same values on the session row, read from there
-    /// rather than re-derived, so the per-message copies the content source
-    /// stamps can never disagree with the session's own columns. Both callers
-    /// pass what they already hold — the fresh spawn its just-resolved values,
-    /// the resume the persisted row's.
+    /// `cwd` is the session's launch directory as Delta resolved and recorded it
+    /// — the value both callers already hold (the fresh spawn its just-resolved
+    /// one, the resume the persisted row's). It is passed on to the content
+    /// accumulator so every message reports where the agent is running; the
+    /// provider's own facts about the session (model, branch) are the adapter's
+    /// to add.
     ///
     /// It holds the live adapter + handle in the runtime (so the connection stays
     /// up and the session reads as open, with no `OpenHandle` for the PTY bridge
@@ -378,7 +376,6 @@ where
         factory: &Arc<dyn AgentAdapterFactory>,
         bind: AdapterBind,
         cwd: String,
-        git_branch: Option<String>,
         main_thread_id: ThreadId,
         seed_seq: i64,
     ) -> Result<(Arc<dyn AgentAdapter>, AgentSessionHandle)> {
@@ -421,11 +418,12 @@ where
         });
 
         // Build the push-based content accumulator: seeded so minted ordering
-        // continues past whatever is already persisted, and carrying the
-        // session's launch site so every message it folds reports where the
-        // agent is running. The adapter joins this with the provider facts only
-        // it knows (Codex: the model the server resolved for the thread), which
-        // is why it is handed the live handle too.
+        // continues past whatever is already persisted, and carrying the launch
+        // directory so every message it folds reports where the agent is
+        // running. The adapter joins this with the facts only it knows (Codex:
+        // the model the server resolved and the branch it saw, both read off the
+        // thread's opening response), which is why it is handed the live handle
+        // too.
         self.state.set_agent_content_source(adapter.content_source(
             &handle,
             ContentSourceRequest {
@@ -433,7 +431,6 @@ where
                 main_thread: main_thread_id,
                 seed_seq,
                 cwd,
-                git_branch,
             },
         ));
 
@@ -475,12 +472,12 @@ where
     /// original spawn carried.
     ///
     /// The session's **provider metadata is still reported after a resume**, and
-    /// is re-read rather than remembered: the launch site comes from the
+    /// is re-read rather than remembered: the launch directory comes from the
     /// persisted row (which outlives the restart by definition), and the model
-    /// from the `thread/resume` response — Codex's resume response carries the
-    /// same required top-level `model` as its start response, so the reattached
-    /// thread announces what it is running. Nothing about a resumed session's
-    /// metadata degrades relative to a fresh one.
+    /// and branch from the `thread/resume` response — Codex's resume response
+    /// carries the same `model` and `thread.gitInfo` its start response does, so
+    /// the reattached thread re-announces what it is running and where. Nothing
+    /// about a resumed session's metadata degrades relative to a fresh one.
     ///
     /// The caller resolves `factory` through the registry
     /// ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory))
@@ -512,7 +509,6 @@ where
                 provider_session_id,
             },
             session.cwd.clone(),
-            session.branch_at_launch.clone(),
             main_thread_id,
             seed_seq,
         )

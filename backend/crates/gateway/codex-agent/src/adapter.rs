@@ -79,7 +79,9 @@ use crate::translate::{
     classify_server_request, is_turn_completed, started_turn_id, translate_notification,
     ServerRequestKind,
 };
-use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEvent};
+use crate::{
+    codex_content_source, AppServerConnection, CodexThreadFacts, StartedThread, ThreadEvent,
+};
 
 /// Codex's static capability profile — the single source of truth returned by
 /// [`AgentAdapter::capabilities`] and read (without a live adapter) by the
@@ -132,16 +134,11 @@ const METHOD_NOT_FOUND: i64 = -32601;
 struct CodexSession {
     tx: UnboundedSender<AgentEvent>,
     rx: Option<UnboundedReceiver<AgentEvent>>,
-    /// The model the server **resolved** for this thread, read off the
-    /// `thread/start` / `thread/resume` response (both carry it as a required
-    /// top-level `model`).
-    ///
-    /// This — not anything Delta asked for — is the truth about what is running:
-    /// the model can come from a selected launch option, from the user's own
-    /// `~/.codex/config.toml` default, or from the server's built-in default,
-    /// and only the response says which won. `None` if a server omits it, so the
-    /// fact degrades rather than being invented.
-    model: Option<String>,
+    /// What the server reported about this thread in the response that opened
+    /// it — the model it resolved and the git branch it saw. Recorded at
+    /// registration and handed to the session's content accumulator, which
+    /// stamps both onto every message. See [`thread_facts`].
+    facts: CodexThreadFacts,
     /// Open approval requests: neutral `request_id` → the verbatim wire id the
     /// response must echo. Shared with the translation task, which inserts an
     /// entry when it surfaces a `PermissionRequested`.
@@ -183,9 +180,9 @@ impl CodexAppServerAdapter {
     }
 
     /// Register a fresh session for a started/resumed thread: open its event
-    /// channel, record the provider facts the opening response announced (the
-    /// resolved model), emit the opening [`AgentEvent::SessionStarted`], and
-    /// spawn the translation task that drains the thread's frames onto the
+    /// channel, record the facts the opening response announced about the thread
+    /// (see [`thread_facts`]), emit the opening [`AgentEvent::SessionStarted`],
+    /// and spawn the translation task that drains the thread's frames onto the
     /// channel.
     fn register_session(&self, started: StartedThread) -> AgentSessionHandle {
         let StartedThread {
@@ -193,7 +190,7 @@ impl CodexAppServerAdapter {
             events,
             result,
         } = started;
-        let model = resolved_model(&result);
+        let facts = thread_facts(&result);
         let (tx, rx) = mpsc::unbounded_channel();
         // Buffered before `events()` is called, so the opener is never dropped.
         let _ = tx.send(AgentEvent::SessionStarted {
@@ -219,7 +216,7 @@ impl CodexAppServerAdapter {
                 CodexSession {
                     tx,
                     rx: Some(rx),
-                    model,
+                    facts,
                     approvals,
                     current_turn_id,
                     task,
@@ -232,15 +229,17 @@ impl CodexAppServerAdapter {
         }
     }
 
-    /// The model the server resolved for a still-known session's thread, as
-    /// recorded by [`Self::register_session`]. `None` for an unknown/closed
-    /// session, or when the opening response carried no `model`.
-    fn session_model(&self, key: &str) -> Option<String> {
+    /// What the server reported about a still-known session's thread, as
+    /// recorded by [`Self::register_session`]. Everything degrades to `None` for
+    /// an unknown or closed session, exactly as it does when the response
+    /// carried no such fact.
+    fn session_facts(&self, key: &str) -> CodexThreadFacts {
         self.sessions
             .lock()
             .expect("sessions mutex poisoned")
             .get(key)
-            .and_then(|session| session.model.clone())
+            .map(|session| session.facts.clone())
+            .unwrap_or_default()
     }
 
     /// Emit an event on a session's channel, if the session is still known.
@@ -409,21 +408,47 @@ fn inject_message_item(text: &str) -> Value {
     })
 }
 
-/// The model a `thread/start` / `thread/resume` response reports for the thread
-/// it opened, read from the top-level `model` both responses carry (see the
-/// vendored `ThreadStartResponse` / `ThreadResumeResponse` schemas, where it is
-/// a required string alongside `cwd`, `sandbox` and `approvalPolicy`).
+/// What a `thread/start` / `thread/resume` response reports about the thread it
+/// opened, gathered from the two places the vendored schemas put it.
 ///
-/// This is deliberately read from the **response** rather than echoed from the
-/// request: `model` is only one of several inputs the server reconciles (a
-/// selected launch option, the user's `config.toml` default, the server's own
-/// default), so the request says what Delta asked for while the response says
-/// what is actually running. A missing or non-string value degrades to `None`.
-fn resolved_model(result: &Value) -> Option<String> {
-    result
-        .get("model")
+/// Both facts are read from the **response** rather than reconstructed on
+/// Delta's side, because both are things the *server* decided or saw:
+///
+/// - `model` is the top-level field both `ThreadStartResponse` and
+///   `ThreadResumeResponse` require (alongside `cwd`, `sandbox` and
+///   `approvalPolicy`). It is only one of several inputs the server reconciles —
+///   a selected launch option, the user's `config.toml` default, the server's
+///   own default — so the request says what Delta asked for while the response
+///   says what is actually running.
+/// - `git_branch` is `thread.gitInfo.branch`. `Thread.gitInfo` is
+///   `GitInfo | null` ("Optional Git metadata captured when the thread was
+///   created") and `GitInfo.branch` is itself `string | null`. The server
+///   captures it from the thread's own working directory, so it is reported for
+///   any git-backed session — not only the ones Delta happens to have recorded a
+///   branch for itself.
+///
+/// Every layer of absence — a missing field, an explicit `null`, a non-string,
+/// or an empty string — degrades to `None` rather than being invented. A session
+/// outside a git working tree, or one on a detached HEAD, genuinely has no
+/// branch to report.
+fn thread_facts(result: &Value) -> CodexThreadFacts {
+    CodexThreadFacts {
+        model: non_empty_str(result.get("model")),
+        git_branch: non_empty_str(
+            result
+                .get("thread")
+                .and_then(|thread| thread.get("gitInfo"))
+                .and_then(|git_info| git_info.get("branch")),
+        ),
+    }
+}
+
+/// A JSON value read as an owned, non-empty string; anything else (absent,
+/// `null`, a non-string, or `""`) is `None`.
+fn non_empty_str(value: Option<&Value>) -> Option<String> {
+    value
         .and_then(Value::as_str)
-        .filter(|model| !model.is_empty())
+        .filter(|text| !text.is_empty())
         .map(str::to_owned)
 }
 
@@ -656,10 +681,10 @@ impl AgentAdapter for CodexAppServerAdapter {
         // Codex pushes structured `item/*` / `turn/*` frames, so its event pump
         // folds them into canonical messages through this accumulator (the
         // `CodexConversationSource`), rather than reading a transcript. The
-        // launch site rides the neutral request; the model is the one fact only
-        // this adapter holds, recorded from the thread's opening response when
-        // the session was registered.
-        codex_content_source(req, self.session_model(&handle.key))
+        // launch directory rides the neutral request; the model and branch are
+        // the facts only this adapter holds, recorded from the thread's opening
+        // response when the session was registered.
+        codex_content_source(req, self.session_facts(&handle.key))
     }
 }
 

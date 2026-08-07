@@ -111,15 +111,13 @@ pub struct ContentSourceRequest {
     pub seed_seq: i64,
     /// The directory the session's agent runs in: the launch directory Delta
     /// resolved at spawn and recorded on the session row (the git worktree path
-    /// when the session was started with one). Taken from Delta's own record
-    /// rather than re-derived, so a message's `cwd` always agrees with the
-    /// session's other launch-site columns.
+    /// when the session was started with one).
+    ///
+    /// This is the one launch-site fact Delta *decides* rather than observes, so
+    /// it travels from the core. Everything the **provider** decided or observed
+    /// about the session — which model is running it, which branch it is on — is
+    /// the adapter's to supply, from whatever its own protocol reports.
     pub cwd: String,
-    /// The branch the session launched on, as recorded on the session row
-    /// (`branch_at_launch`). `None` when Delta recorded none — a session started
-    /// without a git worktree leaves that column NULL — so the fact degrades
-    /// rather than being invented.
-    pub git_branch: Option<String>,
 }
 
 /// Inputs for sending a user prompt into an open session.
@@ -277,11 +275,13 @@ pub trait AgentAdapter: Send + Sync {
     ///
     /// `handle` names the session on the *provider's* side, so an adapter can
     /// join the neutral request with whatever it learned when it opened that
-    /// session — Codex reads the model the server resolved for the thread off
-    /// its `thread/start` / `thread/resume` response and stamps it on the
-    /// session's messages, which is the only truthful source for it (the model
-    /// may come from a launch option, the user's own Codex config, or the
-    /// server's default).
+    /// session — Codex reads the model the server resolved for the thread, and
+    /// the git branch it observed in the thread's working directory, off its
+    /// `thread/start` / `thread/resume` response and stamps both on the
+    /// session's messages. That response is the only truthful source for either:
+    /// the model may come from a launch option, the user's own Codex config, or
+    /// the server's default, and the branch is what the provider actually saw
+    /// rather than what Delta expected to be there.
     ///
     /// The default returns a [`NullContentSource`]: a provider that pulls its
     /// content from a transcript (Claude) rather than pushing structured frames

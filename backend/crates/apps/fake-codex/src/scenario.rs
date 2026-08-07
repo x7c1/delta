@@ -34,6 +34,11 @@
 //! - `model` (default `"fake-codex-model"`): the model reported as the
 //!   `thread/start` / `thread/resume` response's top-level `model` — the model
 //!   the server *resolved* for the thread, whatever the client asked for.
+//! - `git_info` (default absent): the object reported as the response's
+//!   `thread.gitInfo` — the git metadata a real server captures from the
+//!   thread's working directory (`{ branch, originUrl, sha }`, each nullable).
+//!   Absent leaves `gitInfo` off the response entirely, which is the shape a
+//!   session outside a git working tree gets.
 //! - `turn` (optional): what a `turn/start` request plays. When absent, a
 //!   `turn/start` still gets a response but emits nothing.
 //!
@@ -157,6 +162,12 @@ pub struct Scenario {
     /// echoing what it asked for.
     #[serde(default = "default_model")]
     pub model: String,
+    /// Reported as `thread.gitInfo` on the `thread/start` / `thread/resume`
+    /// response, verbatim. `None` omits the field, re-enacting a thread whose
+    /// working directory is not a git working tree; `Some({"branch": null})`
+    /// re-enacts a git directory on a detached HEAD.
+    #[serde(default)]
+    pub git_info: Option<Value>,
     /// What a `turn/start` plays (nothing beyond a response when absent). Used
     /// when [`Self::turns`] is empty; the same turn is replayed on every
     /// `turn/start` (its ids are therefore reused across turns).
@@ -221,6 +232,7 @@ impl Scenario {
             server_info: default_server_info(),
             thread_id: DEFAULT_THREAD_ID.to_owned(),
             model: DEFAULT_MODEL.to_owned(),
+            git_info: None,
             turn: Some(Turn {
                 turn_id: default_turn_id(),
                 emit: vec![
