@@ -41,7 +41,8 @@ use std::sync::Mutex;
 
 use agent_contract::{drain, launch_request};
 use delta_usecase::{
-    AgentAdapter, AgentEvent, AgentProvider, LaunchRequest, Result, SendRequest, TmuxDriver,
+    AgentAdapter, AgentEvent, AgentProvider, LaunchOptionSpec, LaunchRequest, Result, SendRequest,
+    TmuxDriver,
 };
 
 use crate::{ClaudeCodePtyHookAdapter, ClaudeLaunchConfig};
@@ -164,7 +165,10 @@ async fn claude_launch_builds_the_expected_command() {
         .launch(LaunchRequest {
             session_id: "sid-123".to_owned(),
             workdir: "/work".to_owned(),
-            extra_args: vec!["--model".to_owned(), "opus".to_owned()],
+            launch_options: vec![LaunchOptionSpec {
+                name: "--model".to_owned(),
+                value: Some("opus".to_owned()),
+            }],
             first_prompt: Some("do the thing".to_owned()),
         })
         .await

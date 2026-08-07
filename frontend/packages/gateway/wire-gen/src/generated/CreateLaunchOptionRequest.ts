@@ -4,11 +4,13 @@ import type { AgentProvider } from "./AgentProvider";
 /**
  * Request body for `POST /api/launch-options`.
  *
- * Registers one custom `claude` CLI flag as a flat `(label?, name, value?)`
- * record. `name` is the flag (e.g. `--plugin-dir`, `--permission-mode`) and is
- * required; `value` is its argument (e.g. `/path/to/plugins`, `auto`) and is
- * omitted for a valueless flag; `label` is an optional human-friendly note.
- * The optional fields default to absent, matching what serde accepts.
+ * Registers one custom agent startup setting as a flat `(label?, name,
+ * value?)` record. `name` is required and is read in the vocabulary of the
+ * option's `provider` — a CLI flag for Claude (`--plugin-dir`), a
+ * `thread/start` field for Codex (`model`); `value` is its argument/value
+ * (e.g. `/path/to/plugins`, `gpt-5-codex`) and is omitted for a valueless
+ * option; `label` is an optional human-friendly note. The optional fields
+ * default to absent, matching what serde accepts.
  */
 export type CreateLaunchOptionRequest = { 
 /**
@@ -16,11 +18,13 @@ export type CreateLaunchOptionRequest = {
  */
 label?: string, 
 /**
- * The flag itself, e.g. `--plugin-dir`. Required.
+ * What the option is called in the provider's vocabulary, e.g.
+ * `--plugin-dir` (Claude) or `model` (Codex). Required.
  */
 name: string, 
 /**
- * The flag's argument, e.g. `/path/to/plugins`. Omitted for a valueless flag.
+ * The option's argument/value, e.g. `/path/to/plugins`. Omitted for a
+ * valueless option.
  */
 value?: string, 
 /**

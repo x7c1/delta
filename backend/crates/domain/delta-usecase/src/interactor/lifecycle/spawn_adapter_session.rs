@@ -37,8 +37,8 @@ use std::sync::Arc;
 use delta_model::{AgentProvider, MessageUuid, Send, Session, ThreadId};
 
 use crate::agent::{
-    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, LaunchRequest, ResumeRequest,
-    SendRequest,
+    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, LaunchOptionSpec, LaunchRequest,
+    ResumeRequest, SendRequest,
 };
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
@@ -54,8 +54,13 @@ use super::FreshSpawn;
 /// provider thread. The single difference the shared
 /// [`SessionContext::bind_adapter_agent`] branches on.
 enum AdapterBind {
-    /// A fresh spawn: start a new provider thread (`adapter.launch`).
-    Launch,
+    /// A fresh spawn: start a new provider thread (`adapter.launch`), carrying
+    /// the launch options the user selected for it. Only a fresh thread takes
+    /// them — see [`SessionContext::resume_adapter_agent`] for why a resume
+    /// does not.
+    Launch {
+        launch_options: Vec<LaunchOptionSpec>,
+    },
     /// A resume: reattach to the persisted provider thread (`adapter.resume`),
     /// so no new thread is minted.
     Resume { provider_session_id: String },
@@ -81,9 +86,18 @@ where
     /// and completes the send row at the `turn/start` acknowledgement (see the
     /// module docs for the FSM decision).
     ///
+    /// `launch_option_ids` are the registered launch options the user selected
+    /// for this session, in selection order. They are resolved here to their
+    /// neutral `(name, value?)` records and handed to the adapter on the launch
+    /// request; the adapter renders them for its provider (Codex maps them onto
+    /// `thread/start` fields). A selected id no longer in the registry is
+    /// skipped with a warning rather than aborting the launch, exactly as on
+    /// the Claude path.
+    ///
     /// Rolls the eager session row back on any connect/launch failure, so a
-    /// provider that is unavailable leaves no orphan row behind — mirroring
-    /// `spawn_fresh`'s rollback on a failed tmux launch.
+    /// provider that is unavailable — or one that rejects a launch option —
+    /// leaves no orphan row behind, mirroring `spawn_fresh`'s rollback on a
+    /// failed tmux launch.
     pub(in crate::interactor) async fn spawn_adapter_session(
         &mut self,
         provider: AgentProvider,
@@ -94,18 +108,16 @@ where
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
 
-        // Per-provider launch options are not yet modeled for adapter-backed
-        // providers (Codex's map to `thread/start` fields, not argv flags), so
-        // reject a request carrying any rather than silently dropping it. A git
-        // worktree, by contrast, is just a working directory: it is resolved
-        // below exactly like the Claude path, so a session started from a PR
-        // (which always arrives as a `UseRemoteBranch` worktree request) lands
-        // in that PR's worktree.
-        if !launch_option_ids.is_empty() {
-            return Err(Error::Agent(format!(
-                "launch options are not supported for a {provider:?} session yet"
-            )));
-        }
+        // Resolve the user-selected launch options up front, before anything is
+        // created — the same side-effect-free gate the Claude path runs (see
+        // [`Self::resolve_launch_options`]). They travel to the adapter as
+        // neutral `(name, value?)` pairs and are rendered there (Codex maps
+        // them onto `thread/start` fields), so this layer never learns a
+        // provider's launch wire shape. A git worktree, by contrast, is just a
+        // working directory: it is resolved below exactly like the Claude path,
+        // so a session started from a PR (which always arrives as a
+        // `UseRemoteBranch` worktree request) lands in that PR's worktree.
+        let launch_options = self.resolve_launch_options(&launch_option_ids).await?;
 
         // The registered factory lazily stands up the provider's adapter
         // (Codex: spawns `codex app-server` + handshake). Absent means the
@@ -203,7 +215,7 @@ where
         let (adapter, handle) = match self
             .bind_adapter_agent(
                 &factory,
-                AdapterBind::Launch,
+                AdapterBind::Launch { launch_options },
                 cwd.clone(),
                 main_thread_id,
                 0,
@@ -363,15 +375,16 @@ where
         let session_id = self.id.clone();
         let adapter = factory.connect().await?;
         let handle = match bind {
-            AdapterBind::Launch => {
+            AdapterBind::Launch { launch_options } => {
                 adapter
                     .launch(LaunchRequest {
                         session_id: session_id.as_str().to_owned(),
                         workdir: cwd,
-                        // Launch options are rejected upstream; a first prompt is
-                        // delivered as its own turn (not on launch) so the send
-                        // row completes at the `turn/start` acknowledgement.
-                        extra_args: Vec::new(),
+                        // The adapter renders these for its provider. A first
+                        // prompt is delivered as its own turn (not on launch) so
+                        // the send row completes at the `turn/start`
+                        // acknowledgement.
+                        launch_options,
                         first_prompt: None,
                     })
                     .await?
@@ -430,6 +443,17 @@ where
     /// count** — which, for a single-thread adapter-backed session whose seqs
     /// are minted densely from 0, is exactly `MAX(seq) + 1`. Seeding at 0 (as a
     /// fresh spawn does) would renumber/duplicate the existing history.
+    ///
+    /// **Launch options are deliberately not re-applied here.** They configure
+    /// the provider *thread*, which the resume reattaches to rather than mints:
+    /// Codex's `thread/resume` takes its config fields as optional *overrides*
+    /// of what the resumed thread already carries, so sending none keeps the
+    /// thread exactly as `thread/start` configured it. Delta also has no
+    /// per-session record of which options were selected (the registry is
+    /// session-independent and the `session` row stores no selection), so there
+    /// is nothing to replay. This matches the Claude path, where a resume is
+    /// `claude --settings … --resume <id>` with none of the launch flags the
+    /// original spawn carried.
     ///
     /// The caller resolves `factory` through the registry
     /// ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory))

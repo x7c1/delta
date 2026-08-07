@@ -2,7 +2,7 @@
 //! response/notification/server-request frames on stdout.
 
 use std::io::{BufRead, StdoutLock, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
@@ -29,6 +29,10 @@ pub fn run() -> Result<(), String> {
         // full-loop branch test can prove the hidden context reached the server.
         // Off unless the client hands the fake a path via this env var.
         inject_log: std::env::var_os("FAKE_CODEX_INJECT_LOG").map(PathBuf::from),
+        // The same idea for `thread/start`: record the params the client sent,
+        // so a full-loop test can prove the session's launch options reached the
+        // server as real `ThreadStartParams` fields.
+        thread_start_log: std::env::var_os("FAKE_CODEX_THREAD_START_LOG").map(PathBuf::from),
     };
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| format!("read stdin: {e}"))?;
@@ -61,6 +65,10 @@ struct Server<'a> {
     /// call), when the client set `FAKE_CODEX_INJECT_LOG`. `None` disables the
     /// record.
     inject_log: Option<PathBuf>,
+    /// Where to append each `thread/start` params object (one JSON line per
+    /// call), when the client set `FAKE_CODEX_THREAD_START_LOG`. `None` disables
+    /// the record.
+    thread_start_log: Option<PathBuf>,
 }
 
 /// A turn suspended on a `blocking` approval: the emits still to play once the
@@ -130,8 +138,11 @@ impl Server<'_> {
                 self.respond(id, json!({ "serverInfo": server_info }))
             }
             "thread/start" => {
-                // Real `thread/start` returns the started thread under
+                // Record the params verbatim (for a test to assert the session's
+                // launch options arrived as `ThreadStartParams` fields), then
+                // answer. Real `thread/start` returns the started thread under
                 // `result.thread` (a `Thread`, whose `id` is the thread id).
+                append_record(self.thread_start_log.as_deref(), params, "thread start log")?;
                 let thread_id = self.scenario.thread_id.clone();
                 self.respond(id, json!({ "thread": { "id": thread_id } }))
             }
@@ -321,20 +332,8 @@ impl Server<'_> {
     /// client enabled it via `FAKE_CODEX_INJECT_LOG`. A no-op otherwise. Each
     /// call writes one JSON line, so a test can read back every injection in
     /// order.
-    fn record_injected_items(&mut self, items: &Value) -> Result<(), String> {
-        let Some(path) = self.inject_log.as_ref() else {
-            return Ok(());
-        };
-        let mut line = serde_json::to_string(items).map_err(|e| format!("encode items: {e}"))?;
-        line.push('\n');
-        use std::io::Write as _;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|e| format!("open inject log `{}`: {e}", path.display()))?;
-        file.write_all(line.as_bytes())
-            .map_err(|e| format!("write inject log: {e}"))
+    fn record_injected_items(&self, items: &Value) -> Result<(), String> {
+        append_record(self.inject_log.as_deref(), items, "inject log")
     }
 
     fn respond(&mut self, id: Value, result: Value) -> Result<(), String> {
@@ -365,6 +364,26 @@ impl Server<'_> {
             .map_err(|e| format!("write frame: {e}"))?;
         self.out.flush().map_err(|e| format!("flush frame: {e}"))
     }
+}
+
+/// Append one JSON line to a sidecar record file, when the client asked for one
+/// (`path` is `None` otherwise, and this is a no-op). Every record the fake
+/// keeps works this way — one JSON value per line, appended in call order — so a
+/// test reads back exactly what the client sent, in order. `what` names the
+/// record in error messages.
+fn append_record(path: Option<&Path>, value: &Value, what: &str) -> Result<(), String> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let mut line = serde_json::to_string(value).map_err(|e| format!("encode {what}: {e}"))?;
+    line.push('\n');
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|e| format!("open {what} `{}`: {e}", path.display()))?;
+    file.write_all(line.as_bytes())
+        .map_err(|e| format!("write {what}: {e}"))
 }
 
 /// A minimal `Turn` object as the real schema shapes it: the `id`, a `status`,
