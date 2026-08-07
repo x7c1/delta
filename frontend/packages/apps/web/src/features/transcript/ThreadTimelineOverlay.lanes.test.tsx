@@ -1051,7 +1051,7 @@ describe('ThreadTimelineOverlay grid lane layout', () => {
   });
 });
 
-describe('ThreadTimelineOverlay cluster mark size (v11 Improvement 1)', () => {
+describe('ThreadTimelineOverlay cluster mark size', () => {
   // v10 dogfooding revealed that the cluster's render size (5 px) was
   // visually indistinguishable from the 6 px main-role dots — the user
   // could not tell a run-of-tool-calls cluster apart from a user/Claude
