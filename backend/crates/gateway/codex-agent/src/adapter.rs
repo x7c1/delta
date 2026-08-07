@@ -67,11 +67,12 @@ use tokio::task::JoinHandle;
 
 use delta_usecase::{
     AgentAdapter, AgentCapabilities, AgentContentSource, AgentEvent, AgentEventStream,
-    AgentProvider, AgentSessionHandle, ContextInjectionCapability, Error as UsecaseError,
-    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchOptionSpec,
-    LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult,
-    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionId,
-    SessionIdentityCapability, SteerCapability, TerminalCapability, ThreadId, TranscriptCapability,
+    AgentProvider, AgentSessionHandle, ContentSourceRequest, ContextInjectionCapability,
+    Error as UsecaseError, EventCapability, ForkCapability, InterruptCapability, LaunchCapability,
+    LaunchOptionSpec, LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle,
+    Result as UsecaseResult, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
+    SessionEndReason, SessionIdentityCapability, SteerCapability, TerminalCapability,
+    TranscriptCapability,
 };
 
 use crate::translate::{
@@ -125,11 +126,22 @@ const DECISION_DECLINE: &str = "decline";
 const METHOD_NOT_FOUND: i64 = -32601;
 
 /// Per-session plumbing: the event sender the adapter and its translation task
-/// emit through, the receiver handed out once by [`AgentAdapter::events`], and
-/// the map of open approval requests awaiting a decision.
+/// emit through, the receiver handed out once by [`AgentAdapter::events`], the
+/// map of open approval requests awaiting a decision, and the provider facts
+/// the opening response announced about the thread.
 struct CodexSession {
     tx: UnboundedSender<AgentEvent>,
     rx: Option<UnboundedReceiver<AgentEvent>>,
+    /// The model the server **resolved** for this thread, read off the
+    /// `thread/start` / `thread/resume` response (both carry it as a required
+    /// top-level `model`).
+    ///
+    /// This — not anything Delta asked for — is the truth about what is running:
+    /// the model can come from a selected launch option, from the user's own
+    /// `~/.codex/config.toml` default, or from the server's built-in default,
+    /// and only the response says which won. `None` if a server omits it, so the
+    /// fact degrades rather than being invented.
+    model: Option<String>,
     /// Open approval requests: neutral `request_id` → the verbatim wire id the
     /// response must echo. Shared with the translation task, which inserts an
     /// entry when it surfaces a `PermissionRequested`.
@@ -171,12 +183,17 @@ impl CodexAppServerAdapter {
     }
 
     /// Register a fresh session for a started/resumed thread: open its event
-    /// channel, emit the opening [`AgentEvent::SessionStarted`], and spawn the
-    /// translation task that drains the thread's frames onto the channel.
+    /// channel, record the provider facts the opening response announced (the
+    /// resolved model), emit the opening [`AgentEvent::SessionStarted`], and
+    /// spawn the translation task that drains the thread's frames onto the
+    /// channel.
     fn register_session(&self, started: StartedThread) -> AgentSessionHandle {
         let StartedThread {
-            thread_id, events, ..
+            thread_id,
+            events,
+            result,
         } = started;
+        let model = resolved_model(&result);
         let (tx, rx) = mpsc::unbounded_channel();
         // Buffered before `events()` is called, so the opener is never dropped.
         let _ = tx.send(AgentEvent::SessionStarted {
@@ -202,6 +219,7 @@ impl CodexAppServerAdapter {
                 CodexSession {
                     tx,
                     rx: Some(rx),
+                    model,
                     approvals,
                     current_turn_id,
                     task,
@@ -212,6 +230,17 @@ impl CodexAppServerAdapter {
             provider_session_id: thread_id.clone(),
             key: thread_id,
         }
+    }
+
+    /// The model the server resolved for a still-known session's thread, as
+    /// recorded by [`Self::register_session`]. `None` for an unknown/closed
+    /// session, or when the opening response carried no `model`.
+    fn session_model(&self, key: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .expect("sessions mutex poisoned")
+            .get(key)
+            .and_then(|session| session.model.clone())
     }
 
     /// Emit an event on a session's channel, if the session is still known.
@@ -378,6 +407,24 @@ fn inject_message_item(text: &str) -> Value {
         "role": "user",
         "content": [{ "type": "input_text", "text": text }],
     })
+}
+
+/// The model a `thread/start` / `thread/resume` response reports for the thread
+/// it opened, read from the top-level `model` both responses carry (see the
+/// vendored `ThreadStartResponse` / `ThreadResumeResponse` schemas, where it is
+/// a required string alongside `cwd`, `sandbox` and `approvalPolicy`).
+///
+/// This is deliberately read from the **response** rather than echoed from the
+/// request: `model` is only one of several inputs the server reconciles (a
+/// selected launch option, the user's `config.toml` default, the server's own
+/// default), so the request says what Delta asked for while the response says
+/// what is actually running. A missing or non-string value degrades to `None`.
+fn resolved_model(result: &Value) -> Option<String> {
+    result
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+        .map(str::to_owned)
 }
 
 /// The id of the turn a `turn/start` response announces, read from the `Turn`
@@ -603,14 +650,16 @@ impl AgentAdapter for CodexAppServerAdapter {
 
     fn content_source(
         &self,
-        session_id: SessionId,
-        main_thread: ThreadId,
-        seed_seq: i64,
+        handle: &AgentSessionHandle,
+        req: ContentSourceRequest,
     ) -> Box<dyn AgentContentSource> {
         // Codex pushes structured `item/*` / `turn/*` frames, so its event pump
         // folds them into canonical messages through this accumulator (the
-        // `CodexConversationSource`), rather than reading a transcript.
-        codex_content_source(session_id, main_thread, seed_seq)
+        // `CodexConversationSource`), rather than reading a transcript. The
+        // launch site rides the neutral request; the model is the one fact only
+        // this adapter holds, recorded from the thread's opening response when
+        // the session was registered.
+        codex_content_source(req, self.session_model(&handle.key))
     }
 }
 

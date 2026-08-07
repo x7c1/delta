@@ -547,6 +547,106 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
     );
 }
 
+/// The Codex **message-metadata** full loop: a persisted Codex message reports
+/// the model the server resolved for the thread and the directory the session is
+/// running in — the feedback channel for a user-selectable model.
+///
+/// The session selects `model=requested-by-delta` as a launch option while the
+/// fake app-server answers `thread/start` with a *different* top-level `model`.
+/// That divergence is the whole point: Delta's request is only one input to the
+/// server's decision (the user's own `config.toml` and the server's default are
+/// others), so only the response says what is actually running. Asserting the
+/// **server's** value proves the metadata is read back rather than echoed.
+///
+/// `cwd` is checked against the `cwd` Delta itself sent on `thread/start`, so the
+/// message reports the same launch directory the agent was started in — not a
+/// separately re-derived path that could drift from it.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_messages_report_the_resolved_model_and_the_launch_directory() {
+    const RESOLVED_MODEL: &str = "gpt-5.6-sol";
+    let scenario = ScenarioGuard::write(&format!(
+        r#"{{
+            "thread_id": "thr_metadata",
+            "model": "{RESOLVED_MODEL}",
+            "turn": {{
+                "turn_id": "turn_metadata",
+                "emit": [
+                    {{ "type": "turn_started" }},
+                    {{ "type": "item_started",   "item": {{ "id": "item_1", "type": "agentMessage" }} }},
+                    {{ "type": "item_completed", "item": {{ "id": "item_1", "type": "agentMessage", "text": "{REPLY}" }} }},
+                    {{ "type": "turn_completed", "status": "completed" }}
+                ]
+            }}
+        }}"#
+    ));
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    let model_option =
+        register_launch_option(&app, "model", Some("requested-by-delta"), "codex").await;
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [model_option],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the send was created: {body:?}"
+    );
+    let session_id = body["send"]["session_id"].as_str().unwrap().to_owned();
+    let thread_id = body["send"]["thread_id"].as_i64().unwrap();
+
+    drain_one_turn(&mut events, &session_id).await;
+
+    // What Delta asked for, and where it launched, as the fake actually received
+    // them.
+    let starts = scenario.thread_starts();
+    assert_eq!(starts.len(), 1, "one thread was started: {starts:?}");
+    assert_eq!(
+        starts[0]["model"],
+        json!("requested-by-delta"),
+        "the selected launch option did ride the request"
+    );
+    let launch_cwd = starts[0]["cwd"]
+        .as_str()
+        .expect("Delta always sends its own cwd")
+        .to_owned();
+
+    let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
+    assert_eq!(status, StatusCode::OK, "messages fetched: {body:?}");
+    let messages = body["messages"].as_array().unwrap();
+    assert!(!messages.is_empty(), "the turn persisted messages");
+    for message in messages {
+        assert_eq!(
+            message["model"],
+            json!(RESOLVED_MODEL),
+            "the persisted message reports the model the SERVER resolved, not the \
+             `requested-by-delta` Delta asked for: {message:?}"
+        );
+        assert_eq!(
+            message["cwd"],
+            json!(launch_cwd),
+            "the persisted message reports the directory the session launched in: {message:?}"
+        );
+        assert_eq!(
+            message["git_branch"],
+            Value::Null,
+            "a session started without a worktree recorded no branch, so none is \
+             reported rather than invented: {message:?}"
+        );
+    }
+}
+
 /// A launch option naming a `thread/start` field Delta fills in itself is
 /// rejected loudly at spawn: `400` naming the offending key, and no session row
 /// left behind.
@@ -977,10 +1077,16 @@ impl Drop for DbGuard {
 /// so two successive turns (the second after a restart) produce distinct,
 /// non-colliding provider items. The provider thread id is fixed to `thr_restart`
 /// across both, so the resume reattaches to the same thread.
-fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str) -> ScenarioGuard {
+///
+/// `model` is what this backend's app-server reports for the thread. The two
+/// halves of the restart test give distinct values, so the post-restart messages
+/// prove the metadata came from the **resume** response rather than from
+/// anything cached before the restart.
+fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str, model: &str) -> ScenarioGuard {
     ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_restart",
+            "model": "{model}",
             "turn": {{
                 "turn_id": "{turn_id}",
                 "emit": [
@@ -1013,10 +1119,14 @@ fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str) -> ScenarioG
 async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     const REPLY_ONE: &str = "reply from turn one";
     const REPLY_TWO: &str = "reply from turn two";
+    // Distinct per backend, so a post-restart message reporting `MODEL_TWO`
+    // can only have learned it from the `thread/resume` response.
+    const MODEL_ONE: &str = "model-before-restart";
+    const MODEL_TWO: &str = "model-after-restart";
     let db = DbGuard::new();
 
     // ---- Before the restart: create the session, complete turn 1. ----
-    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE);
+    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE, MODEL_ONE);
     let (thread_id, session_id) = {
         let (app, state) = build_app_with(db.open(), &scenario1);
         let mut events = state.subscribe();
@@ -1056,7 +1166,7 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     };
 
     // ---- After the restart: a brand-new backend over the SAME database. ----
-    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO);
+    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO, MODEL_TWO);
     let (app, state) = build_app_with(db.open(), &scenario2);
     let mut events = state.subscribe();
     state
@@ -1125,6 +1235,30 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
         seqs,
         vec![0, 1, 2, 3],
         "sequence numbers continue contiguously across the resume: {messages:?}"
+    );
+
+    // A resumed session still reports its provider metadata: `thread/resume`
+    // carries the same required top-level `model` as `thread/start`, so the
+    // post-restart turn's messages are stamped from the resume response — the
+    // second backend's model, never left blank and never the pre-restart one.
+    // The pre-restart messages keep the model that was running when they were
+    // folded, since each row records what produced it.
+    let model_of = |text: &str| {
+        messages
+            .iter()
+            .find(|m| m["content_text"] == json!(text))
+            .unwrap_or_else(|| panic!("`{text}` is present"))["model"]
+            .clone()
+    };
+    assert_eq!(
+        model_of(REPLY_TWO),
+        json!(MODEL_TWO),
+        "the resumed turn reports the model its `thread/resume` announced: {messages:?}"
+    );
+    assert_eq!(
+        model_of(REPLY_ONE),
+        json!(MODEL_ONE),
+        "the pre-restart turn keeps the model that produced it: {messages:?}"
     );
 }
 

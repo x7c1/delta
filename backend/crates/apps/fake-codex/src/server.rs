@@ -144,7 +144,13 @@ impl Server<'_> {
                 // `result.thread` (a `Thread`, whose `id` is the thread id).
                 append_record(self.thread_start_log.as_deref(), params, "thread start log")?;
                 let thread_id = self.scenario.thread_id.clone();
-                self.respond(id, json!({ "thread": { "id": thread_id } }))
+                // The response also announces the thread's resolved config — the
+                // real `ThreadStartResponse` requires a top-level `model`. The
+                // scenario's model is answered verbatim, *ignoring* any `model`
+                // the client sent, which is how a real server behaves when the
+                // user's config or its own default wins.
+                let model = self.scenario.model.clone();
+                self.respond(id, json!({ "thread": { "id": thread_id }, "model": model }))
             }
             "thread/resume" => {
                 // Resume echoes back the requested thread id (a real server
@@ -155,7 +161,11 @@ impl Server<'_> {
                     .and_then(Value::as_str)
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
-                self.respond(id, json!({ "thread": { "id": thread_id } }))
+                // `ThreadResumeResponse` carries the same required top-level
+                // `model` as the start response, so a resumed thread reports
+                // what it is running just like a fresh one.
+                let model = self.scenario.model.clone();
+                self.respond(id, json!({ "thread": { "id": thread_id }, "model": model }))
             }
             "thread/inject_items" => {
                 // Hidden per-turn context: the client appends Responses API

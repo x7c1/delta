@@ -37,8 +37,8 @@ use std::sync::Arc;
 use delta_model::{AgentProvider, MessageUuid, Send, Session, ThreadId};
 
 use crate::agent::{
-    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, LaunchOptionSpec, LaunchRequest,
-    ResumeRequest, SendRequest,
+    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, ContentSourceRequest, LaunchOptionSpec,
+    LaunchRequest, ResumeRequest, SendRequest,
 };
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
@@ -217,6 +217,7 @@ where
                 &factory,
                 AdapterBind::Launch { launch_options },
                 cwd.clone(),
+                branch_at_launch.clone(),
                 main_thread_id,
                 0,
             )
@@ -353,6 +354,14 @@ where
     ///   replayed/continued frames extend the existing history instead of
     ///   renumbering or duplicating it.
     ///
+    /// `cwd` and `git_branch` are the session's launch site as Delta *recorded*
+    /// it (the resolved launch directory and, for a worktree spawn, the branch
+    /// it was created on): the same values on the session row, read from there
+    /// rather than re-derived, so the per-message copies the content source
+    /// stamps can never disagree with the session's own columns. Both callers
+    /// pass what they already hold — the fresh spawn its just-resolved values,
+    /// the resume the persisted row's.
+    ///
     /// It holds the live adapter + handle in the runtime (so the connection stays
     /// up and the session reads as open, with no `OpenHandle` for the PTY bridge
     /// to attach to), then spawns the event pump that drains the adapter's
@@ -369,6 +378,7 @@ where
         factory: &Arc<dyn AgentAdapterFactory>,
         bind: AdapterBind,
         cwd: String,
+        git_branch: Option<String>,
         main_thread_id: ThreadId,
         seed_seq: i64,
     ) -> Result<(Arc<dyn AgentAdapter>, AgentSessionHandle)> {
@@ -379,7 +389,7 @@ where
                 adapter
                     .launch(LaunchRequest {
                         session_id: session_id.as_str().to_owned(),
-                        workdir: cwd,
+                        workdir: cwd.clone(),
                         // The adapter renders these for its provider. A first
                         // prompt is delivered as its own turn (not on launch) so
                         // the send row completes at the `turn/start`
@@ -396,7 +406,7 @@ where
                     .resume(ResumeRequest {
                         session_id: session_id.as_str().to_owned(),
                         provider_session_id,
-                        workdir: cwd,
+                        workdir: cwd.clone(),
                     })
                     .await?
             }
@@ -410,12 +420,21 @@ where
             handle: handle.clone(),
         });
 
-        // Build the push-based content accumulator, seeded so minted ordering
-        // continues past whatever is already persisted.
+        // Build the push-based content accumulator: seeded so minted ordering
+        // continues past whatever is already persisted, and carrying the
+        // session's launch site so every message it folds reports where the
+        // agent is running. The adapter joins this with the provider facts only
+        // it knows (Codex: the model the server resolved for the thread), which
+        // is why it is handed the live handle too.
         self.state.set_agent_content_source(adapter.content_source(
-            session_id,
-            main_thread_id,
-            seed_seq,
+            &handle,
+            ContentSourceRequest {
+                session_id,
+                main_thread: main_thread_id,
+                seed_seq,
+                cwd,
+                git_branch,
+            },
         ));
 
         // Spawn the event pump. Adapter frames arrive after the send that
@@ -455,6 +474,14 @@ where
     /// `claude --settings … --resume <id>` with none of the launch flags the
     /// original spawn carried.
     ///
+    /// The session's **provider metadata is still reported after a resume**, and
+    /// is re-read rather than remembered: the launch site comes from the
+    /// persisted row (which outlives the restart by definition), and the model
+    /// from the `thread/resume` response — Codex's resume response carries the
+    /// same required top-level `model` as its start response, so the reattached
+    /// thread announces what it is running. Nothing about a resumed session's
+    /// metadata degrades relative to a fresh one.
+    ///
     /// The caller resolves `factory` through the registry
     /// ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory))
     /// — the same predicate that decided the session is adapter-backed at all.
@@ -485,6 +512,7 @@ where
                 provider_session_id,
             },
             session.cwd.clone(),
+            session.branch_at_launch.clone(),
             main_thread_id,
             seed_seq,
         )

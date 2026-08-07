@@ -149,8 +149,9 @@ async fn codex_closed_session_send_resumes_across_restart() {
             vec!["thr_resume".to_owned()],
             "resume reattached to the persisted provider thread id"
         );
+        let seeds: Vec<i64> = log.content_requests.iter().map(|r| r.seed_seq).collect();
         assert_eq!(
-            log.content_seeds,
+            seeds,
             vec![0, 2],
             "the content source seeds at 0 on spawn and at the persisted count on resume"
         );
