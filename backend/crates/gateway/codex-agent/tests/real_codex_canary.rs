@@ -62,8 +62,8 @@ use codex_agent::schema::{
 };
 use codex_agent::{CodexAdapterFactory, CodexLaunchConfig};
 use delta_usecase::{
-    AgentAdapter, AgentAdapterFactory, AgentEvent, AgentEventStream, LaunchRequest, SendRequest,
-    TurnStatus,
+    AgentAdapter, AgentAdapterFactory, AgentEvent, AgentEventStream, ContentSourceRequest,
+    LaunchRequest, SendRequest, SessionId, ThreadId, TurnStatus,
 };
 use serde_json::Value;
 use tokio::time::timeout;
@@ -182,6 +182,38 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
         .await
         .expect("launch a real Codex thread");
     let mut stream = adapter.events(&handle);
+
+    // The real `thread/start` response announces the model the server resolved
+    // for the thread, and the adapter carries it onto every message the session
+    // folds. Asserting it here — against the real binary — is what keeps the
+    // vendored claim ("`model` is a required top-level field of
+    // `ThreadStartResponse`") honest: if a future codex release moves or drops
+    // it, sessions would silently go back to reporting no model, and only this
+    // canary would notice. The value itself is not pinned (which model the
+    // account resolves to is not Delta's business); that it is reported at all
+    // is.
+    let mut content = adapter.content_source(
+        &handle,
+        ContentSourceRequest {
+            session_id: SessionId::from("01920000-0000-7000-8000-0000000000c4"),
+            main_thread: ThreadId(1),
+            seed_seq: 0,
+            cwd: cwd.as_str(),
+            git_branch: None,
+        },
+    );
+    let (probe, _) = content.ingest(&AgentEvent::AssistantMessage {
+        provider_item_id: "probe".to_owned(),
+        text: "probe".to_owned(),
+        at_ms: None,
+    });
+    let reported_model = probe[0].model.clone();
+    assert!(
+        reported_model
+            .as_deref()
+            .is_some_and(|model| !model.is_empty()),
+        "the real thread/start response must report the resolved model, got {reported_model:?}"
+    );
 
     // Drain the opening SessionStarted so the turn assertions start clean.
     match timeout(TURN_TIMEOUT, stream.recv()).await {
