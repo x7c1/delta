@@ -513,13 +513,18 @@ fn folded_message(source: &mut Box<dyn AgentContentSource>) -> Message {
 /// A launched session's messages report the model the **server** resolved — not
 /// the one Delta asked for — and the branch the server **observed**.
 ///
-/// The launch selects `model=gpt-5-codex`, and the server answers with a
-/// different `model` — exactly what happens when the user's own Codex config or
-/// the server's default wins over (or renames) the requested model. The value
-/// that reaches the message is the server's, so the transcript always shows what
-/// is really running. The branch comes from `thread.gitInfo.branch` on the same
-/// response, `cwd` from the neutral request, and `response_time_ms` stays `None`
-/// — Codex exposes no per-message latency.
+/// The launch selects one model and the server answers with a **different** one
+/// — exactly what happens when the user's own Codex config or the server's
+/// default wins over (or renames) the requested model. That divergence is the
+/// point of the test, so the requested value is deliberately a synthetic string
+/// that no catalog contains (`requested-by-delta`): were it a real slug, a
+/// future edit could quietly align it with the resolved one and the test would
+/// keep passing while proving nothing. The value that reaches the message is the
+/// server's, so the transcript always shows what is really running.
+///
+/// The branch comes from `thread.gitInfo.branch` on the same response, `cwd`
+/// from the neutral request, and `response_time_ms` stays `None` — Codex exposes
+/// no per-message latency.
 #[tokio::test]
 async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observed() {
     let (conn, mut server) = connect();
@@ -529,7 +534,7 @@ async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observe
         let start = server.next_frame().await;
         assert_eq!(start["method"], "thread/start");
         assert_eq!(
-            start["params"]["model"], "gpt-5-codex",
+            start["params"]["model"], "requested-by-delta",
             "the selected launch option rode the request"
         );
         // The real `ThreadStartResponse` carries `model` at the top level and the
@@ -559,7 +564,7 @@ async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observe
         .launch(LaunchRequest {
             session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
             workdir: "/work/app".to_owned(),
-            launch_options: vec![option("model", Some("gpt-5-codex"))],
+            launch_options: vec![option("model", Some("requested-by-delta"))],
             first_prompt: None,
         })
         .await
