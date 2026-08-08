@@ -667,7 +667,7 @@ export function createMockApi(): MockApi {
       if (name.length === 0) {
         // A blank name is a 400, exactly as the real server rejects it.
         return HttpResponse.json(
-          { error: 'a launch option must have a non-blank `name` (the flag)' },
+          { error: 'a launch option must have a non-blank `name`' },
           { status: 400 },
         );
       }

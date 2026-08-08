@@ -61,16 +61,16 @@ use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use delta_usecase::{
     AgentAdapter, AgentCapabilities, AgentContentSource, AgentEvent, AgentEventStream,
     AgentProvider, AgentSessionHandle, ContextInjectionCapability, Error as UsecaseError,
-    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchRequest,
-    PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionId,
+    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchOptionSpec,
+    LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult,
+    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionId,
     SessionIdentityCapability, SteerCapability, TerminalCapability, ThreadId, TranscriptCapability,
 };
 
@@ -104,6 +104,18 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     fork: ForkCapability::None,
     steer: SteerCapability::None,
 };
+
+/// `thread/start` fields Delta fills in itself, which a user-registered launch
+/// option must never overwrite.
+///
+/// `cwd` is the whole list today: Delta resolves the session's working
+/// directory (the git worktree path, when the session was started with one) and
+/// records the session's repo root, repository display name and
+/// branch-at-launch against exactly that directory. Letting a launch option
+/// override it would put the agent somewhere other than where those columns say
+/// it is. A launch option naming one of these is rejected rather than dropped,
+/// so the user sees why their option did not take effect.
+const DELTA_OWNED_THREAD_FIELDS: &[&str] = &["cwd"];
 
 /// The Codex decision wire value for an allow.
 const DECISION_ACCEPT: &str = "accept";
@@ -276,6 +288,86 @@ impl CodexAppServerAdapter {
     }
 }
 
+/// Build the `thread/start` params for a launch: Delta's own fields plus the
+/// user's selected launch options, mapped one-to-one onto `ThreadStartParams`
+/// fields.
+///
+/// A launch option is passed through **unvalidated**: its `name` is the field
+/// name and its `value` is that field's value. `ThreadStartParams` is a moving
+/// target (`model`, `sandbox`, `approvalPolicy`, `personality`, `serviceTier`,
+/// `config`, …), so an allowlist here would mean a Delta release for every new
+/// upstream field. The cost of the pass-through is that a misspelled key or a
+/// bad value is not caught here — it comes back as an error from the codex
+/// server, which is where the authority over that schema actually lives.
+///
+/// Two things are still rejected, loudly, because silently accepting them would
+/// corrupt state Delta is responsible for:
+///
+/// - a key Delta sets itself ([`DELTA_OWNED_THREAD_FIELDS`]). `cwd` is
+///   load-bearing: with a worktree it is the resolved worktree path, and the
+///   session's repo-root / display-name / branch-at-launch columns are recorded
+///   against it, so a user-registered `cwd` overriding it would break the
+///   worktree contract while the recorded columns went on describing a
+///   directory the agent is not in;
+/// - the same key twice. Unlike a repeatable CLI flag, a JSON field can only be
+///   set once, so a second option carrying the same name would silently discard
+///   the first.
+pub(crate) fn thread_start_params(
+    workdir: &str,
+    options: &[LaunchOptionSpec],
+) -> UsecaseResult<Value> {
+    let mut params = Map::new();
+    params.insert("cwd".to_owned(), json!(workdir));
+    for option in options {
+        if DELTA_OWNED_THREAD_FIELDS.contains(&option.name.as_str()) {
+            return Err(UsecaseError::LaunchOptionRejected(format!(
+                "`{}` cannot be used with Codex: Delta sets that thread/start \
+                 field itself for every session",
+                option.name
+            )));
+        }
+        if params.contains_key(&option.name) {
+            return Err(UsecaseError::LaunchOptionRejected(format!(
+                "`{}` is selected more than once: a thread/start field can only \
+                 be set once",
+                option.name
+            )));
+        }
+        params.insert(
+            option.name.clone(),
+            thread_start_value(option.value.as_deref()),
+        );
+    }
+    Ok(Value::Object(params))
+}
+
+/// Map a launch option's registry value onto its `thread/start` field value.
+///
+/// The registry stores values as text, but `ThreadStartParams` fields are not
+/// all strings — `ephemeral` is a boolean, `config` is an object, and
+/// `approvalPolicy` is either a string or an object. So:
+///
+/// - **no value** → JSON `true`. A valueless option reads as a bare boolean
+///   field being switched on (`ephemeral`), the same way a valueless CLI flag
+///   reads on the Claude side;
+/// - **a value that parses as JSON** → that JSON value. `true`, `42`,
+///   `{"granular":{…}}` and `["a","b"]` all reach the server with their real
+///   types;
+/// - **anything else** → the value as a JSON string. This is the common case:
+///   `gpt-5.6-sol`, `read-only` and `on-request` are not valid JSON documents,
+///   so they arrive as the strings they are.
+///
+/// The consequence of that ordering is that a string value which *happens* to
+/// be valid JSON (`5`, `null`, `true`) becomes the parsed type. A user who
+/// needs the literal string writes it quoted (`"5"`), which parses as the JSON
+/// string `5`.
+fn thread_start_value(value: Option<&str>) -> Value {
+    match value {
+        None => Value::Bool(true),
+        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_owned())),
+    }
+}
+
 /// Build a Responses API user-message item carrying `text`, the shape
 /// `thread/inject_items` appends to the thread's model-visible history (a
 /// `MessageResponseItem` with a single `input_text` content item — see the
@@ -312,10 +404,12 @@ impl AgentAdapter for CodexAppServerAdapter {
     async fn launch(&self, req: LaunchRequest) -> UsecaseResult<AgentSessionHandle> {
         // The server assigns the thread id; Delta's own session id is not pinned
         // onto it (that is the `ProviderReturnsId` identity model). The workdir
-        // rides `thread/start` as `cwd`.
+        // rides `thread/start` as `cwd`, and the user's selected launch options
+        // ride it as further fields (see [`thread_start_params`]).
+        let params = thread_start_params(&req.workdir, &req.launch_options)?;
         let started = self
             .conn
-            .start_thread(Some(json!({ "cwd": req.workdir })))
+            .start_thread(Some(params))
             .await
             .map_err(to_usecase_err)?;
         let handle = self.register_session(started);
@@ -327,6 +421,14 @@ impl AgentAdapter for CodexAppServerAdapter {
         Ok(handle)
     }
 
+    /// Reattach to an existing thread with `thread/resume`.
+    ///
+    /// No launch options ride this call. `ThreadResumeParams`' config fields
+    /// (`model`, `sandbox`, `approvalPolicy`, `config`, …) are documented as
+    /// *overrides* for the resumed thread, so omitting them keeps whatever
+    /// `thread/start` configured — and the core has no per-session record of
+    /// which options were selected to replay anyway (see
+    /// `resume_adapter_agent` in the core for the full reasoning).
     async fn resume(&self, req: ResumeRequest) -> UsecaseResult<AgentSessionHandle> {
         let started = self
             .conn

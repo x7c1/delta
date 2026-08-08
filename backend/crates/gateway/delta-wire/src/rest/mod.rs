@@ -28,7 +28,8 @@ mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
 mod providers_response;
 pub use providers_response::{
-    WireProviderAvailability, WireProviderCapabilities, WireProvidersResponse,
+    WireLaunchOptionStyle, WireProviderAvailability, WireProviderCapabilities,
+    WireProvidersResponse,
 };
 mod pull_requests_response;
 pub use pull_requests_response::{WirePullRequest, WirePullRequestsResponse};

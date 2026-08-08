@@ -1,8 +1,7 @@
 use delta_model::Send;
 
-use crate::agent::AgentProvider;
+use crate::agent::{AgentProvider, LaunchOptionSpec};
 use crate::error::Result;
-use crate::interactor::launch_options::expand_leading_tilde;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::runtime::PendingSpawn;
 use crate::pane_token::PaneToken;
@@ -132,51 +131,18 @@ where
             None => None,
         };
 
-        // Resolve the user-selected launch options to argv flags before minting
-        // or launching anything, mirroring the workdir gate above: a resolution
-        // failure leaves no side effects. The registry is small, so a single
-        // fetch plus a by-id lookup (preserving the user's selection order) is
-        // cheap. A selected id that is no longer registered (a concurrent
-        // delete after the picker rendered) is skipped with a warning rather
-        // than failing the launch, so a stale UI selection cannot kill a spawn.
-        // Each option contributes its `name` and, when present, its `value`; a
-        // valueless flag contributes only the name.
-        let launch_option_args = if launch_option_ids.is_empty() {
-            Vec::new()
-        } else {
-            let by_id = self
-                .store
-                .list_launch_options()
-                .await?
-                .into_iter()
-                .map(|option| (option.id, option))
-                .collect::<std::collections::HashMap<_, _>>();
-            // Read HOME once for tilde expansion (see the push below).
-            let home = std::env::var("HOME").ok().filter(|h| !h.is_empty());
-            let mut args = Vec::new();
-            for id in &launch_option_ids {
-                match by_id.get(id) {
-                    Some(option) => {
-                        args.push(option.name.clone());
-                        if let Some(value) = &option.value {
-                            // Expand a leading `~` ourselves: this command line
-                            // is forwarded to `claude` as an argv tail with no
-                            // shell, so the shell's tilde expansion never runs.
-                            // Left as-is, a `~/...` value would reach `claude`
-                            // literally and be resolved against the (worktree)
-                            // cwd, yielding a bogus `<cwd>/~/...` path.
-                            args.push(expand_leading_tilde(value, home.as_deref()));
-                        }
-                    }
-                    None => tracing::warn!(
-                        launch_option_id = id,
-                        session_id = %session_id,
-                        "selected launch option is no longer registered; skipping it"
-                    ),
-                }
-            }
-            args
-        };
+        // Resolve the user-selected launch options before minting or launching
+        // anything, mirroring the workdir gate above: a resolution failure
+        // leaves no side effects (see [`Self::resolve_launch_options`], which
+        // both spawn paths share). Claude is an argv-launched provider, so each
+        // resolved `(name, value?)` pair renders as its flag followed by its
+        // argument — a valueless flag contributes only the name.
+        let launch_option_args: Vec<String> = self
+            .resolve_launch_options(&launch_option_ids)
+            .await?
+            .iter()
+            .flat_map(LaunchOptionSpec::to_argv)
+            .collect();
 
         // The minter is atomic, so token uniqueness needs no coordination here.
         let token = self.mint_free_token().await?;

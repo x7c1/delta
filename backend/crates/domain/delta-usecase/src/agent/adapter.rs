@@ -7,9 +7,11 @@
 //! the gateway adapter that implements it.
 //!
 //! The request/handle types here are intentionally minimal — just enough to
-//! express the current usage. They carry provider-neutral fields; a provider's
-//! own launch knobs are resolved into `extra_args` (or the provider's adapter
-//! config) before they reach here.
+//! express the current usage. They carry provider-neutral fields; the user's
+//! selected launch options arrive as neutral [`LaunchOptionSpec`] records that
+//! each adapter renders in its own way (Claude → argv flags, Codex →
+//! `thread/start` fields), so no caller in the core has to know which shape a
+//! provider wants.
 
 use async_trait::async_trait;
 use delta_model::{SessionId, ThreadId};
@@ -21,6 +23,42 @@ use crate::agent::{
 use crate::error::{Error, Result};
 use crate::interactor::PermissionDecision;
 
+/// One launch option the user selected for this session, resolved from the
+/// registry into the neutral `(name, value?)` pair the registry stores.
+///
+/// The pair is deliberately **not** rendered here: what a `name` means is a
+/// provider concern, and rendering it is the adapter's job. Claude reads the
+/// pair as a CLI flag and its argument (`--model opus`, see [`Self::to_argv`]);
+/// Codex reads it as a `thread/start` field name and its value (`model` →
+/// `"gpt-5.6-sol"`). Keeping the pair neutral is what lets the core hand every
+/// provider the same list instead of branching on which provider it is talking
+/// to.
+///
+/// Values arrive already resolved (a leading `~` is expanded by the core, since
+/// no shell ever runs over a launch-option value for any provider), so an
+/// adapter renders them verbatim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchOptionSpec {
+    /// What the option is called — a CLI flag for an argv-launched provider
+    /// (`--permission-mode`), a request field name for a structured one
+    /// (`sandbox`).
+    pub name: String,
+    /// The option's argument/value; `None` for a valueless option.
+    pub value: Option<String>,
+}
+
+impl LaunchOptionSpec {
+    /// Render this option as argv tokens, the shape a command-line-launched
+    /// provider needs: the name, followed by the value when there is one (a
+    /// valueless option contributes only its name).
+    pub fn to_argv(&self) -> Vec<String> {
+        match &self.value {
+            Some(value) => vec![self.name.clone(), value.clone()],
+            None => vec![self.name.clone()],
+        }
+    }
+}
+
 /// Inputs for launching a fresh agent session.
 #[derive(Debug, Clone)]
 pub struct LaunchRequest {
@@ -30,9 +68,11 @@ pub struct LaunchRequest {
     pub session_id: String,
     /// The working directory the agent runs in.
     pub workdir: String,
-    /// Provider-specific launch flags/fields, already resolved to argv tokens
-    /// (Claude's launch-option flags). Empty when none were selected.
-    pub extra_args: Vec<String>,
+    /// The launch options the user selected, in selection order, as neutral
+    /// `(name, value?)` pairs. The adapter renders them for its provider —
+    /// Claude appends them to the launch argv, Codex maps them onto
+    /// `thread/start` fields. Empty when none were selected.
+    pub launch_options: Vec<LaunchOptionSpec>,
     /// A first prompt delivered at launch, when the session was started from
     /// the composer's first Send.
     pub first_prompt: Option<String>,

@@ -67,6 +67,11 @@ struct ScenarioGuard {
     /// per call), handed to the child via `FAKE_CODEX_INJECT_LOG`. Empty/absent
     /// unless a turn injects hidden context — the branch loop reads it back.
     inject_log: std::path::PathBuf,
+    /// Where the fake appends each `thread/start` params object (one JSON line
+    /// per call), handed to the child via `FAKE_CODEX_THREAD_START_LOG`. The
+    /// launch-options loop reads it back to prove the session's selection
+    /// arrived as real `ThreadStartParams` fields.
+    thread_start_log: std::path::PathBuf,
 }
 
 impl ScenarioGuard {
@@ -80,10 +85,12 @@ impl ScenarioGuard {
         let path = dir.join("scenario.json");
         std::fs::write(&path, scenario).unwrap();
         let inject_log = dir.join("inject.log");
+        let thread_start_log = dir.join("thread-start.log");
         Self {
             dir,
             path,
             inject_log,
+            thread_start_log,
         }
     }
 
@@ -91,14 +98,27 @@ impl ScenarioGuard {
     /// parsed as JSON. Empty when the fake was never asked to inject (the file
     /// is created lazily on the first injection).
     fn injected_items(&self) -> Vec<Value> {
-        match std::fs::read_to_string(&self.inject_log) {
-            Ok(contents) => contents
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| serde_json::from_str(line).expect("recorded inject line is JSON"))
-                .collect(),
-            Err(_) => Vec::new(),
-        }
+        read_json_lines(&self.inject_log)
+    }
+
+    /// The `thread/start` params the fake recorded, one per line, parsed as
+    /// JSON. Empty when no thread was ever started.
+    fn thread_starts(&self) -> Vec<Value> {
+        read_json_lines(&self.thread_start_log)
+    }
+}
+
+/// Read a sidecar record the fake keeps (one JSON value per line, in call
+/// order). A missing file means the fake never wrote that record — the files
+/// are created lazily on first use — so it reads as empty.
+fn read_json_lines(path: &std::path::Path) -> Vec<Value> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => contents
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("recorded line is JSON"))
+            .collect(),
+        Err(_) => Vec::new(),
     }
 }
 
@@ -124,8 +144,8 @@ fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (Router, AppS
         // The fake IS the app-server, so it takes no `app-server` argument.
         codex_bin: env!("CARGO_BIN_EXE_fake-codex").to_owned(),
         args: vec![],
-        // Hand the fake its scenario and inject-record path through the child's
-        // env, not the parent's.
+        // Hand the fake its scenario and sidecar record paths through the
+        // child's env, not the parent's.
         env: vec![
             (
                 "FAKE_CODEX_SCENARIO".to_owned(),
@@ -134,6 +154,10 @@ fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (Router, AppS
             (
                 "FAKE_CODEX_INJECT_LOG".to_owned(),
                 scenario.inject_log.to_string_lossy().into_owned(),
+            ),
+            (
+                "FAKE_CODEX_THREAD_START_LOG".to_owned(),
+                scenario.thread_start_log.to_string_lossy().into_owned(),
             ),
         ],
     };
@@ -416,6 +440,159 @@ async fn drain_one_turn(
             _ => {}
         }
     }
+}
+
+/// Register one launch option over the REST registry and return its id.
+async fn register_launch_option(
+    app: &Router,
+    name: &str,
+    value: Option<&str>,
+    provider: &str,
+) -> i64 {
+    let mut body = json!({ "name": name, "provider": provider });
+    if let Some(value) = value {
+        body["value"] = json!(value);
+    }
+    let (status, created) = post_json(app, "/api/launch-options", body).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the launch option was registered: {created:?}"
+    );
+    created["id"]
+        .as_i64()
+        .expect("the created launch option carries its id")
+}
+
+/// The Codex **launch-options** full loop: options the user registered for
+/// Codex and selected when starting a session reach the provider as
+/// `thread/start` fields.
+///
+/// This is the regression proof for the bug where the Settings UI happily
+/// registered a Codex-scoped launch option and the new-session picker offered
+/// it, but selecting it made the spawn fail outright — the core rejected any
+/// selection for a non-Claude provider. The test registers three options over
+/// the real REST registry, starts a Codex session selecting them, and reads
+/// back the `thread/start` params the fake app-server actually received.
+///
+/// It also pins the value-mapping rule: a value that is not valid JSON is the
+/// string it looks like, a value that parses keeps its real type, and a
+/// valueless option is the bare boolean `true`.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
+    let scenario = streaming_turn_scenario();
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    // A plain string value, a JSON-object value, and a valueless option.
+    let model = register_launch_option(&app, "model", Some("gpt-5.6-sol"), "codex").await;
+    let config = register_launch_option(
+        &app,
+        "config",
+        Some(r#"{"tools":{"web_search":true}}"#),
+        "codex",
+    )
+    .await;
+    let ephemeral = register_launch_option(&app, "ephemeral", None, "codex").await;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [model, config, ephemeral],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a Codex session selecting launch options starts (it used to fail): {body:?}"
+    );
+    let session_id = body["send"]["session_id"]
+        .as_str()
+        .expect("the send response carries its session id")
+        .to_owned();
+
+    // Let the opening turn finish, so the session is unambiguously live rather
+    // than merely accepted.
+    drain_one_turn(&mut events, &session_id).await;
+
+    let starts = scenario.thread_starts();
+    assert_eq!(starts.len(), 1, "one thread was started: {starts:?}");
+    let params = &starts[0];
+    assert!(
+        params["cwd"].as_str().is_some_and(|cwd| !cwd.is_empty()),
+        "Delta's own cwd is still sent, got {params:?}"
+    );
+    assert_eq!(
+        params["model"],
+        json!("gpt-5.6-sol"),
+        "a non-JSON value arrives as the string it looks like"
+    );
+    assert_eq!(
+        params["config"],
+        json!({ "tools": { "web_search": true } }),
+        "a JSON value arrives with its real type, not as a quoted string"
+    );
+    assert_eq!(
+        params["ephemeral"],
+        json!(true),
+        "a valueless option switches its boolean field on"
+    );
+}
+
+/// A launch option naming a `thread/start` field Delta fills in itself is
+/// rejected loudly at spawn: `400` naming the offending key, and no session row
+/// left behind.
+///
+/// `cwd` is the field that matters — with a worktree it is the resolved
+/// worktree path, and the session's repo-root / display-name /
+/// branch-at-launch columns are recorded against it — so a user option
+/// silently overriding it would leave those columns describing a directory the
+/// agent is not running in. Failing the spawn is the only honest answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_codex_launch_option_overriding_a_delta_owned_field_fails_the_spawn() {
+    let scenario = streaming_turn_scenario();
+    let (app, _state) = build_app(&scenario);
+
+    let cwd = register_launch_option(&app, "cwd", Some("/somewhere/else"), "codex").await;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [cwd],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a Delta-owned field is rejected, not silently applied: {body:?}"
+    );
+    assert!(
+        body["error"].as_str().is_some_and(|e| e.contains("cwd")),
+        "the error names the offending key, got {body:?}"
+    );
+
+    // The eager session row was rolled back, so a rejected spawn leaves nothing
+    // behind for the navigator to show.
+    let (status, sessions) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK, "sessions fetched: {sessions:?}");
+    assert_eq!(
+        sessions["sessions"].as_array().map(Vec::len),
+        Some(0),
+        "a rejected spawn leaves no session row: {sessions:?}"
+    );
 }
 
 /// The Codex **multi-turn** full loop: a second (and later) message to an

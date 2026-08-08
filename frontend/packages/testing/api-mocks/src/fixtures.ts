@@ -1019,8 +1019,10 @@ export function mockRepositories(): {
  * `GET /api/providers`. Both providers are available by default so the
  * new-session provider selector is fully usable with no backend and existing
  * tests / e2e are unaffected. Capabilities mirror the real backend: Claude
- * offers an attachable terminal (`has_terminal: true`), Codex is headless
- * (`has_terminal: false`) — the workspace hides the terminal tab for the latter.
+ * offers an attachable terminal (`has_terminal: true`) and takes its launch
+ * options as CLI flags, Codex is headless (`has_terminal: false`) and takes
+ * them as session-start request fields — the workspace hides the terminal tab
+ * for the latter, and Settings words its launch-option form from the style.
  * A test that needs an unavailable provider overrides this handler (see
  * `createHandlers`).
  */
@@ -1030,13 +1032,13 @@ export function mockProviders(): ProviderAvailability[] {
       provider: 'claude',
       available: true,
       detail: null,
-      capabilities: { has_terminal: true },
+      capabilities: { has_terminal: true, launch_option_style: 'cli_flag' },
     },
     {
       provider: 'codex',
       available: true,
       detail: null,
-      capabilities: { has_terminal: false },
+      capabilities: { has_terminal: false, launch_option_style: 'request_field' },
     },
   ];
 }

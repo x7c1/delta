@@ -30,7 +30,7 @@ pub fn launch_request() -> LaunchRequest {
     LaunchRequest {
         session_id: "01920000-0000-7000-8000-000000000001".to_owned(),
         workdir: "/tmp/workdir".to_owned(),
-        extra_args: Vec::new(),
+        launch_options: Vec::new(),
         first_prompt: None,
     }
 }

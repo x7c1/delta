@@ -25,9 +25,10 @@ pub use agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
     AgentEventStream, AgentPermissionRequest, AgentProvider, AgentSessionHandle,
     ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
-    LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability,
-    SteerCapability, TerminalCapability, TranscriptCapability, TurnStatus,
+    LaunchCapability, LaunchOptionSpec, LaunchRequest, PermissionCapability, PtyHandle,
+    ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
+    SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    TurnStatus,
 };
 pub use error::{Error, Result};
 pub use interactor::{

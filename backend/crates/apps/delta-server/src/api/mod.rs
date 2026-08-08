@@ -484,9 +484,12 @@ pub(crate) async fn list_launch_options(
 
 /// `POST /api/launch-options` — register a new custom launch option.
 ///
-/// `name` (the flag) is required and must be non-blank; `label` and `value` are
-/// optional (a valueless flag carries no `value`). A blank `name` is a `400`.
-/// Returns the created record so the client can render it without a refetch.
+/// `name` is required and must be non-blank; `label` and `value` are optional
+/// (a valueless option carries no `value`). A blank `name` is a `400`. What
+/// `name` means is the provider's business — a CLI flag for Claude, a
+/// `thread/start` field for Codex — so the validation here is deliberately only
+/// "present and non-blank", and the message stays provider-neutral. Returns the
+/// created record so the client can render it without a refetch.
 pub(crate) async fn create_launch_option(
     State(state): State<AppState>,
     Json(req): Json<WireCreateLaunchOptionRequest>,
@@ -494,7 +497,7 @@ pub(crate) async fn create_launch_option(
     let name = req.name.trim();
     if name.is_empty() {
         return Err(ApiError::BadRequest(
-            "a launch option must have a non-blank `name` (the flag)".to_owned(),
+            "a launch option must have a non-blank `name`".to_owned(),
         ));
     }
     // `label`/`value` are kept verbatim apart from trimming surrounding

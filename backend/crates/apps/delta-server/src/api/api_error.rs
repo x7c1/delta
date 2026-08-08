@@ -184,6 +184,11 @@ impl IntoResponse for ApiError {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Some(OPEN_CWD_SPAWN_FAILED_CODE),
                     ),
+                    // A selected launch option the provider's adapter will not
+                    // apply (a Delta-owned field, or the same field twice):
+                    // the caller can fix it, so 400 with the adapter's message
+                    // naming the offending key.
+                    Error::LaunchOptionRejected(_) => (StatusCode::BAD_REQUEST, None),
                     // Everything else is an internal failure.
                     Error::Tmux(_)
                     | Error::Agent(_)

@@ -484,6 +484,12 @@ mod tests {
             claude["capabilities"]["has_terminal"], true,
             "Claude reports a terminal"
         );
+        // Claude is launched as a command line, so its launch options are argv
+        // flags — Settings words its registration form from this.
+        assert_eq!(
+            claude["capabilities"]["launch_option_style"], "cli_flag",
+            "Claude reports flag-style launch options"
+        );
 
         let codex = providers
             .iter()
@@ -499,6 +505,12 @@ mod tests {
         assert_eq!(
             codex["capabilities"]["has_terminal"], false,
             "Codex reports no terminal"
+        );
+        // Codex is driven over a structured request, so its launch options are
+        // `thread/start` field names rather than flags.
+        assert_eq!(
+            codex["capabilities"]["launch_option_style"], "request_field",
+            "Codex reports field-style launch options"
         );
     }
 

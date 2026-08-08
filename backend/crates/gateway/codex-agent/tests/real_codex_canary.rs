@@ -176,7 +176,7 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
         .launch(LaunchRequest {
             session_id: "01920000-0000-7000-8000-0000000000c4".to_owned(),
             workdir: cwd.as_str(),
-            extra_args: Vec::new(),
+            launch_options: Vec::new(),
             first_prompt: None,
         })
         .await
