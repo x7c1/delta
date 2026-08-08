@@ -33,6 +33,18 @@ function makeMessage(role: MessageRole, text: string): Message {
   return makeMessageWithContent(role, [{ type: 'text', text }], text);
 }
 
+/**
+ * The rendered message's prose bubble, or `null` when it was laid out bare.
+ * The bubble is data-tagged so the layout can be asserted structurally — its
+ * background class is shared with the collapsible cards, which are exactly what
+ * a bare layout leaves unwrapped.
+ */
+function proseBubble(): HTMLElement | null {
+  return screen
+    .getByTestId('message-item')
+    .querySelector<HTMLElement>('[data-prose-bubble]');
+}
+
 function makeMessageWithContent(
   role: MessageRole,
   content: ContentBlock[],
@@ -229,6 +241,78 @@ describe('MessageItem', () => {
     ]);
     render(<MessageItem message={message} />);
     expect(screen.getByText('thinking')).toBeInTheDocument();
+  });
+
+  describe('the prose bubble', () => {
+    // The bubble is the container for the words a message says. It is earned by
+    // rendering prose and lost by rendering anything that stands on its own as a
+    // card, so a card-only message is not dressed up as speech and no card is
+    // ever nested inside a rounded bubble.
+    it('wraps a reply that is prose', () => {
+      render(
+        <MessageItem message={makeMessage('assistant', 'the answer')} />,
+      );
+      expect(proseBubble()).not.toBeNull();
+    });
+
+    it('still wraps a reply that also carries the model thinking', () => {
+      // The common Claude shape: thinking and the reply arrive as blocks of one
+      // message. The thinking is part of that utterance, so the reply keeps its
+      // bubble and the thinking card sits inside it.
+      const message = makeMessageWithContent('assistant', [
+        { type: 'thinking', thinking: 'let me reason' },
+        { type: 'text', text: 'the answer' },
+      ]);
+      render(<MessageItem message={message} />);
+
+      const bubble = proseBubble();
+      expect(bubble).not.toBeNull();
+      expect(within(bubble!).getByText('thinking')).toBeInTheDocument();
+      expect(within(bubble!).getByText('the answer')).toBeInTheDocument();
+    });
+
+    it('leaves a thinking-only message bare, so reasoning does not read as a reply', () => {
+      // Codex delivers reasoning as its own message. It is not speech, so it
+      // must sit with the other cards rather than in the reply bubble — which
+      // would also nest a bordered card inside a rounded box.
+      const message = makeMessageWithContent('assistant', [
+        { type: 'thinking', thinking: 'weighing the options' },
+      ]);
+      render(<MessageItem message={message} />);
+
+      expect(screen.getByText('thinking')).toBeInTheDocument();
+      expect(proseBubble()).toBeNull();
+    });
+
+    it('leaves a tool turn bare, with or without accompanying prose', () => {
+      const toolOnly = render(
+        <MessageItem
+          message={makeMessageWithContent('assistant', [
+            { type: 'tool_use', id: 't1', name: 'Bash', input: {} },
+          ])}
+        />,
+      );
+      expect(proseBubble()).toBeNull();
+      toolOnly.unmount();
+
+      render(
+        <MessageItem
+          message={makeMessageWithContent('assistant', [
+            { type: 'text', text: 'running it now' },
+            { type: 'tool_use', id: 't1', name: 'Bash', input: {} },
+          ])}
+        />,
+      );
+      expect(proseBubble()).toBeNull();
+    });
+
+    it('leaves an unsupported block bare rather than dressing it as a reply', () => {
+      // The same latent problem as reasoning: `other` renders as a card, so it
+      // must not be wrapped either.
+      const message = makeMessageWithContent('assistant', [{ type: 'other' }]);
+      render(<MessageItem message={message} />);
+      expect(proseBubble()).toBeNull();
+    });
   });
 
   it('renders a meta line as a collapsed card, not a user bubble', () => {
