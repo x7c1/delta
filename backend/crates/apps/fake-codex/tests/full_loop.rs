@@ -567,10 +567,13 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
 /// others), so only the response says what is actually running. Asserting the
 /// **server's** value proves the metadata is read back rather than echoed.
 ///
-/// The branch comes from the same response, under `thread.gitInfo.branch`. This
-/// session is started with **no git worktree**, which is exactly the case Delta
-/// records no branch for on its own — so a persisted branch here can only have
-/// come from the provider's report.
+/// The branch is exercised over a **real git repository** created for this test,
+/// with the session started in it and **no worktree**. That combination is the
+/// case the feature exists for: Delta fills the session row's `branch_at_launch`
+/// only on the worktree path, and Codex's `thread/start` reports no git metadata
+/// at all, so a branch on these messages can only come from Delta observing its
+/// launch directory. Using a real repo (not a scripted fake) means the real
+/// `Git` gateway runs, so the value is one `git` itself produced.
 ///
 /// `cwd` is checked against the `cwd` Delta itself sent on `thread/start`, so the
 /// message reports the same launch directory the agent was started in — not a
@@ -578,12 +581,12 @@ async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
 #[tokio::test(flavor = "multi_thread")]
 async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_launch_dir() {
     const RESOLVED_MODEL: &str = "gpt-5.6-sol";
-    const OBSERVED_BRANCH: &str = "feature/observed-by-the-server";
+    const OBSERVED_BRANCH: &str = "feature/observed-by-delta";
+    let repo = GitRepoGuard::init(OBSERVED_BRANCH);
     let scenario = ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_metadata",
             "model": "{RESOLVED_MODEL}",
-            "git_info": {{ "branch": "{OBSERVED_BRANCH}" }},
             "turn": {{
                 "turn_id": "turn_metadata",
                 "emit": [
@@ -611,6 +614,9 @@ async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_la
             "provider": "codex",
             "text": "hello codex",
             "launch_option_ids": [model_option],
+            // A real git repo, and NO worktree: the case Delta records no
+            // branch_at_launch for.
+            "workdir": repo.path(),
         }),
     )
     .await;
@@ -657,10 +663,75 @@ async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_la
         assert_eq!(
             message["git_branch"],
             json!(OBSERVED_BRANCH),
-            "the persisted message reports the branch the server observed — even \
-             though this session has no worktree, so Delta recorded none itself: \
-             {message:?}"
+            "the persisted message reports the branch of its launch directory, \
+             observed by Delta — this session has no worktree, so nothing else \
+             knows it: {message:?}"
         );
+    }
+}
+
+/// A throwaway git repository on a named branch, removed on drop.
+///
+/// Used by the metadata loop to exercise the real `Git` gateway: the branch a
+/// message reports must be one `git` actually produced, not a scripted fake.
+struct GitRepoGuard {
+    dir: std::path::PathBuf,
+}
+
+impl GitRepoGuard {
+    /// Create a repository with one empty commit on `branch`.
+    ///
+    /// The commit is required, not decorative: on an unborn HEAD
+    /// `git rev-parse --abbrev-ref HEAD` exits non-zero, which the gateway
+    /// (correctly) reads as "no branch". `--initial-branch` pins the name rather
+    /// than depending on the host's `init.defaultBranch`, and the identity is
+    /// passed with `-c` so the test does not depend on the host's git config
+    /// either.
+    fn init(branch: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "fake-codex-metadata-repo-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        Self::git(&dir, &["init", "--quiet", "--initial-branch", branch]);
+        Self::git(
+            &dir,
+            &[
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "user.name=delta test",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        );
+        Self { dir }
+    }
+
+    /// Run one `git` invocation in `dir`, failing the test if it does not
+    /// succeed — a silently broken fixture would look like a missing branch.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("git must be available to run this test");
+        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    }
+
+    fn path(&self) -> String {
+        self.dir.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for GitRepoGuard {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.dir).ok();
     }
 }
 
@@ -1095,22 +1166,15 @@ impl Drop for DbGuard {
 /// non-colliding provider items. The provider thread id is fixed to `thr_restart`
 /// across both, so the resume reattaches to the same thread.
 ///
-/// `model` and `branch` are what this backend's app-server reports for the
-/// thread. The two halves of the restart test give distinct values, so the
-/// post-restart messages prove the metadata came from the **resume** response
-/// rather than from anything cached before the restart.
-fn restart_turn_scenario(
-    turn_id: &str,
-    item_id: &str,
-    reply: &str,
-    model: &str,
-    branch: &str,
-) -> ScenarioGuard {
+/// `model` is what this backend's app-server reports for the thread. The two
+/// halves of the restart test give distinct values, so the post-restart messages
+/// prove the metadata came from the **resume** response rather than from
+/// anything cached before the restart.
+fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str, model: &str) -> ScenarioGuard {
     ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_restart",
             "model": "{model}",
-            "git_info": {{ "branch": "{branch}" }},
             "turn": {{
                 "turn_id": "{turn_id}",
                 "emit": [
@@ -1143,16 +1207,14 @@ fn restart_turn_scenario(
 async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     const REPLY_ONE: &str = "reply from turn one";
     const REPLY_TWO: &str = "reply from turn two";
-    // Distinct per backend, so a post-restart message reporting `MODEL_TWO` /
-    // `BRANCH_TWO` can only have learned them from the `thread/resume` response.
+    // Distinct per backend, so a post-restart message reporting `MODEL_TWO` can
+    // only have learned it from the `thread/resume` response.
     const MODEL_ONE: &str = "model-before-restart";
     const MODEL_TWO: &str = "model-after-restart";
-    const BRANCH_ONE: &str = "branch-before-restart";
-    const BRANCH_TWO: &str = "branch-after-restart";
     let db = DbGuard::new();
 
     // ---- Before the restart: create the session, complete turn 1. ----
-    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE, MODEL_ONE, BRANCH_ONE);
+    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE, MODEL_ONE);
     let (thread_id, session_id) = {
         let (app, state) = build_app_with(db.open(), &scenario1);
         let mut events = state.subscribe();
@@ -1192,7 +1254,7 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     };
 
     // ---- After the restart: a brand-new backend over the SAME database. ----
-    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO, MODEL_TWO, BRANCH_TWO);
+    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO, MODEL_TWO);
     let (app, state) = build_app_with(db.open(), &scenario2);
     let mut events = state.subscribe();
     state
@@ -1264,37 +1326,27 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     );
 
     // A resumed session still reports its provider metadata: `thread/resume`
-    // carries the same top-level `model` and `thread.gitInfo` as `thread/start`,
-    // so the post-restart turn's messages are stamped from the resume response —
-    // the second backend's values, never left blank and never the pre-restart
-    // ones. The pre-restart messages keep what was reported when they were
+    // carries the same required top-level `model` as `thread/start`, so the
+    // post-restart turn's messages are stamped from the resume response — the
+    // second backend's model, never left blank and never the pre-restart one.
+    // The pre-restart messages keep the model that was running when they were
     // folded, since each row records what produced it.
-    let fact_of = |text: &str, field: &str| {
+    let model_of = |text: &str| {
         messages
             .iter()
             .find(|m| m["content_text"] == json!(text))
-            .unwrap_or_else(|| panic!("`{text}` is present"))[field]
+            .unwrap_or_else(|| panic!("`{text}` is present"))["model"]
             .clone()
     };
     assert_eq!(
-        fact_of(REPLY_TWO, "model"),
+        model_of(REPLY_TWO),
         json!(MODEL_TWO),
         "the resumed turn reports the model its `thread/resume` announced: {messages:?}"
     );
     assert_eq!(
-        fact_of(REPLY_TWO, "git_branch"),
-        json!(BRANCH_TWO),
-        "the resumed turn reports the branch its `thread/resume` announced: {messages:?}"
-    );
-    assert_eq!(
-        fact_of(REPLY_ONE, "model"),
+        model_of(REPLY_ONE),
         json!(MODEL_ONE),
         "the pre-restart turn keeps the model that produced it: {messages:?}"
-    );
-    assert_eq!(
-        fact_of(REPLY_ONE, "git_branch"),
-        json!(BRANCH_ONE),
-        "the pre-restart turn keeps the branch reported when it was folded: {messages:?}"
     );
 }
 

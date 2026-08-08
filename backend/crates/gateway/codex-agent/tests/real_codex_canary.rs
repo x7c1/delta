@@ -17,11 +17,11 @@
 //!    the authenticated user's Codex quota.
 //!
 //! 2. [`real_thread_start_reports_the_metadata_delta_stamps_on_messages`] —
-//!    starts one thread in this checkout (NO turn, so no model quota) and
-//!    asserts the three `thread/start` response facts Delta stamps on every
-//!    Codex message: the top-level `model`, the `thread.gitInfo.branch` matching
-//!    what `git` says about that same directory, and the `cwd` echoed back
-//!    verbatim. Needs the real binary + auth; no turn is run.
+//!    starts one thread in this checkout (NO turn, so no model quota) and pins
+//!    what `thread/start` really reports: the top-level `model` is present, the
+//!    `cwd` is echoed back verbatim, and `thread.gitInfo` is **null** despite the
+//!    schema declaring it — which is why Delta observes its launch directory's
+//!    branch itself. Needs the real binary + auth; no turn is run.
 //!
 //! 3. [`vendored_schema_matches_the_real_generator`] — regenerates the schema
 //!    with `codex app-server generate-json-schema` (a static dump: NO auth, NO
@@ -45,6 +45,20 @@
 //! The drift canary needs only the binary (no auth/network), so it *could*
 //! have been presence-gated; it is `#[ignore]` anyway, for the hermeticity
 //! reason above and so one command runs the whole real-`codex` lane.
+//!
+//! ## Being `#[ignore]`d, they must be run deliberately
+//!
+//! Nothing in `make check` or CI runs these, so an assumption about the wire can
+//! be wrong for as long as nobody types the command. That is not hypothetical:
+//! Delta once sourced a message's `git_branch` from `thread.gitInfo` — a field
+//! the vendored schema declares and documents — and shipped permanently blank
+//! branches, because the real server returns it null and no one had run the
+//! canary that would have said so.
+//!
+//! So: **run `make e2e-real-codex` whenever a change depends on what the real
+//! server sends or returns**, not only when `codex` is upgraded. A schema field's
+//! existence is not evidence that a given response populates it; this lane is how
+//! that difference gets checked.
 //!
 //! ## Running them
 //!
@@ -203,6 +217,7 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
             main_thread: ThreadId(1),
             seed_seq: 0,
             cwd: cwd.as_str(),
+            git_branch: None,
         },
     );
     let (probe, _) = content.ingest(&AgentEvent::AssistantMessage {
@@ -309,26 +324,36 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
 // --- Canary 3: the thread-metadata wire fields -----------------------------
 
 /// The `thread/start` response fields Delta reads a session's message metadata
-/// from are really present, really populated, and really agree with Delta's own
-/// record — checked against the live binary rather than the vendored schema.
+/// from behave as Delta assumes — checked against the live binary rather than
+/// inferred from the vendored schema.
 ///
-/// Delta stamps three provider facts on every Codex message, and each rests on a
-/// claim about this one response:
+/// Delta stamps three facts on every Codex message, from two different sources,
+/// and each rests on a claim about this one response:
 ///
-/// 1. **`model`** — a required top-level string. It is the only truthful source
+/// 1. **`model`** — a required top-level string, and the only truthful source
 ///    for what is running, since the server reconciles the launch option, the
-///    user's config and its own default.
-/// 2. **`thread.gitInfo.branch`** — the branch the server captured from the
-///    thread's working directory. This canary starts its thread in *this
-///    checkout*, asks git what branch that is, and requires the server to report
-///    the same one. That is the strongest available statement of the claim: not
-///    merely "a branch is reported" but "the reported branch is correct".
-/// 3. **`cwd`** — echoed back verbatim. Delta does NOT read the message `cwd`
+///    user's config and its own default. Asserted present.
+/// 2. **`cwd`** — echoed back verbatim. Delta does NOT read the message `cwd`
 ///    from here (it keeps its own recorded launch directory, the string its
 ///    repo-root / requested-workdir columns are stored against), but the two are
-///    supposed to describe the same place. This asserts the echo really is
-///    verbatim, so that decision stays a preference rather than a papered-over
-///    divergence.
+///    supposed to describe the same place. Asserting the echo is verbatim keeps
+///    that decision a preference rather than a papered-over divergence.
+/// 3. **`thread.gitInfo`** — asserted **null**, which is the opposite of what
+///    the schema suggests.
+///
+/// That third assertion is the interesting one. `Thread.gitInfo` is declared as
+/// `GitInfo | null` and documented as "Optional Git metadata captured when the
+/// thread was created", which reads like a populated field. It is not: as of
+/// `codex-cli 0.144.4` the real server returns `gitInfo: null` on `thread/start`
+/// even when `cwd` is a git working tree on a named branch. The declared value
+/// is evidently materialised on some other read path, not this response.
+///
+/// Delta briefly sourced a message's `git_branch` from it and shipped sessions
+/// with a permanently empty branch as a result. It now observes its own launch
+/// directory's branch instead, and this canary pins the reason: if a future
+/// release starts populating `gitInfo` here, this fails and someone can revisit
+/// the choice deliberately — rather than the schema being re-read as evidence a
+/// second time.
 ///
 /// No turn is started, so unlike canary 1 this consumes no model quota — it is
 /// one `thread/start` against the real server.
@@ -336,10 +361,10 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
 #[ignore = "drives the real codex app-server: needs the binary + auth, consumes no model quota"]
 async fn real_thread_start_reports_the_metadata_delta_stamps_on_messages() {
     // Start the thread in this checkout: a real git working tree, so the server
-    // has real git metadata to capture. Nothing is executed in it — only a
-    // thread record is created.
+    // would have real git metadata to report if this response reported any.
+    // Nothing is executed in it — only a thread record is created.
     let repo_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let expected_branch = git_branch_of(&repo_dir);
+    let git_branch = git_branch_of(&repo_dir);
     let cwd = repo_dir.to_string_lossy().into_owned();
 
     let conn = AppServerConnection::spawn(&CodexLaunchConfig {
@@ -360,40 +385,46 @@ async fn real_thread_start_reports_the_metadata_delta_stamps_on_messages() {
         .expect("start a real thread");
     let result = &started.result;
 
-    // 1. The model is reported.
+    // 1. The model is reported. The value is not pinned — which model the
+    //    account resolves to is not Delta's business — only that it is there.
     let model = result.get("model").and_then(Value::as_str);
     assert!(
         model.is_some_and(|model| !model.is_empty()),
         "thread/start must report the resolved model at the top level, got {result}"
     );
 
-    // 2. The captured branch matches what git says about the same directory.
-    let reported_branch = result
-        .get("thread")
-        .and_then(|thread| thread.get("gitInfo"))
-        .and_then(|git_info| git_info.get("branch"))
-        .and_then(Value::as_str);
-    match expected_branch {
-        Some(expected) => assert_eq!(
-            reported_branch,
-            Some(expected.as_str()),
-            "thread/start must report the branch of its own cwd under              thread.gitInfo.branch, got {result}"
-        ),
-        // No git in PATH, or this checkout is not a working tree (a tarball, a
-        // detached HEAD): there is nothing to compare against, so only the
-        // presence of the enclosing structure is worth saying anything about.
-        None => eprintln!(
-            "skipped the gitInfo.branch comparison: git reported no branch for {cwd};              the server said {reported_branch:?}"
-        ),
-    }
-
-    // 3. The cwd comes back verbatim, so Delta's recorded launch directory and
+    // 2. The cwd comes back verbatim, so Delta's recorded launch directory and
     //    the thread's own cwd describe the same place with the same spelling.
     assert_eq!(
         result.get("cwd").and_then(Value::as_str),
         Some(cwd.as_str()),
         "thread/start must echo the cwd it was given, got {result}"
     );
+
+    // 3. `gitInfo` is null even though `cwd` is a git working tree — the pin that
+    //    keeps Delta observing the branch itself. Only meaningful when git agrees
+    //    this directory really is on a branch, so the "the server had something
+    //    to report and still reported nothing" reading holds.
+    let git_info = result
+        .get("thread")
+        .and_then(|thread| thread.get("gitInfo"));
+    match git_branch {
+        Some(branch) => assert!(
+            matches!(git_info, None | Some(Value::Null)),
+            "thread/start is expected to report NO git metadata (as of \
+             codex-cli {VENDORED_CODEX_VERSION}), yet it reported {git_info:?} while git says \
+             this cwd is on `{branch}`. If the server now populates gitInfo, Delta \
+             could source a message's git_branch from it instead of observing the \
+             launch directory itself — revisit deliberately. Full response: {result}"
+        ),
+        // No git in PATH, or this checkout is not a working tree (a tarball, a
+        // detached HEAD): the server having nothing to report would be correct,
+        // so the pin says nothing.
+        None => eprintln!(
+            "skipped the gitInfo pin: git reported no branch for {cwd}; \
+             the server said {git_info:?}"
+        ),
+    }
 }
 
 /// The branch `git` reports for `dir`, or `None` when git is unavailable, `dir`

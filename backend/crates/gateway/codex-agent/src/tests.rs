@@ -486,16 +486,17 @@ fn no_launch_options_leaves_thread_start_params_as_just_the_workdir() {
     assert_eq!(params, json!({ "cwd": "/work" }));
 }
 
-/// A content-source request for a session launched in `/work/app` — the neutral
-/// half of what the pump hands the adapter at bind time. It carries only the
-/// launch directory; what the provider reported about the session is the
-/// adapter's to add.
-fn content_request() -> ContentSourceRequest {
+/// A content-source request for a session launched in `/work/app` on `branch` —
+/// the neutral half of what the pump hands the adapter at bind time. It carries
+/// the launch site Delta resolved and observed; the model the server reported is
+/// the adapter's to add.
+fn content_request(branch: Option<&str>) -> ContentSourceRequest {
     ContentSourceRequest {
         session_id: SessionId::from("01920000-0000-7000-8000-00000000000a"),
         main_thread: ThreadId(1),
         seed_seq: 0,
         cwd: "/work/app".to_owned(),
+        git_branch: branch.map(str::to_owned),
     }
 }
 
@@ -510,8 +511,8 @@ fn folded_message(source: &mut Box<dyn AgentContentSource>) -> Message {
     messages.into_iter().next().expect("one folded message")
 }
 
-/// A launched session's messages report the model the **server** resolved — not
-/// the one Delta asked for — and the branch the server **observed**.
+/// A launched session's messages report the model the **server** resolved, not
+/// the one Delta asked for.
 ///
 /// The launch selects one model and the server answers with a **different** one
 /// — exactly what happens when the user's own Codex config or the server's
@@ -522,11 +523,11 @@ fn folded_message(source: &mut Box<dyn AgentContentSource>) -> Message {
 /// keep passing while proving nothing. The value that reaches the message is the
 /// server's, so the transcript always shows what is really running.
 ///
-/// The branch comes from `thread.gitInfo.branch` on the same response, `cwd`
-/// from the neutral request, and `response_time_ms` stays `None` — Codex exposes
-/// no per-message latency.
+/// `cwd` and `git_branch` ride the neutral request — Codex reports neither, so
+/// they are Delta's own launch site — and `response_time_ms` stays `None`, since
+/// Codex exposes no per-message latency.
 #[tokio::test]
-async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observed() {
+async fn a_launched_sessions_messages_carry_the_model_the_server_resolved() {
     let (conn, mut server) = connect();
     let adapter = CodexAppServerAdapter::new(Arc::new(conn));
 
@@ -537,23 +538,12 @@ async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observe
             start["params"]["model"], "requested-by-delta",
             "the selected launch option rode the request"
         );
-        // The real `ThreadStartResponse` carries `model` at the top level and the
-        // captured git metadata under `thread.gitInfo`. Answer with a DIFFERENT
-        // model than was requested.
+        // The real `ThreadStartResponse` carries `model` at the top level.
+        // Answer with a DIFFERENT model than was requested.
         server
             .send(json!({
                 "id": start["id"],
-                "result": {
-                    "thread": {
-                        "id": "thr_m",
-                        "gitInfo": {
-                            "branch": "feature/x",
-                            "originUrl": "https://example.invalid/app.git",
-                            "sha": "0123456789abcdef"
-                        }
-                    },
-                    "model": "gpt-5.6-sol"
-                }
+                "result": { "thread": { "id": "thr_m" }, "model": "gpt-5.6-sol" }
             }))
             .await;
         // Hold the server side open until the test drops it.
@@ -574,7 +564,7 @@ async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observe
         .expect("server task timed out")
         .expect("server task panicked");
 
-    let mut source = adapter.content_source(&handle, content_request());
+    let mut source = adapter.content_source(&handle, content_request(Some("feature/x")));
     let message = folded_message(&mut source);
     assert_eq!(
         message.model.as_deref(),
@@ -584,7 +574,7 @@ async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observe
     assert_eq!(
         message.git_branch.as_deref(),
         Some("feature/x"),
-        "the message reports the branch the server observed in the thread's cwd"
+        "the launch site's branch rides the neutral request onto the message"
     );
     assert_eq!(message.cwd.as_deref(), Some("/work/app"));
     assert!(
@@ -594,10 +584,10 @@ async fn a_launched_sessions_messages_carry_what_the_server_resolved_and_observe
 }
 
 /// A **resumed** session reports its metadata too: `thread/resume` carries the
-/// same top-level `model` and `thread.gitInfo` as `thread/start`, so a session
-/// picked back up after a restart is not left blank.
+/// same required top-level `model` as `thread/start`, so a session picked back
+/// up after a restart is not left blank.
 #[tokio::test]
-async fn a_resumed_sessions_messages_carry_what_the_resume_reported() {
+async fn a_resumed_sessions_messages_carry_the_model_the_resume_reported() {
     let (conn, mut server) = connect();
     let adapter = CodexAppServerAdapter::new(Arc::new(conn));
 
@@ -608,10 +598,7 @@ async fn a_resumed_sessions_messages_carry_what_the_resume_reported() {
         server
             .send(json!({
                 "id": resume["id"],
-                "result": {
-                    "thread": { "id": "thr_m", "gitInfo": { "branch": "feature/x" } },
-                    "model": "gpt-5.6-sol"
-                }
+                "result": { "thread": { "id": "thr_m" }, "model": "gpt-5.6-sol" }
             }))
             .await;
         server
@@ -630,7 +617,7 @@ async fn a_resumed_sessions_messages_carry_what_the_resume_reported() {
         .expect("server task timed out")
         .expect("server task panicked");
 
-    let mut source = adapter.content_source(&handle, content_request());
+    let mut source = adapter.content_source(&handle, content_request(Some("feature/x")));
     let message = folded_message(&mut source);
     assert_eq!(
         message.model.as_deref(),
@@ -640,18 +627,17 @@ async fn a_resumed_sessions_messages_carry_what_the_resume_reported() {
     assert_eq!(
         message.git_branch.as_deref(),
         Some("feature/x"),
-        "a resumed session reports the branch its resume response announced"
+        "a resumed session's launch site is re-observed and reported too"
     );
     assert_eq!(message.cwd.as_deref(), Some("/work/app"));
 }
 
-/// A thread outside a git working tree has no `gitInfo` at all, and a server may
-/// answer without a `model`. Both leave the fact absent rather than substituting
-/// something plausible — the same degrade-never-fake rule the rest of the Codex
-/// fold follows. The launch directory, which Delta always knows, is still
-/// reported.
+/// A server answering without a `model`, for a session launched outside a git
+/// working tree, leaves both facts absent rather than substituting something
+/// plausible — the same degrade-never-fake rule the rest of the Codex fold
+/// follows. The launch directory, which Delta always knows, is still reported.
 #[tokio::test]
-async fn a_response_without_a_model_or_git_info_degrades_to_none() {
+async fn a_response_without_a_model_degrades_to_none() {
     let (conn, mut server) = connect();
     let adapter = CodexAppServerAdapter::new(Arc::new(conn));
 
@@ -677,7 +663,7 @@ async fn a_response_without_a_model_or_git_info_degrades_to_none() {
         .expect("server task timed out")
         .expect("server task panicked");
 
-    let mut source = adapter.content_source(&handle, content_request());
+    let mut source = adapter.content_source(&handle, content_request(None));
     let message = folded_message(&mut source);
     assert!(
         message.model.is_none(),
@@ -685,67 +671,11 @@ async fn a_response_without_a_model_or_git_info_degrades_to_none() {
     );
     assert!(
         message.git_branch.is_none(),
-        "no gitInfo in the response means no branch on the message"
+        "no branch observed at the launch site means none on the message"
     );
     assert_eq!(
         message.cwd.as_deref(),
         Some("/work/app"),
         "the launch directory is Delta's own record, so it is reported regardless"
-    );
-}
-
-/// The nullable layers inside `gitInfo` degrade the same way its absence does: a
-/// git working tree on a **detached HEAD** reports `gitInfo` with a null
-/// `branch`, which must read as "no branch" rather than crashing or stringifying
-/// the null.
-#[tokio::test]
-async fn git_info_with_a_null_branch_degrades_to_none() {
-    let (conn, mut server) = connect();
-    let adapter = CodexAppServerAdapter::new(Arc::new(conn));
-
-    let server_task = tokio::spawn(async move {
-        let start = server.next_frame().await;
-        server
-            .send(json!({
-                "id": start["id"],
-                "result": {
-                    "thread": {
-                        "id": "thr_d",
-                        // A real detached-HEAD capture: git metadata exists, but
-                        // there is no branch name to report.
-                        "gitInfo": { "branch": null, "sha": "0123456789abcdef" }
-                    },
-                    "model": "gpt-5.6-sol"
-                }
-            }))
-            .await;
-        server
-    });
-
-    let handle = adapter
-        .launch(LaunchRequest {
-            session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
-            workdir: "/work/app".to_owned(),
-            launch_options: Vec::new(),
-            first_prompt: None,
-        })
-        .await
-        .expect("launch");
-    let _server = tokio::time::timeout(TIMEOUT, server_task)
-        .await
-        .expect("server task timed out")
-        .expect("server task panicked");
-
-    let mut source = adapter.content_source(&handle, content_request());
-    let message = folded_message(&mut source);
-    assert!(
-        message.git_branch.is_none(),
-        "a null branch inside gitInfo reports no branch, got {:?}",
-        message.git_branch
-    );
-    assert_eq!(
-        message.model.as_deref(),
-        Some("gpt-5.6-sol"),
-        "the other facts on the same response are unaffected"
     );
 }

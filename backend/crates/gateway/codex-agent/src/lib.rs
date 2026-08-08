@@ -36,7 +36,7 @@ mod translate;
 pub mod wire;
 
 pub use adapter::{CodexAppServerAdapter, CODEX_CAPABILITIES};
-pub use content::{codex_content_source, CodexConversationSource, CodexThreadFacts};
+pub use content::{codex_content_source, CodexConversationSource};
 pub use factory::CodexAdapterFactory;
 
 use std::collections::HashMap;

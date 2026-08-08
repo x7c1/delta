@@ -35,9 +35,9 @@ pub(crate) struct FakeAgentLog {
     pub resumes: Vec<String>,
     /// The [`ContentSourceRequest`] each `content_source` call was built from, in
     /// order. Its `seed_seq` proves a fresh spawn seeds `0` and a resume seeds
-    /// the persisted count (so resumed history is not renumbered); its `cwd`
-    /// proves the session's launch directory reaches the accumulator that stamps
-    /// it onto messages.
+    /// the persisted count (so resumed history is not renumbered); its `cwd` and
+    /// `git_branch` prove the launch site Delta resolved and observed reaches the
+    /// accumulator that stamps them onto messages.
     pub content_requests: Vec<ContentSourceRequest>,
     /// The visible send texts the adapter received, in order.
     pub sends: Vec<String>,
@@ -216,10 +216,10 @@ impl AgentAdapter for FakeAgentAdapter {
         req: ContentSourceRequest,
     ) -> Box<dyn AgentContentSource> {
         // Record the request so a test can assert the seed (a fresh spawn seeds 0,
-        // a resume the persisted count) and the launch directory it carries.
-        // Return a functional accumulator (unlike the trait's `NullContentSource`
-        // default) so pushed user/assistant events actually persist as messages
-        // and `message_count` advances — which is what makes the resume seed
+        // a resume the persisted count) and the launch site it carries. Return a
+        // functional accumulator (unlike the trait's `NullContentSource` default)
+        // so pushed user/assistant events actually persist as messages and
+        // `message_count` advances — which is what makes the resume seed
         // observable end to end.
         self.log.lock().unwrap().content_requests.push(req.clone());
         Box::new(FakeContentSource {
@@ -227,6 +227,7 @@ impl AgentAdapter for FakeAgentAdapter {
             main_thread: req.main_thread,
             next_seq: req.seed_seq,
             cwd: req.cwd,
+            git_branch: req.git_branch,
         })
     }
 
@@ -238,8 +239,8 @@ impl AgentAdapter for FakeAgentAdapter {
 /// A minimal functional [`AgentContentSource`] for the Codex actor tests: folds
 /// `UserPromptAccepted` / `AssistantMessage` into one canonical [`Message`] each,
 /// minting `seq` from `next_seq` (seeded by the adapter's `content_source`) and
-/// stamping the session's launch directory the way the real accumulator does, so
-/// a test can drive real conversation content through the event pump and assert
+/// stamping the session's launch site the way the real accumulator does, so a
+/// test can drive real conversation content through the event pump and assert
 /// persistence + sequencing. Everything else the real accumulator handles (tool
 /// pairing, turn grouping) is out of scope here.
 #[derive(Debug)]
@@ -250,6 +251,8 @@ struct FakeContentSource {
     /// The session's launch directory, stamped on every message (as the real
     /// accumulator does) so the plumbing is observable on persisted rows.
     cwd: String,
+    /// The branch observed in [`Self::cwd`] at bind time, stamped alongside it.
+    git_branch: Option<String>,
 }
 
 impl AgentContentSource for FakeContentSource {
@@ -289,11 +292,10 @@ impl AgentContentSource for FakeContentSource {
             content_text: Some(text.clone()),
             content: vec![ContentBlock::Text { text }],
             created_at: None,
-            // A real adapter also stamps what its provider reported about the
-            // session (model, branch); the fake reports neither, so only the
-            // launch directory is stamped here.
+            // A real adapter also stamps what its provider reported (the
+            // model); the fake reports none, so only the launch site is here.
             model: None,
-            git_branch: None,
+            git_branch: self.git_branch.clone(),
             cwd: Some(self.cwd.clone()),
             response_time_ms: None,
         };
