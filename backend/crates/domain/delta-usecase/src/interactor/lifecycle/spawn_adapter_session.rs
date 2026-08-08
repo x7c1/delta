@@ -37,8 +37,8 @@ use std::sync::Arc;
 use delta_model::{AgentProvider, MessageUuid, Send, Session, ThreadId};
 
 use crate::agent::{
-    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, LaunchOptionSpec, LaunchRequest,
-    ResumeRequest, SendRequest,
+    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, ContentSourceRequest, LaunchOptionSpec,
+    LaunchRequest, ResumeRequest, SendRequest,
 };
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
@@ -353,6 +353,13 @@ where
     ///   replayed/continued frames extend the existing history instead of
     ///   renumbering or duplicating it.
     ///
+    /// `cwd` is the session's launch directory as Delta resolved and recorded it
+    /// — the value both callers already hold (the fresh spawn its just-resolved
+    /// one, the resume the persisted row's). It is passed on to the content
+    /// accumulator, together with the branch observed in it here, so every
+    /// message reports where the agent is running; the model, which only the
+    /// provider knows, is the adapter's to add.
+    ///
     /// It holds the live adapter + handle in the runtime (so the connection stays
     /// up and the session reads as open, with no `OpenHandle` for the PTY bridge
     /// to attach to), then spawns the event pump that drains the adapter's
@@ -379,7 +386,7 @@ where
                 adapter
                     .launch(LaunchRequest {
                         session_id: session_id.as_str().to_owned(),
-                        workdir: cwd,
+                        workdir: cwd.clone(),
                         // The adapter renders these for its provider. A first
                         // prompt is delivered as its own turn (not on launch) so
                         // the send row completes at the `turn/start`
@@ -396,11 +403,22 @@ where
                     .resume(ResumeRequest {
                         session_id: session_id.as_str().to_owned(),
                         provider_session_id,
-                        workdir: cwd,
+                        workdir: cwd.clone(),
                     })
                     .await?
             }
         };
+
+        // Observe the branch of the launch directory, so every message this
+        // session persists reports the working tree it was produced against.
+        //
+        // This is observed here rather than read from the session row's
+        // `branch_at_launch`: that column is only filled on the worktree spawn
+        // path, so a session started in a plain git directory would report no
+        // branch at all despite obviously having one. Observing on every bind
+        // also keeps a resumed session honest, where the spawn-time snapshot
+        // could be stale.
+        let git_branch = self.observe_launch_branch(&cwd).await;
 
         // Represent the running session as open-without-pane: hold the live
         // adapter + handle so the connection stays up and the session reads as
@@ -410,12 +428,21 @@ where
             handle: handle.clone(),
         });
 
-        // Build the push-based content accumulator, seeded so minted ordering
-        // continues past whatever is already persisted.
+        // Build the push-based content accumulator: seeded so minted ordering
+        // continues past whatever is already persisted, and carrying the launch
+        // site so every message it folds reports where the agent is running. The
+        // adapter joins this with the fact only it knows (Codex: the model the
+        // server resolved, read off the thread's opening response), which is why
+        // it is handed the live handle too.
         self.state.set_agent_content_source(adapter.content_source(
-            session_id,
-            main_thread_id,
-            seed_seq,
+            &handle,
+            ContentSourceRequest {
+                session_id,
+                main_thread: main_thread_id,
+                seed_seq,
+                cwd,
+                git_branch,
+            },
         ));
 
         // Spawn the event pump. Adapter frames arrive after the send that
@@ -428,6 +455,39 @@ where
         );
 
         Ok((adapter, handle))
+    }
+
+    /// The git branch checked out in an adapter-backed session's launch
+    /// directory, for stamping on the messages it produces.
+    ///
+    /// Delta observes this itself because no adapter-backed provider reports it.
+    /// Codex's `thread/start` response *declares* a `thread.gitInfo` — the schema
+    /// even documents it as "captured when the thread was created" — but the real
+    /// server returns it as `null` there (verified against `codex-cli 0.144.4`),
+    /// so waiting for the provider to report a branch means never reporting one.
+    /// Asking git about a directory Delta itself chose is not reconstructing a
+    /// provider fact; it is Delta reporting what it observed about its own launch
+    /// site.
+    ///
+    /// A git failure is **not** fatal: `None` is already the honest answer for a
+    /// directory that is not a git working tree or has a detached HEAD, so a
+    /// broken or missing `git` degrades to the same absent metadata rather than
+    /// failing a session the user asked for. It is logged, because "no branch
+    /// shown" caused by a broken git should be diagnosable rather than silent.
+    async fn observe_launch_branch(&self, cwd: &str) -> Option<String> {
+        match self.git_worktree.current_branch(cwd).await {
+            Ok(branch) => branch,
+            Err(err) => {
+                tracing::warn!(
+                    session_id = %self.id,
+                    cwd = %cwd,
+                    error = %err,
+                    "could not observe the launch directory's git branch; \
+                     the session's messages will report no branch"
+                );
+                None
+            }
+        }
     }
 
     /// Reconnect a **closed** adapter-backed session by resuming its provider
@@ -454,6 +514,15 @@ where
     /// is nothing to replay. This matches the Claude path, where a resume is
     /// `claude --settings … --resume <id>` with none of the launch flags the
     /// original spawn carried.
+    ///
+    /// The session's **metadata is still reported after a resume**, and is
+    /// re-established rather than remembered: the launch directory comes from the
+    /// persisted row (which outlives the restart by definition), its branch is
+    /// re-observed by the shared bind path, and the model comes from the
+    /// `thread/resume` response — which carries the same required top-level
+    /// `model` as `thread/start`, so the reattached thread re-announces what it
+    /// is running. Nothing about a resumed session's metadata degrades relative
+    /// to a fresh one.
     ///
     /// The caller resolves `factory` through the registry
     /// ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory))

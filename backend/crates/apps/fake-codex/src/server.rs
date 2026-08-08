@@ -80,6 +80,18 @@ struct PendingTurn {
 }
 
 impl Server<'_> {
+    /// The body a `thread/start` / `thread/resume` response shares: the thread
+    /// alongside the resolved `model`.
+    ///
+    /// Deliberately carries NO `thread.gitInfo`. The schema declares the field,
+    /// but the real `codex app-server` returns it as null on both responses
+    /// (verified against `codex-cli 0.144.4`), so re-enacting it populated here
+    /// would let Delta green-light a source of truth the real server never
+    /// provides. Delta observes its launch directory's branch itself instead.
+    fn thread_response(&self, thread_id: &str) -> Value {
+        json!({ "thread": { "id": thread_id }, "model": self.scenario.model })
+    }
+
     /// Dispatch one incoming frame by its JSON-RPC shape.
     fn handle(&mut self, frame: Value) -> Result<(), String> {
         let id = frame.get("id").cloned();
@@ -143,8 +155,12 @@ impl Server<'_> {
                 // answer. Real `thread/start` returns the started thread under
                 // `result.thread` (a `Thread`, whose `id` is the thread id).
                 append_record(self.thread_start_log.as_deref(), params, "thread start log")?;
-                let thread_id = self.scenario.thread_id.clone();
-                self.respond(id, json!({ "thread": { "id": thread_id } }))
+                // The response also announces what the server decided: the real
+                // `ThreadStartResponse` requires a top-level `model`. The
+                // scenario's model is answered verbatim, *ignoring* any `model`
+                // the client sent — which is how a real server behaves when the
+                // user's config or its own default wins.
+                self.respond(id, self.thread_response(&self.scenario.thread_id.clone()))
             }
             "thread/resume" => {
                 // Resume echoes back the requested thread id (a real server
@@ -155,7 +171,10 @@ impl Server<'_> {
                     .and_then(Value::as_str)
                     .unwrap_or(&self.scenario.thread_id)
                     .to_owned();
-                self.respond(id, json!({ "thread": { "id": thread_id } }))
+                // `ThreadResumeResponse` carries the same top-level `model` as
+                // the start response, so a resumed thread reports what it is
+                // running just like a fresh one.
+                self.respond(id, self.thread_response(&thread_id))
             }
             "thread/inject_items" => {
                 // Hidden per-turn context: the client appends Responses API

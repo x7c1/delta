@@ -108,7 +108,7 @@ e2e-real:
 e2e-real-auto:
 	scripts/e2e-real-auto.sh
 
-## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + schema drift detection (local only; the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
+## e2e-real-codex: run the real-codex canaries against the real `codex app-server` — one safe turn end-to-end + the thread-metadata wire fields + schema drift detection (local only; only the turn consumes Codex quota; never in CI). DELTA_CODEX_BIN overrides the binary.
 .PHONY: e2e-real-codex
 e2e-real-codex:
 	cd backend && cargo test -p codex-agent --test real_codex_canary -- --ignored --test-threads=1 --nocapture

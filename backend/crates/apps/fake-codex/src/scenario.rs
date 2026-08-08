@@ -31,6 +31,9 @@
 //! - `thread_id` (default `"thr_fake_0001"`): the id returned from
 //!   `thread/start` and stamped into every emitted notification's
 //!   `params.threadId` (unless the `turn/start` request itself named a thread).
+//! - `model` (default `"fake-codex-model"`): the model reported as the
+//!   `thread/start` / `thread/resume` response's top-level `model` — the model
+//!   the server *resolved* for the thread, whatever the client asked for.
 //! - `turn` (optional): what a `turn/start` request plays. When absent, a
 //!   `turn/start` still gets a response but emits nothing.
 //!
@@ -71,6 +74,10 @@ use serde_json::{json, Value};
 pub const DEFAULT_APPROVAL_METHOD: &str = "item/commandExecution/requestApproval";
 /// The default thread id when a scenario does not name one.
 pub const DEFAULT_THREAD_ID: &str = "thr_fake_0001";
+/// The default resolved model when a scenario does not name one. Deliberately
+/// unlike any real model name, so a value that leaks into an assertion is
+/// obviously the fake's.
+pub const DEFAULT_MODEL: &str = "fake-codex-model";
 
 /// One scripted emission played during a turn. See the module docs.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -142,6 +149,14 @@ pub struct Scenario {
     /// The id returned from `thread/start` and stamped into notifications.
     #[serde(default = "default_thread_id")]
     pub thread_id: String,
+    /// The model reported as the top-level `model` of the `thread/start` /
+    /// `thread/resume` response — what the server *resolved* for the thread,
+    /// which a real `codex app-server` decides from the request, the user's
+    /// config and its own default. A scenario names a distinctive value so a
+    /// test can prove the client reports the server's answer rather than
+    /// echoing what it asked for.
+    #[serde(default = "default_model")]
+    pub model: String,
     /// What a `turn/start` plays (nothing beyond a response when absent). Used
     /// when [`Self::turns`] is empty; the same turn is replayed on every
     /// `turn/start` (its ids are therefore reused across turns).
@@ -163,6 +178,10 @@ fn default_server_info() -> Value {
 
 fn default_thread_id() -> String {
     DEFAULT_THREAD_ID.to_owned()
+}
+
+fn default_model() -> String {
+    DEFAULT_MODEL.to_owned()
 }
 
 impl Scenario {
@@ -201,6 +220,7 @@ impl Scenario {
         Self {
             server_info: default_server_info(),
             thread_id: DEFAULT_THREAD_ID.to_owned(),
+            model: DEFAULT_MODEL.to_owned(),
             turn: Some(Turn {
                 turn_id: default_turn_id(),
                 emit: vec![
