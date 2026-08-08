@@ -10,7 +10,11 @@ import {
 } from './claudeFormat';
 import { MessageMeta } from './MessageMeta';
 import { MessageTimestamp } from './MessageTimestamp';
-import { messageRendersNothing, type ToolPairing } from './toolPairs';
+import {
+  messageRendersNothing,
+  messageRendersProse,
+  type ToolPairing,
+} from './toolPairs';
 
 export interface MessageItemProps {
   message: Message;
@@ -38,7 +42,9 @@ export interface MessageItemProps {
  * Assistant text is Markdown-rendered; user text is rendered verbatim so
  * newlines and any Markdown-like characters the user typed are preserved as
  * plain text. `thinking` and tool blocks are collapsed by default with a
- * one-line summary. Selecting a text range emits the quote for branching.
+ * one-line summary; a message that renders only such cards — a tool turn, or a
+ * reasoning message a provider delivers on its own — is laid out bare, without
+ * the prose bubble. Selecting a text range emits the quote for branching.
  *
  * Claude's transcript delivers tool results as `role: "user"` lines, so a
  * user-role message that carries no human-authored text is a tool-result
@@ -344,13 +350,16 @@ export const MessageItem = memo(function MessageItem({
     );
   }
 
-  // Assistant prose gets a tinted rounded bubble, in a different hue from the
-  // user's bubble so the two sides are easy to tell apart. Tool turns and
-  // tool-result carriers keep their own Collapsible cards instead — wrapping a
-  // bubble around those would nest a box inside a box.
-  const inBubble = !message.content.some(
-    (block) => block.type === 'tool_use' || block.type === 'tool_result',
-  );
+  // The bubble is the container for prose, so it goes to a message that renders
+  // prose — in a different hue from the user's bubble so the two sides are easy
+  // to tell apart. A message that renders only standalone cards is machine
+  // activity rather than speech and keeps those cards bare: a tool turn, a
+  // tool-result carrier, or a reasoning message a provider delivers on its own.
+  // Asking about the rendered *shape* (see `messageRendersProse`) rather than
+  // listing the block types that happen to render as cards today is what keeps
+  // the next such kind from silently landing in a bubble, which would nest a box
+  // inside a box.
+  const inBubble = messageRendersProse(message, pairing);
   return (
     <article
       className="px-3 text-body"
@@ -359,7 +368,10 @@ export const MessageItem = memo(function MessageItem({
       data-testid="message-item"
     >
       {inBubble ? (
-        <div className="rounded-lg bg-surface-elevated px-3 py-2 text-fg">
+        <div
+          className="rounded-lg bg-surface-elevated px-3 py-2 text-fg"
+          data-prose-bubble="true"
+        >
           {blocks}
         </div>
       ) : (

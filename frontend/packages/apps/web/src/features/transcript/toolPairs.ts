@@ -32,23 +32,43 @@ export function buildToolPairing(messages: Message[]): ToolPairing {
   return { resultByUseId, toolUseIds };
 }
 
-/** Whether a single content block renders to nothing on its own. */
-function blockRendersNothing(
+/**
+ * The shape a content block takes on screen. This is the one place that knows
+ * how each block kind renders, so layout decisions can ask about the *shape*
+ * rather than re-listing block types — a list that silently goes stale every
+ * time a new kind is added.
+ *
+ * - `prose` — flows inline as the message's own words (assistant Markdown, or
+ *   verbatim user text).
+ * - `annotation` — a card that belongs to the surrounding prose turn rather than
+ *   standing on its own: the model's thinking, which is part of the same
+ *   utterance as the reply it accompanies.
+ * - `card` — a standalone bordered card that *is* the message's substance rather
+ *   than something the message says: tool activity, or a block kind this build
+ *   cannot render.
+ * - `nothing` — produces no output at all.
+ */
+export type BlockRendering = 'prose' | 'annotation' | 'card' | 'nothing';
+
+/** How a single content block renders. */
+function blockRendering(
   block: ContentBlock,
   pairing: ToolPairing | undefined,
-): boolean {
+): BlockRendering {
   switch (block.type) {
+    case 'text':
+      return 'prose';
     case 'thinking':
       // Claude Code records a signed reference for thinking but leaves the
       // plaintext empty, so an empty thinking block renders nothing.
-      return block.thinking.trim() === '';
+      return block.thinking.trim() === '' ? 'nothing' : 'annotation';
     case 'tool_result':
       // A result paired to a visible call is shown inline with that call; with
-      // no pairing it is treated as an orphan and rendered, so it is not nothing.
-      return pairing?.toolUseIds.has(block.tool_use_id) ?? false;
-    default:
-      // text, tool_use, and any other block always render something.
-      return false;
+      // no pairing it is treated as an orphan and rendered as its own card.
+      return pairing?.toolUseIds.has(block.tool_use_id) ? 'nothing' : 'card';
+    case 'tool_use':
+    case 'other':
+      return 'card';
   }
 }
 
@@ -64,5 +84,31 @@ export function messageRendersNothing(
   message: Message,
   pairing: ToolPairing | undefined,
 ): boolean {
-  return message.content.every((block) => blockRendersNothing(block, pairing));
+  return message.content.every(
+    (block) => blockRendering(block, pairing) === 'nothing',
+  );
+}
+
+/**
+ * True when what a message renders is prose — words it says — rather than
+ * standalone cards.
+ *
+ * This is what decides whether the message is laid out inside the speech
+ * bubble. The bubble is the container for prose, so it is earned by rendering
+ * prose and lost by rendering anything that stands on its own: a message that
+ * is only cards is machine activity, not speech, and wrapping a bubble around a
+ * card would nest a box inside a box. An `annotation` (the model's thinking) is
+ * part of the surrounding utterance, so it sits *inside* the bubble a reply
+ * earns without earning one on its own — which is why a Claude reply carrying
+ * both text and thinking keeps its bubble while a standalone reasoning message
+ * (Codex delivers reasoning as its own message) does not.
+ */
+export function messageRendersProse(
+  message: Message,
+  pairing: ToolPairing | undefined,
+): boolean {
+  const renderings = message.content.map((block) =>
+    blockRendering(block, pairing),
+  );
+  return renderings.includes('prose') && !renderings.includes('card');
 }

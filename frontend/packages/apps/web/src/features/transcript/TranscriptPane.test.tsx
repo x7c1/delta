@@ -786,6 +786,113 @@ describe('TranscriptPane', () => {
     expect(proseBlock?.className).not.toContain('ml-6');
   });
 
+  it('nests a reasoning message with the tool cards and leaves a prose reply at full width', async () => {
+    // The nesting decision is driven by the shape a message renders as, not by a
+    // list of tool block types: a message whose only block is the model's
+    // reasoning renders as a card, so it must read as a nested step exactly like
+    // a tool row. Asserted here, at the layer that applies the class — the block
+    // wrapper belongs to this component, so a message-level test cannot see it.
+    // (The task-notification, meta and unknown-command asides keep their own
+    // nesting coverage in the tests above; they carry prose and nest by
+    // category, not by shape.)
+    server.use(
+      http.get('*/api/threads/:id/messages', () => {
+        const body: MessagesResponse = {
+          messages: [
+            {
+              uuid: 'm-reply',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'assistant',
+              linear_parent_uuid: null,
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 0,
+              content_text: 'the answer',
+              content: [{ type: 'text', text: 'the answer' }],
+              created_at: '2026-01-01T00:00:01Z',
+            },
+            {
+              uuid: 'm-reasoning',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'assistant',
+              linear_parent_uuid: 'm-reply',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 1,
+              content_text: 'weighing the options',
+              content: [{ type: 'thinking', thinking: 'weighing the options' }],
+              created_at: '2026-01-01T00:00:02Z',
+            },
+            {
+              uuid: 'm-tool',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'assistant',
+              linear_parent_uuid: 'm-reasoning',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 2,
+              content_text: null,
+              content: [
+                { type: 'tool_use', id: 't1', name: 'Bash', input: {} },
+              ],
+              created_at: '2026-01-01T00:00:03Z',
+            },
+            {
+              uuid: 'm-reply-with-tool',
+              session_id: 's',
+              thread_id: MAIN_THREAD_ID,
+              role: 'assistant',
+              linear_parent_uuid: 'm-tool',
+              semantic_parent_uuid: null,
+              prompt_id: null,
+              seq: 3,
+              content_text: 'running it now',
+              content: [
+                { type: 'text', text: 'running it now' },
+                { type: 'tool_use', id: 't2', name: 'Bash', input: {} },
+              ],
+              created_at: '2026-01-01T00:00:04Z',
+            },
+          ],
+        };
+        return HttpResponse.json(body);
+      }),
+    );
+
+    renderPane();
+
+    const blockOf = async (uuid: string) => {
+      const item = await waitFor(() => {
+        const el = document.querySelector(`[data-message-uuid="${uuid}"]`);
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      return item.parentElement!;
+    };
+
+    // The reasoning message is a nested step: left-indented and tightened —
+    // byte-for-byte the layout the tool row beside it gets.
+    const reasoning = await blockOf('m-reasoning');
+    const tool = await blockOf('m-tool');
+    expect(reasoning.className).toContain('ml-6');
+    expect(reasoning.className).toContain('pt-0.5');
+    expect(reasoning.className).toContain('pb-0.5');
+    expect(reasoning.className).toBe(tool.className);
+
+    // A prose reply keeps the full-width prose layout.
+    const reply = await blockOf('m-reply');
+    expect(reply.className).not.toContain('ml-6');
+    expect(reply.className).not.toContain('pt-0.5');
+
+    // A reply that also carries a tool call still nests (regression guard: it
+    // nested before via the tool-block check and must keep doing so).
+    const replyWithTool = await blockOf('m-reply-with-tool');
+    expect(replyWithTool.className).toContain('ml-6');
+  });
+
   it('drops the composer and shows the cannot-resume notice for a resume-unavailable session', async () => {
     // A session whose transcript is gone can never be resumed, so every send or
     // branch would just fail: the input is removed entirely and the session is a

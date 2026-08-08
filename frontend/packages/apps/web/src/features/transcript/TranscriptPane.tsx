@@ -40,7 +40,11 @@ import { SubagentRunningIndicator } from './SubagentRunningIndicator';
 import { ThreadTimelineOverlay } from './ThreadTimelineOverlay';
 import { useTimelineExpanded } from './useTimelineExpanded';
 import { childThreadsByMessage } from './branches';
-import { buildToolPairing, messageRendersNothing } from './toolPairs';
+import {
+  buildToolPairing,
+  messageRendersNothing,
+  messageRendersProse,
+} from './toolPairs';
 import { persistedHasStreamedText } from './streamingHandoff';
 import {
   clearBranchHighlight,
@@ -1501,22 +1505,28 @@ export function TranscriptPane({
 
       {renderedMessages.map((message) => {
         const children = childMap.get(message.uuid) ?? [];
-        // A "tool" message renders as a Collapsible card: an assistant tool call
-        // (`tool_use`) or a standalone tool result (`tool_result` — paired
-        // results are already dropped as empty-rendering, so any that survive are
-        // orphans Claude delivers as `role: user`). The check comes before the
-        // user/prose split so an orphan tool_result is treated as a tool card,
-        // not a user turn.
-        const isToolTurn = message.content.some(
-          (block) => block.type === 'tool_use' || block.type === 'tool_result',
-        );
-        // Tool rows, the harness-injected task-notification card (a collapsed
-        // `<task-notification>` user turn), meta lines, and the unknown-command
-        // system notice all render as nested aside cards: they are tightened and
-        // left-indented so they read as nested steps, distinct from prose — the
-        // notice is a system aside, not the agent's reply.
+        // A nested aside card is tightened and left-indented so it reads as a
+        // nested step rather than prose. Two independent things make a message
+        // one, and they are kept separate on purpose.
+        //
+        // Its *shape*: it renders only standalone cards, never prose — an
+        // assistant tool call (`tool_use`), an orphan tool result (`tool_result`;
+        // paired results are already dropped as empty-rendering, so any that
+        // survive are orphans Claude delivers as `role: user`), or the model's
+        // reasoning when a provider delivers it as its own message. This is the
+        // same `messageRendersProse` question `MessageItem` asks for the prose
+        // bubble, so the indent, the tightened gaps and the bubble cannot
+        // disagree, and a new card-rendering block kind is covered everywhere at
+        // once. It is asked before the user/prose split, so an orphan
+        // tool_result is treated as a card rather than a user turn.
+        //
+        // Its *category*: the harness-injected task-notification card (a
+        // collapsed `<task-notification>` user turn), meta lines, and the
+        // unknown-command system notice all carry prose yet are still asides —
+        // the notice is a system aside, not the agent's reply. These are semantic
+        // categories rather than rendering shapes, so they stay explicit terms.
         const isNestedCard =
-          isToolTurn ||
+          !messageRendersProse(message, pairing) ||
           isTaskNotificationMessage(message) ||
           message.role === 'meta' ||
           isUnknownCommandNoticeMessage(message);

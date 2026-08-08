@@ -227,6 +227,20 @@ enum GoldenEvent {
         provider_item_id: String,
         text: String,
     },
+    /// Mirrors [`AgentEvent::ThinkingDelta`]. Unreachable from this seam — Claude
+    /// never emits it (its thinking arrives already folded into the transcript's
+    /// message content) — but mapped so the exhaustive match keeps compiling and
+    /// a future Claude thinking projection cannot slip in ungoldened.
+    ThinkingDelta {
+        provider_item_id: String,
+        text: String,
+    },
+    /// Mirrors [`AgentEvent::ThinkingMessage`]. Unreachable from this seam, for
+    /// the same reason as [`GoldenEvent::ThinkingDelta`].
+    ThinkingMessage {
+        provider_item_id: String,
+        text: String,
+    },
     ToolStarted {
         provider_item_id: String,
         name: String,
@@ -300,6 +314,21 @@ impl From<&AgentEvent> for GoldenEvent {
                 text,
                 at_ms: _,
             } => GoldenEvent::AssistantMessage {
+                provider_item_id: provider_item_id.clone(),
+                text: text.clone(),
+            },
+            AgentEvent::ThinkingDelta {
+                provider_item_id,
+                text,
+            } => GoldenEvent::ThinkingDelta {
+                provider_item_id: provider_item_id.clone(),
+                text: text.clone(),
+            },
+            AgentEvent::ThinkingMessage {
+                provider_item_id,
+                text,
+                at_ms: _,
+            } => GoldenEvent::ThinkingMessage {
                 provider_item_id: provider_item_id.clone(),
                 text: text.clone(),
             },

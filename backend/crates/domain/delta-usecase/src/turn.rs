@@ -607,6 +607,15 @@ mod agent_event_mapping_tests {
                 text: "msg".to_owned(),
                 at_ms: None,
             },
+            AgentEvent::ThinkingDelta {
+                provider_item_id: "item".to_owned(),
+                text: "frag".to_owned(),
+            },
+            AgentEvent::ThinkingMessage {
+                provider_item_id: "item".to_owned(),
+                text: "reasoning".to_owned(),
+                at_ms: None,
+            },
             AgentEvent::ToolStarted {
                 provider_item_id: "item".to_owned(),
                 name: "tool".to_owned(),
