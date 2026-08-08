@@ -57,10 +57,10 @@ use ingest::{
 use delta_usecase::{
     pane_for, AgentAdapter, AgentCapabilities, AgentEvent, AgentEventStream, AgentProvider,
     AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
-    InterruptCapability, LaunchCapability, LaunchRequest, PaneTokenMinter, PermissionCapability,
-    PtyHandle, Result, ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
-    SessionIdentityCapability, SteerCapability, TerminalCapability, TmuxDriver,
-    TranscriptCapability,
+    InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest, PaneTokenMinter,
+    PermissionCapability, PtyHandle, Result, ResumeCapability, ResumeRequest, SendReceipt,
+    SendRequest, SessionEndReason, SessionIdentityCapability, SteerCapability, TerminalCapability,
+    TmuxDriver, TranscriptCapability,
 };
 
 /// Claude's static capability profile — the single source of truth returned by
@@ -291,7 +291,15 @@ impl<T: TmuxDriver> AgentAdapter for ClaudeCodePtyHookAdapter<T> {
             SESSION_ID_FLAG.to_owned(),
             req.session_id.clone(),
         ];
-        command.extend(req.extra_args);
+        // The user's selected launch options, rendered as argv: Claude reads a
+        // launch option's `name` as a CLI flag and its `value` as that flag's
+        // argument. They sit after Delta's own flags and before the positional
+        // prompt, so the prompt stays the last argument `claude` auto-submits.
+        command.extend(
+            req.launch_options
+                .iter()
+                .flat_map(LaunchOptionSpec::to_argv),
+        );
         // A first prompt rides the launch command line as a trailing positional
         // argument, which `claude` auto-submits at startup (matching the core's
         // spawn path).

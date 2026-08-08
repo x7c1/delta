@@ -2,8 +2,8 @@
 //! reconciliation, run against the REAL `codex app-server` binary (not the
 //! `fake-codex` re-enactment every other test drives).
 //!
-//! Two canaries live here, both `#[ignore]` so neither runs under a bare
-//! `cargo test` or in CI (see "Why both are `#[ignore]`" below):
+//! Three canaries live here, all `#[ignore]` so none runs under a bare
+//! `cargo test` or in CI (see "Why they are all `#[ignore]`" below):
 //!
 //! 1. [`real_codex_completes_a_safe_turn_end_to_end`] — drives Delta's REAL
 //!    [`CodexAppServerAdapter`] (stood up by the REAL [`CodexAdapterFactory`],
@@ -16,7 +16,14 @@
 //!    cheap. Needs the real binary + auth + network; consumes a tiny amount of
 //!    the authenticated user's Codex quota.
 //!
-//! 2. [`vendored_schema_matches_the_real_generator`] — regenerates the schema
+//! 2. [`real_thread_start_reports_the_metadata_delta_stamps_on_messages`] —
+//!    starts one thread in this checkout (NO turn, so no model quota) and pins
+//!    what `thread/start` really reports: the top-level `model` is present, the
+//!    `cwd` is echoed back verbatim, and `thread.gitInfo` is **null** despite the
+//!    schema declaring it — which is why Delta observes its launch directory's
+//!    branch itself. Needs the real binary + auth; no turn is run.
+//!
+//! 3. [`vendored_schema_matches_the_real_generator`] — regenerates the schema
 //!    with `codex app-server generate-json-schema` (a static dump: NO auth, NO
 //!    network) and compares it against the vendored ground truth under
 //!    `vendor/app-server-schema/`, failing loudly if the real generator's
@@ -24,20 +31,34 @@
 //!    guard that a `codex` upgrade which moves the protocol is caught rather
 //!    than silently drifting the `fake-codex` re-enactment green.
 //!
-//! ## Why both are `#[ignore]`
+//! ## Why they are all `#[ignore]`
 //!
 //! Delta's existing real-binary lane (the real-`claude` canaries in
 //! `delta-server/tests/real_claude_canary.rs`) is `#[ignore]` for exactly this
 //! reason: CI runners have no provider binary (and no auth), so a
 //! presence-gated test would only ever skip there while making the local
 //! `make check` gate non-hermetic — its result would depend on which `codex`
-//! version happens to be installed on the developer's host. Keeping BOTH
-//! canaries `#[ignore]` keeps the normal gate hermetic and offline, and makes
+//! version happens to be installed on the developer's host. Keeping EVERY
+//! canary `#[ignore]` keeps the normal gate hermetic and offline, and makes
 //! the real-binary lane a single explicit opt-in, mirroring `make e2e-real`.
 //!
 //! The drift canary needs only the binary (no auth/network), so it *could*
 //! have been presence-gated; it is `#[ignore]` anyway, for the hermeticity
 //! reason above and so one command runs the whole real-`codex` lane.
+//!
+//! ## Being `#[ignore]`d, they must be run deliberately
+//!
+//! Nothing in `make check` or CI runs these, so an assumption about the wire can
+//! be wrong for as long as nobody types the command. That is not hypothetical:
+//! Delta once sourced a message's `git_branch` from `thread.gitInfo` — a field
+//! the vendored schema declares and documents — and shipped permanently blank
+//! branches, because the real server returns it null and no one had run the
+//! canary that would have said so.
+//!
+//! So: **run `make e2e-real-codex` whenever a change depends on what the real
+//! server sends or returns**, not only when `codex` is upgraded. A schema field's
+//! existence is not evidence that a given response populates it; this lane is how
+//! that difference gets checked.
 //!
 //! ## Running them
 //!
@@ -51,7 +72,7 @@
 //! `DELTA_CODEX_BIN` overrides the binary (default: `codex` on PATH), matching
 //! `DELTA_CLAUDE_BIN` in the real-`claude` lane.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -60,12 +81,12 @@ use codex_agent::schema::{
     COMBINED_SERVER_REQUEST_SCHEMA_RELATIVE_PATH, V2_COMBINED_SCHEMA_RELATIVE_PATH,
     VENDORED_CODEX_VERSION,
 };
-use codex_agent::{CodexAdapterFactory, CodexLaunchConfig};
+use codex_agent::{AppServerConnection, CodexAdapterFactory, CodexLaunchConfig};
 use delta_usecase::{
-    AgentAdapter, AgentAdapterFactory, AgentEvent, AgentEventStream, LaunchRequest, SendRequest,
-    TurnStatus,
+    AgentAdapter, AgentAdapterFactory, AgentEvent, AgentEventStream, ContentSourceRequest,
+    LaunchRequest, SendRequest, SessionId, ThreadId, TurnStatus,
 };
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio::time::timeout;
 
 /// The `codex` binary the canaries drive: `DELTA_CODEX_BIN` if set, else the
@@ -176,12 +197,41 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
         .launch(LaunchRequest {
             session_id: "01920000-0000-7000-8000-0000000000c4".to_owned(),
             workdir: cwd.as_str(),
-            extra_args: Vec::new(),
+            launch_options: Vec::new(),
             first_prompt: None,
         })
         .await
         .expect("launch a real Codex thread");
     let mut stream = adapter.events(&handle);
+
+    // The metadata plumbing works against the real server: what the adapter
+    // recorded from the real `thread/start` response reaches a folded message.
+    // (Canary 3 checks the wire fields themselves; this checks that they travel
+    // the whole adapter -> content-source path.) The model value is not pinned —
+    // which model the account resolves to is not Delta's business — only that it
+    // is reported at all.
+    let mut content = adapter.content_source(
+        &handle,
+        ContentSourceRequest {
+            session_id: SessionId::from("01920000-0000-7000-8000-0000000000c4"),
+            main_thread: ThreadId(1),
+            seed_seq: 0,
+            cwd: cwd.as_str(),
+            git_branch: None,
+        },
+    );
+    let (probe, _) = content.ingest(&AgentEvent::AssistantMessage {
+        provider_item_id: "probe".to_owned(),
+        text: "probe".to_owned(),
+        at_ms: None,
+    });
+    let reported_model = probe[0].model.clone();
+    assert!(
+        reported_model
+            .as_deref()
+            .is_some_and(|model| !model.is_empty()),
+        "the real thread/start response must report the resolved model, got {reported_model:?}"
+    );
 
     // Drain the opening SessionStarted so the turn assertions start clean.
     match timeout(TURN_TIMEOUT, stream.recv()).await {
@@ -269,6 +319,128 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
 
     // Close the session cleanly.
     adapter.close(&handle).await.expect("close the session");
+}
+
+// --- Canary 3: the thread-metadata wire fields -----------------------------
+
+/// The `thread/start` response fields Delta reads a session's message metadata
+/// from behave as Delta assumes — checked against the live binary rather than
+/// inferred from the vendored schema.
+///
+/// Delta stamps three facts on every Codex message, from two different sources,
+/// and each rests on a claim about this one response:
+///
+/// 1. **`model`** — a required top-level string, and the only truthful source
+///    for what is running, since the server reconciles the launch option, the
+///    user's config and its own default. Asserted present.
+/// 2. **`cwd`** — echoed back verbatim. Delta does NOT read the message `cwd`
+///    from here (it keeps its own recorded launch directory, the string its
+///    repo-root / requested-workdir columns are stored against), but the two are
+///    supposed to describe the same place. Asserting the echo is verbatim keeps
+///    that decision a preference rather than a papered-over divergence.
+/// 3. **`thread.gitInfo`** — asserted **null**, which is the opposite of what
+///    the schema suggests.
+///
+/// That third assertion is the interesting one. `Thread.gitInfo` is declared as
+/// `GitInfo | null` and documented as "Optional Git metadata captured when the
+/// thread was created", which reads like a populated field. It is not: as of
+/// `codex-cli 0.144.4` the real server returns `gitInfo: null` on `thread/start`
+/// even when `cwd` is a git working tree on a named branch. The declared value
+/// is evidently materialised on some other read path, not this response.
+///
+/// Delta briefly sourced a message's `git_branch` from it and shipped sessions
+/// with a permanently empty branch as a result. It now observes its own launch
+/// directory's branch instead, and this canary pins the reason: if a future
+/// release starts populating `gitInfo` here, this fails and someone can revisit
+/// the choice deliberately — rather than the schema being re-read as evidence a
+/// second time.
+///
+/// No turn is started, so unlike canary 1 this consumes no model quota — it is
+/// one `thread/start` against the real server.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "drives the real codex app-server: needs the binary + auth, consumes no model quota"]
+async fn real_thread_start_reports_the_metadata_delta_stamps_on_messages() {
+    // Start the thread in this checkout: a real git working tree, so the server
+    // would have real git metadata to report if this response reported any.
+    // Nothing is executed in it — only a thread record is created.
+    let repo_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let git_branch = git_branch_of(&repo_dir);
+    let cwd = repo_dir.to_string_lossy().into_owned();
+
+    let conn = AppServerConnection::spawn(&CodexLaunchConfig {
+        codex_bin: codex_bin(),
+        args: vec!["app-server".to_owned()],
+        env: vec![],
+    })
+    .expect("spawn the real codex app-server");
+    conn.initialize(json!({
+        "clientInfo": { "name": "delta", "version": env!("CARGO_PKG_VERSION") }
+    }))
+    .await
+    .expect("initialize handshake");
+
+    let started = conn
+        .start_thread(Some(json!({ "cwd": cwd })))
+        .await
+        .expect("start a real thread");
+    let result = &started.result;
+
+    // 1. The model is reported. The value is not pinned — which model the
+    //    account resolves to is not Delta's business — only that it is there.
+    let model = result.get("model").and_then(Value::as_str);
+    assert!(
+        model.is_some_and(|model| !model.is_empty()),
+        "thread/start must report the resolved model at the top level, got {result}"
+    );
+
+    // 2. The cwd comes back verbatim, so Delta's recorded launch directory and
+    //    the thread's own cwd describe the same place with the same spelling.
+    assert_eq!(
+        result.get("cwd").and_then(Value::as_str),
+        Some(cwd.as_str()),
+        "thread/start must echo the cwd it was given, got {result}"
+    );
+
+    // 3. `gitInfo` is null even though `cwd` is a git working tree — the pin that
+    //    keeps Delta observing the branch itself. Only meaningful when git agrees
+    //    this directory really is on a branch, so the "the server had something
+    //    to report and still reported nothing" reading holds.
+    let git_info = result
+        .get("thread")
+        .and_then(|thread| thread.get("gitInfo"));
+    match git_branch {
+        Some(branch) => assert!(
+            matches!(git_info, None | Some(Value::Null)),
+            "thread/start is expected to report NO git metadata (as of \
+             codex-cli {VENDORED_CODEX_VERSION}), yet it reported {git_info:?} while git says \
+             this cwd is on `{branch}`. If the server now populates gitInfo, Delta \
+             could source a message's git_branch from it instead of observing the \
+             launch directory itself — revisit deliberately. Full response: {result}"
+        ),
+        // No git in PATH, or this checkout is not a working tree (a tarball, a
+        // detached HEAD): the server having nothing to report would be correct,
+        // so the pin says nothing.
+        None => eprintln!(
+            "skipped the gitInfo pin: git reported no branch for {cwd}; \
+             the server said {git_info:?}"
+        ),
+    }
+}
+
+/// The branch `git` reports for `dir`, or `None` when git is unavailable, `dir`
+/// is not a working tree, or HEAD is detached — the same three cases in which
+/// Delta expects no branch to be reported.
+fn git_branch_of(dir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    (!branch.is_empty() && branch != "HEAD").then_some(branch)
 }
 
 // --- Canary 2: schema drift detection --------------------------------------

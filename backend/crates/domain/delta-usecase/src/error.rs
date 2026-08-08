@@ -89,6 +89,17 @@ pub enum Error {
     #[error("agent error: {0}")]
     Agent(String),
 
+    /// A selected launch option cannot be applied to the session being started:
+    /// it names a field the provider's adapter reserves for Delta, or the same
+    /// field twice. Reported by a gateway adapter as it renders the launch
+    /// request for its provider. Surfaced as `400` — the request named a
+    /// selection the server will not honour, and the message says which one, so
+    /// the user can fix the registry entry (a silent drop or a silent override
+    /// would leave them debugging an agent that ignored their setting, or worse,
+    /// one running somewhere Delta did not record).
+    #[error("launch option rejected: {0}")]
+    LaunchOptionRejected(String),
+
     /// A worktree was requested for a fresh session, but the selected working
     /// directory is not inside a git repository. The caller named a directory
     /// that cannot host a worktree, so this is surfaced as `400`.

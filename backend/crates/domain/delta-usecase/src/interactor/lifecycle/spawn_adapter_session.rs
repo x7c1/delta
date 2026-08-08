@@ -37,8 +37,8 @@ use std::sync::Arc;
 use delta_model::{AgentProvider, MessageUuid, Send, Session, ThreadId};
 
 use crate::agent::{
-    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, LaunchRequest, ResumeRequest,
-    SendRequest,
+    AgentAdapter, AgentAdapterFactory, AgentSessionHandle, ContentSourceRequest, LaunchOptionSpec,
+    LaunchRequest, ResumeRequest, SendRequest,
 };
 use crate::error::{Error, Result};
 use crate::interactor::session_actor::actor::SessionContext;
@@ -54,8 +54,13 @@ use super::FreshSpawn;
 /// provider thread. The single difference the shared
 /// [`SessionContext::bind_adapter_agent`] branches on.
 enum AdapterBind {
-    /// A fresh spawn: start a new provider thread (`adapter.launch`).
-    Launch,
+    /// A fresh spawn: start a new provider thread (`adapter.launch`), carrying
+    /// the launch options the user selected for it. Only a fresh thread takes
+    /// them — see [`SessionContext::resume_adapter_agent`] for why a resume
+    /// does not.
+    Launch {
+        launch_options: Vec<LaunchOptionSpec>,
+    },
     /// A resume: reattach to the persisted provider thread (`adapter.resume`),
     /// so no new thread is minted.
     Resume { provider_session_id: String },
@@ -81,9 +86,18 @@ where
     /// and completes the send row at the `turn/start` acknowledgement (see the
     /// module docs for the FSM decision).
     ///
+    /// `launch_option_ids` are the registered launch options the user selected
+    /// for this session, in selection order. They are resolved here to their
+    /// neutral `(name, value?)` records and handed to the adapter on the launch
+    /// request; the adapter renders them for its provider (Codex maps them onto
+    /// `thread/start` fields). A selected id no longer in the registry is
+    /// skipped with a warning rather than aborting the launch, exactly as on
+    /// the Claude path.
+    ///
     /// Rolls the eager session row back on any connect/launch failure, so a
-    /// provider that is unavailable leaves no orphan row behind — mirroring
-    /// `spawn_fresh`'s rollback on a failed tmux launch.
+    /// provider that is unavailable — or one that rejects a launch option —
+    /// leaves no orphan row behind, mirroring `spawn_fresh`'s rollback on a
+    /// failed tmux launch.
     pub(in crate::interactor) async fn spawn_adapter_session(
         &mut self,
         provider: AgentProvider,
@@ -94,18 +108,16 @@ where
     ) -> Result<FreshSpawn> {
         let session_id = self.id.clone();
 
-        // Per-provider launch options are not yet modeled for adapter-backed
-        // providers (Codex's map to `thread/start` fields, not argv flags), so
-        // reject a request carrying any rather than silently dropping it. A git
-        // worktree, by contrast, is just a working directory: it is resolved
-        // below exactly like the Claude path, so a session started from a PR
-        // (which always arrives as a `UseRemoteBranch` worktree request) lands
-        // in that PR's worktree.
-        if !launch_option_ids.is_empty() {
-            return Err(Error::Agent(format!(
-                "launch options are not supported for a {provider:?} session yet"
-            )));
-        }
+        // Resolve the user-selected launch options up front, before anything is
+        // created — the same side-effect-free gate the Claude path runs (see
+        // [`Self::resolve_launch_options`]). They travel to the adapter as
+        // neutral `(name, value?)` pairs and are rendered there (Codex maps
+        // them onto `thread/start` fields), so this layer never learns a
+        // provider's launch wire shape. A git worktree, by contrast, is just a
+        // working directory: it is resolved below exactly like the Claude path,
+        // so a session started from a PR (which always arrives as a
+        // `UseRemoteBranch` worktree request) lands in that PR's worktree.
+        let launch_options = self.resolve_launch_options(&launch_option_ids).await?;
 
         // The registered factory lazily stands up the provider's adapter
         // (Codex: spawns `codex app-server` + handshake). Absent means the
@@ -203,7 +215,7 @@ where
         let (adapter, handle) = match self
             .bind_adapter_agent(
                 &factory,
-                AdapterBind::Launch,
+                AdapterBind::Launch { launch_options },
                 cwd.clone(),
                 main_thread_id,
                 0,
@@ -341,6 +353,13 @@ where
     ///   replayed/continued frames extend the existing history instead of
     ///   renumbering or duplicating it.
     ///
+    /// `cwd` is the session's launch directory as Delta resolved and recorded it
+    /// — the value both callers already hold (the fresh spawn its just-resolved
+    /// one, the resume the persisted row's). It is passed on to the content
+    /// accumulator, together with the branch observed in it here, so every
+    /// message reports where the agent is running; the model, which only the
+    /// provider knows, is the adapter's to add.
+    ///
     /// It holds the live adapter + handle in the runtime (so the connection stays
     /// up and the session reads as open, with no `OpenHandle` for the PTY bridge
     /// to attach to), then spawns the event pump that drains the adapter's
@@ -363,15 +382,16 @@ where
         let session_id = self.id.clone();
         let adapter = factory.connect().await?;
         let handle = match bind {
-            AdapterBind::Launch => {
+            AdapterBind::Launch { launch_options } => {
                 adapter
                     .launch(LaunchRequest {
                         session_id: session_id.as_str().to_owned(),
-                        workdir: cwd,
-                        // Launch options are rejected upstream; a first prompt is
-                        // delivered as its own turn (not on launch) so the send
-                        // row completes at the `turn/start` acknowledgement.
-                        extra_args: Vec::new(),
+                        workdir: cwd.clone(),
+                        // The adapter renders these for its provider. A first
+                        // prompt is delivered as its own turn (not on launch) so
+                        // the send row completes at the `turn/start`
+                        // acknowledgement.
+                        launch_options,
                         first_prompt: None,
                     })
                     .await?
@@ -383,11 +403,22 @@ where
                     .resume(ResumeRequest {
                         session_id: session_id.as_str().to_owned(),
                         provider_session_id,
-                        workdir: cwd,
+                        workdir: cwd.clone(),
                     })
                     .await?
             }
         };
+
+        // Observe the branch of the launch directory, so every message this
+        // session persists reports the working tree it was produced against.
+        //
+        // This is observed here rather than read from the session row's
+        // `branch_at_launch`: that column is only filled on the worktree spawn
+        // path, so a session started in a plain git directory would report no
+        // branch at all despite obviously having one. Observing on every bind
+        // also keeps a resumed session honest, where the spawn-time snapshot
+        // could be stale.
+        let git_branch = self.observe_launch_branch(&cwd).await;
 
         // Represent the running session as open-without-pane: hold the live
         // adapter + handle so the connection stays up and the session reads as
@@ -397,12 +428,21 @@ where
             handle: handle.clone(),
         });
 
-        // Build the push-based content accumulator, seeded so minted ordering
-        // continues past whatever is already persisted.
+        // Build the push-based content accumulator: seeded so minted ordering
+        // continues past whatever is already persisted, and carrying the launch
+        // site so every message it folds reports where the agent is running. The
+        // adapter joins this with the fact only it knows (Codex: the model the
+        // server resolved, read off the thread's opening response), which is why
+        // it is handed the live handle too.
         self.state.set_agent_content_source(adapter.content_source(
-            session_id,
-            main_thread_id,
-            seed_seq,
+            &handle,
+            ContentSourceRequest {
+                session_id,
+                main_thread: main_thread_id,
+                seed_seq,
+                cwd,
+                git_branch,
+            },
         ));
 
         // Spawn the event pump. Adapter frames arrive after the send that
@@ -415,6 +455,39 @@ where
         );
 
         Ok((adapter, handle))
+    }
+
+    /// The git branch checked out in an adapter-backed session's launch
+    /// directory, for stamping on the messages it produces.
+    ///
+    /// Delta observes this itself because no adapter-backed provider reports it.
+    /// Codex's `thread/start` response *declares* a `thread.gitInfo` — the schema
+    /// even documents it as "captured when the thread was created" — but the real
+    /// server returns it as `null` there (verified against `codex-cli 0.144.4`),
+    /// so waiting for the provider to report a branch means never reporting one.
+    /// Asking git about a directory Delta itself chose is not reconstructing a
+    /// provider fact; it is Delta reporting what it observed about its own launch
+    /// site.
+    ///
+    /// A git failure is **not** fatal: `None` is already the honest answer for a
+    /// directory that is not a git working tree or has a detached HEAD, so a
+    /// broken or missing `git` degrades to the same absent metadata rather than
+    /// failing a session the user asked for. It is logged, because "no branch
+    /// shown" caused by a broken git should be diagnosable rather than silent.
+    async fn observe_launch_branch(&self, cwd: &str) -> Option<String> {
+        match self.git_worktree.current_branch(cwd).await {
+            Ok(branch) => branch,
+            Err(err) => {
+                tracing::warn!(
+                    session_id = %self.id,
+                    cwd = %cwd,
+                    error = %err,
+                    "could not observe the launch directory's git branch; \
+                     the session's messages will report no branch"
+                );
+                None
+            }
+        }
     }
 
     /// Reconnect a **closed** adapter-backed session by resuming its provider
@@ -430,6 +503,26 @@ where
     /// count** — which, for a single-thread adapter-backed session whose seqs
     /// are minted densely from 0, is exactly `MAX(seq) + 1`. Seeding at 0 (as a
     /// fresh spawn does) would renumber/duplicate the existing history.
+    ///
+    /// **Launch options are deliberately not re-applied here.** They configure
+    /// the provider *thread*, which the resume reattaches to rather than mints:
+    /// Codex's `thread/resume` takes its config fields as optional *overrides*
+    /// of what the resumed thread already carries, so sending none keeps the
+    /// thread exactly as `thread/start` configured it. Delta also has no
+    /// per-session record of which options were selected (the registry is
+    /// session-independent and the `session` row stores no selection), so there
+    /// is nothing to replay. This matches the Claude path, where a resume is
+    /// `claude --settings … --resume <id>` with none of the launch flags the
+    /// original spawn carried.
+    ///
+    /// The session's **metadata is still reported after a resume**, and is
+    /// re-established rather than remembered: the launch directory comes from the
+    /// persisted row (which outlives the restart by definition), its branch is
+    /// re-observed by the shared bind path, and the model comes from the
+    /// `thread/resume` response — which carries the same required top-level
+    /// `model` as `thread/start`, so the reattached thread re-announces what it
+    /// is running. Nothing about a resumed session's metadata degrades relative
+    /// to a fresh one.
     ///
     /// The caller resolves `factory` through the registry
     /// ([`InteractorCore::adapter_backed_factory`](crate::interactor::InteractorCore::adapter_backed_factory))

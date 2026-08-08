@@ -22,8 +22,8 @@ mod factory;
 mod provider;
 
 pub use adapter::{
-    AgentAdapter, AgentEventStream, AgentSessionHandle, LaunchRequest, PtyHandle, ResumeRequest,
-    SendReceipt, SendRequest,
+    AgentAdapter, AgentEventStream, AgentSessionHandle, ContentSourceRequest, LaunchOptionSpec,
+    LaunchRequest, PtyHandle, ResumeRequest, SendReceipt, SendRequest,
 };
 pub use capabilities::{
     AgentCapabilities, ContextInjectionCapability, EventCapability, ForkCapability,

@@ -5,12 +5,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use delta_usecase::{AgentAdapter, LaunchRequest, SendRequest};
+use delta_usecase::{
+    AgentAdapter, AgentContentSource, AgentEvent, ContentSourceRequest, LaunchOptionSpec,
+    LaunchRequest, Message, ResumeRequest, SendRequest, SessionId, ThreadId,
+};
 use serde_json::{json, Value};
 use tokio::io::{split, AsyncBufReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 use tokio::sync::mpsc;
 
 use super::*;
+use crate::adapter::thread_start_params;
 
 /// A short bound so a wiring bug fails fast instead of hanging the suite.
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -282,7 +286,7 @@ async fn adapter_captures_turn_id_and_sends_it_on_interrupt() {
         .launch(LaunchRequest {
             session_id: "01920000-0000-7000-8000-000000000009".to_owned(),
             workdir: "/tmp/workdir".to_owned(),
-            extra_args: Vec::new(),
+            launch_options: Vec::new(),
             first_prompt: None,
         })
         .await
@@ -344,7 +348,7 @@ async fn interrupt_without_an_active_turn_is_a_no_op() {
         .launch(LaunchRequest {
             session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
             workdir: "/tmp/workdir".to_owned(),
-            extra_args: Vec::new(),
+            launch_options: Vec::new(),
             first_prompt: None,
         })
         .await
@@ -374,4 +378,304 @@ async fn request_resolves_to_closed_when_the_server_exits() {
         .unwrap_err();
     assert!(matches!(err, Error::ConnectionClosed));
     server_task.await.unwrap();
+}
+
+// --- Launch options → `thread/start` fields ---------------------------------
+
+fn option(name: &str, value: Option<&str>) -> LaunchOptionSpec {
+    LaunchOptionSpec {
+        name: name.to_owned(),
+        value: value.map(str::to_owned),
+    }
+}
+
+/// The mapping rule: a launch option's `name` is the `thread/start` field and
+/// its `value` is that field's value, passed through with no allowlist. A value
+/// that is not valid JSON is the string it looks like; one that parses keeps its
+/// real type (so a boolean/object/number field works); a valueless option is the
+/// bare boolean `true`.
+#[test]
+fn launch_options_map_onto_thread_start_fields_by_name() {
+    let params = thread_start_params(
+        "/work",
+        &[
+            option("model", Some("gpt-5.6-sol")),
+            option("sandbox", Some("read-only")),
+            option("ephemeral", None),
+            option("config", Some(r#"{"tools":{"web_search":true}}"#)),
+            option("approvalPolicy", Some(r#"{"granular":{"edits":"never"}}"#)),
+        ],
+    )
+    .expect("no delta-owned key is used");
+
+    assert_eq!(
+        params,
+        json!({
+            // Delta's own field is always present.
+            "cwd": "/work",
+            // Not valid JSON → the string itself.
+            "model": "gpt-5.6-sol",
+            "sandbox": "read-only",
+            // Valueless → the field is switched on.
+            "ephemeral": true,
+            // Valid JSON → the parsed value, with its real type.
+            "config": { "tools": { "web_search": true } },
+            "approvalPolicy": { "granular": { "edits": "never" } },
+        })
+    );
+}
+
+/// A value that happens to parse as a JSON scalar keeps that type, and a quoted
+/// value is the escape hatch for wanting the literal string back.
+#[test]
+fn a_json_scalar_value_keeps_its_type_and_a_quoted_value_stays_a_string() {
+    let params = thread_start_params(
+        "/work",
+        &[
+            option("ephemeral", Some("false")),
+            option("serviceTier", Some(r#""5""#)),
+        ],
+    )
+    .expect("no delta-owned key is used");
+
+    assert_eq!(params["ephemeral"], json!(false));
+    assert_eq!(params["serviceTier"], json!("5"));
+}
+
+/// A launch option naming a field Delta fills in itself is rejected, naming the
+/// offending key — never silently dropped, and never allowed to overwrite the
+/// value Delta recorded the session against.
+#[test]
+fn a_launch_option_naming_a_delta_owned_field_is_rejected() {
+    let err = thread_start_params("/work", &[option("cwd", Some("/somewhere/else"))])
+        .expect_err("cwd is Delta's to set");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("cwd"),
+        "the error names the offending key, got: {message}"
+    );
+}
+
+/// Two selected options naming the same field are rejected rather than one
+/// silently winning: a JSON field, unlike a repeatable CLI flag, can only be set
+/// once.
+#[test]
+fn two_launch_options_naming_the_same_field_are_rejected() {
+    let err = thread_start_params(
+        "/work",
+        &[
+            option("model", Some("gpt-5.6-sol")),
+            option("model", Some("o3")),
+        ],
+    )
+    .expect_err("a duplicate field is ambiguous");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("model"),
+        "the error names the duplicated key, got: {message}"
+    );
+}
+
+/// With nothing selected the launch is byte-identical to what it was before
+/// launch options existed: `cwd` alone.
+#[test]
+fn no_launch_options_leaves_thread_start_params_as_just_the_workdir() {
+    let params = thread_start_params("/work", &[]).expect("no options to reject");
+    assert_eq!(params, json!({ "cwd": "/work" }));
+}
+
+/// A content-source request for a session launched in `/work/app` on `branch` —
+/// the neutral half of what the pump hands the adapter at bind time. It carries
+/// the launch site Delta resolved and observed; the model the server reported is
+/// the adapter's to add.
+fn content_request(branch: Option<&str>) -> ContentSourceRequest {
+    ContentSourceRequest {
+        session_id: SessionId::from("01920000-0000-7000-8000-00000000000a"),
+        main_thread: ThreadId(1),
+        seed_seq: 0,
+        cwd: "/work/app".to_owned(),
+        git_branch: branch.map(str::to_owned),
+    }
+}
+
+/// The one assistant message the source folds from a single completed item, for
+/// asserting the provider metadata stamped on it.
+fn folded_message(source: &mut Box<dyn AgentContentSource>) -> Message {
+    let (messages, _) = source.ingest(&AgentEvent::AssistantMessage {
+        provider_item_id: "item_1".to_owned(),
+        text: "hi".to_owned(),
+        at_ms: None,
+    });
+    messages.into_iter().next().expect("one folded message")
+}
+
+/// A launched session's messages report the model the **server** resolved, not
+/// the one Delta asked for.
+///
+/// The launch selects one model and the server answers with a **different** one
+/// — exactly what happens when the user's own Codex config or the server's
+/// default wins over (or renames) the requested model. That divergence is the
+/// point of the test, so the requested value is deliberately a synthetic string
+/// that no catalog contains (`requested-by-delta`): were it a real slug, a
+/// future edit could quietly align it with the resolved one and the test would
+/// keep passing while proving nothing. The value that reaches the message is the
+/// server's, so the transcript always shows what is really running.
+///
+/// `cwd` and `git_branch` ride the neutral request — Codex reports neither, so
+/// they are Delta's own launch site — and `response_time_ms` stays `None`, since
+/// Codex exposes no per-message latency.
+#[tokio::test]
+async fn a_launched_sessions_messages_carry_the_model_the_server_resolved() {
+    let (conn, mut server) = connect();
+    let adapter = CodexAppServerAdapter::new(Arc::new(conn));
+
+    let server_task = tokio::spawn(async move {
+        let start = server.next_frame().await;
+        assert_eq!(start["method"], "thread/start");
+        assert_eq!(
+            start["params"]["model"], "requested-by-delta",
+            "the selected launch option rode the request"
+        );
+        // The real `ThreadStartResponse` carries `model` at the top level.
+        // Answer with a DIFFERENT model than was requested.
+        server
+            .send(json!({
+                "id": start["id"],
+                "result": { "thread": { "id": "thr_m" }, "model": "gpt-5.6-sol" }
+            }))
+            .await;
+        // Hold the server side open until the test drops it.
+        server
+    });
+
+    let handle = adapter
+        .launch(LaunchRequest {
+            session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
+            workdir: "/work/app".to_owned(),
+            launch_options: vec![option("model", Some("requested-by-delta"))],
+            first_prompt: None,
+        })
+        .await
+        .expect("launch");
+    let _server = tokio::time::timeout(TIMEOUT, server_task)
+        .await
+        .expect("server task timed out")
+        .expect("server task panicked");
+
+    let mut source = adapter.content_source(&handle, content_request(Some("feature/x")));
+    let message = folded_message(&mut source);
+    assert_eq!(
+        message.model.as_deref(),
+        Some("gpt-5.6-sol"),
+        "the message reports the model the server resolved, never the requested one"
+    );
+    assert_eq!(
+        message.git_branch.as_deref(),
+        Some("feature/x"),
+        "the launch site's branch rides the neutral request onto the message"
+    );
+    assert_eq!(message.cwd.as_deref(), Some("/work/app"));
+    assert!(
+        message.response_time_ms.is_none(),
+        "Codex exposes no per-message latency, so it degrades to None"
+    );
+}
+
+/// A **resumed** session reports its metadata too: `thread/resume` carries the
+/// same required top-level `model` as `thread/start`, so a session picked back
+/// up after a restart is not left blank.
+#[tokio::test]
+async fn a_resumed_sessions_messages_carry_the_model_the_resume_reported() {
+    let (conn, mut server) = connect();
+    let adapter = CodexAppServerAdapter::new(Arc::new(conn));
+
+    let server_task = tokio::spawn(async move {
+        let resume = server.next_frame().await;
+        assert_eq!(resume["method"], "thread/resume");
+        assert_eq!(resume["params"]["threadId"], "thr_m");
+        server
+            .send(json!({
+                "id": resume["id"],
+                "result": { "thread": { "id": "thr_m" }, "model": "gpt-5.6-sol" }
+            }))
+            .await;
+        server
+    });
+
+    let handle = adapter
+        .resume(ResumeRequest {
+            session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
+            provider_session_id: "thr_m".to_owned(),
+            workdir: "/work/app".to_owned(),
+        })
+        .await
+        .expect("resume");
+    let _server = tokio::time::timeout(TIMEOUT, server_task)
+        .await
+        .expect("server task timed out")
+        .expect("server task panicked");
+
+    let mut source = adapter.content_source(&handle, content_request(Some("feature/x")));
+    let message = folded_message(&mut source);
+    assert_eq!(
+        message.model.as_deref(),
+        Some("gpt-5.6-sol"),
+        "a resumed session reports the model its resume response announced"
+    );
+    assert_eq!(
+        message.git_branch.as_deref(),
+        Some("feature/x"),
+        "a resumed session's launch site is re-observed and reported too"
+    );
+    assert_eq!(message.cwd.as_deref(), Some("/work/app"));
+}
+
+/// A server answering without a `model`, for a session launched outside a git
+/// working tree, leaves both facts absent rather than substituting something
+/// plausible — the same degrade-never-fake rule the rest of the Codex fold
+/// follows. The launch directory, which Delta always knows, is still reported.
+#[tokio::test]
+async fn a_response_without_a_model_degrades_to_none() {
+    let (conn, mut server) = connect();
+    let adapter = CodexAppServerAdapter::new(Arc::new(conn));
+
+    let server_task = tokio::spawn(async move {
+        let start = server.next_frame().await;
+        server
+            .send(json!({ "id": start["id"], "result": { "thread": { "id": "thr_n" } } }))
+            .await;
+        server
+    });
+
+    let handle = adapter
+        .launch(LaunchRequest {
+            session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
+            workdir: "/work/app".to_owned(),
+            launch_options: Vec::new(),
+            first_prompt: None,
+        })
+        .await
+        .expect("launch");
+    let _server = tokio::time::timeout(TIMEOUT, server_task)
+        .await
+        .expect("server task timed out")
+        .expect("server task panicked");
+
+    let mut source = adapter.content_source(&handle, content_request(None));
+    let message = folded_message(&mut source);
+    assert!(
+        message.model.is_none(),
+        "no model in the response means no model on the message"
+    );
+    assert!(
+        message.git_branch.is_none(),
+        "no branch observed at the launch site means none on the message"
+    );
+    assert_eq!(
+        message.cwd.as_deref(),
+        Some("/work/app"),
+        "the launch directory is Delta's own record, so it is reported regardless"
+    );
 }

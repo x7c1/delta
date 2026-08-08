@@ -67,6 +67,11 @@ struct ScenarioGuard {
     /// per call), handed to the child via `FAKE_CODEX_INJECT_LOG`. Empty/absent
     /// unless a turn injects hidden context — the branch loop reads it back.
     inject_log: std::path::PathBuf,
+    /// Where the fake appends each `thread/start` params object (one JSON line
+    /// per call), handed to the child via `FAKE_CODEX_THREAD_START_LOG`. The
+    /// launch-options loop reads it back to prove the session's selection
+    /// arrived as real `ThreadStartParams` fields.
+    thread_start_log: std::path::PathBuf,
 }
 
 impl ScenarioGuard {
@@ -80,10 +85,12 @@ impl ScenarioGuard {
         let path = dir.join("scenario.json");
         std::fs::write(&path, scenario).unwrap();
         let inject_log = dir.join("inject.log");
+        let thread_start_log = dir.join("thread-start.log");
         Self {
             dir,
             path,
             inject_log,
+            thread_start_log,
         }
     }
 
@@ -91,14 +98,27 @@ impl ScenarioGuard {
     /// parsed as JSON. Empty when the fake was never asked to inject (the file
     /// is created lazily on the first injection).
     fn injected_items(&self) -> Vec<Value> {
-        match std::fs::read_to_string(&self.inject_log) {
-            Ok(contents) => contents
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(|line| serde_json::from_str(line).expect("recorded inject line is JSON"))
-                .collect(),
-            Err(_) => Vec::new(),
-        }
+        read_json_lines(&self.inject_log)
+    }
+
+    /// The `thread/start` params the fake recorded, one per line, parsed as
+    /// JSON. Empty when no thread was ever started.
+    fn thread_starts(&self) -> Vec<Value> {
+        read_json_lines(&self.thread_start_log)
+    }
+}
+
+/// Read a sidecar record the fake keeps (one JSON value per line, in call
+/// order). A missing file means the fake never wrote that record — the files
+/// are created lazily on first use — so it reads as empty.
+fn read_json_lines(path: &std::path::Path) -> Vec<Value> {
+    match std::fs::read_to_string(path) {
+        Ok(contents) => contents
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("recorded line is JSON"))
+            .collect(),
+        Err(_) => Vec::new(),
     }
 }
 
@@ -124,8 +144,8 @@ fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (Router, AppS
         // The fake IS the app-server, so it takes no `app-server` argument.
         codex_bin: env!("CARGO_BIN_EXE_fake-codex").to_owned(),
         args: vec![],
-        // Hand the fake its scenario and inject-record path through the child's
-        // env, not the parent's.
+        // Hand the fake its scenario and sidecar record paths through the
+        // child's env, not the parent's.
         env: vec![
             (
                 "FAKE_CODEX_SCENARIO".to_owned(),
@@ -134,6 +154,10 @@ fn build_app_with(store: SqliteStore, scenario: &ScenarioGuard) -> (Router, AppS
             (
                 "FAKE_CODEX_INJECT_LOG".to_owned(),
                 scenario.inject_log.to_string_lossy().into_owned(),
+            ),
+            (
+                "FAKE_CODEX_THREAD_START_LOG".to_owned(),
+                scenario.thread_start_log.to_string_lossy().into_owned(),
             ),
         ],
     };
@@ -323,6 +347,14 @@ async fn codex_prompt_streams_persists_and_completes_over_the_full_stack() {
         assistant["created_at"],
         json!("2026-07-17T07:12:18.000Z"),
         "the Codex item timestamp is persisted as an ISO-8601 created_at"
+    );
+    // This scenario's app-server reports no git metadata at all — the shape a
+    // thread outside a git working tree gets — so the branch degrades to null
+    // rather than being invented, all the way through to the persisted row.
+    assert_eq!(
+        assistant["git_branch"],
+        Value::Null,
+        "no gitInfo in the thread/start response means no branch on the message"
     );
     // The user prompt persisted too, so the loop is a real conversation.
     let user = messages
@@ -528,6 +560,339 @@ async fn drain_one_turn(
             _ => {}
         }
     }
+}
+
+/// Register one launch option over the REST registry and return its id.
+async fn register_launch_option(
+    app: &Router,
+    name: &str,
+    value: Option<&str>,
+    provider: &str,
+) -> i64 {
+    let mut body = json!({ "name": name, "provider": provider });
+    if let Some(value) = value {
+        body["value"] = json!(value);
+    }
+    let (status, created) = post_json(app, "/api/launch-options", body).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the launch option was registered: {created:?}"
+    );
+    created["id"]
+        .as_i64()
+        .expect("the created launch option carries its id")
+}
+
+/// The Codex **launch-options** full loop: options the user registered for
+/// Codex and selected when starting a session reach the provider as
+/// `thread/start` fields.
+///
+/// This is the regression proof for the bug where the Settings UI happily
+/// registered a Codex-scoped launch option and the new-session picker offered
+/// it, but selecting it made the spawn fail outright — the core rejected any
+/// selection for a non-Claude provider. The test registers three options over
+/// the real REST registry, starts a Codex session selecting them, and reads
+/// back the `thread/start` params the fake app-server actually received.
+///
+/// It also pins the value-mapping rule: a value that is not valid JSON is the
+/// string it looks like, a value that parses keeps its real type, and a
+/// valueless option is the bare boolean `true`.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_launch_options_reach_thread_start_over_the_full_stack() {
+    let scenario = streaming_turn_scenario();
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    // A plain string value, a JSON-object value, and a valueless option.
+    let model = register_launch_option(&app, "model", Some("gpt-5.6-sol"), "codex").await;
+    let config = register_launch_option(
+        &app,
+        "config",
+        Some(r#"{"tools":{"web_search":true}}"#),
+        "codex",
+    )
+    .await;
+    let ephemeral = register_launch_option(&app, "ephemeral", None, "codex").await;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [model, config, ephemeral],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "a Codex session selecting launch options starts (it used to fail): {body:?}"
+    );
+    let session_id = body["send"]["session_id"]
+        .as_str()
+        .expect("the send response carries its session id")
+        .to_owned();
+
+    // Let the opening turn finish, so the session is unambiguously live rather
+    // than merely accepted.
+    drain_one_turn(&mut events, &session_id).await;
+
+    let starts = scenario.thread_starts();
+    assert_eq!(starts.len(), 1, "one thread was started: {starts:?}");
+    let params = &starts[0];
+    assert!(
+        params["cwd"].as_str().is_some_and(|cwd| !cwd.is_empty()),
+        "Delta's own cwd is still sent, got {params:?}"
+    );
+    assert_eq!(
+        params["model"],
+        json!("gpt-5.6-sol"),
+        "a non-JSON value arrives as the string it looks like"
+    );
+    assert_eq!(
+        params["config"],
+        json!({ "tools": { "web_search": true } }),
+        "a JSON value arrives with its real type, not as a quoted string"
+    );
+    assert_eq!(
+        params["ephemeral"],
+        json!(true),
+        "a valueless option switches its boolean field on"
+    );
+}
+
+/// The Codex **message-metadata** full loop: a persisted Codex message reports
+/// the model the server resolved for the thread, the branch the server observed,
+/// and the directory the session is running in — the feedback channel for a
+/// user-selectable model.
+///
+/// The session selects `model=requested-by-delta` as a launch option while the
+/// fake app-server answers `thread/start` with a *different* top-level `model`.
+/// That divergence is the whole point: Delta's request is only one input to the
+/// server's decision (the user's own `config.toml` and the server's default are
+/// others), so only the response says what is actually running. Asserting the
+/// **server's** value proves the metadata is read back rather than echoed.
+///
+/// The branch is exercised over a **real git repository** created for this test,
+/// with the session started in it and **no worktree**. That combination is the
+/// case the feature exists for: Delta fills the session row's `branch_at_launch`
+/// only on the worktree path, and Codex's `thread/start` reports no git metadata
+/// at all, so a branch on these messages can only come from Delta observing its
+/// launch directory. Using a real repo (not a scripted fake) means the real
+/// `Git` gateway runs, so the value is one `git` itself produced.
+///
+/// `cwd` is checked against the `cwd` Delta itself sent on `thread/start`, so the
+/// message reports the same launch directory the agent was started in — not a
+/// separately re-derived path that could drift from it.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_messages_report_the_resolved_model_the_observed_branch_and_the_launch_dir() {
+    const RESOLVED_MODEL: &str = "gpt-5.6-sol";
+    const OBSERVED_BRANCH: &str = "feature/observed-by-delta";
+    let repo = GitRepoGuard::init(OBSERVED_BRANCH);
+    let scenario = ScenarioGuard::write(&format!(
+        r#"{{
+            "thread_id": "thr_metadata",
+            "model": "{RESOLVED_MODEL}",
+            "turn": {{
+                "turn_id": "turn_metadata",
+                "emit": [
+                    {{ "type": "turn_started" }},
+                    {{ "type": "item_started",   "item": {{ "id": "item_1", "type": "agentMessage" }} }},
+                    {{ "type": "item_completed", "item": {{ "id": "item_1", "type": "agentMessage", "text": "{REPLY}" }} }},
+                    {{ "type": "turn_completed", "status": "completed" }}
+                ]
+            }}
+        }}"#
+    ));
+    let (app, state) = build_app(&scenario);
+    let mut events = state.subscribe();
+    state
+        .spawn_async_event_drain()
+        .expect("the async drain is taken exactly once");
+
+    let model_option =
+        register_launch_option(&app, "model", Some("requested-by-delta"), "codex").await;
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [model_option],
+            // A real git repo, and NO worktree: the case Delta records no
+            // branch_at_launch for.
+            "workdir": repo.path(),
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the send was created: {body:?}"
+    );
+    let session_id = body["send"]["session_id"].as_str().unwrap().to_owned();
+    let thread_id = body["send"]["thread_id"].as_i64().unwrap();
+
+    drain_one_turn(&mut events, &session_id).await;
+
+    // What Delta asked for, and where it launched, as the fake actually received
+    // them.
+    let starts = scenario.thread_starts();
+    assert_eq!(starts.len(), 1, "one thread was started: {starts:?}");
+    assert_eq!(
+        starts[0]["model"],
+        json!("requested-by-delta"),
+        "the selected launch option did ride the request"
+    );
+    let launch_cwd = starts[0]["cwd"]
+        .as_str()
+        .expect("Delta always sends its own cwd")
+        .to_owned();
+
+    let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
+    assert_eq!(status, StatusCode::OK, "messages fetched: {body:?}");
+    let messages = body["messages"].as_array().unwrap();
+    assert!(!messages.is_empty(), "the turn persisted messages");
+    for message in messages {
+        assert_eq!(
+            message["model"],
+            json!(RESOLVED_MODEL),
+            "the persisted message reports the model the SERVER resolved, not the \
+             `requested-by-delta` Delta asked for: {message:?}"
+        );
+        assert_eq!(
+            message["cwd"],
+            json!(launch_cwd),
+            "the persisted message reports the directory the session launched in: {message:?}"
+        );
+        assert_eq!(
+            message["git_branch"],
+            json!(OBSERVED_BRANCH),
+            "the persisted message reports the branch of its launch directory, \
+             observed by Delta — this session has no worktree, so nothing else \
+             knows it: {message:?}"
+        );
+    }
+}
+
+/// A throwaway git repository on a named branch, removed on drop.
+///
+/// Used by the metadata loop to exercise the real `Git` gateway: the branch a
+/// message reports must be one `git` actually produced, not a scripted fake.
+struct GitRepoGuard {
+    dir: std::path::PathBuf,
+}
+
+impl GitRepoGuard {
+    /// Create a repository with one empty commit on `branch`.
+    ///
+    /// The commit is required, not decorative: on an unborn HEAD
+    /// `git rev-parse --abbrev-ref HEAD` exits non-zero, which the gateway
+    /// (correctly) reads as "no branch". `--initial-branch` pins the name rather
+    /// than depending on the host's `init.defaultBranch`, and the identity is
+    /// passed with `-c` so the test does not depend on the host's git config
+    /// either.
+    fn init(branch: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "fake-codex-metadata-repo-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        Self::git(&dir, &["init", "--quiet", "--initial-branch", branch]);
+        Self::git(
+            &dir,
+            &[
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "user.name=delta test",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ],
+        );
+        Self { dir }
+    }
+
+    /// Run one `git` invocation in `dir`, failing the test if it does not
+    /// succeed — a silently broken fixture would look like a missing branch.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("git must be available to run this test");
+        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    }
+
+    fn path(&self) -> String {
+        self.dir.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for GitRepoGuard {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.dir).ok();
+    }
+}
+
+/// A launch option naming a `thread/start` field Delta fills in itself is
+/// rejected loudly at spawn: `400` naming the offending key, and no session row
+/// left behind.
+///
+/// `cwd` is the field that matters — with a worktree it is the resolved
+/// worktree path, and the session's repo-root / display-name /
+/// branch-at-launch columns are recorded against it — so a user option
+/// silently overriding it would leave those columns describing a directory the
+/// agent is not running in. Failing the spawn is the only honest answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_codex_launch_option_overriding_a_delta_owned_field_fails_the_spawn() {
+    let scenario = streaming_turn_scenario();
+    let (app, _state) = build_app(&scenario);
+
+    let cwd = register_launch_option(&app, "cwd", Some("/somewhere/else"), "codex").await;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/sends",
+        json!({
+            "new_session": true,
+            "provider": "codex",
+            "text": "hello codex",
+            "launch_option_ids": [cwd],
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "a Delta-owned field is rejected, not silently applied: {body:?}"
+    );
+    assert!(
+        body["error"].as_str().is_some_and(|e| e.contains("cwd")),
+        "the error names the offending key, got {body:?}"
+    );
+
+    // The eager session row was rolled back, so a rejected spawn leaves nothing
+    // behind for the navigator to show.
+    let (status, sessions) = get(&app, "/api/sessions").await;
+    assert_eq!(status, StatusCode::OK, "sessions fetched: {sessions:?}");
+    assert_eq!(
+        sessions["sessions"].as_array().map(Vec::len),
+        Some(0),
+        "a rejected spawn leaves no session row: {sessions:?}"
+    );
 }
 
 /// The Codex **multi-turn** full loop: a second (and later) message to an
@@ -912,10 +1277,16 @@ impl Drop for DbGuard {
 /// so two successive turns (the second after a restart) produce distinct,
 /// non-colliding provider items. The provider thread id is fixed to `thr_restart`
 /// across both, so the resume reattaches to the same thread.
-fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str) -> ScenarioGuard {
+///
+/// `model` is what this backend's app-server reports for the thread. The two
+/// halves of the restart test give distinct values, so the post-restart messages
+/// prove the metadata came from the **resume** response rather than from
+/// anything cached before the restart.
+fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str, model: &str) -> ScenarioGuard {
     ScenarioGuard::write(&format!(
         r#"{{
             "thread_id": "thr_restart",
+            "model": "{model}",
             "turn": {{
                 "turn_id": "{turn_id}",
                 "emit": [
@@ -948,10 +1319,14 @@ fn restart_turn_scenario(turn_id: &str, item_id: &str, reply: &str) -> ScenarioG
 async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     const REPLY_ONE: &str = "reply from turn one";
     const REPLY_TWO: &str = "reply from turn two";
+    // Distinct per backend, so a post-restart message reporting `MODEL_TWO` can
+    // only have learned it from the `thread/resume` response.
+    const MODEL_ONE: &str = "model-before-restart";
+    const MODEL_TWO: &str = "model-after-restart";
     let db = DbGuard::new();
 
     // ---- Before the restart: create the session, complete turn 1. ----
-    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE);
+    let scenario1 = restart_turn_scenario("turn_one", "item_one", REPLY_ONE, MODEL_ONE);
     let (thread_id, session_id) = {
         let (app, state) = build_app_with(db.open(), &scenario1);
         let mut events = state.subscribe();
@@ -991,7 +1366,7 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
     };
 
     // ---- After the restart: a brand-new backend over the SAME database. ----
-    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO);
+    let scenario2 = restart_turn_scenario("turn_two", "item_two", REPLY_TWO, MODEL_TWO);
     let (app, state) = build_app_with(db.open(), &scenario2);
     let mut events = state.subscribe();
     state
@@ -1060,6 +1435,30 @@ async fn codex_resume_across_restart_continues_the_persisted_conversation() {
         seqs,
         vec![0, 1, 2, 3],
         "sequence numbers continue contiguously across the resume: {messages:?}"
+    );
+
+    // A resumed session still reports its provider metadata: `thread/resume`
+    // carries the same required top-level `model` as `thread/start`, so the
+    // post-restart turn's messages are stamped from the resume response — the
+    // second backend's model, never left blank and never the pre-restart one.
+    // The pre-restart messages keep the model that was running when they were
+    // folded, since each row records what produced it.
+    let model_of = |text: &str| {
+        messages
+            .iter()
+            .find(|m| m["content_text"] == json!(text))
+            .unwrap_or_else(|| panic!("`{text}` is present"))["model"]
+            .clone()
+    };
+    assert_eq!(
+        model_of(REPLY_TWO),
+        json!(MODEL_TWO),
+        "the resumed turn reports the model its `thread/resume` announced: {messages:?}"
+    );
+    assert_eq!(
+        model_of(REPLY_ONE),
+        json!(MODEL_ONE),
+        "the pre-restart turn keeps the model that produced it: {messages:?}"
     );
 }
 

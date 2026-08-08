@@ -404,7 +404,7 @@ fn launch_request() -> LaunchRequest {
     LaunchRequest {
         session_id: SESSION_ID.to_owned(),
         workdir: "/tmp/workdir".to_owned(),
-        extra_args: Vec::new(),
+        launch_options: Vec::new(),
         first_prompt: None,
     }
 }

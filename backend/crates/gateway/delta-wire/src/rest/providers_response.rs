@@ -1,7 +1,7 @@
 //! The wire form of the provider-availability listing (`GET /api/providers`).
 
 use delta_model::ProviderAvailability;
-use delta_usecase::{AgentCapabilities, TerminalCapability};
+use delta_usecase::{AgentCapabilities, LaunchCapability, TerminalCapability};
 use serde::Serialize;
 use ts_rs::TS;
 
@@ -27,12 +27,54 @@ pub struct WireProviderCapabilities {
     /// (Codex's headless app-server) → `false`. The workspace hides the terminal
     /// toggle and pane for a provider whose value is `false`.
     pub has_terminal: bool,
+    /// How this provider reads a registered launch option's `(name, value?)`
+    /// pair. Settings words its launch-option form from this, so a user
+    /// registering an option for a field-style provider is told to write
+    /// `model`, not `--model`.
+    pub launch_option_style: WireLaunchOptionStyle,
+}
+
+/// How a provider interprets a launch option's `name` and `value`.
+///
+/// A registered launch option is a provider-neutral `(name, value?)` pair; what
+/// the pair *means* depends on how the provider is launched, which is why this
+/// is a capability rather than something the UI derives from the provider name.
+/// Delta validates neither names nor values (the agent that receives them owns
+/// that vocabulary), so telling the user which vocabulary to write in is the
+/// only guard-rail there is — hence carrying it on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename = "LaunchOptionStyle")]
+pub enum WireLaunchOptionStyle {
+    /// `name` is a command-line flag and `value` its argument
+    /// (`--permission-mode auto`). A valueless option is a bare flag.
+    CliFlag,
+    /// `name` is a field of the provider's session-start request and `value`
+    /// that field's value (Codex's `thread/start`: `model` → `gpt-5.6-sol`). A
+    /// valueless option sets a bare boolean field.
+    RequestField,
 }
 
 impl From<AgentCapabilities> for WireProviderCapabilities {
     fn from(capabilities: AgentCapabilities) -> Self {
         WireProviderCapabilities {
             has_terminal: matches!(capabilities.terminal, TerminalCapability::AttachablePty),
+            launch_option_style: capabilities.launch.into(),
+        }
+    }
+}
+
+impl From<LaunchCapability> for WireLaunchOptionStyle {
+    /// Derived from *how the provider is launched*, the same profile field that
+    /// decides which session path it takes: a provider Delta launches as a
+    /// command line takes its options as argv flags, while one Delta drives over
+    /// a structured request takes them as fields of that request. Deriving it
+    /// keeps the adapter's capability profile the single source of truth, so a
+    /// new provider cannot ship a launch style the UI has never heard of.
+    fn from(launch: LaunchCapability) -> Self {
+        match launch {
+            LaunchCapability::PtyCommand => WireLaunchOptionStyle::CliFlag,
+            LaunchCapability::JsonRpcAppServer => WireLaunchOptionStyle::RequestField,
         }
     }
 }
@@ -100,11 +142,12 @@ mod tests {
         SteerCapability, TranscriptCapability,
     };
 
-    /// A capability profile with the given terminal surface; the other fields
-    /// are placeholders the wire projection does not read.
-    fn caps_with_terminal(terminal: TerminalCapability) -> AgentCapabilities {
+    /// A capability profile with the given terminal surface and launch
+    /// capability; the other fields are placeholders the wire projection does
+    /// not read.
+    fn caps(terminal: TerminalCapability, launch: LaunchCapability) -> AgentCapabilities {
         AgentCapabilities {
-            launch: LaunchCapability::PtyCommand,
+            launch,
             session_identity: SessionIdentityCapability::DeltaCanSetId,
             resume: ResumeCapability::Supported,
             events: EventCapability::HookAndTranscript,
@@ -126,7 +169,10 @@ mod tests {
                 available: true,
                 detail: None,
             },
-            caps_with_terminal(TerminalCapability::AttachablePty),
+            caps(
+                TerminalCapability::AttachablePty,
+                LaunchCapability::PtyCommand,
+            ),
         )]);
         assert_eq!(
             serde_json::to_value(response).unwrap(),
@@ -136,7 +182,10 @@ mod tests {
                         "provider": "claude",
                         "available": true,
                         "detail": null,
-                        "capabilities": { "has_terminal": true }
+                        "capabilities": {
+                            "has_terminal": true,
+                            "launch_option_style": "cli_flag"
+                        }
                     }
                 ]
             }),
@@ -154,7 +203,10 @@ mod tests {
                 available: false,
                 detail: Some("The 'codex' binary for codex was not found on PATH.".to_owned()),
             },
-            caps_with_terminal(TerminalCapability::NoTerminal),
+            caps(
+                TerminalCapability::NoTerminal,
+                LaunchCapability::JsonRpcAppServer,
+            ),
         )]);
         let value = serde_json::to_value(response).unwrap();
         assert_eq!(value["providers"][0]["provider"], "codex");
@@ -164,14 +216,44 @@ mod tests {
             "The 'codex' binary for codex was not found on PATH."
         );
         assert_eq!(value["providers"][0]["capabilities"]["has_terminal"], false);
+        assert_eq!(
+            value["providers"][0]["capabilities"]["launch_option_style"],
+            "request_field"
+        );
     }
 
     /// The `NoPtyNeeded` middle variant also projects to `has_terminal: false`:
     /// only an attachable PTY earns a terminal tab.
     #[test]
     fn no_pty_needed_projects_to_no_terminal() {
-        let caps =
-            WireProviderCapabilities::from(caps_with_terminal(TerminalCapability::NoPtyNeeded));
-        assert!(!caps.has_terminal);
+        let projected = WireProviderCapabilities::from(caps(
+            TerminalCapability::NoPtyNeeded,
+            LaunchCapability::PtyCommand,
+        ));
+        assert!(!projected.has_terminal);
+    }
+
+    /// The launch-option style follows the launch capability, not the terminal
+    /// one: a command-line launch means argv flags, a structured launch means
+    /// request fields. Pin both directions so a provider cannot quietly switch
+    /// the vocabulary Settings tells the user to write in.
+    #[test]
+    fn the_launch_option_style_follows_the_launch_capability() {
+        let flag = WireProviderCapabilities::from(caps(
+            TerminalCapability::AttachablePty,
+            LaunchCapability::PtyCommand,
+        ));
+        assert_eq!(flag.launch_option_style, WireLaunchOptionStyle::CliFlag);
+
+        // Same terminal surface, different launch: only the launch capability
+        // moves the style.
+        let field = WireProviderCapabilities::from(caps(
+            TerminalCapability::AttachablePty,
+            LaunchCapability::JsonRpcAppServer,
+        ));
+        assert_eq!(
+            field.launch_option_style,
+            WireLaunchOptionStyle::RequestField
+        );
     }
 }

@@ -3,8 +3,10 @@ import type { AgentProvider } from "./AgentProvider";
 
 /**
  * One registered launch option: a flat `(label?, name, value?)` record for a
- * custom `claude` CLI flag. `name` is the flag (e.g. `--plugin-dir`), `value`
- * its argument (`null` for a valueless flag), and `label` an optional note.
+ * custom agent startup setting. `name` and `value` are read in the provider's
+ * own vocabulary — a CLI flag and its argument for Claude (`--plugin-dir`), a
+ * `thread/start` field and its value for Codex (`model`) — with `value` null
+ * for a valueless option, and `label` an optional note.
  * `default_enabled` marks it to start pre-checked in the session-start picker.
  * `provider` is the provider the option applies to; the session-start picker
  * only offers options matching the new session's provider.

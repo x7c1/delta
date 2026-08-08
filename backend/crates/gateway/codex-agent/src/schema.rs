@@ -30,6 +30,12 @@ pub const V2_COMBINED_SCHEMA_RELATIVE_PATH: &str =
 pub const COMBINED_SERVER_REQUEST_SCHEMA_RELATIVE_PATH: &str =
     "vendor/app-server-schema/codex_app_server_protocol.schemas.json";
 
+/// Directory, relative to this crate's manifest directory, holding the vendored
+/// v2 schema split one file per type (`ThreadStartParams.json`, …). Same
+/// provenance as the combined v2 document; convenient when a single request
+/// shape is the thing being reconciled against.
+pub const V2_PER_TYPE_SCHEMA_RELATIVE_DIR: &str = "vendor/app-server-schema/v2";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,6 +113,54 @@ mod tests {
                 "vendored server-request schema is missing approval method `{method}`"
             );
         }
+    }
+
+    /// Read one vendored per-type v2 schema document.
+    fn per_type_schema(type_name: &str) -> serde_json::Value {
+        let path = format!(
+            "{}/{}/{type_name}.json",
+            env!("CARGO_MANIFEST_DIR"),
+            V2_PER_TYPE_SCHEMA_RELATIVE_DIR
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("vendored schema missing at {path}: {err}"));
+        serde_json::from_str(&raw)
+            .unwrap_or_else(|err| panic!("vendored schema at {path} is not valid JSON: {err}"))
+    }
+
+    /// The two schema facts the launch-option pass-through rests on.
+    ///
+    /// 1. `cwd` is a real `ThreadStartParams` field, so guarding it as
+    ///    Delta-owned guards something that exists; and `ThreadStartParams`
+    ///    marks nothing required, so a launch carrying only Delta's own fields
+    ///    is a complete request.
+    /// 2. `ThreadResumeParams` requires **only** `threadId`: its config fields
+    ///    (`model`, `sandbox`, `approvalPolicy`, `config`, …) are optional
+    ///    overrides of what the resumed thread already carries. That is the
+    ///    basis for not replaying a session's launch options on resume — a
+    ///    resume that names none keeps the thread exactly as `thread/start`
+    ///    configured it. If a future Codex made any of them required, this
+    ///    fails and the decision gets revisited.
+    #[test]
+    fn thread_start_and_resume_params_leave_config_fields_optional() {
+        let start = per_type_schema("ThreadStartParams");
+        assert!(
+            start.pointer("/properties/cwd").is_some(),
+            "`cwd` must be a real ThreadStartParams field for the Delta-owned guard to mean anything"
+        );
+        assert!(
+            start.get("required").is_none(),
+            "ThreadStartParams is expected to require no field, got {:?}",
+            start.get("required")
+        );
+
+        let resume = per_type_schema("ThreadResumeParams");
+        assert_eq!(
+            resume.get("required"),
+            Some(&serde_json::json!(["threadId"])),
+            "thread/resume must require only the thread id, leaving every config \
+             field an optional override"
+        );
     }
 
     #[test]

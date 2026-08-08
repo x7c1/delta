@@ -15,11 +15,11 @@ use tokio::sync::mpsc;
 
 use crate::agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
-    AgentEventStream, AgentProvider, AgentSessionHandle, ContextInjectionCapability,
-    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchRequest,
-    PermissionCapability, PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
-    SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
-    TurnStatus,
+    AgentEventStream, AgentProvider, AgentSessionHandle, ContentSourceRequest,
+    ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
+    LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle, ResumeCapability,
+    ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability, SteerCapability,
+    TerminalCapability, TranscriptCapability, TurnStatus,
 };
 use crate::error::{Error, Result};
 use crate::interactor::PermissionDecision;
@@ -33,10 +33,12 @@ pub(crate) struct FakeAgentLog {
     /// The provider session ids `resume` was called with, in order. Proves a
     /// resume reattached to the persisted thread (not a fresh `launch`).
     pub resumes: Vec<String>,
-    /// The `seed_seq` each `content_source` call was constructed with, in order.
-    /// Proves a fresh spawn seeds `0` and a resume seeds the persisted count, so
-    /// resumed history is not renumbered.
-    pub content_seeds: Vec<i64>,
+    /// The [`ContentSourceRequest`] each `content_source` call was built from, in
+    /// order. Its `seed_seq` proves a fresh spawn seeds `0` and a resume seeds
+    /// the persisted count (so resumed history is not renumbered); its `cwd` and
+    /// `git_branch` prove the launch site Delta resolved and observed reaches the
+    /// accumulator that stamps them onto messages.
+    pub content_requests: Vec<ContentSourceRequest>,
     /// The visible send texts the adapter received, in order.
     pub sends: Vec<String>,
     /// The hidden-context texts `inject_context` received, in order. Proves a
@@ -210,20 +212,22 @@ impl AgentAdapter for FakeAgentAdapter {
 
     fn content_source(
         &self,
-        session_id: SessionId,
-        main_thread: ThreadId,
-        seed_seq: i64,
+        _handle: &AgentSessionHandle,
+        req: ContentSourceRequest,
     ) -> Box<dyn AgentContentSource> {
-        // Record the seed so a test can assert a fresh spawn seeds 0 and a resume
-        // seeds the persisted count. Return a functional accumulator (unlike the
-        // trait's `NullContentSource` default) so pushed user/assistant events
-        // actually persist as messages and `message_count` advances — which is
-        // what makes the resume seed observable end to end.
-        self.log.lock().unwrap().content_seeds.push(seed_seq);
+        // Record the request so a test can assert the seed (a fresh spawn seeds 0,
+        // a resume the persisted count) and the launch site it carries. Return a
+        // functional accumulator (unlike the trait's `NullContentSource` default)
+        // so pushed user/assistant events actually persist as messages and
+        // `message_count` advances — which is what makes the resume seed
+        // observable end to end.
+        self.log.lock().unwrap().content_requests.push(req.clone());
         Box::new(FakeContentSource {
-            session_id,
-            main_thread,
-            next_seq: seed_seq,
+            session_id: req.session_id,
+            main_thread: req.main_thread,
+            next_seq: req.seed_seq,
+            cwd: req.cwd,
+            git_branch: req.git_branch,
         })
     }
 
@@ -234,7 +238,8 @@ impl AgentAdapter for FakeAgentAdapter {
 
 /// A minimal functional [`AgentContentSource`] for the Codex actor tests: folds
 /// `UserPromptAccepted` / `AssistantMessage` into one canonical [`Message`] each,
-/// minting `seq` from `next_seq` (seeded by the adapter's `content_source`), so a
+/// minting `seq` from `next_seq` (seeded by the adapter's `content_source`) and
+/// stamping the session's launch site the way the real accumulator does, so a
 /// test can drive real conversation content through the event pump and assert
 /// persistence + sequencing. Everything else the real accumulator handles (tool
 /// pairing, turn grouping) is out of scope here.
@@ -243,6 +248,11 @@ struct FakeContentSource {
     session_id: SessionId,
     main_thread: ThreadId,
     next_seq: i64,
+    /// The session's launch directory, stamped on every message (as the real
+    /// accumulator does) so the plumbing is observable on persisted rows.
+    cwd: String,
+    /// The branch observed in [`Self::cwd`] at bind time, stamped alongside it.
+    git_branch: Option<String>,
 }
 
 impl AgentContentSource for FakeContentSource {
@@ -282,9 +292,11 @@ impl AgentContentSource for FakeContentSource {
             content_text: Some(text.clone()),
             content: vec![ContentBlock::Text { text }],
             created_at: None,
+            // A real adapter also stamps what its provider reported (the
+            // model); the fake reports none, so only the launch site is here.
             model: None,
-            git_branch: None,
-            cwd: None,
+            git_branch: self.git_branch.clone(),
+            cwd: Some(self.cwd.clone()),
             response_time_ms: None,
         };
         (vec![message], Vec::new())

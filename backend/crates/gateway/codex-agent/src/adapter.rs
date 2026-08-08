@@ -61,17 +61,18 @@ use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use delta_usecase::{
     AgentAdapter, AgentCapabilities, AgentContentSource, AgentEvent, AgentEventStream,
-    AgentProvider, AgentSessionHandle, ContextInjectionCapability, Error as UsecaseError,
-    EventCapability, ForkCapability, InterruptCapability, LaunchCapability, LaunchRequest,
-    PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionId,
-    SessionIdentityCapability, SteerCapability, TerminalCapability, ThreadId, TranscriptCapability,
+    AgentProvider, AgentSessionHandle, ContentSourceRequest, ContextInjectionCapability,
+    Error as UsecaseError, EventCapability, ForkCapability, InterruptCapability, LaunchCapability,
+    LaunchOptionSpec, LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle,
+    Result as UsecaseResult, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
+    SessionEndReason, SessionIdentityCapability, SteerCapability, TerminalCapability,
+    TranscriptCapability,
 };
 
 use crate::translate::{
@@ -105,6 +106,18 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     steer: SteerCapability::None,
 };
 
+/// `thread/start` fields Delta fills in itself, which a user-registered launch
+/// option must never overwrite.
+///
+/// `cwd` is the whole list today: Delta resolves the session's working
+/// directory (the git worktree path, when the session was started with one) and
+/// records the session's repo root, repository display name and
+/// branch-at-launch against exactly that directory. Letting a launch option
+/// override it would put the agent somewhere other than where those columns say
+/// it is. A launch option naming one of these is rejected rather than dropped,
+/// so the user sees why their option did not take effect.
+const DELTA_OWNED_THREAD_FIELDS: &[&str] = &["cwd"];
+
 /// The Codex decision wire value for an allow.
 const DECISION_ACCEPT: &str = "accept";
 /// The Codex decision wire value for a deny.
@@ -113,11 +126,26 @@ const DECISION_DECLINE: &str = "decline";
 const METHOD_NOT_FOUND: i64 = -32601;
 
 /// Per-session plumbing: the event sender the adapter and its translation task
-/// emit through, the receiver handed out once by [`AgentAdapter::events`], and
-/// the map of open approval requests awaiting a decision.
+/// emit through, the receiver handed out once by [`AgentAdapter::events`], the
+/// map of open approval requests awaiting a decision, and the provider facts
+/// the opening response announced about the thread.
 struct CodexSession {
     tx: UnboundedSender<AgentEvent>,
     rx: Option<UnboundedReceiver<AgentEvent>>,
+    /// The model the server **resolved** for this thread, read off the
+    /// `thread/start` / `thread/resume` response (both carry it as a required
+    /// top-level `model`).
+    ///
+    /// This — not anything Delta asked for — is the truth about what is running:
+    /// the model can come from a selected launch option, from the user's own
+    /// `~/.codex/config.toml` default, or from the server's built-in default,
+    /// and only the response says which won. `None` if a server omits it, so the
+    /// fact degrades rather than being invented.
+    ///
+    /// It is the *only* session fact Codex reports here. The response's `cwd` is
+    /// just an echo of what Delta sent, and its `thread.gitInfo` is null (see
+    /// [`resolved_model`]), so the launch site is Delta's own to supply.
+    model: Option<String>,
     /// Open approval requests: neutral `request_id` → the verbatim wire id the
     /// response must echo. Shared with the translation task, which inserts an
     /// entry when it surfaces a `PermissionRequested`.
@@ -159,12 +187,17 @@ impl CodexAppServerAdapter {
     }
 
     /// Register a fresh session for a started/resumed thread: open its event
-    /// channel, emit the opening [`AgentEvent::SessionStarted`], and spawn the
-    /// translation task that drains the thread's frames onto the channel.
+    /// channel, record the model the opening response announced (see
+    /// [`resolved_model`]), emit the opening [`AgentEvent::SessionStarted`], and
+    /// spawn the translation task that drains the thread's frames onto the
+    /// channel.
     fn register_session(&self, started: StartedThread) -> AgentSessionHandle {
         let StartedThread {
-            thread_id, events, ..
+            thread_id,
+            events,
+            result,
         } = started;
+        let model = resolved_model(&result);
         let (tx, rx) = mpsc::unbounded_channel();
         // Buffered before `events()` is called, so the opener is never dropped.
         let _ = tx.send(AgentEvent::SessionStarted {
@@ -190,6 +223,7 @@ impl CodexAppServerAdapter {
                 CodexSession {
                     tx,
                     rx: Some(rx),
+                    model,
                     approvals,
                     current_turn_id,
                     task,
@@ -200,6 +234,17 @@ impl CodexAppServerAdapter {
             provider_session_id: thread_id.clone(),
             key: thread_id,
         }
+    }
+
+    /// The model the server resolved for a still-known session's thread, as
+    /// recorded by [`Self::register_session`]. `None` for an unknown or closed
+    /// session, exactly as when the response carried no model.
+    fn session_model(&self, key: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .expect("sessions mutex poisoned")
+            .get(key)
+            .and_then(|session| session.model.clone())
     }
 
     /// Emit an event on a session's channel, if the session is still known.
@@ -276,6 +321,86 @@ impl CodexAppServerAdapter {
     }
 }
 
+/// Build the `thread/start` params for a launch: Delta's own fields plus the
+/// user's selected launch options, mapped one-to-one onto `ThreadStartParams`
+/// fields.
+///
+/// A launch option is passed through **unvalidated**: its `name` is the field
+/// name and its `value` is that field's value. `ThreadStartParams` is a moving
+/// target (`model`, `sandbox`, `approvalPolicy`, `personality`, `serviceTier`,
+/// `config`, …), so an allowlist here would mean a Delta release for every new
+/// upstream field. The cost of the pass-through is that a misspelled key or a
+/// bad value is not caught here — it comes back as an error from the codex
+/// server, which is where the authority over that schema actually lives.
+///
+/// Two things are still rejected, loudly, because silently accepting them would
+/// corrupt state Delta is responsible for:
+///
+/// - a key Delta sets itself ([`DELTA_OWNED_THREAD_FIELDS`]). `cwd` is
+///   load-bearing: with a worktree it is the resolved worktree path, and the
+///   session's repo-root / display-name / branch-at-launch columns are recorded
+///   against it, so a user-registered `cwd` overriding it would break the
+///   worktree contract while the recorded columns went on describing a
+///   directory the agent is not in;
+/// - the same key twice. Unlike a repeatable CLI flag, a JSON field can only be
+///   set once, so a second option carrying the same name would silently discard
+///   the first.
+pub(crate) fn thread_start_params(
+    workdir: &str,
+    options: &[LaunchOptionSpec],
+) -> UsecaseResult<Value> {
+    let mut params = Map::new();
+    params.insert("cwd".to_owned(), json!(workdir));
+    for option in options {
+        if DELTA_OWNED_THREAD_FIELDS.contains(&option.name.as_str()) {
+            return Err(UsecaseError::LaunchOptionRejected(format!(
+                "`{}` cannot be used with Codex: Delta sets that thread/start \
+                 field itself for every session",
+                option.name
+            )));
+        }
+        if params.contains_key(&option.name) {
+            return Err(UsecaseError::LaunchOptionRejected(format!(
+                "`{}` is selected more than once: a thread/start field can only \
+                 be set once",
+                option.name
+            )));
+        }
+        params.insert(
+            option.name.clone(),
+            thread_start_value(option.value.as_deref()),
+        );
+    }
+    Ok(Value::Object(params))
+}
+
+/// Map a launch option's registry value onto its `thread/start` field value.
+///
+/// The registry stores values as text, but `ThreadStartParams` fields are not
+/// all strings — `ephemeral` is a boolean, `config` is an object, and
+/// `approvalPolicy` is either a string or an object. So:
+///
+/// - **no value** → JSON `true`. A valueless option reads as a bare boolean
+///   field being switched on (`ephemeral`), the same way a valueless CLI flag
+///   reads on the Claude side;
+/// - **a value that parses as JSON** → that JSON value. `true`, `42`,
+///   `{"granular":{…}}` and `["a","b"]` all reach the server with their real
+///   types;
+/// - **anything else** → the value as a JSON string. This is the common case:
+///   `gpt-5.6-sol`, `read-only` and `on-request` are not valid JSON documents,
+///   so they arrive as the strings they are.
+///
+/// The consequence of that ordering is that a string value which *happens* to
+/// be valid JSON (`5`, `null`, `true`) becomes the parsed type. A user who
+/// needs the literal string writes it quoted (`"5"`), which parses as the JSON
+/// string `5`.
+fn thread_start_value(value: Option<&str>) -> Value {
+    match value {
+        None => Value::Bool(true),
+        Some(raw) => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_owned())),
+    }
+}
+
 /// Build a Responses API user-message item carrying `text`, the shape
 /// `thread/inject_items` appends to the thread's model-visible history (a
 /// `MessageResponseItem` with a single `input_text` content item — see the
@@ -286,6 +411,34 @@ fn inject_message_item(text: &str) -> Value {
         "role": "user",
         "content": [{ "type": "input_text", "text": text }],
     })
+}
+
+/// The model a `thread/start` / `thread/resume` response reports for the thread
+/// it opened, read from the top-level `model` both responses carry (see the
+/// vendored `ThreadStartResponse` / `ThreadResumeResponse` schemas, where it is
+/// a required string alongside `cwd`, `sandbox` and `approvalPolicy`).
+///
+/// This is deliberately read from the **response** rather than echoed from the
+/// request: `model` is only one of several inputs the server reconciles (a
+/// selected launch option, the user's `config.toml` default, the server's own
+/// default), so the request says what Delta asked for while the response says
+/// what is actually running. A missing, null, non-string or empty value degrades
+/// to `None` rather than being invented.
+///
+/// It is the only session fact worth reading here. The response's `thread` also
+/// declares a `gitInfo` (`GitInfo | null`, documented as "captured when the
+/// thread was created"), but the real server returns it as **null** on this
+/// response — verified against `codex-cli 0.144.4`, and pinned by the
+/// `real_thread_start_reports_the_metadata_delta_stamps_on_messages` canary. The
+/// field's presence in the schema is not evidence that this response populates
+/// it, so Delta observes the branch of its own launch directory instead of
+/// waiting for one here.
+fn resolved_model(result: &Value) -> Option<String> {
+    result
+        .get("model")
+        .and_then(Value::as_str)
+        .filter(|model| !model.is_empty())
+        .map(str::to_owned)
 }
 
 /// The id of the turn a `turn/start` response announces, read from the `Turn`
@@ -312,10 +465,12 @@ impl AgentAdapter for CodexAppServerAdapter {
     async fn launch(&self, req: LaunchRequest) -> UsecaseResult<AgentSessionHandle> {
         // The server assigns the thread id; Delta's own session id is not pinned
         // onto it (that is the `ProviderReturnsId` identity model). The workdir
-        // rides `thread/start` as `cwd`.
+        // rides `thread/start` as `cwd`, and the user's selected launch options
+        // ride it as further fields (see [`thread_start_params`]).
+        let params = thread_start_params(&req.workdir, &req.launch_options)?;
         let started = self
             .conn
-            .start_thread(Some(json!({ "cwd": req.workdir })))
+            .start_thread(Some(params))
             .await
             .map_err(to_usecase_err)?;
         let handle = self.register_session(started);
@@ -327,6 +482,14 @@ impl AgentAdapter for CodexAppServerAdapter {
         Ok(handle)
     }
 
+    /// Reattach to an existing thread with `thread/resume`.
+    ///
+    /// No launch options ride this call. `ThreadResumeParams`' config fields
+    /// (`model`, `sandbox`, `approvalPolicy`, `config`, …) are documented as
+    /// *overrides* for the resumed thread, so omitting them keeps whatever
+    /// `thread/start` configured — and the core has no per-session record of
+    /// which options were selected to replay anyway (see
+    /// `resume_adapter_agent` in the core for the full reasoning).
     async fn resume(&self, req: ResumeRequest) -> UsecaseResult<AgentSessionHandle> {
         let started = self
             .conn
@@ -501,14 +664,16 @@ impl AgentAdapter for CodexAppServerAdapter {
 
     fn content_source(
         &self,
-        session_id: SessionId,
-        main_thread: ThreadId,
-        seed_seq: i64,
+        handle: &AgentSessionHandle,
+        req: ContentSourceRequest,
     ) -> Box<dyn AgentContentSource> {
         // Codex pushes structured `item/*` / `turn/*` frames, so its event pump
         // folds them into canonical messages through this accumulator (the
-        // `CodexConversationSource`), rather than reading a transcript.
-        codex_content_source(session_id, main_thread, seed_seq)
+        // `CodexConversationSource`), rather than reading a transcript. The
+        // launch site rides the neutral request; the model is the one fact only
+        // this adapter holds, recorded from the thread's opening response when
+        // the session was registered.
+        codex_content_source(req, self.session_model(&handle.key))
     }
 }
 

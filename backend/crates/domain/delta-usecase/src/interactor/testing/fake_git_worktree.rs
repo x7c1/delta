@@ -54,6 +54,10 @@ pub(crate) struct FakeGitWorktree {
     /// When set, `create_worktree` fails instead of recording the call,
     /// simulating a `git worktree add` failure.
     pub(crate) fail_create: bool,
+    /// When set, `current_branch` returns an error instead of a branch,
+    /// simulating a `git` that is missing or broken — distinct from the `Ok(None)`
+    /// a non-repo or detached HEAD produces.
+    pub(crate) fail_current_branch: bool,
     /// The `create_worktree` calls made, in order.
     pub(crate) created: Mutex<Vec<CreatedWorktree>>,
     /// Scripted results for `worktree_path_for_branch`, keyed by branch name.
@@ -84,6 +88,12 @@ impl FakeGitWorktree {
             .lock()
             .unwrap()
             .push((dir.to_owned(), branch.to_owned()));
+        self
+    }
+
+    /// Make `current_branch` fail outright, as a missing or broken `git` would.
+    pub(crate) fn with_failing_current_branch(mut self) -> Self {
+        self.fail_current_branch = true;
         self
     }
 
@@ -121,6 +131,9 @@ impl GitWorktree for FakeGitWorktree {
     }
 
     async fn current_branch(&self, path: &str) -> Result<Option<String>> {
+        if self.fail_current_branch {
+            return Err(crate::error::Error::Git("git rev-parse failed".into()));
+        }
         Ok(self
             .current_branches
             .lock()

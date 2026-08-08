@@ -25,13 +25,18 @@
 //! ## Faithful vs. degraded (never faked)
 //!
 //! Reproduced faithfully: role (user / assistant), text, the model's extended
-//! thinking, tool use ↔ result pairing, and the turn group (`prompt_id` from the
-//! provider turn id). Absent provider facts degrade to `None` rather than being
-//! invented — `created_at`, `model`, `git_branch`, `cwd`, `response_time_ms`,
-//! and the linear parent link. `Meta` / `CompactSummary` blocks are simply not
-//! produced (Codex does not expose them); a `Thinking` block *is*, folded from
-//! the neutral [`AgentEvent::ThinkingMessage`] a `reasoning` item projects to, so
-//! a Codex session shows the model's thinking exactly as a Claude one does.
+//! thinking, tool use ↔ result pairing, the turn group (`prompt_id` from the
+//! provider turn id), and the session's metadata — the `model` the server
+//! resolved, plus the `cwd` Delta launched the session in and the `git_branch`
+//! it observed there, all set once at construction and stamped on every message
+//! (see [`CodexConversationSource::new`]). Absent facts degrade to `None` rather
+//! than being invented — `created_at`, `response_time_ms`, and the linear parent
+//! link, plus `model` when the server reported none and `git_branch` when the
+//! launch directory is not a git working tree. `Meta` / `CompactSummary` blocks
+//! are simply not produced (Codex does not expose them); a `Thinking` block
+//! *is*, folded from the neutral [`AgentEvent::ThinkingMessage`] a `reasoning`
+//! item projects to, so a Codex session shows the model's thinking exactly as a
+//! Claude one does.
 //!
 //! A plain turn's messages land on the session's `main` thread the source is
 //! constructed with; a *branch* turn (Delta's
@@ -42,13 +47,14 @@
 //! semantic parent — matching the `send` row's own lane + parent, so branch
 //! content lives on the branch lane exactly like Claude's.
 //!
-//! ## Dormant in this slice
+//! ## How it is driven
 //!
-//! Like [`crate::CodexAppServerAdapter`] before it was wired, this is
-//! **dormant-but-tested**: it is a pure fold with no I/O, unit-tested in
-//! isolation here. The event pump that feeds it live — draining `events()` into
-//! both this and the FSM, and posting the resulting `(messages, effects)`
-//! batches into `persist_conversation_batch` — lands in the following slice.
+//! It is a pure fold with no I/O, so it is unit-tested in isolation here. Live,
+//! the event pump drives it: `events()` is drained into both this and the FSM,
+//! and the resulting `(messages, effects)` batches are posted into
+//! `persist_conversation_batch`. The pump builds one per session at bind time
+//! (see [`codex_content_source`]), which is also when the per-session metadata
+//! above is captured.
 //!
 //! [`AgentEvent`]: delta_usecase::AgentEvent
 //! [`ForkCapability::None`]: delta_usecase::ForkCapability
@@ -57,7 +63,7 @@
 use std::collections::HashMap;
 
 use delta_model::{ContentBlock, Message, MessageUuid, PromptId, Role, SessionId, ThreadId};
-use delta_usecase::{AgentContentSource, AgentEvent, Effect};
+use delta_usecase::{AgentContentSource, AgentEvent, ContentSourceRequest, Effect};
 use serde_json::Value;
 
 /// A tool call awaiting its completion frame: the name and input captured from
@@ -103,29 +109,59 @@ pub struct CodexConversationSource {
     current_turn: Option<PromptId>,
     /// Tool calls started but not yet completed, keyed by `provider_item_id`.
     pending_tools: HashMap<String, PendingTool>,
+    /// The model the Codex server resolved for this thread, read by the adapter
+    /// off the response that opened it. `None` when the response carried none.
+    model: Option<String>,
+    /// The directory the agent is running in — the launch directory Delta
+    /// resolved for this session.
+    cwd: String,
+    /// The branch Delta observed in [`Self::cwd`] when the session was bound.
+    /// `None` when that directory is not a git working tree, or HEAD is detached
+    /// there — neither of which is worth inventing a branch name for.
+    git_branch: Option<String>,
 }
 
 impl CodexConversationSource {
     /// Build a source for one session.
     ///
-    /// `main_thread` is the session's `main` thread: a plain turn's messages land
-    /// there, and it is where each turn's routing resets to. A branch turn instead
-    /// routes onto its branch child thread via
+    /// `req.main_thread` is the session's `main` thread: a plain turn's messages
+    /// land there, and it is where each turn's routing resets to. A branch turn
+    /// instead routes onto its branch child thread via
     /// [`AgentContentSource::begin_turn`], set before the turn's frames arrive.
-    /// `seed_seq` is the next `seq` to mint — the store's current `MAX(seq) + 1`,
-    /// or `0` for a fresh session — so the minted ordering continues past whatever
-    /// is already persisted.
-    pub fn new(session_id: SessionId, main_thread: ThreadId, seed_seq: i64) -> Self {
+    /// `req.seed_seq` is the next `seq` to mint — the store's current
+    /// `MAX(seq) + 1`, or `0` for a fresh session — so the minted ordering
+    /// continues past whatever is already persisted.
+    ///
+    /// `model` and `req.cwd` / `req.git_branch` are the session's metadata,
+    /// stamped on every message this source folds. They are taken here, at
+    /// construction, because all three are settled before the session's first
+    /// frame and never change while it runs.
+    ///
+    /// They come from two different places, by which party is the authority:
+    ///
+    /// - `model` is what the **server** resolved, read by the adapter off the
+    ///   response that opened the thread. Delta cannot know it — a launch
+    ///   option, the user's own config and the server's default all feed that
+    ///   decision, and only the response says which won.
+    /// - `cwd` and `git_branch` are **Delta's own** launch site: the directory it
+    ///   chose to run the agent in, and the branch it observed there. Codex
+    ///   reports neither (its `thread/start` echoes `cwd` back and leaves
+    ///   `gitInfo` null), so Delta's own record and observation are the only
+    ///   honest source.
+    pub fn new(req: ContentSourceRequest, model: Option<String>) -> Self {
         Self {
-            session_id,
+            session_id: req.session_id,
             // A turn defaults to the main thread with no semantic parent, so a
             // session that never branches behaves exactly as before; a branch
             // turn overrides both via `begin_turn` before its frames arrive.
-            turn_thread: main_thread,
+            turn_thread: req.main_thread,
             pending_semantic_parent: None,
-            next_seq: seed_seq,
+            next_seq: req.seed_seq,
             current_turn: None,
             pending_tools: HashMap::new(),
+            model,
+            cwd: req.cwd,
+            git_branch: req.git_branch,
         }
     }
 
@@ -292,8 +328,11 @@ impl CodexConversationSource {
     /// `startedAtMs` / `completedAtMs` the translation carried onto the event),
     /// converted here to the canonical ISO-8601 UTC `created_at` string. It stays
     /// `None` when the provider exposed no time, so `created_at` degrades rather
-    /// than being invented. `model` / `git_branch` / `cwd` remain unconditionally
-    /// `None` — those provider facts are a separate follow-up.
+    /// than being invented. `model` / `git_branch` / `cwd` are copied from the
+    /// session metadata captured at construction (see
+    /// [`CodexConversationSource::new`]); `response_time_ms` stays `None` — Codex
+    /// exposes no per-message latency and inferring one from item timestamps
+    /// would be a different measurement than Claude's, so it degrades.
     fn build(
         &mut self,
         uuid: MessageUuid,
@@ -321,9 +360,9 @@ impl CodexConversationSource {
             content_text: Message::flatten_text(&content),
             content,
             created_at: at_ms.and_then(iso8601_from_epoch_ms),
-            model: None,
-            git_branch: None,
-            cwd: None,
+            model: self.model.clone(),
+            git_branch: self.git_branch.clone(),
+            cwd: Some(self.cwd.clone()),
             response_time_ms: None,
         }
     }
@@ -378,21 +417,17 @@ impl AgentContentSource for CodexConversationSource {
 /// Build a Codex session's content source as the domain-side
 /// [`AgentContentSource`] trait object the event pump holds.
 ///
-/// The Delta-side constructor: the pump knows a session's `session_id`, its
-/// `main_thread` (Codex v1 lands every message there), and `seed_seq` — the
-/// store's current `MAX(seq) + 1`, so minted ordering continues past whatever
-/// is already persisted — and gets back the boxed neutral seam without naming
-/// the concrete type. Dormant in this slice: nothing wires the pump yet.
+/// The Delta-side constructor: the core hands over the neutral
+/// [`ContentSourceRequest`] (the session's identity, its `main_thread` — Codex
+/// v1 lands every message there —, the `seed_seq` that continues the persisted
+/// ordering, and the launch site it resolved and observed), the adapter adds the
+/// `model` the Codex server reported for the thread, and the caller gets back
+/// the boxed neutral seam without naming the concrete type.
 pub fn codex_content_source(
-    session_id: SessionId,
-    main_thread: ThreadId,
-    seed_seq: i64,
+    req: ContentSourceRequest,
+    model: Option<String>,
 ) -> Box<dyn AgentContentSource> {
-    Box::new(CodexConversationSource::new(
-        session_id,
-        main_thread,
-        seed_seq,
-    ))
+    Box::new(CodexConversationSource::new(req, model))
 }
 
 /// Convert an epoch-millisecond timestamp to the canonical ISO-8601 UTC string
@@ -459,8 +494,26 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The launch directory every source built by [`request`] runs in.
+    const TEST_CWD: &str = "/work/app";
+
+    /// A content-source request for `session`, landing on `main_thread` and
+    /// minting from `seed_seq`, launched in [`TEST_CWD`] with no branch observed
+    /// there — the shape a session outside a git working tree gets.
+    fn request(session: &str, main_thread: ThreadId, seed_seq: i64) -> ContentSourceRequest {
+        ContentSourceRequest {
+            session_id: SessionId::from(session),
+            main_thread,
+            seed_seq,
+            cwd: TEST_CWD.to_owned(),
+            git_branch: None,
+        }
+    }
+
+    /// A source with no model reported and no branch observed, so only the
+    /// launch directory is stamped.
     fn source() -> CodexConversationSource {
-        CodexConversationSource::new(SessionId::from("sess-1"), ThreadId(1), 0)
+        CodexConversationSource::new(request("sess-1", ThreadId(1), 0), None)
     }
 
     #[test]
@@ -480,11 +533,104 @@ mod tests {
         assert_eq!(m.seq, 0);
         assert_eq!(m.content, vec![text_block("hi")]);
         assert_eq!(m.content_text.as_deref(), Some("hi"));
-        // Every provider fact Codex does not expose degrades to None.
+        // Every provider fact Codex does not expose degrades to None — including
+        // the model, which this source was built without.
         assert!(m.created_at.is_none());
         assert!(m.model.is_none());
         assert!(m.linear_parent_uuid.is_none());
         assert!(m.response_time_ms.is_none());
+    }
+
+    /// The session's provider metadata is stamped on **every** message the fold
+    /// produces — the user prompt, the assistant reply, a paired tool call, and a
+    /// tool flushed at turn end — and stays put across turns, because it is a
+    /// per-session fact captured once rather than something re-read per event.
+    #[test]
+    fn every_folded_message_carries_the_sessions_model_cwd_and_branch() {
+        let mut src = CodexConversationSource::new(
+            ContentSourceRequest {
+                session_id: SessionId::from("sess-1"),
+                main_thread: ThreadId(1),
+                seed_seq: 0,
+                cwd: "/work/app".to_owned(),
+                git_branch: Some("feature/x".to_owned()),
+            },
+            Some("gpt-5.6-sol".to_owned()),
+        );
+
+        let mut folded = Vec::new();
+        folded.extend(src.ingest(&AgentEvent::TurnStarted {
+            provider_turn_id: Some("turn_1".to_owned()),
+        }));
+        folded.extend(src.ingest(&AgentEvent::UserPromptAccepted {
+            provider_message_id: None,
+            text: "hello".to_owned(),
+            at_ms: None,
+        }));
+        folded.extend(src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "item_1".to_owned(),
+            text: "hi".to_owned(),
+            at_ms: None,
+        }));
+        src.ingest(&AgentEvent::ToolStarted {
+            provider_item_id: "t1".to_owned(),
+            name: "Bash".to_owned(),
+            input_json: json!({ "command": "ls" }),
+            at_ms: None,
+        });
+        folded.extend(src.ingest(&AgentEvent::ToolCompleted {
+            provider_item_id: "t1".to_owned(),
+            output_json: json!({ "exitCode": 0 }),
+            at_ms: None,
+        }));
+        // A tool left open at turn end is flushed — that path stamps too.
+        src.ingest(&AgentEvent::ToolStarted {
+            provider_item_id: "t2".to_owned(),
+            name: "Bash".to_owned(),
+            input_json: json!({}),
+            at_ms: None,
+        });
+        folded.extend(src.ingest(&AgentEvent::TurnCompleted {
+            status: delta_usecase::TurnStatus::Completed,
+        }));
+        // A second turn still reports the same session facts.
+        folded.extend(src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "item_2".to_owned(),
+            text: "again".to_owned(),
+            at_ms: None,
+        }));
+
+        assert_eq!(folded.len(), 5, "prompt + reply + tool + flush + reply");
+        for m in &folded {
+            assert_eq!(
+                m.model.as_deref(),
+                Some("gpt-5.6-sol"),
+                "message {} reports the session's model",
+                m.uuid.as_str()
+            );
+            assert_eq!(m.cwd.as_deref(), Some("/work/app"));
+            assert_eq!(m.git_branch.as_deref(), Some("feature/x"));
+        }
+    }
+
+    /// A session with no model reported and no branch observed still reports the
+    /// one fact Delta always knows — where the agent is running — and degrades
+    /// the other two rather than inventing them.
+    #[test]
+    fn absent_provider_metadata_degrades_but_the_launch_directory_is_always_reported() {
+        let mut src = source();
+        let msgs = src.ingest(&AgentEvent::AssistantMessage {
+            provider_item_id: "item_1".to_owned(),
+            text: "hi".to_owned(),
+            at_ms: None,
+        });
+        let m = &msgs[0];
+        assert!(m.model.is_none(), "no model reported means none stamped");
+        assert!(
+            m.git_branch.is_none(),
+            "no branch observed means no branch stamped"
+        );
+        assert_eq!(m.cwd.as_deref(), Some(TEST_CWD));
     }
 
     #[test]
@@ -598,7 +744,7 @@ mod tests {
 
     #[test]
     fn seed_seq_continues_past_persisted_messages() {
-        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(1), 42);
+        let mut src = CodexConversationSource::new(request("s", ThreadId(1), 42), None);
         let msgs = src.ingest(&AgentEvent::AssistantMessage {
             provider_item_id: "i".to_owned(),
             text: "x".to_owned(),
@@ -784,7 +930,7 @@ mod tests {
         // Its first prompt-less user prompt must NOT reuse `codex-user-0` — that
         // would overwrite the pre-restart message — so it is keyed off the seeded
         // seq (2) instead, and lands at seq 2.
-        let mut resumed = CodexConversationSource::new(SessionId::from("sess-1"), ThreadId(1), 2);
+        let mut resumed = CodexConversationSource::new(request("sess-1", ThreadId(1), 2), None);
         let resumed_msg = resumed
             .ingest(&AgentEvent::UserPromptAccepted {
                 provider_message_id: None,
@@ -808,7 +954,7 @@ mod tests {
         // Drive through the domain-side `AgentContentSource` seam (the shape the
         // pump holds), built by the Delta-side factory. It must return the same
         // messages the inherent fold produces, plus an empty effect list.
-        let mut src = codex_content_source(SessionId::from("sess-1"), ThreadId(1), 7);
+        let mut src = codex_content_source(request("sess-1", ThreadId(1), 7), None);
         let (messages, effects) = src.ingest(&AgentEvent::AssistantMessage {
             provider_item_id: "item_1".to_owned(),
             text: "hi".to_owned(),
@@ -828,7 +974,7 @@ mod tests {
     fn a_branch_turn_routes_its_messages_to_the_branch_thread_and_stamps_the_semantic_parent() {
         // `begin_turn` sets the branch child thread + the branched-from message
         // before the turn's frames arrive (as the dispatch does on the mailbox).
-        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(8), 0);
+        let mut src = CodexConversationSource::new(request("s", ThreadId(8), 0), None);
         src.begin_turn(
             ThreadId(9),
             Some(MessageUuid::from("codex-item-msg_parent")),
@@ -877,7 +1023,7 @@ mod tests {
         // With no `begin_turn`, or `begin_turn(main, None)`, every message stays
         // on the main thread with no semantic parent — the pre-fix behaviour a
         // non-branching session must keep byte-for-byte.
-        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(8), 0);
+        let mut src = CodexConversationSource::new(request("s", ThreadId(8), 0), None);
         src.begin_turn(ThreadId(8), None);
         let user = src.ingest(&AgentEvent::UserPromptAccepted {
             provider_message_id: None,
@@ -900,7 +1046,7 @@ mod tests {
         // A branch turn overrides the routing; the following plain turn's
         // `begin_turn(main, None)` must reset it, so late/next-turn content does
         // not leak onto the branch lane.
-        let mut src = CodexConversationSource::new(SessionId::from("s"), ThreadId(8), 0);
+        let mut src = CodexConversationSource::new(request("s", ThreadId(8), 0), None);
         src.begin_turn(
             ThreadId(9),
             Some(MessageUuid::from("codex-item-msg_parent")),
@@ -925,7 +1071,7 @@ mod tests {
 
     #[test]
     fn the_content_source_trait_returns_an_empty_batch_for_control_events() {
-        let mut src = codex_content_source(SessionId::from("s"), ThreadId(1), 0);
+        let mut src = codex_content_source(request("s", ThreadId(1), 0), None);
         let (messages, effects) = src.ingest(&AgentEvent::TurnStarted {
             provider_turn_id: Some("turn_1".to_owned()),
         });
