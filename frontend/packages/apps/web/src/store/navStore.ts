@@ -90,7 +90,23 @@ export interface NavState {
   /** Whether the terminal pane is shown (persistent pane on large screens, or
    *  the slide-in overlay on small screens). */
   terminalOpen: boolean;
-  /** Width of the persistent terminal pane in pixels (large screens only). */
+  /**
+   * Whether the comms-log pane is shown — the right-pane window a session whose
+   * provider has no terminal gets instead (see `ProviderCapabilities`).
+   *
+   * Deliberately its OWN flag rather than a shared "right pane open" bit: both
+   * are persisted, and with a single bit a `true` left behind by a Claude session
+   * would open the comms pane the moment a Codex session took focus (and vice
+   * versa) — a pane the user never asked for. With two flags each pane only ever
+   * reopens for the kind of session it belongs to.
+   */
+  commsOpen: boolean;
+  /**
+   * Width of the persistent right pane in pixels (large screens only), shared by
+   * the terminal and comms-log panes: at most one is ever shown, and a user who
+   * has sized the right column means that size for the column, not for one
+   * provider's version of it.
+   */
   terminalWidth: number;
 
   /**
@@ -158,6 +174,8 @@ export interface NavState {
   closeSettings: () => void;
   setTerminalOpen: (open: boolean) => void;
   toggleTerminal: () => void;
+  setCommsOpen: (open: boolean) => void;
+  toggleComms: () => void;
   /** Set the terminal pane width, clamped to the allowed range. */
   setTerminalWidth: (width: number) => void;
 }
@@ -181,12 +199,12 @@ function focusChange(sessionId: FocusedSession) {
 }
 
 /**
- * Navigation/layout store. The focused session, active thread, terminal
- * visibility, and terminal width are **persisted to localStorage** so a browser
- * reload restores the same layout instead of snapping back to a closed terminal
- * on `main`. A restored focused session that no longer exists, or an active
- * thread outside the focused session, is reconciled by the workspace (see
- * `WorkspaceScreen`).
+ * Navigation/layout store. The focused session, active thread, right-pane
+ * visibility (terminal and comms log, one flag each), and right-pane width are
+ * **persisted to localStorage** so a browser reload restores the same layout
+ * instead of snapping back to a closed terminal on `main`. A restored focused
+ * session that no longer exists, or an active thread outside the focused
+ * session, is reconciled by the workspace (see `WorkspaceScreen`).
  */
 export const useNavStore = create<NavState>()(
   persist(
@@ -197,6 +215,7 @@ export const useNavStore = create<NavState>()(
       activeThreadJumpTarget: null,
       settingsOpen: false,
       terminalOpen: false,
+      commsOpen: false,
       terminalWidth: DEFAULT_TERMINAL_WIDTH,
 
       setFocusedSession: (sessionId) =>
@@ -266,6 +285,8 @@ export const useNavStore = create<NavState>()(
       setTerminalOpen: (open) => set({ terminalOpen: open }),
       toggleTerminal: () =>
         set((state) => ({ terminalOpen: !state.terminalOpen })),
+      setCommsOpen: (open) => set({ commsOpen: open }),
+      toggleComms: () => set((state) => ({ commsOpen: !state.commsOpen })),
       setTerminalWidth: (width) => set({ terminalWidth: clampTerminalWidth(width) }),
     }),
     {
@@ -277,6 +298,7 @@ export const useNavStore = create<NavState>()(
         activeThreadId: state.activeThreadId,
         settingsOpen: state.settingsOpen,
         terminalOpen: state.terminalOpen,
+        commsOpen: state.commsOpen,
         terminalWidth: state.terminalWidth,
       }),
       // Re-clamp the restored width in case the viewport shrank since last time.

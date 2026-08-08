@@ -8,6 +8,8 @@ mod async_event_sink;
 pub use async_event_sink::{AsyncEventReceiver, AsyncEventSink};
 mod binary_detector;
 pub use binary_detector::BinaryDetector;
+mod comms_log;
+pub use comms_log::{CommsDirection, CommsEntry, CommsFrameKind, CommsLogSink, NullCommsLog};
 mod dir_listing;
 pub use dir_listing::{DirEntry, DirListing};
 mod external_opener;

@@ -24,6 +24,24 @@ export type ProviderCapabilities = {
  */
 has_terminal: boolean, 
 /**
+ * Whether the browser can inspect the frames Delta exchanges with this
+ * provider — i.e. whether this provider's sessions get the comms-log pane
+ * (the `/comms` stream) as their right-pane window.
+ *
+ * Derived from the internal [`LaunchCapability`], the same field
+ * [`Self::launch_option_style`] follows, because *how Delta drives a
+ * provider* is what decides whether there are frames to show:
+ * [`LaunchCapability::JsonRpcAppServer`] means Delta itself writes and reads
+ * every message, so the exchange is inspectable by construction → `true`;
+ * [`LaunchCapability::PtyCommand`] means Delta launched a terminal program
+ * and holds no message-level view of it — its window is the terminal
+ * instead → `false`.
+ *
+ * So the two flags are complementary, not independent: the right pane is the
+ * terminal when [`Self::has_terminal`], and the comms log when this is set.
+ */
+has_comms_log: boolean, 
+/**
  * How this provider reads a registered launch option's `(name, value?)`
  * pair. Settings words its launch-option form from this, so a user
  * registering an option for a field-style provider is told to write

@@ -27,6 +27,22 @@ pub struct WireProviderCapabilities {
     /// (Codex's headless app-server) → `false`. The workspace hides the terminal
     /// toggle and pane for a provider whose value is `false`.
     pub has_terminal: bool,
+    /// Whether the browser can inspect the frames Delta exchanges with this
+    /// provider — i.e. whether this provider's sessions get the comms-log pane
+    /// (the `/comms` stream) as their right-pane window.
+    ///
+    /// Derived from the internal [`LaunchCapability`], the same field
+    /// [`Self::launch_option_style`] follows, because *how Delta drives a
+    /// provider* is what decides whether there are frames to show:
+    /// [`LaunchCapability::JsonRpcAppServer`] means Delta itself writes and reads
+    /// every message, so the exchange is inspectable by construction → `true`;
+    /// [`LaunchCapability::PtyCommand`] means Delta launched a terminal program
+    /// and holds no message-level view of it — its window is the terminal
+    /// instead → `false`.
+    ///
+    /// So the two flags are complementary, not independent: the right pane is the
+    /// terminal when [`Self::has_terminal`], and the comms log when this is set.
+    pub has_comms_log: bool,
     /// How this provider reads a registered launch option's `(name, value?)`
     /// pair. Settings words its launch-option form from this, so a user
     /// registering an option for a field-style provider is told to write
@@ -59,6 +75,7 @@ impl From<AgentCapabilities> for WireProviderCapabilities {
     fn from(capabilities: AgentCapabilities) -> Self {
         WireProviderCapabilities {
             has_terminal: matches!(capabilities.terminal, TerminalCapability::AttachablePty),
+            has_comms_log: matches!(capabilities.launch, LaunchCapability::JsonRpcAppServer),
             launch_option_style: capabilities.launch.into(),
         }
     }
@@ -184,6 +201,7 @@ mod tests {
                         "detail": null,
                         "capabilities": {
                             "has_terminal": true,
+                            "has_comms_log": false,
                             "launch_option_style": "cli_flag"
                         }
                     }
@@ -216,9 +234,36 @@ mod tests {
             "The 'codex' binary for codex was not found on PATH."
         );
         assert_eq!(value["providers"][0]["capabilities"]["has_terminal"], false);
+        assert_eq!(value["providers"][0]["capabilities"]["has_comms_log"], true);
         assert_eq!(
             value["providers"][0]["capabilities"]["launch_option_style"],
             "request_field"
+        );
+    }
+
+    /// The comms-log capability follows the launch capability, not the terminal
+    /// one — the two are complementary windows onto the same session, so a
+    /// structured-launch provider earns the inspector and a command-launch one
+    /// does not, whatever terminal surface either reports.
+    #[test]
+    fn the_comms_log_capability_follows_the_launch_capability() {
+        let pty = WireProviderCapabilities::from(caps(
+            TerminalCapability::AttachablePty,
+            LaunchCapability::PtyCommand,
+        ));
+        assert!(
+            !pty.has_comms_log,
+            "a terminal program's window is its terminal, not a frame log"
+        );
+
+        let app_server = WireProviderCapabilities::from(caps(
+            TerminalCapability::NoTerminal,
+            LaunchCapability::JsonRpcAppServer,
+        ));
+        assert!(app_server.has_comms_log);
+        assert!(
+            !app_server.has_terminal,
+            "the headless provider's only window is the frame log"
         );
     }
 

@@ -67,12 +67,12 @@ use tokio::task::JoinHandle;
 
 use delta_usecase::{
     AgentAdapter, AgentCapabilities, AgentContentSource, AgentEvent, AgentEventStream,
-    AgentProvider, AgentSessionHandle, ContentSourceRequest, ContextInjectionCapability,
-    Error as UsecaseError, EventCapability, ForkCapability, InterruptCapability, LaunchCapability,
-    LaunchOptionSpec, LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle,
-    Result as UsecaseResult, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
-    SessionEndReason, SessionIdentityCapability, SteerCapability, TerminalCapability,
-    TranscriptCapability,
+    AgentProvider, AgentSessionHandle, CommsDirection, CommsEntry, CommsFrameKind, CommsLogSink,
+    ContentSourceRequest, ContextInjectionCapability, Error as UsecaseError, EventCapability,
+    ForkCapability, InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest,
+    PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability,
+    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability,
+    SteerCapability, TerminalCapability, TranscriptCapability,
 };
 
 use crate::translate::{
@@ -130,6 +130,13 @@ const METHOD_NOT_FOUND: i64 = -32601;
 /// map of open approval requests awaiting a decision, and the provider facts
 /// the opening response announced about the thread.
 struct CodexSession {
+    /// Delta's own conversation id for this session.
+    ///
+    /// The adapter addresses everything else by the provider thread id (which is
+    /// the handle key), but the comms-log inspector is keyed by the id the
+    /// browser knows — and this adapter is the only layer holding both, so it
+    /// remembers Delta's id here to scope the frames it records.
+    session_id: String,
     tx: UnboundedSender<AgentEvent>,
     rx: Option<UnboundedReceiver<AgentEvent>>,
     /// The model the server **resolved** for this thread, read off the
@@ -191,7 +198,7 @@ impl CodexAppServerAdapter {
     /// [`resolved_model`]), emit the opening [`AgentEvent::SessionStarted`], and
     /// spawn the translation task that drains the thread's frames onto the
     /// channel.
-    fn register_session(&self, started: StartedThread) -> AgentSessionHandle {
+    fn register_session(&self, session_id: String, started: StartedThread) -> AgentSessionHandle {
         let StartedThread {
             thread_id,
             events,
@@ -206,12 +213,14 @@ impl CodexAppServerAdapter {
         let approvals: Arc<Mutex<HashMap<String, Value>>> = Arc::new(Mutex::new(HashMap::new()));
         let current_turn_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let task = tokio::spawn(translate_loop(
+            session_id.clone(),
             events,
             tx.clone(),
             // A weak reference: the task must not keep the connection alive, or
             // dropping the adapter would never close the thread channel and the
             // task would never exit.
             Arc::downgrade(&self.conn),
+            Arc::clone(self.conn.comms_log()),
             Arc::clone(&approvals),
             Arc::clone(&current_turn_id),
         ));
@@ -221,6 +230,7 @@ impl CodexAppServerAdapter {
             .insert(
                 thread_id.clone(),
                 CodexSession {
+                    session_id,
                     tx,
                     rx: Some(rx),
                     model,
@@ -245,6 +255,18 @@ impl CodexAppServerAdapter {
             .expect("sessions mutex poisoned")
             .get(key)
             .and_then(|session| session.model.clone())
+    }
+
+    /// The comms-log scope for a still-known session: Delta's conversation id,
+    /// recorded when the session was registered. `None` for an unknown or closed
+    /// session, in which case the frame is simply not recorded (there is no
+    /// inspector left for it).
+    fn scope_of(&self, key: &str) -> Option<String> {
+        self.sessions
+            .lock()
+            .expect("sessions mutex poisoned")
+            .get(key)
+            .map(|session| session.session_id.clone())
     }
 
     /// Emit an event on a session's channel, if the session is still known.
@@ -307,7 +329,11 @@ impl CodexAppServerAdapter {
         });
         let result = self
             .conn
-            .request("turn/start", Some(params))
+            .request(
+                self.scope_of(&handle.key).as_deref(),
+                "turn/start",
+                Some(params),
+            )
             .await
             .map_err(to_usecase_err)?;
         let provider_message_id = turn_id_of(&result);
@@ -468,12 +494,16 @@ impl AgentAdapter for CodexAppServerAdapter {
         // rides `thread/start` as `cwd`, and the user's selected launch options
         // ride it as further fields (see [`thread_start_params`]).
         let params = thread_start_params(&req.workdir, &req.launch_options)?;
+        // `thread/start` is scoped to Delta's session id — the only id that
+        // exists at this point (the thread id is what this call returns), and the
+        // one the inspector is keyed by, so a session's log opens with its own
+        // launch rather than starting mid-conversation.
         let started = self
             .conn
-            .start_thread(Some(params))
+            .start_thread(Some(&req.session_id), Some(params))
             .await
             .map_err(to_usecase_err)?;
-        let handle = self.register_session(started);
+        let handle = self.register_session(req.session_id, started);
         // A first prompt from the composer's opening Send starts a turn straight
         // away, mirroring how the Claude adapter auto-submits its launch prompt.
         if let Some(prompt) = req.first_prompt {
@@ -493,12 +523,13 @@ impl AgentAdapter for CodexAppServerAdapter {
     async fn resume(&self, req: ResumeRequest) -> UsecaseResult<AgentSessionHandle> {
         let started = self
             .conn
-            .resume_thread(Some(
-                json!({ "threadId": req.provider_session_id, "cwd": req.workdir }),
-            ))
+            .resume_thread(
+                Some(&req.session_id),
+                Some(json!({ "threadId": req.provider_session_id, "cwd": req.workdir })),
+            )
             .await
             .map_err(to_usecase_err)?;
-        Ok(self.register_session(started))
+        Ok(self.register_session(req.session_id, started))
     }
 
     async fn send(
@@ -526,7 +557,11 @@ impl AgentAdapter for CodexAppServerAdapter {
             "items": [inject_message_item(text)],
         });
         self.conn
-            .request("thread/inject_items", Some(params))
+            .request(
+                self.scope_of(&handle.key).as_deref(),
+                "thread/inject_items",
+                Some(params),
+            )
             .await
             .map_err(to_usecase_err)?;
         Ok(())
@@ -557,6 +592,7 @@ impl AgentAdapter for CodexAppServerAdapter {
         };
         self.conn
             .request(
+                self.scope_of(&handle.key).as_deref(),
                 "turn/interrupt",
                 Some(json!({
                     "threadId": handle.provider_session_id,
@@ -584,7 +620,7 @@ impl AgentAdapter for CodexAppServerAdapter {
         request_id: &str,
         decision: PermissionDecision,
     ) -> UsecaseResult<()> {
-        let wire_id = {
+        let (wire_id, scope) = {
             let sessions = self.sessions.lock().expect("sessions mutex poisoned");
             let session = sessions
                 .get(&handle.key)
@@ -594,7 +630,7 @@ impl AgentAdapter for CodexAppServerAdapter {
                 .lock()
                 .expect("approvals mutex poisoned")
                 .remove(request_id);
-            removed
+            (removed, session.session_id.clone())
         };
         let wire_id = wire_id.ok_or_else(|| {
             UsecaseError::Agent(format!(
@@ -611,7 +647,11 @@ impl AgentAdapter for CodexAppServerAdapter {
         // request (the permissions approval, whose response differs, never
         // becomes an open approval — it takes the unsupported path).
         self.conn
-            .respond(&wire_id, json!({ "decision": decision_value }))
+            .respond(
+                Some(&scope),
+                &wire_id,
+                json!({ "decision": decision_value }),
+            )
             .await
             .map_err(to_usecase_err)?;
         self.emit(
@@ -634,10 +674,18 @@ impl AgentAdapter for CodexAppServerAdapter {
                 reason: SessionEndReason::Closed,
             },
         );
-        self.sessions
+        let closed = self
+            .sessions
             .lock()
             .expect("sessions mutex poisoned")
             .remove(&handle.key);
+        // Release the session's comms-log buffer with the session itself: a
+        // closed session has no live wire, so holding its frames would only leak
+        // one buffer per closed session for the process's lifetime while showing
+        // a log that can never grow again.
+        if let Some(closed) = closed {
+            self.conn.comms_log().discard(&closed.session_id);
+        }
         Ok(())
     }
 
@@ -684,14 +732,25 @@ impl AgentAdapter for CodexAppServerAdapter {
 /// because they need I/O: a modeled approval is recorded (so a later decision
 /// can answer it), and an unmodeled request is answered immediately with an
 /// error so the session never hangs on it.
+///
+/// This is also the adapter's **receive-side comms-log tap**: every frame the
+/// demux routes to this thread is mirrored into `comms` under `session_id`
+/// before it is translated, which is what makes the inspector show the pushed
+/// flow (`turn/*`, `item/*`, approval requests) and not just Delta's own calls.
+/// It is done here rather than in the connection's reader because the reader
+/// keys frames by provider thread id while the log is keyed by Delta session id,
+/// and this task is the first place both are in scope.
 async fn translate_loop(
+    session_id: String,
     mut events: UnboundedReceiver<ThreadEvent>,
     tx: UnboundedSender<AgentEvent>,
     conn: Weak<AppServerConnection>,
+    comms: Arc<dyn CommsLogSink>,
     approvals: Arc<Mutex<HashMap<String, Value>>>,
     current_turn_id: Arc<Mutex<Option<String>>>,
 ) {
     while let Some(event) = events.recv().await {
+        record_inbound(&comms, &session_id, &event);
         match event {
             ThreadEvent::Notification(notification) => {
                 // Maintain the tracked turn id off the pushed `turn/*` frames: a
@@ -736,6 +795,7 @@ async fn translate_loop(
                     if let Some(conn) = conn.upgrade() {
                         let _ = conn
                             .respond_error(
+                                Some(&session_id),
                                 &request.id,
                                 METHOD_NOT_FOUND,
                                 &format!("unsupported server request: {method}"),
@@ -755,6 +815,29 @@ async fn translate_loop(
             },
         }
     }
+}
+
+/// Mirror one server → client frame into the comms log.
+///
+/// A notification and a server-originated request differ only in whether the
+/// frame carries an id, which is exactly the [`CommsFrameKind`] distinction —
+/// both arrive here on the same channel, so one function covers both.
+fn record_inbound(comms: &Arc<dyn CommsLogSink>, session_id: &str, event: &ThreadEvent) {
+    let entry = match event {
+        ThreadEvent::Notification(notification) => CommsEntry::new(
+            CommsDirection::FromAgent,
+            CommsFrameKind::Notification,
+            Some(&notification.method),
+            notification.to_frame_json(),
+        ),
+        ThreadEvent::ServerRequest(request) => CommsEntry::new(
+            CommsDirection::FromAgent,
+            CommsFrameKind::Request,
+            Some(&request.method),
+            request.to_frame_json(),
+        ),
+    };
+    comms.record(session_id, entry);
 }
 
 /// Map a transport error into the use-case error type at the trait boundary.

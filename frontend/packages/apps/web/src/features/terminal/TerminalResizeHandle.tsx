@@ -2,12 +2,18 @@ import { useCallback, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavStore } from '../../store/navStore';
 
 /**
- * A thin draggable divider on the left edge of the persistent terminal pane
- * (large screens only). Dragging left/right sets the terminal width via the
- * nav store, which clamps it to the allowed range.
+ * A thin draggable divider on the left edge of the persistent right pane (large
+ * screens only). Dragging left/right sets the pane width via the nav store,
+ * which clamps it to the allowed range.
  *
- * The terminal sits on the right, so the new width is the distance from the
- * pointer to the right viewport edge: `window.innerWidth - clientX`.
+ * Shared by both right-pane kinds — the terminal and the comms log — since they
+ * are one column the user sizes once, and at most one of them is ever shown. Its
+ * accessible name stays "Resize terminal": that is the control users know it as,
+ * and the store field it drives (`terminalWidth`) is likewise the right column's
+ * width under its original name.
+ *
+ * The pane sits on the right, so the new width is the distance from the pointer
+ * to the right viewport edge: `window.innerWidth - clientX`.
  */
 export function TerminalResizeHandle() {
   const setTerminalWidth = useNavStore((state) => state.setTerminalWidth);

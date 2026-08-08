@@ -22,6 +22,7 @@ import {
 import { useLiveStore } from '../../store/liveStore';
 import { useGarbageCollectSessionScopedStorage } from '../../store/sessionScopedStorage';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { CommsLogPane } from '../comms/CommsLogPane';
 import { NavigatorPane } from '../navigator/NavigatorPane';
 import { SettingsView } from '../settings/SettingsView';
 import { TranscriptPane } from '../transcript/TranscriptPane';
@@ -54,7 +55,31 @@ function TerminalIcon({ className }: { className?: string }) {
 }
 
 /**
- * Tailwind class string for the "Terminal" reopen button. Lives next to the
+ * A two-way-arrows glyph for the "Comms" reopen button, so the frame log reads
+ * as an exchange at a glance — the counterpart to {@link TerminalIcon} for a
+ * provider whose window is its wire rather than a screen. Decorative: always
+ * `aria-hidden`, so the button's accessible name stays its "Comms" label.
+ */
+function CommsIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 8h13l-3-3" />
+      <path d="M20 16H7l3 3" />
+    </svg>
+  );
+}
+
+/**
+ * Tailwind class string for the right pane's reopen button. Lives next to the
  * matching collapsed-state class in `ThreadTimelineOverlay`
  * ({@link TIMELINE_TOGGLE_BUTTON_CLASS}) — the two buttons sit side-by-side
  * in the transcript pane's top region, so they must read as the same
@@ -62,7 +87,7 @@ function TerminalIcon({ className }: { className?: string }) {
  * Keeping the literal class chain spelled out here (rather than imported)
  * keeps each side reviewable on its own.
  */
-const TERMINAL_TOGGLE_BUTTON_CLASS =
+const PANE_TOGGLE_BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-3 py-1.5 text-caption font-medium text-fg shadow-md transition-colors hover:bg-surface-elevated';
 
 /**
@@ -82,10 +107,16 @@ function pickInitialFocus(sessions: SessionListItem[]): FocusedSession {
 
 /**
  * The top-level session-centric workspace: navigator (session → thread tree) |
- * transcript | terminal. On load it lists every session and focuses one; the
+ * transcript | right pane. On load it lists every session and focuses one; the
  * composer drives the conversation (new session on cold start, resume on a
  * closed session), so the terminal is no longer required to begin. A focused
  * closed session renders read-only.
+ *
+ * The right pane is whichever window the focused session's provider actually
+ * has, chosen from its capability profile: the embedded terminal for a provider
+ * Delta launches as a terminal program, and the comms-log inspector — the
+ * JSON-RPC frames Delta exchanges with it — for a headless one, which would
+ * otherwise have no window into what its agent is doing at all.
  */
 export function WorkspaceScreen() {
   const client = useApiClient();
@@ -142,6 +173,8 @@ export function WorkspaceScreen() {
   const setActiveThread = useNavStore((state) => state.setActiveThread);
   const terminalOpen = useNavStore((state) => state.terminalOpen);
   const toggleTerminal = useNavStore((state) => state.toggleTerminal);
+  const commsOpen = useNavStore((state) => state.commsOpen);
+  const toggleComms = useNavStore((state) => state.toggleComms);
   const terminalWidth = useNavStore((state) => state.terminalWidth);
   const clearUnread = useLiveStore((state) => state.clearUnread);
   const spawns = useLiveStore((state) => state.spawns);
@@ -352,6 +385,30 @@ export function WorkspaceScreen() {
         ? focusedCapabilities.has_terminal
         : providersQuery.isSuccess;
 
+  // Whether the focused session's provider offers the comms log instead — the
+  // right-pane window a headless provider has in place of a terminal, read from
+  // the same capability profile (never from `provider === 'codex'`).
+  //
+  // The unresolved case fails CLOSED here, unconditionally: unlike the terminal
+  // there is no historical default to preserve, so a capability nobody has
+  // confirmed means no pane. That covers both the loading window and a provider
+  // the query does not list — a browser must never open a `/comms` socket for a
+  // session whose provider may not have one.
+  const focusedHasCommsLog = focusedCapabilities?.has_comms_log ?? false;
+
+  // Which window this session gets. At most one: the two capabilities are
+  // complementary (a provider Delta drives as a terminal program has no frame
+  // log, and vice versa), and the terminal keeps precedence so a provider that
+  // somehow reported both behaves exactly as it does today.
+  const showTerminalPane = terminalOpen && focusedHasTerminal;
+  const showCommsPane = commsOpen && !focusedHasTerminal && focusedHasCommsLog;
+  // And which reopen button. Each is its pane's condition with the open flag
+  // flipped — the button is what you press while that pane is closed — so the
+  // same "at most one, terminal first" split decides both.
+  const showTerminalToggle = !terminalOpen && focusedHasTerminal;
+  const showCommsToggle =
+    !commsOpen && !focusedHasTerminal && focusedHasCommsLog;
+
   // Fence the embedded terminal behind an error boundary: its attach runs in an
   // effect that can throw (e.g. an xterm addon failing to load), and without a
   // boundary that exception would unmount the whole app. Isolating it here keeps
@@ -371,25 +428,42 @@ export function WorkspaceScreen() {
     </ErrorBoundary>
   );
 
-  // The Terminal reopen button rides at the right end of the transcript
+  // The comms-log pane. No error boundary around it (unlike the terminal): it
+  // mounts no third-party widget and its only side effect is a WebSocket whose
+  // failures are already handled inside, so there is no render-time throw for a
+  // boundary to catch.
+  const commsLog = (
+    <CommsLogPane sessionId={focusedRealSessionId} attachable={focusedOpen} />
+  );
+
+  // The right pane's reopen button rides at the right end of the transcript
   // pane's top region (next to the collapsed timeline toggle) so the two
   // controls share one row and the timeline card can grow downward without
-  // overlapping anything. `null` while the terminal is open: the transcript
-  // pane drops the slot entirely and the top region centers on whatever is
-  // left (timeline toggle alone, or nothing at all on the new-session
-  // screen).
-  const terminalToggleButton =
-    focusedHasTerminal && !terminalOpen ? (
-      <button
-        type="button"
-        onClick={toggleTerminal}
-        data-testid="terminal-toggle"
-        className={TERMINAL_TOGGLE_BUTTON_CLASS}
-      >
-        <TerminalIcon className="h-3.5 w-3.5" />
-        Terminal
-      </button>
-    ) : null;
+  // overlapping anything. `null` while that pane is already open: the transcript
+  // pane drops the slot entirely and the top region centers on whatever is left
+  // (timeline toggle alone, or nothing at all on the new-session screen). One
+  // slot rather than two: the two toggle conditions above are mutually exclusive.
+  const paneToggleButton = showTerminalToggle ? (
+    <button
+      type="button"
+      onClick={toggleTerminal}
+      data-testid="terminal-toggle"
+      className={PANE_TOGGLE_BUTTON_CLASS}
+    >
+      <TerminalIcon className="h-3.5 w-3.5" />
+      Terminal
+    </button>
+  ) : showCommsToggle ? (
+    <button
+      type="button"
+      onClick={toggleComms}
+      data-testid="comms-toggle"
+      className={PANE_TOGGLE_BUTTON_CLASS}
+    >
+      <CommsIcon className="h-3.5 w-3.5" />
+      Comms
+    </button>
+  ) : null;
 
   return (
     <div className="relative flex h-full overflow-hidden">
@@ -415,14 +489,14 @@ export function WorkspaceScreen() {
             // directory picker is mandatory (non-dismissable) — the user must
             // choose a directory before reaching the new-session screen.
             workdirMandatory={sessions.length === 0}
-            terminalButton={terminalToggleButton}
+            paneToggleButton={paneToggleButton}
           />
         ) : activeThread ? (
           <TranscriptPane
             threads={threads}
             activeThread={activeThread}
             readOnly={!focusedOpen}
-            terminalButton={terminalToggleButton}
+            paneToggleButton={paneToggleButton}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-secondary text-fg-subtle">
@@ -431,23 +505,24 @@ export function WorkspaceScreen() {
         )}
       </div>
 
-      {/* Right: terminal — attaches to the focused session's pane. Gated on the
-          focused provider's terminal capability as well as `terminalOpen`, so a
-          provider with no terminal (Codex) never shows a pane even if
-          `terminalOpen` was persisted true from a previous Claude session. */}
-      {terminalOpen &&
-        focusedHasTerminal &&
+      {/* Right: the focused session's window — the terminal for a provider with
+          an attachable pane, the comms log for a headless one. Each is gated on
+          its own capability AND its own persisted open flag, so a flag left
+          `true` by a session of the OTHER provider can never open the wrong
+          pane (and, since mounting the terminal pane is what opens `/pty`, a
+          terminal-less provider never fires that socket at all). */}
+      {(showTerminalPane || showCommsPane) &&
         (isLargeScreen ? (
           <div
             className="relative z-20 shrink-0"
             style={{ width: terminalWidth }}
           >
             <TerminalResizeHandle />
-            {terminal}
+            {showTerminalPane ? terminal : commsLog}
           </div>
         ) : (
           <div className="absolute inset-y-0 right-0 z-20 w-[min(90vw,28rem)] shadow-xl">
-            {terminal}
+            {showTerminalPane ? terminal : commsLog}
           </div>
         ))}
 

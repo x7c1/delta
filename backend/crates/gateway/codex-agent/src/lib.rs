@@ -26,6 +26,22 @@
 //! correlates to; a thread-scoped notification or server request is delivered to
 //! that thread's [`ThreadEvent`] channel; anything not scoped to a known thread
 //! goes to the connection-level "unrouted" channel.
+//!
+//! ## Observability
+//!
+//! Because this provider is headless — there is no terminal for a human to watch
+//! — every frame is also mirrored into a
+//! [`CommsLogSink`](delta_usecase::CommsLogSink) for the browser's comms-log
+//! inspector: outgoing frames and their responses here (see
+//! [`AppServerConnection::with_comms_log`]), server-pushed frames in the
+//! adapter's own receive path (which is where a provider thread id can be
+//! attributed to a Delta session id). Mirroring is observability only and never
+//! blocks — see the port's docs.
+//!
+//! Attribution is therefore the limit of what the inspector can show: a server
+//! frame carrying no `threadId` belongs to no session, so it goes to the
+//! unrouted channel above and lands in no log. When reading the inspector, an
+//! absent frame means "not attributable to a session", not "never sent".
 
 mod adapter;
 mod content;
@@ -44,6 +60,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use delta_usecase::{CommsDirection, CommsEntry, CommsFrameKind, CommsLogSink, NullCommsLog};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
@@ -133,6 +150,18 @@ pub struct AppServerConnection {
     _child: Option<Child>,
     /// The reader task, aborted on drop so it never outlives the connection.
     reader: JoinHandle<()>,
+    /// Where every frame this connection writes — and every response it reads —
+    /// is mirrored for the comms-log inspector. [`NullCommsLog`] unless the
+    /// composition root attached one (see
+    /// [`AppServerConnection::with_comms_log`]), so the emit sites need no
+    /// `Option` handling.
+    ///
+    /// Server-originated frames (notifications and approval requests) are *not*
+    /// mirrored here: the reader demuxes them by provider thread id, while the
+    /// log is keyed by Delta session id, and only the adapter knows that
+    /// mapping. It mirrors them from its own receive path (see
+    /// `adapter::translate_loop`).
+    comms: Arc<dyn CommsLogSink>,
 }
 
 impl Drop for AppServerConnection {
@@ -189,21 +218,53 @@ impl AppServerConnection {
             unrouted: Mutex::new(Some(unrouted_rx)),
             _child: child,
             reader: reader_task,
+            comms: NullCommsLog::arc(),
         }
+    }
+
+    /// Mirror this connection's frames into `sink` for the comms-log inspector.
+    ///
+    /// A builder rather than a constructor argument so every existing call site
+    /// (and every test that drives a connection over injected pipes) keeps its
+    /// unobserved default.
+    pub fn with_comms_log(mut self, sink: Arc<dyn CommsLogSink>) -> Self {
+        self.comms = sink;
+        self
+    }
+
+    /// The comms-log sink this connection mirrors into, so the adapter records
+    /// its own receive path into the same log rather than being handed a second
+    /// copy of the sink.
+    pub fn comms_log(&self) -> &Arc<dyn CommsLogSink> {
+        &self.comms
     }
 
     /// Perform the `initialize` → `initialized` handshake, returning the
     /// server's `initialize` result. `params` is passed through verbatim.
     pub async fn initialize(&self, params: Value) -> Result<Value> {
-        let result = self.request("initialize", Some(params)).await?;
+        // The handshake stands the shared server up before any thread exists, so
+        // it belongs to no Delta session and is not recorded (scope `None`).
+        let result = self.request(None, "initialize", Some(params)).await?;
         // The client signals it is ready to receive with an `initialized`
         // notification, mirroring the LSP-style handshake.
-        self.notify("initialized", None).await?;
+        self.notify(None, "initialized", None).await?;
         Ok(result)
     }
 
     /// Send a request and await its correlated response.
-    pub async fn request(&self, method: &str, params: Option<Value>) -> Result<Value> {
+    ///
+    /// `scope` is the Delta session id this exchange belongs to, for the
+    /// comms-log inspector; `None` for a connection-level call that belongs to
+    /// no session (the handshake). Both the outgoing request and the response it
+    /// correlates to are recorded here — the awaiting caller is the one place
+    /// that knows which request a response answers, so attributing it needs no
+    /// side table.
+    pub async fn request(
+        &self,
+        scope: Option<&str>,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending
@@ -212,6 +273,21 @@ impl AppServerConnection {
             .insert(id, tx);
 
         let frame = wire::encode_request(id, method, params).map_err(Error::Encode)?;
+        // Recorded BEFORE the write, and this is load-bearing: the server can
+        // push a notification caused by this request while the write is still
+        // completing, and the reader records that on another task — so recording
+        // afterwards would let an effect appear ahead of its cause in the log,
+        // destroying the one thing the log is for (the sequence). The cost is that
+        // a frame whose write then fails is still shown, which is the better
+        // failure: a write that fails has killed the connection, and the frame it
+        // died on is exactly what an operator needs to see.
+        self.record(
+            scope,
+            CommsDirection::ToAgent,
+            CommsFrameKind::Request,
+            Some(method),
+            &frame,
+        );
         if let Err(err) = self.write_frame(&frame).await {
             // Do not leak the pending slot if the write failed.
             self.pending
@@ -225,15 +301,38 @@ impl AppServerConnection {
         // connection closes, so a closed connection surfaces as `Err` rather
         // than hanging forever.
         let response = rx.await.map_err(|_| Error::ConnectionClosed)?;
+        self.record(
+            scope,
+            CommsDirection::FromAgent,
+            CommsFrameKind::Response,
+            // A response names no method of its own; showing the method it
+            // answers is what makes the pair readable at a glance.
+            Some(method),
+            &response.to_frame_json(),
+        );
         response.outcome.map_err(|error| Error::Rpc {
             method: method.to_owned(),
             error,
         })
     }
 
-    /// Send a notification (no response is expected).
-    pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<()> {
+    /// Send a notification (no response is expected). `scope` is as on
+    /// [`Self::request`].
+    pub async fn notify(
+        &self,
+        scope: Option<&str>,
+        method: &str,
+        params: Option<Value>,
+    ) -> Result<()> {
         let frame = wire::encode_notification(method, params).map_err(Error::Encode)?;
+        // Before the write, for the ordering reason given in [`Self::request`].
+        self.record(
+            scope,
+            CommsDirection::ToAgent,
+            CommsFrameKind::Notification,
+            Some(method),
+            &frame,
+        );
         self.write_frame(&frame).await
     }
 
@@ -260,8 +359,12 @@ impl AppServerConnection {
     /// The channel is registered before returning, and a well-behaved server
     /// emits a thread's notifications only after `turn/start`, so no early
     /// notification is lost between learning the id and subscribing.
-    pub async fn start_thread(&self, params: Option<Value>) -> Result<StartedThread> {
-        let result = self.request("thread/start", params).await?;
+    pub async fn start_thread(
+        &self,
+        scope: Option<&str>,
+        params: Option<Value>,
+    ) -> Result<StartedThread> {
+        let result = self.request(scope, "thread/start", params).await?;
         let thread_id =
             thread_id_from_result(&result).ok_or_else(|| Error::UnexpectedResponse {
                 method: "thread/start".to_owned(),
@@ -284,13 +387,17 @@ impl AppServerConnection {
     /// `id` is the thread id); when it omits it the requested id (carried in
     /// `params.threadId`) is used, so a lean resume result still yields a usable
     /// id.
-    pub async fn resume_thread(&self, params: Option<Value>) -> Result<StartedThread> {
+    pub async fn resume_thread(
+        &self,
+        scope: Option<&str>,
+        params: Option<Value>,
+    ) -> Result<StartedThread> {
         let requested = params
             .as_ref()
             .and_then(|p| p.get("threadId"))
             .and_then(Value::as_str)
             .map(str::to_owned);
-        let result = self.request("thread/resume", params).await?;
+        let result = self.request(scope, "thread/resume", params).await?;
         let thread_id = thread_id_from_result(&result)
             .or(requested)
             .ok_or_else(|| Error::UnexpectedResponse {
@@ -310,16 +417,44 @@ impl AppServerConnection {
     /// Answer a server-originated request with a success result. `id` is the
     /// verbatim id the [`ServerRequest`] carried, echoed back with the same JSON
     /// type the server used.
-    pub async fn respond(&self, id: &Value, result: Value) -> Result<()> {
+    /// `scope` is as on [`Self::request`].
+    pub async fn respond(&self, scope: Option<&str>, id: &Value, result: Value) -> Result<()> {
         let frame = wire::encode_success_response(id, result).map_err(Error::Encode)?;
+        // Before the write, for the ordering reason given in [`Self::request`] —
+        // which matters most here: answering an approval is what unblocks the
+        // turn, so the frames it releases follow immediately.
+        self.record(
+            scope,
+            CommsDirection::ToAgent,
+            CommsFrameKind::Response,
+            // Delta's answer names no method; the server request it answers is
+            // the frame just above it in the log.
+            None,
+            &frame,
+        );
         self.write_frame(&frame).await
     }
 
     /// Answer a server-originated request with a JSON-RPC error. Used to reject a
     /// request Delta does not model, so a well-behaved server unblocks its turn
     /// rather than waiting forever for a reply.
-    pub async fn respond_error(&self, id: &Value, code: i64, message: &str) -> Result<()> {
+    /// `scope` is as on [`Self::request`].
+    pub async fn respond_error(
+        &self,
+        scope: Option<&str>,
+        id: &Value,
+        code: i64,
+        message: &str,
+    ) -> Result<()> {
         let frame = wire::encode_error_response(id, code, message).map_err(Error::Encode)?;
+        // Before the write, for the ordering reason given in [`Self::request`].
+        self.record(
+            scope,
+            CommsDirection::ToAgent,
+            CommsFrameKind::Response,
+            None,
+            &frame,
+        );
         self.write_frame(&frame).await
     }
 
@@ -330,6 +465,32 @@ impl AppServerConnection {
             .lock()
             .expect("unrouted mutex poisoned")
             .take()
+    }
+
+    /// Mirror one frame into the comms log, if it belongs to a session.
+    ///
+    /// A frame with no `scope` belongs to no Delta session (the shared server's
+    /// handshake), so there is no inspector for it to appear in and it is
+    /// dropped here rather than being fanned out to unrelated sessions. The
+    /// trailing newline the wire framing adds is stripped — it is transport
+    /// framing, not part of the JSON the inspector shows.
+    ///
+    /// Non-blocking by contract (see [`CommsLogSink`]), so this is safe to call
+    /// on the turn's own code path.
+    fn record(
+        &self,
+        scope: Option<&str>,
+        direction: CommsDirection,
+        kind: CommsFrameKind,
+        method: Option<&str>,
+        frame: &str,
+    ) {
+        if let Some(session_id) = scope {
+            self.comms.record(
+                session_id,
+                CommsEntry::new(direction, kind, method, frame.trim_end()),
+            );
+        }
     }
 
     async fn write_frame(&self, frame: &str) -> Result<()> {

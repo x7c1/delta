@@ -39,6 +39,15 @@ vi.mock('../../data/useSessionEvents', () => ({
 vi.mock('../terminal/TerminalPane', () => ({
   TerminalPane: () => <div data-testid="terminal-pane" />,
 }));
+// The comms pane opens a `/comms` WebSocket in its effect, which is as
+// meaningless in jsdom as the terminal's attach. Its own suite
+// (`CommsLogPane.test.tsx`) covers what it renders per session state; here the
+// question is only WHICH pane the workspace mounts.
+vi.mock('../comms/CommsLogPane', () => ({
+  CommsLogPane: ({ attachable }: { attachable: boolean }) => (
+    <div data-testid="comms-pane" data-attachable={String(attachable)} />
+  ),
+}));
 
 // jsdom does not implement matchMedia, which `useMediaQuery` relies on.
 beforeAll(() => {
@@ -86,6 +95,7 @@ describe('WorkspaceScreen multi-session', () => {
       preNewSessionFocus: null,
       settingsOpen: false,
       terminalOpen: false,
+      commsOpen: false,
     });
     useComposerStore.setState({
       drafts: {},
@@ -584,6 +594,7 @@ describe('WorkspaceScreen multi-session', () => {
     id: string,
     provider: 'claude' | 'codex',
     mainThreadId: number,
+    open = true,
   ) {
     server.use(
       http.get('*/api/sessions', () =>
@@ -604,7 +615,7 @@ describe('WorkspaceScreen multi-session', () => {
                 provider_session_id: null,
                 provider_thread_id: null,
               },
-              open: true,
+              open,
               main_thread_id: mainThreadId,
               last_activity_at: '2026-01-01T00:00:02Z',
             },
@@ -745,6 +756,129 @@ describe('WorkspaceScreen multi-session', () => {
       expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
     );
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  // --- Right-pane selection by capability ---------------------------------
+  //
+  // The workspace has two right-pane windows and picks between them from the
+  // focused provider's capability profile — never from the provider name. The
+  // rows below are the operation × state matrix that selection has to get right:
+  // a terminal provider, a headless one (live and dormant), a pane-open flag left
+  // behind by the OTHER provider, and the window before any capability is known.
+
+  it('offers the comms toggle — not the terminal one — for a headless provider (Codex)', async () => {
+    // The mirror image of the Claude row above: Codex reports no terminal but a
+    // comms log, so the session gets the frame-log toggle instead. Neither is
+    // chosen from the provider id.
+    useNavStore.setState({ focusedSessionId: SESSION_ID_4 });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    expect(await screen.findByTestId('comms-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument();
+  });
+
+  it('offers neither the comms toggle nor the comms pane for a terminal provider (Claude), even with commsOpen persisted', async () => {
+    // A provider with a terminal has no frame log to show, so offering the
+    // toggle would hand the user a window that cannot exist — and a `commsOpen`
+    // left behind by a Codex session must not open one either (the stale-flag
+    // row, in this direction; the other direction is asserted below).
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID,
+      terminalOpen: false,
+      commsOpen: true,
+    });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+
+    renderScreen();
+
+    expect(await screen.findByTestId('terminal-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('comms-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('comms-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('shows the comms pane for a live Codex session when commsOpen is set', async () => {
+    useNavStore.setState({ focusedSessionId: SESSION_ID_4, commsOpen: true });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    const pane = await screen.findByTestId('comms-pane');
+    // A live session is attachable, so the pane streams rather than idling.
+    expect(pane.dataset.attachable).toBe('true');
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('still shows the comms pane for a closed Codex session, marked not attachable', async () => {
+    // A dormant session has no live adapter. The pane must still open — showing
+    // its idle state (asserted in `CommsLogPane.test.tsx`) — rather than
+    // vanishing, crashing, or spinning forever.
+    useNavStore.setState({ focusedSessionId: SESSION_ID_4, commsOpen: true });
+    useSingleSessionOfProvider(
+      SESSION_ID_4,
+      'codex',
+      SESSION_4_MAIN_THREAD_ID,
+      false,
+    );
+
+    renderScreen();
+
+    const pane = await screen.findByTestId('comms-pane');
+    expect(pane.dataset.attachable).toBe('false');
+  });
+
+  it('does not open the comms pane from a terminalOpen persisted by a Claude session', async () => {
+    // The stale-persisted-state row. Each pane has its OWN flag precisely so a
+    // `true` left behind by the other provider cannot open the wrong window: with
+    // only `terminalOpen` set, a focused Codex session shows NEITHER pane.
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_4,
+      terminalOpen: true,
+      commsOpen: false,
+    });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('comms-toggle')).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('comms-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  it('withholds the comms pane and toggle until the providers query resolves', async () => {
+    // Capability unknown → fail closed, with no historical default to preserve:
+    // a browser must never open a `/comms` socket for a session whose provider
+    // may not have one. Once Codex's profile arrives, both appear.
+    let resolveProviders: () => void = () => {};
+    const providersGate = new Promise<void>((resolve) => {
+      resolveProviders = resolve;
+    });
+    server.use(
+      http.get('*/api/providers', async () => {
+        await providersGate;
+        return HttpResponse.json({ providers: mockProviders() });
+      }),
+    );
+    useNavStore.setState({ focusedSessionId: SESSION_ID_4, commsOpen: true });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+
+    renderScreen();
+
+    // Fully rendered, providers still pending → nothing offered, nothing mounted.
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_4_MAIN_THREAD_ID,
+      ),
+    );
+    expect(screen.queryByTestId('comms-pane')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('comms-toggle')).not.toBeInTheDocument();
+
+    resolveProviders();
+    expect(await screen.findByTestId('comms-pane')).toBeInTheDocument();
   });
 
   it("falls back to the cwd basename when a session has no launch repo_root", async () => {

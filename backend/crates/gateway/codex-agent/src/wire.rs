@@ -89,6 +89,26 @@ pub struct Response {
     pub outcome: std::result::Result<Value, RpcError>,
 }
 
+impl Response {
+    /// Re-render this response as the JSON frame it was parsed from, for the
+    /// comms-log inspector.
+    ///
+    /// Reconstructed rather than kept verbatim: the reader parses each line into
+    /// this type and does not hold the original bytes. The reconstruction is
+    /// faithful for everything the transport models (`id` plus `result` or
+    /// `error`, with the payload preserved as raw JSON); a top-level field the
+    /// parser deliberately ignores — a `jsonrpc` version tag — does not
+    /// reappear, which is exactly what the inspector should show, since a field
+    /// the parser dropped is a field Delta never acted on.
+    pub fn to_frame_json(&self) -> String {
+        let frame = match &self.outcome {
+            Ok(result) => json!({ "id": self.id, "result": result }),
+            Err(error) => json!({ "id": self.id, "error": error }),
+        };
+        frame.to_string()
+    }
+}
+
 /// A server-originated request (server → client), such as `*/requestApproval`.
 /// It carries an id, so the client is expected to answer it; the C1 transport
 /// only routes it (the C2 adapter decides and replies).
@@ -103,6 +123,15 @@ pub struct ServerRequest {
     pub params: Value,
 }
 
+impl ServerRequest {
+    /// Re-render this request as the JSON frame it was parsed from, for the
+    /// comms-log inspector. See [`Response::to_frame_json`] for why it is
+    /// reconstructed rather than kept verbatim.
+    pub fn to_frame_json(&self) -> String {
+        json!({ "id": self.id, "method": self.method, "params": self.params }).to_string()
+    }
+}
+
 /// A server-originated notification (server → client), such as `item/*` or
 /// `turn/*`.
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +140,15 @@ pub struct Notification {
     pub method: String,
     /// The method parameters (`Null` when absent).
     pub params: Value,
+}
+
+impl Notification {
+    /// Re-render this notification as the JSON frame it was parsed from, for the
+    /// comms-log inspector. See [`Response::to_frame_json`] for why it is
+    /// reconstructed rather than kept verbatim.
+    pub fn to_frame_json(&self) -> String {
+        json!({ "method": self.method, "params": self.params }).to_string()
+    }
 }
 
 /// A parsed incoming frame, classified by which JSON-RPC fields it carries.
@@ -358,6 +396,51 @@ mod tests {
     fn rejects_a_frame_with_neither_method_nor_id() {
         let err = parse_incoming(r#"{"params":{}}"#).unwrap_err();
         assert!(matches!(err, ParseError::NotRpc(_)));
+    }
+
+    /// Every incoming shape re-renders as the frame it was parsed from, which is
+    /// what the comms-log inspector displays. Pinned per shape so a change to
+    /// the parsed types cannot silently change what the inspector shows.
+    #[test]
+    fn incoming_frames_re_render_as_their_json() {
+        let response = parse_incoming(r#"{"id":3,"result":{"threadId":"thr_9"}}"#).unwrap();
+        let Incoming::Response(response) = response else {
+            panic!("expected a response");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&response.to_frame_json()).unwrap(),
+            json!({ "id": 3, "result": { "threadId": "thr_9" } }),
+        );
+
+        let error = parse_incoming(r#"{"id":4,"error":{"code":-32601,"message":"no"}}"#).unwrap();
+        let Incoming::Response(error) = error else {
+            panic!("expected a response");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&error.to_frame_json()).unwrap(),
+            json!({ "id": 4, "error": { "code": -32601, "message": "no" } }),
+        );
+
+        let notification =
+            parse_incoming(r#"{"method":"item/completed","params":{"threadId":"thr_2"}}"#).unwrap();
+        let Incoming::Notification(notification) = notification else {
+            panic!("expected a notification");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&notification.to_frame_json()).unwrap(),
+            json!({ "method": "item/completed", "params": { "threadId": "thr_2" } }),
+        );
+
+        let request =
+            parse_incoming(r#"{"id":"srv-1","method":"item/x/requestApproval","params":{}}"#)
+                .unwrap();
+        let Incoming::ServerRequest(request) = request else {
+            panic!("expected a server request");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&request.to_frame_json()).unwrap(),
+            json!({ "id": "srv-1", "method": "item/x/requestApproval", "params": {} }),
+        );
     }
 
     #[test]

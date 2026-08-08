@@ -7,7 +7,11 @@ use std::time::Duration;
 use tokio::sync::broadcast;
 
 use delta_bootstrap::{AppInteractor, Config};
-use delta_usecase::{AsyncEventReceiver, AsyncEventSink, SessionEvent, SessionLifecycle};
+use delta_usecase::{
+    AsyncEventReceiver, AsyncEventSink, CommsLogSink, SessionEvent, SessionLifecycle,
+};
+
+use crate::comms_log::{CommsLogHub, CommsSubscription};
 
 /// Capacity of the per-process event broadcast channel.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
@@ -35,6 +39,12 @@ pub struct AppState {
     /// Delta's dedicated tmux socket, so the PTY bridge attaches on the same
     /// server the sessions live on (`tmux -L <socket> attach-session`).
     tmux_socket: Arc<str>,
+    /// The per-session comms log the `/comms` stream serves.
+    ///
+    /// The same instance the adapters record into (it is handed to the
+    /// composition root as their [`CommsLogSink`]), so a frame an adapter emits
+    /// and a frame the browser reads are two views of one buffer.
+    comms_log: Arc<CommsLogHub>,
 }
 
 impl AppState {
@@ -44,8 +54,14 @@ impl AppState {
     /// sweep returning restart-orphaned `dispatched` rows to `queued`) runs
     /// against the freshly-opened store before the state is handed out.
     pub async fn build(config: &Config) -> anyhow::Result<Self> {
-        let interactor = delta_bootstrap::build(config).await?;
-        Ok(Self::from_interactor(interactor, &config.tmux_socket))
+        // The comms log is created here, before the composition root wires the
+        // adapters, because it is the one gateway BOTH sides need: the adapters
+        // record into it and the `/comms` route reads it. Handing the same
+        // instance to both is what makes the pane show live frames.
+        let comms_log = Arc::new(CommsLogHub::new());
+        let interactor =
+            delta_bootstrap::build(config, Arc::clone(&comms_log) as Arc<dyn CommsLogSink>).await?;
+        Ok(Self::from_interactor(interactor, &config.tmux_socket).with_comms_log(comms_log))
     }
 
     /// Build the shared state from an already-wired Interactor.
@@ -70,7 +86,34 @@ impl AppState {
             events,
             async_events: Arc::new(std::sync::Mutex::new(Some(async_rx))),
             tmux_socket: Arc::from(tmux_socket),
+            // An unwired log: `/comms` then serves an always-idle stream, which
+            // is exactly right for a state whose interactor records nowhere.
+            // `build` (and any test that wants live frames) replaces it via
+            // `with_comms_log`.
+            comms_log: Arc::new(CommsLogHub::new()),
         }
+    }
+
+    /// Serve `/comms` from `hub` — the same instance the wired adapters record
+    /// into.
+    ///
+    /// Separate from [`Self::from_interactor`] because the interactor is built
+    /// first (the composition root needs the sink to wire the adapters) and every
+    /// existing test builds its state without one; without this, a state whose
+    /// adapters record into a hub would serve a *different*, permanently empty
+    /// hub, and the pane would look idle during a live turn.
+    pub fn with_comms_log(mut self, hub: Arc<CommsLogHub>) -> Self {
+        self.comms_log = hub;
+        self
+    }
+
+    /// Watch one session's comms log: buffered frames, then the live tail.
+    ///
+    /// What the `/comms` route pumps into its socket, and — since it is the whole
+    /// contract minus the socket bytes — what an integration test asserts on
+    /// without standing up a WebSocket client.
+    pub fn watch_comms_log(&self, session_id: &str) -> CommsSubscription {
+        self.comms_log.subscribe(session_id)
     }
 
     /// Delta's dedicated tmux socket name (`tmux -L <socket>`).

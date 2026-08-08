@@ -47,7 +47,7 @@ async fn handshake_and_thread_start_round_trip_against_the_fake_binary() {
     assert_eq!(init["serverInfo"]["name"], "fake-codex");
 
     // 2. thread/start round-trip: the fake returns its default thread id.
-    let mut started = tokio::time::timeout(TIMEOUT, conn.start_thread(None))
+    let mut started = tokio::time::timeout(TIMEOUT, conn.start_thread(None, None))
         .await
         .expect("thread/start timed out")
         .expect("thread/start failed");
@@ -57,7 +57,11 @@ async fn handshake_and_thread_start_round_trip_against_the_fake_binary() {
     //    are demuxed onto this thread's channel in order.
     let turn = tokio::time::timeout(
         TIMEOUT,
-        conn.request("turn/start", Some(json!({ "threadId": started.thread_id }))),
+        conn.request(
+            None,
+            "turn/start",
+            Some(json!({ "threadId": started.thread_id })),
+        ),
     )
     .await
     .expect("turn/start timed out")
@@ -129,12 +133,19 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
     conn.initialize(json!({ "clientInfo": { "name": "delta", "version": "0" } }))
         .await
         .expect("initialize failed");
-    let mut started = conn.start_thread(None).await.expect("thread/start failed");
+    let mut started = conn
+        .start_thread(None, None)
+        .await
+        .expect("thread/start failed");
     assert_eq!(started.thread_id, "thr_script");
 
-    conn.request("turn/start", Some(json!({ "threadId": started.thread_id })))
-        .await
-        .expect("turn/start failed");
+    conn.request(
+        None,
+        "turn/start",
+        Some(json!({ "threadId": started.thread_id })),
+    )
+    .await
+    .expect("turn/start failed");
 
     // Collect the five emissions; the third is the server-originated approval
     // request, the rest are notifications.

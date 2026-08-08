@@ -115,7 +115,7 @@ async fn handshake_then_thread_start_round_trip_and_demux() {
         .expect("initialize failed");
     assert_eq!(init_result["serverInfo"]["name"], "fake");
 
-    let mut started = tokio::time::timeout(TIMEOUT, conn.start_thread(None))
+    let mut started = tokio::time::timeout(TIMEOUT, conn.start_thread(None, None))
         .await
         .expect("thread/start timed out")
         .expect("thread/start failed");
@@ -153,8 +153,8 @@ async fn correlates_concurrent_requests_answered_out_of_order() {
     });
 
     let (a, b) = tokio::join!(
-        conn.request("method/one", None),
-        conn.request("method/two", None),
+        conn.request(None, "method/one", None),
+        conn.request(None, "method/two", None),
     );
     assert_eq!(a.unwrap()["which"], "first");
     assert_eq!(b.unwrap()["which"], "second");
@@ -175,7 +175,10 @@ async fn error_response_surfaces_as_rpc_error() {
             .await;
     });
 
-    let err = conn.request("does/not/exist", None).await.unwrap_err();
+    let err = conn
+        .request(None, "does/not/exist", None)
+        .await
+        .unwrap_err();
     match err {
         Error::Rpc { method, error } => {
             assert_eq!(method, "does/not/exist");
@@ -372,7 +375,7 @@ async fn request_resolves_to_closed_when_the_server_exits() {
         drop(server);
     });
 
-    let err = tokio::time::timeout(TIMEOUT, conn.request("turn/start", None))
+    let err = tokio::time::timeout(TIMEOUT, conn.request(None, "turn/start", None))
         .await
         .expect("request should not hang after the connection closes")
         .unwrap_err();

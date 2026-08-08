@@ -8,8 +8,12 @@ export function apiBaseUrl(): string {
   return import.meta.env.VITE_API_BASE_URL ?? '';
 }
 
-/** Full ws:// URL of the live `/ws` event stream for the current origin. */
-export function wsUrl(path: '/ws' | '/pty'): string {
+/**
+ * Full ws:// URL of one of the server's WebSocket endpoints for the current
+ * origin: the `/ws` event stream, the `/pty` terminal bridge, or the `/comms`
+ * observability log.
+ */
+export function wsUrl(path: '/ws' | '/pty' | '/comms'): string {
   const base = apiBaseUrl();
   if (base) {
     return base.replace(/^http/, 'ws').replace(/\/$/, '') + path;
