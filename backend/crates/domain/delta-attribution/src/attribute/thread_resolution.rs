@@ -97,10 +97,15 @@ pub(super) fn resolve_line_thread(
         }
         (state.carry_thread, None)
     } else if is_human_turn {
+        // Text-based correlation against the head outstanding send. Exact
+        // equality for a plain send; `prompt_echoes_send` additionally
+        // recognizes the rewrite Claude Code applies to an image-attachment
+        // send, whose swallowed path line comes back as a leading `[Image #N]`
+        // placeholder — a send exact equality alone could never match.
         let head_matches = state
             .outstanding
             .front()
-            .is_some_and(|send| send.text.trim() == trimmed);
+            .is_some_and(|send| claude_format::prompt_echoes_send(&send.text, trimmed));
         match head_matches
             .then(|| state.outstanding.pop_front())
             .flatten()

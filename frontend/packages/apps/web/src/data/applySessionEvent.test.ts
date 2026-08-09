@@ -299,6 +299,37 @@ describe('applySessionEvent', () => {
     expect(useLiveStore.getState().notices).toEqual({});
   });
 
+  it('records the parked-send notice and refetches open sends on send_parked', () => {
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      {
+        kind: 'send_parked',
+        session_id: 'other-session',
+        send_id: 42,
+        text: 'never delivered',
+      },
+      queryClient,
+      9,
+      FOCUSED,
+    );
+
+    // Unlike external input, a parked send is recorded for EVERY session: the
+    // user's own message was dropped, so it must be waiting for them when they
+    // return to that session rather than only if they were watching it.
+    expect(
+      noticeOf(useLiveStore.getState().notices, 'other-session', 'send_parked'),
+    ).toMatchObject({ sendId: 42, text: 'never delivered' });
+    // The row was cancelled server-side, so the pending chip must be refetched
+    // away rather than left spinning.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.sessionSends('other-session'),
+    });
+    // A dropped message is not "new content" — no unread badge.
+    expect(useLiveStore.getState().unread).toEqual({});
+  });
+
   it('invalidates the affected threads and the open sends on transcript_updated', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');

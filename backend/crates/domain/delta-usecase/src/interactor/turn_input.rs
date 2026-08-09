@@ -6,11 +6,17 @@
 //! call site feeds the machine the same way. It runs inside the session's
 //! actor, where the turn state is plain owned data: the mailbox already
 //! serialized every input that can move it.
+//!
+//! The table is a pure function of (state, input), so anything that depends on
+//! *history* lives here instead. The requeue budget is the one such rule: the
+//! table says "requeue this orphaned send", and this file decides whether that
+//! send has already had its retry — parking it if it has, so a send whose echo
+//! can never match stops re-dispatching instead of looping forever.
 
 use crate::agent::{AgentEvent, TurnStatus};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
-use crate::ports::{GitWorktree, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{turn_input_for_agent_event, OrphanedSend, TurnInput, TurnState};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
@@ -56,13 +62,20 @@ where
         match result.orphaned {
             None => {}
             Some(OrphanedSend::Requeue(send_id)) => {
-                tracing::warn!(
-                    session_id = %id,
-                    send_id,
-                    "outstanding send never echoed; returning it to `queued` so it \
-                     re-dispatches when the session is next idle"
-                );
-                self.store.requeue_send(send_id).await?;
+                // Requeueing assumes the next dispatch echoes cleanly; the
+                // budget is what keeps that optimism from becoming an
+                // unbounded loop. See `SessionRuntime::claim_requeue`.
+                if self.state.claim_requeue(send_id) {
+                    tracing::warn!(
+                        session_id = %id,
+                        send_id,
+                        "outstanding send never echoed; returning it to `queued` so it \
+                         re-dispatches when the session is next idle"
+                    );
+                    self.store.requeue_send(send_id).await?;
+                } else {
+                    self.park_unechoable_send(send_id).await?;
+                }
             }
             Some(OrphanedSend::Cancel(send_id)) => {
                 tracing::warn!(
@@ -70,6 +83,7 @@ where
                     send_id,
                     "outstanding send can no longer be delivered; cancelling it"
                 );
+                self.state.forget_requeues(send_id);
                 self.store.cancel_send(send_id).await?;
             }
             Some(OrphanedSend::CancelIfUnmatched(send_id)) => {
@@ -85,12 +99,55 @@ where
                             "turn ended but its send never matched a transcript line; \
                              cancelling the stale dispatched row"
                         );
+                        self.state.forget_requeues(send_id);
                         self.store.cancel_send(send_id).await?;
                     }
                 }
             }
         }
         Ok(result.next)
+    }
+
+    /// Park a send that has spent its requeue budget: cancel the row and
+    /// announce why, instead of returning it to `queued` for another doomed
+    /// dispatch.
+    ///
+    /// `cancelled` is reused deliberately — it is already the terminal status
+    /// for "this send will not be delivered", it already drops the row out of
+    /// the open-send list (so the pending chip clears rather than spinning),
+    /// and reusing it needs no schema change. What `cancelled` alone does NOT
+    /// carry is a reason, and a message vanishing with no explanation is the
+    /// failure mode this whole path exists to avoid — so the cancel is paired
+    /// with a [`SessionEvent::SendParked`] carrying the text, letting the
+    /// browser tell the user their message was not delivered and hand it back
+    /// for editing. The event goes out on the async seam because this runs
+    /// deep inside a transition whose callers have no event channel; the
+    /// server drains it onto the same broadcast the synchronous paths feed.
+    ///
+    /// The row is read back before cancelling (it is the head dispatched row —
+    /// the only row [`OrphanedSend::Requeue`] ever names) so the event can
+    /// carry its text; if it is somehow gone, the cancel and the event still
+    /// happen, because a silent drop is never the fallback.
+    async fn park_unechoable_send(&mut self, send_id: i64) -> Result<()> {
+        let parked = self
+            .store
+            .head_dispatched_send(self.id)
+            .await?
+            .filter(|head| head.id == send_id);
+        tracing::warn!(
+            session_id = %self.id,
+            send_id,
+            "outstanding send never echoed again after its one re-dispatch; its echo \
+             appears unmatchable, so it is parked (cancelled) instead of requeued"
+        );
+        self.state.forget_requeues(send_id);
+        self.store.cancel_send(send_id).await?;
+        self.emit_async_event(SessionEvent::SendParked {
+            session_id: self.id.clone(),
+            send_id,
+            text: parked.map(|send| send.text).unwrap_or_default(),
+        });
+        Ok(())
     }
 
     /// Apply a turn-*end* fact, expressed as a provider-neutral

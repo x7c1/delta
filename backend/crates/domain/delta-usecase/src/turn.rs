@@ -64,6 +64,11 @@
 //!   consumed inside a mangled external prompt *and* re-typed cleanly later),
 //!   which the user can see and recover from — whereas cancelling would drop
 //!   the message with no trace. This is the deliberate mismatch semantics.
+//!   *Bounded*, though: a send whose echo can never match would requeue on
+//!   every attempt, so the caller (`interactor::turn_input`) grants each send a
+//!   finite requeue budget and parks it once the budget is spent. The count is
+//!   history rather than turn state, so it lives on `SessionRuntime` (the
+//!   session actor's runtime state), not in this pure table.
 //! - [`OrphanedSend::Cancel`] — the send can never be delivered (its pane is
 //!   gone or its dispatch failed). Cancelling clears it from the open list so
 //!   the failure surfaces instead of wedging the queue.
