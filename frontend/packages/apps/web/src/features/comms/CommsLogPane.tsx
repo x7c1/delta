@@ -402,7 +402,7 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
           </span>
           <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-fg-subtle">
             <span>{first.kind}</span>
-            <span className="whitespace-nowrap">{firstTime} …</span>
+            <span className="whitespace-nowrap">{firstTime}</span>
             <span className="whitespace-nowrap">{lastTime}</span>
           </span>
         </summary>
