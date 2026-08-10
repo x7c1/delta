@@ -227,9 +227,11 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
  * payload is one click away for the frame that turns out to matter.
  *
  * Two lines because the method is the row's payload and deserves the full
- * width: the direction arrow and method sit on the first line, the kind and
- * timestamp tuck under them right-aligned, so a narrow pane truncates long
- * method names last instead of first.
+ * width: the disclosure triangle, direction arrow and method sit on the first
+ * line, the kind and timestamp tuck under them right-aligned, so a narrow pane
+ * truncates long method names last instead of first. The triangle is our own
+ * (native marker hidden): a block-level summary would otherwise render the
+ * marker on a line of its own above the content.
  */
 function CommsFrameRow({ frame }: { frame: CommsFrame }) {
   const pretty = useMemo(
@@ -252,8 +254,17 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
       className="border-b border-border-default last:border-b-0"
     >
       <details className="group">
-        <summary className="cursor-pointer px-2 py-1 font-mono text-caption hover:bg-surface-elevated">
+        <summary className="cursor-pointer list-none px-2 py-1 font-mono text-caption hover:bg-surface-elevated [&::-webkit-details-marker]:hidden">
           <span className="flex items-baseline gap-2">
+            {/* Our own disclosure triangle, inline with the method: the native
+                list-item marker sits on a line of its own once the summary is
+                no longer the flex container itself. */}
+            <span
+              aria-hidden="true"
+              className="inline-block shrink-0 text-fg-subtle transition-transform group-open:rotate-90"
+            >
+              {'▸'}
+            </span>
             <span
               aria-hidden="true"
               className={
