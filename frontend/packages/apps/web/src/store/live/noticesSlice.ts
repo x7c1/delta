@@ -75,6 +75,25 @@ export interface ExternalInputNotice {
 }
 
 /**
+ * A composed message was never delivered: two dispatches in a row produced no
+ * matching echo, so the server parked it (cancelled the row) rather than
+ * re-typing it on every idle forever. The notice is what keeps that from being
+ * a silent loss — it shows the text back to the user so they can copy or
+ * re-send it.
+ *
+ * Session-scoped, not thread-scoped: an undelivered message matters wherever
+ * the user is looking. Survives turn ends (see the lifecycle table below);
+ * removed on dismiss or when the session closes.
+ */
+export interface SendParkedNotice {
+  kind: 'send_parked';
+  sendId: number;
+  /** The composed message that never reached the session. */
+  text: string;
+  at: number;
+}
+
+/**
  * A Send/open just failed to resume this session because its transcript is
  * gone (the server's `resume_unavailable`). Drives the inline "cannot be
  * resumed" notice; the session stays closed and no optimistic pending chip is
@@ -104,6 +123,7 @@ export type SessionNotice =
   | PermissionNotice
   | QuestionNotice
   | ExternalInputNotice
+  | SendParkedNotice
   | ResumeUnavailableNotice
   | SpawnFailureBufferedNotice;
 
@@ -140,6 +160,10 @@ const NOTICE_LIFECYCLE: Record<
   // Same scope as the permission prompt: once the turn it interleaved with is
   // over (or the session is gone), the marker has served its purpose.
   external_input: ['turn_end', 'session_closed'],
+  // An undelivered message stays undelivered when the turn ends — and the park
+  // happens inside a turn that is about to end, so a `turn_end` sweep would
+  // erase the notice seconds after it appeared.
+  send_parked: ['session_closed'],
   // A resume-impossible session is closed and turn-less; only a successful
   // open proves the flag stale.
   resume_unavailable: ['session_opened'],
@@ -258,6 +282,8 @@ export interface NoticesSlice {
   dismissQuestion: (sessionId: SessionId) => void;
   /** Dismiss the external-input notice for a session. */
   dismissExternalInput: (sessionId: SessionId) => void;
+  /** Dismiss the parked-send notice for a session. */
+  dismissSendParked: (sessionId: SessionId) => void;
 }
 
 export const createNoticesSlice: StateCreator<
@@ -380,6 +406,16 @@ export const createNoticesSlice: StateCreator<
       );
       return Object.keys(next).length > 0 ? next : state;
     }),
+
+  dismissSendParked: (sessionId) =>
+    set((state) => {
+      const next = removeNotices(
+        state.notices,
+        sessionId,
+        (notice) => notice.kind === 'send_parked',
+      );
+      return Object.keys(next).length > 0 ? next : state;
+    }),
 });
 
 export const reducePermissionRequested: EventReducer<
@@ -474,3 +510,19 @@ export const reduceExternalInput: EventReducer<
   NoticesState,
   'external_input'
 > = (state) => state;
+
+// A send the server gave up delivering. Unlike external input this is
+// recorded for EVERY session, focused or not: the user's own message
+// was dropped, and they must find out when they come back to that
+// session, not only if they happened to be watching it.
+export const reduceSendParked: EventReducer<NoticesState, 'send_parked'> = (
+  state,
+  event,
+) => ({
+  notices: withNotice(state.notices, event.session_id, {
+    kind: 'send_parked',
+    sendId: event.send_id,
+    text: event.text,
+    at: Date.now(),
+  }),
+});

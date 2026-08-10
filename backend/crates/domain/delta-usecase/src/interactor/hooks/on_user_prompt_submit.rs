@@ -26,15 +26,19 @@ where
     ///
     /// Correlation is against the ONE outstanding send: under the
     /// single-outstanding dispatch rule at most one `dispatched` send exists
-    /// per session, so the hook's prompt either equals that send's text (the
-    /// echo of Delta's own dispatch — resolved *before* syncing, so the
+    /// per session, so the hook's prompt either echoes that send's text
+    /// (Delta's own dispatch coming back — resolved *before* syncing, so the
     /// locator quote is returned as `additionalContext` even when the user's
     /// transcript line has not been written yet) or it is external input. The
-    /// text equality is kept as a sanity check: a mismatch means the
-    /// keystrokes were mangled (e.g. interleaved pane typing), so it is logged
-    /// loudly, the prompt is treated as the external input it textually is,
-    /// and the turn machine returns the outstanding send to `queued` so it
-    /// re-dispatches intact once this turn ends.
+    /// echo test ([`claude_format::prompt_echoes_send`]) is exact equality for
+    /// a plain send, widened only to absorb the rewrite Claude Code applies to
+    /// an image-attachment send. A mismatch means either the dispatched
+    /// keystrokes were mangled — pane input interleaving with them, say — or
+    /// the prompt was never Delta's to begin with; either way it is logged
+    /// loudly, treated as the external input it textually is, and the turn
+    /// machine returns the outstanding send to `queued` so it re-dispatches
+    /// intact once this turn ends — at most once, after which the send is
+    /// parked instead of looping (see [`SessionContext::apply_turn_input`]).
     ///
     /// The actual message→thread attribution (and `mark_send_matched`) happens
     /// inside [`Self::sync_transcript`], keyed by comparing each ingested user
@@ -48,6 +52,8 @@ where
     ///
     /// Returns the events to broadcast and, when a locator quote should be
     /// injected, the `additionalContext` string for the hook response.
+    ///
+    /// [`SessionContext::apply_turn_input`]: Self::apply_turn_input
     pub(in crate::interactor) async fn on_user_prompt_submit(
         &mut self,
         hook: UserPromptSubmitHook,
@@ -79,7 +85,7 @@ where
         let outstanding = self.store.head_dispatched_send(&hook.session_id).await?;
         let pending = outstanding
             .as_ref()
-            .filter(|send| send.text.trim() == hook.prompt.trim())
+            .filter(|send| claude_format::prompt_echoes_send(&send.text, &hook.prompt))
             .cloned();
         // Resolve the `additionalContext` note *before* syncing, so the current
         // user line is not yet ingested and `latest_user_thread` still reports
@@ -135,7 +141,8 @@ where
                         got = %hook.prompt.trim(),
                         "UserPromptSubmit does not echo the outstanding send: the \
                          dispatched keystrokes were mangled or overtaken; treating the \
-                         prompt as external input (the turn machine requeues the send)"
+                         prompt as external input (the turn machine requeues the send, \
+                         or parks it once its requeue budget is spent)"
                     );
                 }
                 self.apply_turn_input(TurnInput::ExternalPrompt).await?;

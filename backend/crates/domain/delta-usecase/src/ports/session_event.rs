@@ -40,6 +40,32 @@ pub enum SessionEvent {
     /// queued→dispatched transition happens, instead of waiting for the next
     /// turn-lifecycle event.
     SendDispatched { session_id: SessionId, send_id: i64 },
+    /// A dispatched send was abandoned after its echo failed to match twice.
+    ///
+    /// Delta correlates a send with the `UserPromptSubmit` it produces by
+    /// text; a mismatch returns the send to `queued` to be re-typed on the
+    /// next idle. The turn machine allows that retry once and then *parks* the
+    /// send: the row is cancelled (so it leaves the open-send list and the
+    /// pending chip stops spinning) and this event says so, carrying the
+    /// composed `text` back so the browser can show what was not delivered
+    /// instead of losing it silently.
+    ///
+    /// Session-scoped, not thread-scoped: an undelivered message is the user's
+    /// problem wherever they happen to be looking.
+    ///
+    /// Fire-and-forget, like every event here: it is not replayed on reconnect
+    /// and there is no queryable field a refetch could re-seed it from (the
+    /// parked row is `cancelled`, so it is out of the open-send list). A
+    /// browser that was disconnected when the park happened therefore learns
+    /// nothing; the text survives only on the cancelled row in the store.
+    /// Making it recoverable is a follow-up for the attribution redesign, not
+    /// something this seam can do on its own.
+    SendParked {
+        session_id: SessionId,
+        send_id: i64,
+        /// The composed message that was never delivered.
+        text: String,
+    },
     /// A queued send was confirmed as a turn start.
     ///
     /// `thread_id` is the thread the dispatched send was composed for, so the

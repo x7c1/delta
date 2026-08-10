@@ -6,6 +6,7 @@ import {
   reducePermissionRequested,
   reducePermissionResolved,
   reduceQuestionAsked,
+  reduceSendParked,
   reduceSessionOpened,
   reduceSessionRegistered,
 } from './noticesSlice';
@@ -60,6 +61,7 @@ const EVENT_REDUCERS: {
   subagent_started: reduceSubagentStarted,
   subagent_finished: reduceSubagentFinished,
   external_input: reduceExternalInput,
+  send_parked: reduceSendParked,
   session_registered: reduceSessionRegistered,
   session_opened: reduceSessionOpened,
   session_closed: reduceSessionClosed,

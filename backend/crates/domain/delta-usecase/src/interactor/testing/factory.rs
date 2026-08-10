@@ -94,6 +94,15 @@ pub(crate) fn interactor_with_git_and_codex_factory(
     interactor_with_git(git_worktree).with_adapter_factory(factory as Arc<dyn AgentAdapterFactory>)
 }
 
+/// Build a test interactor with the async event seam wired, returning the
+/// receiver alongside it — the only way to observe an event emitted *outside*
+/// a call's synchronous `Vec<SessionEvent>` return, such as a parked send
+/// announced from inside a turn transition.
+pub(crate) fn interactor_with_event_sink() -> (TestInteractor, crate::ports::AsyncEventReceiver) {
+    let (sink, receiver) = crate::ports::AsyncEventSink::channel();
+    (interactor().with_event_sink(sink), receiver)
+}
+
 /// An interactor whose tmux dispatch always fails.
 pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
     Interactor::new(
