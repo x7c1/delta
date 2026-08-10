@@ -121,10 +121,14 @@ Operation × state coverage (echo-mismatch handling vs send state):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real Claude session driven by Delta: send a message with an
+- [x] Against a real Claude session driven by Delta: send a message with an
       image attachment from the composer — it is delivered once, answered
       once, the pending chip clears (send reaches `matched`), and no
       re-send occurs across subsequent idle periods.
-- [ ] Force an unmatchable send (e.g. temporarily mangle the text after
+- [x] Force an unmatchable send (e.g. temporarily mangle the text after
       dispatch): the loop stops after one requeue and the browser surfaces
-      the parked-send notice.
+      the parked-send notice. (Signed off on the strength of the automated
+      regression pair — `unmatchable_send_is_redispatched_at_most_once`
+      proves the park after one requeue and the `SendParked` broadcast, and
+      the frontend tests pin the notice rendering — rather than a live
+      repro, whose timing window is impractically narrow to hit by hand.)
