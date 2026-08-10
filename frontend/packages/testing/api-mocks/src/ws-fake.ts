@@ -52,14 +52,27 @@ export function defaultScript(): SessionEvent[] {
       kind: 'status_updated',
       session_id: SESSION_ID,
       snapshot: {
+        provider: 'claude',
         model_id: 'claude-opus-4-8',
         model_display_name: 'Opus 4.8',
         context_used_percentage: 38,
         context_window_size: null,
         context_current_usage: null,
         total_input_tokens: null,
-        five_hour: { used_percentage: 67, resets_at: fiveHourResetsAt },
-        seven_day: { used_percentage: 42, resets_at: sevenDayResetsAt },
+        // Windows carry their own length, which is what the footer labels the
+        // rows from — 5 hours and 7 days here, matching Claude's real pair.
+        rate_limits: [
+          {
+            duration_seconds: 5 * 60 * 60,
+            used_percentage: 67,
+            resets_at: fiveHourResetsAt,
+          },
+          {
+            duration_seconds: 7 * 24 * 60 * 60,
+            used_percentage: 42,
+            resets_at: sevenDayResetsAt,
+          },
+        ],
         total_cost_usd: null,
         current_dir: null,
       },

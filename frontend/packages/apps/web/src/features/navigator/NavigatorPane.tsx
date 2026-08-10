@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { RateLimitWindow, SessionListItem } from '@delta/wire-gen';
 import {
@@ -20,6 +20,11 @@ import {
   computeBudgetLinePercentage,
   formatResetCountdown,
 } from './rateLimitReset';
+import {
+  UNKNOWN_WINDOW_LABEL,
+  windowBucketCount,
+  windowLabel,
+} from './rateLimitWindow';
 
 /**
  * Estimated height of a collapsed session card, in pixels. Only a seed for the
@@ -122,36 +127,39 @@ function SettingsIcon({ className }: { className?: string }) {
 }
 
 /**
- * One account-wide rate-limit row in the footer: a window label (`5h` / `7d`),
- * a {@link Meter} bar, the percentage, and a compact relative reset countdown.
- * The two rows share the same neutral dark accent; they are told apart by the
- * `5h` / `7d` label, not colour. The fill is anchored to the right edge of the
- * track and grows leftward (see the `className` passed at the call site), so
- * the bar's right edge represents the moment of reset. The caller hides the row
- * entirely when its window is absent, so this only renders a present window; a
- * `null` percentage within a present window reads as 0%.
+ * One account-wide rate-limit row in the footer: a label derived from the
+ * window's `duration_seconds` by {@link windowLabel} (`5h`, `7d`, `30m`, or
+ * {@link UNKNOWN_WINDOW_LABEL} when the provider reported no length), a
+ * {@link Meter} bar, the percentage, and a compact relative reset countdown.
+ * Rows share the same neutral dark accent; they are told apart by their label,
+ * not colour. The fill is anchored to the right edge of the track and grows
+ * leftward (see the `className` passed at the call site), so the bar's right
+ * edge represents the moment of reset. The caller maps this over the windows
+ * the account actually reported, so there is always a window to render; a
+ * `null` percentage within it reads as 0%.
  *
  * A 1px budget-line marker is overlaid on the bar at the right edge of the
- * current bucket (the window split into `bucketCount` equal parts — 7 days for
- * `7d`, 5 hours for `5h`). It steps one bucket to the left each time the
- * clock crosses a boundary: right after a reset the line is at `1 /
- * bucketCount` from the right (the first bucket's share is fair game); on the
- * final bucket the line reaches the left edge (the whole window is fair
- * game). To keep the hairline crisp regardless of zoom and device-pixel-ratio,
- * the marker is pinned to `left: 0` and driven by `transform: translateX(<integer
- * px>)` — the same trick the thread-timeline playhead uses to avoid the
- * sub-pixel shimmer that fractional `right: NN.NN%` values cause. Its color
- * switches from `bg-fg` to `bg-surface` (the panel background token — the
- * color-negative of the fill's `bg-fg-muted` in every theme) as soon as the
- * fill overtakes it. Overlaying the surface color on the fill maxes out
- * contrast in dark / light / sepia alike, so the over-pace case reads at a
- * glance even where fill and line overlap. The invariant remains: fill INSIDE
- * (right of) the line = within this bucket's share; fill CROSSING (left of)
- * the line = over-pace.
+ * current bucket (the window split into `bucketCount` equal parts, derived
+ * from the window's own duration by {@link windowBucketCount} — 7 days for a
+ * 7-day window, 5 hours for a 5-hour one, and so on for any other duration).
+ * It steps one bucket to the left each time the clock crosses a boundary:
+ * right after a reset the line is at `1 / bucketCount` from the right (the
+ * first bucket's share is fair game); on the final bucket the line reaches the
+ * left edge (the whole window is fair game). To keep the hairline crisp
+ * regardless of zoom and device-pixel-ratio, the marker is pinned to `left: 0`
+ * and driven by `transform: translateX(<integer px>)` — the same trick the
+ * thread-timeline playhead uses to avoid the sub-pixel shimmer that fractional
+ * `right: NN.NN%` values cause. Its color switches from `bg-fg` to
+ * `bg-surface` (the panel background token — the color-negative of the fill's
+ * `bg-fg-muted` in every theme) as soon as the fill overtakes it. Overlaying
+ * the surface color on the fill maxes out contrast in dark / light / sepia
+ * alike, so the over-pace case reads at a glance even where fill and line
+ * overlap. The invariant remains: fill INSIDE (right of) the line = within
+ * this bucket's share; fill CROSSING (left of) the line = over-pace.
  *
  * The numeric percentage cell is sized to `3ch` — a snug `99%` fit in the
  * monospace tabular column — and right-aligns its text so the trailing `↻`
- * reset countdown column lines up across the 5h / 7d rows for the common
+ * reset countdown column lines up across every rendered row for the common
  * 0–99% case without needing to zero-pad shorter numbers into a `021%` form.
  * A `100%` reading lets the cell grow to its natural width, which nudges that
  * row's reset column a few pixels right; that is acceptable given how rare a
@@ -159,39 +167,40 @@ function SettingsIcon({ className }: { className?: string }) {
  *
  * The row uses a monospace family on purpose so EVERY character — digits, `%`,
  * the `↻` reset glyph, the letters in `5d04h` / `02h13m`, and any spaces —
- * sits in a fixed-width cell, which is what keeps the two rows' columns
- * aligned. Tabular-figures (`tabular-nums`) alone equalises digit glyphs only,
- * leaving symbols and letters at proportional widths — so it is not sufficient
- * here.
+ * sits in a fixed-width cell, which is what keeps every row's columns aligned
+ * regardless of how many the account reports. Tabular-figures (`tabular-nums`)
+ * alone equalises digit glyphs only, leaving symbols and letters at
+ * proportional widths — so it is not sufficient here.
  */
 function RateLimitRow({
-  label,
   window: rateWindow,
-  windowDurationSeconds,
-  bucketCount,
   fillClassName,
   meterClassName,
   testId,
 }: {
-  label: string;
   window: RateLimitWindow;
-  windowDurationSeconds: number;
-  bucketCount: number;
   fillClassName: string;
   meterClassName?: string;
   testId: string;
 }) {
+  // Both the label and the pacing come from the window's own duration, so a
+  // provider Delta has never rendered before needs no code here.
+  const duration = rateWindow.duration_seconds;
+  const label = windowLabel(duration) ?? UNKNOWN_WINDOW_LABEL;
   const percentage = rateWindow.used_percentage ?? 0;
   const reset =
     rateWindow.resets_at !== null
       ? formatResetCountdown(rateWindow.resets_at)
       : null;
+  // The budget line paces spending across the window, so it needs BOTH the
+  // reset instant and the window's length. A window missing either is shown
+  // without a marker rather than with one drawn against a guessed duration.
   const budgetLinePercentage =
-    rateWindow.resets_at !== null
+    rateWindow.resets_at !== null && duration !== null
       ? computeBudgetLinePercentage(
           rateWindow.resets_at,
-          windowDurationSeconds,
-          bucketCount,
+          duration,
+          windowBucketCount(duration),
         )
       : null;
   // Track the meter container's live pixel width so the marker's translateX
@@ -334,11 +343,12 @@ export function NavigatorPane({
   ]);
 
   const connection = useLiveStore((state) => state.connection);
-  // Account-wide rate limits (the latest `status_updated` snapshot, identical
-  // across sessions). The footer is the natural home for this app-global state.
-  // Each window's row is hidden when the window is absent — a non-Pro/Max
-  // account, or before the first API response — rather than shown zeroed.
-  const rateLimits = useLiveStore((state) => state.rateLimits);
+  // Account-wide rate limits, keyed by provider (see RateLimitsByProvider in
+  // statusTypes). The footer is the natural home for this app-global state, and
+  // the rows below show the windows of the FOCUSED session's provider — so one
+  // provider's limits never appear under another's session, and with nothing
+  // focused there is no account to speak for and so no rows.
+  const rateLimitsByProvider = useLiveStore((state) => state.rateLimits);
   // Per-session notices (a pending permission request driving the row's badge)
   // are read inside each SessionNode with a narrow selector, not subscribed to
   // here: a notice arriving on any session must not re-render the whole pane —
@@ -351,6 +361,14 @@ export function NavigatorPane({
   // so the row's spinner already covers it; the navigator shows no separate
   // subagent count.
   const focusedSessionId = useNavStore((state) => state.focusedSessionId);
+  // Memoized because this pane re-renders on every scroll frame of the windowed
+  // session list, and the lookup walks the whole loaded list.
+  const rateLimits = useMemo(() => {
+    const provider = sessions.find(
+      (item) => item.session.id === focusedSessionId,
+    )?.session.provider;
+    return provider ? (rateLimitsByProvider[provider] ?? []) : [];
+  }, [sessions, focusedSessionId, rateLimitsByProvider]);
   const settingsOpen = useNavStore((state) => state.settingsOpen);
   const openSettings = useNavStore((state) => state.openSettings);
   const startNewSession = useNavStore((state) => state.startNewSession);
@@ -401,47 +419,38 @@ export function NavigatorPane({
       }
       footer={
         // A quiet utility bar, distinct from the primary action up top. The
-        // account-wide rate-limit meters (5h / 7d) stack ABOVE the connection
-        // row — the footer is the natural home for app-global state — and each is
-        // omitted when its window is absent. Below them: the live connection
-        // status (dot + a status word like "Connected") on the left, and an
-        // icon-only Settings entry on the right (claude.ai-style, opens the
-        // settings dialog overlaid on the workspace).
+        // focused provider's account rate-limit meters stack ABOVE the
+        // connection row — one per window that account reported. Below them: the
+        // live connection status (dot + a status word like "Connected") on the
+        // left, and an icon-only Settings entry on the right (claude.ai-style,
+        // opens the settings dialog overlaid on the workspace).
         <div className="flex flex-col gap-1.5">
-          {(rateLimits?.fiveHour || rateLimits?.sevenDay) && (
+          {rateLimits.length > 0 && (
             <div className="flex flex-col gap-1 pt-1.5" data-testid="rate-limits">
-              {rateLimits.fiveHour && (
-                <RateLimitRow
-                  label="5h"
-                  window={rateLimits.fiveHour}
-                  windowDurationSeconds={5 * 60 * 60}
-                  // The 5h window's budget line steps hourly; the 7d window's
-                  // steps daily — so bucketCount matches the row's natural unit.
-                  bucketCount={5}
-                  // Shared neutral accent — the rows are told apart by the label.
-                  fillClassName="bg-fg-muted"
-                  // `flex justify-end` on the Meter's outer track pushes its
-                  // inner fill div to the right edge, so the bar grows leftward
-                  // from the reset side without modifying the Meter primitive.
-                  meterClassName="flex justify-end"
-                  testId="rate-limit-5h"
-                />
-              )}
-              {rateLimits.sevenDay && (
-                <RateLimitRow
-                  label="7d"
-                  window={rateLimits.sevenDay}
-                  windowDurationSeconds={7 * 24 * 60 * 60}
-                  bucketCount={7}
-                  // Shared neutral accent — the rows are told apart by the label.
-                  fillClassName="bg-fg-muted"
-                  // `flex justify-end` on the Meter's outer track pushes its
-                  // inner fill div to the right edge, so the bar grows leftward
-                  // from the reset side without modifying the Meter primitive.
-                  meterClassName="flex justify-end"
-                  testId="rate-limit-7d"
-                />
-              )}
+              {rateLimits.map((window, index) => {
+                // A window carries no id, so its label — its duration, which IS
+                // its identity — names the row: it is both React's key and the
+                // testId suffix (`rate-limit-5h` / `rate-limit-7d` still mean
+                // the rows they always did). A window whose length the provider
+                // did not report falls back to its position, which is stable
+                // because the provider sends the windows in a stable order.
+                const rowId =
+                  windowLabel(window.duration_seconds) ?? `w${index + 1}`;
+                return (
+                  <RateLimitRow
+                    key={rowId}
+                    window={window}
+                    // Shared neutral accent — rows are told apart by the label.
+                    fillClassName="bg-fg-muted"
+                    // `flex justify-end` on the Meter's outer track pushes its
+                    // inner fill div to the right edge, so the bar grows
+                    // leftward from the reset side without modifying the Meter
+                    // primitive.
+                    meterClassName="flex justify-end"
+                    testId={`rate-limit-${rowId}`}
+                  />
+                );
+              })}
             </div>
           )}
           <div className="flex items-center justify-between gap-2">

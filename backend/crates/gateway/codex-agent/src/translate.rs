@@ -54,10 +54,27 @@
 //! Parts are joined with a blank line, since each array element is a separate
 //! reasoning part. An item with neither maps to nothing, so an empty thinking
 //! block is never minted.
+//!
+//! **Usage.** Codex reports what it is spending on two independent
+//! notifications, and the two are scoped differently:
+//!
+//! - `thread/tokenUsage/updated` is thread-scoped, so it flows through the
+//!   normal per-thread demux and becomes an
+//!   [`AgentEvent::TokenUsageUpdated`] ([`token_usage`]);
+//! - `account/rateLimits/updated` carries **no `threadId`** at all — it
+//!   describes the account behind the shared connection, not any one thread —
+//!   so it never reaches [`translate_notification`]. It is folded by
+//!   [`AccountRateLimits`], which also implements the sparse-merge rule the
+//!   vendored schema demands of clients, and becomes an
+//!   [`AgentEvent::RateLimitsUpdated`].
+//!
+//! Both are observability only: they complete no message and touch no turn.
 
 use serde_json::Value;
 
-use delta_usecase::{AgentEvent, AgentPermissionRequest, TurnStatus};
+use delta_usecase::{
+    AgentEvent, AgentPermissionRequest, AgentTokenUsage, RateLimitWindow, TurnStatus,
+};
 
 use crate::wire::{Notification, ServerRequest};
 
@@ -96,6 +113,16 @@ const REASONING_PART_SEPARATOR: &str = "\n\n";
 /// The streaming-delta method (`AgentMessageDeltaNotification`) that carries a
 /// fragment of an assistant message, under `params.itemId` / `params.delta`.
 const METHOD_AGENT_MESSAGE_DELTA: &str = "item/agentMessage/delta";
+
+/// The thread-scoped usage notification (`ThreadTokenUsageUpdatedNotification`):
+/// `{ threadId, turnId, tokenUsage }`, where `tokenUsage` is a
+/// `ThreadTokenUsage`.
+const METHOD_THREAD_TOKEN_USAGE: &str = "thread/tokenUsage/updated";
+/// The account-scoped rate-limit notification
+/// (`AccountRateLimitsUpdatedNotification`): `{ rateLimits }`, a sparse
+/// `RateLimitSnapshot`. It carries **no** `threadId` — see
+/// [`AccountRateLimits`].
+const METHOD_ACCOUNT_RATE_LIMITS: &str = "account/rateLimits/updated";
 
 /// The streaming-delta method (`ReasoningTextDeltaNotification`) carrying a
 /// fragment of the model's raw reasoning, under `params.itemId` /
@@ -166,6 +193,7 @@ pub fn translate_notification(n: &Notification) -> Vec<AgentEvent> {
             int_field(&n.params, "completedAtMs"),
         ),
         METHOD_AGENT_MESSAGE_DELTA => agent_message_delta(&n.params),
+        METHOD_THREAD_TOKEN_USAGE => token_usage(&n.params),
         // Both text-bearing reasoning deltas share the `{itemId, delta}` shape
         // and both are fragments of the same item's thinking, so they project to
         // the same neutral fragment.
@@ -217,6 +245,142 @@ fn reasoning_delta(params: &Value) -> Vec<AgentEvent> {
         provider_item_id: string_field(params, "itemId").unwrap_or_default(),
         text,
     }]
+}
+
+/// Project a `thread/tokenUsage/updated` into a neutral
+/// [`AgentEvent::TokenUsageUpdated`].
+///
+/// The vendored `ThreadTokenUsage` carries two `TokenUsageBreakdown`s — `total`
+/// (every model call this thread has made, added up) and `last` (the most
+/// recent call's) — plus an optional `modelContextWindow`.
+///
+/// **Occupancy comes from `last`; `total` is a running sum and would be
+/// nonsense here.** Every call re-sends the whole conversation, so `last`'s
+/// input side *is* the conversation currently in the window and
+/// `last.totalTokens` is that plus the reply it drew — which is exactly what
+/// occupies the window. `total` instead accumulates every call's tokens, so it
+/// passes the window size after a handful of turns and never comes back: three
+/// real Codex rollouts against a 258,400-token window end at
+/// `total.totalTokens` = 576k / 1.31M / 1.74M (223% / 507% / 674% of the
+/// window) while their `last.totalTokens` sit at 48k / 50k / 73k (19–28%). A
+/// bar driven by `total` would therefore read "full" on every session that ran
+/// more than a few turns. `total` still answers the cumulative question —
+/// how many input tokens this session has sent — which is the one
+/// [`AgentTokenUsage::total_input_tokens`] asks, so that field alone reads it.
+///
+/// **The percentage is computed here, at Codex's own edge, or not at all.** The
+/// server reports absolute counts and never a percentage, so the adapter
+/// divides `last.totalTokens` by `modelContextWindow` — and when the server
+/// reports no window (the field is nullable, and zero would be meaningless
+/// besides) it reports *no percentage*, rather than a NaN, an infinity or a
+/// fabricated 0%.
+fn token_usage(params: &Value) -> Vec<AgentEvent> {
+    let Some(usage) = params.get("tokenUsage") else {
+        return Vec::new();
+    };
+    let in_context = usage
+        .get("last")
+        .and_then(|last| uint_field(last, "totalTokens"));
+    let context_window_size = uint_field(usage, "modelContextWindow").filter(|size| *size > 0);
+    vec![AgentEvent::TokenUsageUpdated {
+        usage: AgentTokenUsage {
+            context_used_percentage: in_context.zip(context_window_size).map(|(used, size)| {
+                // Both are counts, so the ratio is exact enough in `f64` for a
+                // display percentage; the browser rounds it for the readout.
+                used as f64 / size as f64 * 100.0
+            }),
+            context_window_size,
+            context_current_usage: in_context,
+            total_input_tokens: usage
+                .get("total")
+                .and_then(|total| uint_field(total, "inputTokens")),
+        },
+    }]
+}
+
+/// The account-scoped rate-limit state observed on one `codex app-server`
+/// connection, and the merge the vendored schema requires of its clients.
+///
+/// `account/rateLimits/updated` is a **sparse rolling update**: the schema says
+/// in as many words that a client must merge the values it carries into the
+/// snapshot it last observed, and that a null field "does not clear a previously
+/// observed value" (see [`merge_window`] for what that means field by field).
+/// This type is where that merge lives — at the provider's own edge, since the
+/// merge rule is the provider's, not the core's.
+///
+/// It is connection-scoped rather than session-scoped because the account is:
+/// one shared app-server connection hosts every Codex session, and these limits
+/// describe the account behind it.
+#[derive(Debug, Default)]
+pub struct AccountRateLimits {
+    /// The most significant window the account reports, as last observed.
+    primary: Option<RateLimitWindow>,
+    /// The secondary window, as last observed.
+    secondary: Option<RateLimitWindow>,
+}
+
+impl AccountRateLimits {
+    /// Fold one account-scoped notification into the observed state and project
+    /// it into neutral events.
+    ///
+    /// Yields nothing for any notification this build does not model — including
+    /// a rate-limit frame with no `rateLimits` object at all, which states
+    /// nothing and must therefore not be turned into an empty window list that
+    /// would wipe the display.
+    pub fn translate(&mut self, n: &Notification) -> Vec<AgentEvent> {
+        match n.method.as_str() {
+            METHOD_ACCOUNT_RATE_LIMITS => match n.params.get("rateLimits") {
+                Some(snapshot) => vec![AgentEvent::RateLimitsUpdated {
+                    windows: self.merge(snapshot),
+                }],
+                None => Vec::new(),
+            },
+            _ => Vec::new(),
+        }
+    }
+
+    /// Merge a sparse `RateLimitSnapshot` into the observed windows and return
+    /// them, most significant first. A window the account does not report at all
+    /// is simply absent from the list (its row disappears rather than showing
+    /// zero).
+    fn merge(&mut self, snapshot: &Value) -> Vec<RateLimitWindow> {
+        self.primary = merge_window(self.primary.take(), snapshot.get("primary"));
+        self.secondary = merge_window(self.secondary.take(), snapshot.get("secondary"));
+        [self.primary.clone(), self.secondary.clone()]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+}
+
+/// Merge one sparse window onto the last observed one.
+///
+/// An absent or null window leaves the previous observation untouched. A present
+/// one overwrites only the fields it actually carries: `usedPercent` is required
+/// by the schema, while `resetsAt` and `windowDurationMins` are nullable and a
+/// null there means "unavailable in this rolling update", not "cleared".
+fn merge_window(
+    previous: Option<RateLimitWindow>,
+    update: Option<&Value>,
+) -> Option<RateLimitWindow> {
+    let Some(update) = update.filter(|value| !value.is_null()) else {
+        // Nothing said about this window: keep exactly what was last observed
+        // (including having observed nothing).
+        return previous;
+    };
+    let previous = previous.unwrap_or_default();
+    Some(RateLimitWindow {
+        // Minutes on the wire, seconds in the neutral model — the unit the
+        // browser labels and paces the row with.
+        duration_seconds: int_field(update, "windowDurationMins")
+            .map(|minutes| minutes * 60)
+            .or(previous.duration_seconds),
+        used_percentage: update
+            .get("usedPercent")
+            .and_then(Value::as_f64)
+            .or(previous.used_percentage),
+        resets_at: int_field(update, "resetsAt").or(previous.resets_at),
+    })
 }
 
 /// The id of the turn a `turn/started` notification announces — the id
@@ -506,9 +670,17 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
 
 /// Read an integer field from a JSON object, returning `None` when absent or not
 /// an integer. Used for the item lifecycle timestamps (`startedAtMs` /
-/// `completedAtMs`, epoch milliseconds).
+/// `completedAtMs`, epoch milliseconds) and the rate-limit window's reset time /
+/// duration.
 fn int_field(value: &Value, key: &str) -> Option<i64> {
     value.get(key).and_then(Value::as_i64)
+}
+
+/// Read an unsigned integer field from a JSON object. Used for the token counts,
+/// which are counts and can never be negative; a negative value on the wire is
+/// nonsense and degrades to `None` rather than wrapping.
+fn uint_field(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(Value::as_u64)
 }
 
 #[cfg(test)]
@@ -965,6 +1137,221 @@ mod tests {
         assert!(translate_notification(&notification(
             "thread/somethingNew",
             json!({ "threadId": "thr_1" })
+        ))
+        .is_empty());
+    }
+
+    /// The token-usage breakdown the real server sends: every field of
+    /// `TokenUsageBreakdown` is required, so a fixture that omits one would not
+    /// be a shape the server can produce.
+    fn breakdown(total: u64, input: u64) -> Value {
+        json!({
+            "totalTokens": total,
+            "inputTokens": input,
+            "cachedInputTokens": 0,
+            "outputTokens": 0,
+            "reasoningOutputTokens": 0,
+        })
+    }
+
+    #[test]
+    fn thread_token_usage_becomes_a_usage_event_with_a_percentage_of_the_context_window() {
+        // The real `ThreadTokenUsageUpdatedNotification`: thread-scoped, so it
+        // arrives through the per-thread demux and must NOT fall into the
+        // catch-all that used to swallow it.
+        let events = translate_notification(&notification(
+            "thread/tokenUsage/updated",
+            json!({
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "tokenUsage": {
+                    // The proportions a real session reaches: the running
+                    // `total` is already 2.5x the window while the last call —
+                    // the conversation actually in the window — is a quarter of
+                    // it.
+                    "total": breakdown(500_000, 480_000),
+                    "last": breakdown(50_000, 48_000),
+                    "modelContextWindow": 200_000,
+                }
+            }),
+        ));
+        assert_eq!(
+            events,
+            vec![AgentEvent::TokenUsageUpdated {
+                usage: AgentTokenUsage {
+                    // 50_000 / 200_000 — computed here, at Codex's own edge,
+                    // because the server never sends a percentage.
+                    context_used_percentage: Some(25.0),
+                    context_window_size: Some(200_000),
+                    // `last`, never the running `total`: the latter would read
+                    // 250% here, and only ever climbs.
+                    context_current_usage: Some(50_000),
+                    // The one genuinely cumulative number, so this one is
+                    // `total`'s.
+                    total_input_tokens: Some(480_000),
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn token_usage_without_a_context_window_reports_no_percentage() {
+        // `modelContextWindow` is nullable. With nothing to divide by there is
+        // no honest percentage, so the counts are still reported and the
+        // percentage is omitted — never NaN, never a fabricated 0%.
+        for window in [json!(null), json!(0)] {
+            let events = translate_notification(&notification(
+                "thread/tokenUsage/updated",
+                json!({
+                    "threadId": "thr_1",
+                    "turnId": "turn_1",
+                    "tokenUsage": {
+                        "total": breakdown(500_000, 480_000),
+                        "last": breakdown(50_000, 48_000),
+                        "modelContextWindow": window,
+                    }
+                }),
+            ));
+            assert_eq!(
+                events,
+                vec![AgentEvent::TokenUsageUpdated {
+                    usage: AgentTokenUsage {
+                        context_used_percentage: None,
+                        context_window_size: None,
+                        context_current_usage: Some(50_000),
+                        total_input_tokens: Some(480_000),
+                    },
+                }],
+                "modelContextWindow {window} must yield no percentage"
+            );
+        }
+
+        // A frame with no `tokenUsage` at all states nothing.
+        assert!(translate_notification(&notification(
+            "thread/tokenUsage/updated",
+            json!({ "threadId": "thr_1", "turnId": "turn_1" })
+        ))
+        .is_empty());
+    }
+
+    #[test]
+    fn account_rate_limits_become_duration_identified_windows() {
+        // The real `AccountRateLimitsUpdatedNotification`: note the absence of
+        // any `threadId` — this frame belongs to the account, not a thread.
+        let mut limits = AccountRateLimits::default();
+        let events = limits.translate(&notification(
+            "account/rateLimits/updated",
+            json!({
+                "rateLimits": {
+                    "primary": { "usedPercent": 21, "resetsAt": 1_700_000_000_i64, "windowDurationMins": 300 },
+                    "secondary": { "usedPercent": 4, "resetsAt": 1_700_500_000_i64, "windowDurationMins": 10_080 },
+                    "planType": "pro",
+                }
+            }),
+        ));
+        assert_eq!(
+            events,
+            vec![AgentEvent::RateLimitsUpdated {
+                windows: vec![
+                    RateLimitWindow {
+                        // 300 minutes on the wire is 5 hours of neutral window.
+                        duration_seconds: Some(5 * 60 * 60),
+                        used_percentage: Some(21.0),
+                        resets_at: Some(1_700_000_000),
+                    },
+                    RateLimitWindow {
+                        duration_seconds: Some(7 * 24 * 60 * 60),
+                        used_percentage: Some(4.0),
+                        resets_at: Some(1_700_500_000),
+                    },
+                ],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_sparse_rate_limit_update_merges_and_never_clears_what_was_observed() {
+        // The vendored schema is explicit: a rolling update is sparse, and a
+        // null field "does not clear a previously observed value".
+        let mut limits = AccountRateLimits::default();
+        limits.translate(&notification(
+            "account/rateLimits/updated",
+            json!({
+                "rateLimits": {
+                    "primary": { "usedPercent": 21, "resetsAt": 1_700_000_000_i64, "windowDurationMins": 300 },
+                    "secondary": { "usedPercent": 4, "resetsAt": 1_700_500_000_i64, "windowDurationMins": 10_080 },
+                }
+            }),
+        ));
+
+        // A second update naming only `primary` — and, within it, only the
+        // required `usedPercent`. Everything it does not carry survives: the
+        // whole `secondary` window, and `primary`'s own reset time and duration.
+        let events = limits.translate(&notification(
+            "account/rateLimits/updated",
+            json!({
+                "rateLimits": {
+                    "primary": { "usedPercent": 37, "resetsAt": null, "windowDurationMins": null },
+                    "secondary": null,
+                }
+            }),
+        ));
+        assert_eq!(
+            events,
+            vec![AgentEvent::RateLimitsUpdated {
+                windows: vec![
+                    RateLimitWindow {
+                        duration_seconds: Some(5 * 60 * 60),
+                        used_percentage: Some(37.0),
+                        resets_at: Some(1_700_000_000),
+                    },
+                    RateLimitWindow {
+                        duration_seconds: Some(7 * 24 * 60 * 60),
+                        used_percentage: Some(4.0),
+                        resets_at: Some(1_700_500_000),
+                    },
+                ],
+            }]
+        );
+
+        // An update that omits both keys entirely leaves everything standing.
+        let events = limits.translate(&notification(
+            "account/rateLimits/updated",
+            json!({ "rateLimits": { "planType": "pro" } }),
+        ));
+        let AgentEvent::RateLimitsUpdated { windows } = &events[0] else {
+            panic!("expected a rate-limit event, got {events:?}");
+        };
+        assert_eq!(windows.len(), 2, "an omitted window is not a cleared one");
+        assert_eq!(windows[0].used_percentage, Some(37.0));
+    }
+
+    #[test]
+    fn an_account_frame_that_states_nothing_yields_no_event() {
+        let mut limits = AccountRateLimits::default();
+        // No `rateLimits` object: nothing was observed, so nothing is emitted —
+        // an empty window list here would wipe the display on a malformed frame.
+        assert!(limits
+            .translate(&notification("account/rateLimits/updated", json!({})))
+            .is_empty());
+        // A method this build does not model is dropped, not guessed at.
+        assert!(limits
+            .translate(&notification(
+                "account/somethingNew",
+                json!({ "whatever": true })
+            ))
+            .is_empty());
+    }
+
+    #[test]
+    fn the_account_frame_is_not_thread_scoped() {
+        // Guard against the fake (and any future scenario) drifting into
+        // stamping a `threadId` onto the account frame: the thread-scoped
+        // translator must not model it, because in production it never reaches
+        // that path at all.
+        assert!(translate_notification(&notification(
+            "account/rateLimits/updated",
+            json!({ "rateLimits": { "primary": { "usedPercent": 21 } } })
         ))
         .is_empty());
     }

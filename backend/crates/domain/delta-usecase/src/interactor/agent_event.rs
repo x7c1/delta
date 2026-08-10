@@ -20,12 +20,18 @@ use std::collections::BTreeSet;
 
 use tokio::sync::mpsc;
 
-use crate::agent::{AgentEvent, AgentEventStream, AgentPermissionRequest, TurnStatus};
+use crate::agent::{
+    AgentEvent, AgentEventStream, AgentPermissionRequest, AgentProvider, AgentTokenUsage,
+    TurnStatus,
+};
 use crate::interactor::agent_permission::reduce_permission_event;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::interactor::session_actor::input::SessionInput;
 use crate::interactor::PermissionDecision;
-use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
+use crate::ports::{
+    GitWorktree, RateLimitWindow, SessionEvent, SessionStore, StatusSnapshot, TmuxDriver,
+    Transcript, Workspace,
+};
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -49,7 +55,11 @@ where
     /// 2. **Control / streaming** — a live [`AgentEvent::AssistantDelta`] becomes
     ///    a non-persisted [`SessionEvent::AssistantStreaming`] preview, and a
     ///    [`AgentEvent::TurnCompleted`] advances the turn machine and emits the
-    ///    matching turn-end browser event.
+    ///    matching turn-end browser event. The usage pair
+    ///    ([`AgentEvent::TokenUsageUpdated`] /
+    ///    [`AgentEvent::RateLimitsUpdated`]) is observability only: it becomes a
+    ///    [`SessionEvent::StatusUpdated`] broadcast and touches neither the
+    ///    store nor the turn machine.
     ///
     /// Fire-and-forget: the pump has no reply channel, so a per-event failure is
     /// logged and the pump continues rather than tearing the session down over a
@@ -70,6 +80,8 @@ where
                 request_id,
                 decision,
             } => self.resolve_agent_permission(&request_id, decision),
+            AgentEvent::TokenUsageUpdated { usage } => self.report_token_usage(usage),
+            AgentEvent::RateLimitsUpdated { windows } => self.report_rate_limits(windows),
             // Every other event either completed content (handled above) or is
             // control-only with no browser signal in this slice (session
             // start/end, turn start — already applied at send — and
@@ -172,6 +184,62 @@ where
         for event in reduce_permission_event(self.state, self.id, &event) {
             self.emit_async_event(event);
         }
+    }
+
+    /// Broadcast the session's latest token accounting as a
+    /// [`SessionEvent::StatusUpdated`] — the same fire-and-forget "latest value"
+    /// channel Claude's status-line hook broadcasts on, so both providers drive
+    /// one display.
+    ///
+    /// Nothing is persisted and nothing is recomputed: the numbers are exactly
+    /// what the adapter reported (see [`AgentTokenUsage`]). The snapshot states
+    /// nothing about rate limits, so a token-usage frame can never clear the
+    /// account windows an earlier frame reported.
+    fn report_token_usage(&mut self, usage: AgentTokenUsage) {
+        let Some(provider) = self.agent_provider() else {
+            return;
+        };
+        self.emit_async_event(SessionEvent::StatusUpdated {
+            session_id: self.id.clone(),
+            snapshot: StatusSnapshot {
+                context_used_percentage: usage.context_used_percentage,
+                context_window_size: usage.context_window_size,
+                context_current_usage: usage.context_current_usage,
+                total_input_tokens: usage.total_input_tokens,
+                ..StatusSnapshot::new(provider)
+            },
+        });
+    }
+
+    /// Broadcast the account's rate-limit windows, observed on this session's
+    /// provider, on the same status channel.
+    ///
+    /// The windows are account-scoped, and the browser keys them by the
+    /// snapshot's provider — so the adapter surfacing the same fact on several
+    /// of its sessions is idempotent rather than conflicting. The snapshot
+    /// states nothing about context usage, so it cannot disturb the per-session
+    /// context bar.
+    fn report_rate_limits(&mut self, windows: Vec<RateLimitWindow>) {
+        let Some(provider) = self.agent_provider() else {
+            return;
+        };
+        self.emit_async_event(SessionEvent::StatusUpdated {
+            session_id: self.id.clone(),
+            snapshot: StatusSnapshot {
+                rate_limits: Some(windows),
+                ..StatusSnapshot::new(provider)
+            },
+        });
+    }
+
+    /// The provider driving this session's open agent, which stamps every usage
+    /// snapshot. `None` once the agent session is gone (a frame that raced the
+    /// close), in which case the snapshot is dropped: an unattributed set of
+    /// rate limits is exactly the thing that must never reach the browser.
+    fn agent_provider(&self) -> Option<AgentProvider> {
+        self.state
+            .open_agent()
+            .map(|agent| agent.adapter.provider())
     }
 
     /// Fold the event through the content accumulator and persist anything it

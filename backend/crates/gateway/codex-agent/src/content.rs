@@ -282,8 +282,11 @@ impl CodexConversationSource {
             }
             AgentEvent::TurnCompleted { .. } => self.flush_pending_tools(),
             // Streaming previews are the control layer's job (the browser's
-            // live `AssistantStreaming`), never persisted here; every other
-            // variant carries no content.
+            // live `AssistantStreaming`), never persisted here. Usage facts
+            // (`TokenUsageUpdated` / `RateLimitsUpdated`) are observability
+            // only and deliberately stay out of the conversation: they are
+            // measurements *about* the session, not something anyone said.
+            // Every other variant carries no content either.
             _ => Vec::new(),
         }
     }

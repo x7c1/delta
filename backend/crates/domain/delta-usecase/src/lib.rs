@@ -23,7 +23,7 @@ mod turn;
 
 pub use agent::{
     AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentContentSource, AgentEvent,
-    AgentEventStream, AgentPermissionRequest, AgentProvider, AgentSessionHandle,
+    AgentEventStream, AgentPermissionRequest, AgentProvider, AgentSessionHandle, AgentTokenUsage,
     ContentSourceRequest, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest, PermissionCapability,
     PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,

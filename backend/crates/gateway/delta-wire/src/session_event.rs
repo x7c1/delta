@@ -4,6 +4,8 @@ use delta_usecase::{RateLimitWindow, SessionEvent, StatusSnapshot};
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::session::WireAgentProvider;
+
 /// JSON shape of a session event on the `/ws` stream.
 ///
 /// Mirrors the domain [`SessionEvent`] variant-for-variant; see that type for
@@ -134,37 +136,49 @@ pub enum WireSessionEvent {
         session_id: String,
         tool_use_id: String,
     },
-    /// The latest Claude Code status-line snapshot for a session: selected
-    /// model, context-window usage, rate limits, and cost. A "latest value"
-    /// keyed by `session_id` (each snapshot supersedes the last), not an append.
+    /// The latest usage snapshot for a session: selected model, context-window
+    /// usage, the account's rate limits, and cost. A "latest value" keyed by
+    /// `session_id` (each snapshot supersedes the last), not an append.
     StatusUpdated {
         session_id: String,
         snapshot: WireStatusSnapshot,
     },
 }
 
-/// The wire form of a Claude Code status-line snapshot. Every field is optional
-/// (a session before its first API response reports `null`s and omits the rate
-/// limits); see `delta_usecase::StatusSnapshot` for the semantics.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
+/// The wire form of a session's usage snapshot. Every field is optional (a
+/// session before its provider's first usage report carries `null`s), and a
+/// provider that reports usage on several frames sends one snapshot per frame,
+/// each stating only what that frame said; see `delta_usecase::StatusSnapshot`
+/// for the semantics.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[ts(rename = "StatusSnapshot")]
 pub struct WireStatusSnapshot {
+    /// Which provider's account and session these numbers describe. The client
+    /// keys the account-scoped rate limits by this, so one provider's limits
+    /// are never shown for another's session.
+    pub provider: WireAgentProvider,
     pub model_id: Option<String>,
     pub model_display_name: Option<String>,
     pub context_used_percentage: Option<f64>,
     pub context_window_size: Option<u64>,
     pub context_current_usage: Option<u64>,
     pub total_input_tokens: Option<u64>,
-    pub five_hour: Option<WireRateLimitWindow>,
-    pub seven_day: Option<WireRateLimitWindow>,
+    /// The account's rate-limit windows, most significant first. `null` means
+    /// this snapshot says nothing about rate limits (so the client keeps what it
+    /// has); `[]` means the account has none to show.
+    pub rate_limits: Option<Vec<WireRateLimitWindow>>,
     pub total_cost_usd: Option<f64>,
     pub current_dir: Option<String>,
 }
 
-/// The wire form of one rate-limit window.
+/// The wire form of one rate-limit window, identified by its duration rather
+/// than by a provider-specific name.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, TS)]
 #[ts(rename = "RateLimitWindow")]
 pub struct WireRateLimitWindow {
+    /// How long the window is, in seconds — what the client labels the row
+    /// from. `null` when the provider reported a window without its length.
+    pub duration_seconds: Option<i64>,
     pub used_percentage: Option<f64>,
     /// Unix epoch seconds at which the window resets.
     pub resets_at: Option<i64>,
@@ -173,6 +187,7 @@ pub struct WireRateLimitWindow {
 impl From<RateLimitWindow> for WireRateLimitWindow {
     fn from(window: RateLimitWindow) -> Self {
         Self {
+            duration_seconds: window.duration_seconds,
             used_percentage: window.used_percentage,
             resets_at: window.resets_at,
         }
@@ -182,14 +197,16 @@ impl From<RateLimitWindow> for WireRateLimitWindow {
 impl From<StatusSnapshot> for WireStatusSnapshot {
     fn from(snapshot: StatusSnapshot) -> Self {
         Self {
+            provider: snapshot.provider.into(),
             model_id: snapshot.model_id,
             model_display_name: snapshot.model_display_name,
             context_used_percentage: snapshot.context_used_percentage,
             context_window_size: snapshot.context_window_size,
             context_current_usage: snapshot.context_current_usage,
             total_input_tokens: snapshot.total_input_tokens,
-            five_hour: snapshot.five_hour.map(WireRateLimitWindow::from),
-            seven_day: snapshot.seven_day.map(WireRateLimitWindow::from),
+            rate_limits: snapshot
+                .rate_limits
+                .map(|windows| windows.into_iter().map(WireRateLimitWindow::from).collect()),
             total_cost_usd: snapshot.total_cost_usd,
             current_dir: snapshot.current_dir,
         }
@@ -478,7 +495,27 @@ fn sample_events() -> Vec<WireSessionEvent> {
         },
         WireSessionEvent::StatusUpdated {
             session_id: session_id(),
-            snapshot: WireStatusSnapshot::default(),
+            // A populated sample rather than an empty one: the exhaustiveness
+            // guard is what proves a new snapshot field reaches the generated
+            // bindings, and an all-`null` sample would let a field be added
+            // without its shape ever being exercised. The rate-limit window
+            // carries its duration, which is the window's identity on the wire.
+            snapshot: WireStatusSnapshot {
+                provider: WireAgentProvider::Claude,
+                model_id: Some("model-sample".to_owned()),
+                model_display_name: Some("Model Sample".to_owned()),
+                context_used_percentage: Some(42.5),
+                context_window_size: Some(200_000),
+                context_current_usage: Some(85_000),
+                total_input_tokens: Some(90_000),
+                rate_limits: Some(vec![WireRateLimitWindow {
+                    duration_seconds: Some(5 * 60 * 60),
+                    used_percentage: Some(12.0),
+                    resets_at: Some(1_700_000_000),
+                }]),
+                total_cost_usd: Some(0.1234),
+                current_dir: Some("/work".to_owned()),
+            },
         },
     ];
     for event in &samples {
@@ -491,7 +528,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
 mod tests {
     use super::*;
 
-    use delta_model::{MessageUuid, SessionId, ThreadId};
+    use delta_model::{AgentProvider, MessageUuid, SessionId, ThreadId};
 
     fn json(event: &WireSessionEvent) -> serde_json::Value {
         serde_json::to_value(event).unwrap()
@@ -808,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn status_updated_serializes_its_snapshot_with_nested_rate_limits() {
+    fn status_updated_serializes_its_snapshot_with_duration_identified_rate_limits() {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::StatusUpdated {
                 session_id: SessionId::from("sess-1"),
@@ -819,30 +856,38 @@ mod tests {
                     context_window_size: Some(200_000),
                     context_current_usage: Some(85_000),
                     total_input_tokens: Some(90_000),
-                    five_hour: Some(RateLimitWindow {
-                        used_percentage: Some(12.0),
-                        resets_at: Some(1_700_000_000),
-                    }),
-                    seven_day: Some(RateLimitWindow {
-                        used_percentage: Some(3.5),
-                        resets_at: Some(1_700_500_000),
-                    }),
+                    rate_limits: Some(vec![
+                        RateLimitWindow {
+                            duration_seconds: Some(5 * 60 * 60),
+                            used_percentage: Some(12.0),
+                            resets_at: Some(1_700_000_000),
+                        },
+                        RateLimitWindow {
+                            duration_seconds: Some(7 * 24 * 60 * 60),
+                            used_percentage: Some(3.5),
+                            resets_at: Some(1_700_500_000),
+                        },
+                    ]),
                     total_cost_usd: Some(0.1234),
                     current_dir: Some("/work".to_owned()),
+                    ..StatusSnapshot::new(AgentProvider::Claude)
                 },
             })),
             serde_json::json!({
                 "kind": "status_updated",
                 "session_id": "sess-1",
                 "snapshot": {
+                    "provider": "claude",
                     "model_id": "claude-opus-4",
                     "model_display_name": "Opus 4",
                     "context_used_percentage": 42.5,
                     "context_window_size": 200_000,
                     "context_current_usage": 85_000,
                     "total_input_tokens": 90_000,
-                    "five_hour": { "used_percentage": 12.0, "resets_at": 1_700_000_000 },
-                    "seven_day": { "used_percentage": 3.5, "resets_at": 1_700_500_000 },
+                    "rate_limits": [
+                        { "duration_seconds": 18_000, "used_percentage": 12.0, "resets_at": 1_700_000_000 },
+                        { "duration_seconds": 604_800, "used_percentage": 3.5, "resets_at": 1_700_500_000 },
+                    ],
                     "total_cost_usd": 0.1234,
                     "current_dir": "/work",
                 },
@@ -859,21 +904,59 @@ mod tests {
                 session_id: SessionId::from("sess-1"),
                 snapshot: StatusSnapshot {
                     model_display_name: Some("Opus 4".to_owned()),
-                    ..StatusSnapshot::default()
+                    ..StatusSnapshot::new(AgentProvider::Claude)
                 },
             })),
             serde_json::json!({
                 "kind": "status_updated",
                 "session_id": "sess-1",
                 "snapshot": {
+                    "provider": "claude",
                     "model_id": null,
                     "model_display_name": "Opus 4",
                     "context_used_percentage": null,
                     "context_window_size": null,
                     "context_current_usage": null,
                     "total_input_tokens": null,
-                    "five_hour": null,
-                    "seven_day": null,
+                    "rate_limits": null,
+                    "total_cost_usd": null,
+                    "current_dir": null,
+                },
+            }),
+        );
+    }
+
+    #[test]
+    fn a_non_claude_snapshot_names_its_own_provider_and_may_state_only_rate_limits() {
+        // The account-scoped Codex frame: it says nothing about context usage,
+        // and its windows are identified by the duration the server reported.
+        // The provider tag is what keeps these limits off a Claude session.
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::StatusUpdated {
+                session_id: SessionId::from("sess-1"),
+                snapshot: StatusSnapshot {
+                    rate_limits: Some(vec![RateLimitWindow {
+                        duration_seconds: Some(300 * 60),
+                        used_percentage: Some(21.0),
+                        resets_at: None,
+                    }]),
+                    ..StatusSnapshot::new(AgentProvider::Codex)
+                },
+            })),
+            serde_json::json!({
+                "kind": "status_updated",
+                "session_id": "sess-1",
+                "snapshot": {
+                    "provider": "codex",
+                    "model_id": null,
+                    "model_display_name": null,
+                    "context_used_percentage": null,
+                    "context_window_size": null,
+                    "context_current_usage": null,
+                    "total_input_tokens": null,
+                    "rate_limits": [
+                        { "duration_seconds": 18_000, "used_percentage": 21.0, "resets_at": null },
+                    ],
                     "total_cost_usd": null,
                     "current_dir": null,
                 },
