@@ -1025,6 +1025,48 @@ describe('liveStore.applyEvent notices', () => {
     expect(notices()).toEqual({});
   });
 
+  it('surfaces a parked send and keeps the notice past the turn that parked it', () => {
+    // The park happens mid-turn, and that turn ends moments later — so a
+    // `turn_end` sweep would erase the notice before anyone could read it.
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).toMatchObject({
+      sendId: 42,
+      text: 'never delivered',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'turn_completed',
+      session_id: 'sess-1',
+      thread_id: 1,
+      stop_reason: null,
+    });
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).not.toBeNull();
+
+    // It goes away on an explicit dismiss…
+    useLiveStore.getState().dismissSendParked('sess-1');
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).toBeNull();
+  });
+
+  it('clears a parked-send notice when the session closes', () => {
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_closed',
+      session_id: 'sess-1',
+    });
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).toBeNull();
+  });
+
   it('keeps the resume-unavailable notice across turn ends and clears it on open', () => {
     useLiveStore.getState().markResumeUnavailable('sess-1');
     expect(noticeOf(notices(), 'sess-1', 'resume_unavailable')).not.toBeNull();

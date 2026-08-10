@@ -28,6 +28,15 @@ pub enum WireSessionEvent {
     SessionClosed { session_id: String },
     /// A held (`queued`) send was promoted to `dispatched` and typed.
     SendDispatched { session_id: String, send_id: i64 },
+    /// A dispatched send was abandoned after its echo failed to match twice:
+    /// the row is cancelled and `text` carries the composed message back, so
+    /// the client can tell the user it was never delivered instead of dropping
+    /// it silently (or re-typing it forever).
+    SendParked {
+        session_id: String,
+        send_id: i64,
+        text: String,
+    },
     /// A queued send was confirmed as a turn start. `thread_id` is the thread
     /// the dispatched send took its turn on, so the running indicator lights on
     /// the exact thread rather than the whole session.
@@ -206,6 +215,15 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id: session_id.0,
                 send_id,
             },
+            SessionEvent::SendParked {
+                session_id,
+                send_id,
+                text,
+            } => Self::SendParked {
+                session_id: session_id.0,
+                send_id,
+                text,
+            },
             SessionEvent::TurnStarted {
                 session_id,
                 send_id,
@@ -358,6 +376,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::SessionOpened { .. }
             | WireSessionEvent::SessionClosed { .. }
             | WireSessionEvent::SendDispatched { .. }
+            | WireSessionEvent::SendParked { .. }
             | WireSessionEvent::TurnStarted { .. }
             | WireSessionEvent::ExternalInput { .. }
             | WireSessionEvent::TurnCompleted { .. }
@@ -388,6 +407,11 @@ fn sample_events() -> Vec<WireSessionEvent> {
         WireSessionEvent::SendDispatched {
             session_id: session_id(),
             send_id: 1,
+        },
+        WireSessionEvent::SendParked {
+            session_id: session_id(),
+            send_id: 1,
+            text: "never delivered".to_owned(),
         },
         WireSessionEvent::TurnStarted {
             session_id: session_id(),
@@ -594,6 +618,23 @@ mod tests {
     }
 
     #[test]
+    fn send_parked_serializes_with_the_undelivered_text() {
+        assert_eq!(
+            json(&WireSessionEvent::from(SessionEvent::SendParked {
+                session_id: SessionId::from("sess-1"),
+                send_id: 42,
+                text: "read this\n/home/dev/pictures/shot.png".to_owned(),
+            })),
+            serde_json::json!({
+                "kind": "send_parked",
+                "session_id": "sess-1",
+                "send_id": 42,
+                "text": "read this\n/home/dev/pictures/shot.png",
+            }),
+        );
+    }
+
+    #[test]
     fn turn_events_keep_their_payload_fields_on_the_wire() {
         assert_eq!(
             json(&WireSessionEvent::from(SessionEvent::TurnStarted {
@@ -656,6 +697,7 @@ mod tests {
                 "session_opened",
                 "session_closed",
                 "send_dispatched",
+                "send_parked",
                 "turn_started",
                 "external_input",
                 "turn_completed",

@@ -202,6 +202,14 @@ export function TranscriptPane({
       ? noticeOf(state.notices, activeThread.session_id, 'external_input')
       : null,
   );
+  // The focused session's parked-send notice, if any: a composed message the
+  // server stopped trying to deliver. No thread gate — the message never
+  // reached the conversation, so there is no thread it belongs to.
+  const sendParked = useLiveStore((state) =>
+    activeThread
+      ? noticeOf(state.notices, activeThread.session_id, 'send_parked')
+      : null,
+  );
   // Whether the focused (closed) session just failed to resume because its
   // transcript is gone; drives the inline "cannot be resumed" notice.
   const resumeUnavailable = useLiveStore((state) =>
@@ -275,6 +283,7 @@ export function TranscriptPane({
   const dismissExternalInput = useLiveStore(
     (state) => state.dismissExternalInput,
   );
+  const dismissSendParked = useLiveStore((state) => state.dismissSendParked);
 
   // The sub-thread chip currently hovered; its text is highlighted in the body.
   const [hoveredBranchTitle, setHoveredBranchTitle] = useState<string | null>(
@@ -800,6 +809,9 @@ export function TranscriptPane({
     externalInput !== null &&
     externalInput.threadId === activeThread.id;
 
+  const showSendParked =
+    !newSession && activeThread !== null && sendParked !== null;
+
   // Show the live assistant preview on the thread it belongs to whenever a
   // preview exists with text. `done` only means every chunk of the message has
   // arrived, NOT that the turn ended — the preview stays until the persisted
@@ -937,6 +949,7 @@ export function TranscriptPane({
     const hasNotices =
       (readOnly && !newSession) ||
       (showExternalInput && activeThread !== null) ||
+      (showSendParked && activeThread !== null) ||
       pendingEntries.length > 0;
     bottomContent = (
       <>
@@ -979,6 +992,39 @@ export function TranscriptPane({
                   size="sm"
                   variant="ghost"
                   onClick={() => dismissExternalInput(activeThread.session_id)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            )}
+
+            {showSendParked && activeThread && sendParked && (
+              <div
+                className="flex items-start gap-2 rounded border border-danger/30 bg-danger/10 px-2 py-1 text-caption"
+                data-testid="send-parked-notice"
+                role="alert"
+              >
+                <Badge className="shrink-0" tone="warning">
+                  not delivered
+                </Badge>
+                <span className="min-w-0 flex-1 break-words text-fg-muted">
+                  This message never reached the session — the terminal kept
+                  answering something else, so Delta stopped re-sending it.
+                  Copy it and try again:
+                  {/* Scrolled, not clamped: this notice holds the only copy of
+                      the text left in the UI, so a `line-clamp` would leave a
+                      long message's tail unreadable and unselectable — the
+                      silent loss this notice exists to prevent. The height cap
+                      keeps it from pushing the composer off-screen. */}
+                  <span className="mt-1 block max-h-32 overflow-y-auto whitespace-pre-wrap text-fg-default">
+                    {sendParked.text}
+                  </span>
+                </span>
+                <Button
+                  className="shrink-0"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => dismissSendParked(activeThread.session_id)}
                 >
                   Dismiss
                 </Button>

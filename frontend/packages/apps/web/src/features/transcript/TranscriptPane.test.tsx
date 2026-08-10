@@ -966,6 +966,34 @@ describe('TranscriptPane', () => {
     expect(useLiveStore.getState().notices).toEqual({});
   });
 
+  it('shows the parked-send notice with the undelivered text, and dismisses it', async () => {
+    useLiveStore.setState({
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'send_parked',
+            sendId: 42,
+            text: 'read this\n/home/dev/pictures/shot.png',
+            at: 0,
+          },
+        ],
+      },
+    });
+
+    renderPane();
+
+    const notice = await screen.findByTestId('send-parked-notice');
+    // The text is handed back verbatim: this is the only copy the user has
+    // left of a message the session never received.
+    expect(notice).toHaveTextContent('read this');
+    expect(notice).toHaveTextContent('/home/dev/pictures/shot.png');
+
+    fireEvent.click(within(notice).getByRole('button', { name: 'Dismiss' }));
+
+    expect(screen.queryByTestId('send-parked-notice')).not.toBeInTheDocument();
+    expect(useLiveStore.getState().notices).toEqual({});
+  });
+
   it('shows the running-subagent indicator for the active thread, indented to align with tool calls', async () => {
     useLiveStore.setState({
       runningSubagents: {

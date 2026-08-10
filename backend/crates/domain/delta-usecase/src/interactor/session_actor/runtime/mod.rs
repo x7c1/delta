@@ -187,6 +187,41 @@ pub struct SessionRuntime {
     ///
     /// [`AUTO_COMPACT_REDISPATCH_DEBOUNCE`]: auto_compact::AUTO_COMPACT_REDISPATCH_DEBOUNCE
     last_auto_compact_redispatch_at: Option<Instant>,
+    /// How many times each send has been returned to `queued` by the turn
+    /// machine's [`OrphanedSend::Requeue`] disposition, keyed by send id — the
+    /// budget that stops an un-echoable send from being re-typed forever.
+    ///
+    /// Requeueing is optimistic: it re-dispatches on the next idle, which is
+    /// the right answer for a one-off mangling and the wrong one for a send
+    /// that can *never* match its echo, where every attempt mismatches the
+    /// same way and burns another model turn. [`MAX_REQUEUES_PER_SEND`] caps
+    /// the retries; past the cap the send is parked (cancelled and surfaced)
+    /// instead of requeued.
+    ///
+    /// The count does not distinguish *why* the echo failed: an unrelated
+    /// prompt landing inside the narrow dispatch⇄echo window twice for the
+    /// same send spends the budget too. That prompt may be someone typing into
+    /// the pane, or a harness-injected task notification, which spends the
+    /// budget without even surfacing as external input. That is the point —
+    /// the net has to catch failure modes Delta has not thought of — and firing
+    /// early is bounded and legible: the send is parked with its text handed
+    /// back.
+    ///
+    /// Runtime-only, like everything else here: a restart drops the counts,
+    /// granting an un-echoable send one further re-dispatch before the cap
+    /// stops it again — the loop still terminates, so a retry count persisted
+    /// on the send row would not be worth its cost.
+    ///
+    /// An entry is dropped whenever the turn machine itself retires the send
+    /// (echo matched, orphan-cancelled, parked). A send the *user* cancels
+    /// while it sits `queued` leaves its count behind, harmlessly: send ids
+    /// are never reused, so a leftover count can never be charged to a later
+    /// send. NOT part of [`Self::is_empty`]: a leftover count is a fact about
+    /// the past and must not pin the actor alive.
+    ///
+    /// [`OrphanedSend::Requeue`]: crate::turn::OrphanedSend::Requeue
+    /// [`MAX_REQUEUES_PER_SEND`]: turn::MAX_REQUEUES_PER_SEND
+    requeues_per_send: HashMap<i64, u32>,
 }
 
 impl SessionRuntime {

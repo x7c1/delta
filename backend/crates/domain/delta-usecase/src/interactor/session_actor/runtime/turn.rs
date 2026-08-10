@@ -5,6 +5,18 @@ use crate::turn::{transition, Transition, TurnInput, TurnState};
 
 use super::SessionRuntime;
 
+/// How many times one send may be returned to `queued` by the turn machine
+/// before Delta stops re-dispatching it and parks it instead.
+///
+/// One retry, not zero: a send whose echo was mangled once (interleaved pane
+/// typing, a compaction swallowing the keystrokes) really does come back
+/// intact on the next attempt, and losing a composed message to a single
+/// hiccup would be worse than the retry. Not more than one: a send whose echo
+/// can *never* match — Claude Code rewrites the prompt, so equality is
+/// unreachable — mismatches identically on every attempt, and each attempt
+/// costs a full model turn. Two dispatches are enough to tell the two apart.
+pub const MAX_REQUEUES_PER_SEND: u32 = 1;
+
 impl SessionRuntime {
     /// The session's current turn state.
     pub fn turn(&self) -> TurnState {
@@ -22,6 +34,12 @@ impl SessionRuntime {
     pub fn apply_turn(&mut self, input: TurnInput) -> Transition {
         let result = transition(self.turn, input);
         self.turn = result.next;
+        // A matched send has left the outstanding set for good; dropping its
+        // budget here (not only on the orphan dispositions) keeps the map
+        // bounded by the sends in flight, not by the session's lifetime.
+        if let TurnInput::EchoMatched { send_id } = input {
+            self.forget_requeues(send_id);
+        }
         if result.next == TurnState::Idle {
             self.pending_permission = None;
             self.pending_question = None;
@@ -56,5 +74,24 @@ impl SessionRuntime {
         self.pending_question = None;
         self.running_subagents.clear();
         self.streaming_message = None;
+        self.requeues_per_send.clear();
+    }
+
+    /// Spend one requeue from `send_id`'s budget, reporting whether the send
+    /// may still be returned to `queued` (and so re-dispatched on the next
+    /// idle). `false` means the budget is exhausted: the caller must park the
+    /// send instead of requeueing it, or the dispatch⇄mismatch cycle never
+    /// ends. See [`MAX_REQUEUES_PER_SEND`] and the `requeues_per_send` field
+    /// docs for why the cap is where it is.
+    pub fn claim_requeue(&mut self, send_id: i64) -> bool {
+        let spent = self.requeues_per_send.entry(send_id).or_insert(0);
+        *spent += 1;
+        *spent <= MAX_REQUEUES_PER_SEND
+    }
+
+    /// Drop `send_id`'s requeue budget: the send left the outstanding set
+    /// (matched, cancelled, or parked), so its retry history is moot.
+    pub fn forget_requeues(&mut self, send_id: i64) {
+        self.requeues_per_send.remove(&send_id);
     }
 }

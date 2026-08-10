@@ -117,6 +117,13 @@ export function applySessionEvent(
         refreshFocusedThreads();
       }
       break;
+    case 'send_parked':
+      // The server gave up delivering a composed message and cancelled its
+      // row, so the open-send list changed: refetch it (regardless of focus)
+      // to clear the pending chip that would otherwise spin forever. The
+      // "why" is already in the store as a notice.
+      invalidateSessionSends(queryClient, event.session_id);
+      break;
     case 'external_input':
       // Direct-pane input lands on the focused session's active thread. The
       // marker is recorded only for the focused session so a background
