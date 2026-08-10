@@ -112,12 +112,12 @@ stream, persistence, or golden fixtures.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real `codex app-server` session: while a turn is in flight,
+- [x] Against a real `codex app-server` session: while a turn is in flight,
       the pane shows the live request/notification flow (thread/turn/item
       frames), and a server-originated approval request is visible when one
       occurs.
-- [ ] Run `make e2e-real-codex` (ignored canaries) once and confirm green —
+- [x] Run `make e2e-real-codex` (ignored canaries) once and confirm green —
       these do not run in CI.
-- [ ] A Claude session on the same build shows the terminal pane exactly as
+- [x] A Claude session on the same build shows the terminal pane exactly as
       before, and toggling between a Claude and a Codex session swaps the
       pane correctly with no stale persisted-open leakage.
