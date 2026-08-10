@@ -103,8 +103,8 @@ test('a Codex session opens a comms pane listing its frames in order', async ({
   await firstFrame.locator('summary').click();
   await expect(firstFrame.locator('pre')).toContainText('"thread/start"');
 
-  // And the pane closes from its own control (in the pane header, above the
-  // frame list), returning the toggle.
+  // And the pane closes from its own control (floating over the frame list,
+  // dressed like the terminal's), returning the toggle.
   await page.getByRole('button', { name: 'Close communication log' }).click();
   await expect(pane).toHaveCount(0);
   await expect(commsToggle).toBeVisible();

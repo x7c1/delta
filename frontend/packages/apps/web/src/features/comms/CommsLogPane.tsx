@@ -198,21 +198,18 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
       className="border-l border-border-default"
       bodyClassName="bg-terminal-bg"
       bodyRef={bodyRef}
-      header={
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-caption font-medium text-fg">
-            Communication log
-          </span>
-          <button
-            type="button"
-            onClick={() => setCommsOpen(false)}
-            aria-label="Close communication log"
-            title="Close communication log"
-            className="rounded px-1.5 py-0.5 text-secondary leading-none text-fg-subtle transition hover:bg-surface-elevated hover:text-fg"
-          >
-            »
-          </button>
-        </div>
+      // No header, a floating collapse control — the terminal pane's exact
+      // dress, so switching providers never reshapes the right pane's chrome.
+      overlay={
+        <button
+          type="button"
+          onClick={() => setCommsOpen(false)}
+          aria-label="Close communication log"
+          title="Close communication log"
+          className="pointer-events-auto absolute right-2 top-2 z-10 rounded bg-terminal-overlay/60 px-1.5 py-0.5 text-secondary leading-none text-terminal-fg opacity-60 transition hover:bg-terminal-overlay-hover hover:text-terminal-fg-strong hover:opacity-100 focus-visible:opacity-100"
+        >
+          »
+        </button>
       }
     >
       <div data-testid="comms-pane" className="min-w-0">
