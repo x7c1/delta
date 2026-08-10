@@ -335,9 +335,9 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
               {label}
             </span>
           </span>
-          <span className="flex items-baseline justify-end gap-2 text-fg-subtle">
+          <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-fg-subtle">
             <span>{frame.kind}</span>
-            <span>{time}</span>
+            <span className="whitespace-nowrap">{time}</span>
           </span>
         </summary>
         <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-surface-elevated px-2 py-1 font-mono text-caption text-fg-muted">
@@ -400,11 +400,10 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
               ×{frames.length}
             </span>
           </span>
-          <span className="flex items-baseline justify-end gap-2 text-fg-subtle">
+          <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-fg-subtle">
             <span>{first.kind}</span>
-            <span>
-              {firstTime} … {lastTime}
-            </span>
+            <span className="whitespace-nowrap">{firstTime} …</span>
+            <span className="whitespace-nowrap">{lastTime}</span>
           </span>
         </summary>
         <ol className="min-w-0 border-t border-border-default pl-4">
