@@ -59,6 +59,10 @@ export interface CommsLogPaneProps {
  * to keep instances alive across a session switch (unlike the terminal, where
  * re-attaching has a visible cost in the agent's own UI).
  *
+ * Painted with the `terminal-*` tokens (theme-fixed dark, see index.css) so
+ * the right pane keeps one look whether a session offers a terminal or this
+ * log — the two are the same window in different clothes.
+ *
  * The view follows the newest frame while the reader is at the end of the log,
  * and stops following the moment they scroll up — so a turn in flight stays in
  * view without stealing the frame someone is studying.
@@ -192,6 +196,7 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
   return (
     <Panel
       className="border-l border-border-default"
+      bodyClassName="bg-terminal-bg"
       bodyRef={bodyRef}
       header={
         <div className="flex items-center justify-between gap-2">
@@ -212,7 +217,7 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
     >
       <div data-testid="comms-pane" className="min-w-0">
         {note !== null && (
-          <p data-testid="comms-empty-note" className="p-3 text-caption text-fg-muted">
+          <p data-testid="comms-empty-note" className="p-3 text-caption text-terminal-fg/70">
             {note}
           </p>
         )}
@@ -310,16 +315,18 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
       data-testid="comms-frame"
       data-direction={frame.direction}
       data-kind={frame.kind}
-      className="border-b border-border-default last:border-b-0"
+      className="border-b border-terminal-overlay last:border-b-0"
     >
       <details className="group">
-        <summary className="cursor-pointer list-none px-2 py-1 font-mono text-caption hover:bg-surface-elevated [&::-webkit-details-marker]:hidden">
+        <summary className="cursor-pointer list-none px-2 py-1 font-mono text-caption hover:bg-terminal-overlay [&::-webkit-details-marker]:hidden">
           <span className="flex items-baseline gap-2">
             <span
               aria-hidden="true"
               title={toAgent ? 'Delta → agent' : 'agent → Delta'}
               className={
-                toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'
+                toAgent
+                  ? 'shrink-0 text-terminal-fg-strong'
+                  : 'shrink-0 text-terminal-fg/60'
               }
             >
               {toAgent ? '→' : '←'}
@@ -330,17 +337,17 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
             </span>
             <span
               data-testid="comms-frame-method"
-              className="min-w-0 flex-1 truncate text-fg"
+              className="min-w-0 flex-1 truncate text-terminal-fg-strong"
             >
               {label}
             </span>
           </span>
-          <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-fg-subtle">
+          <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-terminal-fg/60">
             <span>{frame.kind}</span>
             <span className="whitespace-nowrap">{time}</span>
           </span>
         </summary>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-surface-elevated px-2 py-1 font-mono text-caption text-fg-muted">
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-terminal-overlay px-2 py-1 font-mono text-caption text-terminal-fg">
           {pretty}
         </pre>
       </details>
@@ -369,16 +376,18 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
       data-testid="comms-frame-group"
       data-direction={first.direction}
       data-kind={first.kind}
-      className="border-b border-border-default last:border-b-0"
+      className="border-b border-terminal-overlay last:border-b-0"
     >
       <details className="group">
-        <summary className="cursor-pointer list-none px-2 py-1 font-mono text-caption hover:bg-surface-elevated [&::-webkit-details-marker]:hidden">
+        <summary className="cursor-pointer list-none px-2 py-1 font-mono text-caption hover:bg-terminal-overlay [&::-webkit-details-marker]:hidden">
           <span className="flex items-baseline gap-2">
             <span
               aria-hidden="true"
               title={toAgent ? 'Delta → agent' : 'agent → Delta'}
               className={
-                toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'
+                toAgent
+                  ? 'shrink-0 text-terminal-fg-strong'
+                  : 'shrink-0 text-terminal-fg/60'
               }
             >
               {toAgent ? '→' : '←'}
@@ -389,20 +398,20 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
             </span>
             <span
               data-testid="comms-frame-method"
-              className="min-w-0 flex-1 truncate text-fg"
+              className="min-w-0 flex-1 truncate text-terminal-fg-strong"
             >
               {label}
             </span>
             <span
               data-testid="comms-frame-group-count"
-              className="shrink-0 text-fg-subtle"
+              className="shrink-0 text-terminal-fg/60"
             >
               ×{frames.length}
             </span>
           </span>
           {/* Always two lines — first frame's stamp above the last one's — so
               the span of the burst reads vertically regardless of pane width. */}
-          <span className="flex flex-col items-end text-fg-subtle">
+          <span className="flex flex-col items-end text-terminal-fg/60">
             <span className="flex items-baseline gap-2">
               <span>{first.kind}</span>
               <span className="whitespace-nowrap">{firstTime}</span>
@@ -410,7 +419,7 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
             <span className="whitespace-nowrap">{lastTime}</span>
           </span>
         </summary>
-        <ol className="min-w-0 border-t border-border-default pl-4">
+        <ol className="min-w-0 border-t border-terminal-overlay pl-4">
           {frames.map((frame) => (
             <CommsFrameRow key={frame.seq} frame={frame} />
           ))}
