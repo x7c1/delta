@@ -400,9 +400,13 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
               ×{frames.length}
             </span>
           </span>
-          <span className="flex flex-wrap items-baseline justify-end gap-x-2 text-fg-subtle">
-            <span>{first.kind}</span>
-            <span className="whitespace-nowrap">{firstTime}</span>
+          {/* Always two lines — first frame's stamp above the last one's — so
+              the span of the burst reads vertically regardless of pane width. */}
+          <span className="flex flex-col items-end text-fg-subtle">
+            <span className="flex items-baseline gap-2">
+              <span>{first.kind}</span>
+              <span className="whitespace-nowrap">{firstTime}</span>
+            </span>
             <span className="whitespace-nowrap">{lastTime}</span>
           </span>
         </summary>
