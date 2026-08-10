@@ -4,6 +4,7 @@ use axum::routing::{get, post};
 use axum::Router;
 
 use crate::api;
+use crate::comms;
 use crate::hooks;
 use crate::pty;
 use crate::state::AppState;
@@ -125,6 +126,11 @@ pub fn router(state: AppState) -> Router {
         .route("/ws", get(ws::ws_handler))
         // Terminal bridge to the tmux pane.
         .route("/pty", get(pty::pty_handler))
+        // Comms-log stream: the JSON-RPC frames Delta exchanges with a headless
+        // provider, per session. The window a terminal-less session has instead
+        // of `/pty`; deliberately its own route so neither the conversation
+        // stream nor the terminal bridge is touched (see `crate::comms`).
+        .route("/comms", get(comms::comms_handler))
         .with_state(state)
 }
 
@@ -181,6 +187,25 @@ mod tests {
             version.starts_with(&format!("v{}", env!("CARGO_PKG_VERSION"))),
             "expected the response to start with v<CARGO_PKG_VERSION>, got {version}",
         );
+    }
+
+    /// The comms-log route exists and requires a session to watch: a request
+    /// without `session_id` is rejected by the query extractor before any stream
+    /// is opened, so a client bug cannot leave a socket tailing nothing. (The
+    /// stream's own replay-then-tail behaviour is asserted over the real stack in
+    /// the Codex full-loop suite, and at the hub level in `crate::comms_log`.)
+    #[tokio::test]
+    async fn comms_requires_a_session_id() {
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .uri("/comms")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -337,7 +362,7 @@ mod tests {
             port: 7878,
             launch: delta_usecase::LaunchConfig::default(),
         };
-        let interactor = delta_bootstrap::build(&config)
+        let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())
             .await
             .unwrap()
             .with_gh_cli(Arc::new(UnavailableGh) as Arc<dyn delta_usecase::GhCli>);
@@ -441,7 +466,7 @@ mod tests {
             port: 7878,
             launch: delta_usecase::LaunchConfig::default(),
         };
-        let interactor = delta_bootstrap::build(&config)
+        let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())
             .await
             .unwrap()
             .with_codex_bin("codex")

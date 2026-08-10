@@ -20,6 +20,12 @@ export {
   type PtyConnection,
   type PtyConnectionOptions,
 } from './pty';
+export {
+  connectCommsLog,
+  parseCommsFrame,
+  type CommsLogConnection,
+  type CommsLogOptions,
+} from './comms';
 export { queryKeys } from './query-keys';
 export {
   useSessionsQuery,

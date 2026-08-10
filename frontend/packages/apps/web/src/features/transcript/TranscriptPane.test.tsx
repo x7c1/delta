@@ -1752,7 +1752,7 @@ describe('TranscriptPane', () => {
         expect(rightCluster.className).toContain('z-20');
         // The right cluster carries NO shared surface-bar background or
         // border on purpose: each pill inside already has its own card
-        // chrome (TIMELINE_TOGGLE_BUTTON_CLASS / TERMINAL_TOGGLE_BUTTON_CLASS).
+        // chrome (TIMELINE_TOGGLE_BUTTON_CLASS / PANE_TOGGLE_BUTTON_CLASS).
         // A regression that re-introduced the v17 single-bar look would
         // put `bg-surface` back on this cluster wrapper.
         // Negative lookahead excludes `bg-surface-elevated` (a different
@@ -1788,7 +1788,7 @@ describe('TranscriptPane', () => {
 
       it('places the Terminal button inside the right-side cluster alongside the timeline toggle when collapsed', async () => {
         // The Terminal button is forwarded into TranscriptPane as the
-        // `terminalButton` slot (see WorkspaceScreen). It must render
+        // `paneToggleButton` slot (see WorkspaceScreen). It must render
         // INSIDE the floating right-side cluster so it stays on screen
         // alongside the timeline toggle; if it were a sibling outside
         // the cluster, it would scroll away with the conversation.
@@ -1803,7 +1803,7 @@ describe('TranscriptPane', () => {
                 threads={mockThreads}
                 activeThread={mockThreads.find((t) => t.id === MAIN_THREAD_ID)!}
                 readOnly={false}
-                terminalButton={
+                paneToggleButton={
                   <button data-testid="terminal-toggle">Terminal</button>
                 }
               />
@@ -1852,7 +1852,7 @@ describe('TranscriptPane', () => {
                 threads={mockThreads}
                 activeThread={mockThreads.find((t) => t.id === BRANCH_THREAD_ID)!}
                 readOnly={false}
-                terminalButton={
+                paneToggleButton={
                   <button data-testid="terminal-toggle">Terminal</button>
                 }
               />
@@ -1994,7 +1994,7 @@ describe('TranscriptPane', () => {
                 threads={mockThreads}
                 activeThread={mockThreads.find((t) => t.id === BRANCH_THREAD_ID)!}
                 readOnly={false}
-                terminalButton={
+                paneToggleButton={
                   <button data-testid="terminal-toggle">Terminal</button>
                 }
               />

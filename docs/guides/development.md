@@ -392,9 +392,9 @@ Start the server (see Backend), then:
 pnpm --filter @delta/web dev
 ```
 
-Vite proxies `/api`, `/ws`, and `/pty` to `127.0.0.1:7878` by default; if the
-server runs elsewhere, start the dev server with the same `DELTA_PORT` and the
-proxy follows it.
+Vite proxies `/api`, `/ws`, `/pty`, and `/comms` to `127.0.0.1:7878` by default;
+if the server runs elsewhere, start the dev server with the same `DELTA_PORT`
+and the proxy follows it.
 
 ### Notes
 

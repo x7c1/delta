@@ -26,6 +26,9 @@ agent-contract = { workspace = true }
 # resolution), so wiring the real ones is lighter than reimplementing every port
 # as a stub.
 delta-server = { workspace = true }
+# The comms-log loop asserts on the `/comms` stream's frame shape, which the wire
+# crate owns.
+delta-wire = { workspace = true }
 delta-sqlite = { workspace = true }
 delta-transcript = { workspace = true }
 tmux-driver = { workspace = true }

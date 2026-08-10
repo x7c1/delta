@@ -7,6 +7,10 @@
 
 export type { SessionEvent } from './generated/SessionEvent';
 export { EVENT_KINDS, type SessionEventKind } from './generated/event-kinds';
+
+export type { CommsFrame } from './generated/CommsFrame';
+export type { CommsDirection } from './generated/CommsDirection';
+export type { CommsFrameKind } from './generated/CommsFrameKind';
 export type { StatusSnapshot } from './generated/StatusSnapshot';
 export type { RateLimitWindow } from './generated/RateLimitWindow';
 

@@ -139,14 +139,19 @@ export interface TranscriptPaneProps {
    */
   workdirMandatory?: boolean;
   /**
-   * The "Terminal" reopen button, rendered at the right end of the top region
+   * The right pane's reopen button, rendered at the right end of the top region
    * (next to the collapsed timeline toggle) so the two controls share one row
    * and the timeline card can grow downward without overlapping anything else.
-   * Optional: `null` (or absent) hides the slot entirely — used while the
-   * terminal pane is already open, or in tests that do not exercise the
-   * terminal at all.
+   *
+   * Which button it is depends on the focused session's provider capabilities —
+   * "Terminal" for a provider with an attachable PTY, "Comms" for a headless one
+   * whose window is its frame log — and that choice is the workspace's to make
+   * (see `WorkspaceScreen`); this pane only hosts the slot, which is why it is a
+   * plain node rather than a flag. Optional: `null` (or absent) hides the slot
+   * entirely — used while the right pane is already open, or in tests that do
+   * not exercise it at all.
    */
-  terminalButton?: ReactNode;
+  paneToggleButton?: ReactNode;
 }
 
 /**
@@ -164,7 +169,7 @@ export function TranscriptPane({
   readOnly,
   newSession = false,
   workdirMandatory = false,
-  terminalButton = null,
+  paneToggleButton = null,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -420,7 +425,7 @@ export function TranscriptPane({
 
   // In the COLLAPSED state the top row is rendered as two independent
   // absolute floating cards — the breadcrumb at top-left and the
-  // {Thread + Terminal} cluster at top-right — so the conversation shows
+  // {Thread + pane toggle} cluster at top-right — so the conversation shows
   // through the gap between them rather than being hidden under a full-
   // width white bar. Each card pins itself with `top`/`left` (or
   // `top`/`right`) at the shared `overlay-inset` so they read as one row
@@ -437,7 +442,7 @@ export function TranscriptPane({
   // exposed as the `--delta-top-region-reserve` CSS variable.
   //
   // In the EXPANDED state the entire top region — the expanded timeline
-  // card AND the row carrying the breadcrumb + Terminal underneath it —
+  // card AND the row carrying the breadcrumb + pane toggle underneath it —
   // sits inside a SINGLE absolute container pinned to the top of the
   // Panel's body region (`absolute top-0 left-0 right-0 z-20`). The
   // container does NOT scroll with the conversation: it anchors to the
@@ -447,7 +452,7 @@ export function TranscriptPane({
   // timeline scrolled the conversation, dragging the timeline itself
   // off-screen so the user could not scrub again after the first jump.
   // Inside the container the children use normal flow (the timeline
-  // card on top, the breadcrumb + Terminal row underneath); no child
+  // card on top, the breadcrumb + pane-toggle row underneath); no child
   // carries its own absolute positioning.
   //
   // Like the collapsed state, the expanded container does not occupy
@@ -468,13 +473,13 @@ export function TranscriptPane({
   // `timelineExpanded` flips the entire top-row layout — not just the
   // timeline card's own collapsed/expanded chrome:
   //   - collapsed: two independent absolute floating cards (breadcrumb
-  //     top-left, {Thread + Terminal} cluster top-right) over the
+  //     top-left, {Thread + pane toggle} cluster top-right) over the
   //     scrolling body, plus a measured `padding-top` reserve so the
   //     first message clears them.
   //   - expanded: a SINGLE absolute container pinned to the top of the
   //     Panel's body region (does not scroll with the conversation),
   //     holding the expanded timeline card on top and a single
-  //     normal-flow row of breadcrumb + Terminal underneath it. The
+  //     normal-flow row of breadcrumb + pane toggle underneath it. The
   //     body reserves a measured `padding-top` equal to the container's
   //     height so the first message clears it.
   // The state is shared with `ThreadTimelineOverlay` via a module-scoped
@@ -1205,7 +1210,7 @@ export function TranscriptPane({
   //     the visual row height those two cards form together.
   //   - expanded: observe the single `expandedContainerRef` (the
   //     absolute container pinned to the top of the Panel's body region,
-  //     holding the timeline card and the breadcrumb+Terminal under-row
+  //     holding the timeline card and the breadcrumb+pane-toggle under-row
   //     in normal flow) and write the container's total height.
   //
   // Re-running the effect on the `timelineExpanded` flip disconnects
@@ -1267,7 +1272,7 @@ export function TranscriptPane({
     newSession,
     activeThread?.id,
     isOnSubThread,
-    terminalButton,
+    paneToggleButton,
   ]);
 
   // The top region layout splits into two distinct shapes by
@@ -1275,15 +1280,15 @@ export function TranscriptPane({
   //
   //   1. COLLAPSED (default): two independent absolute floating cards
   //      sit at the top of the conversation panel —
-  //         [breadcrumb]                        [{Thread} {Terminal}]
-  //      The breadcrumb pins to top-left; the {Thread + Terminal}
+  //         [breadcrumb]                    [{Thread} {pane toggle}]
+  //      The breadcrumb pins to top-left; the {Thread + pane toggle}
   //      cluster pins to top-right. Both share the same `overlay-inset`
   //      top/side offsets so they read as one row even though they are
   //      two boxes, and the conversation shows through the gap between
   //      them — there is NO full-width white bar. Each piece keeps its
-  //      own card chrome (a breadcrumb card; the Thread/Terminal pills
-  //      already carry `bg-surface shadow-md` via
-  //      `TIMELINE_TOGGLE_BUTTON_CLASS` / `TERMINAL_TOGGLE_BUTTON_CLASS`)
+  //      own card chrome (a breadcrumb card; the Thread/pane-toggle
+  //      pills already carry `bg-surface shadow-md` via
+  //      `TIMELINE_TOGGLE_BUTTON_CLASS` / `PANE_TOGGLE_BUTTON_CLASS`)
   //      so the floating elements stay legible against any conversation
   //      content scrolling underneath. The body reserves
   //      `padding-top: var(--delta-top-region-reserve)` equal to the
@@ -1293,12 +1298,12 @@ export function TranscriptPane({
   //   2. EXPANDED: a SINGLE absolute container pinned to the top of
   //      the Panel's body region holds the entire top region —
   //         [expanded timeline card                                  ]
-  //         [breadcrumb] [flex-1 spacer]                  [{Terminal}]
+  //         [breadcrumb] [flex-1 spacer]               [{pane toggle}]
   //      The container is `absolute top-0 left-0 right-0 z-20`, so it
   //      anchors to the Panel's relative wrapper (outside the
   //      scrolling body) and STAYS PINNED across conversation scroll.
   //      Inside the container the children use normal flow — the
-  //      timeline card on top, the breadcrumb + Terminal row directly
+  //      timeline card on top, the breadcrumb + pane-toggle row directly
   //      underneath — no child carries its own absolute positioning.
   //      Pinning the container — not its children — is what fixes the
   //      v18 regression where the expanded timeline scrolled away with
@@ -1332,13 +1337,13 @@ export function TranscriptPane({
   );
   // The single floating right-side cluster (collapsed state only) —
   // pinned top-right via `top-overlay-inset` / `right-overlay-inset`,
-  // with the Thread toggle and Terminal pills side-by-side inside it.
+  // with the Thread toggle and the pane-toggle pill side-by-side inside it.
   // The cluster wrapper carries NO shared background or border on
   // purpose: each pill already has its own white card chrome via
-  // `TIMELINE_TOGGLE_BUTTON_CLASS` / `TERMINAL_TOGGLE_BUTTON_CLASS`, so
+  // `TIMELINE_TOGGLE_BUTTON_CLASS` / `PANE_TOGGLE_BUTTON_CLASS`, so
   // wrapping them in another white bar would re-introduce the v17
   // top-bar look the v18 design retracts.
-  const showRightCluster = showTimeline || terminalButton;
+  const showRightCluster = showTimeline || paneToggleButton;
   const collapsedRightCluster = showRightCluster && (
     <div
       ref={rightClusterOverlayRef}
@@ -1353,7 +1358,7 @@ export function TranscriptPane({
           conversationBodyRef={bodyRef}
         />
       )}
-      {terminalButton}
+      {paneToggleButton}
     </div>
   );
   // The top region itself. Two completely different shapes by
@@ -1366,7 +1371,7 @@ export function TranscriptPane({
   //   - expanded: a SINGLE absolute container pinned to the top of the
   //     Panel body region (`absolute top-0 left-0 right-0 z-20`)
   //     holding the expanded timeline card on top and a single
-  //     normal-flow row of breadcrumb + Terminal underneath it. The
+  //     normal-flow row of breadcrumb + pane toggle underneath it. The
   //     container itself takes no layout space inside the scrolling
   //     body — the body reserves matching `padding-top` from the
   //     ResizeObserver-driven `--delta-top-region-reserve`, mirroring
@@ -1396,7 +1401,7 @@ export function TranscriptPane({
             conversationBodyRef={bodyRef}
           />
         )}
-        {(showBreadcrumb || terminalButton) && (
+        {(showBreadcrumb || paneToggleButton) && (
           <div
             data-testid="transcript-top-row"
             data-expanded="true"
@@ -1410,7 +1415,7 @@ export function TranscriptPane({
               <span />
             )}
             <span className="flex-1" />
-            {terminalButton}
+            {paneToggleButton}
           </div>
         )}
       </div>
@@ -1445,7 +1450,7 @@ export function TranscriptPane({
       // under-reserves on first paint.
       //
       // In the COLLAPSED state the top row's two cards (breadcrumb,
-      // {Thread + Terminal} cluster) float as independent absolute
+      // {Thread + pane toggle} cluster) float as independent absolute
       // overlays over the body, so they carry no layout height — the
       // body must reserve an equivalent top gap, otherwise the first
       // message would render under them on initial paint. The reserve
@@ -1490,9 +1495,9 @@ export function TranscriptPane({
         newSession ? (
           <NewSessionTabBar />
         ) : // `undefined` (not `null`) so Panel drops the header bar entirely.
-        // The breadcrumb / timeline / Terminal-toggle are rendered in flow at
+        // The breadcrumb / timeline / pane-toggle are rendered in flow at
         // the top of the body via `topRegion`; on the main thread there is no
-        // breadcrumb but the timeline + Terminal still ride along.
+        // breadcrumb but the timeline + pane toggle still ride along.
         undefined
       }
       overlay={

@@ -33,7 +33,7 @@ use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
     AgentAdapterFactory, AgentCapabilities, AgentProvider, BinaryDetector, BoxedInteractor,
-    ExternalOpener, GhCli, Interactor,
+    CommsLogSink, ExternalOpener, GhCli, Interactor,
 };
 use external_opener::SystemOpener;
 use gh_cli::Gh;
@@ -140,6 +140,12 @@ impl Config {
 /// stateless [`Tmux`] driver mints a fresh tmux session per spawn, so no fixed
 /// session name is configured.
 ///
+/// `comms_log` receives the JSON-RPC frames every adapter-driven session
+/// exchanges with its provider, for the browser's comms-log inspector. Passed in
+/// (rather than created here) because the transport layer serves the same
+/// instance on `/comms`; a caller with no inspector passes
+/// [`delta_usecase::NullCommsLog`].
+///
 /// Boot-time send reconcile: every `dispatched` row surviving from the
 /// previous process is restored here — returned to `queued` with the
 /// `restored_at` marker set — before any session actor exists. A restored
@@ -150,7 +156,7 @@ impl Config {
 /// cancelled.
 ///
 /// [`SessionStore::restore_all_dispatched`]: delta_usecase::SessionStore::restore_all_dispatched
-pub async fn build(config: &Config) -> Result<AppInteractor> {
+pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<AppInteractor> {
     let store = SqliteStore::open(&config.database_path)?;
     let restored = delta_usecase::SessionStore::restore_all_dispatched(&store).await?;
     if restored > 0 {
@@ -176,8 +182,12 @@ pub async fn build(config: &Config) -> Result<AppInteractor> {
     // (what `/api/providers` reports), so the two can never diverge.
     let codex_launch = codex_launch_from_env();
     let codex_bin = codex_launch.codex_bin.clone();
+    // The comms log is injected here rather than resolved inside the adapter: it
+    // is an observability gateway the transport layer owns (it is also what
+    // serves `/comms`), and a provider whose wire is not inspectable simply never
+    // records into it — so no per-provider branch appears anywhere.
     let codex_adapter_factory: Arc<dyn AgentAdapterFactory> =
-        Arc::new(CodexAdapterFactory::new(codex_launch));
+        Arc::new(CodexAdapterFactory::new(codex_launch).with_comms_log(comms_log));
     // Real PATH probe for the provider-availability endpoint. Constructing it
     // touches no filesystem; the first probe per binary does, then memoises.
     let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
@@ -225,6 +235,8 @@ fn codex_launch_from_env() -> CodexLaunchConfig {
 mod tests {
     use super::*;
 
+    use delta_usecase::NullCommsLog;
+
     fn test_config() -> Config {
         Config {
             database_path: ":memory:".into(),
@@ -238,7 +250,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_wires_an_interactor_with_in_memory_store() {
-        assert!(build(&test_config()).await.is_ok());
+        assert!(build(&test_config(), NullCommsLog::arc()).await.is_ok());
     }
 
     /// The static accessor resolves each provider's terminal capability without
@@ -323,7 +335,7 @@ mod tests {
             database_path: path_str.clone(),
             ..test_config()
         };
-        build(&config).await.unwrap();
+        build(&config, NullCommsLog::arc()).await.unwrap();
 
         let store = SqliteStore::open(&path_str).unwrap();
         let stale = store.send(stale_id).await.unwrap().unwrap();

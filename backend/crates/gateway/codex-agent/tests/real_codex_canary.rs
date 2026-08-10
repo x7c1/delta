@@ -380,7 +380,7 @@ async fn real_thread_start_reports_the_metadata_delta_stamps_on_messages() {
     .expect("initialize handshake");
 
     let started = conn
-        .start_thread(Some(json!({ "cwd": cwd })))
+        .start_thread(None, Some(json!({ "cwd": cwd })))
         .await
         .expect("start a real thread");
     let result = &started.result;

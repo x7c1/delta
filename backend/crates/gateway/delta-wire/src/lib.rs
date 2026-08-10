@@ -7,6 +7,8 @@
 //! layer serializes.
 //!
 //! - [`WireSessionEvent`] is the `/ws` stream contract.
+//! - [`WireCommsFrame`] is the `/comms` stream contract: the per-session
+//!   observability log of the frames Delta exchanges with a headless provider.
 //! - The [`rest`] module owns the `/api/*` request and response shapes,
 //!   composed from the wire twins of the domain records ([`WireSession`],
 //!   [`WireThread`], [`WireMessage`], [`WireSend`], …).
@@ -17,6 +19,8 @@
 //! types into the frontend's `@delta/wire-gen` package, so the browser types
 //! can never drift from the Rust contract.
 
+mod comms_frame;
+pub use comms_frame::{WireCommsDirection, WireCommsFrame, WireCommsFrameKind};
 mod content_block;
 pub use content_block::WireContentBlock;
 pub mod hooks;

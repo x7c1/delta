@@ -5,6 +5,8 @@
 //!
 //! - `SessionEvent.ts` — the `/ws` discriminated union, exported by ts-rs from
 //!   [`WireSessionEvent`].
+//! - `CommsFrame.ts` — the `/comms` observability stream's frame, exported by
+//!   ts-rs from [`WireCommsFrame`].
 //! - `event-kinds.ts` — the `EVENT_KINDS` const listing every `kind`
 //!   discriminant, derived from the same enum.
 //! - One file per REST request/response shape (and each wire twin they are
@@ -26,7 +28,7 @@ use delta_wire::rest::{
     WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
     WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
-use delta_wire::{event_kinds, export_config, WireSessionEvent};
+use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
 
 /// Where the generated files live, relative to this crate's manifest.
@@ -40,6 +42,9 @@ fn main() {
     let config = export_config().with_out_dir(out_dir);
 
     WireSessionEvent::export_all(&config).expect("export SessionEvent.ts");
+
+    // The `/comms` stream: one frame shape, pulling in its direction/kind enums.
+    WireCommsFrame::export_all(&config).expect("export CommsFrame.ts");
 
     // The REST surface: exporting each endpoint's top-level request/response
     // shape pulls in every wire twin it is composed of (Session, Thread,

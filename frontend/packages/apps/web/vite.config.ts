@@ -17,6 +17,7 @@ export default defineConfig({
       '/api': `http://127.0.0.1:${backendPort}`,
       '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
       '/pty': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
+      '/comms': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
     },
   },
   test: {

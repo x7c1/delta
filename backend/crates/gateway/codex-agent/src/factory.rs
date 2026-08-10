@@ -13,16 +13,30 @@ use async_trait::async_trait;
 use serde_json::json;
 
 use delta_usecase::{
-    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentProvider, Error as UsecaseError,
-    Result as UsecaseResult,
+    AgentAdapter, AgentAdapterFactory, AgentCapabilities, AgentProvider, CommsLogSink,
+    Error as UsecaseError, NullCommsLog, Result as UsecaseResult,
 };
 
 use crate::{AppServerConnection, CodexAppServerAdapter, CodexLaunchConfig, CODEX_CAPABILITIES};
 
 /// Builds the Codex [`AgentAdapter`] on demand from a held launch config.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CodexAdapterFactory {
     config: CodexLaunchConfig,
+    /// Where every connection this factory builds mirrors its frames for the
+    /// comms-log inspector. [`NullCommsLog`] unless the composition root
+    /// attached one.
+    comms_log: Arc<dyn CommsLogSink>,
+}
+
+impl std::fmt::Debug for CodexAdapterFactory {
+    /// Hand-written because a `dyn` sink is not `Debug`; the launch config is the
+    /// only state worth showing anyway.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CodexAdapterFactory")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
 }
 
 impl CodexAdapterFactory {
@@ -30,7 +44,17 @@ impl CodexAdapterFactory {
     ///
     /// Purely stores `config`; nothing is spawned here.
     pub fn new(config: CodexLaunchConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            comms_log: NullCommsLog::arc(),
+        }
+    }
+
+    /// Mirror the frames of every connection this factory builds into `sink`, so
+    /// the browser's comms-log inspector can tail them.
+    pub fn with_comms_log(mut self, sink: Arc<dyn CommsLogSink>) -> Self {
+        self.comms_log = sink;
+        self
     }
 }
 
@@ -47,7 +71,11 @@ impl AgentAdapterFactory for CodexAdapterFactory {
     }
 
     async fn connect(&self) -> UsecaseResult<Arc<dyn AgentAdapter>> {
-        let conn = Arc::new(AppServerConnection::spawn(&self.config).map_err(to_usecase_err)?);
+        let conn = Arc::new(
+            AppServerConnection::spawn(&self.config)
+                .map_err(to_usecase_err)?
+                .with_comms_log(Arc::clone(&self.comms_log)),
+        );
         // `ClientInfo` requires BOTH `name` and `version` (see the vendored
         // schema); the real `codex app-server` rejects an `initialize` missing
         // `version` with `[-32600] Invalid request: missing field 'version'`.

@@ -140,10 +140,11 @@ const MIN_LANE_AXIS_PX = 240;
 const LANE_RIGHT_PAD_PX = 16;
 /**
  * Tailwind class string for the collapsed-state toggle button. Mirrors the
- * Terminal button's shape exactly so the two buttons sit side-by-side in the
- * top region without one reading as a different control type. The Terminal
- * button lives in `WorkspaceScreen` and uses the same class chain — kept in
- * sync via `TERMINAL_TOGGLE_BUTTON_CLASS` over there.
+ * pane-toggle button's shape exactly so the two buttons sit side-by-side in the
+ * top region without one reading as a different control type. The pane-toggle
+ * button (Terminal or Comms, depending on the focused provider) lives in
+ * `WorkspaceScreen` and uses the same class chain — kept in sync via
+ * `PANE_TOGGLE_BUTTON_CLASS` over there.
  */
 export const TIMELINE_TOGGLE_BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-border-default bg-surface px-3 py-1.5 text-caption font-medium text-fg shadow-md transition-colors hover:bg-surface-elevated';
@@ -1497,15 +1498,15 @@ export function ThreadTimelineOverlay({
   ]);
 
   // The collapsed state is just a single button styled to match the
-  // Terminal toggle that sits alongside it in the top region (see
+  // pane-toggle button that sits alongside it in the top region (see
   // {@link TIMELINE_TOGGLE_BUTTON_CLASS}). The expanded state grows
   // downward into a card whose chrome (border / shadow / background)
   // matches the breadcrumb and composer cards (the shared
   // {@link FLOATING_CARD_CLASS} family in `TranscriptPane`). Keeping the
-  // collapsed toggle visually identical to Terminal — and the expanded
-  // card visually identical to the other delta UI cards — is what makes
-  // the timeline land in the top region without reading as a third style
-  // of chrome.
+  // collapsed toggle visually identical to the pane-toggle button — and
+  // the expanded card visually identical to the other delta UI cards —
+  // is what makes the timeline land in the top region without reading
+  // as a third style of chrome.
   if (!expanded) {
     return (
       <button
