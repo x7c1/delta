@@ -88,6 +88,15 @@ test('a Codex session opens a comms pane listing its frames in order', async ({
   expect(methods[0]).toBe('thread/start');
   expect(methods).toContain('turn/completed');
 
+  // The scripted streaming burst folds into one group row — the flood-control
+  // that keeps requests and approvals visible during a long answer.
+  const group = page.getByTestId('comms-frame-group');
+  await expect(group).toBeVisible();
+  await expect(group.getByTestId('comms-frame-group-count')).toHaveText('×4');
+  await group.locator('summary').first().click();
+  await expect(group.getByTestId('comms-frame').first()).toBeVisible();
+  await group.locator('summary').first().click();
+
   // The payload is one click away: expanding a frame reveals its JSON.
   const firstFrame = frames.first();
   await expect(firstFrame.locator('pre')).toBeHidden();

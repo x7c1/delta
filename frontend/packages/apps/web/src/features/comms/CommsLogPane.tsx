@@ -62,6 +62,11 @@ export interface CommsLogPaneProps {
  * The view follows the newest frame while the reader is at the end of the log,
  * and stops following the moment they scroll up — so a turn in flight stays in
  * view without stealing the frame someone is studying.
+ *
+ * Streaming bursts are folded: a run of [`GROUP_MIN`]+ consecutive frames with
+ * the same direction, kind and method renders as one expandable group row, so
+ * a turn's hundreds of `item/agentMessage/delta` notifications cannot bury the
+ * requests and approvals around them.
  */
 export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
   const [frames, setFrames] = useState<CommsFrame[]>([]);
@@ -162,6 +167,8 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
     }
   }, [frames.length]);
 
+  const rows = useMemo(() => buildCommsRows(frames), [frames]);
+
   const note = useMemo(() => {
     if (isMockMode()) {
       return frames.length === 0
@@ -210,13 +217,65 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
           </p>
         )}
         <ol className="min-w-0">
-          {frames.map((frame) => (
-            <CommsFrameRow key={frame.seq} frame={frame} />
-          ))}
+          {rows.map((row) =>
+            row.type === 'frame' ? (
+              <CommsFrameRow key={row.frame.seq} frame={row.frame} />
+            ) : (
+              <CommsFrameGroupRow key={row.frames[0].seq} frames={row.frames} />
+            ),
+          )}
         </ol>
       </div>
     </Panel>
   );
+}
+
+/**
+ * How many identical consecutive frames it takes to fold them into one group
+ * row. Three keeps genuine pairs (a request and its retry, say) visible as
+ * individual rows while still catching every streaming burst, which runs to
+ * dozens or hundreds.
+ */
+const GROUP_MIN = 3;
+
+/** One rendered row: a single frame, or a folded run of identical ones. */
+type CommsRow =
+  | { type: 'frame'; frame: CommsFrame }
+  | { type: 'group'; frames: CommsFrame[] };
+
+/**
+ * Fold runs of [`GROUP_MIN`]+ consecutive frames sharing direction, kind and
+ * method into group rows. Deliberately generic — no method allowlist — so any
+ * chatty stream (`item/agentMessage/delta` today, whatever tomorrow's provider
+ * emits) folds without this file learning its name.
+ */
+export function buildCommsRows(frames: CommsFrame[]): CommsRow[] {
+  const rows: CommsRow[] = [];
+  let run: CommsFrame[] = [];
+  const flush = () => {
+    if (run.length >= GROUP_MIN) {
+      rows.push({ type: 'group', frames: run });
+    } else {
+      for (const frame of run) {
+        rows.push({ type: 'frame', frame });
+      }
+    }
+    run = [];
+  };
+  for (const frame of frames) {
+    const head = run[0];
+    if (
+      head !== undefined &&
+      (frame.direction !== head.direction ||
+        frame.kind !== head.kind ||
+        frame.method !== head.method)
+    ) {
+      flush();
+    }
+    run.push(frame);
+  }
+  flush();
+  return rows;
 }
 
 /**
@@ -292,6 +351,80 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
         <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-surface-elevated px-2 py-1 font-mono text-caption text-fg-muted">
           {pretty}
         </pre>
+      </details>
+    </li>
+  );
+}
+
+/**
+ * A folded run of identical consecutive frames — one row carrying the shared
+ * method, the run length and the time span, expandable to the individual
+ * frames (each still expandable to its payload).
+ *
+ * Collapsed by default for the same reason frames are: the log's value is the
+ * sequence, and a streaming burst is one event in that sequence, not dozens.
+ */
+function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
+  const first = frames[0];
+  const last = frames[frames.length - 1];
+  const firstTime = useMemo(() => formatFrameTime(first.at_ms), [first.at_ms]);
+  const lastTime = useMemo(() => formatFrameTime(last.at_ms), [last.at_ms]);
+  const label = first.method ?? `(${first.kind})`;
+  const toAgent = first.direction === 'to_agent';
+
+  return (
+    <li
+      data-testid="comms-frame-group"
+      data-direction={first.direction}
+      data-kind={first.kind}
+      className="border-b border-border-default last:border-b-0"
+    >
+      <details className="group">
+        <summary className="cursor-pointer list-none px-2 py-1 font-mono text-caption hover:bg-surface-elevated [&::-webkit-details-marker]:hidden">
+          <span className="flex items-baseline gap-2">
+            <span
+              aria-hidden="true"
+              className="inline-block shrink-0 text-fg-subtle transition-transform group-open:rotate-90"
+            >
+              {'▸'}
+            </span>
+            <span
+              aria-hidden="true"
+              className={
+                toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'
+              }
+            >
+              {toAgent ? '→' : '←'}
+            </span>
+            {/* The direction in words, for anyone who cannot rely on the glyph. */}
+            <span className="sr-only">
+              {toAgent ? 'sent to agent' : 'received from agent'}
+            </span>
+            <span
+              data-testid="comms-frame-method"
+              className="min-w-0 flex-1 truncate text-fg"
+            >
+              {label}
+            </span>
+            <span
+              data-testid="comms-frame-group-count"
+              className="shrink-0 text-fg-subtle"
+            >
+              ×{frames.length}
+            </span>
+          </span>
+          <span className="flex items-baseline justify-end gap-2 text-fg-subtle">
+            <span>{first.kind}</span>
+            <span>
+              {firstTime} … {lastTime}
+            </span>
+          </span>
+        </summary>
+        <ol className="min-w-0 border-t border-border-default pl-4">
+          {frames.map((frame) => (
+            <CommsFrameRow key={frame.seq} frame={frame} />
+          ))}
+        </ol>
       </details>
     </li>
   );

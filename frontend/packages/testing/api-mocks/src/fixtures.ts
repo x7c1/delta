@@ -1040,6 +1040,11 @@ export function mockCommsFrames(): CommsFrame[] {
     ['to_agent', 'request', 'turn/start', { id: 2, method: 'turn/start', params: { threadId: 'thr_mock_0001', input: [{ type: 'text', text: 'add a test' }] } }],
     ['from_agent', 'response', 'turn/start', { id: 2, result: { turn: { id: 'turn_mock_0001' } } }],
     ['from_agent', 'notification', 'turn/started', { method: 'turn/started', params: { threadId: 'thr_mock_0001', turnId: 'turn_mock_0001' } }],
+    // A streaming burst — long enough for the pane to fold it into a group row.
+    ['from_agent', 'notification', 'item/agentMessage/delta', { method: 'item/agentMessage/delta', params: { threadId: 'thr_mock_0001', itemId: 'm1', delta: 'Adding' } }],
+    ['from_agent', 'notification', 'item/agentMessage/delta', { method: 'item/agentMessage/delta', params: { threadId: 'thr_mock_0001', itemId: 'm1', delta: ' the' } }],
+    ['from_agent', 'notification', 'item/agentMessage/delta', { method: 'item/agentMessage/delta', params: { threadId: 'thr_mock_0001', itemId: 'm1', delta: ' test' } }],
+    ['from_agent', 'notification', 'item/agentMessage/delta', { method: 'item/agentMessage/delta', params: { threadId: 'thr_mock_0001', itemId: 'm1', delta: ' now.' } }],
     ['from_agent', 'request', 'item/commandExecution/requestApproval', { id: 'srv-1', method: 'item/commandExecution/requestApproval', params: { threadId: 'thr_mock_0001', itemId: 'exec_1', command: 'cargo test' } }],
     ['to_agent', 'response', null, { id: 'srv-1', result: { decision: 'accept' } }],
     ['from_agent', 'notification', 'item/completed', { method: 'item/completed', params: { threadId: 'thr_mock_0001', item: { id: 'm1', type: 'agentMessage', text: 'Added the test.' } } }],

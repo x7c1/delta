@@ -5,6 +5,7 @@ import type { CommsFrame } from '@delta/wire-gen';
 import type { SessionId } from '@delta/model';
 import { useNavStore } from '../../store/navStore';
 import {
+  buildCommsRows,
   CommsLogPane,
   formatFrameTime,
   prettyPayload,
@@ -144,6 +145,50 @@ describe('CommsLogPane', () => {
     );
   });
 
+  it('folds a streaming burst into one expandable group row', () => {
+    render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
+    deliver(
+      frame({ seq: 0, method: 'turn/start' }),
+      ...[1, 2, 3, 4].map((seq) =>
+        frame({
+          seq,
+          at_ms: Date.UTC(2026, 0, 1, 9, 30, 0) + seq * 10,
+          direction: 'from_agent' as const,
+          kind: 'notification' as const,
+          method: 'item/agentMessage/delta',
+        }),
+      ),
+      frame({
+        seq: 5,
+        direction: 'from_agent',
+        kind: 'notification',
+        method: 'turn/completed',
+      }),
+    );
+
+    // The burst is one row, labelled with the shared method and the run length,
+    // so it cannot bury the frames around it.
+    const group = screen.getByTestId('comms-frame-group');
+    expect(
+      group.querySelector('[data-testid="comms-frame-method"]')?.textContent,
+    ).toBe('item/agentMessage/delta');
+    expect(
+      group.querySelector('[data-testid="comms-frame-group-count"]')
+        ?.textContent,
+    ).toBe('×4');
+
+    // The individual frames are still there behind the fold, each with its own
+    // payload disclosure.
+    expect(group.querySelectorAll('[data-testid="comms-frame"]')).toHaveLength(
+      4,
+    );
+    // And the neighbours stay individual rows at the top level.
+    const topLevelMethods = Array.from(
+      screen.getAllByTestId('comms-frame'),
+    ).filter((row) => !group.contains(row));
+    expect(topLevelMethods).toHaveLength(2);
+  });
+
   it('shows a waiting state once connected with no frames yet', () => {
     render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
     act(() => connected?.onStatus?.('open'));
@@ -264,6 +309,44 @@ describe('CommsLogPane', () => {
     render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
     screen.getByLabelText('Close communication log').click();
     expect(useNavStore.getState().commsOpen).toBe(false);
+  });
+});
+
+describe('buildCommsRows', () => {
+  const burst = (count: number, overrides: Partial<CommsFrame> = {}) =>
+    Array.from({ length: count }, (_, index) =>
+      frame({
+        seq: index,
+        direction: 'from_agent',
+        kind: 'notification',
+        method: 'item/agentMessage/delta',
+        ...overrides,
+      }),
+    );
+
+  it('folds a run of three or more identical frames into a group', () => {
+    const rows = buildCommsRows(burst(3));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].type).toBe('group');
+  });
+
+  it('keeps runs shorter than three as individual rows', () => {
+    const rows = buildCommsRows(burst(2));
+    expect(rows.map((row) => row.type)).toEqual(['frame', 'frame']);
+  });
+
+  it('breaks a run when direction, kind or method changes', () => {
+    const rows = buildCommsRows([
+      ...burst(3),
+      frame({
+        seq: 10,
+        direction: 'from_agent',
+        kind: 'notification',
+        method: 'turn/completed',
+      }),
+      ...burst(3),
+    ]);
+    expect(rows.map((row) => row.type)).toEqual(['group', 'frame', 'group']);
   });
 });
 
