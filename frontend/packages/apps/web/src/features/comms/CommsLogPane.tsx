@@ -220,11 +220,16 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
 }
 
 /**
- * A frame's one-line summary plus its payload behind a disclosure.
+ * A frame's two-line summary plus its payload behind a disclosure.
  *
  * Collapsed by default: the value of the log is the *sequence* — which methods
  * flew, in what order, which way — and a wall of expanded JSON destroys it. The
  * payload is one click away for the frame that turns out to matter.
+ *
+ * Two lines because the method is the row's payload and deserves the full
+ * width: the direction arrow and method sit on the first line, the kind and
+ * timestamp tuck under them right-aligned, so a narrow pane truncates long
+ * method names last instead of first.
  */
 function CommsFrameRow({ frame }: { frame: CommsFrame }) {
   const pretty = useMemo(
@@ -247,25 +252,31 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
       className="border-b border-border-default last:border-b-0"
     >
       <details className="group">
-        <summary className="flex cursor-pointer items-baseline gap-2 px-2 py-1 font-mono text-caption hover:bg-surface-elevated">
-          <span
-            aria-hidden="true"
-            className={toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'}
-          >
-            {toAgent ? '→' : '←'}
+        <summary className="cursor-pointer px-2 py-1 font-mono text-caption hover:bg-surface-elevated">
+          <span className="flex items-baseline gap-2">
+            <span
+              aria-hidden="true"
+              className={
+                toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'
+              }
+            >
+              {toAgent ? '→' : '←'}
+            </span>
+            {/* The direction in words, for anyone who cannot rely on the glyph. */}
+            <span className="sr-only">
+              {toAgent ? 'sent to agent' : 'received from agent'}
+            </span>
+            <span
+              data-testid="comms-frame-method"
+              className="min-w-0 flex-1 truncate text-fg"
+            >
+              {label}
+            </span>
           </span>
-          {/* The direction in words, for anyone who cannot rely on the glyph. */}
-          <span className="sr-only">
-            {toAgent ? 'sent to agent' : 'received from agent'}
+          <span className="flex items-baseline justify-end gap-2 text-fg-subtle">
+            <span>{frame.kind}</span>
+            <span>{time}</span>
           </span>
-          <span
-            data-testid="comms-frame-method"
-            className="min-w-0 flex-1 truncate text-fg"
-          >
-            {label}
-          </span>
-          <span className="shrink-0 text-fg-subtle">{frame.kind}</span>
-          <span className="shrink-0 text-fg-subtle">{time}</span>
         </summary>
         <pre className="overflow-x-auto whitespace-pre-wrap break-all bg-surface-elevated px-2 py-1 font-mono text-caption text-fg-muted">
           {pretty}
@@ -290,8 +301,10 @@ export function prettyPayload(payloadJson: string): string {
 
 /**
  * A frame's wall-clock time, to the millisecond — the resolution that makes two
- * frames in the same turn tellable apart. Locale-formatted, since the reader is
- * comparing it against their own clock and their own logs.
+ * frames in the same turn tellable apart. Fixed 24-hour form (`14:47:51.246`):
+ * a 12-hour locale rendering would wedge its AM/PM marker between the seconds
+ * and the appended milliseconds (`11:47:51 AM.246`), and a log column wants a
+ * fixed width anyway.
  */
 export function formatFrameTime(atMs: number): string {
   const date = new Date(atMs);
@@ -299,6 +312,7 @@ export function formatFrameTime(atMs: number): string {
     return '';
   }
   const time = date.toLocaleTimeString([], {
+    hourCycle: 'h23',
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',

@@ -285,6 +285,11 @@ describe('formatFrameTime', () => {
     expect(formatFrameTime(at)).toMatch(/\.045$/);
   });
 
+  it('uses a fixed 24-hour clock — a 12-hour locale would wedge AM/PM between the seconds and the milliseconds', () => {
+    const afternoon = new Date(2026, 0, 1, 14, 47, 51, 246).getTime();
+    expect(formatFrameTime(afternoon)).toBe('14:47:51.246');
+  });
+
   it('renders an unusable timestamp as empty rather than "Invalid Date"', () => {
     expect(formatFrameTime(Number.NaN)).toBe('');
   });
