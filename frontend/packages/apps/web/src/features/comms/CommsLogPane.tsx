@@ -326,6 +326,7 @@ function CommsFrameRow({ frame }: { frame: CommsFrame }) {
             </span>
             <span
               aria-hidden="true"
+              title={toAgent ? 'Delta → agent' : 'agent → Delta'}
               className={
                 toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'
               }
@@ -390,6 +391,7 @@ function CommsFrameGroupRow({ frames }: { frames: CommsFrame[] }) {
             </span>
             <span
               aria-hidden="true"
+              title={toAgent ? 'Delta → agent' : 'agent → Delta'}
               className={
                 toAgent ? 'shrink-0 text-accent' : 'shrink-0 text-fg-subtle'
               }
