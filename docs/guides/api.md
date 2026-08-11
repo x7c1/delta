@@ -2,8 +2,12 @@
 
 ## Overview
 
-The Delta server is a local process that wraps one or more Claude Code sessions
-and exposes them to a browser UI. It serves three kinds of traffic:
+The Delta server is a local process that wraps one or more AI agent sessions
+and exposes them to a browser UI. Each provider is driven through its own
+adapter: Claude Code runs in a tmux pane (driven via `send-keys`, observed
+through JSONL transcripts and HTTP hooks), while Codex runs as a
+`codex app-server` subprocess spoken to over JSON-RPC. The server serves three
+kinds of traffic:
 
 - **Browser REST surface** (`/api/*`) — request/response queries and commands
   the browser issues to hydrate state and enqueue sends. Sessions are listed,
