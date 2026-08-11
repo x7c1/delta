@@ -49,9 +49,16 @@
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
 //! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
 //! | `notification { method, params? }` | Emit an arbitrary notification (escape hatch for shapes not covered above). |
+//! | `account_notification { method, params? }` | Emit an **account-scoped** notification: the params are written verbatim, WITHOUT a `threadId`, exactly as the real server emits `account/rateLimits/updated`. |
 //!
 //! Every emitted notification (and the approval request) gets `threadId` stamped
-//! into its `params` so the client transport can demux it to the right thread.
+//! into its `params` so the client transport can demux it to the right thread —
+//! *except* `account_notification`, and that exception is the point. A real
+//! `codex app-server` emits account-scoped frames (the rate-limit rolling update)
+//! with no thread at all, so they take the client's connection-level unrouted
+//! path rather than its per-thread demux. A fake that stamped a `threadId` onto
+//! them would exercise the routed path instead, and a test written against it
+//! would pass while the real path was broken.
 //!
 //! A separate `turn/interrupt` request (whenever it arrives) must carry
 //! `{threadId, turnId}` (the fake rejects it with a JSON-RPC error if the
@@ -114,6 +121,14 @@ pub enum Emit {
         blocking: bool,
     },
     Notification {
+        method: String,
+        #[serde(default)]
+        params: Value,
+    },
+    /// An account-scoped notification, emitted with its params **verbatim** —
+    /// no `threadId` is stamped in. See the module docs for why the distinction
+    /// from [`Emit::Notification`] is load-bearing.
+    AccountNotification {
         method: String,
         #[serde(default)]
         params: Value,
@@ -269,6 +284,7 @@ mod tests {
                         { "type": "request_approval", "method": "item/fileChange/requestApproval", "params": { "itemId": "fc_1" } },
                         { "type": "request_approval" },
                         { "type": "notification", "method": "server/note", "params": { "n": 2 } },
+                        { "type": "account_notification", "method": "account/rateLimits/updated", "params": { "rateLimits": { "primary": { "usedPercent": 7 } } } },
                         { "type": "turn_completed", "status": "completed" }
                     ]
                 }
@@ -278,7 +294,7 @@ mod tests {
         assert_eq!(scenario.thread_id, "thr_x");
         let turn = scenario.turn.unwrap();
         assert_eq!(turn.turn_id, "turn_x");
-        assert_eq!(turn.emit.len(), 8);
+        assert_eq!(turn.emit.len(), 9);
         assert_eq!(turn.emit[0], Emit::TurnStarted);
         assert_eq!(
             turn.emit[2],
@@ -297,6 +313,13 @@ mod tests {
         );
         assert_eq!(
             turn.emit[7],
+            Emit::AccountNotification {
+                method: "account/rateLimits/updated".to_owned(),
+                params: json!({ "rateLimits": { "primary": { "usedPercent": 7 } } }),
+            }
+        );
+        assert_eq!(
+            turn.emit[8],
             Emit::TurnCompleted {
                 status: "completed".to_owned()
             }

@@ -31,6 +31,8 @@ pub use capabilities::{
     SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
 };
 pub use content_source::{AgentContentSource, NullContentSource};
-pub use event::{AgentEvent, AgentPermissionRequest, SessionEndReason, TurnStatus};
+pub use event::{
+    AgentEvent, AgentPermissionRequest, AgentTokenUsage, SessionEndReason, TurnStatus,
+};
 pub use factory::AgentAdapterFactory;
 pub use provider::AgentProvider;

@@ -64,6 +64,15 @@ async fn recv(rx: &mut mpsc::UnboundedReceiver<ThreadEvent>) -> ThreadEvent {
         .expect("thread channel closed")
 }
 
+/// The unrouted channel is bounded (see `UNROUTED_CAPACITY`), so it has its own
+/// receiver type.
+async fn recv_unrouted(rx: &mut mpsc::Receiver<ThreadEvent>) -> ThreadEvent {
+    tokio::time::timeout(TIMEOUT, rx.recv())
+        .await
+        .expect("timed out waiting for an unrouted frame")
+        .expect("unrouted channel closed")
+}
+
 /// The exit-gate scenario: an `initialize` handshake followed by a scripted
 /// `thread/start` round-trip, then a thread-scoped notification is demuxed to
 /// that thread's channel. Proves transport + demux end to end in-process.
@@ -209,7 +218,7 @@ async fn unscoped_notification_goes_to_the_unrouted_channel() {
         server
     });
 
-    let event = recv(&mut unrouted).await;
+    let event = recv_unrouted(&mut unrouted).await;
     match event {
         ThreadEvent::Notification(n) => assert_eq!(n.method, "server/status"),
         other => panic!("expected a notification, got {other:?}"),

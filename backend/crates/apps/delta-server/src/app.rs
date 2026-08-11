@@ -1105,16 +1105,33 @@ mod tests {
                 snapshot,
             } => {
                 assert_eq!(session_id.0, "sess-status");
+                assert_eq!(
+                    snapshot.provider,
+                    delta_usecase::AgentProvider::Claude,
+                    "the status line is Claude's edge, and the snapshot says so"
+                );
                 assert_eq!(snapshot.context_used_percentage, Some(42.5));
                 // `current_usage` arrives as an object; the snapshot sums its
                 // input-side buckets (5000 + 0 + 80000) into the occupancy.
                 assert_eq!(snapshot.context_current_usage, Some(85000));
-                let five_hour = snapshot.five_hour.expect("5h window present");
-                assert_eq!(five_hour.used_percentage, Some(12.0));
-                assert_eq!(five_hour.resets_at, Some(1700000000));
-                let seven_day = snapshot.seven_day.expect("7d window present");
-                assert_eq!(seven_day.used_percentage, Some(3.5));
-                assert_eq!(seven_day.resets_at, Some(1700500000));
+                // Claude's two named windows become duration-identified ones, in
+                // significance order: the 5-hour window first, the 7-day second.
+                let windows = snapshot.rate_limits.expect("rate limits stated");
+                assert_eq!(
+                    windows,
+                    vec![
+                        delta_usecase::RateLimitWindow {
+                            duration_seconds: Some(5 * 60 * 60),
+                            used_percentage: Some(12.0),
+                            resets_at: Some(1700000000),
+                        },
+                        delta_usecase::RateLimitWindow {
+                            duration_seconds: Some(7 * 24 * 60 * 60),
+                            used_percentage: Some(3.5),
+                            resets_at: Some(1700500000),
+                        },
+                    ]
+                );
             }
             other => panic!("expected StatusUpdated, got {other:?}"),
         }
@@ -1162,8 +1179,15 @@ mod tests {
             delta_usecase::SessionEvent::StatusUpdated { snapshot, .. } => {
                 assert_eq!(snapshot.context_used_percentage, None);
                 assert_eq!(snapshot.context_current_usage, None);
-                assert!(snapshot.five_hour.is_none(), "rate limits absent");
-                assert!(snapshot.seven_day.is_none(), "rate limits absent");
+                // The status line always states the account's rate limits, so an
+                // absent `rate_limits` section is an empty list ("this account
+                // has none") rather than silence — a subscription that lapsed
+                // must clear the footer rows, not freeze them.
+                assert_eq!(
+                    snapshot.rate_limits,
+                    Some(Vec::new()),
+                    "rate limits stated as none"
+                );
             }
             other => panic!("expected StatusUpdated, got {other:?}"),
         }

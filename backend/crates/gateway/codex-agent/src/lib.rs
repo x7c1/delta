@@ -27,6 +27,14 @@
 //! that thread's [`ThreadEvent`] channel; anything not scoped to a known thread
 //! goes to the connection-level "unrouted" channel.
 //!
+//! That channel is not a dead end: it is where genuinely **account-scoped**
+//! frames arrive (`account/rateLimits/updated` names no thread, because the
+//! account is shared by every thread on the connection), and the adapter drains
+//! it — see [`AppServerConnection::take_unrouted`]. It is bounded
+//! ([`UNROUTED_CAPACITY`]) so a connection nobody drains cannot grow without
+//! limit; an overflowing frame is dropped with a log line rather than
+//! accumulating silently.
+//!
 //! ## Observability
 //!
 //! Because this provider is headless — there is no terminal for a human to watch
@@ -38,10 +46,12 @@
 //! attributed to a Delta session id). Mirroring is observability only and never
 //! blocks — see the port's docs.
 //!
-//! Attribution is therefore the limit of what the inspector can show: a server
-//! frame carrying no `threadId` belongs to no session, so it goes to the
-//! unrouted channel above and lands in no log. When reading the inspector, an
-//! absent frame means "not attributable to a session", not "never sent".
+//! Attribution shapes what the inspector shows: a server frame carrying no
+//! `threadId` belongs to no *one* session, so it goes to the unrouted channel
+//! above — and the adapter's drain mirrors it into EVERY live session's log,
+//! since it is a fact about the connection all of them share. Only a frame that
+//! arrives while no session is open lands in no log at all: there is no
+//! inspector open to show it in.
 
 mod adapter;
 mod content;
@@ -112,6 +122,15 @@ pub enum ThreadEvent {
     ServerRequest(ServerRequest),
 }
 
+/// How many unrouted frames the connection buffers before dropping them.
+///
+/// Bounded rather than unbounded so a connection nobody drains (a
+/// transport-only unit test) costs a fixed, small amount of memory instead of
+/// growing for the process's lifetime. The drain (the adapter's account loop)
+/// empties it continuously, so in production the buffer only ever absorbs a
+/// burst against traffic that is a handful of account notifications per session.
+const UNROUTED_CAPACITY: usize = 256;
+
 type PendingMap = Arc<Mutex<HashMap<RequestId, oneshot::Sender<wire::Response>>>>;
 type ThreadMap = Arc<Mutex<HashMap<String, ThreadSlot>>>;
 
@@ -141,9 +160,11 @@ pub struct AppServerConnection {
     pending: PendingMap,
     /// Per-thread event channels, keyed by the provider thread id.
     threads: ThreadMap,
-    /// Frames not scoped to any registered thread (connection-level
-    /// notifications, or a stray frame for an unknown thread). Handed out once.
-    unrouted: Mutex<Option<mpsc::UnboundedReceiver<ThreadEvent>>>,
+    /// Frames not scoped to any registered thread: the account-scoped
+    /// notifications a shared connection carries (`account/rateLimits/updated`
+    /// names no thread), plus any stray frame for an unknown thread. Handed out
+    /// once, to the adapter that drains it.
+    unrouted: Mutex<Option<mpsc::Receiver<ThreadEvent>>>,
     /// The child process, kept alive for the connection's lifetime and killed
     /// on drop (`kill_on_drop`). `None` when the connection was built over
     /// injected pipes in a test.
@@ -201,7 +222,7 @@ impl AppServerConnection {
     {
         let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
         let threads: ThreadMap = Arc::new(Mutex::new(HashMap::new()));
-        let (unrouted_tx, unrouted_rx) = mpsc::unbounded_channel();
+        let (unrouted_tx, unrouted_rx) = mpsc::channel(UNROUTED_CAPACITY);
 
         let reader_task = tokio::spawn(read_loop(
             reader,
@@ -459,8 +480,14 @@ impl AppServerConnection {
     }
 
     /// Take the connection-level "unrouted" channel: frames that were not scoped
-    /// to any registered thread. Returns `None` if already taken.
-    pub fn take_unrouted(&self) -> Option<mpsc::UnboundedReceiver<ThreadEvent>> {
+    /// to any registered thread — chiefly the account-scoped notifications that
+    /// carry no `threadId`. Returns `None` if already taken.
+    ///
+    /// The adapter takes it when it is built and drains it for the connection's
+    /// lifetime, which is what turns an account frame into a browser-visible
+    /// fact. Nothing else may take it: a second caller would get `None` and
+    /// silently see no frames.
+    pub fn take_unrouted(&self) -> Option<mpsc::Receiver<ThreadEvent>> {
         self.unrouted
             .lock()
             .expect("unrouted mutex poisoned")
@@ -533,7 +560,7 @@ async fn read_loop<R>(
     reader: R,
     pending: PendingMap,
     threads: ThreadMap,
-    unrouted: mpsc::UnboundedSender<ThreadEvent>,
+    unrouted: mpsc::Sender<ThreadEvent>,
 ) where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -573,7 +600,7 @@ fn dispatch(
     msg: Incoming,
     pending: &PendingMap,
     threads: &ThreadMap,
-    unrouted: &mpsc::UnboundedSender<ThreadEvent>,
+    unrouted: &mpsc::Sender<ThreadEvent>,
 ) {
     // The thread id (if any) is read before `msg` is moved into the event.
     let thread_id = msg.thread_id().map(str::to_owned);
@@ -616,10 +643,17 @@ fn route_thread_event(
     thread_id: Option<String>,
     event: ThreadEvent,
     threads: &ThreadMap,
-    unrouted: &mpsc::UnboundedSender<ThreadEvent>,
+    unrouted: &mpsc::Sender<ThreadEvent>,
 ) {
     let Some(thread_id) = thread_id else {
-        let _ = unrouted.send(event);
+        // `try_send` rather than an await: the reader must never block on a slow
+        // (or absent) drain, since that would stall every thread's frames behind
+        // one account notification. A full or closed channel drops the frame
+        // loudly — the buffer is sized so this means the drain is gone, not that
+        // it is briefly behind.
+        if let Err(err) = unrouted.try_send(event) {
+            eprintln!("codex-agent: dropping an unrouted frame ({err})");
+        }
         return;
     };
     let mut guard = threads.lock().expect("threads mutex poisoned");

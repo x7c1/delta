@@ -20,28 +20,48 @@ function reset() {
     streamingMessages: {},
     runningSubagents: {},
     contextUsage: {},
-    rateLimits: null,
+    rateLimits: {},
   });
 }
 
-/** A status-line snapshot, with sensible defaults overridable per field. */
+/**
+ * A usage snapshot, with sensible defaults overridable per field. `rate_limits`
+ * defaults to `null` — "this snapshot says nothing about rate limits" — which
+ * is what a provider's token-usage-only frame looks like.
+ */
 function statusSnapshot(
   overrides: Partial<StatusSnapshot> = {},
 ): StatusSnapshot {
   return {
+    provider: 'claude',
     model_id: null,
     model_display_name: null,
     context_used_percentage: null,
     context_window_size: null,
     context_current_usage: null,
     total_input_tokens: null,
-    five_hour: null,
-    seven_day: null,
+    rate_limits: null,
     total_cost_usd: null,
     current_dir: null,
     ...overrides,
   };
 }
+
+/** A rate-limit window of `durationSeconds`, as the wire delivers it. */
+function window(
+  durationSeconds: number | null,
+  usedPercentage: number | null,
+  resetsAt: number | null,
+) {
+  return {
+    duration_seconds: durationSeconds,
+    used_percentage: usedPercentage,
+    resets_at: resetsAt,
+  };
+}
+
+const FIVE_HOURS = 5 * 60 * 60;
+const SEVEN_DAYS = 7 * 24 * 60 * 60;
 
 /** A thread-targeted submit chip, as `beginSending` records before its POST. */
 function beginThreadSending(overrides: { sessionId?: string; threadId?: number } = {}) {
@@ -1653,29 +1673,96 @@ describe('liveStore status_updated', () => {
     });
   });
 
-  it('keeps a single global rate-limit snapshot across sessions', () => {
+  it('keeps one rate-limit snapshot per provider, replaced by the latest', () => {
     const store = useLiveStore.getState();
     store.applyEvent({
       kind: 'status_updated',
       session_id: 'sess-1',
       snapshot: statusSnapshot({
-        five_hour: { used_percentage: 10, resets_at: 100 },
-        seven_day: { used_percentage: 2, resets_at: 200 },
+        rate_limits: [window(FIVE_HOURS, 10, 100)],
       }),
     });
     store.applyEvent({
       kind: 'status_updated',
       session_id: 'sess-2',
       snapshot: statusSnapshot({
-        five_hour: { used_percentage: 30, resets_at: 300 },
-        seven_day: { used_percentage: 9, resets_at: 400 },
+        rate_limits: [window(FIVE_HOURS, 30, 300)],
       }),
     });
-    // The latest event (from a different session) replaces the global snapshot.
+    // Both sessions are Claude sessions reporting the same account, so the
+    // later event simply replaces that provider's windows.
     expect(useLiveStore.getState().rateLimits).toEqual({
-      fiveHour: { used_percentage: 30, resets_at: 300 },
-      sevenDay: { used_percentage: 9, resets_at: 400 },
+      claude: [window(FIVE_HOURS, 30, 300)],
     });
+  });
+
+  it('keeps each provider\'s rate limits apart', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-claude',
+      snapshot: statusSnapshot({
+        rate_limits: [window(FIVE_HOURS, 10, 100)],
+      }),
+    });
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-codex',
+      snapshot: statusSnapshot({
+        provider: 'codex',
+        rate_limits: [window(SEVEN_DAYS, 55, 500)],
+      }),
+    });
+    // A Codex account update must not overwrite the Claude account's windows:
+    // they are different accounts that happen to share a footer.
+    expect(useLiveStore.getState().rateLimits).toEqual({
+      claude: [window(FIVE_HOURS, 10, 100)],
+      codex: [window(SEVEN_DAYS, 55, 500)],
+    });
+  });
+
+  it('leaves rate limits alone when a snapshot says nothing about them', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-codex',
+      snapshot: statusSnapshot({
+        provider: 'codex',
+        rate_limits: [window(SEVEN_DAYS, 55, 500)],
+      }),
+    });
+    // A token-usage frame carries `rate_limits: null` — no statement — and the
+    // account's windows must survive it. (A provider that reports usage and
+    // limits on separate frames would otherwise wipe its own footer every turn.)
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-codex',
+      snapshot: statusSnapshot({
+        provider: 'codex',
+        context_used_percentage: 25,
+      }),
+    });
+    expect(useLiveStore.getState().rateLimits).toEqual({
+      codex: [window(SEVEN_DAYS, 55, 500)],
+    });
+    expect(useLiveStore.getState().contextUsage).toEqual({ 'sess-codex': 25 });
+  });
+
+  it('clears a provider\'s windows when it reports it has none', () => {
+    const store = useLiveStore.getState();
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ rate_limits: [window(FIVE_HOURS, 10, 100)] }),
+    });
+    // An empty list IS a statement — "this account has no windows" — so the
+    // rows clear (e.g. a subscription that lapsed), unlike a `null`.
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-1',
+      snapshot: statusSnapshot({ rate_limits: [] }),
+    });
+    expect(useLiveStore.getState().rateLimits).toEqual({ claude: [] });
   });
 
   it('drops a session context entry when the percentage goes null (e.g. /compact)', () => {
@@ -1708,11 +1795,10 @@ describe('liveStore status persistence', () => {
         context_used_percentage: 62,
         // Reset times in the far future so the freshness pruning keeps them
         // (resets_at is epoch seconds; load compares against now/1000).
-        five_hour: { used_percentage: 30, resets_at: Date.now() / 1000 + 3600 },
-        seven_day: {
-          used_percentage: 9,
-          resets_at: Date.now() / 1000 + 5 * 86400,
-        },
+        rate_limits: [
+          window(FIVE_HOURS, 30, Date.now() / 1000 + 3600),
+          window(SEVEN_DAYS, 9, Date.now() / 1000 + 5 * 86400),
+        ],
       }),
     });
 
@@ -1721,8 +1807,38 @@ describe('liveStore status persistence', () => {
     const restored = loadPersistedStatus(Date.now());
     expect(restored.contextUsage).toEqual({ 'sess-1': 62 });
     expect(restored.rateLimits).toEqual({
-      fiveHour: { used_percentage: 30, resets_at: expect.any(Number) },
-      sevenDay: { used_percentage: 9, resets_at: expect.any(Number) },
+      claude: [
+        { ...window(FIVE_HOURS, 30, expect.any(Number)) },
+        { ...window(SEVEN_DAYS, 9, expect.any(Number)) },
+      ],
     });
+  });
+
+  it('round-trips a multi-provider snapshot through localStorage', () => {
+    const store = useLiveStore.getState();
+    const resetsAt = Date.now() / 1000 + 3600;
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-claude',
+      snapshot: statusSnapshot({ rate_limits: [window(FIVE_HOURS, 30, resetsAt)] }),
+    });
+    store.applyEvent({
+      kind: 'status_updated',
+      session_id: 'sess-codex',
+      snapshot: statusSnapshot({
+        provider: 'codex',
+        context_used_percentage: 12,
+        rate_limits: [window(SEVEN_DAYS, 44, resetsAt)],
+      }),
+    });
+
+    // Both accounts survive the reload, still apart: a restore that collapsed
+    // them would resurrect exactly the cross-provider leak the keying prevents.
+    const restored = loadPersistedStatus(Date.now());
+    expect(restored.rateLimits).toEqual({
+      claude: [window(FIVE_HOURS, 30, resetsAt)],
+      codex: [window(SEVEN_DAYS, 44, resetsAt)],
+    });
+    expect(restored.contextUsage).toEqual({ 'sess-codex': 12 });
   });
 });

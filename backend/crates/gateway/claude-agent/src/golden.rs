@@ -264,6 +264,22 @@ enum GoldenEvent {
         method: String,
         detail_json: Value,
     },
+    /// Mirrors [`AgentEvent::TokenUsageUpdated`]. Unreachable from this seam —
+    /// Claude reports its usage through the status-line hook, which is not part
+    /// of the adapter's event projection — but mapped so the exhaustive match
+    /// keeps compiling and a future Claude usage projection cannot slip in
+    /// ungoldened.
+    TokenUsageUpdated {
+        context_used_percentage: Option<f64>,
+        context_window_size: Option<u64>,
+        context_current_usage: Option<u64>,
+        total_input_tokens: Option<u64>,
+    },
+    /// Mirrors [`AgentEvent::RateLimitsUpdated`]. Unreachable from this seam,
+    /// for the same reason as [`GoldenEvent::TokenUsageUpdated`].
+    RateLimitsUpdated {
+        windows: Vec<GoldenRateLimitWindow>,
+    },
     TurnCompleted {
         status: &'static str,
     },
@@ -271,6 +287,15 @@ enum GoldenEvent {
         recoverable: bool,
         message: String,
     },
+}
+
+/// A serializable mirror of one neutral rate-limit window, for
+/// [`GoldenEvent::RateLimitsUpdated`].
+#[derive(Serialize)]
+struct GoldenRateLimitWindow {
+    duration_seconds: Option<i64>,
+    used_percentage: Option<f64>,
+    resets_at: Option<i64>,
 }
 
 impl From<&AgentEvent> for GoldenEvent {
@@ -372,6 +397,22 @@ impl From<&AgentEvent> for GoldenEvent {
             } => GoldenEvent::UnsupportedInteraction {
                 method: method.clone(),
                 detail_json: detail_json.clone(),
+            },
+            AgentEvent::TokenUsageUpdated { usage } => GoldenEvent::TokenUsageUpdated {
+                context_used_percentage: usage.context_used_percentage,
+                context_window_size: usage.context_window_size,
+                context_current_usage: usage.context_current_usage,
+                total_input_tokens: usage.total_input_tokens,
+            },
+            AgentEvent::RateLimitsUpdated { windows } => GoldenEvent::RateLimitsUpdated {
+                windows: windows
+                    .iter()
+                    .map(|window| GoldenRateLimitWindow {
+                        duration_seconds: window.duration_seconds,
+                        used_percentage: window.used_percentage,
+                        resets_at: window.resets_at,
+                    })
+                    .collect(),
             },
             AgentEvent::TurnCompleted { status } => GoldenEvent::TurnCompleted {
                 status: match status {

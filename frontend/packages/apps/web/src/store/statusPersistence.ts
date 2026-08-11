@@ -1,13 +1,12 @@
-import type { RateLimitWindow } from '@delta/wire-gen';
-import type { RateLimits } from './statusTypes';
+import type { RateLimitsByProvider, RateLimitWindows } from './statusTypes';
 
 /**
- * Best-effort persistence of the statusLine snapshot (per-session context usage
- * + account-wide rate limits) across page reloads.
+ * Best-effort persistence of the usage snapshot (per-session context usage +
+ * per-provider account rate limits) across page reloads.
  *
  * The snapshot is ephemeral: the server only broadcasts it live and the store
  * resets on reload, so without this the context bar and rate-limit footer go
- * blank until the next statusLine event fires. We keep the last snapshot in
+ * blank until the next usage event fires. We keep the last snapshot in
  * `localStorage` and restore it on load, with two freshness guards so a
  * long-idle restart never shows stale "mystery" values:
  *
@@ -26,7 +25,7 @@ const TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export interface RestoredStatus {
   contextUsage: Record<string, number>;
-  rateLimits: RateLimits | null;
+  rateLimits: RateLimitsByProvider;
 }
 
 interface PersistedStatus extends RestoredStatus {
@@ -34,7 +33,7 @@ interface PersistedStatus extends RestoredStatus {
   savedAt: number;
 }
 
-const EMPTY: RestoredStatus = { contextUsage: {}, rateLimits: null };
+const EMPTY: RestoredStatus = { contextUsage: {}, rateLimits: {} };
 
 export function loadPersistedStatus(now: number): RestoredStatus {
   try {
@@ -46,7 +45,7 @@ export function loadPersistedStatus(now: number): RestoredStatus {
     }
     return {
       contextUsage: parsed.contextUsage ?? {},
-      rateLimits: dropExpiredWindows(parsed.rateLimits ?? null, now),
+      rateLimits: dropExpiredWindows(parsed.rateLimits ?? {}, now),
     };
   } catch {
     return EMPTY;
@@ -55,7 +54,7 @@ export function loadPersistedStatus(now: number): RestoredStatus {
 
 export function savePersistedStatus(
   contextUsage: Record<string, number>,
-  rateLimits: RateLimits | null,
+  rateLimits: RateLimitsByProvider,
   now: number,
 ): void {
   try {
@@ -66,16 +65,24 @@ export function savePersistedStatus(
   }
 }
 
-/** Drop a rate-limit window whose reset time (epoch seconds) has already passed. */
+/**
+ * Drop every rate-limit window whose reset time (epoch seconds) has already
+ * passed, provider by provider. A provider left with no live window keeps an
+ * empty list rather than being deleted: "this account's windows all rolled
+ * over" and "this provider was never heard from" both render as no rows, and
+ * collapsing them would only add a case to reason about.
+ */
 function dropExpiredWindows(
-  rateLimits: RateLimits | null,
+  rateLimits: RateLimitsByProvider,
   now: number,
-): RateLimits | null {
-  if (!rateLimits) return null;
+): RateLimitsByProvider {
   const nowSeconds = now / 1000;
-  const keep = (w: RateLimitWindow | null): RateLimitWindow | null =>
-    w && w.resets_at !== null && w.resets_at < nowSeconds ? null : w;
-  const fiveHour = keep(rateLimits.fiveHour);
-  const sevenDay = keep(rateLimits.sevenDay);
-  return fiveHour === null && sevenDay === null ? null : { fiveHour, sevenDay };
+  const live = (windows: RateLimitWindows): RateLimitWindows =>
+    windows.filter((w) => w.resets_at === null || w.resets_at >= nowSeconds);
+  return Object.fromEntries(
+    Object.entries(rateLimits).map(([provider, windows]) => [
+      provider,
+      live(windows ?? []),
+    ]),
+  );
 }

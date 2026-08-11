@@ -37,8 +37,8 @@ use axum::response::IntoResponse;
 use axum::Json;
 
 use delta_usecase::{
-    MessageDisplayHook, PermissionDecision, RateLimitWindow, SessionEndHook, SessionEvent,
-    SessionId, SessionStartHook, StatusSnapshot, StopHook, UserPromptSubmitHook,
+    AgentProvider, MessageDisplayHook, PermissionDecision, RateLimitWindow, SessionEndHook,
+    SessionEvent, SessionId, SessionStartHook, StatusSnapshot, StopHook, UserPromptSubmitHook,
 };
 use delta_wire::hooks::{
     MessageDisplayPayload, PermissionRequestPayload, PermissionRequestResponse, PostToolUsePayload,
@@ -331,10 +331,29 @@ pub async fn status_line(
     StatusCode::OK
 }
 
+/// The length of Claude Code's rolling 5-hour rate-limit window, in seconds.
+///
+/// Claude names its two windows (`five_hour` / `seven_day`) instead of
+/// declaring how long they are, so this constant is where the name becomes the
+/// duration the neutral [`RateLimitWindow`] carries. Nothing downstream of this
+/// hook knows Claude's window names.
+const FIVE_HOUR_WINDOW_SECONDS: i64 = 5 * 60 * 60;
+/// The length of Claude Code's rolling 7-day rate-limit window, in seconds. See
+/// [`FIVE_HOUR_WINDOW_SECONDS`].
+const SEVEN_DAY_WINDOW_SECONDS: i64 = 7 * 24 * 60 * 60;
+
 /// Project the raw `statusLine` payload onto the domain [`StatusSnapshot`],
-/// flattening Claude Code's nested shape and forwarding `used_percentage`
-/// verbatim (it is precomputed against the correct window size — Delta never
-/// recomputes it from token counts).
+/// flattening Claude Code's nested shape.
+///
+/// Each provider's own edge is the authority for its numbers, and this edge is
+/// Claude's: `used_percentage` is already computed against the correct window
+/// size, so it is forwarded as-is and never re-derived from the token counts
+/// sitting next to it.
+///
+/// Rate limits are always stated here — `Some(windows)`, empty when Claude sent
+/// none — because a status-line refresh describes the whole account state: an
+/// account that has dropped out of a Pro/Max subscription must clear its rows,
+/// not keep showing the last ones observed.
 fn status_snapshot_from(payload: StatusLinePayload) -> StatusSnapshot {
     // Each nested section is optional; treat an absent one as its empty
     // default so every leaf field collapses to `None` uniformly.
@@ -357,17 +376,34 @@ fn status_snapshot_from(payload: StatusLinePayload) -> StatusSnapshot {
                 + usage.cache_read_input_tokens.unwrap_or(0)
         }),
         total_input_tokens: context.total_input_tokens,
-        five_hour: rate_limits.five_hour.map(rate_limit_window_from),
-        seven_day: rate_limits.seven_day.map(rate_limit_window_from),
+        rate_limits: Some(
+            [
+                rate_limits
+                    .five_hour
+                    .map(|window| rate_limit_window_from(window, FIVE_HOUR_WINDOW_SECONDS)),
+                rate_limits
+                    .seven_day
+                    .map(|window| rate_limit_window_from(window, SEVEN_DAY_WINDOW_SECONDS)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+        ),
         total_cost_usd: payload.cost.and_then(|cost| cost.total_cost_usd),
         current_dir: payload
             .workspace
             .and_then(|workspace| workspace.current_dir),
+        ..StatusSnapshot::new(AgentProvider::Claude)
     }
 }
 
-fn rate_limit_window_from(window: StatusLineRateLimitWindow) -> RateLimitWindow {
+/// Project one named Claude window onto the neutral, duration-identified one.
+fn rate_limit_window_from(
+    window: StatusLineRateLimitWindow,
+    duration_seconds: i64,
+) -> RateLimitWindow {
     RateLimitWindow {
+        duration_seconds: Some(duration_seconds),
         used_percentage: window.used_percentage,
         resets_at: window.resets_at,
     }

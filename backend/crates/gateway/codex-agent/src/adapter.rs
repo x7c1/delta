@@ -77,7 +77,7 @@ use delta_usecase::{
 
 use crate::translate::{
     classify_server_request, is_turn_completed, started_turn_id, translate_notification,
-    ServerRequestKind,
+    AccountRateLimits, ServerRequestKind,
 };
 use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEvent};
 
@@ -175,21 +175,52 @@ impl Drop for CodexSession {
     }
 }
 
+/// Per-session channels, keyed by the provider thread id (which is also the
+/// handle key). Shared with the account loop, which fans an account-scoped fact
+/// out to every live session.
+type SessionMap = Arc<Mutex<HashMap<String, CodexSession>>>;
+/// The account loop's non-owning view of [`SessionMap`]: it must observe the
+/// adapter's sessions without keeping them (and their translation tasks) alive.
+type WeakSessionMap = Weak<Mutex<HashMap<String, CodexSession>>>;
+
 /// The [`AgentAdapter`] for Codex over a shared `codex app-server` connection.
 pub struct CodexAppServerAdapter {
     conn: Arc<AppServerConnection>,
-    /// Per-session channels, keyed by the provider thread id (which is also the
-    /// handle key).
-    sessions: Mutex<HashMap<String, CodexSession>>,
+    sessions: SessionMap,
+    /// The account loop, aborted when the adapter is dropped so it never
+    /// outlives the connection it drains.
+    account_task: JoinHandle<()>,
+}
+
+impl Drop for CodexAppServerAdapter {
+    fn drop(&mut self) {
+        self.account_task.abort();
+    }
 }
 
 impl CodexAppServerAdapter {
     /// Build the adapter over an already-initialised connection to the shared
-    /// `codex app-server`.
+    /// `codex app-server`, and start draining its account-scoped frames.
+    ///
+    /// Taking the unrouted channel here — at construction, once per connection —
+    /// is what makes an account notification reach the browser at all: it names
+    /// no thread, so the transport's demux cannot deliver it to a session, and
+    /// nothing else reads that channel.
     pub fn new(conn: Arc<AppServerConnection>) -> Self {
+        let sessions: SessionMap = Arc::new(Mutex::new(HashMap::new()));
+        let account_task = tokio::spawn(account_loop(
+            conn.take_unrouted(),
+            Arc::clone(conn.comms_log()),
+            // Weak, for the same reason the per-session translation task holds a
+            // weak connection: the loop must not keep the adapter's sessions —
+            // and through them the live translation tasks — alive after the
+            // adapter is dropped.
+            Arc::downgrade(&sessions),
+        ));
         Self {
             conn,
-            sessions: Mutex::new(HashMap::new()),
+            sessions,
+            account_task,
         }
     }
 
@@ -814,6 +845,84 @@ async fn translate_loop(
                 }
             },
         }
+    }
+}
+
+/// The connection-level drain: fold the frames that belong to no thread into
+/// neutral events and fan them out to every live session.
+///
+/// `account/rateLimits/updated` is the reason this exists. It carries no
+/// `threadId` — the account it describes is shared by every thread on the
+/// connection — so the transport routes it here instead of to a session. The
+/// facts it produces are account-scoped, and the browser keys them by provider,
+/// so surfacing the same fact on each live session is idempotent rather than
+/// conflicting: whichever session's pump runs first tells the browser the truth,
+/// and the rest repeat it.
+///
+/// Fan-out to zero sessions drops the fact rather than deferring it. The
+/// session map is empty between `initialize` and the connection's first
+/// `launch` or `resume`, so an account update that lands in that gap reaches no
+/// one. The frame still updates the merged state (see [`AccountRateLimits`]),
+/// but that state is never replayed to a session registered later, so such a
+/// session shows no rate-limit rows until the server pushes its next rolling
+/// update — and whether one comes is the server's cadence to decide, not
+/// something this loop can guarantee.
+///
+/// A frame that yields no neutral event is logged and dropped, never re-queued:
+/// the whole point of draining is that nothing accumulates here unseen. Two
+/// kinds of frame yield nothing: a method this build does not model, and a
+/// rate-limit frame that states nothing (no `rateLimits` object at all). A
+/// server → client *request* with no thread takes the same path — logged
+/// rather than answered, because answering a request whose session is unknown
+/// is a guess.
+///
+/// Every frame — translated or not — is also mirrored into each live session's
+/// comms log. The connection cannot attribute an account frame to one session,
+/// but the operator reading the inspector still needs to see the frame that
+/// moved the rate-limit rows; showing it in every open Codex session's log is
+/// the honest rendering of "this arrived on the connection you are watching".
+async fn account_loop(
+    unrouted: Option<mpsc::Receiver<ThreadEvent>>,
+    comms: Arc<dyn CommsLogSink>,
+    sessions: WeakSessionMap,
+) {
+    let Some(mut unrouted) = unrouted else {
+        // Someone else already took the channel. Nothing to drain, and nothing
+        // this loop could do about it.
+        eprintln!("codex-agent: the unrouted channel was already taken; account frames are lost");
+        return;
+    };
+    let mut rate_limits = AccountRateLimits::default();
+    while let Some(frame) = unrouted.recv().await {
+        let events = match &frame {
+            ThreadEvent::Notification(notification) => rate_limits.translate(notification),
+            ThreadEvent::ServerRequest(_) => Vec::new(),
+        };
+        if events.is_empty() {
+            eprintln!(
+                "codex-agent: dropping a connection-level frame that produced no event: `{}`",
+                frame_method(&frame)
+            );
+        }
+        let Some(sessions) = sessions.upgrade() else {
+            return;
+        };
+        for session in sessions.lock().expect("sessions mutex poisoned").values() {
+            record_inbound(&comms, &session.session_id, &frame);
+            for event in &events {
+                // A closed receiver means that session's pump is gone; the
+                // account fact is not its alone, so the loop carries on.
+                let _ = session.tx.send(event.clone());
+            }
+        }
+    }
+}
+
+/// The method name of a connection-level frame, for the drop log.
+fn frame_method(frame: &ThreadEvent) -> &str {
+    match frame {
+        ThreadEvent::Notification(notification) => &notification.method,
+        ThreadEvent::ServerRequest(request) => &request.method,
     }
 }
 

@@ -385,6 +385,70 @@ async fn frames_are_attributed_to_deltas_session_id() {
     assert_eq!(entries[0].direction, CommsDirection::ToAgent);
 }
 
+/// An account-scoped frame — one carrying no `threadId`, so the transport can
+/// attribute it to no single session — is mirrored into EVERY live session's
+/// log.
+///
+/// It is a fact about the shared connection, and the rate-limit rows it moves
+/// are shown in every one of those sessions, so an operator reading any of their
+/// inspectors must be able to see the frame that moved them. Recording it
+/// nowhere (which is what the connection alone can do with it) would leave the
+/// footer changing for no visible reason.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_account_scoped_frame_is_recorded_in_every_live_session() {
+    let sink = RecordingSink::arc();
+    // `account_notification` is emitted verbatim, with no `threadId` stamped in
+    // — the way the real server emits an account rolling update.
+    let (adapter, _guard) = adapter_with(
+        r#"{
+            "thread_id": "thr_account",
+            "turn": {
+                "turn_id": "turn_account",
+                "emit": [
+                    { "type": "turn_started" },
+                    { "type": "account_notification", "method": "account/rateLimits/updated",
+                      "params": { "rateLimits": { "primary": { "usedPercent": 21, "windowDurationMins": 300 } } } },
+                    { "type": "turn_completed", "status": "completed" }
+                ]
+            }
+        }"#,
+        Arc::clone(&sink) as Arc<dyn CommsLogSink>,
+    )
+    .await;
+
+    let handle = adapter
+        .launch(launch_request(SESSION_ID))
+        .await
+        .expect("launch");
+    let mut stream = adapter.events(&handle);
+    adapter
+        .send(
+            &handle,
+            SendRequest {
+                text: "trigger the account update".to_owned(),
+            },
+        )
+        .await
+        .expect("send");
+    // The account frame is drained on its own task, so wait for the neutral
+    // event rather than for turn end (which it may well follow).
+    collect_until(&mut stream, |event| {
+        matches!(event, AgentEvent::RateLimitsUpdated { .. })
+    })
+    .await;
+
+    assert!(
+        has_frame(
+            &sink.entries_for(SESSION_ID),
+            CommsDirection::FromAgent,
+            CommsFrameKind::Notification,
+            Some("account/rateLimits/updated"),
+        ),
+        "the account frame is visible in the session's inspector: {:?}",
+        sink.entries_for(SESSION_ID)
+    );
+}
+
 /// Two sessions on ONE shared app-server keep separate logs: the second
 /// session's frames never appear under the first's id.
 #[tokio::test(flavor = "multi_thread")]

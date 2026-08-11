@@ -311,6 +311,14 @@ impl Server<'_> {
                 Emit::Notification { method, params } => {
                     self.emit_notification(method, with_thread_id(params.clone(), thread_id))?
                 }
+                // Deliberately NOT stamped with `threadId`: an account-scoped
+                // frame belongs to the account behind the connection, not to any
+                // thread, and the real server emits it that way. Stamping one in
+                // would send it down the client's per-thread demux and let a
+                // test green-light a connection-level path it never exercised.
+                Emit::AccountNotification { method, params } => {
+                    self.emit_notification(method, params.clone())?
+                }
             }
         }
         Ok(())

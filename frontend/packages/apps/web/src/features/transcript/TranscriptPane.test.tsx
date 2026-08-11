@@ -2270,7 +2270,7 @@ describe('TranscriptPane composer context bar', () => {
       streamingMessages: {},
       runningSubagents: {},
       contextUsage: {},
-      rateLimits: null,
+      rateLimits: {},
     });
     useComposerStore.setState({
       drafts: {},

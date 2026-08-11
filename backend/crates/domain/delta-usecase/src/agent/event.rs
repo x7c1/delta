@@ -15,6 +15,7 @@
 use serde_json::Value;
 
 use crate::interactor::PermissionDecision;
+use crate::ports::RateLimitWindow;
 
 /// Why a session's underlying agent process ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +37,29 @@ pub enum TurnStatus {
     Interrupted,
     /// The turn ended in an error.
     Failed,
+}
+
+/// Token accounting for one session, as the provider's own edge reported it.
+///
+/// Observability only — nothing here is persisted or fed to the turn machine.
+/// The fields mirror [`crate::ports::StatusSnapshot`]'s context fields so the
+/// pump can forward them without inventing anything.
+///
+/// **The percentage is the provider's to compute, never the core's** — only the
+/// provider knows what window the counts are against (see
+/// [`crate::ports::StatusSnapshot`] for what each edge does with that rule).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AgentTokenUsage {
+    /// Percentage of the context window in use, or `None` when the provider
+    /// cannot say (the window size is unknown). Never a placeholder — an absent
+    /// percentage hides the bar rather than pinning it at 0%.
+    pub context_used_percentage: Option<f64>,
+    /// The context window's total size in tokens.
+    pub context_window_size: Option<u64>,
+    /// Tokens currently occupying the context window.
+    pub context_current_usage: Option<u64>,
+    /// Total input tokens sent this session.
+    pub total_input_tokens: Option<u64>,
 }
 
 /// A tool-permission request surfaced by the agent, in provider-neutral form.
@@ -158,6 +182,26 @@ pub enum AgentEvent {
     /// (rather than dropping or blocking on it) is the invariant that keeps an
     /// app-server session from silently hanging on an unhandled request.
     UnsupportedInteraction { method: String, detail_json: Value },
+    /// The session's token accounting changed (a turn consumed context).
+    ///
+    /// Session-scoped and observability-only: it completes no message, touches
+    /// no turn state, and is never persisted — it exists so the browser can show
+    /// how full the context window is. A provider with no usage edge simply
+    /// never emits it, and the display stays empty.
+    TokenUsageUpdated { usage: AgentTokenUsage },
+    /// The **account's** rate-limit windows changed, as observed on this
+    /// session's provider.
+    ///
+    /// Account-scoped, not session-scoped: one account's limits are shared by
+    /// every session of that provider (a single Codex app-server connection
+    /// hosts many of them), so the adapter surfaces the same fact on each live
+    /// session and the browser keys it by provider rather than by session.
+    ///
+    /// The windows replace the account's previous ones wholesale — an adapter
+    /// whose provider sends *sparse* updates merges them against what it last
+    /// observed before emitting, since only the adapter knows its provider's
+    /// merge rules. An empty vector means "this account has no windows".
+    RateLimitsUpdated { windows: Vec<RateLimitWindow> },
     /// The turn finished, with its terminal status.
     TurnCompleted { status: TurnStatus },
     /// An error occurred. `recoverable` distinguishes a transient error the
