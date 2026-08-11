@@ -128,9 +128,23 @@ export function applySessionEvent(
       // Direct-pane input lands on the focused session's active thread. The
       // marker is recorded only for the focused session so a background
       // session's typing never surfaces on the transcript the user is viewing.
+      //
+      // Deliberately NO unread bump, unlike `turn_completed` above. The wire
+      // event carries no `thread_id`, so the only thread it can be attributed
+      // to is the focused ACTIVE one — the thread on screen, read by
+      // definition. That is the invariant the `turn_completed` guard enforces.
+      //
+      // The bump that used to be here was also unclearable: a badge is
+      // suppressed while its thread is active (ThreadTree), and back when
+      // `clearUnread` fired only on the activation edge (see WorkspaceScreen),
+      // an already active thread never crossed that edge again. The count sat
+      // unseen until the user switched away, then surfaced as a phantom. The
+      // deactivation edge now clears such counts as a backstop, but the right
+      // fix is not to create one: the user-visible record of the input is the
+      // dismissible notice that `noteExternalInput` records below, already on
+      // screen when the input arrives.
       if (isFocused && focusedSessionId !== null && activeThreadId !== null) {
         invalidateThreadMessages(queryClient, activeThreadId);
-        store.bumpUnread(activeThreadId);
         store.noteExternalInput(focusedSessionId, activeThreadId, event.prompt);
       }
       break;

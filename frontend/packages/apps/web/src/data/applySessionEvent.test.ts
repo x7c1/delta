@@ -265,8 +265,9 @@ describe('applySessionEvent', () => {
     expect(useLiveStore.getState().unread).toEqual({});
   });
 
-  it('badges the focused active thread on external_input', () => {
+  it('notices external_input on the focused active thread without badging it', () => {
     const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     applySessionEvent(
       { kind: 'external_input', session_id: FOCUSED, prompt: 'typed' },
       queryClient,
@@ -274,14 +275,41 @@ describe('applySessionEvent', () => {
       FOCUSED,
     );
 
-    expect(useLiveStore.getState().unread[9]).toBe(1);
-    // The notice is keyed by the focused session.
+    // The notice — the user-visible record of the input — is keyed by the
+    // focused session and names the thread it landed on, and that thread's
+    // transcript refetches so the typed line appears.
     expect(
       noticeOf(useLiveStore.getState().notices, FOCUSED, 'external_input'),
     ).toMatchObject({
       threadId: 9,
       prompt: 'typed',
     });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 9] });
+
+    // But NO unread. The event carries no `thread_id`, so the only thread it
+    // can be attributed to is the focused active one — the thread on screen,
+    // which is read by definition. A count written here was invisible while the
+    // thread stayed active (its badge is suppressed) and no activation edge
+    // ever came back to clear it, so it surfaced as a phantom "1" the moment
+    // the user switched threads.
+    expect(useLiveStore.getState().unread).toEqual({});
+  });
+
+  it('does not badge any thread when external_input arrives with no active thread', () => {
+    const queryClient = new QueryClient();
+
+    // The focus-transition window: the session is focused but its active thread
+    // is not bound yet (a session switch nulls it, and the new-session screen
+    // has none). Nothing may be attributed to "the next thread to become
+    // active" — that would be the same phantom, one thread over.
+    applySessionEvent(
+      { kind: 'external_input', session_id: FOCUSED, prompt: 'typed' },
+      queryClient,
+      null,
+      FOCUSED,
+    );
+
+    expect(useLiveStore.getState().unread).toEqual({});
   });
 
   it('ignores external_input for a non-focused session', () => {
