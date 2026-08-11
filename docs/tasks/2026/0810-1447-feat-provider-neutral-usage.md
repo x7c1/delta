@@ -163,13 +163,13 @@ Operation × state coverage (usage display vs focused-session state):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real `codex app-server` session: after a turn completes, the
+- [x] Against a real `codex app-server` session: after a turn completes, the
       composer context bar percentage matches the `thread/tokenUsage/updated`
       frame visible in the comms pane (`last.totalTokens /
       modelContextWindow`),
       and rate-limit rows appear and match an observed
       `account/rateLimits/updated` frame.
-- [ ] A Claude session on the same build shows the navigator footer and
+- [x] A Claude session on the same build shows the navigator footer and
       context bar exactly as before; switching focus between a Claude and a
       Codex session swaps the rate-limit display with no cross-provider
       leakage.
