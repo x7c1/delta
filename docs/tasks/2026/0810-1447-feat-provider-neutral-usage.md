@@ -173,5 +173,5 @@ Operation × state coverage (usage display vs focused-session state):
       context bar exactly as before; switching focus between a Claude and a
       Codex session swaps the rate-limit display with no cross-provider
       leakage.
-- [ ] Run `make e2e-real-codex` (ignored canaries) once and confirm green —
+- [x] Run `make e2e-real-codex` (ignored canaries) once and confirm green —
       these do not run in CI.
