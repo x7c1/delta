@@ -124,7 +124,7 @@ Operation × state coverage (unread count vs thread state):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a live session that receives orchestrator/task-notification
+- [x] On a live session that receives orchestrator/task-notification
       traffic: focus the busy thread, let notifications arrive, switch to
       another thread — no phantom "1" appears on the busy thread; its badge
       appears only for turns that complete while it is genuinely
