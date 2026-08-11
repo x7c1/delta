@@ -8,7 +8,14 @@ import {
   it,
   vi,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
@@ -24,7 +31,9 @@ import {
   mockProviders,
 } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
+import type { SessionEvent } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
+import { applySessionEvent } from '../../data/applySessionEvent';
 import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { useLiveStore } from '../../store/liveStore';
@@ -78,13 +87,55 @@ function renderScreen() {
     defaultOptions: { queries: { retry: false } },
   });
   const client = new ApiClient({ baseUrl: 'http://localhost' });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <ApiProvider client={client}>
-        <WorkspaceScreen />
-      </ApiProvider>
-    </QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <WorkspaceScreen />
+        </ApiProvider>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+/**
+ * Deliver a live `SessionEvent` to the rendered workspace exactly as
+ * `useSessionEvents` does — reading the CURRENT focus out of the nav store at
+ * event time (with `NEW_SESSION_FOCUS` mapped to null) rather than capturing it
+ * up front. `useSessionEvents` itself is stubbed out in this suite, so the
+ * routing has to be reproduced here; reading focus live is the part that
+ * matters, since the unread rules are decided from it.
+ */
+function deliverEvent(queryClient: QueryClient, event: SessionEvent) {
+  const { activeThreadId, focusedSessionId } = useNavStore.getState();
+  act(() => {
+    applySessionEvent(
+      event,
+      queryClient,
+      activeThreadId,
+      focusedSessionId === null || focusedSessionId === NEW_SESSION_FOCUS
+        ? null
+        : focusedSessionId,
+    );
+  });
+}
+
+/**
+ * The navigator row for the sub-thread labelled `title`. Scoped to the session
+ * card because the transcript pane names the active thread too — an unscoped
+ * lookup matches both once that thread is the one on screen. The label span is
+ * nested inside the row button, so walk up to the button: that is the element
+ * carrying the thread's unread badge.
+ */
+function threadRow(title: string): HTMLElement {
+  const row = within(screen.getByTestId('session-card'))
+    .getByText(title)
+    .closest('button');
+  if (row === null) {
+    throw new Error(`no navigator row for thread "${title}"`);
+  }
+  return row;
 }
 
 describe('WorkspaceScreen multi-session', () => {
@@ -142,6 +193,160 @@ describe('WorkspaceScreen multi-session', () => {
       expect(useLiveStore.getState().unread[MAIN_THREAD_ID]).toBeUndefined(),
     );
     expect(useLiveStore.getState().unread[SESSION_2_MAIN_THREAD_ID]).toBe(1);
+  });
+
+  it('never reveals a badge for events that landed while the thread was on screen', async () => {
+    // The live-dogfooding regression, end to end. Thread A ("scratch ideas")
+    // is the thread the user is reading while input typed straight into its
+    // pane keeps arriving as `external_input`. Switching to another thread used
+    // to REVEAL a "1" on A for exactly those events: the count was invisible
+    // while A was active (its badge is suppressed) and no activation edge ever
+    // came back to clear it, so it sat pinned to the thread the user had just
+    // been reading.
+    useSingleSessionOfProvider(SESSION_ID_2, 'claude', SESSION_2_MAIN_THREAD_ID);
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_2,
+      activeThreadId: SESSION_2_BRANCH_THREAD_ID,
+    });
+
+    const { queryClient } = renderScreen();
+
+    await waitFor(() => expect(threadRow('scratch ideas')).toBeInTheDocument());
+    expect(useNavStore.getState().activeThreadId).toBe(
+      SESSION_2_BRANCH_THREAD_ID,
+    );
+
+    for (const prompt of ['notification one', 'notification two']) {
+      deliverEvent(queryClient, {
+        kind: 'external_input',
+        session_id: SESSION_ID_2,
+        prompt,
+      });
+    }
+
+    // The user moves to thread B — the session's main thread, reached by
+    // clicking the card header. This is the transition that used to expose the
+    // phantom count.
+    fireEvent.click(screen.getByTestId('session-node'));
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_2_MAIN_THREAD_ID,
+      ),
+    );
+
+    expect(within(threadRow('scratch ideas')).queryByText('1')).toBeNull();
+    expect(within(threadRow('scratch ideas')).queryByText('2')).toBeNull();
+    expect(
+      useLiveStore.getState().unread[SESSION_2_BRANCH_THREAD_ID],
+    ).toBeUndefined();
+  });
+
+  it('badges a thread whose turns complete after the user moved to another thread', async () => {
+    // The other half of the invariant: suppressing the on-screen bump must not
+    // mute genuine unread. Here thread B (main) is active from the start, so
+    // completions on thread A ("scratch ideas") land while A is not the active
+    // thread — they badge it, accumulate past 1, and clear for good once A is
+    // selected.
+    useSingleSessionOfProvider(SESSION_ID_2, 'claude', SESSION_2_MAIN_THREAD_ID);
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_2,
+      activeThreadId: SESSION_2_MAIN_THREAD_ID,
+    });
+
+    const { queryClient } = renderScreen();
+
+    await waitFor(() => expect(threadRow('scratch ideas')).toBeInTheDocument());
+
+    const completeBranchTurn = () =>
+      deliverEvent(queryClient, {
+        kind: 'turn_completed',
+        session_id: SESSION_ID_2,
+        thread_id: SESSION_2_BRANCH_THREAD_ID,
+        stop_reason: null,
+      });
+
+    completeBranchTurn();
+    await waitFor(() =>
+      expect(
+        within(threadRow('scratch ideas')).getByText('1'),
+      ).toBeInTheDocument(),
+    );
+
+    // Counts keep accumulating while the user is away — the badge is not a
+    // boolean pinned at 1.
+    completeBranchTurn();
+    await waitFor(() =>
+      expect(
+        within(threadRow('scratch ideas')).getByText('2'),
+      ).toBeInTheDocument(),
+    );
+
+    // Selecting the thread clears it, and switching away again with no new
+    // events must not bring it back (the regression the user hit).
+    fireEvent.click(threadRow('scratch ideas'));
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_2_BRANCH_THREAD_ID,
+      ),
+    );
+    fireEvent.click(screen.getByTestId('session-node'));
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_2_MAIN_THREAD_ID,
+      ),
+    );
+
+    expect(within(threadRow('scratch ideas')).queryByText('2')).toBeNull();
+    expect(
+      useLiveStore.getState().unread[SESSION_2_BRANCH_THREAD_ID],
+    ).toBeUndefined();
+  });
+
+  it('drops a count that reached the on-screen thread despite the router guard', async () => {
+    // The deactivation-edge backstop on its own. The router refuses to bump the
+    // focused active thread, but it decides that from focus state that can lag
+    // the screen (the windows are listed on the unread effect in
+    // `WorkspaceScreen`). Routing a completion for thread A through such a
+    // window — the router sees no active thread while A is in fact displayed —
+    // lands a count on a thread the user is reading, and leaving A must still
+    // not reveal it. Nothing but that effect's cleanup clears this.
+    useSingleSessionOfProvider(SESSION_ID_2, 'claude', SESSION_2_MAIN_THREAD_ID);
+    useNavStore.setState({
+      focusedSessionId: SESSION_ID_2,
+      activeThreadId: SESSION_2_BRANCH_THREAD_ID,
+    });
+
+    const { queryClient } = renderScreen();
+
+    await waitFor(() => expect(threadRow('scratch ideas')).toBeInTheDocument());
+
+    act(() => {
+      applySessionEvent(
+        {
+          kind: 'turn_completed',
+          session_id: SESSION_ID_2,
+          thread_id: SESSION_2_BRANCH_THREAD_ID,
+          stop_reason: null,
+        },
+        queryClient,
+        // The lagging focus state, deliberately not read from the nav store.
+        null,
+        SESSION_ID_2,
+      );
+    });
+    expect(useLiveStore.getState().unread[SESSION_2_BRANCH_THREAD_ID]).toBe(1);
+
+    fireEvent.click(screen.getByTestId('session-node'));
+    await waitFor(() =>
+      expect(useNavStore.getState().activeThreadId).toBe(
+        SESSION_2_MAIN_THREAD_ID,
+      ),
+    );
+
+    expect(within(threadRow('scratch ideas')).queryByText('1')).toBeNull();
+    expect(
+      useLiveStore.getState().unread[SESSION_2_BRANCH_THREAD_ID],
+    ).toBeUndefined();
   });
 
   it('focuses a tracked spawn by its real id once it appears in the list', async () => {
@@ -586,10 +791,13 @@ describe('WorkspaceScreen multi-session', () => {
     expect(screen.getByText(formattedTime as string)).toBeInTheDocument();
   });
 
-  // A single-session `/api/sessions` override for a given provider, so the
-  // terminal-gating tests below do not depend on the shared mock store's mutated
-  // state or on pagination. The focused session's threads still resolve through
-  // the default handler (the store keeps every seed session's threads).
+  // A single-session `/api/sessions` override for a given provider, so a test
+  // does not depend on the shared mock store's mutated state or on pagination.
+  // The focused session's threads still resolve through the default handler
+  // (the store keeps every seed session's threads). Originally added for the
+  // terminal-gating tests below; also used above by the unread-badge tests,
+  // which need exactly one session card rendered for `threadRow` to scope to —
+  // without it they fail on "found multiple elements", not on a badge.
   function useSingleSessionOfProvider(
     id: string,
     provider: 'claude' | 'codex',

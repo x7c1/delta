@@ -297,15 +297,31 @@ export function WorkspaceScreen() {
     setActiveThread,
   ]);
 
-  // Clear the unread badge whenever a thread becomes active. Unread is
+  // Clear the unread badge on BOTH edges of a thread being active. Unread is
   // thread-keyed, so activating a thread clears exactly its badge; the
   // collapsed session row's OR-aggregated dot clears once its last unread
   // thread is viewed. Focusing a session activates its main thread (see
   // NavigatorPane), which clears main's unread through this same path.
+  //
+  // The cleanup — the DEACTIVATION edge — backstops the event-router guards:
+  // leaving a thread must never *reveal* a count for something that happened
+  // while it was on screen. The router (`applySessionEvent`) already refuses to
+  // bump the focused active thread, but it decides that from client focus state
+  // that can lag the screen: `activeThreadId` is null across a session switch
+  // (see `focusChange` in `navStore`) and on the new-session screen, and the
+  // active-thread reconciliation above is deliberately skipped while
+  // `threadsQuery.isFetching`. Clearing on the way out closes all of those
+  // windows at once — whatever landed on the thread while it was displayed goes
+  // with it. The cost is that a bump landing in the sub-frame gap between the
+  // active-thread switch and this cleanup is wiped too: a badge missed for a
+  // turn the user just watched finish, which beats a phantom count that never
+  // goes away.
   useEffect(() => {
-    if (activeThreadId !== null) {
-      clearUnread(activeThreadId);
+    if (activeThreadId === null) {
+      return;
     }
+    clearUnread(activeThreadId);
+    return () => clearUnread(activeThreadId);
   }, [activeThreadId, clearUnread]);
 
   // Refetch the bound thread's messages on every active-thread transition.
