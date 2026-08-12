@@ -39,6 +39,10 @@ pub enum SessionEvent {
     /// Lets the browser refetch the open-send list the moment the
     /// queued→dispatched transition happens, instead of waiting for the next
     /// turn-lifecycle event.
+    ///
+    /// Pane-backed sessions only: an adapter-backed session (Codex) dispatches
+    /// each send as it arrives, so it has no queued→dispatched transition to
+    /// announce (see `docs/guides/api/sends.md` for the two dispatch paths).
     SendDispatched { session_id: SessionId, send_id: i64 },
     /// A dispatched send was abandoned after its echo failed to match twice.
     ///
@@ -60,6 +64,10 @@ pub enum SessionEvent {
     /// nothing; the text survives only on the cancelled row in the store.
     /// Making it recoverable is a follow-up for the attribution redesign, not
     /// something this seam can do on its own.
+    ///
+    /// Pane-backed sessions only: parking is the echo-correlation path's
+    /// failure mode, and an adapter-backed session matches on the turn id its
+    /// provider returns instead.
     SendParked {
         session_id: SessionId,
         send_id: i64,
@@ -71,13 +79,21 @@ pub enum SessionEvent {
     /// `thread_id` is the thread the dispatched send was composed for, so the
     /// browser can light the running indicator on the exact thread (main or a
     /// branch) that took the turn rather than the session as a whole.
+    ///
+    /// Pane-backed sessions only, too: an adapter-backed session has no prompt
+    /// hook to fire.
     TurnStarted {
         session_id: SessionId,
         send_id: i64,
         thread_id: ThreadId,
         matched_uuid: MessageUuid,
     },
-    /// External input was detected (typed directly into the pane).
+    /// A prompt matched no outstanding send. Usually the user typed straight
+    /// into the pane, but a dispatched send whose echo came back mangled also
+    /// lands here.
+    ///
+    /// Pane-backed sessions only: an adapter-backed session has no pane to
+    /// type into and no echo to mismatch.
     ExternalInput {
         session_id: SessionId,
         prompt: String,

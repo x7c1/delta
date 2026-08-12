@@ -9,8 +9,19 @@ answering or cancelling an `AskUserQuestion`. Session lifecycle routes are in
 conventions and error semantics are in [README.md](README.md).
 
 A send moves through `queued` → `dispatched` → `matched` (or `cancelled`): it is
-written to the session's correlation FIFO, typed into the session's pane once the
-session is idle, and finally correlated with the transcript line it produced.
+written to the session's correlation FIFO, handed to the agent, and finally
+correlated with the message it produced. *How* it is handed over depends on the
+provider's adapter:
+
+- **Pane-backed (Claude Code)** — the text is typed into the session's tmux pane
+  as keystrokes once the session is idle, and matched when its echo comes back
+  through the transcript. This is the path with a real `queued` stage: only one
+  send may be outstanding per turn, so anything composed mid-turn waits.
+- **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
+  turn-start request on the `codex app-server` connection and is matched to the
+  turn id that request returns, so the row goes `dispatched` → `matched` within
+  the same call.
+
 Permission and question answers are not sends — they resolve a request the agent
 raised mid-turn.
 
@@ -18,10 +29,10 @@ raised mid-turn.
 
 ### `POST /api/sends`
 
-Enqueue a send. The send is written to a session's correlation FIFO and dispatched
-into its tmux pane as keystrokes. The session is determined by the request, not by
-an implicit "current" session — the send either continues an existing session or
-starts a new one:
+Enqueue a send. The send is written to a session's correlation FIFO and
+dispatched the way the session's provider is driven (see the Overview). The
+session is determined by the request, not by an implicit "current" session —
+the send either continues an existing session or starts a new one:
 
 - **Existing session** — set `thread_id`. The session is derived from the thread
   (threads belong to a session). When `semantic_parent_uuid` is also set this is a
@@ -150,10 +161,14 @@ disconnected: events fired during the gap are never replayed.
   }
   ```
 
-  - `turn.state` is `idle`, `awaiting_echo` (a send was typed into the pane and
-    its echo has not arrived), or `in_flight`. `send_id` names the send driving
-    the turn — `null` while idle and for a turn started by input typed directly
-    into the pane — and `thread_id` the thread it runs on (`null` while idle).
+  - `turn.state` is `idle`, `awaiting_echo` (pane-backed only: a send was typed
+    into the pane and its echo has not arrived), or `in_flight` — an
+    adapter-backed session goes straight to `in_flight`, its turn-start request
+    needing no echo. `send_id` names the send driving the turn — `null` while
+    idle and for a turn started by input typed directly into the pane — and
+    `thread_id` the thread it runs on (`null` while idle). Only an echo match
+    names a send, so an adapter-backed session leaves `send_id` `null` on every
+    turn: correlate its running indicator by `thread_id`.
   - `permission` is the tool-permission dialog awaiting an answer, or `null`.
     Answer it with
     [`POST /api/permissions/{id}/decision`](#post-apipermissionsiddecision).
@@ -230,10 +245,11 @@ Answer a pending tool-permission request from the browser. `{id}` is the
 `request_id` reported by the `permission_requested` event or by the `permission`
 field of [`GET /api/sessions/{id}/sends`](#get-apisessionsidsends).
 
-Resolving the row wakes the blocked
+For a pane-backed session, resolving the row wakes the blocked
 [`POST /hooks/permission-request`](hooks.md#post-hookspermission-request) call,
 which carries the decision back to the agent — so the tool proceeds (or is
-denied) without anyone touching the TUI prompt.
+denied) without anyone touching the TUI prompt. An adapter-backed one has no
+hook to wake: its decision goes back over the provider connection instead.
 
 Request:
 
@@ -243,11 +259,13 @@ Request:
 
 `decision` is `allow` or `deny`.
 
-- **204 No Content** — the decision was recorded and handed to the waiting hook.
+- **204 No Content** — the decision was recorded and handed to the agent.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
   awaiting a browser decision: it was already decided, or its hook wait timed out
   and the interactive TUI prompt owns it now. The browser falls back to the
-  answer-in-the-terminal guidance.
+  answer-in-the-terminal guidance. An adapter-backed session returns it once
+  the session has been closed, and has no terminal for the browser to point
+  the user at.
 
 ## Questions
 

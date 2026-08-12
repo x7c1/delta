@@ -1,7 +1,7 @@
 //! Pull-request types for the new-session PR tab.
 //!
-//! A `PullRequest` is the per-PR row the picker renders, derived from `gh
-//! search prs`. `Lens` picks which of the two `gh` queries to run (the
+//! A `PullRequest` is the per-PR row the picker renders, derived from the
+//! gateway's PR search. `Lens` picks which of the two `gh` queries to run (the
 //! reviewer-non-draft lens, and the author-mine lens, both surfaced on the
 //! tab side-by-side). `PullRequestList` is what the use case returns — the
 //! PRs themselves plus a flag telling the UI whether `gh` is available at
@@ -15,7 +15,7 @@
 
 use std::fmt;
 
-/// Which `gh search prs` query backs a PR list.
+/// Which PR search query backs a PR list.
 ///
 /// `Reviewer` is "open PRs that requested my review and are not drafts" —
 /// the inbox lens; `Author` is "open PRs I authored" — useful for picking
@@ -58,9 +58,9 @@ impl fmt::Display for PullRequestLens {
 
 /// One pull request row in the PR tab.
 ///
-/// The fields mirror the `gh search prs --json …` projection the gateway
-/// requests, plus `has_local_clone` which the use case derives from the
-/// session-history aggregation: true when at least one registered clone of
+/// The fields mirror the projection the gateway's PR search asks for, plus
+/// `has_local_clone` which the use case derives from the session-history
+/// aggregation: true when at least one registered clone of
 /// `(repo_owner, repo_name)` exists on disk, so the UI can render the row
 /// as clickable (vs. de-emphasised + inline "no local clone" hint).
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -29,9 +29,10 @@ where
     /// `gh` availability is checked first: when `gh` is not installed or
     /// `gh auth status` fails the list is empty and `gh_available` is
     /// `false`, so the endpoint never 5xx's on missing tooling. The
-    /// gateway's actual `gh search prs` call is memoised per-lens for
-    /// [`PR_SEARCH_CACHE_TTL`] so flipping between the panel's lenses
-    /// (or remounting it) does not re-shell on every focus change.
+    /// gateway's actual search call — a GitHub search query issued through
+    /// `gh api graphql` — is memoised per-lens for [`PR_SEARCH_CACHE_TTL`]
+    /// so flipping between the panel's lenses (or remounting it) does not
+    /// re-shell on every focus change.
     ///
     /// `has_local_clone` on each row is derived by joining the gh result
     /// against `list_repositories`: a row's PR repository is considered
@@ -70,8 +71,8 @@ where
     ///
     /// Each lens caches independently — the reviewer and author result
     /// sets are largely disjoint, and a stale reviewer list should not
-    /// block a fresh author refresh. A miss runs `gh search prs` and
-    /// stamps the entry with the wall-clock at which it was fetched;
+    /// block a fresh author refresh. A miss shells out to the gh driver
+    /// and stamps the entry with the wall-clock at which it was fetched;
     /// further hits inside [`PR_SEARCH_CACHE_TTL`] reuse the cached vec.
     async fn cached_pr_search(&self, lens: PullRequestLens) -> Result<Vec<PullRequest>> {
         let now = Instant::now();

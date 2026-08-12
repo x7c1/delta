@@ -14,7 +14,7 @@ use crate::pull_request::{PullRequest, PullRequestLens};
 /// Scripts both gh-availability and the per-lens search results.
 ///
 /// `authenticated` flips the `gh auth status` answer; `reviewer_prs` /
-/// `author_prs` carry the canned `gh search prs` result the matching lens
+/// `author_prs` carry the canned PR search result the matching lens
 /// returns. Tests build it directly and pass it to
 /// [`crate::Interactor::with_gh_cli`].
 #[derive(Default)]

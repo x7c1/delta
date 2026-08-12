@@ -133,10 +133,18 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
 ```
 
 - `status` is one of `queued` (waiting for the session to go idle), `dispatched`
-  (typed into the pane, awaiting correlation), `matched`, or `cancelled`. The
+  (handed to the agent, awaiting correlation), `matched`, or `cancelled`. The
   first two are the *open* statuses [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends)
-  reports.
-- `matched_uuid` is set once the send is correlated with a transcript message.
+  reports. How a row walks that ladder depends on how the provider is driven
+  (see [sends.md](sends.md) for the two dispatch paths): an adapter-backed
+  session (Codex) goes `dispatched` → `matched` inside the enqueue call, so its
+  rows are effectively never observed in an open status.
+- `matched_uuid` is `null` until the send is correlated, and then carries the id
+  it was correlated with: the uuid of the transcript message it produced for a
+  pane-backed session, the provider's own turn id for an adapter-backed one — so
+  it is not always an id that
+  [`GET /api/threads/{id}/messages`](sessions.md#get-apithreadsidmessages)
+  returns.
 - `restored_at` is set only on a `queued` row recovered at boot from a
   `dispatched` state a dead server process left behind. Such a row never
   auto-dispatches; it waits for
