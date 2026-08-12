@@ -25,7 +25,8 @@ by both — see "Portability conventions" below.
 | macOS | `tmux` via Homebrew (`brew install tmux`). `lsof`, `make` (GNU make 3.81), `awk`, `bash` 3.2, `date`, and `pkill` ship with the system. Installing the Xcode Command Line Tools (`xcode-select --install`) is the standard way to get `make`. |
 
 In addition, both platforms need the Rust toolchain (`cargo`) and pnpm (via
-`corepack enable`), and an authenticated Claude Code (`claude`) — see the
+`corepack enable`), plus the agent CLIs you plan to drive: an authenticated
+Claude Code (`claude`) and/or Codex (`codex`) — see the
 "Run the whole thing locally" section below.
 
 ### `lsof` is assumed
@@ -424,6 +425,8 @@ composer (or a New action) spawns a session, so there is nothing else to launch.
 - An authenticated Claude Code (`claude`). Authentication is assumed — the
   server relies on a cached token (or `CLAUDE_CODE_OAUTH_TOKEN`) and does not run
   interactive OAuth. If you have not logged in yet, run `claude` once on its own.
+- To drive Codex sessions, an authenticated Codex CLI (`codex`) — the server
+  spawns `codex app-server` on demand. Optional if you only use Claude Code.
 - The Rust toolchain (`cargo`) and pnpm (via `corepack enable`).
 
 ### Launch

@@ -8,12 +8,12 @@ practice, broken down by the three surfaces where a compatibility promise
 could plausibly apply:
 
 1. **SQLite schema** — the on-disk overlay (`delta.db`) that delta-server
-   maintains alongside Claude Code.
+   maintains alongside the agent CLIs.
 2. **Wire contract** — the REST, WebSocket, and hook shapes shared between
    delta-server and the browser UI (defined by the `delta-wire` crate and
    regenerated into `@delta/wire-gen`).
-3. **`claude` CLI compatibility** — which versions of the upstream Claude
-   Code CLI delta is known to work against.
+3. **Agent CLI compatibility** — which versions of the upstream agent CLIs
+   (`claude`, `codex`) delta is known to work against.
 
 All three are governed by the same `v0.x` stance: *free to break, optimised
 for development velocity, re-decided at `v1.0`*. The rationale, the
@@ -50,20 +50,20 @@ overlay from scratch.
 
 ### Why this is safe
 
-Delta is a wrapper around Claude Code, not the system of record. The data
-that would be painful to lose lives on the Claude Code side:
+Delta is a wrapper around the agent CLIs, not the system of record. The
+data that would be painful to lose lives on the agent side:
 
-- The transcript JSONL.
-- The Claude Code hook payloads.
+- Claude Code's transcript JSONL and hook payloads.
+- Codex's thread storage, owned by `codex app-server`.
 - The session bodies themselves.
 
 Delta's SQLite overlay holds only the metadata it derives or layers on top
 of that — thread structure, pending-send correlation, recency hints, and
-similar. `make reset` deletes that overlay and nothing else; the Claude
-Code data is untouched, so after a reset the next run hydrates from the
-upstream transcripts on first use. The user-visible cost of `make reset`
-is therefore low, and `v0.x` deliberately exploits that to keep schema
-iteration cheap.
+similar. `make reset` deletes that overlay and nothing else; the agent-side
+records are untouched, and after a reset the next run rehydrates Claude
+Code sessions from the upstream transcripts on first use. The user-visible
+cost of `make reset` is therefore low, and `v0.x` deliberately exploits
+that to keep schema iteration cheap.
 
 ### Operational safety net: `SCHEMA_VERSION` gate
 
@@ -180,14 +180,14 @@ This policy is re-decided when **either** of:
 After `v1.0`, expect a versioned wire contract and conventional commit
 annotations for breaking changes.
 
-## Subdomain 3 — `claude` CLI compatibility
+## Subdomain 3 — agent CLI compatibility
 
 ### Policy (v0.x)
 
-Delta publishes **nothing** about which versions of the upstream `claude`
-CLI it supports. There is no published version range, no
-`Verified-against:` marker, no last-green pin. Claude Code's own release
-cadence is fast — sometimes several updates per day — and any
+Delta publishes **nothing** about which versions of the upstream agent
+CLIs (`claude`, `codex`) it supports. There is no published version range,
+no `Verified-against:` marker, no last-green pin. Both upstreams move
+fast — Claude Code sometimes ships several updates per day — and any
 hand-maintained range would go stale faster than it can be reviewed;
 rather than commit to a freshness obligation that would pull in a cron
 or timer driver to satisfy, `v0.x` simply makes no public statement at
@@ -196,7 +196,7 @@ all.
 This is symmetric with subdomains 1 and 2: in `v0.x`, delta promises
 nothing about any of the three surfaces. The only on-disk record of
 what `claude` version a given installation actually ran against is the
-startup info log described below.
+startup info log described below; there is no `codex` counterpart yet.
 
 ### Startup version log
 
@@ -212,6 +212,13 @@ spawn-failure or non-zero exit, startup continues in every case) are
 defined by the doc-comment on `log_claude_version` in
 `backend/crates/apps/delta-server/src/claude_version.rs`, which is the
 source of truth.
+
+There is no `codex` counterpart to this log yet. The server's
+provider-availability probe reports **binary presence only** (it is what
+the new-session UI uses to surface an unlaunchable provider), and a
+version-compatibility verdict is deferred to the real-Codex canary — see
+the doc-comment on `ProviderAvailability` in
+`backend/crates/domain/delta-model/src/provider_availability.rs`.
 
 ### Legacy-format parsing
 
@@ -230,10 +237,10 @@ the SQLite policy already implies.
 
 ### Fix window on upstream breakage
 
-When an upstream Claude Code release breaks delta's parsing or hook
-handling, the fix window is **best-effort**. Delta does not promise a
-turnaround time, and does not commit to any scheduled detection
-mechanism. In practice the fix happens when the maintainer notices the
+When an upstream agent CLI release breaks delta's parsing, hook handling,
+or app-server integration, the fix window is **best-effort**. Delta does
+not promise a turnaround time, and does not commit to any scheduled
+detection mechanism. In practice the fix happens when the maintainer notices the
 breakage during their own use of delta, not on a schedule and not in
 response to a public canary signal.
 
@@ -253,9 +260,15 @@ For the gating mechanism, the per-host state files, and an optional
 periodic-driver setup, see
 [development.md — Automatic canary trigger](development.md#automatic-canary-trigger-opt-in).
 
+The Codex counterpart is `make e2e-real-codex`, which runs the real-codex
+canaries (one safe turn end to end, the thread-metadata wire fields, and
+schema drift detection) against the real `codex app-server`. It has no
+auto-gating wrapper yet, and is likewise an internal tool, not a public
+compatibility commitment.
+
 ### When this rule expires
 
-This policy — publishing nothing about upstream `claude` versions, the
+This policy — publishing nothing about upstream agent CLI versions, the
 no-enforcement startup log, the freedom to remove legacy branches, the
 best-effort fix window, and the absence of any scheduled canary
 contract — is re-decided at `v1.0`, or earlier if the user base expands
@@ -272,10 +285,10 @@ some form of automated update mechanism are likely to be re-evaluated.
 | Wire-breaking changes (REST / WS / hooks) | Free | Versioned contract; breaking changes annotated |
 | `Accept-Version` / `/ws` handshake version | None | Likely introduced |
 | Wire bindings freshness CI gate | Kept | Kept |
-| Published `claude` version range | None | Re-decided |
+| Published agent CLI version ranges | None | Re-decided |
 | Startup `claude --version` log | Info, no enforcement | Re-decided |
 | Removal of legacy transcript-format branches | Free | Re-decided (likely deprecation window) |
-| Fix window on upstream `claude` breakage | Best-effort | Re-decided |
+| Fix window on upstream agent CLI breakage | Best-effort | Re-decided |
 
 The single principle behind all of this: **`v0.x` is the phase where
 delta optimises for iteration speed, knowing that the only user is the
