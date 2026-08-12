@@ -1,137 +1,85 @@
-//! Router assembly.
+//! Router assembly: the composition root that binds a handler to every
+//! endpoint `delta-wire` declares.
+//!
+//! What each endpoint is for — and which wire shapes it speaks — is documented
+//! at the declaration in [`delta_wire::endpoint`], so this file stays a list of
+//! bindings, with `RouteBinder` rejecting any drift between the two.
 
-use axum::routing::{get, post};
 use axum::Router;
+
+use delta_wire::endpoint;
 
 use crate::api;
 use crate::comms;
 use crate::hooks;
 use crate::pty;
+use crate::route_binder::RouteBinder;
 use crate::state::AppState;
 use crate::ws;
 
 /// Build the application router with all routes wired to shared state.
+///
+/// # Panics
+///
+/// If the bound routes are not exactly the declared ones — see `RouteBinder`.
 pub fn router(state: AppState) -> Router {
-    Router::new()
-        .route("/health", get(health))
+    RouteBinder::new()
+        .bind(endpoint::Health, health)
         // Control plane: Claude Code HTTP hooks.
-        .route("/hooks/user-prompt-submit", post(hooks::user_prompt_submit))
-        .route("/hooks/stop", post(hooks::stop))
-        // Live assistant text streamed during generation (before the transcript
-        // flush); buffered as a provisional preview and broadcast to the browser.
-        .route("/hooks/message-display", post(hooks::message_display))
-        .route("/hooks/pre-tool-use", post(hooks::pre_tool_use))
-        // A tool call completed; used to close a subagent's running window.
-        .route("/hooks/post-tool-use", post(hooks::post_tool_use))
-        // Interactive permission dialog appeared (a human answer is pending).
-        .route("/hooks/permission-request", post(hooks::permission_request))
-        // A session's TUI became ready (launch-readiness signal): binds a fresh
-        // spawn on startup, releases the held first prompt on resume.
-        .route("/hooks/session-start", post(hooks::session_start))
-        // A session terminated; used to catch a spawn that died before binding.
-        .route("/hooks/session-end", post(hooks::session_end))
-        // The latest Claude Code status-line snapshot (model / context-window
-        // usage / rate limits / cost), broadcast to the browser. None of this
-        // is in the transcript, so the snapshot is the only source for it. Not
-        // a hook: it is the `statusLine` command Delta injects into the session
-        // settings.
-        .route("/hooks/status-line", post(hooks::status_line))
+        .bind(endpoint::HookUserPromptSubmit, hooks::user_prompt_submit)
+        .bind(endpoint::HookStop, hooks::stop)
+        .bind(endpoint::HookMessageDisplay, hooks::message_display)
+        .bind(endpoint::HookPreToolUse, hooks::pre_tool_use)
+        .bind(endpoint::HookPostToolUse, hooks::post_tool_use)
+        .bind(endpoint::HookPermissionRequest, hooks::permission_request)
+        .bind(endpoint::HookSessionStart, hooks::session_start)
+        .bind(endpoint::HookSessionEnd, hooks::session_end)
+        .bind(endpoint::HookStatusLine, hooks::status_line)
         // Browser REST surface: queries and commands.
-        .route(
-            "/api/sessions",
-            get(api::list_sessions).post(api::create_session),
+        .bind(endpoint::ListSessions, api::list_sessions)
+        .bind(endpoint::CreateSession, api::create_session)
+        .bind(endpoint::OpenSession, api::open_session)
+        .bind(endpoint::CloseSession, api::close_session)
+        .bind(endpoint::InterruptSession, api::interrupt)
+        .bind(endpoint::ListThreads, api::list_threads)
+        .bind(endpoint::ListSends, api::list_sends)
+        .bind(endpoint::ListThreadMessages, api::thread_messages)
+        .bind(endpoint::CreateSend, api::create_send)
+        .bind(endpoint::CancelSend, api::cancel_send)
+        .bind(endpoint::ReleaseSend, api::release_send)
+        .bind(endpoint::DecidePermission, api::decide_permission)
+        .bind(endpoint::AnswerQuestion, api::answer_question)
+        .bind(endpoint::CancelQuestion, api::cancel_question)
+        .bind(endpoint::ListWorkdir, api::list_workdir)
+        .bind(endpoint::RecentWorkdir, api::recent_workdir)
+        .bind(endpoint::WorkdirGit, api::workdir_git)
+        .bind(endpoint::WorkdirGitBranches, api::workdir_git_branches)
+        .bind(endpoint::OpenCwd, api::open_cwd)
+        .bind(endpoint::ListRepositories, api::list_repositories)
+        .bind(
+            endpoint::ListRepositoryScanRoots,
+            api::list_repository_scan_roots,
         )
-        .route("/api/sessions/{id}/open", post(api::open_session))
-        .route("/api/sessions/{id}/close", post(api::close_session))
-        .route("/api/sessions/{id}/interrupt", post(api::interrupt))
-        .route("/api/sessions/{id}/threads", get(api::list_threads))
-        .route("/api/sessions/{id}/sends", get(api::list_sends))
-        .route("/api/threads/{id}/messages", get(api::thread_messages))
-        .route("/api/sends", post(api::create_send))
-        // Cancel a still-queued send before it is dispatched into the pane.
-        .route("/api/sends/{id}/cancel", post(api::cancel_send))
-        // Release a restored send (recovered at boot from a dead process's
-        // dispatched state) into the normal queued flow.
-        .route("/api/sends/{id}/release", post(api::release_send))
-        // Answer a pending tool-permission request from the browser.
-        .route(
-            "/api/permissions/{id}/decision",
-            post(api::decide_permission),
+        .bind(
+            endpoint::CreateRepositoryScanRoot,
+            api::create_repository_scan_root,
         )
-        // Answer a pending AskUserQuestion from the browser (keystroke injection
-        // into the session's TUI pane).
-        .route(
-            "/api/sessions/{id}/questions/{request_id}/answer",
-            post(api::answer_question),
+        .bind(
+            endpoint::DeleteRepositoryScanRoot,
+            api::delete_repository_scan_root,
         )
-        // Cancel a pending AskUserQuestion from the browser (Escape injection
-        // into the session's TUI pane). The request_id rides in the body since
-        // a cancel carries no selection.
-        .route(
-            "/api/sessions/{id}/questions/cancel",
-            post(api::cancel_question),
-        )
-        // Working-directory picker: browse and recents (read-only).
-        .route("/api/workdir/list", get(api::list_workdir))
-        .route("/api/workdir/recent", get(api::recent_workdir))
-        // Open a known cwd in an external tool (initially VS Code only).
-        // The registry lives in the interactor; the endpoint accepts an
-        // optional `handler` id for future disambiguation.
-        .route("/api/open-cwd", post(api::open_cwd))
-        // Registered repositories for the new-session Repository tab: every
-        // distinct repo Delta has launched a session under, with its known
-        // clones bundled by origin URL and ordered by recency.
-        .route("/api/repositories", get(api::list_repositories))
-        // Repository scan roots: parent directories whose direct children
-        // every `/api/repositories` call probes for git clones, surfacing
-        // clones the user has never launched a session in (the umbrella-
-        // session pattern). The registered path is URL-safe base64 in the
-        // DELETE path segment so its embedded `/` characters survive routing.
-        .route(
-            "/api/repository-scan-roots",
-            get(api::list_repository_scan_roots).post(api::create_repository_scan_root),
-        )
-        .route(
-            "/api/repository-scan-roots/{path_b64}",
-            axum::routing::delete(api::delete_repository_scan_root),
-        )
-        // Pull requests for the new-session PR tab (per lens): drives
-        // `gh search prs` through the gh CLI gateway and tags each row
-        // with whether Delta has a local clone of the PR's repo.
-        .route("/api/prs", get(api::list_pull_requests))
-        // Provider availability for the new-session selector: whether each
-        // provider's launch binary is present on this host, so an un-installed
-        // provider is disabled with a reason instead of failing at spawn.
-        .route("/api/providers", get(api::list_providers))
-        // Git detection for the worktree-at-start option (read-only): is the
-        // selected directory a git repo, and what remote branches can a worktree
-        // be based on.
-        .route("/api/workdir/git", get(api::workdir_git))
-        .route("/api/workdir/git/branches", get(api::workdir_git_branches))
-        // Launch-option registry: list, create, update (toggle the
-        // `default_enabled` flag), and delete the custom `claude` CLI flags the
-        // user can later select when starting a session.
-        .route(
-            "/api/launch-options",
-            get(api::list_launch_options).post(api::create_launch_option),
-        )
-        .route(
-            "/api/launch-options/{id}",
-            axum::routing::patch(api::update_launch_option).delete(api::delete_launch_option),
-        )
-        // Delta workspace version for the browser footer. Pre-formatted
-        // server-side so the browser never has to know how to render `+dev.<sha>`.
-        .route("/api/version", get(api::get_version))
-        // Browser event stream.
-        .route("/ws", get(ws::ws_handler))
-        // Terminal bridge to the tmux pane.
-        .route("/pty", get(pty::pty_handler))
-        // Comms-log stream: the JSON-RPC frames Delta exchanges with a headless
-        // provider, per session. The window a terminal-less session has instead
-        // of `/pty`; deliberately its own route so neither the conversation
-        // stream nor the terminal bridge is touched (see `crate::comms`).
-        .route("/comms", get(comms::comms_handler))
-        .with_state(state)
+        .bind(endpoint::ListPullRequests, api::list_pull_requests)
+        .bind(endpoint::ListProviders, api::list_providers)
+        .bind(endpoint::ListLaunchOptions, api::list_launch_options)
+        .bind(endpoint::CreateLaunchOption, api::create_launch_option)
+        .bind(endpoint::UpdateLaunchOption, api::update_launch_option)
+        .bind(endpoint::DeleteLaunchOption, api::delete_launch_option)
+        .bind(endpoint::GetVersion, api::get_version)
+        // Streams.
+        .bind(endpoint::SessionEventStream, ws::ws_handler)
+        .bind(endpoint::PtyStream, pty::pty_handler)
+        .bind(endpoint::CommsStream, comms::comms_handler)
+        .finish(state)
 }
 
 async fn health() -> &'static str {
