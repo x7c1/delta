@@ -121,7 +121,7 @@ register one declared endpoint per call even for shared paths.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] `make dev` boots the real server (the startup path constructs the
+- [x] `make dev` boots the real server (the startup path constructs the
       router, so the declaration assert passes in the release binary) and the
       UI loads and can open a session.
 
