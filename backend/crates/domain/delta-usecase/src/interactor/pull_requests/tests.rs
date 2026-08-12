@@ -114,7 +114,7 @@ async fn has_local_clone_is_set_only_for_registered_repos() {
 #[tokio::test]
 async fn lens_selects_the_matching_gh_query() {
     // The reviewer and author result sets are largely disjoint; the use
-    // case must shell `gh search prs` with the lens that was asked for,
+    // case must run the PR search with the lens that was asked for,
     // not (silently) the other one.
     let reviewer_prs = vec![fixture_pr("x7c1", "delta", "feat/review")];
     let author_prs = vec![fixture_pr("x7c1", "other", "feat/mine")];
@@ -139,7 +139,7 @@ async fn lens_selects_the_matching_gh_query() {
 #[tokio::test]
 async fn search_results_are_memoised_per_lens() {
     // Within the cache TTL, repeated calls for the same lens must not
-    // re-shell to `gh search prs`. The two lenses cache independently.
+    // re-shell to the gh driver. The two lenses cache independently.
     let gh = Arc::new(FakeGhCli::authenticated(
         vec![fixture_pr("x7c1", "delta", "feat/x")],
         vec![fixture_pr("x7c1", "other", "feat/y")],

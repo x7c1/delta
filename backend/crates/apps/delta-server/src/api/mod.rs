@@ -366,7 +366,7 @@ pub(crate) struct ListPullRequestsQuery {
 /// `GET /api/prs?lens=reviewer|author` — pull requests for the new-session
 /// PR tab.
 ///
-/// Drives `gh search prs` through the gateway, then joins the result
+/// Drives the PR search through the gateway, then joins the result
 /// against the registered repositories so each row carries
 /// `has_local_clone`. When `gh` is not installed or `gh auth status`
 /// fails, the response is `{ gh_available: false, pull_requests: [] }`

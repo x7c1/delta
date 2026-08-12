@@ -13,7 +13,7 @@ use crate::pull_request::{PullRequest, PullRequestLens};
 /// Drives the `gh` CLI for the new-session PR tab.
 ///
 /// Two responsibilities: report whether `gh` is even usable on this host
-/// (installed AND authenticated), and run the per-lens `gh search prs`
+/// (installed AND authenticated), and run the per-lens PR search
 /// query. The availability check is process-cached by the gateway — once
 /// answered it stays answered until the server restarts, so opening the PR
 /// tab is cheap on a host where `gh` is missing; the per-lens results are
@@ -33,11 +33,11 @@ pub trait GhCli: Send + Sync {
     /// rather than as a server error.
     async fn is_authenticated(&self) -> bool;
 
-    /// Run `gh search prs` for `lens` and return the parsed PR rows.
+    /// Run the PR search for `lens` and return the parsed PR rows.
     ///
     /// `has_local_clone` on the rows is left at its default (`false`) —
     /// the use case fills it in by joining against the registered
-    /// repositories. The gateway only owns the gh subprocess + JSON
+    /// repositories. The gateway owns only the gh subprocess and its JSON
     /// parsing.
     async fn search_prs(&self, lens: PullRequestLens) -> Result<Vec<PullRequest>>;
 }

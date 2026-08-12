@@ -89,7 +89,7 @@ declare_endpoints! {
     /// Interrupts the session's in-flight turn.
     InterruptSession: POST "/api/sessions/{id}/interrupt";
 
-    /// The session's threads, newest first.
+    /// The session's threads, in creation order (ascending `id`).
     ListThreads: GET "/api/sessions/{id}/threads", response = WireThreadsResponse;
 
     /// The session's sends, with the turn each one produced.
@@ -165,9 +165,9 @@ declare_endpoints! {
     /// its embedded `/` characters survive routing.
     DeleteRepositoryScanRoot: DELETE "/api/repository-scan-roots/{path_b64}";
 
-    /// Pull requests for the new-session PR tab (per lens): drives
-    /// `gh search prs` through the gh CLI gateway and tags each row with
-    /// whether Delta has a local clone of the PR's repo.
+    /// Pull requests for the new-session PR tab (per lens): drives the PR
+    /// search through the gh CLI gateway and tags each row with whether
+    /// Delta has a local clone of the PR's repo.
     ListPullRequests: GET "/api/prs", response = WirePullRequestsResponse;
 
     /// Provider availability for the new-session selector: whether each

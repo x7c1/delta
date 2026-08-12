@@ -62,7 +62,7 @@ use crate::pull_request::{PullRequest, PullRequestLens};
 
 use session_actor::registry::SessionRegistry;
 
-/// How long a `gh search prs` result stays memoised before the next call
+/// How long a PR search result stays memoised before the next call
 /// re-shells out. Short enough that a refresh on the user's timescale wins,
 /// long enough that flipping tabs in the panel does not spam `gh`.
 pub(crate) const PR_SEARCH_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -75,7 +75,7 @@ pub(crate) const PR_SEARCH_CACHE_TTL: Duration = Duration::from_secs(30);
 /// the Codex adapter factory.
 pub(crate) const DEFAULT_CODEX_COMMAND: &str = "codex";
 
-/// Per-process memo for `gh search prs <lens>`.
+/// Per-process memo of one lens's PR search result.
 ///
 /// Held under [`InteractorCore::pr_search_cache`] so toggling between
 /// lenses (or re-mounting the PR tab) does not re-shell out within the
@@ -204,7 +204,7 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// no live path emits on it yet — the push-based producer (the Codex event
     /// pump) that does lands in a later change.
     pub(in crate::interactor) event_sink: Option<AsyncEventSink>,
-    /// Per-lens memo of the latest `gh search prs` result, keeping a focus
+    /// Per-lens memo of the latest PR search result, keeping a focus
     /// flip between the two lenses cheap. Bounded by
     /// [`PR_SEARCH_CACHE_TTL`] so the picker still picks up newly-opened
     /// PRs on the user's timescale.

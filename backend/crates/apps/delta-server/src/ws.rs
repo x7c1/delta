@@ -1,10 +1,12 @@
 //! Browser event WebSocket.
 //!
 //! Each connected browser subscribes to the process-wide event stream and
-//! receives JSON-encoded session events: session registered, opened, closed,
-//! turn started, external input, turn completed, transcript updated, and
-//! permission requested. Every event is id-routed by `session_id`; focus is
-//! purely client-side, so there is no server-side focus event.
+//! receives every session event as JSON — whatever
+//! [`SessionEvent`](delta_usecase::SessionEvent) currently declares, with
+//! each variant's payload documented for clients in
+//! `docs/guides/api/live-channels.md`. Every event is id-routed by
+//! `session_id`; focus is purely client-side, so there is no server-side
+//! focus event.
 //!
 //! Domain [`SessionEvent`](delta_usecase::SessionEvent)s are converted to
 //! their wire twin [`WireSessionEvent`] at this boundary; the wire crate owns

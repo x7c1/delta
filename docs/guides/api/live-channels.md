@@ -112,7 +112,10 @@ which frames arrive, and a client must handle each event whenever it lands.
 - `send_dispatched` — a held (`queued`) send was promoted to `dispatched` and
   its keystrokes typed: the session went idle and the send took its turn. Lets
   the client refetch the open-send list at that transition instead of waiting
-  for the next turn-lifecycle event.
+  for the next turn-lifecycle event. Pane-backed sessions only: an
+  adapter-backed one (Codex) dispatches each send as it arrives (see
+  [sends.md](sends.md) for the two dispatch paths), so it has no
+  queued→dispatched transition to announce.
 - `send_parked` — a dispatched send was abandoned. Delta correlates a send with
   the `UserPromptSubmit` it produces by text; a mismatch returns the send to
   `queued` to be re-typed on the next idle, and after the second failed echo the
@@ -120,7 +123,9 @@ which frames arrive, and a client must handle each event whenever it lands.
   its chip stops spinning — and `text` carries the composed message back, so the
   client can tell the user it was never delivered instead of dropping it
   silently. Session-scoped, not thread-scoped. A client that was disconnected
-  when the park happened cannot recover that text afterwards.
+  when the park happened cannot recover that text afterwards. Pane-backed
+  sessions only: parking is the echo-correlation path's failure mode, and an
+  adapter-backed session matches on the turn id its provider returns instead.
 - `turn_started` — a queued send was correlated with a transcript message,
   named by `matched_uuid`. `send_id` is the send that took the turn and
   `thread_id` the thread it took it on, so the running indicator lights on that
@@ -128,14 +133,16 @@ which frames arrive, and a client must handle each event whenever it lands.
   turn: it fires only when the send's own user line was already in the transcript
   as the prompt hook ran, and usually the line lands later — that turn then
   produces no `turn_started` at all and its `turn_completed` drives the refresh.
-  So never wait for this event to learn that a turn is running; the answer that
-  is always there is the `turn` in
+  Pane-backed sessions only, too: an adapter-backed session has no prompt hook
+  to fire. So never wait for this event to learn that a turn is running; the
+  answer that is always there is the `turn` in
   [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends).
 - `external_input` — a prompt that matched no outstanding send. Usually the user
   typed straight into the pane, but a dispatched send whose echo came back
   mangled also lands here: the text does not match, so the prompt looks
   external, while that send returns to `queued` for its one retry (and is parked
-  after that). Session-scoped — it names no thread.
+  after that). Session-scoped — it names no thread. Pane-backed sessions only:
+  an adapter-backed session has no pane to type into and no echo to mismatch.
 - `turn_completed` — a response finished (Claude's `Stop` hook, or a headless
   provider's turn-end frame). `thread_id` is the thread whose in-flight turn
   just ended, so the client clears the running indicator on the exact thread
