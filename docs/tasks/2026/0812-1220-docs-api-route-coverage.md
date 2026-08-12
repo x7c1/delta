@@ -100,7 +100,7 @@ Two parts:
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Spot-check three newly documented endpoints against a live server
+- [x] Spot-check three newly documented endpoints against a live server
       (`make dev`) — e.g. `GET /api/version`, `GET /api/workdir/recent`, and
       one error path — and confirm the documented shapes match reality.
 
