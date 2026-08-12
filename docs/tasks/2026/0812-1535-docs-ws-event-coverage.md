@@ -77,7 +77,7 @@ this prose is held to the union by the coverage test.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In a live session (`make dev`), observe at least one newly documented
+- [x] In a live session (`make dev`), observe at least one newly documented
       event on `/ws` (e.g. `send_dispatched` when a queued send types into
       the pane, or `status_updated` after a turn) and confirm the received
       frame matches the documented shape.
