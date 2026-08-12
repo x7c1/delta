@@ -33,6 +33,17 @@ backend's `delta-wire` crate, which also generates the frontend's
 `@delta/wire-gen` TypeScript bindings (`make gen`), so the types cannot drift
 from the implementation.
 
+The routes those shapes travel over are declared in the same crate, as
+`delta_wire::endpoint::ENDPOINTS`
+(`backend/crates/gateway/delta-wire/src/endpoint/table.rs`) — one entry per
+method and path, covering the live channels and the hook control plane as well
+as `/api/*`. The server mounts every handler through that table and refuses to
+build a router that disagrees with it, so the table is the complete and current
+list of routes. These documents do not describe every route in it yet, so a
+route missing here is a gap in the prose, not a route the server lacks. What
+the table leaves out — query parameters, status codes and error bodies — is
+documented here only.
+
 ## Conventions
 
 - All timestamps are ISO-8601 strings.

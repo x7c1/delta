@@ -14,6 +14,10 @@
 //!   [`WireThread`], [`WireMessage`], [`WireSend`], …).
 //! - The [`hooks`] module owns the Claude Code hook payloads (`/hooks/*`),
 //!   which are never exported to TypeScript (see its module docs).
+//! - The [`endpoint`] module owns the inventory of routes those shapes travel
+//!   over, which is what makes this crate the whole contract rather than half
+//!   of it: the server mounts its handlers through that table and refuses to
+//!   boot on any disagreement with it.
 //!
 //! The `export-ts` binary (see `src/bin/export-ts.rs`) writes the TypeScript
 //! types into the frontend's `@delta/wire-gen` package, so the browser types
@@ -23,6 +27,7 @@ mod comms_frame;
 pub use comms_frame::{WireCommsDirection, WireCommsFrame, WireCommsFrameKind};
 mod content_block;
 pub use content_block::WireContentBlock;
+pub mod endpoint;
 pub mod hooks;
 mod message;
 pub use message::{WireMessage, WireRole};
