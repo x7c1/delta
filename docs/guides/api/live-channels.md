@@ -5,7 +5,7 @@
 The three WebSocket surfaces the browser holds open: the event stream (`/ws`)
 every client consumes, plus one right-pane window per session whose kind
 follows the provider's capabilities (see
-[rest.md — `GET /api/providers`](rest.md#get-apiproviders)): a PTY bridge
+[settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a PTY bridge
 (`/pty`) for a provider with an attachable terminal, or a comms log (`/comms`)
 for a provider Delta drives headlessly. Shared conventions are in
 [README.md](README.md).
@@ -107,7 +107,7 @@ An observability stream for one session: the JSON-RPC frames Delta exchanges wit
 a provider it drives headlessly (Codex's `codex app-server`). It is what a
 session with no terminal has in place of `/pty`. The UI picks between the two
 from the provider's `capabilities`
-(see [rest.md — `GET /api/providers`](rest.md#get-apiproviders)): `has_terminal`
+(see [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): `has_terminal`
 gets the terminal pane, `has_comms_log` gets this one.
 
 - **Server → browser**: one `CommsFrame` per text frame, as JSON.
