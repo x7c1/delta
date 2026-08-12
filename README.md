@@ -16,15 +16,14 @@ channel into side branches.
 
 ## Status
 
-Delta is alpha quality. It adopts
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html), but while it stays
-on `0.x` **no compatibility is guaranteed**: the SQLite schema, the
-browser↔server wire contract, and which upstream agent CLI versions Delta
-works against may all change in any `0.x` bump. See
-[docs/guides/compatibility.md](docs/guides/compatibility.md) for the full
-policy. Supported platforms are **Linux and macOS**.
+Delta is alpha quality.
 
-## Install
+- Supported platforms: **Linux** and **macOS**.
+- While it stays on `0.x`, **no compatibility is guaranteed** — see
+  [docs/guides/compatibility.md](docs/guides/compatibility.md) for what that
+  means for each surface.
+
+## Getting started
 
 Delta is distributed as source only — there are no prebuilt binaries yet.
 
@@ -34,15 +33,10 @@ cd delta
 make dev
 ```
 
-`make dev` runs the local development loop (backend + frontend). See
-[docs/guides/development.md](docs/guides/development.md) for prerequisites
-(tmux, cargo, pnpm, and the agent CLIs you plan to use) and the rest of the
-workflow.
+`make dev` brings up the local development loop (backend + frontend), and
+`make help` lists every other target.
 
-## Development
-
-Common tasks run through `make` from the repo root — `make help` lists the
-targets (`dev`, `mock`, `build`, `test`, `lint`, `check`, `e2e`, …). Build,
-test, lint, and run details are in
-[docs/guides/development.md](docs/guides/development.md), and the
-browser↔server contract in [docs/guides/api.md](docs/guides/api.md).
+- Prerequisites and the day-to-day workflow:
+  [docs/guides/development.md](docs/guides/development.md)
+- The browser↔server contract:
+  [docs/guides/api.md](docs/guides/api.md)
