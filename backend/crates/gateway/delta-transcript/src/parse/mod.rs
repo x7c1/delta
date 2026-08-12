@@ -114,7 +114,7 @@ pub(crate) fn parse_line_outcome(line: &str) -> Result<ParsedLine, serde_json::E
     // it both displays and flows through send correlation. Current claude
     // writes a `queue-operation` line instead and replays the prompt as a
     // plain user line (see the queued-prompt drift note in
-    // docs/guides/development.md), but transcripts recorded by older versions
+    // docs/guides/development/canary.md), but transcripts recorded by older versions
     // are still resumed and viewed.
     let queued_prompt = raw
         .attachment

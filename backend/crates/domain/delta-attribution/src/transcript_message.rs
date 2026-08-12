@@ -36,7 +36,7 @@ pub struct TranscriptMessage {
     /// claude records a uuid-less `queue-operation` line instead (skipped by
     /// the parser) and replays the prompt as a plain user line that flows the
     /// normal attribution path (see the queued-prompt drift note in
-    /// docs/guides/development.md); but transcripts recorded by older
+    /// docs/guides/development/canary.md); but transcripts recorded by older
     /// versions are still resumed and viewed.
     ///
     /// It is surfaced as a [`Role::User`] message so it both displays and feeds

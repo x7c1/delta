@@ -30,7 +30,7 @@ Never duplicate content across files.
 
 ## Code Quality
 
-Build, test, lint, and run commands for both parts live in @docs/guides/development.md.
+Build, test, lint, and run commands for both parts live in @docs/guides/development/README.md.
 After changing code, run the quality gate for the area you touched and fix any
 issues before considering the task complete.
 

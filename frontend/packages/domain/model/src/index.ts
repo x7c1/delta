@@ -1,7 +1,7 @@
 // Frontend-side domain helpers for Delta. No React, no fetch, no side
 // effects, and no dependency on any other workspace package.
 //
-// The wire JSON shapes (documented in docs/guides/api.md) are NOT defined
+// The wire JSON shapes (documented in docs/guides/api/shapes.md) are NOT defined
 // here: they are generated from the backend's `delta-wire` crate into
 // @delta/wire-gen. This package keeps only what the frontend adds on top —
 // identifier aliases and pure view-model helpers like the thread tree.

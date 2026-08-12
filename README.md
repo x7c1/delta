@@ -37,6 +37,6 @@ make dev
 `make help` lists every other target.
 
 - Prerequisites and the day-to-day workflow:
-  [docs/guides/development.md](docs/guides/development.md)
+  [docs/guides/development](docs/guides/development/README.md)
 - The browser↔server contract:
-  [docs/guides/api.md](docs/guides/api.md)
+  [docs/guides/api](docs/guides/api/README.md)

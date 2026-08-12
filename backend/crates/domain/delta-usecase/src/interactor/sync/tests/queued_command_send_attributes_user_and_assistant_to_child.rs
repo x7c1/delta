@@ -3,7 +3,7 @@ use delta_model::{MessageUuid, SessionId};
 use crate::interactor::testing::*;
 
 /// LEGACY FORMAT (older claude versions; see the queued-prompt drift note in
-/// docs/guides/development.md — current claude replays queued prompts as
+/// docs/guides/development/canary.md — current claude replays queued prompts as
 /// plain user lines instead, but old transcripts are still resumed/viewed):
 /// a branch send issued while a turn is in flight is queued by Claude and
 /// recorded only as a `queued_command` attachment — never a normal user line,

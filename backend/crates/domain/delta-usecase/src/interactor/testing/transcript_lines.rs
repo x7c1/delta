@@ -63,7 +63,7 @@ pub(crate) fn api_error_line(uuid: &str) -> TranscriptMessage {
 /// both displays and flows through send correlation. Mirrors `user_line`
 /// apart from the flag. LEGACY FORMAT — current claude replays queued prompts
 /// as plain user lines instead (see the queued-prompt drift note in
-/// docs/guides/development.md); kept because old transcripts are still
+/// docs/guides/development/canary.md); kept because old transcripts are still
 /// resumed and viewed.
 pub(crate) fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {

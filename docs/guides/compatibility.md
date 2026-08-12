@@ -27,9 +27,9 @@ distribution where an old client could be running against a new server. The
 rules below take advantage of that scope. They are expected to tighten when
 the user base widens or when `v1.0` cutover is on the table.
 
-For build, run, and `make reset` mechanics referenced below, see
-[development.md](development.md); this document only covers the policy
-layer, not the workflow itself.
+For build, run, and `make reset` mechanics referenced below, see the
+[development guide](development/README.md); this document only covers the
+policy layer, not the workflow itself.
 
 ## Subdomain 1 — SQLite schema
 
@@ -226,7 +226,8 @@ the doc-comment on `ProviderAvailability` in
 **legacy-format compatibility** — paths that keep older Claude Code
 transcript shapes parseable so existing recorded transcripts can still
 be viewed and resumed. The current example is the pre-`queue-operation`
-queued-prompt shape (see development.md's drift runbook for context).
+queued-prompt shape (see the drift runbook in
+[development/canary.md](development/canary.md) for context).
 
 Symmetric with the "freely break" stance of subdomains 1 and 2, these
 legacy branches **may be removed at any time during `v0.x`**. There is no
@@ -258,7 +259,7 @@ promise to run it on a schedule, and does not publish its results.
 
 For the gating mechanism, the per-host state files, and an optional
 periodic-driver setup, see
-[development.md — Automatic canary trigger](development.md#automatic-canary-trigger-opt-in).
+[development/canary.md — Automatic canary trigger](development/canary.md#automatic-canary-trigger-opt-in).
 
 The Codex counterpart is `make e2e-real-codex`, which runs the real-codex
 canaries (one safe turn end to end, the thread-metadata wire fields, and
