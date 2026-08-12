@@ -88,8 +88,7 @@ stays in sync with every force-push.
   the matching tag and GitHub Release.
 
 For the underlying setup (the `RELEASE_PAT` secret, why a user PAT is
-required instead of `GITHUB_TOKEN`), see
-[development.md → Release automation](development.md#release-automation).
+required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
 
 ## Recovery
 
@@ -102,3 +101,44 @@ required instead of `GITHUB_TOKEN`), see
 - The `Release` workflow gates on a green CI: a red `main` will never tag
   a release. Fix CI first and the next successful CI run cuts the
   release automatically.
+
+## Release automation setup
+
+The flow above is developer-facing; this section covers the supporting
+setup: how the release PR is opened under a user PAT and why that is
+required.
+
+The `Create Release PR` workflow (`.github/workflows/create-release-pr.yml`)
+opens and updates the rolling release PR. It runs on two triggers: every push
+to `main`, and `pull_request: types: [edited]` so that promoting a release
+PR's title (e.g. `Release v0.1.1` → `Release v0.2.0`) is picked up immediately
+rather than waiting for the next main push. The `pull_request` branch is
+gated on an **open** PR carrying the `release` label whose **title actually
+changed** (`changes.title.from != null`), so body-only edits, no-op title
+saves, and bot self-edits do not retrigger the workflow. It pushes a
+`release/since-<UTC date+time>` branch (chosen once when the PR is opened and
+reused for the lifetime of that PR) and calls `gh pr create` under a
+**user-scoped personal access token**, exposed to the workflow as the
+repository secret **`RELEASE_PAT`**.
+
+A user-scoped token is required because GitHub's recursion-prevention rule
+suppresses `pull_request` workflow runs on PRs authored by `github-actions[bot]`.
+With the default `GITHUB_TOKEN` the release PR would be bot-authored, so `CI`
+and `Validate Release PR` would sit in `action_required` and never go green.
+Pushing and opening the PR under a user PAT makes the PR user-authored, which
+lets the existing checks trigger normally.
+
+**Required setup (one-time, per repo).** A maintainer must register
+`RELEASE_PAT` in the repository's Actions secrets with these scopes:
+
+- `contents: write` — push the `release/since-<UTC date+time>` branch.
+- `pull-requests: write` — create and edit the release PR.
+
+Without the secret, the workflow fails loudly at the `git push` step. There is
+no fallback to `GITHUB_TOKEN` by design: a silent fallback would mask exactly
+the misconfiguration the PAT is solving.
+
+The `Release` workflow (`.github/workflows/release.yml`) that tags and publishes
+after the release PR is merged keeps using the default `GITHUB_TOKEN` — it runs
+under a human-triggered merge event, so recursion is not a concern, and no
+workflow in this repo listens to tag pushes.

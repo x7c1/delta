@@ -8,8 +8,8 @@
 # `queued_command` attachment, `isMeta` flagging, the permission-decision
 # envelope — still holds against the real `claude` binary. The fake-claude
 # lane (`make e2e-fake`) re-enacts that contract deterministically; this lane
-# is what keeps the re-enactment honest. See docs/guides/development.md
-# ("End-to-end canaries (real claude)") for when to run it and what to do
+# is what keeps the re-enactment honest. See docs/guides/development/canary.md
+# ("Real-claude canaries") for when to run it and what to do
 # when it breaks.
 #
 # Two layers, cheapest first:

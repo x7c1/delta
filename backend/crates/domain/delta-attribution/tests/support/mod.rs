@@ -61,7 +61,7 @@ pub fn api_error_line(uuid: &str) -> TranscriptMessage {
 /// turn was in flight, surfaced by the parser as a flagged user line.
 /// LEGACY FORMAT — written only by older claude versions; current claude
 /// replays queued prompts as plain user lines (see the queued-prompt drift
-/// note in docs/guides/development.md).
+/// note in docs/guides/development/canary.md).
 pub fn queued_command_line(uuid: &str, text: &str) -> TranscriptMessage {
     TranscriptMessage {
         is_queued_command: true,

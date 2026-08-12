@@ -8,7 +8,7 @@
 //! transcript parsing and hook handling. When one breaks, the upstream
 //! contract changed — update `fake-claude`'s scenario engine (and Delta's
 //! parsing) to the new reality so the fake lane never drifts green. See
-//! docs/guides/development.md ("End-to-end canaries (real claude)").
+//! docs/guides/development/canary.md ("Real-claude canaries").
 //!
 //! Every test is `#[ignore]`: a run consumes the local user's Claude
 //! subscription quota, so the suite only runs on demand via `make e2e-real`
@@ -585,7 +585,7 @@ async fn interrupting_a_turn_writes_the_marker_and_queued_prompts_dequeue() {
     // versions wrote a `queued_command` attachment line instead, which
     // `delta-transcript` still parses as legacy-format compatibility for
     // transcripts recorded back then (see the queued-prompt drift note in
-    // docs/guides/development.md).
+    // docs/guides/development/canary.md).
     with_one_retry("interrupt_and_queued", || async {
         let capture = Arc::new(Capture {
             events: Mutex::new(Vec::new()),

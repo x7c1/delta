@@ -103,7 +103,7 @@ e2e-fake:
 e2e-real:
 	scripts/e2e-real.sh
 
-## e2e-real-auto: run e2e-real only if the claude version changed AND ≥24h since the last attempt — for a periodic driver (see docs/guides/development.md)
+## e2e-real-auto: run e2e-real only if the claude version changed AND ≥24h since the last attempt — for a periodic driver (see docs/guides/development/canary.md)
 .PHONY: e2e-real-auto
 e2e-real-auto:
 	scripts/e2e-real-auto.sh

@@ -3,7 +3,7 @@
 # e2e-real-auto.sh — gated automatic trigger for the real-claude canary suite.
 #
 # Meant to be invoked by a periodic driver (the systemd user timer under
-# scripts/systemd/, or a cron line — see docs/guides/development.md,
+# scripts/systemd/, or a cron line — see docs/guides/development/canary.md,
 # "Automatic canary trigger"). Each tick it runs `make e2e-real` only when
 # BOTH hold:
 #
@@ -161,7 +161,7 @@ if [ "$status" -eq 0 ]; then
 fi
 
 record_attempt "failure (exit $status)"
-printf '\033[1;31m[e2e-real-auto]\033[0m FAILURE: real-claude canary suite failed (exit %s) on claude %s — likely upstream contract drift. Log: %s. See docs/guides/development.md (drift runbook).\n' \
+printf '\033[1;31m[e2e-real-auto]\033[0m FAILURE: real-claude canary suite failed (exit %s) on claude %s — likely upstream contract drift. Log: %s. See docs/guides/development/canary.md (drift runbook).\n' \
   "$status" "$current_version" "$log_file" >&2
 if command -v notify-send >/dev/null 2>&1; then
   notify-send -u critical "Delta canary FAILED" \
