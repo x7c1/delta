@@ -74,11 +74,16 @@ export interface PermissionNoticeCardProps {
 const HAS_TERMINAL_WHEN_UNKNOWN = true;
 
 /**
- * The floating permission notice: tool name, an input summary, and Allow/Deny
+ * The permission notice card: tool name, an input summary, and Allow/Deny
  * buttons wired to `POST /api/permissions/{id}/decision`. A successful
  * decision needs no local cleanup — the broadcast `permission_resolved`
  * clears the store notice and unmounts this card, or re-points it at the next
  * pending request when several are outstanding.
+ *
+ * Like the question card, it renders INLINE at the conversation tail (not in a
+ * floating overlay): the request interrupts the turn the user is reading, so
+ * the Allow/Deny controls sit in the flow right where their eyes already are,
+ * over the pane's own background instead of over transcript text.
  *
  * Several CAN be outstanding: a provider running tool calls in parallel raises
  * N approvals at once. The card always shows the oldest unanswered one and says
@@ -138,11 +143,11 @@ export function PermissionNoticeCard({
 
   return (
     <div
-      className="pointer-events-auto absolute right-overlay-inset top-overlay-inset max-w-xs space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-caption shadow-md"
+      className="flex flex-col gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-secondary"
       data-testid="permission-notice"
       role="alert"
     >
-      <p className="font-medium text-warning">
+      <p className="text-caption font-medium text-warning">
         Permission requested: {notice.toolName}
         {remaining > 0 && (
           <span
@@ -160,7 +165,7 @@ export function PermissionNoticeCard({
         canAnswerInTerminal ? (
           <>
             <p className="text-fg-muted">Answer the prompt in the terminal.</p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" onClick={onOpenTerminal}>
                 Open terminal
               </Button>
@@ -178,7 +183,7 @@ export function PermissionNoticeCard({
               This request can no longer be answered — it was already resolved,
               or the agent connection was lost.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button size="sm" variant="ghost" onClick={onDismiss}>
                 Dismiss
               </Button>
@@ -186,7 +191,7 @@ export function PermissionNoticeCard({
           </>
         )
       ) : (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" disabled={posting} onClick={() => decide('allow')}>
             Allow
           </Button>
