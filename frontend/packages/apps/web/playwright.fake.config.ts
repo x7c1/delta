@@ -33,6 +33,17 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   reporter: process.env.CI ? 'github' : 'list',
+  // Every observable in this suite sits at the end of a real multi-hop loop
+  // (composer POST → keystrokes → tmux pane → the scripted fake → the JSONL
+  // transcript tail → WS broadcast → render), so even a fresh session's first
+  // turn legitimately takes seconds on a loaded CI runner. Playwright's 5s
+  // default expect timeout is calibrated for in-browser UI, not that loop, and
+  // intermittently failed honest first-turn waits (the `toHaveCount(2)` right
+  // after `startNewSession`, present in most specs). Give every expectation
+  // the generosity the long cross-turn waits already carry explicitly: a
+  // passing assertion still resolves the moment its condition holds, so only
+  // genuine failures report slower.
+  expect: { timeout: 15_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
     // These failures surface only in CI and don't reproduce locally, so a
