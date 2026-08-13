@@ -1058,6 +1058,8 @@ describe('TranscriptPane', () => {
             toolName: 'Bash',
             toolInput: '{"command":"rm -rf scratch"}',
             dismissed: false,
+            queued: [],
+            pendingCount: 1,
           },
         ],
       },
@@ -1083,6 +1085,8 @@ describe('TranscriptPane', () => {
             toolName: 'Bash',
             toolInput: '{"command":"rm -rf scratch"}',
             dismissed: false,
+            queued: [],
+            pendingCount: 1,
           },
         ],
       },
@@ -1126,6 +1130,8 @@ describe('TranscriptPane', () => {
             toolName: 'Bash',
             toolInput: '{"command":"rm -rf scratch"}',
             dismissed: false,
+            queued: [],
+            pendingCount: 1,
           },
         ],
       },
@@ -1164,6 +1170,8 @@ describe('TranscriptPane', () => {
             toolName: 'Bash',
             toolInput: '{"command":"ls"}',
             dismissed: false,
+            queued: [],
+            pendingCount: 1,
           },
         ],
       },
@@ -1183,6 +1191,84 @@ describe('TranscriptPane', () => {
     expect(screen.queryByTestId('permission-notice')).not.toBeInTheDocument();
   });
 
+  it('shows the queue head with the remaining count and walks it as answers land', async () => {
+    // A parallel tool-call fan-out: three approvals outstanding at once. The card
+    // shows the OLDEST (the head) and says how many more are waiting, and each
+    // resolution promotes the next — so answering walks the queue front to back
+    // instead of leaving the rest invisible.
+    useLiveStore.setState({
+      notices: {
+        [SESSION_ID]: [
+          {
+            kind: 'permission',
+            requestId: 11,
+            toolName: 'cat a',
+            toolInput: '{"command":"cat a"}',
+            dismissed: false,
+            queued: [
+              {
+                requestId: 12,
+                toolName: 'cat b',
+                toolInput: '{"command":"cat b"}',
+              },
+              {
+                requestId: 13,
+                toolName: 'cat c',
+                toolInput: '{"command":"cat c"}',
+              },
+            ],
+            pendingCount: 3,
+          },
+        ],
+      },
+    });
+
+    renderPane();
+    const notice = await screen.findByTestId('permission-notice');
+    expect(notice).toHaveTextContent('Permission requested: cat a');
+    expect(
+      within(notice).getByTestId('permission-notice-remaining'),
+    ).toHaveTextContent('+2 more');
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'permission_resolved',
+        session_id: SESSION_ID,
+        request_id: 11,
+      });
+    });
+
+    // The next request took the card over — the browser is never left without a
+    // dialog while approvals are still pending.
+    const promoted = await screen.findByTestId('permission-notice');
+    expect(promoted).toHaveTextContent('Permission requested: cat b');
+    expect(
+      within(promoted).getByTestId('permission-notice-remaining'),
+    ).toHaveTextContent('+1 more');
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'permission_resolved',
+        session_id: SESSION_ID,
+        request_id: 12,
+      });
+    });
+    const last = await screen.findByTestId('permission-notice');
+    expect(last).toHaveTextContent('Permission requested: cat c');
+    expect(
+      within(last).queryByTestId('permission-notice-remaining'),
+    ).not.toBeInTheDocument();
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'permission_resolved',
+        session_id: SESSION_ID,
+        request_id: 13,
+      });
+    });
+    expect(screen.queryByTestId('permission-notice')).not.toBeInTheDocument();
+  });
+
   it('hides the permission card on Dismiss without dropping the notice entry', async () => {
     useLiveStore.setState({
       notices: {
@@ -1193,6 +1279,8 @@ describe('TranscriptPane', () => {
             toolName: 'Bash',
             toolInput: '{"command":"ls"}',
             dismissed: false,
+            queued: [],
+            pendingCount: 1,
           },
         ],
       },

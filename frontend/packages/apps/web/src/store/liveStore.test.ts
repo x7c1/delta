@@ -829,15 +829,29 @@ describe('liveStore.applyEvent notices', () => {
     toolName: 'Bash',
     toolInput: '{}',
     dismissed: false,
+    queued: [],
+    pendingCount: 1,
   } as const;
 
-  function requestPermission(sessionId = 'sess-1', requestId = 7) {
+  function requestPermission(
+    sessionId = 'sess-1',
+    requestId = 7,
+    toolName = 'Bash',
+  ) {
     useLiveStore.getState().applyEvent({
       kind: 'permission_requested',
       session_id: sessionId,
       request_id: requestId,
-      tool_name: 'Bash',
+      tool_name: toolName,
       tool_input: '{}',
+    });
+  }
+
+  function resolvePermission(sessionId: string, requestId: number) {
+    useLiveStore.getState().applyEvent({
+      kind: 'permission_resolved',
+      session_id: sessionId,
+      request_id: requestId,
     });
   }
 
@@ -898,11 +912,7 @@ describe('liveStore.applyEvent notices', () => {
     requestPermission('sess-1', 8);
 
     // A stale resolution for an older request must not wipe the live notice.
-    useLiveStore.getState().applyEvent({
-      kind: 'permission_resolved',
-      session_id: 'sess-1',
-      request_id: 7,
-    });
+    resolvePermission('sess-1', 7);
     expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
       ...PERMISSION_NOTICE,
       requestId: 8,
@@ -923,11 +933,11 @@ describe('liveStore.applyEvent notices', () => {
     // After a reconnect the refetched sends envelope reports the pending
     // dialog; a non-null report re-seeds the notice the dropped
     // `permission_requested` would have set.
-    useLiveStore.getState().seedPermission('sess-1', {
-      request_id: 7,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 7, tool_name: 'Bash', tool_input: '{}' },
+      1,
+    );
     expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual(
       PERMISSION_NOTICE,
     );
@@ -939,32 +949,150 @@ describe('liveStore.applyEvent notices', () => {
 
     // A report of the SAME request changes nothing — in particular it must
     // not resurrect the card the user just dismissed.
-    useLiveStore.getState().seedPermission('sess-1', {
-      request_id: 7,
-      tool_name: 'Bash',
-      tool_input: '{}',
-    });
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 7, tool_name: 'Bash', tool_input: '{}' },
+      1,
+    );
     expect(noticeOf(notices(), 'sess-1', 'permission')?.dismissed).toBe(true);
 
     // A null report clears nothing: clearing is owned by the events and the
     // lifecycle sweeps, so a momentarily-stale refetch cannot wipe a notice
     // an event just set.
-    useLiveStore.getState().seedPermission('sess-1', null);
+    useLiveStore.getState().seedPermission('sess-1', null, 0);
     expect(noticeOf(notices(), 'sess-1', 'permission')).not.toBeNull();
 
     // A DIFFERENT pending request is a new question: it replaces the entry,
     // un-dismissed.
-    useLiveStore.getState().seedPermission('sess-1', {
-      request_id: 9,
-      tool_name: 'Edit',
-      tool_input: '{}',
-    });
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 9, tool_name: 'Edit', tool_input: '{}' },
+      1,
+    );
     expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
       kind: 'permission',
       requestId: 9,
       toolName: 'Edit',
       toolInput: '{}',
       dismissed: false,
+      queued: [],
+      pendingCount: 1,
+    });
+  });
+
+  it('shows the FIRST of several rapid permission requests, queueing the rest', () => {
+    // A parallel tool-call fan-out lands N requests in the same instant. The
+    // last writer must NOT win: the card the user is looking at stays put and
+    // the newcomers queue behind it, counted.
+    requestPermission('sess-1', 11, 'cat a');
+    requestPermission('sess-1', 12, 'cat b');
+    requestPermission('sess-1', 13, 'cat c');
+
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      kind: 'permission',
+      requestId: 11,
+      toolName: 'cat a',
+      toolInput: '{}',
+      dismissed: false,
+      queued: [
+        { requestId: 12, toolName: 'cat b', toolInput: '{}' },
+        { requestId: 13, toolName: 'cat c', toolInput: '{}' },
+      ],
+      pendingCount: 3,
+    });
+  });
+
+  it('promotes the next queued request when the shown one resolves', () => {
+    requestPermission('sess-1', 11, 'cat a');
+    requestPermission('sess-1', 12, 'cat b');
+
+    resolvePermission('sess-1', 11);
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      kind: 'permission',
+      requestId: 12,
+      toolName: 'cat b',
+      toolInput: '{}',
+      dismissed: false,
+      queued: [],
+      pendingCount: 1,
+    });
+
+    // The server also re-broadcasts the promoted head so an event-only client is
+    // never left dialog-less; a client that promoted it itself must treat that as
+    // a no-op rather than queueing the shown request behind itself.
+    requestPermission('sess-1', 12, 'cat b');
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toMatchObject({
+      requestId: 12,
+      queued: [],
+      pendingCount: 1,
+    });
+
+    resolvePermission('sess-1', 12);
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toBeNull();
+  });
+
+  it('drops a resolved QUEUED request without disturbing the shown one', () => {
+    // A decision (or a provider withdrawal) can settle a request that is not the
+    // head: the endpoint is keyed by row id, not by queue position.
+    requestPermission('sess-1', 11, 'cat a');
+    requestPermission('sess-1', 12, 'cat b');
+    requestPermission('sess-1', 13, 'cat c');
+
+    resolvePermission('sess-1', 12);
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      kind: 'permission',
+      requestId: 11,
+      toolName: 'cat a',
+      toolInput: '{}',
+      dismissed: false,
+      queued: [{ requestId: 13, toolName: 'cat c', toolInput: '{}' }],
+      pendingCount: 2,
+    });
+  });
+
+  it('seedPermission restores the head AND the depth after a reconnect', () => {
+    // The reconnect drops the event-built notices; the refetched envelope reports
+    // the head plus how many are pending, so the card comes back with its
+    // remaining-count indication even though this client never saw the other
+    // requests' events.
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 11, tool_name: 'cat a', tool_input: '{}' },
+      3,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toEqual({
+      kind: 'permission',
+      requestId: 11,
+      toolName: 'cat a',
+      toolInput: '{}',
+      dismissed: false,
+      queued: [],
+      pendingCount: 3,
+    });
+
+    // A later refetch of the same head only corrects the depth, leaving the card
+    // (and a dismissal) alone.
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 11, tool_name: 'cat a', tool_input: '{}' },
+      2,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')?.pendingCount).toBe(2);
+
+    // A report whose head is one this client has queued means its own head
+    // resolved during the gap: everything ahead of the reported head is dropped
+    // and the rest of the queue survives.
+    requestPermission('sess-1', 12, 'cat b');
+    requestPermission('sess-1', 13, 'cat c');
+    useLiveStore.getState().seedPermission(
+      'sess-1',
+      { request_id: 12, tool_name: 'cat b', tool_input: '{}' },
+      2,
+    );
+    expect(noticeOf(notices(), 'sess-1', 'permission')).toMatchObject({
+      requestId: 12,
+      queued: [{ requestId: 13, toolName: 'cat c', toolInput: '{}' }],
+      pendingCount: 2,
     });
   });
 

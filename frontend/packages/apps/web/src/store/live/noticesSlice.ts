@@ -6,18 +6,35 @@ import type { EventReducer } from './eventReducer';
 /** The notices state alone, the only fields this module's reducers touch. */
 type NoticesState = Pick<NoticesSlice, 'notices'>;
 
+/** One pending permission request, as the notice's queue holds it. */
+export interface QueuedPermissionRequest {
+  requestId: number;
+  toolName: string;
+  /** The tool input, serialized as JSON text (shown summarized). */
+  toolInput: string;
+}
+
 /**
- * A pending permission prompt blocking its session until it is answered — in
+ * The pending permission prompts blocking a session until they are answered — in
  * the browser (the notice's Allow/Deny) or in the terminal. The focused
  * session's notice drives the floating card over the transcript, and any
  * session's drives a badge on its navigator row.
  *
+ * The card shows ONE request — this entry's own {@link requestId} — because a
+ * decision is one answer to one question. But several can be outstanding at
+ * once: a provider that runs tool calls in parallel raises N approvals in the
+ * same instant. Those queue in {@link queued} behind the shown one, oldest
+ * first, so N rapid `permission_requested` events leave the FIRST request on
+ * screen (not the last) and answering it promotes the next.
+ *
  * Set by `permission_requested` and re-seeded from the sends envelope's
- * `permission` field after a reconnect (the event is not replayed). Removed on
- * `permission_resolved` (same request only), when the turn ends, and when the
- * session closes. A user dismiss only flags the entry {@link dismissed} —
- * removing it would let the next refetch re-seed the same still-pending
- * request and resurrect the card the user just closed.
+ * `permission` / `permission_count` after a reconnect (events are not
+ * replayed). `permission_resolved` for the shown request promotes the next
+ * queued one (or removes the notice when none is left); for a queued one it
+ * removes just that entry. The whole notice also goes when the turn ends and
+ * when the session closes. A user dismiss only flags the entry
+ * {@link dismissed} — removing it would let the next refetch re-seed the same
+ * still-pending request and resurrect the card the user just closed.
  */
 export interface PermissionNotice {
   kind: 'permission';
@@ -27,6 +44,20 @@ export interface PermissionNotice {
   toolInput: string;
   /** True once the user dismissed the card; the entry stays for de-dup. */
   dismissed: boolean;
+  /**
+   * The requests waiting behind the shown one, oldest first. Empty in the
+   * ordinary single-dialog case (and always empty for a pane-backed provider,
+   * whose hook blocks until each dialog is answered).
+   */
+  queued: QueuedPermissionRequest[];
+  /**
+   * How many requests the session has pending in total, the shown one included
+   * — so at least `1 + queued.length`. It can exceed that: after a reconnect the
+   * envelope reports the head plus a depth, and the identities of the requests
+   * behind it are only learned from later events. This is what the card's
+   * remaining-count indication reads.
+   */
+  pendingCount: number;
 }
 
 /**
@@ -247,16 +278,19 @@ export interface NoticesSlice {
   clearResumeUnavailable: (sessionId: SessionId) => void;
   /**
    * Seed a session's permission notice from the server's queryable pending
-   * dialog (the `permission` field of `GET /api/sessions/{id}/sends`).
+   * queue (the `permission` head and `permission_count` depth of
+   * `GET /api/sessions/{id}/sends`).
    * Mirrors {@link RunningThreadsSlice.seedActiveTurn}: set-only (`null`
    * clears nothing — clearing is owned by the events and the lifecycle
-   * sweeps), and a report of the request the notice already shows changes
-   * nothing, so a refetch can neither resurrect a notice an event just
-   * resolved nor un-dismiss one the user closed.
+   * sweeps), and a report of the request the notice already shows leaves the
+   * card alone, so a refetch can neither resurrect a notice an event just
+   * resolved nor un-dismiss one the user closed — only its remaining count
+   * catches up.
    */
   seedPermission: (
     sessionId: SessionId,
     permission: PendingPermission | null,
+    pendingCount: number,
   ) => void;
   /**
    * Seed a session's question notice from the server's queryable pending
@@ -315,15 +349,43 @@ export const createNoticesSlice: StateCreator<
       return Object.keys(next).length > 0 ? next : state;
     }),
 
-  seedPermission: (sessionId, permission) =>
+  seedPermission: (sessionId, permission, pendingCount) =>
     set((state) => {
       if (permission === null) {
         return state;
       }
       const current = noticeOf(state.notices, sessionId, 'permission');
       if (current?.requestId === permission.request_id) {
-        return state;
+        // Same head: keep the card (and its dismissed flag) exactly as it is,
+        // and only let the server's depth correct the remaining count — a client
+        // that missed the events for the queued requests knows their number from
+        // here even though it knows none of their identities. Floored at what
+        // this client can already see, since the snapshot may predate events it
+        // has applied. (The event reducers need no such floor: their arithmetic
+        // moves the count and the queue together.)
+        const depth = Math.max(pendingCount, 1 + current.queued.length);
+        if (depth === current.pendingCount) {
+          return state;
+        }
+        return {
+          notices: withNotice(state.notices, sessionId, {
+            ...current,
+            pendingCount: depth,
+          }),
+        };
       }
+      // A different head. When the server's head is one of the requests this
+      // client has queued, its own head must have resolved during the gap: drop
+      // everything ahead of the reported head and keep the rest of the queue.
+      // Otherwise the reported head is unknown here, and the envelope is the only
+      // truth available — take it alone, with the server's depth.
+      const promotedIndex = (current?.queued ?? []).findIndex(
+        (request) => request.requestId === permission.request_id,
+      );
+      const queued =
+        current && promotedIndex >= 0
+          ? current.queued.slice(promotedIndex + 1)
+          : [];
       return {
         notices: withNotice(state.notices, sessionId, {
           kind: 'permission',
@@ -331,6 +393,8 @@ export const createNoticesSlice: StateCreator<
           toolName: permission.tool_name,
           toolInput: permission.tool_input,
           dismissed: false,
+          queued,
+          pendingCount: Math.max(pendingCount, 1 + queued.length),
         }),
       };
     }),
@@ -418,18 +482,50 @@ export const createNoticesSlice: StateCreator<
     }),
 });
 
+// A tool is asking to proceed. The FIRST unanswered request owns the card: a
+// provider running tool calls in parallel raises several at once, and swapping
+// the card out from under the user (the last writer winning) is what left the
+// other requests unanswerable. So a request arriving while one is shown queues
+// behind it and only bumps the remaining count.
 export const reducePermissionRequested: EventReducer<
   NoticesState,
   'permission_requested'
-> = (state, event) => ({
-  notices: withNotice(state.notices, event.session_id, {
-    kind: 'permission',
+> = (state, event) => {
+  const request: QueuedPermissionRequest = {
     requestId: event.request_id,
     toolName: event.tool_name,
     toolInput: event.tool_input,
-    dismissed: false,
-  }),
-});
+  };
+  const current = noticeOf(state.notices, event.session_id, 'permission');
+  if (current === null) {
+    return {
+      notices: withNotice(state.notices, event.session_id, {
+        kind: 'permission',
+        ...request,
+        dismissed: false,
+        queued: [],
+        pendingCount: 1,
+      }),
+    };
+  }
+  // Already shown, or already queued: a re-broadcast of the same request (the
+  // server re-raises a promoted head, and a retried hook can repeat one) must
+  // not queue it twice or reset its position.
+  if (
+    current.requestId === request.requestId ||
+    current.queued.some((queued) => queued.requestId === request.requestId)
+  ) {
+    return state;
+  }
+  const queued = [...current.queued, request];
+  return {
+    notices: withNotice(state.notices, event.session_id, {
+      ...current,
+      queued,
+      pendingCount: current.pendingCount + 1,
+    }),
+  };
+};
 
 // Claude Code's AskUserQuestion is presenting its options in the
 // TUI; surface the dedicated question card. Driven off PreToolUse so
@@ -449,18 +545,62 @@ export const reduceQuestionAsked: EventReducer<
 });
 
 // The request was answered (a browser decision or the correlated
-// tool_result). Remove the notice only when it is the SAME request
-// that resolved, so a stale resolution never wipes a newer pending
-// prompt for the same session. An auto-approved tool resolves
-// almost immediately, so this clears the brief notice; a genuine
-// prompt has no resolution until the human answers. The same event
-// also clears a `question` notice with the matching request id: an
-// AskUserQuestion's request row resolves the moment its tool_result
-// (the user's pick) is ingested.
+// tool_result). Only the resolved request leaves, so a stale resolution never
+// wipes a newer pending prompt for the same session:
+//
+// - the SHOWN request → the next queued one takes the card (un-dismissed: it is
+//   a question the user has not answered yet), or the notice goes when the queue
+//   is empty. The server also re-broadcasts the promoted head, which this
+//   client's own promotion makes a no-op — so the dialog survives either way;
+// - a QUEUED request → that entry alone is dropped and the card stays put;
+// - an unknown request → nothing changes.
+//
+// An auto-approved tool resolves almost immediately, so this clears the brief
+// notice; a genuine prompt has no resolution until the human answers. The same
+// event also clears a `question` notice with the matching request id: an
+// AskUserQuestion's request row resolves the moment its tool_result (the user's
+// pick) is ingested.
 export const reducePermissionResolved: EventReducer<
   NoticesState,
   'permission_resolved'
 > = (state, event) => {
+  const permission = noticeOf(state.notices, event.session_id, 'permission');
+  if (permission !== null) {
+    if (permission.requestId === event.request_id) {
+      const [promoted, ...rest] = permission.queued;
+      // With no known successor the notice goes, even if the server reported a
+      // deeper queue (the reconnect seed knows the depth but not the identities):
+      // there is nothing to show a card for. The server's promotion broadcast
+      // brings the next request in a moment, and the next envelope refetch
+      // restores the true remaining count.
+      if (promoted !== undefined) {
+        return {
+          notices: withNotice(state.notices, event.session_id, {
+            kind: 'permission',
+            ...promoted,
+            dismissed: false,
+            queued: rest,
+            pendingCount: permission.pendingCount - 1,
+          }),
+        };
+      }
+    } else if (
+      permission.queued.some(
+        (queued) => queued.requestId === event.request_id,
+      )
+    ) {
+      const queued = permission.queued.filter(
+        (request) => request.requestId !== event.request_id,
+      );
+      return {
+        notices: withNotice(state.notices, event.session_id, {
+          ...permission,
+          queued,
+          pendingCount: permission.pendingCount - 1,
+        }),
+      };
+    }
+  }
   const next = removeNotices(
     state.notices,
     event.session_id,

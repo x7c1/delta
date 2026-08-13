@@ -287,6 +287,64 @@ describe('GET /api/sessions/{id}/sends mock', () => {
     });
   });
 
+  it('reports the pending-permission queue as head plus depth', async () => {
+    // The mock mirrors the real server's queue: several approvals can be
+    // outstanding at once (a parallel tool-call fan-out), the envelope reports
+    // the OLDEST as the head with the total depth beside it, and a resolution
+    // retires only the request it names — so the next one becomes the head.
+    const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    for (const [requestId, command] of [
+      [11, 'cat a'],
+      [12, 'cat b'],
+      [13, 'cat c'],
+    ] as const) {
+      applyEvent({
+        kind: 'permission_requested',
+        session_id: SESSION_ID,
+        request_id: requestId,
+        tool_name: command,
+        tool_input: '{}',
+      });
+    }
+
+    let envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.permission?.request_id).toBe(11);
+    expect(envelope.permission_count).toBe(3);
+
+    // A middle request resolves: the head is untouched, the depth shrinks.
+    applyEvent({
+      kind: 'permission_resolved',
+      session_id: SESSION_ID,
+      request_id: 12,
+    });
+    envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.permission?.request_id).toBe(11);
+    expect(envelope.permission_count).toBe(2);
+
+    // The head resolves: the next request takes over.
+    applyEvent({
+      kind: 'permission_resolved',
+      session_id: SESSION_ID,
+      request_id: 11,
+    });
+    envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.permission?.request_id).toBe(13);
+    expect(envelope.permission_count).toBe(1);
+
+    // The turn ending sweeps whatever is left, as the server's runtime does.
+    applyEvent({
+      kind: 'turn_completed',
+      session_id: SESSION_ID,
+      thread_id: MAIN_THREAD_ID,
+      stop_reason: null,
+    });
+    envelope = await getOpenSends(httpHandlers, SESSION_ID);
+    expect(envelope.permission).toBeNull();
+    expect(envelope.permission_count).toBe(0);
+  });
+
   it('responds 404 for an unknown session id', async () => {
     const handlers = createHandlers() as HttpHandler[];
     const response = await runGet(

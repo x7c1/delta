@@ -21,7 +21,7 @@ async fn the_dialog_is_reported_from_the_hook_and_survives_an_abandoned_wait() {
     let session = SessionId::from("sess-1");
 
     assert_eq!(
-        ix.live_state_for(&session).await.pending_permission,
+        ix.live_state_for(&session).await.pending_permission(),
         None,
         "nothing is pending before the hook fires"
     );
@@ -36,10 +36,9 @@ async fn the_dialog_is_reported_from_the_hook_and_survives_an_abandoned_wait() {
         .await
         .unwrap();
 
-    let pending = ix
-        .live_state_for(&session)
-        .await
-        .pending_permission
+    let live = ix.live_state_for(&session).await;
+    let pending = live
+        .pending_permission()
         .expect("the dialog is queryable while it awaits an answer");
     assert_eq!(pending.request_id, wait.request_id);
     assert_eq!(pending.tool_name, "Bash");
@@ -52,7 +51,7 @@ async fn the_dialog_is_reported_from_the_hook_and_survives_an_abandoned_wait() {
     assert!(
         ix.live_state_for(&session)
             .await
-            .pending_permission
+            .pending_permission()
             .is_some(),
         "an abandoned wait leaves the dialog pending (the TUI prompt is up)"
     );
@@ -78,7 +77,7 @@ async fn a_browser_decision_clears_the_queryable_dialog() {
         .unwrap();
 
     assert_eq!(
-        ix.live_state_for(&session).await.pending_permission,
+        ix.live_state_for(&session).await.pending_permission(),
         None,
         "a decided dialog is no longer reported"
     );
@@ -109,7 +108,7 @@ async fn the_turn_ending_clears_the_queryable_dialog() {
     .unwrap();
 
     assert_eq!(
-        ix.live_state_for(&session).await.pending_permission,
+        ix.live_state_for(&session).await.pending_permission(),
         None,
         "a dialog never outlives its turn"
     );

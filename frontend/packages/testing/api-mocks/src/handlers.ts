@@ -289,7 +289,10 @@ export function createMockApi(): MockApi {
         turn,
         // The pending permission dialog rides along exactly as the real
         // server reports it, so the reconnect re-seed path works in mock mode.
-        permission: entry.pendingPermission ?? null,
+        permission: entry.pendingPermissions?.[0] ?? null,
+        // …and its depth, so a reconnecting client can rebuild both the dialog
+        // and its "N approvals pending" indication from this one response.
+        permission_count: entry.pendingPermissions?.length ?? 0,
         // Likewise the pending AskUserQuestion, so its re-seed path works too.
         question: entry.pendingQuestion ?? null,
         // Likewise the running subagents, so the reconnect re-seed path works.
@@ -793,13 +796,42 @@ export function createMockApi(): MockApi {
     }
   };
 
-  const setPendingPermission = (
+  /** Append a pending dialog to a session's approval queue (de-duplicated). */
+  const enqueuePendingPermission = (
     sessionId: string,
-    pending: PendingPermission | undefined,
+    pending: PendingPermission,
   ) => {
     const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (!entry) {
+      return;
+    }
+    const current = entry.pendingPermissions ?? [];
+    if (current.some((p) => p.request_id === pending.request_id)) {
+      return;
+    }
+    entry.pendingPermissions = [...current, pending];
+  };
+
+  /**
+   * Drop one request from a session's approval queue, leaving the others — the
+   * real server's keyed removal, so a resolution for a queued request cannot
+   * clear the visible one (and vice versa).
+   */
+  const resolvePendingPermission = (sessionId: string, requestId: number) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
+    if (!entry?.pendingPermissions) {
+      return;
+    }
+    entry.pendingPermissions = entry.pendingPermissions.filter(
+      (p) => p.request_id !== requestId,
+    );
+  };
+
+  /** Drop a session's whole approval queue (a turn end / close sweep). */
+  const clearPendingPermissions = (sessionId: string) => {
+    const entry = store.sessions.find((s) => s.session.id === sessionId);
     if (entry) {
-      entry.pendingPermission = pending;
+      entry.pendingPermissions = undefined;
     }
   };
 
@@ -859,8 +891,9 @@ export function createMockApi(): MockApi {
     switch (event.kind) {
       case 'permission_requested':
         // Mirror the dialog into queryable state, exactly as the real server
-        // keeps it in the session's runtime for the sends envelope.
-        setPendingPermission(event.session_id, {
+        // keeps it in the session's runtime for the sends envelope: appended to
+        // the queue, so a second request never overwrites the first.
+        enqueuePendingPermission(event.session_id, {
           request_id: event.request_id,
           tool_name: event.tool_name,
           tool_input: event.tool_input,
@@ -876,9 +909,11 @@ export function createMockApi(): MockApi {
         });
         break;
       case 'permission_resolved':
-        // The same event clears both a permission dialog and a question whose
-        // request id matches (the real server emits it for either row).
-        setPendingPermission(event.session_id, undefined);
+        // The same event settles a permission dialog and a question whose
+        // request id matches (the real server emits it for either row). Keyed
+        // for the permission queue: only the answered request leaves, so the
+        // next one becomes the envelope's head.
+        resolvePendingPermission(event.session_id, event.request_id);
         setPendingQuestion(event.session_id, undefined);
         break;
       case 'subagent_started':
@@ -918,7 +953,7 @@ export function createMockApi(): MockApi {
         // its turn, mirroring the server's runtime sweep.
         resolveOpenSends(event.session_id, 'matched');
         setActiveTurn(event.session_id, undefined);
-        setPendingPermission(event.session_id, undefined);
+        clearPendingPermissions(event.session_id);
         setPendingQuestion(event.session_id, undefined);
         // A subagent cannot outlive its turn, mirroring the server's sweep.
         clearSubagents(event.session_id);
@@ -926,7 +961,7 @@ export function createMockApi(): MockApi {
       case 'turn_interrupted':
         resolveOpenSends(event.session_id, 'cancelled');
         setActiveTurn(event.session_id, undefined);
-        setPendingPermission(event.session_id, undefined);
+        clearPendingPermissions(event.session_id);
         setPendingQuestion(event.session_id, undefined);
         clearSubagents(event.session_id);
         break;
@@ -953,7 +988,7 @@ export function createMockApi(): MockApi {
           if (event.kind === 'session_closed') {
             // No live process, no dialog — the server clears its runtime
             // mirror when the close drives the turn back to idle.
-            entry.pendingPermission = undefined;
+            entry.pendingPermissions = undefined;
             entry.pendingQuestion = undefined;
             entry.runningSubagents = undefined;
           }

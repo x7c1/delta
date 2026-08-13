@@ -8,7 +8,7 @@ use crate::turn::TurnState;
 use super::{PendingPermission, PendingQuestion, RunningSubagent, SessionRuntime};
 
 /// One consistent snapshot of the runtime state the sends envelope reports:
-/// the turn phase plus the pending permission dialog, the pending question, and
+/// the turn phase plus the pending permission queue, the pending question, and
 /// the set of running subagents, read in a single actor message so they can
 /// never disagree within one response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,15 +19,27 @@ pub struct SessionLiveState {
     /// running indicator on the exact thread (main or a branch) without waiting
     /// for the next turn-lifecycle event.
     pub in_progress_thread: Option<ThreadId>,
-    pub pending_permission: Option<PendingPermission>,
+    /// The permission dialogs awaiting an answer, oldest first. The head is the
+    /// dialog the browser shows; the length is the depth it reports ("N approvals
+    /// pending"), so a reconnecting client rebuilds both from a plain refetch.
+    /// Empty when nothing is pending.
+    pub pending_permissions: Vec<PendingPermission>,
     pub pending_question: Option<PendingQuestion>,
     /// The subagents currently running in this session's turn, oldest first.
     pub running_subagents: Vec<RunningSubagent>,
 }
 
+impl SessionLiveState {
+    /// The permission dialog the browser shows: the queue's head, or `None` when
+    /// nothing is pending.
+    pub fn pending_permission(&self) -> Option<&PendingPermission> {
+        self.pending_permissions.first()
+    }
+}
+
 impl SessionRuntime {
-    /// Snapshot the queryable live state (turn phase + pending permission +
-    /// pending question + running subagents) in one read, for the sends
+    /// Snapshot the queryable live state (turn phase + the pending permission
+    /// queue + pending question + running subagents) in one read, for the sends
     /// envelope.
     /// The `in_progress_thread` is left `None` here and filled in by the actor
     /// handler, which has the store needed to resolve the in-flight turn's
@@ -36,7 +48,7 @@ impl SessionRuntime {
         SessionLiveState {
             turn: self.turn,
             in_progress_thread: None,
-            pending_permission: self.pending_permission.clone(),
+            pending_permissions: self.pending_permissions.clone(),
             pending_question: self.pending_question.clone(),
             running_subagents: self.running_subagents.clone(),
         }

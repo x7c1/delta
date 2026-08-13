@@ -1,0 +1,35 @@
+{
+  "thread_id": "thr_codex_parallel",
+  "model": "fake-codex-model",
+  "turn": {
+    "turn_id": "turn_codex_parallel",
+    "emit": [
+      { "type": "turn_started" },
+      {
+        "type": "request_approval",
+        "method": "item/commandExecution/requestApproval",
+        "params": { "itemId": "exec_1", "command": "cat alpha.txt", "cwd": "/tmp" }
+      },
+      {
+        "type": "request_approval",
+        "method": "item/commandExecution/requestApproval",
+        "params": { "itemId": "exec_2", "command": "cat beta.txt", "cwd": "/tmp" }
+      },
+      {
+        "type": "request_approval",
+        "method": "item/commandExecution/requestApproval",
+        "params": { "itemId": "exec_3", "command": "cat gamma.txt", "cwd": "/tmp" }
+      },
+      { "type": "await_approvals" },
+      {
+        "type": "item_completed",
+        "item": {
+          "id": "item_reply",
+          "type": "agentMessage",
+          "text": "all three files read"
+        }
+      },
+      { "type": "turn_completed", "status": "completed" }
+    ]
+  }
+}

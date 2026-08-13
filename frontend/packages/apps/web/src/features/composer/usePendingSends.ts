@@ -54,6 +54,7 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   const serverSends = sendsQuery.data?.sends;
   const serverTurn = sendsQuery.data?.turn;
   const serverPermission = sendsQuery.data?.permission;
+  const serverPermissionCount = sendsQuery.data?.permission_count;
   const serverQuestion = sendsQuery.data?.question;
   const serverRunningSubagents = sendsQuery.data?.running_subagents;
 
@@ -90,9 +91,13 @@ export function usePendingSends(surface: PendingSurface | null): PendingEntry[] 
   }, [sessionId, serverTurn, sendsUpdatedAt, sendsSettled]);
   useEffect(() => {
     if (sessionId !== null && serverPermission !== undefined) {
-      useLiveStore.getState().seedPermission(sessionId, serverPermission);
+      // The envelope reports the queue head plus its depth, so the re-seeded
+      // notice carries both the dialog and how many answers are still owed.
+      useLiveStore
+        .getState()
+        .seedPermission(sessionId, serverPermission, serverPermissionCount ?? 0);
     }
-  }, [sessionId, serverPermission, sendsUpdatedAt]);
+  }, [sessionId, serverPermission, serverPermissionCount, sendsUpdatedAt]);
   useEffect(() => {
     if (sessionId !== null && serverQuestion !== undefined) {
       useLiveStore.getState().seedQuestion(sessionId, serverQuestion);

@@ -25,6 +25,7 @@ pub fn run() -> Result<(), String> {
         server_request_seq: 0,
         turn_index: 0,
         pending: None,
+        outstanding_approvals: Vec::new(),
         // A sidecar record of the items each `thread/inject_items` carried, so a
         // full-loop branch test can prove the hidden context reached the server.
         // Off unless the client hands the fake a path via this env var.
@@ -57,10 +58,16 @@ struct Server<'a> {
     /// turn from a scenario's `turns` sequence so successive turns can carry
     /// distinct ids. Ignored when the scenario uses the single `turn`.
     turn_index: usize,
-    /// The suspended remainder of a turn, set when a `blocking` approval was
-    /// emitted and awaiting the client's decision. Resumed (and cleared) when the
-    /// client's response frame arrives. `None` when no turn is gated.
+    /// The suspended remainder of a turn, set when the script parked it on an
+    /// approval gate (a `blocking` approval, or `await_approvals`). Resumed (and
+    /// cleared) once the gate's condition is met by the client's response
+    /// frame(s). `None` when no turn is gated.
     pending: Option<PendingTurn>,
+    /// The ids of server → client approval requests that have been emitted and
+    /// not yet answered, in emission order. Several are outstanding at once
+    /// whenever a scenario fans approvals out before gating on them, which is
+    /// what `await_approvals` waits to drain.
+    outstanding_approvals: Vec<String>,
     /// Where to append each `thread/inject_items` payload (one JSON line per
     /// call), when the client set `FAKE_CODEX_INJECT_LOG`. `None` disables the
     /// record.
@@ -71,12 +78,23 @@ struct Server<'a> {
     thread_start_log: Option<PathBuf>,
 }
 
-/// A turn suspended on a `blocking` approval: the emits still to play once the
-/// client answers, plus the thread and turn they belong to.
+/// A turn suspended on an approval gate: the emits still to play once the gate
+/// opens, plus the thread and turn they belong to.
 struct PendingTurn {
     thread_id: String,
     turn_id: String,
     remaining: Vec<Emit>,
+    gate: ApprovalGate,
+}
+
+/// What has to happen before a suspended turn plays its remainder.
+enum ApprovalGate {
+    /// A `blocking` approval: the very next answer resumes the turn.
+    NextAnswer,
+    /// An `await_approvals` step: the turn resumes once no approval is left
+    /// outstanding — the parallel fan-out case, where the model is waiting on
+    /// several decisions and the turn cannot end until all of them land.
+    AllAnswered,
 }
 
 impl Server<'_> {
@@ -105,10 +123,9 @@ impl Server<'_> {
             }
             // A notification: method, no id (e.g. `initialized`). No reply.
             (Some(_method), None) => Ok(()),
-            // A response to one of our server → client requests. If a turn is
-            // suspended on a blocking approval, this is the decision it was
-            // waiting for: resume the turn, echoing the received decision. When
-            // nothing is pending (a fire-and-forget approval) just log it.
+            // A response to one of our server → client requests: an approval
+            // decision. It retires that request, and — if a turn is suspended on
+            // an approval gate — may open the gate.
             (None, Some(id)) => {
                 let decision = frame
                     .get("result")
@@ -117,7 +134,13 @@ impl Server<'_> {
                     .unwrap_or("unknown")
                     .to_owned();
                 eprintln!("fake-codex: client answered server request {id} with {decision}");
-                self.resume_pending_turn(&decision)
+                let request_id = id
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| id.to_string());
+                self.outstanding_approvals
+                    .retain(|open| open != &request_id);
+                self.on_approval_answered(&request_id, &decision)
             }
             (None, None) => Err(format!("frame is not a JSON-RPC message: {frame}")),
         }
@@ -246,9 +269,10 @@ impl Server<'_> {
     }
 
     /// Play scripted emissions in order, stamping `threadId` into each. Stops
-    /// early (suspending the turn) when a `blocking` approval is emitted: the
-    /// emits after it are parked in [`Self::pending`] and replayed by
-    /// [`Self::resume_pending_turn`] once the client answers.
+    /// early (suspending the turn) at an approval gate — a `blocking` approval,
+    /// or an `await_approvals` with requests still outstanding: the emits after it
+    /// are parked in [`Self::pending`] and replayed by
+    /// [`Self::on_approval_answered`] once the gate opens.
     fn play_emits(&mut self, emits: &[Emit], thread_id: &str, turn_id: &str) -> Result<(), String> {
         for (i, emit) in emits.iter().enumerate() {
             match emit {
@@ -299,11 +323,27 @@ impl Server<'_> {
                     self.emit_server_request(method, with_thread_id(params.clone(), thread_id))?;
                     if *blocking {
                         // Suspend the turn: park the rest and wait for the
-                        // client's decision (resumed in `resume_pending_turn`).
+                        // client's decision (resumed in `on_approval_answered`).
                         self.pending = Some(PendingTurn {
                             thread_id: thread_id.to_owned(),
                             turn_id: turn_id.to_owned(),
                             remaining: emits[i + 1..].to_vec(),
+                            gate: ApprovalGate::NextAnswer,
+                        });
+                        return Ok(());
+                    }
+                }
+                // Park the turn until every outstanding approval is answered.
+                // With nothing outstanding the gate is already open, so the
+                // script simply carries on — a scenario can keep the step in
+                // place unconditionally.
+                Emit::AwaitApprovals => {
+                    if !self.outstanding_approvals.is_empty() {
+                        self.pending = Some(PendingTurn {
+                            thread_id: thread_id.to_owned(),
+                            turn_id: turn_id.to_owned(),
+                            remaining: emits[i + 1..].to_vec(),
+                            gate: ApprovalGate::AllAnswered,
                         });
                         return Ok(());
                     }
@@ -324,20 +364,28 @@ impl Server<'_> {
         Ok(())
     }
 
-    /// Resume a turn suspended on a `blocking` approval, now that the client has
-    /// answered with `decision` (`accept`/`decline`). Echoes the received
-    /// decision back as a completed assistant message — so the value that
-    /// round-tripped to the server is observable end-to-end — then plays the
-    /// parked remainder of the turn. A no-op when no turn is suspended.
-    fn resume_pending_turn(&mut self, decision: &str) -> Result<(), String> {
+    /// React to one approval decision (`accept`/`decline`) for `request_id`.
+    ///
+    /// Echoes the received decision back as a completed assistant message — so
+    /// every value that round-tripped to the server is observable end-to-end —
+    /// and then, if the suspended turn's gate is now open, plays the parked
+    /// remainder. Under [`ApprovalGate::AllAnswered`] the turn stays suspended
+    /// while any approval is still outstanding, which is exactly the real
+    /// behavior a parallel fan-out has: the turn cannot finish until every
+    /// request has an answer.
+    ///
+    /// A no-op when no turn is suspended (a fire-and-forget approval nothing
+    /// gates on): the decision is logged by the caller and nothing else happens.
+    fn on_approval_answered(&mut self, request_id: &str, decision: &str) -> Result<(), String> {
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
-        let thread_id = pending.thread_id;
-        let turn_id = pending.turn_id;
-        // Echo the decision as an assistant message, on a dedicated item id so it
-        // never collides with the turn's own items.
-        let echo_id = format!("approval_echo_{}", self.server_request_seq);
+        let thread_id = pending.thread_id.clone();
+        let turn_id = pending.turn_id.clone();
+        // Echo the decision as an assistant message, keyed by the answered
+        // request so N answers produce N distinct items that never collide with
+        // the turn's own.
+        let echo_id = format!("approval_echo_{request_id}");
         self.emit_notification(
             "item/started",
             with_thread_id(
@@ -352,6 +400,13 @@ impl Server<'_> {
                 &thread_id,
             ),
         )?;
+        if matches!(pending.gate, ApprovalGate::AllAnswered)
+            && !self.outstanding_approvals.is_empty()
+        {
+            // Still waiting on the rest of the fan-out: keep the turn parked.
+            self.pending = Some(pending);
+            return Ok(());
+        }
         self.play_emits(&pending.remaining, &thread_id, &turn_id)
     }
 
@@ -375,9 +430,12 @@ impl Server<'_> {
         self.write_frame(json!({ "method": method, "params": params }))
     }
 
+    /// Emit a server → client request with a freshly minted id, recording it as
+    /// outstanding until the client answers it.
     fn emit_server_request(&mut self, method: &str, params: Value) -> Result<(), String> {
         self.server_request_seq += 1;
         let id = format!("srv-{}", self.server_request_seq);
+        self.outstanding_approvals.push(id.clone());
         self.write_frame(json!({ "id": id, "method": method, "params": params }))
     }
 

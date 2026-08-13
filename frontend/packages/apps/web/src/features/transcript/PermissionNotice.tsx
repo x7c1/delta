@@ -46,7 +46,13 @@ export interface PermissionNoticeCardProps {
  * The floating permission notice: tool name, an input summary, and Allow/Deny
  * buttons wired to `POST /api/permissions/{id}/decision`. A successful
  * decision needs no local cleanup — the broadcast `permission_resolved`
- * clears the store notice and unmounts this card.
+ * clears the store notice and unmounts this card, or re-points it at the next
+ * pending request when several are outstanding.
+ *
+ * Several CAN be outstanding: a provider running tool calls in parallel raises
+ * N approvals at once. The card always shows the oldest unanswered one and says
+ * how many more are waiting, so answering walks the queue front to back instead
+ * of leaving the rest invisible (and, in the field, unanswered forever).
  *
  * When the decision endpoint answers `409 permission_not_pending` (the hook's
  * browser-decision wait timed out, so the interactive TUI prompt owns the
@@ -85,6 +91,10 @@ export function PermissionNoticeCard({
     });
   };
 
+  // How many other requests are still waiting behind this one. Shown so the
+  // user knows the queue is not empty when this card clears.
+  const remaining = Math.max(notice.pendingCount - 1, 0);
+
   return (
     <div
       className="pointer-events-auto absolute right-overlay-inset top-overlay-inset max-w-xs space-y-1 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-caption shadow-md"
@@ -93,6 +103,14 @@ export function PermissionNoticeCard({
     >
       <p className="font-medium text-warning">
         Permission requested: {notice.toolName}
+        {remaining > 0 && (
+          <span
+            className="ml-1 font-normal text-fg-muted"
+            data-testid="permission-notice-remaining"
+          >
+            (+{remaining} more)
+          </span>
+        )}
       </p>
       <p className="break-all font-mono text-code text-fg-muted">
         {toolInputSummary(notice.toolInput)}

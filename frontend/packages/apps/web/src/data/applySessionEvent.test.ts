@@ -481,6 +481,8 @@ describe('applySessionEvent', () => {
       toolName: 'Edit',
       toolInput: '{}',
       dismissed: false,
+      queued: [],
+      pendingCount: 1,
     });
   });
 });

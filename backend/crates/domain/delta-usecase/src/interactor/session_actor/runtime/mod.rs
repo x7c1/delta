@@ -81,12 +81,18 @@ pub struct SessionRuntime {
     /// response blocks on the receiver), resolved by a browser decision, and
     /// abandoned on the transport's timeout.
     permission_waiters: HashMap<i64, oneshot::Sender<PermissionDecision>>,
-    /// The permission dialog currently awaiting an answer, if any. Unlike a
-    /// waiter (which only lives while the hook response blocks on a browser
-    /// decision), this survives the decision-wait timeout: the TUI prompt is
-    /// still up, so the question is still genuinely pending. At most one
-    /// exists — `claude` shows one dialog at a time.
-    pending_permission: Option<PendingPermission>,
+    /// The permission dialogs currently awaiting an answer, oldest first (the
+    /// head is the one the browser shows). Unlike a waiter (which only lives
+    /// while the hook response blocks on a browser decision), an entry survives
+    /// the decision-wait timeout: the TUI prompt is still up, so the question is
+    /// still genuinely pending.
+    ///
+    /// A queue rather than a slot because an adapter-backed provider (Codex) can
+    /// raise N approvals within one turn — see
+    /// [`SessionRuntime::enqueue_pending_permission`] for what keeping only the
+    /// last one cost. A `Vec`, not a `VecDeque`: removals are keyed by request id
+    /// rather than strictly from the front, and every reader wants a slice.
+    pending_permissions: Vec<PendingPermission>,
     /// The `AskUserQuestion` tool call currently presenting its options in the
     /// TUI, if any. Set by the `PreToolUse` hook for that tool and cleared when
     /// the correlated `tool_result` resolves its request row or the turn ends.
@@ -237,7 +243,7 @@ impl SessionRuntime {
             && self.resuming.is_none()
             && self.turn == TurnState::Idle
             && self.permission_waiters.is_empty()
-            && self.pending_permission.is_none()
+            && self.pending_permissions.is_empty()
             && self.pending_question.is_none()
             && self.running_subagents.is_empty()
     }

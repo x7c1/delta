@@ -140,7 +140,7 @@ async fn permission_request_for_ask_user_question_passes_through() {
 
     // No pending_permission is mirrored (only the PreToolUse question is).
     assert_eq!(
-        ix.live_state_for(&session).await.pending_permission,
+        ix.live_state_for(&session).await.pending_permission(),
         None,
         "the passthrough sets no pending permission dialog"
     );

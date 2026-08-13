@@ -4,12 +4,16 @@ import { expect, type Page } from '@playwright/test';
  * Fake-mode end-to-end support helpers.
  *
  * Each spec drives the real app against the real backend; the only scripted
- * part is the `fake-claude` binary the backend spawns. The backend's wrapper
- * script points `FAKE_CLAUDE_SCENARIO_DIR` at this suite's `scenarios/`
- * directory, and the fake selects `<dir>/<first word of the first prompt>.json`
- * — so the scenario a session follows is chosen by the first prompt each spec
- * sends. Keep the first word of every spec's first prompt equal to a scenario
- * file name.
+ * part is the fake the backend spawns as the session's agent — `fake-claude`
+ * for a Claude session, `fake-codex` for a Codex one.
+ *
+ * For `fake-claude`, the backend's wrapper script points
+ * `FAKE_CLAUDE_SCENARIO_DIR` at this suite's `scenarios/` directory, and the
+ * fake selects `<dir>/<first word of the first prompt>.json` — so the scenario a
+ * session follows is chosen by the first prompt each spec sends. Keep the first
+ * word of every CLAUDE spec's first prompt equal to a scenario file name. A
+ * Codex session's scenario is pinned for the whole run by the server fixture
+ * instead (see {@link startNewCodexSession}), so its prompt text is free.
  */
 
 /**
@@ -40,12 +44,49 @@ export async function startNewSession(
   prompt: string,
   workdir?: string,
 ): Promise<void> {
+  await startSessionOn(page, null, prompt, workdir);
+}
+
+/**
+ * Like {@link startNewSession}, but on the **Codex** provider: the terminal-less
+ * adapter path, whose scripted server is the `fake-codex` binary the backend
+ * spawns (its scenario is fixed for the run by the server fixture's wrapper —
+ * unlike `fake-claude`, the Codex fake has no prompt-word scenario selection).
+ */
+export async function startNewCodexSession(
+  page: Page,
+  prompt: string,
+  workdir?: string,
+): Promise<void> {
+  await startSessionOn(page, 'codex', prompt, workdir);
+}
+
+/**
+ * The shared body of the two entry points: enter the new-session flow, pick the
+ * provider (when one is named — otherwise the form's default, Claude, stands),
+ * choose a directory, and send.
+ */
+async function startSessionOn(
+  page: Page,
+  provider: 'claude' | 'codex' | null,
+  prompt: string,
+  workdir?: string,
+): Promise<void> {
   const newSessionEmpty = page.getByTestId('new-session-empty');
   await expect(
     page.getByTestId('session-node').first().or(newSessionEmpty),
   ).toBeVisible();
   if (!(await newSessionEmpty.isVisible())) {
     await page.getByRole('button', { name: 'New session', exact: true }).click();
+  }
+
+  if (provider !== null) {
+    // The provider radio gates on `GET /api/providers`: a provider whose binary
+    // the server cannot find renders disabled, so waiting for it to be enabled
+    // fails loudly here instead of silently launching the default provider.
+    const option = page.getByTestId(`provider-option-${provider}`);
+    await expect(option).toBeEnabled();
+    await option.check();
   }
 
   // Switch to the Directory tab so its inline Recent + Browse picker

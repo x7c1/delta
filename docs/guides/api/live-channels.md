@@ -36,8 +36,8 @@ what it missed while leaving the socket open. So a client must treat these
 events as prompts to update state it can also read, and rebuild after any gap —
 a fresh connect, a reconnect, a lag — from
 [`GET /api/sessions/{id}/sends`](sends.md#get-apisessionsidsends), which returns
-the open sends plus the queryable live state (turn phase and thread, pending
-permission, pending question, running subagents), and from
+the open sends plus the queryable live state (turn phase and thread, the pending
+permission queue's head and depth, pending question, running subagents), and from
 [`GET /api/sessions`](sessions.md#get-apisessions), whose per-session `open` flag
 says what a missed `session_registered` / `session_opened` / `session_closed`
 would have said. What no refetch can rebuild is the little that is never
@@ -190,7 +190,14 @@ which frames arrive, and a client must handle each event whenever it lands.
   parses it only for display), so the notice can show what the tool is about to
   do next to its Allow/Deny buttons. `request_id` is the row
   [`POST /api/permissions/{id}/decision`](sends.md#post-apipermissionsiddecision)
-  decides.
+  decides. One per request, so a provider raising several approvals at once (a
+  parallel tool-call fan-out) emits several: they form a FIFO queue whose arrival
+  order is this broadcast order, and the client shows the first while the rest
+  wait. The *same* event is re-emitted for whichever request is promoted to head
+  when a resolution retires the previous one, so a client that only follows events
+  always has a dialog on screen while approvals are pending; a client already
+  tracking the queue treats the repeat as a no-op. See
+  [the queue semantics](sends.md#the-pending-permission-queue).
 - `question_asked` — Claude Code's `AskUserQuestion` tool is presenting a
   multiple-choice question. `tool_input` is the raw `{"questions":[…]}` payload
   as JSON text, which the client parses to render the question card, and
@@ -206,7 +213,9 @@ which frames arrive, and a client must handle each event whenever it lands.
   with the open request is ingested — which is also how an answer given in the
   TUI clears the card. An auto-approved tool resolves almost immediately, while
   a genuine prompt yields no result until a human answers, so the notice
-  persists until then.
+  persists until then. It settles exactly the named `request_id`: with several
+  approvals pending, the others stay pending and answerable, and the next one is
+  raised by the follow-up `permission_requested` described above.
 
 ### Streaming and subagents
 

@@ -48,6 +48,7 @@
 //! | `turn_started` | Emit a `turn/started` notification. |
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
 //! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
+//! | `await_approvals` | **Suspend** the turn until *every* approval emitted so far has been answered. Each answer is echoed as an assistant message the moment it arrives; the parked remainder plays once the last outstanding approval is answered. A no-op when nothing is outstanding. |
 //! | `notification { method, params? }` | Emit an arbitrary notification (escape hatch for shapes not covered above). |
 //! | `account_notification { method, params? }` | Emit an **account-scoped** notification: the params are written verbatim, WITHOUT a `threadId`, exactly as the real server emits `account/rateLimits/updated`. |
 //!
@@ -59,6 +60,13 @@
 //! path rather than its per-thread demux. A fake that stamped a `threadId` onto
 //! them would exercise the routed path instead, and a test written against it
 //! would pass while the real path was broken.
+//!
+//! Several non-blocking `request_approval` steps followed by `await_approvals`
+//! reproduce what a real `codex app-server` does on a parallel tool-call
+//! fan-out: N approval requests outstanding at once, the turn finishing only
+//! once every one of them has an answer. `blocking: true` is the serial case —
+//! one approval gating the turn — and cannot express the parallel one, since it
+//! stops the script at the first request.
 //!
 //! A separate `turn/interrupt` request (whenever it arrives) must carry
 //! `{threadId, turnId}` (the fake rejects it with a JSON-RPC error if the
@@ -120,6 +128,19 @@ pub enum Emit {
         #[serde(default)]
         blocking: bool,
     },
+    /// Suspend the turn until **every** approval emitted so far has been
+    /// answered, then play the rest of the turn.
+    ///
+    /// This is the parallel-approval gate: a scenario emits N non-blocking
+    /// `request_approval` steps (so all N are outstanding at once, as a real
+    /// `codex app-server` does when the model fans tool calls out) and then parks
+    /// the turn here. Each answer is echoed as an assistant message as it
+    /// arrives, so a test can prove every request round-tripped — and the turn
+    /// completes only after the last one, which is what makes an unanswerable
+    /// request show up as a hung turn rather than a silent pass.
+    ///
+    /// A no-op when no approval is outstanding.
+    AwaitApprovals,
     Notification {
         method: String,
         #[serde(default)]
@@ -324,6 +345,38 @@ mod tests {
                 status: "completed".to_owned()
             }
         );
+    }
+
+    #[test]
+    fn parses_a_parallel_approval_fan_out() {
+        // The parallel shape: several non-blocking approvals (all outstanding at
+        // once) parked on `await_approvals`, with the turn end behind the gate.
+        let scenario: Scenario = serde_json::from_str(
+            r#"{
+                "turn": {
+                    "emit": [
+                        { "type": "request_approval", "params": { "itemId": "e1", "command": "cat a" } },
+                        { "type": "request_approval", "params": { "itemId": "e2", "command": "cat b" } },
+                        { "type": "await_approvals" },
+                        { "type": "turn_completed", "status": "completed" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+        let turn = scenario.turn.expect("a turn");
+        assert!(
+            turn.emit[..2].iter().all(|e| matches!(
+                e,
+                Emit::RequestApproval {
+                    blocking: false,
+                    ..
+                }
+            )),
+            "the fan-out does not block between requests: {:?}",
+            turn.emit
+        );
+        assert_eq!(turn.emit[2], Emit::AwaitApprovals);
     }
 
     #[test]

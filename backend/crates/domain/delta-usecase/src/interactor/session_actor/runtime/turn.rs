@@ -28,9 +28,11 @@ impl SessionRuntime {
     /// anomalies). The transition table lives in the `turn` module.
     ///
     /// A transition back to [`TurnState::Idle`] (stop, interrupt, close) also
-    /// drops any pending permission dialog and pending question: both blocked
-    /// that turn, so the turn ending — however it ended — makes them moot. This
-    /// is the same lifecycle the browser notices have.
+    /// drops every pending permission dialog and the pending question: they all
+    /// blocked that turn, so the turn ending — however it ended — makes them moot.
+    /// This is the same lifecycle the browser notices have. The provider has
+    /// already settled or abandoned those requests by then; Delta only drops its
+    /// mirror of them.
     pub fn apply_turn(&mut self, input: TurnInput) -> Transition {
         let result = transition(self.turn, input);
         self.turn = result.next;
@@ -41,7 +43,7 @@ impl SessionRuntime {
             self.forget_requeues(send_id);
         }
         if result.next == TurnState::Idle {
-            self.pending_permission = None;
+            self.pending_permissions.clear();
             self.pending_question = None;
             // A FOREGROUND subagent cannot outlive the turn that spawned it:
             // once the turn ends (stop, interrupt, close) any still-running
@@ -70,7 +72,7 @@ impl SessionRuntime {
     /// one would pin a doomed actor alive forever.
     pub fn forget_turn(&mut self) {
         self.turn = TurnState::Idle;
-        self.pending_permission = None;
+        self.pending_permissions.clear();
         self.pending_question = None;
         self.running_subagents.clear();
         self.streaming_message = None;

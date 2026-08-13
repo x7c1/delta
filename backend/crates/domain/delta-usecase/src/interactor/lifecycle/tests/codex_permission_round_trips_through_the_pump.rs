@@ -90,7 +90,7 @@ async fn codex_permission_round_trips_through_the_pump() {
     let pending = wait_for("the permission mirror to rise", || {
         let ix = &ix;
         let sid = sid.clone();
-        async move { ix.live_state_for(&sid).await.pending_permission }
+        async move { ix.live_state_for(&sid).await.pending_permission().cloned() }
     })
     .await;
     assert!(
@@ -130,7 +130,7 @@ async fn codex_permission_round_trips_through_the_pump() {
         async move {
             ix.live_state_for(&sid)
                 .await
-                .pending_permission
+                .pending_permission()
                 .is_none()
                 .then_some(())
         }

@@ -11,8 +11,8 @@ import path from 'node:path';
  * The server-restart semantics under test (a `dispatched` send a dead process
  * left behind, swept back to `queued` + `restored_at` at the next boot) cross
  * a server-process death, so a spec must be able to kill the server and bring
- * it back against the *same* database, tmux socket, and scripted-claude
- * wrapper. That is only possible if the test process holds the child-process
+ * it back against the *same* database, tmux socket, and scripted-agent
+ * wrappers. That is only possible if the test process holds the child-process
  * handle — which `scripts/e2e-fake.sh` used to keep as bash locals and never
  * exposed. This module moves that ownership into the worker: it boots the
  * server, polls `/health`, exposes {@link ServerHandle.restart}, and tears
@@ -20,13 +20,13 @@ import path from 'node:path';
  *
  * A single boot implementation lives here (in Node) so the bash entry point
  * and the fixture cannot drift: `scripts/e2e-fake.sh` is now a thin wrapper
- * that only builds the two binaries and invokes the suite.
+ * that only builds the binaries and invokes the suite.
  *
  * ## Per-run isolation (mirrors the retired bash locals)
  *
- * - the SQLite database, spawn workdirs, the scripted-claude wrapper, and a
- *   pid file live in a fresh temp dir (`delta-e2e-fake.<rand>/`), removed on
- *   teardown;
+ * - the SQLite database, spawn workdirs, the scripted-claude and scripted-codex
+ *   wrappers, and a pid file live in a fresh temp dir
+ *   (`delta-e2e-fake.<rand>/`), removed on teardown;
  * - tmux runs on a unique per-run socket (`delta-e2e-fake-<pid>`), killed on
  *   teardown, so a leftover or parallel run never collides;
  * - the fake's transcripts live under the temp dir too, and are copied into
@@ -64,7 +64,15 @@ const REPO_ROOT = path.resolve(HERE, '../../../../../..');
 const BACKEND_DIR = path.join(REPO_ROOT, 'backend');
 const SERVER_BIN = path.join(BACKEND_DIR, 'target/debug/delta-server');
 const FAKE_BIN = path.join(BACKEND_DIR, 'target/debug/fake-claude');
+const FAKE_CODEX_BIN = path.join(BACKEND_DIR, 'target/debug/fake-codex');
 const SCENARIO_DIR = path.join(HERE, '..', 'scenarios');
+/**
+ * The scripted turn every Codex session in a run plays. `fake-codex` selects its
+ * scenario from `FAKE_CODEX_SCENARIO` (one file, read at process start), not from
+ * the prompt like `fake-claude` — so the run pins one Codex scenario here and the
+ * Codex specs share it.
+ */
+const CODEX_SCENARIO = path.join(SCENARIO_DIR, 'codex-parallel-approvals.json');
 
 // The per-run state (server.log, transcripts) lives in a temp dir deleted on
 // teardown, which is useless once CI tears the runner down. Mirror the
@@ -82,7 +90,7 @@ export interface ServerHandle {
   /**
    * SIGKILL the current server child (a hard death — the production incident
    * was never a graceful shutdown) and relaunch against the SAME database,
-   * tmux socket, and scripted-claude wrapper, polling `/health` until the new
+   * tmux socket, and scripted-agent wrappers, polling `/health` until the new
    * generation is ready. The relaunched generation logs to the next log file.
    */
   restart(): Promise<void>;
@@ -231,8 +239,9 @@ function logTail(logPath: string): string {
 
 /**
  * Boot a fresh server for this worker: sweep prior leaks, lay down the per-run
- * temp dir and the scripted-claude wrapper, spawn generation 1, and wait for
- * `/health`. Returns the handle the fixture hands to specs.
+ * temp dir and the two scripted-agent wrappers (claude and codex), spawn
+ * generation 1, and wait for `/health`. Returns the handle the fixture hands to
+ * specs.
  */
 export async function bootServer(): Promise<ServerHandle> {
   sweepStaleRuns();
@@ -253,10 +262,14 @@ export async function bootServer(): Promise<ServerHandle> {
   fs.rmSync(ARTIFACT_DIR, { recursive: true, force: true });
   fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
 
-  if (!fs.existsSync(SERVER_BIN) || !fs.existsSync(FAKE_BIN)) {
+  if (
+    !fs.existsSync(SERVER_BIN) ||
+    !fs.existsSync(FAKE_BIN) ||
+    !fs.existsSync(FAKE_CODEX_BIN)
+  ) {
     throw new Error(
-      `Missing built binaries (${SERVER_BIN}, ${FAKE_BIN}). Run \`make e2e-fake\` ` +
-        `(it builds them) rather than invoking Playwright directly.`,
+      `Missing built binaries (${SERVER_BIN}, ${FAKE_BIN}, ${FAKE_CODEX_BIN}). ` +
+        `Run \`make e2e-fake\` (it builds them) rather than invoking Playwright directly.`,
     );
   }
 
@@ -277,6 +290,20 @@ export async function bootServer(): Promise<ServerHandle> {
       `  *) export FAKE_CLAUDE_SCENARIO_DIR='${SCENARIO_DIR}' ;;\n` +
       `esac\n` +
       `exec '${FAKE_BIN}' "$@"\n`,
+    { mode: 0o755 },
+  );
+
+  // The Codex counterpart: the adapter spawns this as the `codex` binary (the
+  // fake IS the app-server, so the `app-server` argument it is handed is
+  // ignored). The wrapper is what hands the fake its scenario, and its mere
+  // existence is also what makes the provider selector's Codex option
+  // selectable — `GET /api/providers` probes exactly this path.
+  const codexWrapper = path.join(runDir, 'codex-bin.sh');
+  fs.writeFileSync(
+    codexWrapper,
+    `#!/bin/sh\n` +
+      `export FAKE_CODEX_SCENARIO='${CODEX_SCENARIO}'\n` +
+      `exec '${FAKE_CODEX_BIN}' "$@"\n`,
     { mode: 0o755 },
   );
 
@@ -301,6 +328,7 @@ export async function bootServer(): Promise<ServerHandle> {
           DELTA_SESSION_WORKDIR: workdir,
           DELTA_TMUX_SOCKET: tmuxSocket,
           DELTA_CLAUDE_BIN: wrapper,
+          DELTA_CODEX_BIN: codexWrapper,
           DELTA_LAUNCH_DEADLINE_MS: '3000',
           DELTA_PERMISSION_DECISION_TIMEOUT_MS: '3000',
         },

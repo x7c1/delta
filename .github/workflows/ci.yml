@@ -124,10 +124,10 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  # Fake-mode e2e: the real backend + tmux with the scripted fake-claude
-  # binary behind it, driven by the browser. Complements (never replaces) the
-  # mock-mode e2e job above: that one isolates the frontend, this one proves
-  # the full loop (REST → spawn → tmux → hooks → transcript → tail → WS).
+  # Fake-mode e2e: the real backend + tmux with the scripted fake-claude and
+  # fake-codex binaries behind it, driven by the browser. Complements (never
+  # replaces) the mock-mode e2e job above: that one isolates the frontend, this
+  # one proves the full loop (REST → spawn → tmux → hooks → transcript → tail → WS).
   e2e-fake:
     runs-on: ubuntu-latest
     steps:
