@@ -87,7 +87,7 @@ a test per row):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real `codex app-server` session: kill the session's
+- [x] Against a real `codex app-server` session: kill the session's
       app-server process (by PID) while an approval dialog is pending, click
       Allow (fails on the dead wire), click again — the card shows the
       terminal-less guidance instead of "Answer the prompt in the terminal",
