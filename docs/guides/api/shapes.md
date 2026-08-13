@@ -3,7 +3,7 @@
 ## Overview
 
 The JSON shapes shared across the API surfaces: `Session`, `Thread`,
-`Message`, `ContentBlock`, and `PendingSend`. The endpoint documentation in
+`Message`, `ContentBlock`, and `Send`. The endpoint documentation in
 this directory ([sessions.md](sessions.md), [sends.md](sends.md),
 [live-channels.md](live-channels.md), [hooks.md](hooks.md)) refers to these by
 name. Conventions (timestamps, id types, error bodies) are in
@@ -115,7 +115,7 @@ A tagged union keyed on `type`:
 
 Any unmodelled block kind is preserved as `{ "type": "other" }`.
 
-## `PendingSend`
+## `Send`
 
 ```json
 {
