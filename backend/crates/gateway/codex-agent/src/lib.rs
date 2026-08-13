@@ -71,7 +71,7 @@ pub mod schema;
 mod translate;
 pub mod wire;
 
-pub use adapter::{CodexAppServerAdapter, CODEX_CAPABILITIES};
+pub use adapter::{thread_start_params, CodexAppServerAdapter, CODEX_CAPABILITIES};
 pub use content::{codex_content_source, CodexConversationSource};
 pub use factory::CodexAdapterFactory;
 

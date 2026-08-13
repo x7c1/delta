@@ -12,6 +12,40 @@
 //! each adapter renders in its own way (Claude → argv flags, Codex →
 //! `thread/start` fields), so no caller in the core has to know which shape a
 //! provider wants.
+//!
+//! ## The worktree's source repository
+//!
+//! [`LaunchRequest::worktree_repo_root`] / [`ResumeRequest::worktree_repo_root`]
+//! carry one fact about the session's working directory that a provider cannot
+//! be expected to work out: that Delta created it as a **linked git worktree**,
+//! and which repository it was cut from.
+//!
+//! It matters because a linked worktree's `.git` is only a pointer file
+//! (`gitdir: <repo-root>/.git/worktrees/<id>`) — git's actual writes land in the
+//! source repository's `.git` (the per-worktree `worktrees/<id>/index` plus the
+//! shared `objects/` and `refs/`), which is outside the working directory
+//! entirely. A provider that sandboxes writes to the area around its working
+//! directory therefore blocks — or raises an approval prompt for — every
+//! routine `git add` / `git commit` in such a session, unless it is told about
+//! that directory. Delta is the party that created the worktree, so Delta is
+//! the party that knows; it is derived fresh on every launch and resume and
+//! registered nowhere.
+//!
+//! Adapters whose providers do not sandbox writes ignore it: the Claude launch
+//! is unaffected by this field.
+//!
+//! One limit is worth knowing, because it is reachable rather than exotic: the
+//! value is the *working-tree top* of the directory the session was started
+//! from (`git rev-parse --show-toplevel`), and nothing constrains that directory
+//! to be a main clone — the picker browses the filesystem freely, and its
+//! "recent" list carries every directory a past session was started from, a
+//! linked worktree the user maintains by hand included. Start a worktree session
+//! from a directory that is itself a linked worktree and the root named here is
+//! that worktree, whose own `.git` is again a pointer file, while git still
+//! writes through the original clone's. Such a session keeps the approval
+//! prompts, exactly as before this field existed. Naming the repository's
+//! *common* git directory (`git rev-parse --git-common-dir`, which resolves to
+//! the original clone from anywhere) is what would close that case.
 
 use async_trait::async_trait;
 use delta_model::{SessionId, ThreadId};
@@ -76,6 +110,12 @@ pub struct LaunchRequest {
     /// A first prompt delivered at launch, when the session was started from
     /// the composer's first Send.
     pub first_prompt: Option<String>,
+    /// The root of the repository this session's worktree was cut from, when
+    /// [`Self::workdir`] is a git worktree Delta created for the session;
+    /// `None` for a session launched directly in a user-selected (or scratch)
+    /// directory. See the module docs' *The worktree's source repository* for
+    /// why an adapter is told this.
+    pub worktree_repo_root: Option<String>,
 }
 
 /// Inputs for resuming a previously-closed agent session.
@@ -88,6 +128,13 @@ pub struct ResumeRequest {
     pub provider_session_id: String,
     /// The working directory to resume the agent in.
     pub workdir: String,
+    /// The root of the repository this session's worktree was cut from, when
+    /// [`Self::workdir`] is a git worktree Delta created for the session;
+    /// `None` otherwise. Re-derived on every resume from the session row Delta
+    /// wrote at spawn — the same value the original [`LaunchRequest`] carried —
+    /// so a resumed worktree session is configured exactly like a fresh one.
+    /// See the module docs' *The worktree's source repository*.
+    pub worktree_repo_root: Option<String>,
 }
 
 /// Inputs for building one session's push-based content accumulator

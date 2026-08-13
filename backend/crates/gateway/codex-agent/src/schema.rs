@@ -163,6 +163,39 @@ mod tests {
         );
     }
 
+    /// The schema half of the worktree git-directory grant: `config` is a
+    /// free-form object on **both** `thread/start` and `thread/resume`, so the
+    /// grant has a documented field to ride on either path.
+    ///
+    /// That is all the schema can say. It declares no key names, so it cannot
+    /// tell anyone whether a **dotted** key
+    /// (`sandbox_workspace_write.writable_roots`) is honoured at the leaf the
+    /// way the CLI's `-c` flag is — only the real server can, which is why the
+    /// `real_thread_start_honors_the_worktree_git_grant` canary exists. Keeping
+    /// both is deliberate: this test fails if the field the grant rides on ever
+    /// stops being a free-form object, the canary fails if the real server stops
+    /// honouring the spelling Delta sends.
+    #[test]
+    fn thread_start_and_resume_carry_a_free_form_config_object() {
+        for type_name in ["ThreadStartParams", "ThreadResumeParams"] {
+            let schema = per_type_schema(type_name);
+            let config = schema
+                .pointer("/properties/config")
+                .unwrap_or_else(|| panic!("{type_name} must declare a `config` field"));
+            assert_eq!(
+                config.get("type"),
+                Some(&serde_json::json!(["object", "null"])),
+                "{type_name}.config must be a nullable object, got {config}"
+            );
+            assert_eq!(
+                config.get("additionalProperties"),
+                Some(&serde_json::json!(true)),
+                "{type_name}.config must accept arbitrary keys for the grant to \
+                 ride on, got {config}"
+            );
+        }
+    }
+
     #[test]
     fn vendored_codex_version_is_pinned() {
         assert!(

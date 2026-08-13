@@ -2,7 +2,7 @@
 //! reconciliation, run against the REAL `codex app-server` binary (not the
 //! `fake-codex` re-enactment every other test drives).
 //!
-//! Three canaries live here, all `#[ignore]` so none runs under a bare
+//! Four canaries live here, all `#[ignore]` so none runs under a bare
 //! `cargo test` or in CI (see "Why they are all `#[ignore]`" below):
 //!
 //! 1. [`real_codex_completes_a_safe_turn_end_to_end`] — drives Delta's REAL
@@ -23,7 +23,16 @@
 //!    schema declaring it — which is why Delta observes its launch directory's
 //!    branch itself. Needs the real binary + auth; no turn is run.
 //!
-//! 3. [`vendored_schema_matches_the_real_generator`] — regenerates the schema
+//! 3. [`real_thread_start_honors_the_worktree_git_grant`] — starts two threads
+//!    (NO turn, so no model quota) and pins that the **dotted** config key
+//!    Delta injects for a worktree session,
+//!    `sandbox_workspace_write.writable_roots`, really reaches the thread's
+//!    effective sandbox policy. The vendored schema types `config` as a
+//!    free-form object and so cannot say this; without the canary, an ignored
+//!    key would leave every unit test green and every `git add` prompting.
+//!    Needs the real binary + auth.
+//!
+//! 4. [`vendored_schema_matches_the_real_generator`] — regenerates the schema
 //!    with `codex app-server generate-json-schema` (a static dump: NO auth, NO
 //!    network) and compares it against the vendored ground truth under
 //!    `vendor/app-server-schema/`, failing loudly if the real generator's
@@ -81,10 +90,12 @@ use codex_agent::schema::{
     COMBINED_SERVER_REQUEST_SCHEMA_RELATIVE_PATH, V2_COMBINED_SCHEMA_RELATIVE_PATH,
     VENDORED_CODEX_VERSION,
 };
-use codex_agent::{AppServerConnection, CodexAdapterFactory, CodexLaunchConfig};
+use codex_agent::{
+    thread_start_params, AppServerConnection, CodexAdapterFactory, CodexLaunchConfig,
+};
 use delta_usecase::{
     AgentAdapter, AgentAdapterFactory, AgentEvent, AgentEventStream, ContentSourceRequest,
-    LaunchRequest, SendRequest, SessionId, ThreadId, TurnStatus,
+    LaunchOptionSpec, LaunchRequest, SendRequest, SessionId, ThreadId, TurnStatus,
 };
 use serde_json::{json, Value};
 use tokio::time::timeout;
@@ -199,6 +210,7 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
             workdir: cwd.as_str(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch a real Codex thread");
@@ -321,7 +333,7 @@ async fn real_codex_completes_a_safe_turn_end_to_end() {
     adapter.close(&handle).await.expect("close the session");
 }
 
-// --- Canary 3: the thread-metadata wire fields -----------------------------
+// --- Canary 2: the thread-metadata wire fields -----------------------------
 
 /// The `thread/start` response fields Delta reads a session's message metadata
 /// from behave as Delta assumes — checked against the live binary rather than
@@ -443,7 +455,130 @@ fn git_branch_of(dir: &Path) -> Option<String> {
     (!branch.is_empty() && branch != "HEAD").then_some(branch)
 }
 
-// --- Canary 2: schema drift detection --------------------------------------
+// --- Canary 3: the worktree git-directory grant ----------------------------
+
+/// The real server honours the sandbox grant Delta injects for a worktree
+/// session — the claim the whole feature rests on, and one only the live binary
+/// can settle.
+///
+/// Delta grants a worktree session's real git directory (the source
+/// repository's `.git`, which a linked worktree's own `.git` only points at) by
+/// putting it on the **dotted** config key
+/// `sandbox_workspace_write.writable_roots` in `thread/start`'s free-form
+/// `config`. The vendored schema types that field as an object with arbitrary
+/// keys and stops there: it says nothing about whether a dotted key is applied
+/// at the leaf the way the CLI's `-c` flag applies it, or whether it is merely
+/// stored as an oddly-named unknown key and ignored. If it were ignored, every
+/// unit test here would still pass while users kept getting an approval prompt
+/// on every `git add` — the exact failure this feature exists to remove.
+///
+/// So the assertion reads the **effective** policy back off the response
+/// (`sandbox.writableRoots`, which the server reports for the thread it just
+/// configured) and requires the granted path to be in it.
+///
+/// The params come from `thread_start_params` — the same builder `launch` uses
+/// — so what is pinned is the request production really sends, not a shape
+/// re-spelled in a test. `sandbox` is forced to `workspace-write` so the
+/// effective policy carries writable roots at all, whatever the developer's own
+/// default is.
+///
+/// Also worth reading in the output: the baseline roots (a start with no grant)
+/// against the granted ones. As of `codex-cli 0.144.4` the leaf override
+/// **replaces** the user's global `writable_roots` rather than unioning with it
+/// — accepted deliberately (see the adapter's module docs), and printed here so
+/// the trade-off stays visible rather than folklore.
+///
+/// No turn is started, so this consumes no model quota — two `thread/start`
+/// calls against the real server.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "drives the real codex app-server: needs the binary + auth, consumes no model quota"]
+async fn real_thread_start_honors_the_worktree_git_grant() {
+    // A throwaway cwd stands in for the worktree and a throwaway directory for
+    // the repository it would have been cut from: the grant is a path the
+    // sandbox is told about, and nothing is executed in either.
+    let worktree = TempCwd::new();
+    let repo_root = TempCwd::new();
+    let granted = format!("{}/.git", repo_root.as_str());
+
+    let conn = AppServerConnection::spawn(&CodexLaunchConfig {
+        codex_bin: codex_bin(),
+        args: vec!["app-server".to_owned()],
+        env: vec![],
+    })
+    .expect("spawn the real codex app-server");
+    conn.initialize(json!({
+        "clientInfo": { "name": "delta", "version": env!("CARGO_PKG_VERSION") }
+    }))
+    .await
+    .expect("initialize handshake");
+
+    // Force workspace-write so the effective policy carries writable roots
+    // whatever the developer's own default sandbox is.
+    let workspace_write = [LaunchOptionSpec {
+        name: "sandbox".to_owned(),
+        value: Some("workspace-write".to_owned()),
+    }];
+
+    // The same launch WITHOUT a worktree, for the replacement note below.
+    let baseline = conn
+        .start_thread(
+            None,
+            Some(
+                thread_start_params(&worktree.as_str(), &workspace_write, None)
+                    .expect("build the baseline params"),
+            ),
+        )
+        .await
+        .expect("start a real thread without the grant");
+
+    let started = conn
+        .start_thread(
+            None,
+            Some(
+                thread_start_params(
+                    &worktree.as_str(),
+                    &workspace_write,
+                    Some(&repo_root.as_str()),
+                )
+                .expect("build the granted params"),
+            ),
+        )
+        .await
+        .expect("start a real thread with the grant");
+
+    let roots = writable_roots(&started.result);
+    eprintln!(
+        "writable roots without the grant: {:?}\nwritable roots with the grant:    {roots:?}",
+        writable_roots(&baseline.result),
+    );
+    assert!(
+        roots.contains(&granted),
+        "the real server must apply the dotted `sandbox_workspace_write.writable_roots` \
+         key Delta injects: expected `{granted}` among the thread's effective writable \
+         roots, got {roots:?}. Full response: {}",
+        started.result
+    );
+}
+
+/// The writable roots of the sandbox policy a `thread/start` response reports,
+/// as plain strings. Empty when the policy is not a `workspaceWrite` one, or
+/// carries no roots — either of which fails the assertion above, which is the
+/// honest outcome for "the grant did not take".
+fn writable_roots(result: &Value) -> Vec<String> {
+    result
+        .pointer("/sandbox/writableRoots")
+        .and_then(Value::as_array)
+        .map(|roots| {
+            roots
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// --- Canary 4: schema drift detection --------------------------------------
 
 /// The combined-schema documents Delta vendors and reconciles against, by
 /// crate-relative path.

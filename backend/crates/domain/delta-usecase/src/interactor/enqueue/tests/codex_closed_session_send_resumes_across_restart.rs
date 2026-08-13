@@ -144,9 +144,14 @@ async fn codex_closed_session_send_resumes_across_restart() {
     {
         let log = factory.log();
         let log = log.lock().unwrap();
+        let resumed: Vec<&str> = log
+            .resumes
+            .iter()
+            .map(|req| req.provider_session_id.as_str())
+            .collect();
         assert_eq!(
-            log.resumes,
-            vec!["thr_resume".to_owned()],
+            resumed,
+            vec!["thr_resume"],
             "resume reattached to the persisted provider thread id"
         );
         let seeds: Vec<i64> = log.content_requests.iter().map(|r| r.seed_seq).collect();

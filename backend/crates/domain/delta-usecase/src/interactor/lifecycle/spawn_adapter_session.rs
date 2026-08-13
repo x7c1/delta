@@ -217,6 +217,10 @@ where
                 &factory,
                 AdapterBind::Launch { launch_options },
                 cwd.clone(),
+                // Non-`None` exactly when this spawn created a worktree (the
+                // match above resolves `launch_repo_root` on that arm only), so
+                // nothing is claimed for a plain launch directory.
+                launch_repo_root.clone(),
                 main_thread_id,
                 0,
             )
@@ -360,6 +364,13 @@ where
     /// message reports where the agent is running; the model, which only the
     /// provider knows, is the adapter's to add.
     ///
+    /// `worktree_repo_root` says whether that `cwd` is a worktree Delta created,
+    /// and out of which repository — the one thing about the launch directory a
+    /// provider cannot work out for itself (see
+    /// [`LaunchRequest::worktree_repo_root`]). Both callers hold the same value
+    /// from the same place: the fresh spawn its just-resolved repo root, the
+    /// resume the column that spawn persisted.
+    ///
     /// It holds the live adapter + handle in the runtime (so the connection stays
     /// up and the session reads as open, with no `OpenHandle` for the PTY bridge
     /// to attach to), then spawns the event pump that drains the adapter's
@@ -376,6 +387,7 @@ where
         factory: &Arc<dyn AgentAdapterFactory>,
         bind: AdapterBind,
         cwd: String,
+        worktree_repo_root: Option<String>,
         main_thread_id: ThreadId,
         seed_seq: i64,
     ) -> Result<(Arc<dyn AgentAdapter>, AgentSessionHandle)> {
@@ -393,6 +405,7 @@ where
                         // acknowledgement.
                         launch_options,
                         first_prompt: None,
+                        worktree_repo_root,
                     })
                     .await?
             }
@@ -404,6 +417,7 @@ where
                         session_id: session_id.as_str().to_owned(),
                         provider_session_id,
                         workdir: cwd.clone(),
+                        worktree_repo_root,
                     })
                     .await?
             }
@@ -515,6 +529,11 @@ where
     /// `claude --settings … --resume <id>` with none of the launch flags the
     /// original spawn carried.
     ///
+    /// The worktree's source repository **is** re-supplied, because it is not a
+    /// selection being replayed: it is a fact about the session's own working
+    /// directory, persisted on the row and read back below, and a provider that
+    /// sandboxes writes needs it as much on the second attach as on the first.
+    ///
     /// The session's **metadata is still reported after a resume**, and is
     /// re-established rather than remembered: the launch directory comes from the
     /// persisted row (which outlives the restart by definition), its branch is
@@ -554,6 +573,10 @@ where
                 provider_session_id,
             },
             session.cwd.clone(),
+            // `repo_root` is written by [`Self::spawn_adapter_session`] only on
+            // the worktree arm, so for an adapter-backed session a non-NULL value
+            // *is* "this cwd is a worktree Delta cut from that repository".
+            session.repo_root.clone(),
             main_thread_id,
             seed_seq,
         )

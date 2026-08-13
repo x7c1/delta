@@ -336,9 +336,14 @@ async fn a_send_after_a_death_resumes_the_session_and_runs_a_fresh_turn() {
     {
         let log = factory.log();
         let log = log.lock().unwrap();
+        let resumed: Vec<&str> = log
+            .resumes
+            .iter()
+            .map(|req| req.provider_session_id.as_str())
+            .collect();
         assert_eq!(
-            log.resumes,
-            vec!["thr_death_resume".to_owned()],
+            resumed,
+            vec!["thr_death_resume"],
             "the resume reattached to the persisted provider thread"
         );
         assert_eq!(

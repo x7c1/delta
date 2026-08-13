@@ -14,7 +14,7 @@ use tokio::io::{split, AsyncBufReadExt, AsyncWriteExt, BufReader, ReadHalf, Writ
 use tokio::sync::mpsc;
 
 use super::*;
-use crate::adapter::thread_start_params;
+use crate::adapter::{thread_resume_params, thread_start_params};
 
 /// A short bound so a wiring bug fails fast instead of hanging the suite.
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -300,6 +300,7 @@ async fn adapter_captures_turn_id_and_sends_it_on_interrupt() {
             workdir: "/tmp/workdir".to_owned(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
@@ -362,6 +363,7 @@ async fn interrupt_without_an_active_turn_is_a_no_op() {
             workdir: "/tmp/workdir".to_owned(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
@@ -457,6 +459,7 @@ async fn a_dead_connection_ends_the_adapters_session_as_process_exited() {
             workdir: "/tmp/workdir".to_owned(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
@@ -529,6 +532,7 @@ async fn a_dead_connection_releases_its_sessions_comms_log() {
             workdir: "/tmp/workdir".to_owned(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
@@ -583,6 +587,7 @@ async fn an_orderly_close_ends_the_session_as_closed_and_never_as_a_failure() {
             workdir: "/tmp/workdir".to_owned(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
@@ -658,6 +663,7 @@ fn launch_options_map_onto_thread_start_fields_by_name() {
             option("config", Some(r#"{"tools":{"web_search":true}}"#)),
             option("approvalPolicy", Some(r#"{"granular":{"edits":"never"}}"#)),
         ],
+        None,
     )
     .expect("no delta-owned key is used");
 
@@ -688,6 +694,7 @@ fn a_json_scalar_value_keeps_its_type_and_a_quoted_value_stays_a_string() {
             option("ephemeral", Some("false")),
             option("serviceTier", Some(r#""5""#)),
         ],
+        None,
     )
     .expect("no delta-owned key is used");
 
@@ -700,7 +707,7 @@ fn a_json_scalar_value_keeps_its_type_and_a_quoted_value_stays_a_string() {
 /// value Delta recorded the session against.
 #[test]
 fn a_launch_option_naming_a_delta_owned_field_is_rejected() {
-    let err = thread_start_params("/work", &[option("cwd", Some("/somewhere/else"))])
+    let err = thread_start_params("/work", &[option("cwd", Some("/somewhere/else"))], None)
         .expect_err("cwd is Delta's to set");
 
     let message = err.to_string();
@@ -721,6 +728,7 @@ fn two_launch_options_naming_the_same_field_are_rejected() {
             option("model", Some("gpt-5.6-sol")),
             option("model", Some("o3")),
         ],
+        None,
     )
     .expect_err("a duplicate field is ambiguous");
 
@@ -735,8 +743,197 @@ fn two_launch_options_naming_the_same_field_are_rejected() {
 /// launch options existed: `cwd` alone.
 #[test]
 fn no_launch_options_leaves_thread_start_params_as_just_the_workdir() {
-    let params = thread_start_params("/work", &[]).expect("no options to reject");
+    let params = thread_start_params("/work", &[], None).expect("no options to reject");
     assert_eq!(params, json!({ "cwd": "/work" }));
+}
+
+// --- The worktree git-directory grant ---------------------------------------
+
+/// The dotted config key the grant rides, spelled out here so a test failure
+/// shows the exact wire key rather than a constant's name.
+const GRANT_KEY: &str = "sandbox_workspace_write.writable_roots";
+
+/// A session launched in a Delta-created worktree grants that worktree's REAL
+/// git directory — the source repository's `.git`, where git's writes actually
+/// land — to Codex's `workspace-write` sandbox.
+///
+/// The worktree's own `<cwd>/.git` is deliberately NOT the granted path: it is
+/// only a pointer file, so granting it would leave every `git add` in the
+/// session escalating for approval exactly as before.
+#[test]
+fn a_worktree_launch_grants_the_source_repositorys_git_directory() {
+    let params = thread_start_params("/worktrees/org-repo-01", &[], Some("/repos/org/repo"))
+        .expect("no options to reject");
+
+    assert_eq!(
+        params,
+        json!({
+            "cwd": "/worktrees/org-repo-01",
+            "config": { GRANT_KEY: ["/repos/org/repo/.git"] },
+        })
+    );
+}
+
+/// A launch outside a Delta-created worktree is byte-identical to what it was
+/// before the grant existed — no `config` appears, whether or not the user
+/// selected options. Whether a plain clone's `.git` should be writable is the
+/// user's own global-config choice; Delta only speaks for worktrees it made.
+#[test]
+fn a_non_worktree_launch_injects_nothing() {
+    let bare = thread_start_params("/work", &[], None).expect("no options to reject");
+    assert_eq!(bare, json!({ "cwd": "/work" }));
+
+    let with_options = thread_start_params("/work", &[option("model", Some("gpt-5.6-sol"))], None)
+        .expect("no options to reject");
+    assert_eq!(
+        with_options,
+        json!({ "cwd": "/work", "model": "gpt-5.6-sol" })
+    );
+}
+
+/// A resume re-supplies the same grant a fresh start got, so a worktree session
+/// reattached after a restart is sandboxed exactly like it was launched.
+#[test]
+fn a_worktree_resume_grants_the_same_git_directory() {
+    let params = thread_resume_params(
+        "thr_worktree",
+        "/worktrees/org-repo-01",
+        Some("/repos/org/repo"),
+    );
+
+    assert_eq!(
+        params,
+        json!({
+            "threadId": "thr_worktree",
+            "cwd": "/worktrees/org-repo-01",
+            "config": { GRANT_KEY: ["/repos/org/repo/.git"] },
+        })
+    );
+}
+
+/// Resuming a non-worktree session sends what it always sent: the thread and the
+/// directory to reattach in.
+#[test]
+fn a_non_worktree_resume_injects_nothing() {
+    let params = thread_resume_params("thr_plain", "/work", None);
+    assert_eq!(params, json!({ "threadId": "thr_plain", "cwd": "/work" }));
+}
+
+/// A user-registered `config` that says nothing about the sandbox is **merged**
+/// with, not replaced by, the grant: every key they registered survives and the
+/// grant is added alongside.
+#[test]
+fn a_user_config_without_a_sandbox_key_is_merged_with_the_grant() {
+    let params = thread_start_params(
+        "/worktrees/org-repo-01",
+        &[option(
+            "config",
+            Some(r#"{"tools":{"web_search":true},"model_reasoning_effort":"high"}"#),
+        )],
+        Some("/repos/org/repo"),
+    )
+    .expect("no delta-owned key is used");
+
+    assert_eq!(
+        params,
+        json!({
+            "cwd": "/worktrees/org-repo-01",
+            "config": {
+                "tools": { "web_search": true },
+                "model_reasoning_effort": "high",
+                GRANT_KEY: ["/repos/org/repo/.git"],
+            },
+        })
+    );
+}
+
+/// A user-registered `config` that states its own `sandbox_workspace_write`
+/// suppresses the grant entirely and passes through verbatim — in BOTH spellings
+/// the config format allows, the dotted key and the nested table.
+///
+/// Delta never rewrites an explicit sandbox setting: the alternative is
+/// re-implementing Codex's own merge semantics over a value the user wrote
+/// deliberately. The cost is that such a session keeps the approval prompts this
+/// feature removes — which is the visible status quo, not a new failure.
+#[test]
+fn a_user_config_stating_the_sandbox_suppresses_the_grant() {
+    let dotted = thread_start_params(
+        "/worktrees/org-repo-01",
+        &[option(
+            "config",
+            Some(r#"{"sandbox_workspace_write.writable_roots":["/elsewhere"]}"#),
+        )],
+        Some("/repos/org/repo"),
+    )
+    .expect("no delta-owned key is used");
+    assert_eq!(
+        dotted,
+        json!({
+            "cwd": "/worktrees/org-repo-01",
+            "config": { GRANT_KEY: ["/elsewhere"] },
+        }),
+        "the user's dotted sandbox key passes through untouched"
+    );
+
+    let nested = thread_start_params(
+        "/worktrees/org-repo-01",
+        &[option(
+            "config",
+            Some(r#"{"sandbox_workspace_write":{"network_access":false}}"#),
+        )],
+        Some("/repos/org/repo"),
+    )
+    .expect("no delta-owned key is used");
+    assert_eq!(
+        nested,
+        json!({
+            "cwd": "/worktrees/org-repo-01",
+            "config": { "sandbox_workspace_write": { "network_access": false } },
+        }),
+        "a nested sandbox table also passes through untouched, even though the \
+         key Delta would add is not the one it sets"
+    );
+}
+
+/// A `config` launch option that is not an object at all (the registry stores
+/// text, and the value is passed through unvalidated) is left for the server to
+/// reject: Delta has nothing to merge into, so it defers rather than replacing
+/// what the user typed.
+#[test]
+fn a_non_object_user_config_suppresses_the_grant() {
+    let params = thread_start_params(
+        "/worktrees/org-repo-01",
+        &[option("config", Some("not-an-object"))],
+        Some("/repos/org/repo"),
+    )
+    .expect("no delta-owned key is used");
+
+    assert_eq!(
+        params,
+        json!({ "cwd": "/worktrees/org-repo-01", "config": "not-an-object" })
+    );
+}
+
+/// The grant does not soften the duplicate-key rejection for the field it merges
+/// into: two selected options both named `config` are still rejected, worktree or
+/// not, because the second would silently discard the first.
+#[test]
+fn two_config_launch_options_are_still_rejected_in_a_worktree() {
+    let err = thread_start_params(
+        "/worktrees/org-repo-01",
+        &[
+            option("config", Some(r#"{"tools":{"web_search":true}}"#)),
+            option("config", Some(r#"{"model_reasoning_effort":"high"}"#)),
+        ],
+        Some("/repos/org/repo"),
+    )
+    .expect_err("a duplicate field is ambiguous");
+
+    let message = err.to_string();
+    assert!(
+        message.contains("config"),
+        "the error names the duplicated key, got: {message}"
+    );
 }
 
 /// A content-source request for a session launched in `/work/app` on `branch` —
@@ -809,6 +1006,7 @@ async fn a_launched_sessions_messages_carry_the_model_the_server_resolved() {
             workdir: "/work/app".to_owned(),
             launch_options: vec![option("model", Some("requested-by-delta"))],
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
@@ -862,6 +1060,7 @@ async fn a_resumed_sessions_messages_carry_the_model_the_resume_reported() {
             session_id: "01920000-0000-7000-8000-00000000000a".to_owned(),
             provider_session_id: "thr_m".to_owned(),
             workdir: "/work/app".to_owned(),
+            worktree_repo_root: None,
         })
         .await
         .expect("resume");
@@ -908,6 +1107,7 @@ async fn a_response_without_a_model_degrades_to_none() {
             workdir: "/work/app".to_owned(),
             launch_options: Vec::new(),
             first_prompt: None,
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");
