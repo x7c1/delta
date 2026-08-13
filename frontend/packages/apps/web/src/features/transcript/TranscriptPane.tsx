@@ -868,19 +868,23 @@ export function TranscriptPane({
     />
   ) : undefined;
 
-  // Floating layers over the scrolling transcript (see Panel's `overlay`). They
-  // sit on top of the conversation rather than in flow, so a notice appearing or
-  // disappearing never resizes the scroll viewport — the tail the user is
-  // reading stays put instead of jumping. The body reserves a fixed bottom
-  // padding (below) so resting content clears the bottom (composer) layer.
+  // The floating layer over the scrolling transcript (see Panel's `overlay`):
+  // the composer stack. It sits on top of the conversation rather than in flow,
+  // so its growing/shrinking never resizes the scroll viewport — the tail the
+  // user is reading stays put instead of jumping. The body reserves a fixed
+  // bottom padding (below) so resting content clears it.
 
-  // The permission notice floats at the top-right, deliberately away from the
-  // conversation tail and the input. Pinned above the input (its old home) it
-  // would sit exactly where the user reads. Kept narrow so it does not blanket
-  // the transcript. It clears on dismiss (the entry stays, flagged, so a
-  // refetch cannot resurrect the card), on a decision/resolution, or when the
-  // turn completes.
-  const permissionOverlay = permission && !permission.dismissed && activeThread && (
+  // The permission notice renders INLINE at the conversation tail, exactly like
+  // the question card below: the request interrupts the turn the user is
+  // reading, so Allow/Deny sit in the flow where their eyes already are, over
+  // the pane's own background (a floating top-right card was translucent over
+  // transcript text and collided with the Timeline/pane-toggle cluster pinned
+  // to the same corner). Unlike the question card it is NOT gated by thread:
+  // `permission_requested` carries no thread id, so the notice is session-level
+  // and shows on whichever of the session's threads is active. It clears on
+  // dismiss (the entry stays, flagged, so a refetch cannot resurrect the card),
+  // on a decision/resolution, or when the turn completes.
+  const permissionCard = permission && !permission.dismissed && activeThread && (
     <PermissionNoticeCard
       notice={permission}
       providerHasTerminal={providerHasTerminal}
@@ -972,10 +976,10 @@ export function TranscriptPane({
       <>
         {/* Upper card: status notices + the pending-send strip, kept visually
             separate from the composer so the (now borderless) textarea has a
-            clean boundary of its own. The question card is NOT in this stack: it
-            renders inline at the conversation tail in the scrolling body (see
-            questionCard above), so the choices follow the streamed preamble in
-            the flow instead of floating over it. */}
+            clean boundary of its own. The question and permission cards are NOT
+            in this stack: they render inline at the conversation tail in the
+            scrolling body (see questionCard/permissionCard above), so they
+            follow the conversation in the flow instead of floating over it. */}
         {hasNotices && (
           <div
             className={`${FLOATING_CARD_CLASS} space-y-2 px-3 py-2`}
@@ -1512,12 +1516,7 @@ export function TranscriptPane({
         // breadcrumb but the timeline + pane toggle still ride along.
         undefined
       }
-      overlay={
-        <>
-          {permissionOverlay}
-          {bottomOverlay}
-        </>
-      }
+      overlay={bottomOverlay}
     >
       {topRegion}
       {newSession && (
@@ -1713,12 +1712,19 @@ export function TranscriptPane({
         <SubagentRunningIndicator subagents={subagents} />
       )}
 
-      {/* The interactive question card, inline at the very tail of the
-          conversation: after the rendered messages and the live-streamed
-          bubble, so the choices appear right after the assistant's preamble.
-          Inset to align with the prose, in its own block so the bottom padding
-          (pb-composer-reserve) keeps it clear of the floating composer. */}
-      {questionCard && <div className="px-3 pt-1.5 pb-2">{questionCard}</div>}
+      {/* The interactive cards, inline at the very tail of the conversation:
+          after the rendered messages and the live-streamed bubble. The question
+          card comes first so its choices appear right after the assistant's
+          streamed preamble; the permission notice follows at the very end.
+          Inset to align with the prose, in their own block so the bottom
+          padding (pb-composer-reserve) keeps them clear of the floating
+          composer. */}
+      {(questionCard || permissionCard) && (
+        <div className="space-y-2 px-3 pt-1.5 pb-2">
+          {questionCard}
+          {permissionCard}
+        </div>
+      )}
     </Panel>
   );
 }
