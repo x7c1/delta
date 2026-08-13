@@ -533,6 +533,26 @@ pub trait SessionStore: std::marker::Send + Sync {
         allowed: bool,
     ) -> Result<Vec<i64>>;
 
+    /// Deny every still-`pending` permission request of a session, recording
+    /// `reason` on each row alongside the `denied` status and `decided_at`.
+    ///
+    /// The disposition for requests whose answer can no longer be delivered —
+    /// the agent process ended while approvals were outstanding. `denied` is the
+    /// honest record: the tool was never allowed to run, and the provider that
+    /// asked is gone, so nothing can act on the row afterwards. Leaving them
+    /// `pending` is the failure this exists to prevent: the audit trail would
+    /// claim someone is still being asked, and the row would never settle.
+    /// `reason` is what keeps the trail readable — the status alone cannot
+    /// distinguish a user's Deny from a request nobody could answer.
+    ///
+    /// Returns the ids of the rows that transitioned (empty when nothing was
+    /// pending), so the caller can settle their client-visible notices.
+    async fn deny_pending_permission_requests(
+        &self,
+        session_id: &SessionId,
+        reason: &str,
+    ) -> Result<Vec<i64>>;
+
     /// Record (or refresh) the launching thread of a background task, keyed by
     /// the launching tool_use `id`. A background `Agent`/`Task`/`Bash`
     /// (`run_in_background: true`) returns immediately and its completion is
@@ -875,6 +895,16 @@ impl SessionStore for Box<dyn SessionStore> {
     ) -> Result<Vec<i64>> {
         (**self)
             .resolve_permission_by_tool_use_id(session_id, tool_use_id, allowed)
+            .await
+    }
+
+    async fn deny_pending_permission_requests(
+        &self,
+        session_id: &SessionId,
+        reason: &str,
+    ) -> Result<Vec<i64>> {
+        (**self)
+            .deny_pending_permission_requests(session_id, reason)
             .await
     }
 

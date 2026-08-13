@@ -78,6 +78,23 @@ impl SessionRuntime {
         self.pending_permissions.push(pending);
     }
 
+    /// Drop every queued dialog at once, returning the request ids that were
+    /// pending (oldest first).
+    ///
+    /// The wholesale counterpart of [`Self::resolve_pending_permission`], for
+    /// the one situation where the queue as a whole becomes moot: the agent
+    /// session died, so no dialog in it can ever be answered. Removing them one
+    /// by one through the keyed path would promote (and re-broadcast) each
+    /// successive head — raising dialogs the same settle is in the middle of
+    /// clearing — so the mirror is emptied in one step and the caller broadcasts
+    /// one resolution per id.
+    pub fn clear_pending_permissions(&mut self) -> Vec<i64> {
+        self.pending_permissions
+            .drain(..)
+            .map(|pending| pending.request_id)
+            .collect()
+    }
+
     /// Drop `request_id`'s dialog from the queue, returning the entry that took
     /// over as head when the removal promoted a new one.
     ///

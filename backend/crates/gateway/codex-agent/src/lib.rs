@@ -1,22 +1,24 @@
 //! `codex-agent`: the transport that drives OpenAI Codex through a shared
 //! `codex app-server` process.
 //!
-//! ## Scope in this phase (C1)
+//! ## Scope
 //!
-//! This crate is the **transport + demux plumbing** only — it does not yet
-//! translate Codex's wire events into Delta's neutral `AgentEvent`s, and it
-//! does not implement the `AgentAdapter` trait (that is the next phase). What
-//! it provides:
+//! This module is the **transport + demux plumbing**; the neutral
+//! [`CodexAppServerAdapter`] built on top of it lives in the crate's `adapter`
+//! module, and the wire → `AgentEvent` translation in its `translate` module.
+//! What this file provides:
 //!
 //! - spawning `codex app-server` (the command is configurable, mirroring the
 //!   core's `LaunchConfig::claude_bin`, so a test can point it at a fake),
 //! - the newline-delimited JSON-RPC 2.0 framing (see [`wire`]),
 //! - the `initialize` → `initialized` handshake,
-//! - request/response correlation by id, and
-//! - the **`threadId` → session demux skeleton**: server notifications and
+//! - request/response correlation by id,
+//! - the **`threadId` → session demux**: server notifications and
 //!   server-originated requests are routed to a per-thread channel, so a single
 //!   shared server hosting many threads fans out to one consumer per Delta
-//!   session (session ↔ Codex thread is 1:1).
+//!   session (session ↔ Codex thread is 1:1), and
+//! - the terminal **connection-death** signal on each of those channels (see
+//!   [`ThreadEvent::ConnectionLost`]).
 //!
 //! ## Model
 //!
@@ -26,6 +28,14 @@
 //! correlates to; a thread-scoped notification or server request is delivered to
 //! that thread's [`ThreadEvent`] channel; anything not scoped to a known thread
 //! goes to the connection-level "unrouted" channel.
+//!
+//! When that reader stops because the server is *gone* — EOF or a read error —
+//! the death is announced rather than merely ending the traffic: every pending
+//! request is woken with [`Error::ConnectionClosed`] and every subscribed thread
+//! receives a terminal [`ThreadEvent::ConnectionLost`] on its own channel. That
+//! is what lets the adapter surface a session-ended fact (and the core settle
+//! the stuck turn and its pending approvals) instead of the session's event
+//! stream simply going quiet forever.
 //!
 //! That channel is not a dead end: it is where genuinely **account-scoped**
 //! frames arrive (`account/rateLimits/updated` names no thread, because the
@@ -108,11 +118,18 @@ impl Default for CodexLaunchConfig {
     }
 }
 
-/// A frame delivered to a per-thread channel by the demux.
+/// A frame delivered to a per-thread channel by the demux — or the terminal
+/// fact that no further frame can arrive.
 ///
-/// Deliberately not yet translated into a neutral `AgentEvent` — that is the
-/// next phase. The C1 transport hands the C2 adapter the raw, thread-scoped
+/// The two frame variants are deliberately not translated into a neutral
+/// `AgentEvent` here: the transport hands the adapter the raw, thread-scoped
 /// server frames so it can do the translation.
+///
+/// [`ThreadEvent::ConnectionLost`] is not a frame at all. It rides the same
+/// per-thread channel so it is ordered *behind* every frame that did arrive:
+/// the adapter's translation task therefore sees a thread's last real frames
+/// (an approval request the server managed to write before dying, say) before
+/// it learns the connection is gone, and the core settles in that order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ThreadEvent {
     /// A server → client notification for this thread (`item/*`, `turn/*`, …).
@@ -120,6 +137,17 @@ pub enum ThreadEvent {
     /// A server → client request for this thread (`*/requestApproval`), still
     /// awaiting a response the adapter will send.
     ServerRequest(ServerRequest),
+    /// The connection carrying this thread died: the reader saw EOF (the
+    /// `codex app-server` process exited) or a read error, so nothing further
+    /// will ever arrive on this channel and no outgoing frame can be answered.
+    ///
+    /// Always the last event a thread receives, and emitted exactly once per
+    /// thread — the connection's reader announces it as it exits. It
+    /// exists so a dead connection is a *fact on the stream* rather than the
+    /// stream merely going quiet: silence is indistinguishable from a slow
+    /// model, and that is precisely how a stuck turn and an unanswerable
+    /// approval dialog survived forever in the field.
+    ConnectionLost,
 }
 
 /// How many unrouted frames the connection buffers before dropping them.
@@ -593,6 +621,40 @@ async fn read_loop<R>(
     }
     // Explicitly clear the pending map so waiters wake immediately on close.
     pending.lock().expect("pending mutex poisoned").clear();
+    // Reaching here means the server is gone — EOF or a read error, never an
+    // orderly shutdown: this task has no other exit, and a connection dropped
+    // deliberately aborts it (see `Drop for AppServerConnection`) at the read
+    // above, before this line. So every subscribed thread is told, once, that
+    // its connection died; waking the pending map alone would only settle
+    // Delta's own in-flight requests and leave each session's event stream
+    // silent.
+    announce_connection_lost(&threads);
+}
+
+/// Tell every thread on this connection that it is gone, as the reader exits.
+///
+/// A live subscriber receives [`ThreadEvent::ConnectionLost`] on its channel;
+/// a thread nobody has subscribed to yet gets it appended to its backlog, so a
+/// subscriber that registers after the death is told immediately rather than
+/// waiting for a frame that can never come. The slot is left in place either
+/// way — no further frame can be routed to it, so nothing accumulates.
+fn announce_connection_lost(threads: &ThreadMap) {
+    let mut guard = threads.lock().expect("threads mutex poisoned");
+    for (thread_id, slot) in guard.iter_mut() {
+        match slot {
+            ThreadSlot::Live(tx) => {
+                if tx.send(ThreadEvent::ConnectionLost).is_err() {
+                    // The subscriber is already gone (its pump exited), so
+                    // there is nobody left to tell. Not an error: the session
+                    // this thread belonged to has no live consumer.
+                    eprintln!(
+                        "codex-agent: connection lost, but thread `{thread_id}` has no subscriber"
+                    );
+                }
+            }
+            ThreadSlot::Buffered(buffer) => buffer.push(ThreadEvent::ConnectionLost),
+        }
+    }
 }
 
 /// Route one parsed frame to its destination.

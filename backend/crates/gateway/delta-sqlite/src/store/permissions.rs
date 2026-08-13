@@ -128,4 +128,37 @@ impl SqliteStore {
             .map_err(Error::from)?;
         Ok(ids)
     }
+
+    pub(super) async fn deny_pending_permission_requests(
+        &self,
+        session_id: &SessionId,
+        reason: &str,
+    ) -> std::result::Result<Vec<i64>, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        // Only still-`pending` rows, like every other settle path here, so a row
+        // already answered keeps the disposition it was answered with.
+        let mut stmt = conn
+            .prepare(
+                "UPDATE permission_request
+                 SET status = ?1, decision_reason = ?2, decided_at = ?3
+                 WHERE session_id = ?4 AND status = 'pending'
+                 RETURNING id",
+            )
+            .map_err(Error::from)?;
+        let ids = stmt
+            .query_map(
+                params![
+                    PermissionStatus::Denied.as_str(),
+                    reason,
+                    now,
+                    session_id.as_str()
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(Error::from)?
+            .collect::<std::result::Result<Vec<i64>, _>>()
+            .map_err(Error::from)?;
+        Ok(ids)
+    }
 }

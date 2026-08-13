@@ -163,6 +163,11 @@ async fn scripted_scenario_can_emit_an_approval_request_and_interrupt() {
                 saw_turn_completed = true;
             }
             ThreadEvent::Notification(_) => {}
+            // This scenario never asks the fake to exit, so the connection stays
+            // up; a loss here would mean it died on its own.
+            ThreadEvent::ConnectionLost => {
+                panic!("the fake exited mid-turn without being told to")
+            }
         }
     }
     assert!(saw_approval, "the scripted approval request was demuxed");

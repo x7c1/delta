@@ -25,6 +25,18 @@
 //!   real per-thread close RPC is not modelled in v1; the shared connection
 //!   stays up for its other threads).
 //!
+//! ## Session death
+//!
+//! A session can also end without Delta asking. When the backing
+//! `codex app-server` process exits (or its pipe breaks) the transport
+//! announces [`ThreadEvent::ConnectionLost`] on every thread's channel, and the
+//! translation task turns it into `SessionEnded { reason: ProcessExited }` — the
+//! terminal event the core settles on (stuck turn, pending approvals, open
+//! state). The reason is what tells the two apart: `Closed` is the orderly
+//! teardown `close` emits, `ProcessExited` is a loss. Only one of them is ever
+//! emitted for a session, because the orderly path removes the session (aborting
+//! its translation task) while the death path returns from that task.
+//!
 //! ## Permission handling
 //!
 //! The two approval server-requests whose response is a binary decision —
@@ -783,6 +795,33 @@ async fn translate_loop(
     while let Some(event) = events.recv().await {
         record_inbound(&comms, &session_id, &event);
         match event {
+            // The connection died (the app-server process exited or its pipe
+            // broke). Surface it as the terminal neutral fact so the core can
+            // settle everything a dead wire strands — the in-flight turn, the
+            // approvals awaiting a decision that can no longer be written, the
+            // session's open state — instead of the stream just going silent.
+            // Distinct from `close()`'s `SessionEndReason::Closed`: that is an
+            // orderly teardown Delta asked for, this is a loss it must react to.
+            ThreadEvent::ConnectionLost => {
+                let _ = tx.send(AgentEvent::SessionEnded {
+                    reason: SessionEndReason::ProcessExited,
+                });
+                // Release the session's comms-log buffer, the way `close` does
+                // for the orderly path. The core settles a death by dropping the
+                // session's adapter instead of calling `close`, so this is the
+                // only place a died session's buffer is ever released — and it
+                // must be released: the log's contract is that a session's
+                // buffer goes when the session closes (a reconnect then shows an
+                // empty log), and its own pruning reclaims only buffers that are
+                // both empty and unwatched. Left behind, a dead session's ring —
+                // and every browser still subscribed to it, whose socket would
+                // hang instead of ending — would be held for the process's
+                // lifetime.
+                comms.discard(&session_id);
+                // Terminal by construction: the transport announces it once,
+                // last, so there is nothing further to translate.
+                return;
+            }
             ThreadEvent::Notification(notification) => {
                 // Maintain the tracked turn id off the pushed `turn/*` frames: a
                 // `turn/started` re-affirms the id (the `turn/start` response
@@ -896,7 +935,13 @@ async fn account_loop(
     while let Some(frame) = unrouted.recv().await {
         let events = match &frame {
             ThreadEvent::Notification(notification) => rate_limits.translate(notification),
-            ThreadEvent::ServerRequest(_) => Vec::new(),
+            // A connection-level *request* is a guess to answer (see the docs
+            // above). `ConnectionLost` never reaches this channel at all — the
+            // transport announces it per thread, and this loop ends anyway when
+            // the reader drops the unrouted sender — so it is grouped here
+            // rather than given a fan-out of its own, which would tell every
+            // session's pump the connection died twice.
+            ThreadEvent::ServerRequest(_) | ThreadEvent::ConnectionLost => Vec::new(),
         };
         if events.is_empty() {
             eprintln!(
@@ -918,11 +963,13 @@ async fn account_loop(
     }
 }
 
-/// The method name of a connection-level frame, for the drop log.
+/// The method name of a connection-level frame, for the drop log. A lost
+/// connection names no method, so it reads as itself.
 fn frame_method(frame: &ThreadEvent) -> &str {
     match frame {
         ThreadEvent::Notification(notification) => &notification.method,
         ThreadEvent::ServerRequest(request) => &request.method,
+        ThreadEvent::ConnectionLost => "<connection lost>",
     }
 }
 
@@ -931,8 +978,14 @@ fn frame_method(frame: &ThreadEvent) -> &str {
 /// A notification and a server-originated request differ only in whether the
 /// frame carries an id, which is exactly the [`CommsFrameKind`] distinction —
 /// both arrive here on the same channel, so one function covers both.
+///
+/// [`ThreadEvent::ConnectionLost`] is deliberately not mirrored: the inspector
+/// shows the JSON frames that crossed the wire, and a lost connection is the
+/// absence of one. It reaches the browser as the session's terminal event (and
+/// the settle that follows), not as a fabricated frame in the frame log.
 fn record_inbound(comms: &Arc<dyn CommsLogSink>, session_id: &str, event: &ThreadEvent) {
     let entry = match event {
+        ThreadEvent::ConnectionLost => return,
         ThreadEvent::Notification(notification) => CommsEntry::new(
             CommsDirection::FromAgent,
             CommsFrameKind::Notification,

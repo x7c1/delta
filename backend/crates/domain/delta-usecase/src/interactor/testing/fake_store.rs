@@ -850,6 +850,29 @@ impl SessionStore for FakeStore {
         Ok(resolved)
     }
 
+    async fn deny_pending_permission_requests(
+        &self,
+        session_id: &SessionId,
+        reason: &str,
+    ) -> Result<Vec<i64>> {
+        let mut g = self.inner.lock().unwrap();
+        // Mirror the SQL: every still-pending row of the session becomes
+        // `denied` carrying the reason, and only the ids that transitioned come
+        // back.
+        let mut denied = Vec::new();
+        for req in g
+            .permissions
+            .iter_mut()
+            .filter(|r| &r.session_id == session_id && r.status == PermissionStatus::Pending)
+        {
+            req.status = PermissionStatus::Denied;
+            req.decision_reason = Some(reason.to_owned());
+            req.decided_at = Some("2026-01-01T00:00:00Z".into());
+            denied.push(req.id);
+        }
+        Ok(denied)
+    }
+
     async fn record_subagent_launch(
         &self,
         session_id: &SessionId,

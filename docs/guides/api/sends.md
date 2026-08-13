@@ -284,6 +284,18 @@ above report it as **head plus depth**: `permission` is the request to show,
 - **The queue cannot outlive its turn.** When the turn returns to idle (stop,
   interrupt, close) the whole queue is dropped: the provider has settled or
   abandoned those requests by then, and Delta only drops its mirror.
+- **A session whose agent process dies settles the whole queue.** An
+  adapter-backed provider's process can go away mid-turn (a killed
+  `codex app-server`), and its pending requests can then never be answered — no
+  decision can be written to a connection that no longer exists. So the queue is
+  settled in one pass: one `permission_resolved` per request (so a live client's
+  dialog clears with no refetch, and no promoted head is raised), and each row is
+  recorded **denied** with the reason "the agent session ended before this request
+  could be answered" — the tool never ran, no row is left pending, and the audit
+  trail still distinguishes it from a user's Deny. The same pass settles the turn
+  (`turn_interrupted`) and closes the session (`session_closed`); recovery is the
+  next send, which resumes it. A decision that arrives for one of those requests
+  is a `409` (see below).
 
 ### `POST /api/permissions/{id}/decision`
 
@@ -311,14 +323,16 @@ Request:
   the answered request was the queue head and others are still pending, the next
   one is raised as a fresh `permission_requested`.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
-  awaiting a browser decision: it was already decided, or its hook wait timed out
-  and the interactive TUI prompt owns it now. An adapter-backed session returns
-  it once the session has been closed. So does any retry of a decision that
-  already failed downstream (the **500** a dead agent connection produces): the
-  server's claim on the request is taken before the decision is routed and is
-  never restored, so the failed attempt already spent it. The browser replaces
-  the decision buttons with guidance chosen by the provider's `has_terminal`
-  capability (see
+  awaiting a browser decision: it was already decided, its hook wait timed out
+  and the interactive TUI prompt owns it now, or its adapter-backed session
+  ended (closed, or its agent process died and the settle resolved every
+  pending request — see
+  [the queue semantics](#the-pending-permission-queue)). A retry of a decision
+  that already failed downstream (the **500** a dying agent connection can
+  produce) answers the same 409: the server's claim on the request is taken
+  before the decision is routed and is never restored, so the failed attempt
+  already spent it. The browser replaces the decision buttons with guidance
+  chosen by the provider's `has_terminal` capability (see
   [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a session
   that has a terminal is pointed at the prompt waiting there, while a
   terminal-less one — where the question survives nowhere the user can reach —

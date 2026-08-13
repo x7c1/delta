@@ -482,8 +482,12 @@ where
     /// session's actor, which wakes the blocked hook handler.
     ///
     /// Returns [`Error::PermissionNotPending`] when no waiter can be reached:
-    /// the request is unknown, was already decided, or its hook wait timed
-    /// out and fell back to the TUI prompt — in every case a UI decision can
+    /// the request is unknown, was already decided, its hook wait timed out and
+    /// fell back to the TUI prompt, or its agent session ended — no decision can
+    /// reach a wire that is gone, and the two ends reject it from different
+    /// places: a death's settle drops the index entry here, while a close leaves
+    /// the entry in place and the actor rejects the decision (its open agent, and
+    /// with it the wire to answer on, is gone). In every case a UI decision can
     /// no longer take effect, and the caller surfaces that as a conflict.
     pub async fn decide_permission(
         &self,
