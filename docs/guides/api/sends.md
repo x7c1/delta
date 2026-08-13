@@ -101,12 +101,12 @@ Response:
 - **201 Created**:
 
   ```json
-  { "send": { /* PendingSend */ } }
+  { "send": { /* Send */ } }
   ```
 
   For a `new_session` send the session row and its `main` thread are created
   eagerly, before the agent is launched, and the send is enqueued on that thread
-  in the same call — so the returned `PendingSend` already carries the real
+  in the same call — so the returned `Send` already carries the real
   `id`, `session_id` and `thread_id` the session keeps once it binds, not a
   synthetic placeholder. `locator_quote` is dropped before it reaches the spawn
   (see the field note above), so it is `null` on both the response and the
@@ -137,7 +137,7 @@ disconnected: events fired during the gap are never replayed.
 
   ```json
   {
-    "sends": [ /* PendingSend, ... */ ],
+    "sends": [ /* Send, ... */ ],
     "turn": { "state": "in_flight", "send_id": 7, "thread_id": 2 },
     "permission": {
       "request_id": 3,
@@ -179,8 +179,8 @@ disconnected: events fired during the gap are never replayed.
     first; empty when none is. `background` is `true` for a
     `run_in_background` launch, which can outlive the turn that started it.
 
-  A `queued` send may carry `restored_at` (see `PendingSend` in
-  [shapes.md](shapes.md#pendingsend)): it was recovered at boot from a dead
+  A `queued` send may carry `restored_at` (see `Send` in
+  [shapes.md](shapes.md#send)): it was recovered at boot from a dead
   server process's `dispatched` state and never auto-dispatches — the browser
   offers explicit Send
   ([`POST /api/sends/{id}/release`](#post-apisendsidrelease)) and Cancel actions

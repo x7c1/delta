@@ -30,7 +30,7 @@ kinds of traffic, and this directory has one page per area:
   Claude Code fires during a session.
 
 The JSON shapes shared across those surfaces (`Session`, `Thread`, `Message`,
-`ContentBlock`, `PendingSend`) live in **[shapes.md](shapes.md)**.
+`ContentBlock`, `Send`) live in **[shapes.md](shapes.md)**.
 
 The server binds to `127.0.0.1` only; it is never exposed on a public
 interface. It listens on port `7878` unless `DELTA_PORT` overrides it, so the
