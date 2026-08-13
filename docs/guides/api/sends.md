@@ -323,12 +323,20 @@ Request:
   the answered request was the queue head and others are still pending, the next
   one is raised as a fresh `permission_requested`.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
-  awaiting a browser decision: it was already decided, its hook wait timed out and
-  the interactive TUI prompt owns it now, or its adapter-backed session ended
-  (closed, or its agent process died — see
-  [the queue semantics](#the-pending-permission-queue)). The browser falls back to
-  the answer-in-the-terminal guidance — a dead end for an adapter-backed session,
-  which has no terminal to answer in.
+  awaiting a browser decision: it was already decided, its hook wait timed out
+  and the interactive TUI prompt owns it now, or its adapter-backed session
+  ended (closed, or its agent process died and the settle resolved every
+  pending request — see
+  [the queue semantics](#the-pending-permission-queue)). A retry of a decision
+  that already failed downstream (the **500** a dying agent connection can
+  produce) answers the same 409: the server's claim on the request is taken
+  before the decision is routed and is never restored, so the failed attempt
+  already spent it. The browser replaces the decision buttons with guidance
+  chosen by the provider's `has_terminal` capability (see
+  [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a session
+  that has a terminal is pointed at the prompt waiting there, while a
+  terminal-less one — where the question survives nowhere the user can reach —
+  is told it can no longer be answered, and offered only Dismiss.
 
 ## Questions
 

@@ -152,6 +152,16 @@ export interface TranscriptPaneProps {
    * not exercise it at all.
    */
   paneToggleButton?: ReactNode;
+  /**
+   * Whether the focused session's provider offers an attachable terminal
+   * (`ProviderCapabilities.has_terminal`), forwarded to the permission notice so
+   * its conflict fallback only points at a terminal that exists. Resolving the
+   * capability is the workspace's job — it holds the focused session and the
+   * providers query (see `WorkspaceScreen`) — so this pane only relays it.
+   * `undefined` when the capability is not known yet, which the notice resolves
+   * to its own documented default.
+   */
+  providerHasTerminal?: boolean;
 }
 
 /**
@@ -170,6 +180,7 @@ export function TranscriptPane({
   newSession = false,
   workdirMandatory = false,
   paneToggleButton = null,
+  providerHasTerminal,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -872,6 +883,7 @@ export function TranscriptPane({
   const permissionOverlay = permission && !permission.dismissed && activeThread && (
     <PermissionNoticeCard
       notice={permission}
+      providerHasTerminal={providerHasTerminal}
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissPermission(activeThread.session_id)}
     />

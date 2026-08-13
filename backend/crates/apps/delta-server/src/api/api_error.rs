@@ -12,8 +12,8 @@ const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 
 /// Stable machine-readable code for a permission decision that can no longer
 /// take effect (already decided, or its hook wait timed out and fell back to
-/// the TUI prompt). The frontend switches the notice to the
-/// answer-in-the-terminal guidance on this code.
+/// the TUI prompt). The frontend switches the notice to guidance chosen by the
+/// provider's `has_terminal` capability on this code.
 const PERMISSION_NOT_PENDING_CODE: &str = "permission_not_pending";
 
 /// Stable machine-readable code for an answer to a question that is no longer
@@ -108,8 +108,8 @@ impl IntoResponse for ApiError {
                     // The permission request exists (or existed) but no browser
                     // decision can reach it anymore: a conflict with current
                     // state, with a stable code so the frontend swaps the
-                    // Allow/Deny buttons for the answer-in-the-terminal
-                    // guidance.
+                    // Allow/Deny buttons for guidance chosen by the provider's
+                    // `has_terminal` capability.
                     Error::PermissionNotPending(_) => {
                         (StatusCode::CONFLICT, Some(PERMISSION_NOT_PENDING_CODE))
                     }

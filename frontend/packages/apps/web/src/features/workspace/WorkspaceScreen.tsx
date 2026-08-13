@@ -513,6 +513,14 @@ export function WorkspaceScreen() {
             activeThread={activeThread}
             readOnly={!focusedOpen}
             paneToggleButton={paneToggleButton}
+            // The raw capability, NOT `focusedHasTerminal`: that flag folds in a
+            // fail-closed rule that exists only to keep the pane (and its `/pty`
+            // socket) from mounting on an unresolved profile. The permission
+            // notice opens no socket and has its own default for an unknown
+            // capability, so it gets the unmassaged tri-state — `undefined`
+            // while the providers query is unresolved, if it failed, or if it
+            // does not list this session's provider.
+            providerHasTerminal={focusedCapabilities?.has_terminal}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-secondary text-fg-subtle">

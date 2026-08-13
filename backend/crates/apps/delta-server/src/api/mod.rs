@@ -659,7 +659,8 @@ pub(crate) async fn release_send(
 /// proceeds (or is denied) without anyone touching the TUI prompt. Replies
 /// `409` when the request is no longer awaiting a browser decision (already
 /// decided, or its hook wait timed out and the TUI prompt owns it now); the
-/// browser then falls back to the answer-in-the-terminal guidance.
+/// browser then falls back to guidance chosen by the provider's `has_terminal`
+/// capability.
 pub(crate) async fn decide_permission(
     State(state): State<AppState>,
     Path(id): Path<i64>,

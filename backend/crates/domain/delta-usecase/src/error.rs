@@ -40,8 +40,8 @@ pub enum Error {
     /// A permission decision arrived for a request no browser decision can
     /// reach anymore: the id is unknown, the request was already decided, or
     /// its hook wait timed out and fell back to the interactive TUI prompt.
-    /// Surfaced as `409` so the browser switches to the answer-in-the-terminal
-    /// guidance.
+    /// Surfaced as `409` so the browser switches to guidance chosen by the
+    /// provider's `has_terminal` capability.
     #[error("permission request {0} is not awaiting a decision")]
     PermissionNotPending(i64),
 
