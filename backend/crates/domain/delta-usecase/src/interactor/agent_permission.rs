@@ -2,13 +2,14 @@
 //! moves a session's runtime state and what the browser is told.
 //!
 //! Permission is the first live runtime path routed through the neutral
-//! [`AgentEvent`] stream. The three sites that observe a permission fact — the
-//! `PermissionRequest` hook ([`on_permission_request`]), the browser decision
-//! ([`decide_permission`]), and the correlated `tool_result` ingested by the
-//! transcript sync ([`sync_transcript`]) — each construct the neutral event and
-//! funnel it through [`reduce_permission_event`]. This reducer is the single
-//! authority for the *core-loop* effect of that event: it mutates the queryable
-//! runtime mirror (`pending_permission`) and produces the [`SessionEvent`]
+//! [`AgentEvent`] stream. Every site that observes a permission fact — the
+//! `PermissionRequest` hook ([`on_permission_request`]), the adapter event pump
+//! ([`on_agent_event`]), the browser decision ([`decide_permission`]), and the
+//! correlated `tool_result` ingested by the transcript sync ([`sync_transcript`])
+//! — each construct the neutral event and funnel it through
+//! [`reduce_permission_event`]. This reducer is the single authority for the
+//! *core-loop* effect of that event: it mutates the queryable runtime mirror
+//! (`pending_permissions`, an ordered queue) and produces the [`SessionEvent`]
 //! broadcast that clears or raises the browser notice.
 //!
 //! Everything provider-specific stays out of the event and at the call site,
@@ -19,6 +20,7 @@
 //! already clean — a resolved `request_id` and a decision, nothing Claude-shaped.
 //!
 //! [`on_permission_request`]: super::hooks
+//! [`on_agent_event`]: super::agent_event
 //! [`decide_permission`]: super::permission_decision
 //! [`sync_transcript`]: super::sync
 
@@ -35,13 +37,19 @@ use crate::ports::SessionEvent;
 /// [`AgentEvent`] is a no-op (returns no events), so this is safe to call on any
 /// event as the runtime is progressively routed through the neutral stream.
 ///
-/// - [`AgentEvent::PermissionRequested`] raises the pending dialog mirror and
+/// - [`AgentEvent::PermissionRequested`] appends to the pending dialog queue and
 ///   emits [`SessionEvent::PermissionRequested`] — the notice the browser shows
-///   Allow/Deny next to.
-/// - [`AgentEvent::PermissionResolved`] clears the mirror (both the permission
-///   dialog and any question sharing the same disjoint row-id space, exactly as
-///   the transcript sync has always cleared both together) and emits
+///   Allow/Deny next to. A request arriving while others are pending queues
+///   *behind* them: the head stays put, so the dialog the user is looking at is
+///   never swapped out from under them.
+/// - [`AgentEvent::PermissionResolved`] removes that request from the queue (and
+///   clears any question sharing the same disjoint row-id space, exactly as the
+///   transcript sync has always cleared both together) and emits
 ///   [`SessionEvent::PermissionResolved`] — the signal that settles the notice.
+///   When the resolution retires the *head* and the queue still holds requests,
+///   the promoted head is re-broadcast as a second
+///   [`SessionEvent::PermissionRequested`], so a client that only follows events
+///   always has a dialog on screen while requests are pending.
 pub(in crate::interactor) fn reduce_permission_event(
     state: &mut SessionRuntime,
     session_id: &SessionId,
@@ -57,17 +65,13 @@ pub(in crate::interactor) fn reduce_permission_event(
             // text the notice showed before permission was routed through the
             // event.
             let tool_input_json = request.input_json.to_string();
-            state.set_pending_permission(PendingPermission {
-                request_id,
-                tool_name: request.tool_name.clone(),
-                tool_input_json: tool_input_json.clone(),
-            });
-            vec![SessionEvent::PermissionRequested {
-                session_id: session_id.clone(),
+            let pending = PendingPermission {
                 request_id,
                 tool_name: request.tool_name.clone(),
                 tool_input_json,
-            }]
+            };
+            state.enqueue_pending_permission(pending.clone());
+            vec![permission_requested_event(session_id, &pending)]
         }
         AgentEvent::PermissionResolved { request_id, .. } => {
             let request_id = parse_request_id(request_id);
@@ -75,27 +79,52 @@ pub(in crate::interactor) fn reduce_permission_event(
             // question mirror too is safe and matches the sync path: a question
             // row id and a permission row id are disjoint, so a permission
             // resolution can never wipe a live question's state.
-            state.resolve_pending_permission(request_id);
+            let promoted = state.resolve_pending_permission(request_id);
             state.resolve_pending_question(request_id);
-            vec![SessionEvent::PermissionResolved {
+            let mut events = vec![SessionEvent::PermissionResolved {
                 session_id: session_id.clone(),
                 request_id,
-            }]
+            }];
+            // The answered dialog was the head and more are queued behind it:
+            // raise the next one right away. Without this the browser settles the
+            // notice it just answered and shows nothing until the user refetches,
+            // which reads as "the agent stopped responding" while the provider is
+            // in fact still waiting on the queued approvals.
+            if let Some(head) = promoted {
+                events.push(permission_requested_event(session_id, &head));
+            }
+            events
         }
         _ => Vec::new(),
+    }
+}
+
+/// The browser notice for one pending dialog. Shared by the initial raise, the
+/// promotion of a new head, and the decision path's defensive promotion, so
+/// every client-visible "this dialog needs an answer" signal has one shape.
+pub(in crate::interactor) fn permission_requested_event(
+    session_id: &SessionId,
+    pending: &PendingPermission,
+) -> SessionEvent {
+    SessionEvent::PermissionRequested {
+        session_id: session_id.clone(),
+        request_id: pending.request_id,
+        tool_name: pending.tool_name.clone(),
+        tool_input_json: pending.tool_input_json.clone(),
     }
 }
 
 /// Resolve the neutral, opaque `request_id` string back to the row id the
 /// runtime mirror and [`SessionEvent`] use.
 ///
-/// In v1 the only provider is Claude, whose permission requests are keyed by
-/// Delta's own `permission_request` row id: the call sites stringify that `i64`
-/// into the neutral event, so parsing it back here is total. A structured
-/// provider whose ids are not `i64` row ids would make this a real modelling
-/// seam (the runtime mirror and wire event are `i64` today); that is deferred
-/// with the rest of the provider-neutral id work and is out of this slice's
-/// scope. The `expect` documents the invariant rather than hiding a silent drop.
+/// Every call site stringifies a Delta `permission_request` row id into the
+/// neutral event, so parsing it back here is total. A pane-backed provider
+/// (Claude) is keyed by that row id to begin with; an adapter-backed one (Codex)
+/// has its own opaque approval token, and the event pump allocates the row and
+/// re-expresses the fact under the row id *before* reducing it (see
+/// `agent_event::request_agent_permission`), so the provider token never reaches
+/// this function. The panic documents that invariant rather than hiding a silent
+/// drop.
 fn parse_request_id(request_id: &str) -> i64 {
     request_id.parse::<i64>().unwrap_or_else(|_| {
         panic!("permission request_id must be a Delta row id in v1, got {request_id:?}")
@@ -108,6 +137,7 @@ mod tests {
     use crate::agent::AgentPermissionRequest;
     use crate::interactor::session_actor::runtime::{PendingPermission, PendingQuestion};
     use crate::interactor::PermissionDecision;
+    use crate::turn::TurnInput;
     use delta_model::ThreadId;
 
     fn requested(request_id: &str, tool_name: &str, input: serde_json::Value) -> AgentEvent {
@@ -121,6 +151,23 @@ mod tests {
         }
     }
 
+    fn resolved(request_id: &str) -> AgentEvent {
+        AgentEvent::PermissionResolved {
+            request_id: request_id.to_owned(),
+            decision: PermissionDecision::Allow,
+        }
+    }
+
+    /// The request ids of the pending queue, oldest first.
+    fn queue(state: &SessionRuntime) -> Vec<i64> {
+        state
+            .live_state()
+            .pending_permissions
+            .iter()
+            .map(|p| p.request_id)
+            .collect()
+    }
+
     #[test]
     fn requested_raises_the_mirror_and_emits_the_notice() {
         let mut state = SessionRuntime::default();
@@ -130,7 +177,7 @@ mod tests {
         let events = reduce_permission_event(&mut state, &session, &event);
 
         assert_eq!(
-            state.live_state().pending_permission,
+            state.live_state().pending_permission().cloned(),
             Some(PendingPermission {
                 request_id: 7,
                 tool_name: "Bash".to_owned(),
@@ -169,7 +216,7 @@ mod tests {
         );
 
         assert_eq!(
-            state.live_state().pending_permission,
+            state.live_state().pending_permission(),
             None,
             "a resolved dialog is no longer mirrored"
         );
@@ -178,7 +225,8 @@ mod tests {
             vec![SessionEvent::PermissionResolved {
                 session_id: session,
                 request_id: 7,
-            }]
+            }],
+            "an empty queue produces the settle alone — nothing to promote"
         );
     }
 
@@ -223,7 +271,202 @@ mod tests {
             },
         );
         assert!(events.is_empty());
-        assert_eq!(state.live_state().pending_permission, None);
+        assert_eq!(state.live_state().pending_permission(), None);
+    }
+
+    #[test]
+    fn parallel_requests_queue_in_arrival_order_and_never_overwrite() {
+        // The field failure: a Codex turn fanned out 12 escalated tool calls, all
+        // 12 approvals arrived before any answer, and a single slot kept only the
+        // last — so 11 requests were unanswerable and the turn never finished.
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+
+        let mut raised = Vec::new();
+        for id in 1..=3 {
+            raised.extend(reduce_permission_event(
+                &mut state,
+                &session,
+                &requested(
+                    &id.to_string(),
+                    "Bash",
+                    serde_json::json!({ "command": format!("cat {id}") }),
+                ),
+            ));
+        }
+
+        assert_eq!(queue(&state), vec![1, 2, 3], "FIFO, nothing overwritten");
+        assert_eq!(
+            state
+                .live_state()
+                .pending_permission()
+                .map(|p| p.request_id),
+            Some(1),
+            "the head stays the first request the user was shown"
+        );
+        assert_eq!(
+            raised.len(),
+            3,
+            "every request is broadcast, so a client can build the same queue"
+        );
+    }
+
+    #[test]
+    fn resolving_the_head_promotes_the_next_and_raises_it() {
+        // The no-dialog-less invariant: answering the visible dialog must surface
+        // the next one without the browser refetching anything.
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        for id in 1..=3 {
+            reduce_permission_event(
+                &mut state,
+                &session,
+                &requested(&id.to_string(), "Bash", serde_json::json!({ "n": id })),
+            );
+        }
+
+        let events = reduce_permission_event(&mut state, &session, &resolved("1"));
+
+        assert_eq!(
+            queue(&state),
+            vec![2, 3],
+            "the answered head left the queue"
+        );
+        assert_eq!(
+            events,
+            vec![
+                SessionEvent::PermissionResolved {
+                    session_id: session.clone(),
+                    request_id: 1,
+                },
+                SessionEvent::PermissionRequested {
+                    session_id: session,
+                    request_id: 2,
+                    tool_name: "Bash".to_owned(),
+                    tool_input_json: r#"{"n":2}"#.to_owned(),
+                },
+            ],
+            "the settle is followed by the promoted head's own notice"
+        );
+    }
+
+    #[test]
+    fn resolving_a_non_head_request_leaves_the_visible_dialog_alone() {
+        // A decision can name any pending row (the endpoint is keyed by row id,
+        // not by queue position), so a middle entry can resolve first — e.g. the
+        // provider withdrew it. Only that entry leaves.
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        for id in 1..=3 {
+            reduce_permission_event(
+                &mut state,
+                &session,
+                &requested(&id.to_string(), "Bash", serde_json::json!({ "n": id })),
+            );
+        }
+
+        let events = reduce_permission_event(&mut state, &session, &resolved("2"));
+
+        assert_eq!(queue(&state), vec![1, 3], "only the named entry left");
+        assert_eq!(
+            events,
+            vec![SessionEvent::PermissionResolved {
+                session_id: session,
+                request_id: 2,
+            }],
+            "no promotion: the head never changed, so no new dialog is raised"
+        );
+    }
+
+    #[test]
+    fn a_repeated_request_for_the_same_row_keeps_its_queue_position() {
+        // A retried hook or a duplicate provider frame must not queue the same
+        // dialog twice (and must not push it behind newer ones).
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        reduce_permission_event(
+            &mut state,
+            &session,
+            &requested("1", "Bash", serde_json::json!({ "n": 1 })),
+        );
+        reduce_permission_event(
+            &mut state,
+            &session,
+            &requested("2", "Bash", serde_json::json!({ "n": 2 })),
+        );
+        reduce_permission_event(
+            &mut state,
+            &session,
+            &requested("1", "Bash", serde_json::json!({ "n": 1 })),
+        );
+
+        assert_eq!(queue(&state), vec![1, 2], "de-duplicated, order preserved");
+    }
+
+    #[test]
+    fn resolving_an_unknown_id_changes_nothing() {
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        reduce_permission_event(
+            &mut state,
+            &session,
+            &requested("1", "Bash", serde_json::json!({ "n": 1 })),
+        );
+
+        let events = reduce_permission_event(&mut state, &session, &resolved("99"));
+
+        assert_eq!(queue(&state), vec![1], "the live dialog is untouched");
+        assert_eq!(
+            events,
+            vec![SessionEvent::PermissionResolved {
+                session_id: session,
+                request_id: 99,
+            }],
+            "the settle still broadcasts (a client may hold a stale notice)"
+        );
+    }
+
+    #[test]
+    fn the_turn_returning_to_idle_clears_the_whole_queue() {
+        // A dialog cannot outlive its turn — and that holds for all of them, not
+        // just the head. By the time the turn ends the provider has settled or
+        // abandoned its requests; Delta only drops the mirror.
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        state.apply_turn(TurnInput::Dispatch { send_id: 1 });
+        state.apply_turn(TurnInput::EchoMatched { send_id: 1 });
+        for id in 1..=3 {
+            reduce_permission_event(
+                &mut state,
+                &session,
+                &requested(&id.to_string(), "Bash", serde_json::json!({ "n": id })),
+            );
+        }
+
+        state.apply_turn(TurnInput::Stop);
+
+        assert!(queue(&state).is_empty(), "the queue went with the turn");
+        assert!(
+            state.is_empty(),
+            "nothing pending pins the actor alive after the sweep"
+        );
+    }
+
+    #[test]
+    fn deleting_the_session_clears_the_whole_queue() {
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        for id in 1..=2 {
+            reduce_permission_event(
+                &mut state,
+                &session,
+                &requested(&id.to_string(), "Bash", serde_json::json!({ "n": id })),
+            );
+        }
+
+        state.forget_turn();
+
+        assert!(queue(&state).is_empty(), "the queue went with the session");
     }
 
     #[test]

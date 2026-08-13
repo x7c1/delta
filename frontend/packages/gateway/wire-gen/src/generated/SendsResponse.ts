@@ -9,10 +9,24 @@ import type { Turn } from "./Turn";
  * Response for `GET /api/sessions/{id}/sends`: the session's open
  * (non-terminal) sends — status `queued` or `dispatched` — oldest first, plus
  * the session's queryable live state (the current turn state, the pending
- * permission dialog, the pending question, and the running subagents — each
+ * permission queue, the pending question, and the running subagents — each
  * present/non-empty only while something is in flight).
  */
-export type SendsResponse = { sends: Array<Send>, turn: Turn, permission: PendingPermission | null, question: PendingQuestion | null, 
+export type SendsResponse = { sends: Array<Send>, turn: Turn, 
+/**
+ * The permission dialog to show: the head of the session's pending-approval
+ * queue, or `null` when nothing is pending.
+ */
+permission: PendingPermission | null, 
+/**
+ * How many permission requests are pending in total, `permission` included
+ * (`0` when it is `null`). A parallel-tool-call provider can leave several
+ * outstanding at once, so a client that refetches after a reconnect can
+ * rebuild both the dialog *and* its "N approvals pending" indication without
+ * having seen a single event. The remaining requests surface one at a time:
+ * answering the head promotes the next.
+ */
+permission_count: number, question: PendingQuestion | null, 
 /**
  * The subagents currently running in this session's turn, oldest first.
  * Empty when none is running.

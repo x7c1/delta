@@ -5,9 +5,10 @@
 Two headless Playwright suites drive the real browser DOM, cheapest first:
 **mock mode** (`make e2e`) runs the UI against MSW mocks with no backend at
 all, and **fake mode** (`make e2e-fake`) runs the real backend end to end with
-a scripted stand-in for `claude`. Contract monitoring against the real agent
-CLIs is a third lane, documented in [canary.md](canary.md). Day-to-day build
-and run commands are in [README.md](README.md).
+scripted stand-ins for the agent CLIs (`claude` and `codex`). Contract
+monitoring against the real agent CLIs is a third lane, documented in
+[canary.md](canary.md). Day-to-day build and run commands are in
+[README.md](README.md).
 
 ## Mock mode (`make e2e`)
 
@@ -51,12 +52,20 @@ E2E_REUSE=1 E2E_PORT=5173 make e2e
 A second Playwright suite (`packages/apps/web/e2e-fake/`) drives the real
 backend instead of mocks: a live `delta-server` on a temp database, real tmux
 panes, real hooks, the real transcript tail, and the real WebSocket/PTY
-channels. The only scripted part is the "claude" the server spawns: the
+channels. The only scripted part is the agent the server spawns: the
 `fake-claude` binary (`backend/crates/apps/fake-claude`), a stand-in that
 accepts `claude`'s CLI flags, fires the same HTTP hooks, and writes the same
 transcript JSONL — but follows a deterministic scenario script instead of a
 model. This is the suite that proves the full loop
 (REST → spawn → tmux → hooks → transcript → tail → WS) end to end.
+
+The adapter (terminal-less) path has its own stand-in: `fake-codex`
+(`backend/crates/apps/fake-codex`), spawned as the session's `codex` binary,
+speaking the real `codex app-server` JSON-RPC over stdio. A spec starts a session
+on it with `startNewCodexSession` (the helper picks the provider in the
+new-session form). It covers behavior a pane-backed provider cannot even
+produce — notably several tool approvals outstanding at once, since Claude's
+permission hook blocks its CLI until each dialog is answered.
 
 Run it with:
 
@@ -65,15 +74,16 @@ make e2e-fake
 ```
 
 Ownership is split. `scripts/e2e-fake.sh` is a thin wrapper: it only builds
-the two binaries (`delta-server`, `fake-claude`) and invokes the Playwright
+the binaries (`delta-server`, `fake-claude`, `fake-codex`) and invokes the Playwright
 suite. The **server lifecycle is owned by a worker-scoped Playwright fixture**
 (`packages/apps/web/e2e-fake/support/server.ts`), which runs in the worker
 process and holds the child-process handle — which is what makes the
 server-restart coverage possible (kill the server, relaunch it against the
 same database and tmux socket) and means a worker crash reboots the server.
 The fixture owns the per-run temp database and tmux socket
-(`delta-e2e-fake-<pid>`, killed on teardown), the scripted-claude wrapper, a
-shortened launch watchdog (`DELTA_LAUNCH_DEADLINE_MS`), the dedicated backend
+(`delta-e2e-fake-<pid>`, killed on teardown), the scripted-claude and
+scripted-codex wrappers, a shortened launch watchdog
+(`DELTA_LAUNCH_DEADLINE_MS`), the dedicated backend
 port (7899), and the `/health` readiness poll; Playwright starts the Vite dev
 server (port 5198) proxied to that backend. Because a hard kill (SIGKILL,
 Ctrl-C) can skip teardown, the fixture also **sweeps at startup**: it kills any
@@ -97,6 +107,17 @@ scenario through the **first word of the first prompt it sends**: sending
 `scenarios/first-send.json`. Keep specs structural — assert presence, absence,
 and ordering of UI elements, never scripted reply text.
 
-The same fake also backs a backend-only integration test
-(`backend/crates/apps/fake-claude/tests/full_loop.rs`, part of `cargo test`)
-that proves the loop without a browser; it skips where tmux is missing.
+`fake-codex` scenarios live in the same directory but are selected differently:
+the fake reads ONE file, named by `FAKE_CODEX_SCENARIO` at process start, so the
+server fixture pins a single Codex scenario for the whole run
+(`scenarios/codex-parallel-approvals.json`) and every Codex session plays it. Its
+step vocabulary (including `await_approvals`, which suspends a turn until every
+emitted approval has been answered) is documented in
+`backend/crates/apps/fake-codex/src/scenario.rs`.
+
+Both fakes also back backend-only integration tests (part of `cargo test`) that
+prove the same loops without a browser:
+`backend/crates/apps/fake-claude/tests/full_loop.rs`, which skips where tmux is
+missing, and `backend/crates/apps/fake-codex/tests/full_loop.rs`, where the
+adapter path's turn controls — the parallel approval fan-out included — are
+pinned.

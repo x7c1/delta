@@ -23,7 +23,10 @@ provider's adapter:
   the same call.
 
 Permission and question answers are not sends — they resolve a request the agent
-raised mid-turn.
+raised mid-turn. Permission requests form a FIFO **queue** per session (an
+adapter-backed provider can leave several outstanding at once), surfaced one
+dialog at a time; see
+[The pending-permission queue](#the-pending-permission-queue).
 
 ## Sends
 
@@ -144,6 +147,7 @@ disconnected: events fired during the gap are never replayed.
       "tool_name": "Bash",
       "tool_input": "{\"command\":\"ls\"}"
     },
+    "permission_count": 1,
     "question": {
       "request_id": 5,
       "thread_id": 3,
@@ -169,10 +173,16 @@ disconnected: events fired during the gap are never replayed.
     `thread_id` the thread it runs on (`null` while idle). Only an echo match
     names a send, so an adapter-backed session leaves `send_id` `null` on every
     turn: correlate its running indicator by `thread_id`.
-  - `permission` is the tool-permission dialog awaiting an answer, or `null`.
-    Answer it with
+  - `permission` is the **head** of the session's pending tool-permission queue
+    — the dialog to show — or `null` when nothing is pending. Answer it with
     [`POST /api/permissions/{id}/decision`](#post-apipermissionsiddecision).
     `tool_input` is the tool's input serialized as JSON *text*.
+  - `permission_count` is how many permission requests are pending in total,
+    the head included (`0` when `permission` is `null`). It exceeds 1 when a
+    provider raises several approvals at once — an adapter-backed provider runs
+    tool calls in parallel, so one turn can leave N requests outstanding. The
+    queue is FIFO and surfaces one dialog at a time: see
+    [the queue semantics](#the-pending-permission-queue).
   - `question` is the `AskUserQuestion` currently presenting its options, or
     `null`. `tool_input` is the raw `{"questions":[…]}` payload as JSON text.
   - `running_subagents` lists the `Agent`/`Task` calls still running, oldest
@@ -239,11 +249,49 @@ is still `queued`, so the guarded queued cancel already covers it.
 
 ## Permissions
 
+### The pending-permission queue
+
+A session's outstanding permission requests form a FIFO queue, and the surfaces
+above report it as **head plus depth**: `permission` is the request to show,
+`permission_count` how many are pending in total.
+
+- **Several can be pending at once.** A pane-backed provider (Claude) blocks its
+  CLI inside the permission hook, so its queue never holds more than one entry.
+  An adapter-backed one (Codex) runs tool calls in parallel: a single turn can
+  emit N approval requests in the same instant, and all N are recorded and
+  answerable.
+- **Arrival never displaces the head.** A request that arrives while others are
+  pending queues *behind* them, so the dialog a user is looking at is never
+  swapped out from under them. Every request is broadcast as its own
+  `permission_requested` ([live-channels.md](live-channels.md)), so a client that
+  follows events can rebuild the same order.
+- **Decisions are keyed by row id, not by queue position.**
+  [`POST /api/permissions/{id}/decision`](#post-apipermissionsiddecision) answers
+  any pending request, head or not. Resolving a non-head request removes only
+  that entry and leaves the visible dialog alone.
+- **Answering the head promotes the next.** The resolution broadcasts
+  `permission_resolved` for the answered request and, when the queue is still
+  non-empty, re-broadcasts `permission_requested` for the newly promoted head —
+  so a client that only follows events always has a dialog on screen while
+  requests are pending, with no refetch.
+- **A refetch is always enough to keep answering.** The head and the depth are
+  queryable state, so a client that missed every event rebuilds the dialog *and*
+  its "N approvals pending" indication from one
+  [`GET /api/sessions/{id}/sends`](#get-apisessionsidsends). Only the head's id
+  is reported, though — the queued requests' ids come from their
+  `permission_requested` events alone. So a client that missed those answers the
+  queue front to back, one promoted head at a time, which drains it either way.
+- **The queue cannot outlive its turn.** When the turn returns to idle (stop,
+  interrupt, close) the whole queue is dropped: the provider has settled or
+  abandoned those requests by then, and Delta only drops its mirror.
+
 ### `POST /api/permissions/{id}/decision`
 
 Answer a pending tool-permission request from the browser. `{id}` is the
 `request_id` reported by the `permission_requested` event or by the `permission`
-field of [`GET /api/sessions/{id}/sends`](#get-apisessionsidsends).
+field of [`GET /api/sessions/{id}/sends`](#get-apisessionsidsends). Any pending
+request can be answered, whether or not it is the queue head (see
+[the queue semantics](#the-pending-permission-queue)).
 
 For a pane-backed session, resolving the row wakes the blocked
 [`POST /hooks/permission-request`](hooks.md#post-hookspermission-request) call,
@@ -259,7 +307,9 @@ Request:
 
 `decision` is `allow` or `deny`.
 
-- **204 No Content** — the decision was recorded and handed to the agent.
+- **204 No Content** — the decision was recorded and handed to the agent. When
+  the answered request was the queue head and others are still pending, the next
+  one is raised as a fresh `permission_requested`.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
   awaiting a browser decision: it was already decided, or its hook wait timed out
   and the interactive TUI prompt owns it now. The browser falls back to the

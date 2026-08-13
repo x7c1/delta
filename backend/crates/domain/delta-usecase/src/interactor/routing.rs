@@ -288,7 +288,7 @@ where
     }
 
     /// The queryable live state of a session: its turn phase plus the
-    /// pending permission dialog, snapshotted in one actor message.
+    /// pending permission queue, snapshotted in one actor message.
     ///
     /// Public because the REST surface reports it (the sends envelope
     /// carries `turn` and `permission`, so the browser can rebuild its
@@ -303,7 +303,7 @@ where
         let default = SessionLiveState {
             turn: TurnState::Idle,
             in_progress_thread: None,
-            pending_permission: None,
+            pending_permissions: Vec::new(),
             pending_question: None,
             running_subagents: Vec::new(),
         };
@@ -326,7 +326,7 @@ where
                     session_id = %id,
                     branch = "actor_reply",
                     turn = ?state.turn,
-                    has_pending_permission = state.pending_permission.is_some(),
+                    pending_permissions = state.pending_permissions.len(),
                     has_pending_question = state.pending_question.is_some(),
                     "live_state_for: state from live actor"
                 );

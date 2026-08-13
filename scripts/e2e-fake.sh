@@ -2,19 +2,20 @@
 #
 # e2e-fake.sh — run the fake-mode Playwright suite against a real backend.
 #
-# This script is a thin wrapper: it builds the two binaries the suite needs
-# and invokes Playwright. The `delta-server` lifecycle itself — the temp
-# database, the per-run tmux socket, the scripted-claude wrapper, the spawn,
-# the `/health` readiness poll, and teardown — is owned by a worker-scoped
+# This script is a thin wrapper: it builds the binaries the suite needs and
+# invokes Playwright. The `delta-server` lifecycle itself — the temp database,
+# the per-run tmux socket, the scripted-claude and scripted-codex wrappers, the
+# spawn, the `/health` readiness poll, and teardown — is owned by a worker-scoped
 # Playwright fixture (frontend/packages/apps/web/e2e-fake/support/server.ts),
 # NOT by this script. That single Node boot implementation is what lets a spec
 # kill the server and relaunch it (the server-restart coverage) and keeps the
 # two entry points from drifting.
 #
 # The suite drives the real frontend against a real `delta-server` whose
-# spawned "claude" is the scripted `fake-claude` binary. Everything between the
-# browser and the scripted model is real: REST, the WebSocket event channel,
-# the PTY bridge, tmux panes, hooks, and the JSONL transcript tail.
+# spawned "claude" is the scripted `fake-claude` binary — and whose "codex" is
+# the scripted `fake-codex` app-server, for the adapter-path specs. Everything
+# between the browser and the scripted model is real: REST, the WebSocket event
+# channel, the PTY bridge, tmux panes, hooks, and the JSONL transcript tail.
 #
 # Usage: scripts/e2e-fake.sh [playwright args...]
 #   Any trailing arguments are forwarded to `playwright test`, so a single
@@ -41,10 +42,11 @@ command -v tmux >/dev/null 2>&1 || die "tmux not found on PATH"
 command -v cargo >/dev/null 2>&1 || die "cargo not found on PATH"
 command -v pnpm >/dev/null 2>&1 || die "pnpm not found on PATH"
 
-# Build both binaries up front so the fixture's server spawn is instant (the
-# fixture launches the built `target/debug/{delta-server,fake-claude}`).
-log "Building delta-server and fake-claude ..."
-(cd "$BACKEND_DIR" && cargo build -p delta-server -p fake-claude)
+# Build the binaries up front so the fixture's server spawn is instant (the
+# fixture launches the built `target/debug/{delta-server,fake-claude,fake-codex}`;
+# the Codex fake backs the adapter-path specs).
+log "Building delta-server, fake-claude and fake-codex ..."
+(cd "$BACKEND_DIR" && cargo build -p delta-server -p fake-claude -p fake-codex)
 
 # Run the suite; the worker fixture boots and tears down the server, and
 # Playwright owns the Vite dev server (proxied to the backend port).

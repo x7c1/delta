@@ -14,7 +14,7 @@
 
 use crate::agent::AgentEvent;
 use crate::error::{Error, Result};
-use crate::interactor::agent_permission::reduce_permission_event;
+use crate::interactor::agent_permission::{permission_requested_event, reduce_permission_event};
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 
@@ -77,17 +77,21 @@ where
             // The waiter existed but the row is not `pending` — it was already
             // resolved out from under us (e.g. a tool_result ingested in the
             // same instant). The hook handler still gets the answer; a decided
-            // row is left untouched, and its resolution already cleared the
-            // mirror, so this path emits no further broadcast. Clear the mirror
-            // defensively (keyed, so it cannot wipe a newer dialog).
-            self.state.resolve_pending_permission(request_id);
+            // row is left untouched, and its resolution already dequeued it, so
+            // this path normally emits no further broadcast. Dequeue defensively
+            // (keyed, so it cannot drop another dialog) and, if that removal did
+            // promote a queued dialog to head, raise it — the no-dialog-less
+            // invariant holds on this path too.
+            let promoted = self.state.resolve_pending_permission(request_id);
             tracing::warn!(
                 request_id,
                 "permission decision arrived for a row that is no longer pending; \
                  forwarding the decision to the blocked hook without re-deciding the row"
             );
             let _ = sender.send(decision);
-            return Ok(Vec::new());
+            return Ok(promoted
+                .map(|head| vec![permission_requested_event(self.id, &head)])
+                .unwrap_or_default());
         };
 
         // A dropped receiver means the hook handler gave up (its timeout fired
@@ -101,10 +105,10 @@ where
             );
         }
 
-        // Route the resolution through the permission reducer: it drops the
-        // queryable dialog mirror (keyed, so a stale id cannot wipe a newer
-        // dialog) and produces the `PermissionResolved` broadcast that settles
-        // the browser notice.
+        // Route the resolution through the permission reducer: it dequeues the
+        // answered dialog (keyed, so a stale id cannot drop another one),
+        // produces the `PermissionResolved` broadcast that settles the browser
+        // notice, and raises the next queued dialog when this one was the head.
         let event = AgentEvent::PermissionResolved {
             request_id: request_id.to_string(),
             decision,

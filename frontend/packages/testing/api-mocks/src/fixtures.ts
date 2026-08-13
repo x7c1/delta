@@ -581,12 +581,14 @@ export interface MockStore {
      */
     spawning?: boolean;
     /**
-     * The permission dialog currently awaiting an answer, mirrored from the
-     * scripted `permission_requested`/`permission_resolved` events so the
-     * sends envelope reports it the way the real server does (see
-     * `applyEvent`). Absent means nothing is pending.
+     * The permission dialogs awaiting an answer, oldest first, mirrored from the
+     * scripted `permission_requested`/`permission_resolved` events so the sends
+     * envelope reports the queue head and its depth the way the real server does
+     * (see `applyEvent`). A queue, not a slot: a provider running tool calls in
+     * parallel leaves several outstanding at once. Absent/empty means nothing is
+     * pending.
      */
-    pendingPermission?: PendingPermission;
+    pendingPermissions?: PendingPermission[];
     /**
      * The `AskUserQuestion` currently presenting its options, mirrored from the
      * scripted `question_asked`/`permission_resolved` events so the sends

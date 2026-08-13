@@ -8,6 +8,10 @@
  * (same fields, minus the session id the URL already names): the event is
  * lost for a client whose socket was down when it fired, so a reconnecting
  * client rebuilds its permission notice from this instead.
+ *
+ * Several requests can be pending at once (a provider running tool calls in
+ * parallel), and the envelope reports the queue's **head** here plus the depth
+ * in `permission_count` — the dialog to show, and how many answers are owed.
  */
 export type PendingPermission = { 
 /**

@@ -76,6 +76,8 @@ function setNeedsPermission() {
           toolName: 'Bash',
           toolInput: '{}',
           dismissed: false,
+          queued: [],
+          pendingCount: 1,
         },
       ],
     },
