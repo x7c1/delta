@@ -139,13 +139,13 @@ state — write a test per row):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real `codex app-server` session: a prompt that triggers a
+- [x] Against a real `codex app-server` session: a prompt that triggers a
       parallel escalated `exec_command` fan-out (e.g. fetching many files at
       once with escalated permissions) surfaces every approval in the UI one
       after another; answering them all lets the turn complete, and the
       comms pane shows a response frame for every approval request id — no
       orphaned `pending` rows afterwards.
-- [ ] Run `make e2e-real-codex` (ignored canaries) once and confirm green —
+- [x] Run `make e2e-real-codex` (ignored canaries) once and confirm green —
       these do not run in CI.
 
 ## Out of scope

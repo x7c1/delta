@@ -1887,6 +1887,16 @@ async fn codex_parallel_approvals_are_all_answerable_and_gate_the_turn() {
     // DENY the middle one. A denial is a resolution like any other: it retires
     // only its own request, so the one behind it still promotes, stays
     // answerable, and still gates the turn.
+    //
+    // The turn's completion is tracked from inside the settle loop, exactly like
+    // the single-approval tests do: `PermissionResolved` rides the resolver's
+    // path (the adapter emits it after writing the decision to the wire) while
+    // `turn/completed` rides the provider's push path, so on a loaded machine
+    // the final answer's completion can legally overtake its own
+    // `PermissionResolved` on the broadcast. A separate wait that starts only
+    // after the settle loop would have already consumed the completion in its
+    // catch-all arm and then time out.
+    let mut turn_completed = false;
     for (answered, request_id) in requested.iter().enumerate() {
         let decision = if answered == 1 { "deny" } else { "allow" };
         let response = app
@@ -1925,6 +1935,7 @@ async fn codex_parallel_approvals_are_all_answerable_and_gate_the_turn() {
                 SessionEvent::PermissionRequested {
                     request_id: rid, ..
                 } => promoted = Some(rid),
+                SessionEvent::TurnCompleted { .. } => turn_completed = true,
                 _ => {}
             }
         }
@@ -1949,8 +1960,11 @@ async fn codex_parallel_approvals_are_all_answerable_and_gate_the_turn() {
 
     // With every approval answered the fake plays the parked remainder: the turn
     // completes. A single unanswered request would hang here — which is exactly
-    // what the user experienced.
-    await_turn_completion(&mut events).await;
+    // what the user experienced. (Skipped when the settle loop already observed
+    // the completion — see the reorder note above the loop.)
+    if !turn_completed {
+        await_turn_completion(&mut events).await;
+    }
 
     // Each answer reached the provider, carrying the value the user chose: the
     // fake echoes every decision it received as an assistant message, so two
