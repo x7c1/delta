@@ -113,7 +113,7 @@ per row):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real `codex app-server` session: kill the app-server process
+- [x] Against a real `codex app-server` session: kill the app-server process
       (by PID) while a turn is in flight with a pending approval dialog — the
       dialog clears and the turn settles in the UI without a reload, the
       session shows as closed, and sending a new message resumes it
