@@ -312,10 +312,17 @@ Request:
   one is raised as a fresh `permission_requested`.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
   awaiting a browser decision: it was already decided, or its hook wait timed out
-  and the interactive TUI prompt owns it now. The browser falls back to the
-  answer-in-the-terminal guidance. An adapter-backed session returns it once
-  the session has been closed, and has no terminal for the browser to point
-  the user at.
+  and the interactive TUI prompt owns it now. An adapter-backed session returns
+  it once the session has been closed. So does any retry of a decision that
+  already failed downstream (the **500** a dead agent connection produces): the
+  server's claim on the request is taken before the decision is routed and is
+  never restored, so the failed attempt already spent it. The browser replaces
+  the decision buttons with guidance chosen by the provider's `has_terminal`
+  capability (see
+  [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a session
+  that has a terminal is pointed at the prompt waiting there, while a
+  terminal-less one — where the question survives nowhere the user can reach —
+  is told it can no longer be answered, and offered only Dismiss.
 
 ## Questions
 

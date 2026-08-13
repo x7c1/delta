@@ -154,7 +154,9 @@ describe('WorkspaceScreen multi-session', () => {
       newSessionWorkdir: null,
       workdirDialogOpen: false,
     });
-    useLiveStore.setState({ spawns: [], unread: {} });
+    // `notices` is reset alongside the rest: a case that seeds a permission
+    // notice would otherwise leak the card into every later case's screen.
+    useLiveStore.setState({ spawns: [], unread: {}, notices: {} });
   });
 
   it('clears the focused session’s active thread unread on load', async () => {
@@ -886,6 +888,109 @@ describe('WorkspaceScreen multi-session', () => {
       expect(screen.queryByTestId('terminal-toggle')).not.toBeInTheDocument(),
     );
     expect(screen.queryByTestId('terminal-pane')).not.toBeInTheDocument();
+  });
+
+  // Seed a pending permission notice for a session, as the live event router
+  // would, so the transcript pane's notice card renders with its Allow/Deny
+  // buttons.
+  function seedPermissionNotice(sessionId: string, requestId: number) {
+    useLiveStore.setState({
+      notices: {
+        [sessionId]: [
+          {
+            kind: 'permission',
+            requestId,
+            toolName: 'Bash',
+            toolInput: '{"command":"cargo test"}',
+            dismissed: false,
+            queued: [],
+            pendingCount: 1,
+          },
+        ],
+      },
+    });
+  }
+
+  it('gives a Codex session terminal-free guidance when its decision conflicts', async () => {
+    // The wiring test for the notice's conflict fallback: the workspace is what
+    // resolves the focused session's `has_terminal` and hands it to the
+    // transcript pane. A Codex session (no terminal) whose decision comes back
+    // `409 permission_not_pending` — the agent connection died with the dialog
+    // open, or another tab answered it — must not be told to answer in a
+    // terminal it does not have.
+    useNavStore.setState({ focusedSessionId: SESSION_ID_4 });
+    useSingleSessionOfProvider(SESSION_ID_4, 'codex', SESSION_4_MAIN_THREAD_ID);
+    seedPermissionNotice(SESSION_ID_4, 11);
+    server.use(
+      http.post('*/api/permissions/:id/decision', () =>
+        HttpResponse.json(
+          { error: 'not pending', code: 'permission_not_pending' },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    renderScreen();
+
+    const notice = await screen.findByTestId('permission-notice');
+    // Wait for the providers query to settle before deciding, so the assertion
+    // is about the resolved capability and not the card's unknown-capability
+    // default. The comms toggle is that query's visible effect for Codex.
+    await screen.findByTestId('comms-toggle');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Allow' }));
+
+    expect(
+      await within(notice).findByTestId('permission-notice-unanswerable'),
+    ).toBeInTheDocument();
+    expect(
+      within(notice).queryByText('Answer the prompt in the terminal.'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(notice).queryByRole('button', { name: 'Open terminal' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(notice).getByRole('button', { name: 'Dismiss' }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the terminal guidance for a session whose capability never resolves', async () => {
+    // The other half of the wiring, and the reason the notice gets the RAW
+    // capability rather than the pane's fail-closed `focusedHasTerminal`: here
+    // `GET /api/providers` fails and the query does not retry, so this page will
+    // never learn that Claude has a terminal. The fail-closed flag reads `false`
+    // in exactly that state — handing it to the card would answer a live TUI
+    // prompt's only actionable instruction with "can no longer be answered". The
+    // raw tri-state stays `undefined`, so HAS_TERMINAL_WHEN_UNKNOWN preserves
+    // today's terminal guidance.
+    server.use(
+      http.get('*/api/providers', () =>
+        HttpResponse.json({ error: 'providers unavailable' }, { status: 500 }),
+      ),
+      http.post('*/api/permissions/:id/decision', () =>
+        HttpResponse.json(
+          { error: 'not pending', code: 'permission_not_pending' },
+          { status: 409 },
+        ),
+      ),
+    );
+    useNavStore.setState({ focusedSessionId: SESSION_ID });
+    useSingleSessionOfProvider(SESSION_ID, 'claude', MAIN_THREAD_ID);
+    seedPermissionNotice(SESSION_ID, 12);
+
+    renderScreen();
+
+    const notice = await screen.findByTestId('permission-notice');
+    fireEvent.click(within(notice).getByRole('button', { name: 'Allow' }));
+
+    expect(
+      await within(notice).findByText('Answer the prompt in the terminal.'),
+    ).toBeInTheDocument();
+    expect(
+      within(notice).getByRole('button', { name: 'Open terminal' }),
+    ).toBeInTheDocument();
+    expect(
+      within(notice).queryByTestId('permission-notice-unanswerable'),
+    ).not.toBeInTheDocument();
   });
 
   it('withholds the terminal pane for a Claude session until the providers query resolves', async () => {

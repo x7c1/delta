@@ -57,7 +57,8 @@ export interface ApiClientOptions {
  * `permission_not_pending` means a permission decision can no longer take
  * effect: the request was already decided, or its hook wait timed out and the
  * interactive TUI prompt owns it now. Callers branch on this to swap the
- * Allow/Deny buttons for the answer-in-the-terminal guidance.
+ * Allow/Deny buttons for guidance chosen by the provider's `has_terminal`
+ * capability.
  *
  * `question_not_pending` means an `AskUserQuestion` can no longer be answered
  * from the UI (already answered, its turn ended, or no live pane). Callers
