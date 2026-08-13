@@ -11,6 +11,14 @@ Sessions are addressed by id. Open/closed is process-runtime state held by the
 server (rebuilt empty on restart): a session that exists in the store but has no
 live pane is *closed* and must be reopened before it can receive a send.
 
+A session can also become closed **without being asked to**: when an
+adapter-backed provider's process ends unexpectedly (a killed `codex app-server`)
+the session settles — its in-flight turn ends as `turn_interrupted`, its pending
+permission requests are settled (see
+[sends.md](sends.md#the-pending-permission-queue)) — and it reports `open: false`,
+announced as `session_closed`. Delta does not respawn the process: a send to the
+settled session resumes it, exactly as after a server restart.
+
 ## Sessions
 
 ### `GET /api/sessions`

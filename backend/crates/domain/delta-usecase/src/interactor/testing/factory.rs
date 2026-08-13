@@ -103,6 +103,23 @@ pub(crate) fn interactor_with_event_sink() -> (TestInteractor, crate::ports::Asy
     (interactor().with_event_sink(sink), receiver)
 }
 
+/// Build a test interactor with a Codex [`AgentAdapterFactory`] **and** the
+/// async event seam, returning the receiver alongside it.
+///
+/// Everything a Codex session produces after the driving call returned — the
+/// pump's turn ends, permission settles, and the session-death signals — leaves
+/// on that seam, so a test asserting what the *browser* is told (rather than only
+/// the queryable state) needs both wired at once.
+pub(crate) fn interactor_with_codex_factory_and_event_sink(
+    factory: Arc<FakeAgentFactory>,
+) -> (TestInteractor, crate::ports::AsyncEventReceiver) {
+    let (sink, receiver) = crate::ports::AsyncEventSink::channel();
+    (
+        interactor_with_codex_factory(factory).with_event_sink(sink),
+        receiver,
+    )
+}
+
 /// An interactor whose tmux dispatch always fails.
 pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
     Interactor::new(

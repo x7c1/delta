@@ -49,6 +49,7 @@
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
 //! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
 //! | `await_approvals` | **Suspend** the turn until *every* approval emitted so far has been answered. Each answer is echoed as an assistant message the moment it arrives; the parked remainder plays once the last outstanding approval is answered. A no-op when nothing is outstanding. |
+//! | `exit` | **Die.** The fake exits immediately, without emitting anything further — so the client's reader sees its stdout close, exactly as when a real `codex app-server` process is killed or crashes mid-turn. Everything scripted after this step never plays. |
 //! | `notification { method, params? }` | Emit an arbitrary notification (escape hatch for shapes not covered above). |
 //! | `account_notification { method, params? }` | Emit an **account-scoped** notification: the params are written verbatim, WITHOUT a `threadId`, exactly as the real server emits `account/rateLimits/updated`. |
 //!
@@ -141,6 +142,15 @@ pub enum Emit {
     ///
     /// A no-op when no approval is outstanding.
     AwaitApprovals,
+    /// Die where a real app-server would: the fake exits at this point in the
+    /// turn, closing its stdout, so the client sees the EOF a killed or crashed
+    /// `codex app-server` produces.
+    ///
+    /// This is how a scenario re-enacts the field failure — a process that goes
+    /// away mid-turn, with approvals outstanding and a turn still in flight —
+    /// deterministically, without a test having to find and signal a PID. Nothing
+    /// scripted after it ever plays.
+    Exit,
     Notification {
         method: String,
         #[serde(default)]
@@ -377,6 +387,31 @@ mod tests {
             turn.emit
         );
         assert_eq!(turn.emit[2], Emit::AwaitApprovals);
+    }
+
+    #[test]
+    fn parses_a_mid_turn_death() {
+        // The death shape: an approval goes out and the process dies with it
+        // still unanswered — the field failure a settle test drives.
+        let scenario: Scenario = serde_json::from_str(
+            r#"{
+                "turn": {
+                    "emit": [
+                        { "type": "request_approval", "params": { "itemId": "e1", "command": "cat a" } },
+                        { "type": "exit" },
+                        { "type": "turn_completed", "status": "completed" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+        let turn = scenario.turn.expect("a turn");
+        assert_eq!(turn.emit[1], Emit::Exit);
+        assert_eq!(
+            turn.emit.len(),
+            3,
+            "the steps after the death are parsed (and never played)"
+        );
     }
 
     #[test]

@@ -348,6 +348,20 @@ impl Server<'_> {
                         return Ok(());
                     }
                 }
+                // Die here, as a killed or crashed app-server does: exit without
+                // writing anything more, so the client's reader hits EOF with a
+                // turn still in flight (and any approval still unanswered). The
+                // remaining emits are deliberately never played.
+                Emit::Exit => {
+                    eprintln!("fake-codex: scenario says exit; dying mid-turn");
+                    // Flush what was already written before the process goes
+                    // away — an unflushed frame would make the death arrive
+                    // *earlier* than the script says it does.
+                    self.out
+                        .flush()
+                        .map_err(|e| format!("flush on exit: {e}"))?;
+                    std::process::exit(0);
+                }
                 Emit::Notification { method, params } => {
                     self.emit_notification(method, with_thread_id(params.clone(), thread_id))?
                 }

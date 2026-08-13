@@ -332,6 +332,15 @@ impl SessionStore for SqliteStore {
             .await
     }
 
+    async fn deny_pending_permission_requests(
+        &self,
+        session_id: &SessionId,
+        reason: &str,
+    ) -> std::result::Result<Vec<i64>, delta_usecase::Error> {
+        self.deny_pending_permission_requests(session_id, reason)
+            .await
+    }
+
     async fn record_subagent_launch(
         &self,
         session_id: &SessionId,

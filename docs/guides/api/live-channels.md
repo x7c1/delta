@@ -70,7 +70,12 @@ which frames arrive, and a client must handle each event whenever it lands.
   (resumed by id via `POST /api/sessions/{id}/open`). A brand-new session never
   emits this.
 - `session_closed` — an open session was closed (`POST /api/sessions/{id}/close`);
-  its pane was torn down but its data remains.
+  its pane was torn down but its data remains. It is also emitted when the session
+  closed *itself*: an adapter-backed provider whose process ended unexpectedly
+  settles (`turn_interrupted` for an in-flight turn, `permission_resolved` for
+  every pending request) and then reports the close, so a watching browser
+  converges from events alone — see
+  [sessions.md](sessions.md) for the recovery story.
 - `spawn_failed` — a freshly-spawned session ended, or outlived its deadline,
   before its first `UserPromptSubmit` ever bound it, so it never registered:
   emitted by the `SessionEnd` hook when the launch exited, by the watchdog
@@ -157,8 +162,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   marker line, or a synthetic `isApiErrorMessage` assistant line, and emits
   this, clearing the stuck send without a hook. A headless provider reports it
   straight from its turn-end frame when the turn was interrupted or failed,
-  mirroring `turn_completed`'s two paths. `thread_id` is the interrupted turn's
-  thread, `null` only when no thread is resolvable.
+  mirroring `turn_completed`'s two paths — and also when its agent process ended
+  mid-turn, which produces no turn-end frame at all (see `session_closed`).
+  `thread_id` is the interrupted turn's thread, `null` only when no thread is
+  resolvable.
 - `transcript_updated` — the background tail ingested new transcript lines
   between hooks. Claude Code often flushes the final assistant line to the JSONL
   *after* the `Stop` hook fires, so the hook sync misses it; a ~500ms poll picks
@@ -215,7 +222,10 @@ which frames arrive, and a client must handle each event whenever it lands.
   a genuine prompt yields no result until a human answers, so the notice
   persists until then. It settles exactly the named `request_id`: with several
   approvals pending, the others stay pending and answerable, and the next one is
-  raised by the follow-up `permission_requested` described above.
+  raised by the follow-up `permission_requested` described above. A session whose
+  agent process ended is the one case where *every* pending request is settled at
+  once — one of these each, with no promotion, since none of them can be answered
+  any more (see [sends.md](sends.md#the-pending-permission-queue)).
 
 ### Streaming and subagents
 
