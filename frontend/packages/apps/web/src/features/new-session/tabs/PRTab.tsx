@@ -18,7 +18,11 @@ import { useComposerStore } from '../../../store/composerStore';
  * - workdir = the registered clone's `recently_used_clone_path`;
  * - worktree on, with `start_point.kind = 'use_remote_branch'` keyed
  *   to the PR's head ref. (The head ref is by definition a
- *   non-default branch, which is the worktree-default-ON rule.)
+ *   non-default branch, which is why a PR pick always runs in a
+ *   worktree rather than offering the choice.)
+ * - `pr` provenance on the workdir, which both highlights the picked
+ *   row and locks the composer's worktree controls to that branch —
+ *   the session is for the PR, so there is nothing left to choose.
  *
  * A row whose repo has no registered local clone is visibly
  * de-emphasised and silently un-clickable, with an inline hint
@@ -43,21 +47,16 @@ export function PRTab() {
   // `recently_used_clone_path` on the matching repository entry.
   const repositoriesQuery = useRepositoriesQuery(client, true);
 
-  const setNewSessionWorkdir = useComposerStore(
-    (state) => state.setNewSessionWorkdir,
+  const setNewSessionWorkdirFromPr = useComposerStore(
+    (state) => state.setNewSessionWorkdirFromPr,
   );
-  const setNewSessionWorktreeEnabled = useComposerStore(
-    (state) => state.setNewSessionWorktreeEnabled,
+  // The picked row's highlight follows the workdir's provenance, so it can only
+  // ever agree with what the composer will actually launch: any later directory
+  // pick resets the provenance and the highlight goes with it.
+  const workdirSource = useComposerStore(
+    (state) => state.newSessionWorkdirSource,
   );
-  const setNewSessionWorktreeStartPoint = useComposerStore(
-    (state) => state.setNewSessionWorktreeStartPoint,
-  );
-  const selectedPrUrl = useComposerStore(
-    (state) => state.newSessionSelectedPrUrl,
-  );
-  const setNewSessionSelectedPrUrl = useComposerStore(
-    (state) => state.setNewSessionSelectedPrUrl,
-  );
+  const selectedPrUrl = workdirSource.kind === 'pr' ? workdirSource.url : null;
 
   // The PR endpoint's `gh_available` is the same value for both
   // lenses (it reflects whether `gh auth status` worked, not the
@@ -91,25 +90,11 @@ export function PRTab() {
       // rather than committing to a nonsense workdir.
       return;
     }
-    setNewSessionWorkdir(clonePath);
-    setNewSessionWorktreeEnabled(true);
-    // PR head refs are non-default branches; cut the worktree to
-    // check the branch out itself (the `use_remote_branch` mode), so
-    // resuming a PR's work simply attaches to its branch. A
-    // cross-fork PR (head_repo_owner != repo_owner) currently still
-    // resolves the branch from the local clone's `origin` — letting
-    // `git worktree add` handle the actual fetch failure if the
-    // branch is not reachable, rather than blocking at the click.
-    setNewSessionWorktreeStartPoint({
-      kind: 'use_remote_branch',
-      name: pr.head_ref,
-    });
-    // Mark the row as the active pick so it gets the indigo "you picked
-    // this" highlight. Set last: the earlier writes synchronously trigger
-    // `setNewSessionWorkdir`'s reset side-effects (see composerStore) —
-    // those don't touch the PR url, but the order keeps it obvious that
-    // the highlight reflects the final committed pick.
-    setNewSessionSelectedPrUrl(pr.url);
+    // A cross-fork PR (head_repo_owner != repo_owner) currently still resolves
+    // the branch from the local clone's `origin` — letting `git worktree add`
+    // handle the actual fetch failure if the branch is not reachable, rather
+    // than blocking at the click.
+    setNewSessionWorkdirFromPr(clonePath, pr);
   };
 
   if (isAnyLoading) {

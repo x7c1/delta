@@ -30,14 +30,21 @@ test('picking a PR with a local clone pre-fills the composer and a Send carries 
   // The composer chip now shows the registered clone path.
   await expect(page.getByTestId('workdir-chip')).toContainText('delta');
 
+  // The pick decided the branch, so the worktree section is locked to it: a
+  // one-line summary, and none of the generic selector's controls.
+  await expect(page.getByTestId('worktree-pr-lock')).toContainText(
+    'On feat/repo-tab — PR #174’s head branch.',
+  );
+  await expect(page.getByTestId('worktree-toggle')).toHaveCount(0);
+  await expect(page.getByTestId('worktree-start-point')).toHaveCount(0);
+
   const sendRequest = page.waitForRequest(
     (request) =>
       request.url().endsWith('/api/sends') && request.method() === 'POST',
   );
-  // Switching the worktree on (via `use_remote_branch`) mounts a
-  // second textbox — the remote-branch input pre-filled with the PR
-  // head ref. Address the composer textarea explicitly by its
-  // placeholder so the fill is unambiguous.
+  // Address the composer textarea explicitly by its placeholder: the
+  // new-session screen holds other inputs, so a bare `getByRole('textbox')`
+  // is not guaranteed to be unambiguous.
   await page
     .getByPlaceholder('Message to start a new session…')
     .fill('resume PR work');

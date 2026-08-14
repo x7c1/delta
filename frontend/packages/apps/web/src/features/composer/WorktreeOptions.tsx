@@ -1,15 +1,38 @@
 import { useState } from 'react';
 import { useGitBranchesQuery, useGitRepoInfoQuery } from '@delta/api-client';
+import { displayBranch } from '@delta/model';
 import { Spinner, cn } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import {
+  type NewSessionPrWorkdirSource,
   type WorktreeStartPointSelection,
   useComposerStore,
 } from '../../store/composerStore';
 
 /**
- * The opt-in worktree controls shown in the new-session composer, directly below
- * the selected-directory chip. They appear only when the selected directory is a
+ * The section chrome, shared by the selector and the PR lock so the two read as
+ * the same block of the composer card — only their contents differ.
+ */
+const SECTION_CLASS =
+  'space-y-1.5 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-caption';
+
+/**
+ * The section's headline, identical in both modes: the checkbox's label when the
+ * choice is the user's, plain text when a PR pick has already made it.
+ */
+const SECTION_LABEL = 'Start in an isolated git worktree';
+
+/**
+ * The worktree controls shown in the new-session composer, directly below the
+ * selected-directory chip. What they offer depends on how the workdir was
+ * picked (`newSessionWorkdirSource`):
+ *
+ * - a **PR pick** has already decided everything — the session is for that PR,
+ *   so the section renders a locked summary of the branch it will run on (see
+ *   {@link PrWorktreeLock}) and there is nothing to choose;
+ * - a **directory pick** gets the opt-in selector described below.
+ *
+ * For a directory pick they appear only when the selected directory is a
  * git repository (`GET /api/workdir/git` reports a `repo_root`); for a non-git
  * directory — or while the check is in flight or errors — nothing renders, so a
  * plain non-git session is unaffected.
@@ -49,6 +72,7 @@ import {
 export function WorktreeOptions() {
   const client = useApiClient();
   const workdir = useComposerStore((state) => state.newSessionWorkdir);
+  const source = useComposerStore((state) => state.newSessionWorkdirSource);
   const enabled = useComposerStore((state) => state.newSessionWorktreeEnabled);
   const setEnabled = useComposerStore(
     (state) => state.setNewSessionWorktreeEnabled,
@@ -60,22 +84,33 @@ export function WorktreeOptions() {
     (state) => state.setNewSessionWorktreeStartPoint,
   );
 
-  // Cheap, no-network probe: runs as soon as a directory is selected.
-  const repoQuery = useGitRepoInfoQuery(client, workdir, workdir !== null);
+  // Cheap, no-network probe: runs as soon as a directory is selected. A PR pick
+  // needs neither answer (its repo is a registered clone and its branch is
+  // fixed), so the probe stays off for one.
+  const repoQuery = useGitRepoInfoQuery(
+    client,
+    workdir,
+    workdir !== null && source.kind !== 'pr',
+  );
   const repoRoot = repoQuery.data?.repo_root ?? null;
   const defaultBranch = repoQuery.data?.default_branch ?? null;
 
-  if (workdir === null || repoRoot === null) {
+  if (workdir === null) {
+    return null;
+  }
+
+  if (source.kind === 'pr') {
+    return <PrWorktreeLock source={source} />;
+  }
+
+  if (repoRoot === null) {
     // Not a git repository (or the check is still loading / errored): no
     // worktree option to offer, so the plain non-git flow is untouched.
     return null;
   }
 
   return (
-    <section
-      className="space-y-1.5 rounded border border-border-default bg-surface-elevated px-2 py-1.5 text-caption"
-      data-testid="worktree-options"
-    >
+    <section className={SECTION_CLASS} data-testid="worktree-options">
       <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
@@ -83,9 +118,7 @@ export function WorktreeOptions() {
           onChange={(event) => setEnabled(event.target.checked)}
           data-testid="worktree-toggle"
         />
-        <span className="font-medium text-fg">
-          Start in an isolated git worktree
-        </span>
+        <span className="font-medium text-fg">{SECTION_LABEL}</span>
       </label>
 
       {enabled && (
@@ -96,6 +129,43 @@ export function WorktreeOptions() {
           onChange={setStartPoint}
         />
       )}
+    </section>
+  );
+}
+
+/**
+ * The locked worktree summary for a PR pick: the same section chrome as the
+ * selector, but read-only — no checkbox, no start-point radios, no use-vs-new
+ * choice, no branch picker. Picking the PR already committed the session to its
+ * head branch (`{ kind: "use_remote_branch", name: head_ref }`, written by the
+ * store with the workdir), so every one of those controls could only move the
+ * session *off* the PR it is for.
+ *
+ * Nothing is lost by dropping the opt-out either: `use_remote_branch` reuses
+ * whichever worktree already has the branch checked out — the main working tree
+ * included — so "just work in the main tree" is already what happens when the
+ * PR branch is the one checked out there.
+ *
+ * The lock is not a dead end: picking a directory instead — a clone in
+ * the Repository tab, a Directory-tab row, or the workdir chip's edit button —
+ * stamps `directory` provenance and brings the full selector back. (Picking
+ * another PR row just re-locks to that PR.)
+ */
+function PrWorktreeLock({ source }: { source: NewSessionPrWorkdirSource }) {
+  return (
+    <section className={SECTION_CLASS} data-testid="worktree-options">
+      <p className="font-medium text-fg">{SECTION_LABEL}</p>
+      <p
+        className="text-fg-muted"
+        data-testid="worktree-pr-lock"
+        title={`${source.repo_owner}/${source.repo_name}#${source.number}`}
+      >
+        On{' '}
+        <span className="font-mono text-code text-fg" title={source.head_ref}>
+          {displayBranch(source.head_ref)}
+        </span>{' '}
+        &mdash; PR #{source.number}&rsquo;s head branch.
+      </p>
     </section>
   );
 }

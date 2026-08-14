@@ -7,14 +7,24 @@ import {
   expect,
   it,
 } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../../data/apiContext';
-import { useComposerStore } from '../../../store/composerStore';
+import {
+  DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
+  useComposerStore,
+} from '../../../store/composerStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { Composer } from '../../composer/Composer';
 import { ProviderSelector } from '../../composer/ProviderSelector';
@@ -44,9 +54,9 @@ describe('PRTab', () => {
   beforeEach(() => {
     useComposerStore.setState({
       newSessionWorkdir: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: { kind: 'head' },
-      newSessionSelectedPrUrl: null,
     });
   });
 
@@ -77,6 +87,16 @@ describe('PRTab', () => {
       expect(state.newSessionWorktreeStartPoint).toEqual({
         kind: 'use_remote_branch',
         name: 'feat/repo-tab',
+      });
+      // The pick records its provenance, which is what locks the worktree UI
+      // to the PR's head branch and highlights the row.
+      expect(state.newSessionWorkdirSource).toEqual({
+        kind: 'pr',
+        url: 'https://github.com/x7c1/delta/pull/174',
+        number: 174,
+        repo_owner: 'x7c1',
+        repo_name: 'delta',
+        head_ref: 'feat/repo-tab',
       });
     });
   });
@@ -218,9 +238,10 @@ describe('PRTab', () => {
 
     fireEvent.click(clickable!);
     await waitFor(() => {
-      expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
-        'https://github.com/x7c1/delta/pull/174',
-      );
+      expect(useComposerStore.getState().newSessionWorkdirSource).toMatchObject({
+        kind: 'pr',
+        url: 'https://github.com/x7c1/delta/pull/174',
+      });
     });
 
     rows = await screen.findAllByTestId('pr-tab-row');
@@ -235,11 +256,39 @@ describe('PRTab', () => {
       expect(row).toHaveAttribute('data-selected', 'false');
     }
 
-    // A disabled click is a no-op: the store retains the prior url.
+    // A disabled click is a no-op: the store retains the prior pick.
     fireEvent.click(disabledRow!);
-    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
-      'https://github.com/x7c1/delta/pull/174',
+    expect(useComposerStore.getState().newSessionWorkdirSource).toMatchObject({
+      kind: 'pr',
+      url: 'https://github.com/x7c1/delta/pull/174',
+    });
+  });
+
+  it('drops the highlight when a directory pick replaces the PR provenance', async () => {
+    // The highlight reads the workdir's provenance, so a Repository / Directory
+    // pick (which stamps `directory`) takes it with it — no row is left
+    // claiming to be the active pick while the session starts somewhere else.
+    renderTab();
+    await screen.findByTestId('pr-tab-reviewer');
+    const clickable = (await screen.findAllByTestId('pr-tab-row')).find(
+      (row) => row.getAttribute('data-has-local-clone') === 'true',
     );
+    fireEvent.click(clickable!);
+    await waitFor(() => {
+      expect(
+        screen.getByTitle('https://github.com/x7c1/delta/pull/174'),
+      ).toHaveAttribute('data-selected', 'true');
+    });
+
+    act(() => {
+      useComposerStore
+        .getState()
+        .setNewSessionWorkdir('/home/dev/projects/other');
+    });
+
+    for (const row of await screen.findAllByTestId('pr-tab-row')) {
+      expect(row).toHaveAttribute('data-selected', 'false');
+    }
   });
 
   it('renders every repo label with the same class — no font-weight conditional left over', async () => {
@@ -275,9 +324,9 @@ describe('PRTab → new-session send (provider threading)', () => {
     // selector seeds from the persisted default set below.
     useComposerStore.setState({
       newSessionWorkdir: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: { kind: 'head' },
-      newSessionSelectedPrUrl: null,
       newSessionProvider: 'claude',
       newSessionProviderSeeded: false,
     });

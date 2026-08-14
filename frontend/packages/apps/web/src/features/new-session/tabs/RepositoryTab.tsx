@@ -35,9 +35,6 @@ export function RepositoryTab() {
   const repositoriesQuery = useRepositoriesQuery(client, true);
   const setSelected = useComposerStore((state) => state.setNewSessionWorkdir);
   const selectedPath = useComposerStore((state) => state.newSessionWorkdir);
-  const setNewSessionSelectedPrUrl = useComposerStore(
-    (state) => state.setNewSessionSelectedPrUrl,
-  );
   // Display-only home abbreviation. The stored `newSessionWorkdir` stays
   // the absolute path.
   const home = useHomeDirQuery(client, true).data?.path ?? null;
@@ -199,13 +196,11 @@ export function RepositoryTab() {
                 <li key={clone.path}>
                   <button
                     type="button"
-                    onClick={() => {
-                      // Picking a clone here is mutually exclusive with the PR
-                      // tab's "selected row" highlight — clear it so at most
-                      // one row reads as the active pick across the three tabs.
-                      setSelected(clone.path);
-                      setNewSessionSelectedPrUrl(null);
-                    }}
+                    // Committing a clone stamps `directory` provenance (see
+                    // `setNewSessionWorkdir`), which drops any PR pick — so at
+                    // most one row reads as the active pick across the three
+                    // tabs, and the worktree controls unlock.
+                    onClick={() => setSelected(clone.path)}
                     aria-pressed={isPicked}
                     className={cn(
                       'flex w-full min-w-0 items-center justify-between gap-3 rounded px-2 py-1.5 text-left text-caption hover:bg-surface-elevated-hover',

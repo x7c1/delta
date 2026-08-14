@@ -1,7 +1,11 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type { MessageUuid, ThreadId } from '@delta/model';
-import type { AgentProvider, WorktreeStartPoint } from '@delta/wire-gen';
+import type {
+  AgentProvider,
+  PullRequest,
+  WorktreeStartPoint,
+} from '@delta/wire-gen';
 import { DEFAULT_PROVIDER } from '../providers';
 
 /**
@@ -36,6 +40,19 @@ export interface ComposerState {
    * new-session send and whenever the new-session state is left.
    */
   newSessionWorkdir: string | null;
+  /**
+   * How the current {@link ComposerState.newSessionWorkdir} was picked. Written
+   * atomically with the workdir itself, so the two can never disagree.
+   *
+   * The provenance is what makes the worktree UI honest: a `pr` pick has
+   * already decided the branch (the PR's head ref), so the worktree controls
+   * render as a locked summary instead of a selector the user could move off
+   * the PR. A `directory` pick keeps the full selector. The provenance also
+   * drives the PR tab's "you picked this" row highlight, so at most one row
+   * reads as the active pick across the three tabs — a directory pick resets
+   * the provenance and the highlight goes with it.
+   */
+  newSessionWorkdirSource: NewSessionWorkdirSource;
   /**
    * Whether the new session should start in a fresh git worktree of the
    * selected `newSessionWorkdir`. Only meaningful when that directory is a git
@@ -93,16 +110,6 @@ export interface ComposerState {
    */
   workdirDialogOpen: boolean;
   /**
-   * URL of the PR currently picked in the PR tab, or `null` when nothing is
-   * picked. Drives the "you picked this" indigo highlight on the matching row
-   * so the PR tab gives the same visual feedback as the Repository / Directory
-   * tabs. Session-only intent (not a remembered preference), so it matches the
-   * other `newSession*` ephemerals: cleared whenever the new-session compose
-   * state is left, and cleared by a Repository / Directory pick so at most one
-   * row is highlighted across the three tabs.
-   */
-  newSessionSelectedPrUrl: string | null;
-  /**
    * Which tab the new-session screen shows: PR / Repository / Directory.
    * Persisted to localStorage so a reload restores the user's last choice;
    * defaults to `'repository'` on first run because the dogfooding insight
@@ -139,7 +146,20 @@ export interface ComposerState {
   setDraft: (threadId: ThreadId, text: string) => void;
   clearDraft: (threadId: ThreadId) => void;
   setBranchOrigin: (origin: BranchOrigin | null) => void;
+  /**
+   * Commit a directory pick (Repository / Directory tab, or a `null` reset when
+   * the new-session state is left). Stamps `directory` provenance, so a prior
+   * PR pick — its provenance, and with it the PR row highlight and the locked
+   * worktree summary — never survives into a directory-picked session.
+   */
   setNewSessionWorkdir: (workdir: string | null) => void;
+  /**
+   * Commit a PR pick from the PR tab: the PR's local clone as the workdir, `pr`
+   * provenance, and the worktree forced on at the PR's head branch. One action
+   * so the whole pick lands in a single store update — writing the workdir
+   * first would momentarily reset the worktree state it then has to set again.
+   */
+  setNewSessionWorkdirFromPr: (workdir: string, pr: PullRequest) => void;
   setNewSessionWorktreeEnabled: (enabled: boolean) => void;
   setNewSessionWorktreeStartPoint: (startPoint: WorktreeStartPointSelection) => void;
   /**
@@ -163,7 +183,6 @@ export interface ComposerState {
   openWorkdirDialog: () => void;
   closeWorkdirDialog: () => void;
   setNewSessionTab: (tab: NewSessionTab) => void;
-  setNewSessionSelectedPrUrl: (url: string | null) => void;
   /**
    * Set the selected provider from a user interaction in the selector. Marks
    * the selection as seeded, so a later seed will not overwrite an explicit
@@ -184,6 +203,38 @@ export interface ComposerState {
    */
   resetNewSessionProvider: () => void;
 }
+
+/**
+ * A PR-picked workdir: the identity of the pull request the session is for.
+ * Only the fields the UI reads are carried, named after the wire
+ * {@link PullRequest} so they cannot drift from it — `head_ref` is the branch
+ * the worktree is locked to, `number`/`repo_owner`/`repo_name` label the lock,
+ * and `url` identifies the picked row for its highlight.
+ */
+export type NewSessionPrWorkdirSource = { kind: 'pr' } & Pick<
+  PullRequest,
+  'url' | 'number' | 'repo_owner' | 'repo_name' | 'head_ref'
+>;
+
+/**
+ * How the new session's working directory was picked — see
+ * {@link ComposerState.newSessionWorkdirSource}. `directory` covers every
+ * plain path pick (a Repository-tab clone, a Directory-tab row, a browse
+ * result) as well as the "nothing picked yet" state; only the PR tab produces
+ * `pr`.
+ */
+export type NewSessionWorkdirSource =
+  | { kind: 'directory' }
+  | NewSessionPrWorkdirSource;
+
+/**
+ * The provenance of a directory pick, and of the "no directory picked yet"
+ * state a fresh compose starts in. Shared by the store's initial state and by
+ * `setNewSessionWorkdir`, so the reset path and the fresh state cannot drift.
+ */
+export const DEFAULT_NEW_SESSION_WORKDIR_SOURCE: NewSessionWorkdirSource = {
+  kind: 'directory',
+};
 
 /** The new-session screen's three tabs. */
 export type NewSessionTab = 'pr' | 'repository' | 'directory';
@@ -245,13 +296,13 @@ export const useComposerStore = create<ComposerState>()(
       drafts: {},
       branchOrigin: null,
       newSessionWorkdir: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
       newSessionLaunchOptionIds: [],
       newSessionLaunchOptionsSeeded: false,
       workdirDialogOpen: false,
       newSessionTab: DEFAULT_NEW_SESSION_TAB,
-      newSessionSelectedPrUrl: null,
       newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
       newSessionProviderSeeded: false,
 
@@ -271,10 +322,34 @@ export const useComposerStore = create<ComposerState>()(
         // A new directory selection invalidates any previous git/worktree choice
         // (the new directory may not be a git repo, and its branches differ), so
         // reset the worktree state back to its defaults alongside the workdir.
+        // The provenance resets with it: this path is only ever a directory
+        // pick (or a clear), so a stale `pr` provenance must not outlive it.
         set({
           newSessionWorkdir: workdir,
+          newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
           newSessionWorktreeEnabled: false,
           newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
+        }),
+
+      setNewSessionWorkdirFromPr: (workdir, pr) =>
+        // The PR's head ref is by definition a non-default branch: cut the
+        // worktree to check that branch out itself (the `use_remote_branch`
+        // mode) so resuming a PR's work simply attaches to its branch.
+        set({
+          newSessionWorkdir: workdir,
+          newSessionWorkdirSource: {
+            kind: 'pr',
+            url: pr.url,
+            number: pr.number,
+            repo_owner: pr.repo_owner,
+            repo_name: pr.repo_name,
+            head_ref: pr.head_ref,
+          },
+          newSessionWorktreeEnabled: true,
+          newSessionWorktreeStartPoint: {
+            kind: 'use_remote_branch',
+            name: pr.head_ref,
+          },
         }),
 
       setNewSessionWorktreeEnabled: (enabled) =>
@@ -310,8 +385,6 @@ export const useComposerStore = create<ComposerState>()(
       closeWorkdirDialog: () => set({ workdirDialogOpen: false }),
 
       setNewSessionTab: (tab) => set({ newSessionTab: tab }),
-
-      setNewSessionSelectedPrUrl: (url) => set({ newSessionSelectedPrUrl: url }),
 
       setNewSessionProvider: (provider) =>
         set({ newSessionProvider: provider, newSessionProviderSeeded: true }),

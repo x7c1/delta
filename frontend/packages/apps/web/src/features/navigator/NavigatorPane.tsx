@@ -378,9 +378,6 @@ export function NavigatorPane({
   const resetNewSessionLaunchOptions = useComposerStore(
     (state) => state.resetNewSessionLaunchOptions,
   );
-  const setNewSessionSelectedPrUrl = useComposerStore(
-    (state) => state.setNewSessionSelectedPrUrl,
-  );
   return (
     <Panel
       className="border-r border-border-default"
@@ -399,7 +396,8 @@ export function NavigatorPane({
         // already in that state — changing focus is not enough, the new-session
         // screen now leads with the inline 3-tab picker (PR / Repository /
         // Directory) so no modal is opened from here. Reset any prior selection
-        // (directory and launch options) for a clean start. The header padding
+        // for a clean start — clearing the workdir also drops its provenance
+        // (any PR pick), and the launch options reseed. The header padding
         // is set to `px-2` (via `headerClassName`) so the full-width button
         // lines up with the body's 8px content column.
         <Button
@@ -410,7 +408,6 @@ export function NavigatorPane({
             startNewSession();
             setNewSessionWorkdir(null);
             resetNewSessionLaunchOptions();
-            setNewSessionSelectedPrUrl(null);
           }}
         >
           <PlusIcon className="h-3.5 w-3.5" />

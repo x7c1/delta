@@ -72,7 +72,8 @@ pub struct PullRequest {
     /// The base repository's name segment (e.g. `delta`).
     pub repo_name: String,
     /// The branch the PR proposes to merge — typically a non-default
-    /// branch, which is why the PR tab defaults the worktree toggle on.
+    /// branch, which is why picking the PR starts the session in a worktree
+    /// on this branch.
     pub head_ref: String,
     /// The head repository's owner segment, distinct from `repo_owner` for
     /// a cross-fork PR.
