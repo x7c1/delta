@@ -107,8 +107,10 @@ real-claude loop by hand):
 The Codex counterpart: Rust canaries
 (`backend/crates/gateway/codex-agent/tests/real_codex_canary.rs`) that drive
 the real `codex app-server` — one safe turn end to end, the thread-metadata
-wire fields, and schema drift detection against the vendored app-server
-schema. Only the turn canary consumes Codex quota. `DELTA_CODEX_BIN` overrides
+wire fields, the worktree sandbox grant (that the dotted `config` key Delta
+injects really reaches a thread's effective writable roots), and schema drift
+detection against the vendored app-server schema. Only the turn canary consumes
+Codex quota. `DELTA_CODEX_BIN` overrides
 the binary. Like the claude suite it is local-only, never wired into CI, and
 worth a run after a codex version bump or when the real Codex loop misbehaves
 while the `fake-codex` re-enactment is green. It has no auto-gating wrapper

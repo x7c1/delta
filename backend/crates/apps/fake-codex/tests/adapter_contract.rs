@@ -209,6 +209,7 @@ async fn resume_loads_existing_session() {
             session_id: "delta-sid".to_owned(),
             provider_session_id: "thr_existing".to_owned(),
             workdir: "/tmp/workdir".to_owned(),
+            worktree_repo_root: None,
         })
         .await
         .expect("resume");

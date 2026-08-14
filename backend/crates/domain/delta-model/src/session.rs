@@ -31,16 +31,30 @@ pub struct Session {
     /// the worktree. The per-message `git_branch` on [`crate::Message`] is a
     /// separate per-turn snapshot and is unaffected.
     pub branch_at_launch: Option<String>,
-    /// Working tree root that contained [`Self::cwd`] at spawn time
-    /// (`git rev-parse --show-toplevel`). `None` when the launch directory was
-    /// not inside a git repository, or for sessions that predate this field.
-    /// Like [`Self::branch_at_launch`], this is a spawn-time snapshot — never
-    /// updated later.
+    /// Working tree root (`git rev-parse --show-toplevel`) of the directory this
+    /// session was launched **against**, at spawn time. Like
+    /// [`Self::branch_at_launch`], a spawn-time snapshot — never updated later.
     ///
-    /// Note: this is the *working tree* top, not the repository identity.
-    /// When the launch directory is a linked git worktree, `--show-toplevel`
-    /// returns the worktree path itself (e.g.
-    /// `$HOME/.delta/worktrees/<org>-<repo>-<id>`), not the original clone.
+    /// Which directory that is depends on the spawn:
+    ///
+    /// - a **worktree** spawn resolves it against the dir the user picked, i.e.
+    ///   *before* the worktree is created, so it holds the repository the
+    ///   worktree was cut from — not the worktree itself (which is
+    ///   [`Self::cwd`]). That is what makes it the source of truth for
+    ///   re-establishing a worktree session's context on resume;
+    /// - a plain spawn resolves it against the launch directory itself, so it
+    ///   equals that directory's working-tree top.
+    ///
+    /// `None` when the launch directory was not inside a git repository, and for
+    /// sessions that predate this field. On an adapter-backed (terminal-less)
+    /// session it is additionally `None` for **every** non-worktree spawn, git
+    /// repository or not, because that path records no repo columns at all — so
+    /// a non-NULL value on such a session means exactly "this session runs in a
+    /// worktree Delta cut from that repository".
+    ///
+    /// Note: this is a *working tree* top, not the repository identity. When a
+    /// plain spawn's launch directory is itself a linked git worktree,
+    /// `--show-toplevel` returns that worktree's path, not the original clone.
     /// Use [`Self::repository_display_name`] for the repository-level identity
     /// label the navigator renders.
     pub repo_root: Option<String>,

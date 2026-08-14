@@ -85,9 +85,11 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// row via [`Self::register_session`]). The id is freshly minted, so an
     /// existing row with the same id is an error, not an upsert.
     ///
-    /// `branch_at_launch` and `repo_root` are the spawn-time git snapshot of
-    /// `cwd` — the local branch checked out and the repository root containing
-    /// it. Both are `None` when the launch directory is not inside a git
+    /// `branch_at_launch` and `repo_root` are the spawn-time git snapshot —
+    /// the local branch checked out at `cwd`, and the repository root the
+    /// spawn resolved against the dir the user picked: for a worktree spawn
+    /// that is the repository the worktree was cut from, which does not
+    /// contain `cwd`. Both are `None` when the launch directory is not inside a git
     /// repository (or HEAD is detached). They are persisted once here and
     /// never updated later: see [`Session::branch_at_launch`] /
     /// [`Session::repo_root`] for the spawn-snapshot semantics.

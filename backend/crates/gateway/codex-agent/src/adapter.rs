@@ -60,6 +60,43 @@
 //! [`AgentEvent::UnsupportedInteraction`] and answered) rather than being
 //! answered with a fabricated grant.
 //!
+//! ## The worktree git-directory grant
+//!
+//! Codex's `workspace-write` sandbox makes the thread's `cwd` writable but keeps
+//! the `.git` directory at a writable root's top level read-only, so even in a
+//! plain clone a `git add` escalates for approval. In a **linked worktree** —
+//! which is what Delta launches a worktree session in — the situation is worse:
+//! `<cwd>/.git` is only a pointer file, and git's real writes land in the source
+//! repository's `.git`, outside `cwd` and outside any cwd-relative writable root
+//! a user could configure. Every `git add` / `git commit` in such a session then
+//! raises an approval prompt.
+//!
+//! Delta creates those worktrees, so it closes the gap itself: when the launch
+//! (or resume) request names a [`LaunchRequest::worktree_repo_root`], the
+//! adapter injects that repository's `.git` as a writable root, on the
+//! [`WRITABLE_ROOTS_KEY`] config key of the request (see
+//! [`apply_worktree_git_grant`]). Nothing is registered or persisted — the grant
+//! is derived from the request on every start/resume.
+//!
+//! Two things about the real server are answered by the
+//! `real_thread_start_honors_the_worktree_git_grant` canary rather than assumed:
+//!
+//! - the **dotted** config key is accepted on this path and applies at the leaf,
+//!   exactly as the CLI's `-c` flag does (`codex-cli 0.144.4`). This one the
+//!   canary *asserts*, so a version that stops honouring the spelling turns it
+//!   red;
+//! - a leaf override **replaces** the user's global `writable_roots` list for
+//!   the thread rather than unioning with it — observed, not asserted: the
+//!   canary prints the ungranted thread's roots next to the granted one's, so
+//!   the trade-off is re-read on every run instead of being taken on trust, but
+//!   a version that started unioning would not fail it. That is accepted: the
+//!   only value that list can usefully hold for a worktree session is the one
+//!   Delta is injecting (a relative `".git"`, the workaround users write for a
+//!   normal clone, does not name the worktree's real git directory — and on
+//!   this path 0.144.4 resolves a relative root against the Codex home rather
+//!   than the cwd, so it names nothing useful either way). If replacement ever
+//!   proves harmful, a `config/read`-then-union is the way out.
+//!
 //! ## Never hang
 //!
 //! Any server → client request the adapter does not model is answered
@@ -129,6 +166,20 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
 /// it is. A launch option naming one of these is rejected rather than dropped,
 /// so the user sees why their option did not take effect.
 const DELTA_OWNED_THREAD_FIELDS: &[&str] = &["cwd"];
+
+/// The `thread/start` / `thread/resume` field carrying free-form Codex config
+/// overrides — the one Delta merges its worktree git-directory grant into, and
+/// the one a user's own `config` launch option lands in.
+const CONFIG_FIELD: &str = "config";
+
+/// The config table Delta defers to the user on: any key at or under
+/// `sandbox_workspace_write` (dotted or nested) is the user stating their own
+/// sandbox policy, which Delta never rewrites.
+const SANDBOX_WORKSPACE_WRITE: &str = "sandbox_workspace_write";
+
+/// The dotted config key the worktree git-directory grant is injected on — the
+/// `writable_roots` leaf of [`SANDBOX_WORKSPACE_WRITE`].
+const WRITABLE_ROOTS_KEY: &str = "sandbox_workspace_write.writable_roots";
 
 /// The Codex decision wire value for an allow.
 const DECISION_ACCEPT: &str = "accept";
@@ -405,7 +456,7 @@ impl CodexAppServerAdapter {
 /// Two things are still rejected, loudly, because silently accepting them would
 /// corrupt state Delta is responsible for:
 ///
-/// - a key Delta sets itself ([`DELTA_OWNED_THREAD_FIELDS`]). `cwd` is
+/// - a key Delta sets itself (`DELTA_OWNED_THREAD_FIELDS`). `cwd` is
 ///   load-bearing: with a worktree it is the resolved worktree path, and the
 ///   session's repo-root / display-name / branch-at-launch columns are recorded
 ///   against it, so a user-registered `cwd` overriding it would break the
@@ -414,9 +465,21 @@ impl CodexAppServerAdapter {
 /// - the same key twice. Unlike a repeatable CLI flag, a JSON field can only be
 ///   set once, so a second option carrying the same name would silently discard
 ///   the first.
-pub(crate) fn thread_start_params(
+///
+/// `worktree_repo_root`, when the session runs in a Delta-created worktree,
+/// contributes the sandbox grant for that worktree's real git directory (see
+/// `apply_worktree_git_grant`). It is applied **after** the user's options, so
+/// it can see — and step aside for — a `config` the user registered themselves.
+/// With no worktree the params are exactly what they were before the grant
+/// existed.
+///
+/// It is `pub` so the real-`codex` canary lane can drive the very builder the
+/// adapter launches with, instead of re-spelling the params in the test and
+/// pinning a shape production never sends.
+pub fn thread_start_params(
     workdir: &str,
     options: &[LaunchOptionSpec],
+    worktree_repo_root: Option<&str>,
 ) -> UsecaseResult<Value> {
     let mut params = Map::new();
     params.insert("cwd".to_owned(), json!(workdir));
@@ -440,7 +503,116 @@ pub(crate) fn thread_start_params(
             thread_start_value(option.value.as_deref()),
         );
     }
+    apply_worktree_git_grant(&mut params, worktree_repo_root);
     Ok(Value::Object(params))
+}
+
+/// Build the `thread/resume` params for a reattach: the thread being resumed,
+/// the directory to resume it in, and — for a Delta-created worktree — the same
+/// sandbox grant a fresh start gets (see [`apply_worktree_git_grant`]).
+///
+/// No launch options ride a resume (see [`AgentAdapter::resume`]), so unlike
+/// [`thread_start_params`] this can never fail: there is no user-supplied key to
+/// reject. The grant is re-derived from the resume request, not remembered from
+/// the launch, so a resumed worktree session is sandboxed exactly like a fresh
+/// one even across a server restart.
+///
+/// One caveat on that last sentence: what the real server does with a `config`
+/// on a **resume** is not pinned anywhere. The schema test only says the field
+/// exists on both calls, and the canary drives `thread/start` alone — resuming
+/// a thread the same connection just started rejoins a *running* thread, which
+/// is not the after-a-restart path Delta takes, so it would prove the wrong
+/// thing. The claim is settled by a real restart instead: `git add` inside a
+/// worktree session whose server was restarted must still not prompt.
+pub(crate) fn thread_resume_params(
+    provider_session_id: &str,
+    workdir: &str,
+    worktree_repo_root: Option<&str>,
+) -> Value {
+    let mut params = Map::new();
+    params.insert("threadId".to_owned(), json!(provider_session_id));
+    params.insert("cwd".to_owned(), json!(workdir));
+    apply_worktree_git_grant(&mut params, worktree_repo_root);
+    Value::Object(params)
+}
+
+/// Grant the session's real git directory to Codex's `workspace-write` sandbox,
+/// when the session runs in a Delta-created worktree.
+///
+/// A no-op without a `worktree_repo_root`: a session launched in a plain
+/// directory is left byte-identical to what it was before this existed, because
+/// whether the `.git` at a writable root's top level should be writable there is
+/// the user's own global-config choice, not something Delta's worktree knowledge
+/// bears on. With one, `<repo-root>/.git` — the directory git actually writes
+/// through for the worktree — is added under the request's `config` field on the
+/// dotted [`WRITABLE_ROOTS_KEY`]. See the module docs for the empirical basis of
+/// the dotted spelling and of what it does to the user's global list.
+///
+/// # Deferring to the user
+///
+/// If the user's own `config` launch option already states anything at or under
+/// [`SANDBOX_WORKSPACE_WRITE`], Delta injects **nothing**: their config passes
+/// through verbatim and the deferral is logged. Delta does not deep-merge into
+/// an explicit sandbox setting — that would mean re-implementing Codex's own
+/// (unverified, and moving) merge semantics on top of a value the user wrote
+/// deliberately. The degraded outcome is the visible status quo this feature
+/// removes: approval prompts on git writes inside the worktree. The same
+/// deferral covers a `config` that is not a JSON object at all (the launch
+/// option is passed through unvalidated, so it can be any value the user typed);
+/// merging into it is not possible, and the server is the authority on whether
+/// it is legal.
+///
+/// Any other user keys are preserved: the grant is one added entry in the
+/// object they registered, never a replacement of it.
+fn apply_worktree_git_grant(params: &mut Map<String, Value>, worktree_repo_root: Option<&str>) {
+    let Some(repo_root) = worktree_repo_root else {
+        return;
+    };
+    if let Some(reason) = grant_deferral_reason(params.get(CONFIG_FIELD)) {
+        eprintln!(
+            "codex-agent: not granting `{repo_root}/.git` to the workspace-write sandbox \
+             because {reason}; git writes inside the worktree may raise approval prompts"
+        );
+        return;
+    }
+    let git_dir = json!([format!("{repo_root}/.git")]);
+    match params.get_mut(CONFIG_FIELD) {
+        // The user registered a `config` object that says nothing about the
+        // sandbox: add the grant alongside their keys.
+        Some(Value::Object(config)) => {
+            config.insert(WRITABLE_ROOTS_KEY.to_owned(), git_dir);
+        }
+        // No `config` at all — the common case. Any other shape was already
+        // turned away by `grant_deferral_reason` above.
+        _ => {
+            let mut config = Map::new();
+            config.insert(WRITABLE_ROOTS_KEY.to_owned(), git_dir);
+            params.insert(CONFIG_FIELD.to_owned(), Value::Object(config));
+        }
+    }
+}
+
+/// Why the worktree git grant must not be injected into this `config` value, or
+/// `None` when it is safe to merge into (including an absent `config`). The
+/// returned reason is the log line's explanation, so it names the offending key.
+fn grant_deferral_reason(config: Option<&Value>) -> Option<String> {
+    match config {
+        None => None,
+        Some(Value::Object(config)) => config
+            .keys()
+            .find(|key| is_sandbox_workspace_write_key(key))
+            .map(|key| format!("the registered `config` launch option already states `{key}`")),
+        Some(_) => Some("the registered `config` launch option is not an object".to_owned()),
+    }
+}
+
+/// Whether a `config` key states something in Codex's `sandbox_workspace_write`
+/// table, in either spelling the config format allows: the nested table itself
+/// (`sandbox_workspace_write`) or a dotted path into it
+/// (`sandbox_workspace_write.writable_roots`, …).
+fn is_sandbox_workspace_write_key(key: &str) -> bool {
+    key.strip_prefix(SANDBOX_WORKSPACE_WRITE)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
 }
 
 /// Map a launch option's registry value onto its `thread/start` field value.
@@ -534,9 +706,15 @@ impl AgentAdapter for CodexAppServerAdapter {
     async fn launch(&self, req: LaunchRequest) -> UsecaseResult<AgentSessionHandle> {
         // The server assigns the thread id; Delta's own session id is not pinned
         // onto it (that is the `ProviderReturnsId` identity model). The workdir
-        // rides `thread/start` as `cwd`, and the user's selected launch options
-        // ride it as further fields (see [`thread_start_params`]).
-        let params = thread_start_params(&req.workdir, &req.launch_options)?;
+        // rides `thread/start` as `cwd`, the user's selected launch options ride
+        // it as further fields, and a worktree session's source repository
+        // contributes the sandbox grant for its real git directory (see
+        // [`thread_start_params`]).
+        let params = thread_start_params(
+            &req.workdir,
+            &req.launch_options,
+            req.worktree_repo_root.as_deref(),
+        )?;
         // `thread/start` is scoped to Delta's session id — the only id that
         // exists at this point (the thread id is what this call returns), and the
         // one the inspector is keyed by, so a session's log opens with its own
@@ -563,13 +741,22 @@ impl AgentAdapter for CodexAppServerAdapter {
     /// `thread/start` configured — and the core has no per-session record of
     /// which options were selected to replay anyway (see
     /// `resume_adapter_agent` in the core for the full reasoning).
+    ///
+    /// The worktree git-directory grant is the one exception, and for the
+    /// opposite reason: it is not a selected option Delta would be replaying but a
+    /// fact about the session's own working directory, which the core re-derives
+    /// from the session row on every resume. Sending it keeps a resumed worktree
+    /// session sandboxed exactly like a fresh one; omitting it would bring the
+    /// approval prompts back after a restart.
     async fn resume(&self, req: ResumeRequest) -> UsecaseResult<AgentSessionHandle> {
+        let params = thread_resume_params(
+            &req.provider_session_id,
+            &req.workdir,
+            req.worktree_repo_root.as_deref(),
+        );
         let started = self
             .conn
-            .resume_thread(
-                Some(&req.session_id),
-                Some(json!({ "threadId": req.provider_session_id, "cwd": req.workdir })),
-            )
+            .resume_thread(Some(&req.session_id), Some(params))
             .await
             .map_err(to_usecase_err)?;
         Ok(self.register_session(req.session_id, started))

@@ -170,6 +170,7 @@ async fn claude_launch_builds_the_expected_command() {
                 value: Some("opus".to_owned()),
             }],
             first_prompt: Some("do the thing".to_owned()),
+            worktree_repo_root: None,
         })
         .await
         .expect("launch");

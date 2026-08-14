@@ -30,9 +30,11 @@ use crate::Effect;
 pub(crate) struct FakeAgentLog {
     /// The `LaunchRequest`s the adapter received, in order.
     pub launches: Vec<LaunchRequest>,
-    /// The provider session ids `resume` was called with, in order. Proves a
-    /// resume reattached to the persisted thread (not a fresh `launch`).
-    pub resumes: Vec<String>,
+    /// The `ResumeRequest`s the adapter received, in order. Their
+    /// `provider_session_id` proves a resume reattached to the persisted thread
+    /// (not a fresh `launch`); the rest proves the reattach is configured from
+    /// the persisted row exactly as the original launch was.
+    pub resumes: Vec<ResumeRequest>,
     /// The [`ContentSourceRequest`] each `content_source` call was built from, in
     /// order. Its `seed_seq` proves a fresh spawn seeds `0` and a resume seeds
     /// the persisted count (so resumed history is not renumbered); its `cwd` and
@@ -128,18 +130,15 @@ impl AgentAdapter for FakeAgentAdapter {
     }
 
     async fn resume(&self, req: ResumeRequest) -> Result<AgentSessionHandle> {
-        // Record the provider id resumed against, so a test can prove the
-        // reconnect reattached to the persisted thread rather than launching a
-        // fresh one.
-        self.log
-            .lock()
-            .unwrap()
-            .resumes
-            .push(req.provider_session_id.clone());
+        // Record the whole request, so a test can prove the reconnect reattached
+        // to the persisted thread rather than launching a fresh one — and that
+        // it was configured from the persisted row the way the launch was.
+        let provider_session_id = req.provider_session_id.clone();
+        self.log.lock().unwrap().resumes.push(req);
         Ok(AgentSessionHandle {
             provider: AgentProvider::Codex,
-            provider_session_id: req.provider_session_id.clone(),
-            key: req.provider_session_id,
+            provider_session_id: provider_session_id.clone(),
+            key: provider_session_id,
         })
     }
 

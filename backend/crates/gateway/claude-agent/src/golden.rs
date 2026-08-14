@@ -447,6 +447,7 @@ fn launch_request() -> LaunchRequest {
         workdir: "/tmp/workdir".to_owned(),
         launch_options: Vec::new(),
         first_prompt: None,
+        worktree_repo_root: None,
     }
 }
 
