@@ -194,9 +194,6 @@ export function TranscriptPane({
   const resetNewSessionLaunchOptions = useComposerStore(
     (state) => state.resetNewSessionLaunchOptions,
   );
-  const setNewSessionSelectedPrUrl = useComposerStore(
-    (state) => state.setNewSessionSelectedPrUrl,
-  );
   const resetNewSessionProvider = useComposerStore(
     (state) => state.resetNewSessionProvider,
   );
@@ -646,15 +643,15 @@ export function TranscriptPane({
   }, [activeThread?.id, newSession]);
 
   // Leaving the new-session state discards the selection and closes any
-  // still-open modal, so a later return starts clean. The selection is also
-  // cleared on a successful new-session send by the composer. Keyed on
+  // still-open modal, so a later return starts clean. Clearing the workdir also
+  // drops its provenance (any PR pick) and the worktree choice. The selection is
+  // also cleared on a successful new-session send by the composer. Keyed on
   // `newSession` only: enter is now handled by the Directory tab itself
   // (no more auto-opened modal), but leave-state cleanup still belongs here.
   useEffect(() => {
     if (!newSession) {
       setNewSessionWorkdir(null);
       resetNewSessionLaunchOptions();
-      setNewSessionSelectedPrUrl(null);
       resetNewSessionProvider();
       closeWorkdirDialog();
     }
@@ -662,7 +659,6 @@ export function TranscriptPane({
     newSession,
     setNewSessionWorkdir,
     resetNewSessionLaunchOptions,
-    setNewSessionSelectedPrUrl,
     resetNewSessionProvider,
     closeWorkdirDialog,
   ]);

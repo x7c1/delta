@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { PullRequest } from '@delta/wire-gen';
 import {
   DEFAULT_NEW_SESSION_PROVIDER,
   DEFAULT_NEW_SESSION_TAB,
+  DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
   DEFAULT_WORKTREE_START_POINT,
   useComposerStore,
 } from './composerStore';
@@ -10,14 +12,30 @@ const RESET_STATE = {
   drafts: {},
   branchOrigin: null,
   newSessionWorkdir: null,
+  newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
   newSessionWorktreeEnabled: false,
   newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
   workdirDialogOpen: false,
   newSessionTab: DEFAULT_NEW_SESSION_TAB,
-  newSessionSelectedPrUrl: null,
   newSessionProvider: DEFAULT_NEW_SESSION_PROVIDER,
   newSessionProviderSeeded: false,
 } as const;
+
+/** The PR the provenance tests pick, shaped like the wire payload. */
+const PR: PullRequest = {
+  number: 174,
+  title: 'feat: add Repository tab to the new-session screen',
+  repo_owner: 'x7c1',
+  repo_name: 'delta',
+  head_ref: 'feat/repo-tab',
+  head_repo_owner: 'x7c1',
+  head_repo_name: 'delta',
+  draft: false,
+  url: 'https://github.com/x7c1/delta/pull/174',
+  updated_at: '2026-06-24T00:00:00Z',
+  author_login: 'x7c1',
+  has_local_clone: true,
+};
 
 beforeEach(() => {
   useComposerStore.setState(RESET_STATE);
@@ -180,19 +198,58 @@ describe('composerStore newSessionProvider seed guard', () => {
   });
 });
 
-describe('composerStore newSessionSelectedPrUrl', () => {
-  it('defaults to null on a fresh state', () => {
-    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull();
+describe('composerStore newSessionWorkdirSource', () => {
+  it('starts as a directory pick on a fresh state', () => {
+    expect(useComposerStore.getState().newSessionWorkdirSource).toEqual({
+      kind: 'directory',
+    });
   });
 
-  it('setNewSessionSelectedPrUrl sets and clears the field', () => {
-    const store = useComposerStore.getState();
-    store.setNewSessionSelectedPrUrl('https://github.com/x7c1/delta/pull/174');
-    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBe(
-      'https://github.com/x7c1/delta/pull/174',
-    );
+  it('a PR pick commits the clone, the provenance, and the head-branch worktree at once', () => {
+    useComposerStore
+      .getState()
+      .setNewSessionWorkdirFromPr('/home/dev/projects/delta', PR);
 
-    useComposerStore.getState().setNewSessionSelectedPrUrl(null);
-    expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull();
+    const state = useComposerStore.getState();
+    expect(state.newSessionWorkdir).toBe('/home/dev/projects/delta');
+    expect(state.newSessionWorkdirSource).toEqual({
+      kind: 'pr',
+      url: 'https://github.com/x7c1/delta/pull/174',
+      number: 174,
+      repo_owner: 'x7c1',
+      repo_name: 'delta',
+      head_ref: 'feat/repo-tab',
+    });
+    expect(state.newSessionWorktreeEnabled).toBe(true);
+    expect(state.newSessionWorktreeStartPoint).toEqual({
+      kind: 'use_remote_branch',
+      name: 'feat/repo-tab',
+    });
+  });
+
+  it('a later directory pick drops the PR provenance and its worktree', () => {
+    // The mutual-exclusion rule: the provenance is what the PR row highlight
+    // and the locked worktree summary read, so moving on to a directory must
+    // take both with it.
+    const store = useComposerStore.getState();
+    store.setNewSessionWorkdirFromPr('/home/dev/projects/delta', PR);
+    useComposerStore.getState().setNewSessionWorkdir('/home/dev/projects/other');
+
+    const state = useComposerStore.getState();
+    expect(state.newSessionWorkdirSource).toEqual({ kind: 'directory' });
+    expect(state.newSessionWorktreeEnabled).toBe(false);
+    expect(state.newSessionWorktreeStartPoint).toEqual(
+      DEFAULT_WORKTREE_START_POINT,
+    );
+  });
+
+  it('clearing the directory (leaving new-session) drops the PR provenance', () => {
+    const store = useComposerStore.getState();
+    store.setNewSessionWorkdirFromPr('/home/dev/projects/delta', PR);
+    useComposerStore.getState().setNewSessionWorkdir(null);
+
+    const state = useComposerStore.getState();
+    expect(state.newSessionWorkdir).toBeNull();
+    expect(state.newSessionWorkdirSource).toEqual({ kind: 'directory' });
   });
 });

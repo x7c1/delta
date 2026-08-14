@@ -14,7 +14,7 @@ repo_owner: string,
 repo_name: string, 
 /**
  * Branch the PR proposes to merge — typically non-default, which is
- * why the PR tab defaults the worktree toggle on.
+ * why picking the PR starts the session in a worktree on this branch.
  */
 head_ref: string, 
 /**

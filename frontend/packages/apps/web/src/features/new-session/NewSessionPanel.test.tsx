@@ -16,6 +16,7 @@ import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import {
   DEFAULT_NEW_SESSION_TAB,
+  DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
   useComposerStore,
 } from '../../store/composerStore';
 import { OnCommit, clickDuringCommit } from '../../test/commitPhase';
@@ -26,6 +27,19 @@ const server = setupServer(...createHandlers());
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
+
+/**
+ * The workdir provenance a PR pick leaves behind (the seeded reviewer PR from
+ * the mocks). Used to assert that a directory pick replaces it.
+ */
+const PR_SOURCE = {
+  kind: 'pr',
+  url: 'https://github.com/x7c1/delta/pull/174',
+  number: 174,
+  repo_owner: 'x7c1',
+  repo_name: 'delta',
+  head_ref: 'feat/repo-tab',
+} as const;
 
 function renderPanel(onCommit?: () => void) {
   const queryClient = new QueryClient({
@@ -84,7 +98,7 @@ describe('RepositoryTab', () => {
     useComposerStore.setState({
       newSessionTab: 'repository',
       newSessionWorkdir: null,
-      newSessionSelectedPrUrl: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
     });
   });
 
@@ -113,21 +127,33 @@ describe('RepositoryTab', () => {
     );
   });
 
-  it('clicking a clone clears any previously-set newSessionSelectedPrUrl', async () => {
-    // The "one highlighted row at most across tabs" rule: a Repository
-    // pick must clear the PR tab's selected url so the indigo highlight
-    // does not stick on the PR row after the user has moved on to a
-    // different starting point.
+  it('clicking a clone drops any previous PR provenance', async () => {
+    // The "one highlighted row at most across tabs" rule: a Repository pick
+    // must reset the workdir provenance so the PR row's indigo highlight (and
+    // the locked worktree summary) do not stick after the user has moved on to
+    // a different starting point.
+    //
+    // Seeded as a PR pick of the delta clone — which is also what makes the
+    // assertion meaningful: the tab's mount-time auto-pick short-circuits on a
+    // path that already belongs to the selected repo, so the only write is the
+    // click's.
     useComposerStore.setState({
-      newSessionSelectedPrUrl: 'https://github.com/x7c1/delta/pull/174',
+      newSessionWorkdir: '/home/dev/projects/delta',
+      newSessionWorkdirSource: PR_SOURCE,
     });
     renderPanel();
     const cloneRows = await screen.findAllByTestId(
       'repository-tab-clone-row',
     );
-    fireEvent.click(cloneRows[0]);
+    expect(useComposerStore.getState().newSessionWorkdirSource).toEqual(
+      PR_SOURCE,
+    );
+
+    fireEvent.click(cloneRows[1]);
     await waitFor(() =>
-      expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull(),
+      expect(useComposerStore.getState().newSessionWorkdirSource).toEqual({
+        kind: 'directory',
+      }),
     );
   });
 
@@ -150,7 +176,7 @@ describe('DirectoryTab', () => {
     useComposerStore.setState({
       newSessionTab: 'directory',
       newSessionWorkdir: null,
-      newSessionSelectedPrUrl: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
     });
   });
 
@@ -198,18 +224,26 @@ describe('DirectoryTab', () => {
     );
   });
 
-  it('committing a directory pick clears any previously-set newSessionSelectedPrUrl', async () => {
-    // Same mutual-exclusion rule as RepositoryTab: a Directory pick must
-    // clear the PR tab's selected url so the indigo highlight does not
-    // bleed across tabs.
+  it('committing a directory pick drops any previous PR provenance', async () => {
+    // Same mutual-exclusion rule as RepositoryTab: a Directory pick must reset
+    // the workdir provenance so the PR row's highlight does not bleed across
+    // tabs. Seeding a workdir also keeps the picker's pre-select from firing,
+    // so the click is the only write under test.
     useComposerStore.setState({
-      newSessionSelectedPrUrl: 'https://github.com/x7c1/delta/pull/174',
+      newSessionWorkdir: '/home/dev/projects/website',
+      newSessionWorkdirSource: PR_SOURCE,
     });
     renderPanel();
     const row = await screen.findByTitle('/home/dev/projects/delta');
+    expect(useComposerStore.getState().newSessionWorkdirSource).toEqual(
+      PR_SOURCE,
+    );
+
     fireEvent.click(row);
     await waitFor(() =>
-      expect(useComposerStore.getState().newSessionSelectedPrUrl).toBeNull(),
+      expect(useComposerStore.getState().newSessionWorkdirSource).toEqual({
+        kind: 'directory',
+      }),
     );
   });
 });

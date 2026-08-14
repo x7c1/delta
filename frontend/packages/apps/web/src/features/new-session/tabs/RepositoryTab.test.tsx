@@ -13,7 +13,10 @@ import { setupServer } from 'msw/node';
 import { createHandlers } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../../data/apiContext';
-import { useComposerStore } from '../../../store/composerStore';
+import {
+  DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
+  useComposerStore,
+} from '../../../store/composerStore';
 import { OnCommit, clickDuringCommit } from '../../../test/commitPhase';
 import { RepositoryTab } from './RepositoryTab';
 
@@ -43,9 +46,9 @@ describe('RepositoryTab', () => {
   beforeEach(() => {
     useComposerStore.setState({
       newSessionWorkdir: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: { kind: 'head' },
-      newSessionSelectedPrUrl: null,
     });
   });
 

@@ -8,6 +8,7 @@ import {
   it,
 } from 'vitest';
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -20,6 +21,7 @@ import { createHandlers, MOCK_GIT_REPO_ROOT } from '@delta/api-mocks';
 import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import {
+  DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
   DEFAULT_WORKTREE_START_POINT,
   useComposerStore,
 } from '../../store/composerStore';
@@ -52,6 +54,9 @@ describe('WorktreeOptions', () => {
   beforeEach(() => {
     useComposerStore.setState({
       newSessionWorkdir: null,
+      // Every test in this block is a directory pick — the PR-provenance lock
+      // has its own block below.
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
       newSessionWorktreeEnabled: false,
       newSessionWorktreeStartPoint: DEFAULT_WORKTREE_START_POINT,
     });
@@ -303,5 +308,96 @@ describe('WorktreeOptions', () => {
     expect(await screen.findByTestId('remote-branch-error')).toHaveTextContent(
       'Could not fetch remote branches',
     );
+  });
+});
+
+describe('WorktreeOptions with a PR-picked workdir', () => {
+  // Seeded here rather than reset in an `afterEach`: React Testing Library's
+  // auto-cleanup runs after this file's own hooks, so a store write on the way
+  // out would land on a still-mounted component and trip React's act(...)
+  // warning. Every block seeds the state it needs on entry, so no reset is
+  // needed on exit.
+  beforeEach(() => {
+    // Exactly what `setNewSessionWorkdirFromPr` writes for the mock reviewer
+    // fixture (see PRTab): the clone, `pr` provenance, and the head-branch
+    // worktree.
+    useComposerStore.setState({
+      newSessionWorkdir: MOCK_GIT_REPO_ROOT,
+      newSessionWorkdirSource: {
+        kind: 'pr',
+        url: 'https://github.com/x7c1/delta/pull/174',
+        number: 174,
+        repo_owner: 'x7c1',
+        repo_name: 'delta',
+        head_ref: 'feat/repo-tab',
+      },
+      newSessionWorktreeEnabled: true,
+      newSessionWorktreeStartPoint: {
+        kind: 'use_remote_branch',
+        name: 'feat/repo-tab',
+      },
+    });
+  });
+
+  it('locks the section to the PR head branch instead of offering the selector', async () => {
+    renderOptions();
+
+    // The section still renders (same chrome), but as a read-only summary.
+    expect(await screen.findByTestId('worktree-options')).toHaveTextContent(
+      'Start in an isolated git worktree',
+    );
+    const lock = screen.getByTestId('worktree-pr-lock');
+    expect(lock).toHaveTextContent('feat/repo-tab');
+    expect(lock).toHaveTextContent('PR #174’s head branch');
+
+    // None of the choices the generic selector offers are reachable: the
+    // session is for the PR, so its branch is not up for debate.
+    expect(screen.queryByTestId('worktree-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('worktree-start-point')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('start-point-head')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('start-point-default-branch'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('start-point-other')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('branch-mode')).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId('remote-branch-picker'),
+    ).not.toBeInTheDocument();
+    // Nothing here can move the committed worktree request either.
+    expect(useComposerStore.getState().newSessionWorktreeEnabled).toBe(true);
+    expect(useComposerStore.getState().newSessionWorktreeStartPoint).toEqual({
+      kind: 'use_remote_branch',
+      name: 'feat/repo-tab',
+    });
+  });
+
+  it('renders the lock without consulting the git probe', () => {
+    // The probe is skipped for a PR pick — the clone is registered and the
+    // branch is already decided — so the lock must not hang off its answer.
+    // Seeding a path the mock reports as non-git pins that: the lock renders on
+    // the first paint, where the `repo_root === null` bail-out of the directory
+    // path would have rendered nothing.
+    useComposerStore.setState({ newSessionWorkdir: NON_GIT_DIR });
+    renderOptions();
+
+    expect(screen.getByTestId('worktree-pr-lock')).toHaveTextContent(
+      'feat/repo-tab',
+    );
+  });
+
+  it('restores the full selector once a directory pick replaces the PR', async () => {
+    renderOptions();
+    await screen.findByTestId('worktree-pr-lock');
+
+    // A Repository / Directory pick routes through `setNewSessionWorkdir`,
+    // which stamps `directory` provenance — the lock unlocks in place.
+    act(() => {
+      useComposerStore.getState().setNewSessionWorkdir(MOCK_GIT_REPO_ROOT);
+    });
+
+    expect(await screen.findByTestId('worktree-toggle')).toBeInTheDocument();
+    expect(screen.queryByTestId('worktree-pr-lock')).not.toBeInTheDocument();
+    // The forced-on worktree went with the PR: the toggle reads off again.
+    expect(screen.getByTestId('worktree-toggle')).not.toBeChecked();
   });
 });

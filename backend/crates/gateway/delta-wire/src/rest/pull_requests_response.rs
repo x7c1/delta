@@ -18,7 +18,7 @@ pub struct WirePullRequest {
     /// `<name>` segment of the base repository (e.g. `delta`).
     pub repo_name: String,
     /// Branch the PR proposes to merge — typically non-default, which is
-    /// why the PR tab defaults the worktree toggle on.
+    /// why picking the PR starts the session in a worktree on this branch.
     pub head_ref: String,
     /// `<owner>` segment of the head repository (distinct from
     /// `repo_owner` for a cross-fork PR).
