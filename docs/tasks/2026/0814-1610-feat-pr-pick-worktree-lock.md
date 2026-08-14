@@ -86,7 +86,7 @@ settings exactly as `onPickPr` writes them today.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In the real app, picking a PR shows the locked worktree line and the
+- [x] In the real app, picking a PR shows the locked worktree line and the
       started session lands in a worktree on the PR's head branch.
 
 ## Out of scope
