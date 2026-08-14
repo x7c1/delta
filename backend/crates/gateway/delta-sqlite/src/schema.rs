@@ -35,7 +35,7 @@
 /// applied on open to an existing DB.
 ///
 /// See the compatibility policy doc for the full rule set.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// All `CREATE TABLE`/`CREATE INDEX`/`CREATE TRIGGER` statements, idempotent
 /// via `IF NOT EXISTS`.
@@ -294,17 +294,18 @@ CREATE TABLE IF NOT EXISTS subagent_launch (
   PRIMARY KEY (session_id, tool_use_id)
 ) STRICT;
 
--- Registered repository scan roots: parent directories whose direct children
--- the Repository tab probes for git clones, surfacing clones the user has not
--- yet launched a session in (the "umbrella session" case where `session.repo_root`
--- is the umbrella's path and the actual sub-repos never get a row of their own).
--- One row per registered parent path; the table is session-independent (no foreign
+-- Registered clone roots: directories where the user's git clones live. The
+-- Repository tab probes each one's direct children for git clones, surfacing
+-- clones the user has not yet launched a session in (the "umbrella session" case
+-- where `session.repo_root` is the umbrella's path and the actual sub-repos never
+-- get a row of their own).
+-- One row per registered path; the table is session-independent (no foreign
 -- key, never cascaded) and is only ever rewritten through the dedicated CRUD
--- endpoints. Adding this table does NOT bump `SCHEMA_VERSION`: the `IF NOT EXISTS`
--- clause means an existing database picks it up on the next open with no
--- migration step, exactly like `launch_option` and `subagent_launch` did when
--- they were introduced.
-CREATE TABLE IF NOT EXISTS repository_scan_root (
+-- endpoints. An earlier generation declared this table under a different name;
+-- `IF NOT EXISTS` cannot rename a table, so that rename is a destructive change
+-- and shipped with a `SCHEMA_VERSION` bump (see `SCHEMA_VERSION` for what the
+-- startup gate then does to an existing database).
+CREATE TABLE IF NOT EXISTS clone_root (
   path        TEXT PRIMARY KEY,
   created_at  TEXT NOT NULL
 ) STRICT;

@@ -25,25 +25,27 @@ describe('settingsStore', () => {
   });
 
   it('setActiveCategory updates the active category', () => {
-    useSettingsStore.getState().setActiveCategory('scan-roots');
-    expect(useSettingsStore.getState().activeCategory).toBe('scan-roots');
+    useSettingsStore.getState().setActiveCategory('clone-roots');
+    expect(useSettingsStore.getState().activeCategory).toBe('clone-roots');
 
     useSettingsStore.getState().setActiveCategory('launch-options');
     expect(useSettingsStore.getState().activeCategory).toBe('launch-options');
   });
 
   it('persists the active category to localStorage', () => {
-    useSettingsStore.getState().setActiveCategory('scan-roots');
+    useSettingsStore.getState().setActiveCategory('clone-roots');
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw ?? '{}');
-    expect(parsed.state.activeCategory).toBe('scan-roots');
+    expect(parsed.state.activeCategory).toBe('clone-roots');
   });
 
   it('falls back to the default when a foreign value is rehydrated', async () => {
-    // A foreign value from a different build or a typo: the rehydration hook
-    // normalizes it to the default so the right pane never lands on an
-    // unknown category.
+    // A typo, a value from a different build, or a category id this build has
+    // since renamed: the rehydration hook checks membership in
+    // `SETTINGS_CATEGORY_IDS`, so every id it does not know — a retired one
+    // included — normalizes to the default and the right pane never lands on an
+    // unknown category with a blank body.
     localStorage.setItem(
       SETTINGS_STORAGE_KEY,
       JSON.stringify({ state: { activeCategory: 'mystery' }, version: 0 }),
@@ -57,10 +59,10 @@ describe('settingsStore', () => {
   it('preserves a valid persisted value across rehydration', async () => {
     localStorage.setItem(
       SETTINGS_STORAGE_KEY,
-      JSON.stringify({ state: { activeCategory: 'scan-roots' }, version: 0 }),
+      JSON.stringify({ state: { activeCategory: 'clone-roots' }, version: 0 }),
     );
     await useSettingsStore.persist.rehydrate();
-    expect(useSettingsStore.getState().activeCategory).toBe('scan-roots');
+    expect(useSettingsStore.getState().activeCategory).toBe('clone-roots');
   });
 
   describe('visualEffects', () => {

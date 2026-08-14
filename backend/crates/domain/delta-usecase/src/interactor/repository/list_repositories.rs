@@ -43,7 +43,7 @@ where
     ///    ([`GitWorktree::origin_url`], cached for the process's lifetime so
     ///    the same root is not re-shelled out per call). Carries per-clone
     ///    `last_opened_at` / `last_branch` derived from the session history.
-    /// 2. Scan-derived: every registered scan root's depth-1 children that
+    /// 2. Scan-derived: every registered clone root's depth-1 children that
     ///    look like git workspaces (`<child>/.git` exists). Carries no
     ///    per-clone history (`last_opened_at: None`) until the user actually
     ///    launches a session in the path. This is how the umbrella-session
@@ -116,7 +116,7 @@ where
             }
         }
 
-        // Scan-derived clones. Each registered scan root is enumerated depth-1;
+        // Scan-derived clones. Each registered clone root is enumerated depth-1;
         // its child clones union into `by_identity` keyed by `origin_url` (when
         // set on the child) or by the child's own path (otherwise — the same
         // identity-key fallback the session-derived path uses). A scan-derived
@@ -124,8 +124,8 @@ where
         // `latest_opened_at` (its recency is `None`); when a path already
         // exists in the bundle from the session side it is skipped entirely
         // (de-dup by clone path).
-        let scan_roots = self.store.list_repository_scan_roots().await?;
-        for root in scan_roots {
+        let clone_roots = self.store.list_clone_roots().await?;
+        for root in clone_roots {
             let scanned = scan_one_root(&root.path).await;
             for clone in scanned {
                 let origin = self.cached_origin_url(&clone.path).await?;

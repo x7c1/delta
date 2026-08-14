@@ -50,12 +50,13 @@ pub struct RepositoryCloneRow {
     pub last_branch: Option<String>,
 }
 
-/// One registered repository scan root: a parent directory whose direct children
-/// the Repository tab probes for git clones on every list call. Session-independent
-/// (no foreign key, never cascaded), so a scan root outlives any individual
-/// session and is only ever rewritten through the dedicated CRUD endpoints.
+/// One registered clone root: a directory where the user's git clones live,
+/// whose direct children the Repository tab probes for clones on every list
+/// call. Session-independent (no foreign key, never cascaded), so a clone root
+/// outlives any individual session and is only ever rewritten through the
+/// dedicated CRUD endpoints.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepositoryScanRoot {
+pub struct CloneRoot {
     pub path: String,
     pub created_at: String,
 }
@@ -254,23 +255,23 @@ pub trait SessionStore: std::marker::Send + Sync {
         generated_clone_limit: i64,
     ) -> Result<Vec<RepositoryCloneRow>>;
 
-    /// The registered repository scan roots, most-recently-added first.
+    /// The registered clone roots, most-recently-added first.
     ///
-    /// Each row is a parent directory the Repository tab will probe for git
-    /// clones on every list call. The set is small (one entry per parent
+    /// Each row is a directory whose direct children the Repository tab will
+    /// probe for git clones on every list call. The set is small (one entry per
     /// directory the user has registered) so the whole list is returned at once.
-    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>>;
+    async fn list_clone_roots(&self) -> Result<Vec<CloneRoot>>;
 
-    /// Register a new repository scan root. Returns the created row, or
-    /// [`crate::Error::RepositoryScanRootDuplicate`] when `path` is already
-    /// registered — the PRIMARY KEY constraint is the conflict gate, so callers
-    /// do not need a pre-check.
-    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot>;
+    /// Register a new clone root. Returns the created row, or
+    /// [`crate::Error::CloneRootDuplicate`] when `path` is already registered —
+    /// the PRIMARY KEY constraint is the conflict gate, so callers do not need a
+    /// pre-check.
+    async fn insert_clone_root(&self, path: &str) -> Result<CloneRoot>;
 
-    /// Unregister a repository scan root. Deleting an unknown path is a no-op
-    /// (idempotent), so the Settings dialog's explicit Remove click never
-    /// surfaces a 404 noise on a path the user just removed via another tab.
-    async fn delete_repository_scan_root(&self, path: &str) -> Result<()>;
+    /// Unregister a clone root. Deleting an unknown path is a no-op (idempotent),
+    /// so the Settings dialog's explicit Remove click never surfaces a 404 noise
+    /// on a path the user just removed via another tab.
+    async fn delete_clone_root(&self, path: &str) -> Result<()>;
 
     /// Look up a thread by id.
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>>;
@@ -726,16 +727,16 @@ impl SessionStore for Box<dyn SessionStore> {
             .await
     }
 
-    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>> {
-        (**self).list_repository_scan_roots().await
+    async fn list_clone_roots(&self) -> Result<Vec<CloneRoot>> {
+        (**self).list_clone_roots().await
     }
 
-    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot> {
-        (**self).insert_repository_scan_root(path).await
+    async fn insert_clone_root(&self, path: &str) -> Result<CloneRoot> {
+        (**self).insert_clone_root(path).await
     }
 
-    async fn delete_repository_scan_root(&self, path: &str) -> Result<()> {
-        (**self).delete_repository_scan_root(path).await
+    async fn delete_clone_root(&self, path: &str) -> Result<()> {
+        (**self).delete_clone_root(path).await
     }
 
     async fn thread(&self, id: ThreadId) -> Result<Option<Thread>> {

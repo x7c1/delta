@@ -1,7 +1,7 @@
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
   CreateLaunchOptionRequest,
-  CreateRepositoryScanRootRequest,
+  CreateCloneRootRequest,
   CreateSendRequest,
   GitBranchesResponse,
   GitRepoResponse,
@@ -17,8 +17,8 @@ import type {
   QuestionAnswerRequest,
   QuestionCancelRequest,
   RepositoriesResponse,
-  RepositoryScanRoot,
-  RepositoryScanRootsResponse,
+  CloneRoot,
+  CloneRootsResponse,
   SendRequest,
   SendResponse,
   SendsResponse,
@@ -77,9 +77,9 @@ export interface ApiClientOptions {
  * like a refused cancel and let the pending strip reconcile from the next
  * refetch.
  *
- * `scan_root_duplicate` means a repository scan root was registered twice with
- * the same path. The Settings dialog shows an inline "already registered" hint
- * on this code instead of a generic failure toast.
+ * `clone_root_duplicate` means a clone root was registered twice with the same
+ * path. The Settings dialog shows an inline "already registered" hint on this
+ * code instead of a generic failure toast.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
@@ -87,7 +87,7 @@ export type ApiErrorCode =
   | 'question_not_pending'
   | 'send_not_cancellable'
   | 'send_not_releasable'
-  | 'scan_root_duplicate'
+  | 'clone_root_duplicate'
   | 'open_cwd_path_not_allowed'
   | 'open_cwd_unknown_handler'
   | 'open_cwd_command_not_found'
@@ -524,25 +524,23 @@ export class ApiClient {
   }
 
   /**
-   * `GET /api/repository-scan-roots` — registered repository scan roots,
-   * newest first. Each scan root is a parent directory whose direct children
-   * the Repository tab probes for git clones on every refetch, surfacing
-   * clones the user has not yet started a session in.
+   * `GET /api/clone-roots` — registered clone roots, newest first. Each clone
+   * root is a directory where the user's git clones live; the Repository tab
+   * probes its direct children for clones on every refetch, surfacing clones
+   * the user has not yet started a session in.
    */
-  getRepositoryScanRoots(): Promise<RepositoryScanRootsResponse> {
-    return this.request<RepositoryScanRootsResponse>('/api/repository-scan-roots');
+  getCloneRoots(): Promise<CloneRootsResponse> {
+    return this.request<CloneRootsResponse>('/api/clone-roots');
   }
 
   /**
-   * `POST /api/repository-scan-roots` — register a new scan root. `path` must
-   * be a non-blank absolute path. The server trims a trailing slash. A
-   * duplicate path is a `409` with code `scan_root_duplicate`, surfaced as
+   * `POST /api/clone-roots` — register a new clone root. `path` must be a
+   * non-blank absolute path. The server trims a trailing slash. A duplicate
+   * path is a `409` with code `clone_root_duplicate`, surfaced as
    * {@link ApiError} so the Settings dialog can show an inline hint.
    */
-  createRepositoryScanRoot(
-    body: CreateRepositoryScanRootRequest,
-  ): Promise<RepositoryScanRoot> {
-    return this.request<RepositoryScanRoot>('/api/repository-scan-roots', {
+  createCloneRoot(body: CreateCloneRootRequest): Promise<CloneRoot> {
+    return this.request<CloneRoot>('/api/clone-roots', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -550,16 +548,15 @@ export class ApiClient {
   }
 
   /**
-   * `DELETE /api/repository-scan-roots/{path_b64}` — unregister a scan root
+   * `DELETE /api/clone-roots/{path_b64}` — unregister a clone root
    * (204). The registered path is URL-safe base64-encoded into the path
    * segment so its embedded `/` characters survive routing. Deleting an
    * unknown path is a no-op, so this is idempotent.
    */
-  deleteRepositoryScanRoot(path: string): Promise<void> {
-    return this.requestNoContent(
-      `/api/repository-scan-roots/${encodeBase64Url(path)}`,
-      { method: 'DELETE' },
-    );
+  deleteCloneRoot(path: string): Promise<void> {
+    return this.requestNoContent(`/api/clone-roots/${encodeBase64Url(path)}`, {
+      method: 'DELETE',
+    });
   }
 
   /**
@@ -585,7 +582,7 @@ export class ApiClient {
 
 /**
  * Encode `value` as URL-safe base64 (RFC 4648 §5), no padding. Used to wrap
- * the registered scan-root path in the DELETE path segment without `%2F`
+ * the registered clone-root path in the DELETE path segment without `%2F`
  * escaping its embedded slashes. The implementation is small enough to inline
  * rather than pull in a dependency.
  */

@@ -56,18 +56,9 @@ pub fn router(state: AppState) -> Router {
         .bind(endpoint::WorkdirGitBranches, api::workdir_git_branches)
         .bind(endpoint::OpenCwd, api::open_cwd)
         .bind(endpoint::ListRepositories, api::list_repositories)
-        .bind(
-            endpoint::ListRepositoryScanRoots,
-            api::list_repository_scan_roots,
-        )
-        .bind(
-            endpoint::CreateRepositoryScanRoot,
-            api::create_repository_scan_root,
-        )
-        .bind(
-            endpoint::DeleteRepositoryScanRoot,
-            api::delete_repository_scan_root,
-        )
+        .bind(endpoint::ListCloneRoots, api::list_clone_roots)
+        .bind(endpoint::CreateCloneRoot, api::create_clone_root)
+        .bind(endpoint::DeleteCloneRoot, api::delete_clone_root)
         .bind(endpoint::ListPullRequests, api::list_pull_requests)
         .bind(endpoint::ListProviders, api::list_providers)
         .bind(endpoint::ListLaunchOptions, api::list_launch_options)
@@ -642,7 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repository_scan_roots_round_trip_create_list_delete() {
+    async fn clone_roots_round_trip_create_list_delete() {
         let state = test_state().await;
         let app = router(state);
 
@@ -651,7 +642,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/repository-scan-roots")
+                    .uri("/api/clone-roots")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -660,7 +651,7 @@ mod tests {
         assert_eq!(list.status(), StatusCode::OK);
         let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(body["scan_roots"].as_array().unwrap().len(), 0);
+        assert_eq!(body["clone_roots"].as_array().unwrap().len(), 0);
 
         // Register one root.
         let create = app
@@ -668,7 +659,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/repository-scan-roots")
+                    .uri("/api/clone-roots")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"path":"/home/dev/projects/"}"#))
                     .unwrap(),
@@ -686,7 +677,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/repository-scan-roots")
+                    .uri("/api/clone-roots")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -694,8 +685,8 @@ mod tests {
             .unwrap();
         let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(body["scan_roots"].as_array().unwrap().len(), 1);
-        assert_eq!(body["scan_roots"][0]["path"], "/home/dev/projects");
+        assert_eq!(body["clone_roots"].as_array().unwrap().len(), 1);
+        assert_eq!(body["clone_roots"][0]["path"], "/home/dev/projects");
 
         // Duplicate is a 409 with the stable error code.
         let dup = app
@@ -703,7 +694,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/repository-scan-roots")
+                    .uri("/api/clone-roots")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"path":"/home/dev/projects"}"#))
                     .unwrap(),
@@ -713,16 +704,16 @@ mod tests {
         assert_eq!(dup.status(), StatusCode::CONFLICT);
         let bytes = to_bytes(dup.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(body["code"], "scan_root_duplicate");
+        assert_eq!(body["code"], "clone_root_duplicate");
 
         // Delete via the base64 path token.
-        let token = crate::api::repository_scan_root_path::encode("/home/dev/projects");
+        let token = crate::api::clone_root_path::encode("/home/dev/projects");
         let delete = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(format!("/api/repository-scan-roots/{token}"))
+                    .uri(format!("/api/clone-roots/{token}"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -734,7 +725,7 @@ mod tests {
         let list = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/repository-scan-roots")
+                    .uri("/api/clone-roots")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -742,16 +733,16 @@ mod tests {
             .unwrap();
         let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(body["scan_roots"].as_array().unwrap().len(), 0);
+        assert_eq!(body["clone_roots"].as_array().unwrap().len(), 0);
     }
 
     #[tokio::test]
-    async fn create_repository_scan_root_rejects_a_non_absolute_path() {
+    async fn create_clone_root_rejects_a_non_absolute_path() {
         let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/api/repository-scan-roots")
+                    .uri("/api/clone-roots")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"path":"relative/path"}"#))
                     .unwrap(),
@@ -762,16 +753,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_unknown_repository_scan_root_is_idempotent() {
+    async fn delete_unknown_clone_root_is_idempotent() {
         // No registration first. The DELETE replies 204 anyway: a Settings
         // dialog click on an unknown path is the user's intent ("ensure gone"),
         // not a precondition.
-        let token = crate::api::repository_scan_root_path::encode("/never/registered");
+        let token = crate::api::clone_root_path::encode("/never/registered");
         let response = router(test_state().await)
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(format!("/api/repository-scan-roots/{token}"))
+                    .uri(format!("/api/clone-roots/{token}"))
                     .body(Body::empty())
                     .unwrap(),
             )

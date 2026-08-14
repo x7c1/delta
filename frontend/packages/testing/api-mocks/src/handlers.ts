@@ -1,11 +1,11 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
   CreateLaunchOptionRequest,
-  CreateRepositoryScanRootRequest,
+  CreateCloneRootRequest,
   LaunchOption,
   LaunchOptionsResponse,
-  RepositoryScanRoot,
-  RepositoryScanRootsResponse,
+  CloneRoot,
+  CloneRootsResponse,
   UpdateLaunchOptionRequest,
   MessagesResponse,
   PendingPermission,
@@ -54,7 +54,7 @@ function isNewSessionSend(body: SendRequest): body is SendToNewSession {
 }
 
 /**
- * Decode a URL-safe base64 token used by the scan-root DELETE path segment,
+ * Decode a URL-safe base64 token used by the clone-root DELETE path segment,
  * mirroring the server-side decoder. Returns `null` for any non-base64url
  * byte or invalid UTF-8. The implementation uses `atob` after re-padding and
  * substituting the URL-safe variants.
@@ -713,64 +713,62 @@ export function createMockApi(): MockApi {
       return new HttpResponse(null, { status: 204 });
     }),
 
-    // Repository scan roots: list, create, delete. The mock reproduces the
-    // real server's contract — newest-first ordering, trailing-slash trim,
-    // duplicate-path 409 with the stable `scan_root_duplicate` code, and an
-    // idempotent delete on an unknown path.
-    http.get('*/api/repository-scan-roots', () => {
-      const scan_roots = [...store.repositoryScanRoots].sort((a, b) =>
+    // Clone roots: list, create, delete. The mock reproduces the real server's
+    // contract — newest-first ordering, trailing-slash trim, duplicate-path 409
+    // with the stable `clone_root_duplicate` code, and an idempotent delete on
+    // an unknown path.
+    http.get('*/api/clone-roots', () => {
+      const clone_roots = [...store.cloneRoots].sort((a, b) =>
         b.created_at.localeCompare(a.created_at) || a.path.localeCompare(b.path),
       );
-      const body: RepositoryScanRootsResponse = {
-        scan_roots: scan_roots.map((root) => ({ path: root.path })),
+      const body: CloneRootsResponse = {
+        clone_roots: clone_roots.map((root) => ({ path: root.path })),
       };
       return HttpResponse.json(body);
     }),
 
-    http.post('*/api/repository-scan-roots', async ({ request }) => {
-      const payload = (await request.json()) as CreateRepositoryScanRootRequest;
+    http.post('*/api/clone-roots', async ({ request }) => {
+      const payload = (await request.json()) as CreateCloneRootRequest;
       const rawPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
       const canonical = rawPath.replace(/\/+$/, '') || (rawPath ? '/' : '');
       if (canonical.length === 0) {
         return HttpResponse.json(
-          { error: 'a scan root must have a non-blank `path`' },
+          { error: 'a clone root must have a non-blank `path`' },
           { status: 400 },
         );
       }
       if (!canonical.startsWith('/')) {
         return HttpResponse.json(
-          { error: 'a scan root `path` must be absolute (start with `/`)' },
+          { error: 'a clone root `path` must be absolute (start with `/`)' },
           { status: 400 },
         );
       }
-      if (store.repositoryScanRoots.some((r) => r.path === canonical)) {
+      if (store.cloneRoots.some((r) => r.path === canonical)) {
         return HttpResponse.json(
-          { error: `scan root already registered: ${canonical}`, code: 'scan_root_duplicate' },
+          { error: `clone root already registered: ${canonical}`, code: 'clone_root_duplicate' },
           { status: 409 },
         );
       }
-      store.repositoryScanRoots.push({
+      store.cloneRoots.push({
         path: canonical,
         // Stored only for the newest-first list ordering; stripped from the wire.
         created_at: new Date().toISOString(),
       });
-      const row: RepositoryScanRoot = { path: canonical };
+      const row: CloneRoot = { path: canonical };
       return HttpResponse.json(row, { status: 201 });
     }),
 
-    http.delete('*/api/repository-scan-roots/:path_b64', ({ params }) => {
+    http.delete('*/api/clone-roots/:path_b64', ({ params }) => {
       const token = String(params.path_b64 ?? '');
       const decoded = decodeBase64Url(token);
       if (decoded === null) {
         return HttpResponse.json(
-          { error: 'malformed scan-root path token' },
+          { error: 'malformed clone-root path token' },
           { status: 400 },
         );
       }
       // Idempotent: an unknown path is still a 204.
-      store.repositoryScanRoots = store.repositoryScanRoots.filter(
-        (r) => r.path !== decoded,
-      );
+      store.cloneRoots = store.cloneRoots.filter((r) => r.path !== decoded);
       return new HttpResponse(null, { status: 204 });
     }),
 

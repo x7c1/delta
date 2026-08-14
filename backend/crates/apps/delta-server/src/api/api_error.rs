@@ -33,10 +33,10 @@ const SEND_NOT_CANCELLABLE_CODE: &str = "send_not_cancellable";
 /// and reconciles its pending strip from the next refetch on this code.
 const SEND_NOT_RELEASABLE_CODE: &str = "send_not_releasable";
 
-/// Stable machine-readable code for a repository scan root registered twice
-/// with the same path. The Settings dialog shows an inline "already registered"
-/// hint instead of a generic failure toast on this code.
-const SCAN_ROOT_DUPLICATE_CODE: &str = "scan_root_duplicate";
+/// Stable machine-readable code for a clone root registered twice with the same
+/// path. The Settings dialog shows an inline "already registered" hint instead
+/// of a generic failure toast on this code.
+const CLONE_ROOT_DUPLICATE_CODE: &str = "clone_root_duplicate";
 
 /// Stable machine-readable code for a `POST /api/open-cwd` request whose
 /// `path` is not in the known-cwd allowlist. The frontend surfaces the
@@ -134,11 +134,11 @@ impl IntoResponse for ApiError {
                     Error::SendNotReleasable(_) => {
                         (StatusCode::CONFLICT, Some(SEND_NOT_RELEASABLE_CODE))
                     }
-                    // A repository scan root registered twice: a conflict with
-                    // current state, with a stable code so the Settings dialog
-                    // shows an inline hint instead of a generic failure toast.
-                    Error::RepositoryScanRootDuplicate(_) => {
-                        (StatusCode::CONFLICT, Some(SCAN_ROOT_DUPLICATE_CODE))
+                    // A clone root registered twice: a conflict with current
+                    // state, with a stable code so the Settings dialog shows an
+                    // inline hint instead of a generic failure toast.
+                    Error::CloneRootDuplicate(_) => {
+                        (StatusCode::CONFLICT, Some(CLONE_ROOT_DUPLICATE_CODE))
                     }
                     // The browser's selection could not be turned into a key
                     // sequence (malformed, or an unsupported sub-case): the

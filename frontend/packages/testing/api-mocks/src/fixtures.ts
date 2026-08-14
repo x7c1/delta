@@ -625,14 +625,14 @@ export interface MockStore {
   /** Id assigned to the next created launch option. */
   nextLaunchOptionId: number;
   /**
-   * Registered repository scan roots, newest first (the settings-screen
-   * "Repository scan roots" section). Each parent directory whose direct
-   * children every `GET /api/repositories` call probes for git clones.
-   * Kept with `created_at` so the mock can sort the list newest-first the
-   * way the real server does; the wire form omits the timestamp, and the
-   * `GET` handler strips it before serialising.
+   * Registered clone roots, newest first (the settings-screen "Clone roots"
+   * section). Each is a directory whose direct children every
+   * `GET /api/repositories` call probes for git clones. Kept with `created_at`
+   * so the mock can sort the list newest-first the way the real server does;
+   * the wire form omits the timestamp, and the `GET` handler strips it before
+   * serialising.
    */
-  repositoryScanRoots: { path: string; created_at: string }[];
+  cloneRoots: { path: string; created_at: string }[];
 }
 
 /**
@@ -757,10 +757,11 @@ export function seedData(): MockStore {
       },
     ],
     nextLaunchOptionId: 4,
-    // Empty by default — the Settings dialog's "Repository scan roots" section
-    // renders its zero-state, and tests that need a seeded root call
-    // `insertRepositoryScanRoot` directly on the store.
-    repositoryScanRoots: [],
+    // Empty by default — the Settings dialog's "Clone roots" section renders
+    // its zero-state. The store lives inside `createMockApi`, so a test that
+    // needs a registered root creates it the way the UI does: through the
+    // mock's own `POST /api/clone-roots` handler.
+    cloneRoots: [],
   };
 }
 

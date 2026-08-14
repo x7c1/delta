@@ -39,10 +39,10 @@ pub use interactor::{
 pub use launch_config::{LaunchConfig, DEFAULT_SESSION_COMMAND};
 pub use pane_token::{PaneToken, PaneTokenMinter};
 pub use ports::{
-    pane_for, AsyncEventReceiver, AsyncEventSink, BinaryDetector, CommsDirection, CommsEntry,
-    CommsFrameKind, CommsLogSink, DirEntry, DirListing, ExternalOpener, GhCli, GitRepoInfo,
-    GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, RateLimitWindow, RecentWorkdir,
-    RemoteBranches, RepositoryCloneRow, RepositoryScanRoot, SessionEndHook, SessionEvent,
+    pane_for, AsyncEventReceiver, AsyncEventSink, BinaryDetector, CloneRoot, CommsDirection,
+    CommsEntry, CommsFrameKind, CommsLogSink, DirEntry, DirListing, ExternalOpener, GhCli,
+    GitRepoInfo, GitWorktree, MessageDisplayHook, NewSession, NullCommsLog, RateLimitWindow,
+    RecentWorkdir, RemoteBranches, RepositoryCloneRow, SessionEndHook, SessionEvent,
     SessionLifecycle, SessionPageRow, SessionStartHook, SessionStore, StatusSnapshot, StopHook,
     TmuxDriver, Transcript, TranscriptMessage, TranscriptRead, UserPromptSubmitHook, Workspace,
     WorktreeStartPoint,

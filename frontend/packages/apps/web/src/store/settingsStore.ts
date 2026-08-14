@@ -11,7 +11,7 @@ import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from '../providers';
  */
 export type SettingsCategoryId =
   | 'launch-options'
-  | 'scan-roots'
+  | 'clone-roots'
   | 'appearance'
   | 'default-provider';
 
@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS_CATEGORY: SettingsCategoryId = 'launch-options';
  */
 const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'launch-options',
-  'scan-roots',
+  'clone-roots',
   'appearance',
   'default-provider',
 ];

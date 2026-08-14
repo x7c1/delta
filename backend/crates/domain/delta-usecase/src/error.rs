@@ -73,11 +73,11 @@ pub enum Error {
     #[error("send {0} is not awaiting a release")]
     SendNotReleasable(i64),
 
-    /// A repository scan root was registered twice with the same path. Surfaced
-    /// as `409` so the Settings dialog can show an inline "already registered"
-    /// hint without a generic failure toast.
-    #[error("scan root already registered: {0}")]
-    RepositoryScanRootDuplicate(String),
+    /// A clone root was registered twice with the same path. Surfaced as `409`
+    /// so the Settings dialog can show an inline "already registered" hint
+    /// without a generic failure toast.
+    #[error("clone root already registered: {0}")]
+    CloneRootDuplicate(String),
 
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]

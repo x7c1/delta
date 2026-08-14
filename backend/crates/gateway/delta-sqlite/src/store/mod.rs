@@ -7,10 +7,10 @@
 //! the [`SessionStore`](delta_usecase::SessionStore) trait up by forwarding
 //! to the twins.
 
+mod clone_roots;
 mod launch_options;
 mod messages;
 mod permissions;
-mod scan_roots;
 mod sends;
 mod session_store;
 mod sessions;

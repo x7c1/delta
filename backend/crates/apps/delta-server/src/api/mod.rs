@@ -20,7 +20,7 @@
 
 mod api_error;
 pub(crate) use api_error::ApiError;
-pub(crate) mod repository_scan_root_path;
+pub(crate) mod clone_root_path;
 mod session_cursor;
 
 use axum::extract::{Path, Query, State};
@@ -30,13 +30,13 @@ use serde::Deserialize;
 
 use delta_usecase::{AgentProvider, PullRequestLens, SessionId, ThreadId};
 use delta_wire::rest::{
-    WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
-    WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WireProvidersResponse, WirePullRequestsResponse,
-    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRecentWorkdirItem,
-    WireRepositoriesResponse, WireRepositoryEntry, WireRepositoryScanRoot,
-    WireRepositoryScanRootsResponse, WireSendResponse, WireSendsResponse, WireSessionListItem,
+    WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
+    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
+    WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
+    WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest,
+    WireProvidersResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRecentWorkdirItem, WireRepositoriesResponse,
+    WireRepositoryEntry, WireSendResponse, WireSendsResponse, WireSessionListItem,
     WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
     WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
@@ -273,36 +273,33 @@ pub(crate) async fn list_repositories(
     }))
 }
 
-/// `GET /api/repository-scan-roots` — the registered repository scan roots.
+/// `GET /api/clone-roots` — the registered clone roots.
 ///
-/// Returns the parent directories the user has registered as scan starts for
-/// the Repository tab, newest first. Each entry carries only the path; the
-/// stored `created_at` is omitted from the wire because the Settings list
-/// does not show it.
-pub(crate) async fn list_repository_scan_roots(
+/// Returns the directories the user has registered as homes for their git
+/// clones, newest first. Each entry carries only the path; the stored
+/// `created_at` is omitted from the wire because the Settings list does not
+/// show it.
+pub(crate) async fn list_clone_roots(
     State(state): State<AppState>,
-) -> Result<Json<WireRepositoryScanRootsResponse>, ApiError> {
-    let roots = state.interactor().list_repository_scan_roots().await?;
-    Ok(Json(WireRepositoryScanRootsResponse {
-        scan_roots: roots
-            .into_iter()
-            .map(WireRepositoryScanRoot::from)
-            .collect(),
+) -> Result<Json<WireCloneRootsResponse>, ApiError> {
+    let roots = state.interactor().list_clone_roots().await?;
+    Ok(Json(WireCloneRootsResponse {
+        clone_roots: roots.into_iter().map(WireCloneRoot::from).collect(),
     }))
 }
 
-/// `POST /api/repository-scan-roots` — register a new repository scan root.
+/// `POST /api/clone-roots` — register a new clone root.
 ///
 /// `path` must be a non-blank absolute path (starting with `/`). Trailing
 /// slashes are trimmed for canonicalisation, so `/home/dev/projects/` and
 /// `/home/dev/projects` register the same row. The path is NOT required to
-/// exist or to contain git repos at registration time — a future-state scan
+/// exist or to contain git repos at registration time — a future-state clone
 /// root is allowed. Duplicate paths return `409` with code
-/// `scan_root_duplicate` so the Settings dialog can show an inline hint.
-pub(crate) async fn create_repository_scan_root(
+/// `clone_root_duplicate` so the Settings dialog can show an inline hint.
+pub(crate) async fn create_clone_root(
     State(state): State<AppState>,
-    Json(req): Json<WireCreateRepositoryScanRootRequest>,
-) -> Result<(StatusCode, Json<WireRepositoryScanRoot>), ApiError> {
+    Json(req): Json<WireCreateCloneRootRequest>,
+) -> Result<(StatusCode, Json<WireCloneRoot>), ApiError> {
     let trimmed = req.path.trim();
     // Strip trailing slashes (except a bare root `/`) so the user-typed form
     // is canonicalised before the PRIMARY KEY check sees it.
@@ -316,41 +313,32 @@ pub(crate) async fn create_repository_scan_root(
     };
     if canonical.is_empty() {
         return Err(ApiError::BadRequest(
-            "a scan root must have a non-blank `path`".to_owned(),
+            "a clone root must have a non-blank `path`".to_owned(),
         ));
     }
     if !canonical.starts_with('/') {
         return Err(ApiError::BadRequest(
-            "a scan root `path` must be absolute (start with `/`)".to_owned(),
+            "a clone root `path` must be absolute (start with `/`)".to_owned(),
         ));
     }
-    let root = state
-        .interactor()
-        .add_repository_scan_root(canonical)
-        .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(WireRepositoryScanRoot::from(root)),
-    ))
+    let root = state.interactor().add_clone_root(canonical).await?;
+    Ok((StatusCode::CREATED, Json(WireCloneRoot::from(root))))
 }
 
-/// `DELETE /api/repository-scan-roots/{path_b64}` — unregister a scan root.
+/// `DELETE /api/clone-roots/{path_b64}` — unregister a clone root.
 ///
 /// The registered absolute path is URL-safe base64 in the path segment to
 /// keep its embedded `/` characters out of the route match. A malformed token
 /// is a `400`; an unknown path is a silent no-op (idempotent), so a
 /// Settings dialog click never surfaces a 404 noise on a path the user just
 /// removed via another tab.
-pub(crate) async fn delete_repository_scan_root(
+pub(crate) async fn delete_clone_root(
     State(state): State<AppState>,
     Path(path_b64): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let path = repository_scan_root_path::decode(&path_b64)
-        .ok_or_else(|| ApiError::BadRequest("malformed scan-root path token".to_owned()))?;
-    state
-        .interactor()
-        .remove_repository_scan_root(&path)
-        .await?;
+    let path = clone_root_path::decode(&path_b64)
+        .ok_or_else(|| ApiError::BadRequest("malformed clone-root path token".to_owned()))?;
+    state.interactor().remove_clone_root(&path).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

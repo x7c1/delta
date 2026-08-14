@@ -13,7 +13,7 @@ known directory in an external editor. What the dialog does with the result — 
 Two lists feed the dialog's tabs and are built from different sources: **Recent
 directories** is derived from existing session rows (Delta keeps no separate
 history), while **Repositories** aggregates the same rows by git identity and
-additionally probes any registered scan roots for clones the user has never
+additionally probes any registered clone roots for clones the user has never
 launched a session in.
 
 ## Working directories
@@ -161,15 +161,15 @@ filtered out (lazy GC), and a repository drained of every clone disappears with
 them. Sessions launched outside any git repository do not contribute — those
 surface in [`GET /api/workdir/recent`](#get-apiworkdirrecent) instead. Each call
 also probes the direct children of every registered
-[scan root](#get-apirepository-scan-roots), so a clone the user has never
-launched a session in still appears.
+[clone root](#get-apiclone-roots), so a clone the user has never launched a
+session in still appears.
 
 The session-derived side is capped and not paged: only the 20 most recently
 active repository roots contribute, and within each root at most 5 user-picked
 clone paths plus 10 machine-generated ones (paths under the per-session
 worktree base, so a burst of disposable worktrees cannot squeeze out the main
 tree). A long-idle repository is therefore absent rather than at the end of the
-list. Scan-root probing is not subject to those caps.
+list. Clone-root probing is not subject to those caps.
 
 - **200**:
 
@@ -205,25 +205,27 @@ list. Scan-root probing is not subject to those caps.
     controls. Per-session selections are not persisted yet, so today they are
     always `[]`, `false` and `null`.
 
-### `GET /api/repository-scan-roots`
+### `GET /api/clone-roots`
 
-List the registered scan roots — parent directories whose direct children every
-`GET /api/repositories` call probes for git clones — newest first.
+List the registered clone roots, newest first. A clone root is a directory where
+the user's git clones live; every `GET /api/repositories` call probes its direct
+children for clones.
 
 - **200**:
 
   ```json
-  { "scan_roots": [{ "path": "/home/dev/projects" }] }
+  { "clone_roots": [{ "path": "/home/dev/projects" }] }
   ```
 
   Only the path is on the wire; the stored `created_at` is omitted because the
   Settings list does not show it.
 
-### `POST /api/repository-scan-roots`
+### `POST /api/clone-roots`
 
-Register a scan root: a parent directory (not a clone itself) whose direct
-children are probed for git clones on every `GET /api/repositories`, surfacing
-clones the user has never launched a session in.
+Register a clone root: a directory where the user's git clones live (not a clone
+itself). Its direct children are probed for git clones on every
+`GET /api/repositories`, surfacing clones the user has never launched a session
+in.
 
 Request:
 
@@ -234,7 +236,7 @@ Request:
 `path` must be non-blank and absolute. Trailing slashes are trimmed for
 canonicalisation, so `/home/dev/projects/` and `/home/dev/projects` register the
 same row. The path is NOT required to exist or to contain git repositories at
-registration time — a future-state scan root is allowed.
+registration time — a future-state clone root is allowed.
 
 - **201 Created**:
 
@@ -243,12 +245,13 @@ registration time — a future-state scan root is allowed.
   ```
 
 - **400** — a blank or relative `path`.
-- **409** (body `code: "scan_root_duplicate"`) — the path is already registered.
-  The Settings dialog shows an inline hint instead of a failure toast.
+- **409** (body `code: "clone_root_duplicate"`) — the path is already
+  registered. The Settings dialog shows an inline hint instead of a failure
+  toast.
 
-### `DELETE /api/repository-scan-roots/{path_b64}`
+### `DELETE /api/clone-roots/{path_b64}`
 
-Unregister a scan root. The registered absolute path is URL-safe base64 in the
+Unregister a clone root. The registered absolute path is URL-safe base64 in the
 path segment, so its embedded `/` characters stay out of the route match. Encode
 it unpadded (RFC 4648 §5): `=` is not a token character, so the padding most
 base64 encoders append by default makes the segment undecodable.

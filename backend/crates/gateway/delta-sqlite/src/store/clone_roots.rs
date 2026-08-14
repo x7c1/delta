@@ -1,8 +1,8 @@
-//! Repository scan roots configured in settings.
+//! Clone roots configured in settings.
 
 use rusqlite::params;
 
-use delta_usecase::RepositoryScanRoot;
+use delta_usecase::CloneRoot;
 
 use crate::error::Error;
 use crate::time::now_iso8601;
@@ -10,22 +10,22 @@ use crate::time::now_iso8601;
 use super::SqliteStore;
 
 impl SqliteStore {
-    pub(super) async fn list_repository_scan_roots(
+    pub(super) async fn list_clone_roots(
         &self,
-    ) -> std::result::Result<Vec<RepositoryScanRoot>, delta_usecase::Error> {
+    ) -> std::result::Result<Vec<CloneRoot>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
-        // Newest first: the most recently added scan root is the one a user is
+        // Newest first: the most recently added clone root is the one a user is
         // most likely to be looking for in the Settings list (mirroring
         // `list_launch_options`).
         let mut stmt = conn
             .prepare(
-                "SELECT path, created_at FROM repository_scan_root \
+                "SELECT path, created_at FROM clone_root \
                  ORDER BY created_at DESC, path ASC",
             )
             .map_err(Error::from)?;
         let rows = stmt
             .query_map([], |row| {
-                Ok(RepositoryScanRoot {
+                Ok(CloneRoot {
                     path: row.get::<_, String>(0)?,
                     created_at: row.get::<_, String>(1)?,
                 })
@@ -38,18 +38,18 @@ impl SqliteStore {
         Ok(out)
     }
 
-    pub(super) async fn insert_repository_scan_root(
+    pub(super) async fn insert_clone_root(
         &self,
         path: &str,
-    ) -> std::result::Result<RepositoryScanRoot, delta_usecase::Error> {
+    ) -> std::result::Result<CloneRoot, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let now = now_iso8601();
         let inserted = conn.execute(
-            "INSERT INTO repository_scan_root (path, created_at) VALUES (?1, ?2)",
+            "INSERT INTO clone_root (path, created_at) VALUES (?1, ?2)",
             params![path, now],
         );
         match inserted {
-            Ok(_) => Ok(RepositoryScanRoot {
+            Ok(_) => Ok(CloneRoot {
                 path: path.to_owned(),
                 created_at: now,
             }),
@@ -59,26 +59,21 @@ impl SqliteStore {
             Err(rusqlite::Error::SqliteFailure(err, _))
                 if err.code == rusqlite::ErrorCode::ConstraintViolation =>
             {
-                Err(delta_usecase::Error::RepositoryScanRootDuplicate(
-                    path.to_owned(),
-                ))
+                Err(delta_usecase::Error::CloneRootDuplicate(path.to_owned()))
             }
             Err(err) => Err(Error::from(err).into()),
         }
     }
 
-    pub(super) async fn delete_repository_scan_root(
+    pub(super) async fn delete_clone_root(
         &self,
         path: &str,
     ) -> std::result::Result<(), delta_usecase::Error> {
         let conn = self.conn.lock().await;
         // Idempotent: an explicit Remove click should not 404 on a path the user
         // just removed via another tab; the row is gone either way after the call.
-        conn.execute(
-            "DELETE FROM repository_scan_root WHERE path = ?1",
-            params![path],
-        )
-        .map_err(Error::from)?;
+        conn.execute("DELETE FROM clone_root WHERE path = ?1", params![path])
+            .map_err(Error::from)?;
         Ok(())
     }
 }

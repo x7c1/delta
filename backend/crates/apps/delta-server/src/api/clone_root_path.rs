@@ -1,6 +1,6 @@
-//! URL-safe path encoding for the repository-scan-root DELETE endpoint.
+//! URL-safe path encoding for the clone-root DELETE endpoint.
 //!
-//! `DELETE /api/repository-scan-roots/:path_b64` receives the registered
+//! `DELETE /api/clone-roots/:path_b64` receives the registered
 //! absolute path as a URL-safe base64 token in the path segment, so the
 //! embedded `/` characters survive the route match without `%2F` escaping
 //! quirks.

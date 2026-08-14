@@ -8,6 +8,10 @@
 //! TypeScript by the `export-ts` binary, so the browser types can never drift
 //! from the Rust contract.
 
+mod clone_root_create_request;
+pub use clone_root_create_request::WireCreateCloneRootRequest;
+mod clone_roots_response;
+pub use clone_roots_response::{WireCloneRoot, WireCloneRootsResponse};
 mod error_body;
 pub use error_body::WireErrorBody;
 mod git_response;
@@ -41,10 +45,6 @@ mod repositories_response;
 pub use repositories_response::{
     WireRepositoriesResponse, WireRepositoryClone, WireRepositoryEntry,
 };
-mod repository_scan_root_create_request;
-pub use repository_scan_root_create_request::WireCreateRepositoryScanRootRequest;
-mod repository_scan_roots_response;
-pub use repository_scan_roots_response::{WireRepositoryScanRoot, WireRepositoryScanRootsResponse};
 mod send_request;
 pub use send_request::{SendTargetError, WireCreateSendRequest};
 mod send_response;

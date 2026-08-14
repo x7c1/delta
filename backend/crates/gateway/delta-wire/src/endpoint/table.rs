@@ -11,12 +11,12 @@ use crate::hooks::{
     UserPromptSubmitPayload, UserPromptSubmitResponse,
 };
 use crate::rest::{
-    WireCreateLaunchOptionRequest, WireCreateRepositoryScanRootRequest, WireCreateSendRequest,
-    WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
-    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WireProvidersResponse, WirePullRequestsResponse,
-    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRepositoriesResponse,
-    WireRepositoryScanRoot, WireRepositoryScanRootsResponse, WireSendResponse, WireSendsResponse,
+    WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
+    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
+    WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
+    WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest,
+    WireProvidersResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
+    WireQuestionCancelRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
     WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
     WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
@@ -150,20 +150,20 @@ declare_endpoints! {
     /// bundled by origin URL and ordered by recency.
     ListRepositories: GET "/api/repositories", response = WireRepositoriesResponse;
 
-    /// The registered repository scan roots.
-    ListRepositoryScanRoots: GET "/api/repository-scan-roots",
-        response = WireRepositoryScanRootsResponse;
+    /// The registered clone roots.
+    ListCloneRoots: GET "/api/clone-roots", response = WireCloneRootsResponse;
 
-    /// Registers a scan root: a parent directory whose direct children every
-    /// `/api/repositories` call probes for git clones, surfacing clones the
-    /// user has never launched a session in (the umbrella-session pattern).
-    CreateRepositoryScanRoot: POST "/api/repository-scan-roots",
-        request = WireCreateRepositoryScanRootRequest,
-        response = WireRepositoryScanRoot;
+    /// Registers a clone root: a directory where the user's git clones live,
+    /// whose direct children every `/api/repositories` call probes for clones,
+    /// surfacing ones the user has never launched a session in (the
+    /// umbrella-session pattern).
+    CreateCloneRoot: POST "/api/clone-roots",
+        request = WireCreateCloneRootRequest,
+        response = WireCloneRoot;
 
-    /// Unregisters a scan root. The path is URL-safe base64 in the segment so
+    /// Unregisters a clone root. The path is URL-safe base64 in the segment so
     /// its embedded `/` characters survive routing.
-    DeleteRepositoryScanRoot: DELETE "/api/repository-scan-roots/{path_b64}";
+    DeleteCloneRoot: DELETE "/api/clone-roots/{path_b64}";
 
     /// Pull requests for the new-session PR tab (per lens): drives the PR
     /// search through the gh CLI gateway and tags each row with whether

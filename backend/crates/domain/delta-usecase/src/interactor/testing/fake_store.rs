@@ -11,9 +11,7 @@ use delta_model::{
 };
 
 use crate::error::{Error, Result};
-use crate::ports::{
-    NewSession, RepositoryCloneRow, RepositoryScanRoot, SessionPageRow, SessionStore,
-};
+use crate::ports::{CloneRoot, NewSession, RepositoryCloneRow, SessionPageRow, SessionStore};
 use crate::SessionPageCursor;
 
 /// Derive a thread's `root_message_uuid` the way the SQL store does: the
@@ -52,7 +50,7 @@ pub(crate) struct FakeStoreInner {
     /// the `SubagentLaunch` carrying the launching thread plus the optional
     /// `task_id` learned via the `PostToolUse(Agent)` hook.
     pub(crate) subagent_launches: HashMap<(SessionId, String), SubagentLaunch>,
-    pub(crate) repository_scan_roots: Vec<RepositoryScanRoot>,
+    pub(crate) clone_roots: Vec<CloneRoot>,
 }
 
 #[derive(Default)]
@@ -981,11 +979,11 @@ impl SessionStore for FakeStore {
         Ok(())
     }
 
-    async fn list_repository_scan_roots(&self) -> Result<Vec<RepositoryScanRoot>> {
+    async fn list_clone_roots(&self) -> Result<Vec<CloneRoot>> {
         let g = self.inner.lock().unwrap();
         // Newest first (descending created_at), mirroring the SQL store. Ties
         // on the seeded timestamp fall back to path ASC for a deterministic order.
-        let mut out = g.repository_scan_roots.clone();
+        let mut out = g.clone_roots.clone();
         out.sort_by(|a, b| {
             b.created_at
                 .cmp(&a.created_at)
@@ -994,22 +992,22 @@ impl SessionStore for FakeStore {
         Ok(out)
     }
 
-    async fn insert_repository_scan_root(&self, path: &str) -> Result<RepositoryScanRoot> {
+    async fn insert_clone_root(&self, path: &str) -> Result<CloneRoot> {
         let mut g = self.inner.lock().unwrap();
-        if g.repository_scan_roots.iter().any(|r| r.path == path) {
-            return Err(Error::RepositoryScanRootDuplicate(path.to_owned()));
+        if g.clone_roots.iter().any(|r| r.path == path) {
+            return Err(Error::CloneRootDuplicate(path.to_owned()));
         }
-        let row = RepositoryScanRoot {
+        let row = CloneRoot {
             path: path.to_owned(),
             created_at: "2026-01-01T00:00:00Z".into(),
         };
-        g.repository_scan_roots.push(row.clone());
+        g.clone_roots.push(row.clone());
         Ok(row)
     }
 
-    async fn delete_repository_scan_root(&self, path: &str) -> Result<()> {
+    async fn delete_clone_root(&self, path: &str) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
-        g.repository_scan_roots.retain(|r| r.path != path);
+        g.clone_roots.retain(|r| r.path != path);
         Ok(())
     }
 }
