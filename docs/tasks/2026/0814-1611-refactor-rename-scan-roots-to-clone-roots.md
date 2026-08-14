@@ -82,7 +82,7 @@ verbatim).
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] After `make reset`, the real app registers and removes a clone root in
+- [x] After `make reset`, the real app registers and removes a clone root in
       Settings, and the Repository tab surfaces a direct-child clone of that
       root that has never hosted a session.
 
