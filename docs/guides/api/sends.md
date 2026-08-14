@@ -219,8 +219,11 @@ No event is broadcast: the browser refetches
 - **204 No Content** — the send is cancelled.
 - **409** (body `code: "send_not_cancellable"`) — the send no longer exists, is
   already terminal (matched or cancelled), or is `dispatched` with its echo
-  already arrived, so the turn carries it in flight and the interrupt is the
-  right control instead.
+  already arrived, so the turn carries it in flight and interrupting the turn is
+  the right control instead: `Escape` in the TUI for a pane-backed session,
+  [`POST /api/sessions/{id}/interrupt`](sessions.md#post-apisessionsidinterrupt)
+  for an adapter-backed one (the route is a well-defined no-op on pane-backed
+  sessions).
 
 ### `POST /api/sends/{id}/release`
 
