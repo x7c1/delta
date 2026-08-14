@@ -118,10 +118,10 @@ pre-feature status quo.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] In a real Codex worktree session started from Delta, `git add` and
+- [x] In a real Codex worktree session started from Delta, `git add` and
       `git commit` complete without raising an approval prompt (also confirms
       the real app-server accepts the injected `config` shape).
-- [ ] In a real Codex non-worktree session, behavior is unchanged.
+- [x] In a real Codex non-worktree session, behavior is unchanged.
 
 ## Out of scope
 
