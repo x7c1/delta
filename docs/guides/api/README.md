@@ -17,7 +17,7 @@ kinds of traffic, and this directory has one page per area:
   - **[sends.md](sends.md)** — enqueueing and managing sends, and answering the
     permission requests and questions the agent raises mid-turn.
   - **[workdirs.md](workdirs.md)** — the new-session dialog's sources: working
-    directories, git detection, repositories and scan roots, pull requests, and
+    directories, git detection, repositories and clone roots, pull requests, and
     opening a known directory in an external editor.
   - **[settings.md](settings.md)** — provider availability and capabilities, the
     launch-option registry, and the server version.
@@ -82,7 +82,7 @@ status codes and error bodies — is documented here only.
     body's `code` says which case it is: `resume_unavailable` (the session's
     local transcript file is gone, so `claude --resume <id>` has nothing to
     replay), `permission_not_pending`, `question_not_pending`,
-    `send_not_cancellable`, `send_not_releasable`, or `scan_root_duplicate`.
+    `send_not_cancellable`, `send_not_releasable`, or `clone_root_duplicate`.
     Nothing is mutated in any of these cases.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.

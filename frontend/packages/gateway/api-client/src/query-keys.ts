@@ -49,8 +49,8 @@ export const queryKeys = {
   gitBranches: (path: string) => ['git-branches', path] as const,
   /** The registered launch options (`GET /api/launch-options`). */
   launchOptions: ['launch-options'] as const,
-  /** The registered repository scan roots (`GET /api/repository-scan-roots`). */
-  repositoryScanRoots: ['repository-scan-roots'] as const,
+  /** The registered clone roots (`GET /api/clone-roots`). */
+  cloneRoots: ['clone-roots'] as const,
   /** The Delta workspace version (`GET /api/version`) for the navigator footer. */
   version: ['version'] as const,
   /**

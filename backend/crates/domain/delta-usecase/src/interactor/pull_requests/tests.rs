@@ -170,7 +170,7 @@ async fn search_results_are_memoised_per_lens() {
 #[tokio::test]
 async fn scan_only_repos_satisfy_the_local_clone_check() {
     // The umbrella-session motivation: the user has never launched a session
-    // in `<atelier>/repos/x7c1/zatto`, but a scan root is registered at
+    // in `<atelier>/repos/x7c1/zatto`, but a clone root is registered at
     // `<atelier>/repos/x7c1` and the child `.git` makes the clone discoverable.
     // The PR tab must report `has_local_clone: true` for that PR even though
     // no session row points at the sub-repo.
@@ -190,7 +190,7 @@ async fn scan_only_repos_satisfy_the_local_clone_check() {
     let gh = Arc::new(FakeGhCli::authenticated(prs, Vec::new()));
     let ix = interactor_with_git_and_gh(git, gh);
     ix.store()
-        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .insert_clone_root(tmp.path().to_str().unwrap())
         .await
         .unwrap();
 

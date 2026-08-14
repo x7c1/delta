@@ -15,8 +15,8 @@ use delta_model::{
     Thread, ThreadId,
 };
 use delta_usecase::{
-    NewSession, RecentWorkdir, RepositoryCloneRow, RepositoryScanRoot, SessionPageCursor,
-    SessionPageRow, SessionStore,
+    CloneRoot, NewSession, RecentWorkdir, RepositoryCloneRow, SessionPageCursor, SessionPageRow,
+    SessionStore,
 };
 
 use super::SqliteStore;
@@ -407,23 +407,18 @@ impl SessionStore for SqliteStore {
         self.delete_launch_option(id).await
     }
 
-    async fn list_repository_scan_roots(
-        &self,
-    ) -> std::result::Result<Vec<RepositoryScanRoot>, delta_usecase::Error> {
-        self.list_repository_scan_roots().await
+    async fn list_clone_roots(&self) -> std::result::Result<Vec<CloneRoot>, delta_usecase::Error> {
+        self.list_clone_roots().await
     }
 
-    async fn insert_repository_scan_root(
+    async fn insert_clone_root(
         &self,
         path: &str,
-    ) -> std::result::Result<RepositoryScanRoot, delta_usecase::Error> {
-        self.insert_repository_scan_root(path).await
+    ) -> std::result::Result<CloneRoot, delta_usecase::Error> {
+        self.insert_clone_root(path).await
     }
 
-    async fn delete_repository_scan_root(
-        &self,
-        path: &str,
-    ) -> std::result::Result<(), delta_usecase::Error> {
-        self.delete_repository_scan_root(path).await
+    async fn delete_clone_root(&self, path: &str) -> std::result::Result<(), delta_usecase::Error> {
+        self.delete_clone_root(path).await
     }
 }

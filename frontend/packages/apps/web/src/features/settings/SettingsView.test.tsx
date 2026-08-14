@@ -27,6 +27,7 @@ import {
   THEME_PREFERENCE_STORAGE_KEY,
 } from '../../hooks/useTheme';
 import { useNavStore } from '../../store/navStore';
+import type { SettingsCategoryId } from '../../store/settingsStore';
 import {
   DEFAULT_SETTINGS_CATEGORY,
   DEFAULT_VISUAL_EFFECTS_SETTING,
@@ -97,9 +98,9 @@ function selectProvider(provider: 'claude' | 'codex') {
   fireEvent.click(providerRadio(provider));
 }
 
-/** Switch the right pane to the Repository scan roots category. */
-function switchToScanRoots() {
-  fireEvent.click(screen.getByTestId('settings-category-scan-roots'));
+/** Switch the right pane to the Clone roots category. */
+function switchToCloneRoots() {
+  fireEvent.click(screen.getByTestId('settings-category-clone-roots'));
 }
 
 describe('SettingsView', () => {
@@ -370,38 +371,58 @@ describe('SettingsView', () => {
 
   describe('category sidebar', () => {
     it('opens on the persisted category and reveals its right pane', () => {
-      useSettingsStore.setState({ activeCategory: 'scan-roots' });
+      useSettingsStore.setState({ activeCategory: 'clone-roots' });
       renderSettings();
-      expect(screen.getByTestId('settings-category-scan-roots')).toHaveAttribute(
+      expect(screen.getByTestId('settings-category-clone-roots')).toHaveAttribute(
         'aria-selected',
         'true',
       );
-      expect(screen.getByTestId('scan-roots-section')).toBeInTheDocument();
+      expect(screen.getByTestId('clone-roots-section')).toBeInTheDocument();
       expect(screen.queryByTestId('launch-options-section')).toBeNull();
+    });
+
+    it('renders the first category when the active id is not in the registry', () => {
+      // A category id an earlier build persisted under a name this one has
+      // since renamed (or any other value the registry does not know) reaches
+      // the view only if it slips past the store's rehydration guard — a
+      // `setState` from stale code, a future id, a hand-edited localStorage.
+      // The rail-to-pane lookup must still land on a real category rather than
+      // leaving the right pane blank with every rail entry unselected.
+      useSettingsStore.setState({
+        activeCategory: 'retired-category' as SettingsCategoryId,
+      });
+      renderSettings();
+      expect(screen.getByTestId('launch-options-section')).toBeInTheDocument();
+      expect(screen.queryByTestId('clone-roots-section')).toBeNull();
+      // The rail follows the same fallback, so the rendered pane still has its
+      // tab marked selected instead of the rail showing no selection at all.
+      expect(
+        screen.getByTestId('settings-category-launch-options'),
+      ).toHaveAttribute('aria-selected', 'true');
     });
 
     it('switches the right pane content when a category is clicked', async () => {
       renderSettings();
-      // Default landing pane is Launch options; the scan-roots pane is not
+      // Default landing pane is Launch options; the clone-roots pane is not
       // mounted yet.
       expect(screen.getByTestId('launch-options-section')).toBeInTheDocument();
-      expect(screen.queryByTestId('scan-roots-section')).toBeNull();
+      expect(screen.queryByTestId('clone-roots-section')).toBeNull();
 
-      switchToScanRoots();
+      switchToCloneRoots();
 
       expect(screen.queryByTestId('launch-options-section')).toBeNull();
-      expect(await screen.findByTestId('scan-roots-section')).toBeInTheDocument();
+      expect(await screen.findByTestId('clone-roots-section')).toBeInTheDocument();
     });
 
     it('persists the active category to localStorage', () => {
       renderSettings();
-      switchToScanRoots();
+      switchToCloneRoots();
       const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
       expect(raw).not.toBeNull();
       // The persist middleware wraps state under `{ state, version }`; assert
       // on the parsed shape rather than substring-matching the JSON.
       const parsed = JSON.parse(raw ?? '{}');
-      expect(parsed.state.activeCategory).toBe('scan-roots');
+      expect(parsed.state.activeCategory).toBe('clone-roots');
     });
 
     it('exposes a vertical tablist with one tab per category', () => {
@@ -411,7 +432,7 @@ describe('SettingsView', () => {
       const tabs = within(tablist).getAllByRole('tab');
       expect(tabs.map((t) => t.textContent)).toEqual([
         'Launch options',
-        'Repository scan roots',
+        'Clone roots',
         'Appearance',
         'Default provider',
       ]);
@@ -419,7 +440,7 @@ describe('SettingsView', () => {
         screen.getByTestId('settings-category-launch-options'),
       ).toHaveAttribute('aria-selected', 'true');
       expect(
-        screen.getByTestId('settings-category-scan-roots'),
+        screen.getByTestId('settings-category-clone-roots'),
       ).toHaveAttribute('aria-selected', 'false');
       expect(
         screen.getByTestId('settings-category-appearance'),
@@ -613,87 +634,87 @@ describe('SettingsView', () => {
     });
   });
 
-  describe('Repository scan roots section', () => {
+  describe('Clone roots section', () => {
     it('renders the empty-state when no roots are registered', async () => {
       renderSettings();
-      switchToScanRoots();
-      const section = await screen.findByTestId('scan-roots-section');
+      switchToCloneRoots();
+      const section = await screen.findByTestId('clone-roots-section');
       expect(
-        within(section).getByText('No scan roots registered yet.'),
+        within(section).getByText('No clone roots registered yet.'),
       ).toBeInTheDocument();
-      expect(within(section).queryByTestId('scan-roots-list')).toBeNull();
+      expect(within(section).queryByTestId('clone-roots-list')).toBeNull();
     });
 
-    it('adds a scan root through the picker dialog', async () => {
+    it('adds a clone root through the picker dialog', async () => {
       renderSettings();
-      switchToScanRoots();
-      const section = await screen.findByTestId('scan-roots-section');
-      fireEvent.click(within(section).getByTestId('add-scan-root'));
+      switchToCloneRoots();
+      const section = await screen.findByTestId('clone-roots-section');
+      fireEvent.click(within(section).getByTestId('add-clone-root'));
 
       // The picker dialog opens; the WorkdirPickerBody pre-selects the most
       // recent directory as its candidate, so Add becomes enabled without
       // needing to click a tree node first.
-      const confirm = await screen.findByTestId('scan-root-confirm');
+      const confirm = await screen.findByTestId('clone-root-confirm');
       await waitFor(() => expect(confirm).toBeEnabled());
       fireEvent.click(confirm);
 
       // After success the picker closes and the list shows the new entry.
       await waitFor(() =>
-        expect(within(section).getByTestId('scan-roots-list')).toBeInTheDocument(),
+        expect(within(section).getByTestId('clone-roots-list')).toBeInTheDocument(),
       );
     });
 
     it('shows an inline duplicate hint when adding the same root twice', async () => {
       renderSettings();
-      switchToScanRoots();
-      const section = await screen.findByTestId('scan-roots-section');
+      switchToCloneRoots();
+      const section = await screen.findByTestId('clone-roots-section');
 
       // First registration: the picker opens, the candidate is auto-pre-
       // selected (the WorkdirPickerBody seeds it from the recent list), and
       // submitting succeeds.
-      fireEvent.click(within(section).getByTestId('add-scan-root'));
-      const firstConfirm = await screen.findByTestId('scan-root-confirm');
+      fireEvent.click(within(section).getByTestId('add-clone-root'));
+      const firstConfirm = await screen.findByTestId('clone-root-confirm');
       await waitFor(() => expect(firstConfirm).toBeEnabled());
       fireEvent.click(firstConfirm);
       await waitFor(() =>
-        expect(within(section).getByTestId('scan-roots-list')).toBeInTheDocument(),
+        expect(within(section).getByTestId('clone-roots-list')).toBeInTheDocument(),
       );
 
       // Second attempt at the same path: the server replies 409 with the
       // stable code, and the picker shows an inline "Already registered" hint
       // instead of a global toast.
-      fireEvent.click(within(section).getByTestId('add-scan-root'));
-      const secondConfirm = await screen.findByTestId('scan-root-confirm');
+      fireEvent.click(within(section).getByTestId('add-clone-root'));
+      const secondConfirm = await screen.findByTestId('clone-root-confirm');
       await waitFor(() => expect(secondConfirm).toBeEnabled());
       fireEvent.click(secondConfirm);
       await waitFor(() =>
-        expect(screen.getByTestId('scan-root-duplicate')).toBeInTheDocument(),
+        expect(screen.getByTestId('clone-root-duplicate')).toBeInTheDocument(),
       );
     });
 
-    it('removes a registered scan root', async () => {
+    it('removes a registered clone root', async () => {
       renderSettings();
-      switchToScanRoots();
-      const section = await screen.findByTestId('scan-roots-section');
+      switchToCloneRoots();
+      const section = await screen.findByTestId('clone-roots-section');
 
       // Register one first so there is a row to remove.
-      fireEvent.click(within(section).getByTestId('add-scan-root'));
-      const confirm = await screen.findByTestId('scan-root-confirm');
+      fireEvent.click(within(section).getByTestId('add-clone-root'));
+      const confirm = await screen.findByTestId('clone-root-confirm');
       await waitFor(() => expect(confirm).toBeEnabled());
       fireEvent.click(confirm);
-      const list = await within(section).findByTestId('scan-roots-list');
+      const list = await within(section).findByTestId('clone-roots-list');
 
       // Click the row's Remove button (the only button inside the list row),
       // and the row disappears as the list refetches.
       const removeButton = within(list).getByRole('button', {
-        name: /Remove scan root /,
+        name: /Remove clone root /,
       });
       fireEvent.click(removeButton);
       await waitFor(() =>
-        expect(within(section).queryByTestId('scan-roots-list')).toBeNull(),
+        expect(within(section).queryByTestId('clone-roots-list')).toBeNull(),
       );
       expect(
-        within(section).getByText('No scan roots registered yet.'),
+        within(section).getByText('No clone roots registered yet.'),
       ).toBeInTheDocument();
     });
   });

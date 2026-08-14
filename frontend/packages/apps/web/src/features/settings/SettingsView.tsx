@@ -9,21 +9,21 @@ import {
 } from 'react';
 import {
   ApiError,
-  useAddRepositoryScanRootMutation,
+  useAddCloneRootMutation,
   useCreateLaunchOptionMutation,
   useDeleteLaunchOptionMutation,
   useHomeDirQuery,
   useLaunchOptionsQuery,
-  useRemoveRepositoryScanRootMutation,
+  useRemoveCloneRootMutation,
   useProvidersQuery,
-  useRepositoryScanRootsQuery,
+  useCloneRootsQuery,
   useUpdateLaunchOptionMutation,
 } from '@delta/api-client';
 import type {
   AgentProvider,
   LaunchOption,
   LaunchOptionStyle,
-  RepositoryScanRoot,
+  CloneRoot,
 } from '@delta/wire-gen';
 import { Button, cn, Dialog, ProviderName, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
@@ -42,12 +42,12 @@ import { WorkdirPickerBody } from '../composer/WorkdirPickerBody';
 
 /**
  * The settings modal: hosts the registry of per-provider CLI launch options
- * and the registry of repository scan roots, each a top-level category in a
- * VS Code-style 2-pane layout. The left rail lists categories; the right pane
- * renders the active category's content. The categories are conceptually
- * unrelated (one targets session startup flags, the other where to look for
- * git repos to start sessions in), so they live in separate panes rather than
- * stacked sections — keeping each category's UI undivided by the other.
+ * and the registry of clone roots, each a top-level category in a VS Code-style
+ * 2-pane layout. The left rail lists categories; the right pane renders the
+ * active category's content. The categories are conceptually unrelated (one
+ * targets session startup flags, the other where to look for git repos to start
+ * sessions in), so they live in separate panes rather than stacked sections —
+ * keeping each category's UI undivided by the other.
  *
  * Rendered as a {@link Dialog} overlay layered on top of the workspace rather
  * than replacing the center pane, so the conversation stays in place beneath
@@ -78,9 +78,9 @@ export function SettingsView() {
       render: (active) => <LaunchOptionsSection active={active} />,
     },
     {
-      id: 'scan-roots',
-      label: 'Repository scan roots',
-      render: (active) => <RepositoryScanRootsSection active={active} />,
+      id: 'clone-roots',
+      label: 'Clone roots',
+      render: (active) => <CloneRootsSection active={active} />,
     },
     {
       id: 'appearance',
@@ -556,20 +556,20 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
 }
 
 /**
- * Repository scan roots category content: list of registered parent
- * directories whose direct children every Repository tab refetch probes for
- * git clones, plus a one-shot picker to register a new one. Drives the same
- * backend the New session screen consults, so adding a scan root here
- * surfaces previously-hidden clones on the very next refetch.
+ * Clone roots category content: list of the registered directories where the
+ * user's git clones live — every Repository tab refetch probes their direct
+ * children for clones — plus a one-shot picker to register a new one. Drives
+ * the same backend the New session screen consults, so adding a clone root
+ * here surfaces previously-hidden clones on the very next refetch.
  *
  * `active` mirrors the dialog's `settingsOpen` AND the category being the
  * visible one, so the query only runs while the section is mounted.
  */
-function RepositoryScanRootsSection({ active }: { active: boolean }) {
+function CloneRootsSection({ active }: { active: boolean }) {
   const client = useApiClient();
-  const scanRootsQuery = useRepositoryScanRootsQuery(client, active);
-  const addScanRoot = useAddRepositoryScanRootMutation(client);
-  const removeScanRoot = useRemoveRepositoryScanRootMutation(client);
+  const cloneRootsQuery = useCloneRootsQuery(client, active);
+  const addCloneRoot = useAddCloneRootMutation(client);
+  const removeCloneRoot = useRemoveCloneRootMutation(client);
   const home = useHomeDirQuery(client, active).data?.path ?? null;
 
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -582,26 +582,26 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
   // duplicate shows a tiny "Already registered." hint instead of a global
   // toast. Cleared whenever the picker reopens.
   const duplicate =
-    addScanRoot.error instanceof ApiError &&
-    addScanRoot.error.code === 'scan_root_duplicate';
+    addCloneRoot.error instanceof ApiError &&
+    addCloneRoot.error.code === 'clone_root_duplicate';
 
   // React Query's mutation handle is a fresh object every render, so it
   // cannot sit in the effect dependencies (it would re-fire forever). Pull
   // `reset` out and depend on it (a stable function reference within a given
   // QueryClient lifetime), which keeps the effect well-behaved.
-  const resetScanRootMutation = addScanRoot.reset;
+  const resetCloneRootMutation = addCloneRoot.reset;
   useEffect(() => {
     if (!pickerOpen) {
       setCandidate(null);
-      resetScanRootMutation();
+      resetCloneRootMutation();
     }
-  }, [pickerOpen, resetScanRootMutation]);
+  }, [pickerOpen, resetCloneRootMutation]);
 
   const submit = () => {
     if (candidate === null) {
       return;
     }
-    addScanRoot.mutate(
+    addCloneRoot.mutate(
       { path: candidate },
       {
         onSuccess: () => setPickerOpen(false),
@@ -609,13 +609,13 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
     );
   };
 
-  const scanRoots = scanRootsQuery.data?.scan_roots ?? [];
+  const cloneRoots = cloneRootsQuery.data?.clone_roots ?? [];
 
   return (
-    <section className="space-y-3" data-testid="scan-roots-section">
+    <section className="space-y-3" data-testid="clone-roots-section">
       <div>
         <h3 className="mb-1 text-secondary font-semibold text-fg">
-          Repository scan roots
+          Clone roots
         </h3>
         <p className="text-caption text-fg-muted">
           Delta scans the direct children of each path below for git
@@ -624,35 +624,35 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
         </p>
       </div>
 
-      {scanRootsQuery.isPending ? (
+      {cloneRootsQuery.isPending ? (
         <div className="flex justify-center py-4">
-          <Spinner label="loading scan roots" />
+          <Spinner label="loading clone roots" />
         </div>
-      ) : scanRootsQuery.isError ? (
+      ) : cloneRootsQuery.isError ? (
         <div className="flex flex-col items-center gap-2 py-4 text-secondary text-fg-muted">
-          <p>Could not load scan roots.</p>
+          <p>Could not load clone roots.</p>
           <Button
             size="sm"
             variant="secondary"
-            onClick={() => scanRootsQuery.refetch()}
+            onClick={() => cloneRootsQuery.refetch()}
           >
             Retry
           </Button>
         </div>
-      ) : scanRoots.length === 0 ? (
+      ) : cloneRoots.length === 0 ? (
         <p className="py-3 text-center text-secondary text-fg-subtle">
-          No scan roots registered yet.
+          No clone roots registered yet.
         </p>
       ) : (
-        <ul className="flex flex-col gap-2" data-testid="scan-roots-list">
-          {scanRoots.map((root) => (
-            <ScanRootRow
+        <ul className="flex flex-col gap-2" data-testid="clone-roots-list">
+          {cloneRoots.map((root) => (
+            <CloneRootRow
               key={root.path}
               root={root}
               home={home}
-              onRemove={() => removeScanRoot.mutate(root.path)}
+              onRemove={() => removeCloneRoot.mutate(root.path)}
               removing={
-                removeScanRoot.isPending && removeScanRoot.variables === root.path
+                removeCloneRoot.isPending && removeCloneRoot.variables === root.path
               }
             />
           ))}
@@ -664,9 +664,9 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
           size="sm"
           variant="secondary"
           onClick={() => setPickerOpen(true)}
-          data-testid="add-scan-root"
+          data-testid="add-clone-root"
         >
-          Add scan root…
+          Add clone root…
         </Button>
       </div>
 
@@ -682,8 +682,8 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
             <Button
               variant="primary"
               onClick={submit}
-              disabled={candidate === null || addScanRoot.isPending}
-              data-testid="scan-root-confirm"
+              disabled={candidate === null || addCloneRoot.isPending}
+              data-testid="clone-root-confirm"
             >
               Add
             </Button>
@@ -707,14 +707,14 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
             <p
               className="text-caption text-warning"
               role="alert"
-              data-testid="scan-root-duplicate"
+              data-testid="clone-root-duplicate"
             >
               Already registered.
             </p>
           )}
-          {addScanRoot.isError && !duplicate && (
+          {addCloneRoot.isError && !duplicate && (
             <p className="text-caption text-danger" role="alert">
-              Could not add the scan root. Please try again.
+              Could not add the clone root. Please try again.
             </p>
           )}
         </div>
@@ -723,14 +723,14 @@ function RepositoryScanRootsSection({ active }: { active: boolean }) {
   );
 }
 
-interface ScanRootRowProps {
-  root: RepositoryScanRoot;
+interface CloneRootRowProps {
+  root: CloneRoot;
   home: string | null;
   onRemove: () => void;
   removing: boolean;
 }
 
-function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
+function CloneRootRow({ root, home, onRemove, removing }: CloneRootRowProps) {
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
       <span
@@ -744,7 +744,7 @@ function ScanRootRow({ root, home, onRemove, removing }: ScanRootRowProps) {
         variant="ghost"
         onClick={onRemove}
         disabled={removing}
-        aria-label={`Remove scan root ${root.path}`}
+        aria-label={`Remove clone root ${root.path}`}
       >
         Remove
       </Button>

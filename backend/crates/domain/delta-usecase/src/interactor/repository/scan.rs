@@ -1,6 +1,6 @@
-//! Depth-1 git-clone scanning for registered repository scan roots.
+//! Depth-1 git-clone scanning for registered clone roots.
 //!
-//! `<scan_root>/<child>/.git` (file or dir) is the whole test for "this child
+//! `<clone_root>/<child>/.git` (file or dir) is the whole test for "this child
 //! is a git clone". No recursion, no `git fetch` / `git rev-parse` spawns —
 //! the depth-1 explicit-registration design is the entire contract, so the
 //! scan stays cheap enough to run on every `GET /api/repositories`.
@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-/// One clone discovered under a scan root.
+/// One clone discovered under a clone root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ScannedClone {
     /// Absolute path of the child directory (the clone's working tree root).
@@ -23,7 +23,7 @@ pub(super) struct ScannedClone {
 /// linked worktree's pointer file is the whole signal.
 ///
 /// A missing or unreadable `root` is logged at `warn` and yields an empty
-/// vector — a scan root the user has since removed should not fail the
+/// vector — a clone root the user has since removed should not fail the
 /// repository list. Symlink loops are guarded by canonicalising the root and
 /// each child before recording it: a child whose canonical path repeats one
 /// already visited within this scan is skipped.
@@ -34,7 +34,7 @@ pub(super) async fn scan_one_root(root: &str) -> Vec<ScannedClone> {
     let canonical_root = match tokio::fs::canonicalize(root).await {
         Ok(path) => path,
         Err(err) => {
-            tracing::warn!(root, error = %err, "repository scan root could not be resolved");
+            tracing::warn!(root, error = %err, "clone root could not be resolved");
             return Vec::new();
         }
     };
@@ -42,7 +42,7 @@ pub(super) async fn scan_one_root(root: &str) -> Vec<ScannedClone> {
     let mut read = match tokio::fs::read_dir(&canonical_root).await {
         Ok(read) => read,
         Err(err) => {
-            tracing::warn!(root, error = %err, "repository scan root could not be read");
+            tracing::warn!(root, error = %err, "clone root could not be read");
             return Vec::new();
         }
     };

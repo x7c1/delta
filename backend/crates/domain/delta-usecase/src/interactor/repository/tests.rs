@@ -342,7 +342,7 @@ async fn make_git_child(parent: &std::path::Path, name: &str) -> String {
 
 #[tokio::test]
 async fn scan_only_repo_surfaces_without_a_session() {
-    // A scan root that contains a git clone the user has never launched a
+    // A clone root that contains a git clone the user has never launched a
     // session in: the clone shows up as a `last_opened_at: None` repository so
     // the PR tab's `has_local_clone` join picks it up (this is the whole
     // motivation behind Phase D's umbrella-session fix).
@@ -351,7 +351,7 @@ async fn scan_only_repo_surfaces_without_a_session() {
     let git = FakeGitWorktree::default().with_origin_url(&clone_path, "git@github.com:x7c1/delta");
     let ix = interactor_with_git(git);
     ix.store()
-        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .insert_clone_root(tmp.path().to_str().unwrap())
         .await
         .unwrap();
 
@@ -377,7 +377,7 @@ async fn scan_only_repo_surfaces_without_a_session() {
 #[tokio::test]
 async fn session_and_scan_clones_with_the_same_identity_key_union() {
     // The same repository surfaces from both the session history (one clone
-    // path) and a scan root (a different clone path with the same origin):
+    // path) and a clone root (a different clone path with the same origin):
     // the two collapse into one Repository with both clones, the session-
     // derived one keeping its recency and the scan-derived one carrying none.
     let tmp = tempfile::tempdir().unwrap();
@@ -399,7 +399,7 @@ async fn session_and_scan_clones_with_the_same_identity_key_union() {
         .await
         .unwrap();
     ix.store()
-        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .insert_clone_root(tmp.path().to_str().unwrap())
         .await
         .unwrap();
 
@@ -425,7 +425,7 @@ async fn session_and_scan_clones_with_the_same_identity_key_union() {
 
 #[tokio::test]
 async fn scan_clone_already_in_session_history_is_not_added_twice() {
-    // The user registered a scan root that points at a parent whose child is
+    // The user registered a clone root that points at a parent whose child is
     // the very dir they already launched sessions in. The same path must not
     // be double-counted: the session-derived row wins (carries the recency)
     // and the scan-derived hit is dropped by the de-dup guard.
@@ -446,7 +446,7 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
         .await
         .unwrap();
     ix.store()
-        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .insert_clone_root(tmp.path().to_str().unwrap())
         .await
         .unwrap();
 
@@ -464,14 +464,14 @@ async fn scan_clone_already_in_session_history_is_not_added_twice() {
 }
 
 #[tokio::test]
-async fn scan_root_with_no_git_children_contributes_nothing() {
-    // A scan root that only contains plain (non-git) directories yields no
+async fn clone_root_with_no_git_children_contributes_nothing() {
+    // A clone root that only contains plain (non-git) directories yields no
     // clones — the depth-1 scan looks for `.git` and nothing else.
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir(tmp.path().join("not-a-clone")).unwrap();
     let ix = interactor_with_git(FakeGitWorktree::default());
     ix.store()
-        .insert_repository_scan_root(tmp.path().to_str().unwrap())
+        .insert_clone_root(tmp.path().to_str().unwrap())
         .await
         .unwrap();
 
@@ -483,13 +483,13 @@ async fn scan_root_with_no_git_children_contributes_nothing() {
 }
 
 #[tokio::test]
-async fn missing_scan_root_path_is_skipped_silently() {
-    // The user's scan-root parent has been removed from disk since
+async fn missing_clone_root_path_is_skipped_silently() {
+    // The user's clone-root parent has been removed from disk since
     // registration (or never existed): the call must not fail, the list just
     // misses what that root would have contributed.
     let ix = interactor_with_git(FakeGitWorktree::default());
     ix.store()
-        .insert_repository_scan_root("/no/such/scan/root/path/anywhere")
+        .insert_clone_root("/no/such/clone/root/path/anywhere")
         .await
         .unwrap();
 
