@@ -120,12 +120,12 @@ stale temp cleaned on next request). Each testable one appears below.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a temporary server (separate port and DB), with real `gh`: click a
+- [x] On a temporary server (separate port and DB), with real `gh`: click a
       no-clone PR row, clone a small public repository visible to the
       authenticated account, watch the row flip and the auto-continue land in
       the locked-worktree compose state on the PR's head branch.
-- [ ] While that clone runs, start an unrelated session — it opens normally.
-- [ ] A pre-existing destination directory shows the inline 409 error.
+- [x] While that clone runs, start an unrelated session — it opens normally.
+- [x] A pre-existing destination directory shows the inline 409 error.
 
 ## Out of scope
 
