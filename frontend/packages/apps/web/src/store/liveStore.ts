@@ -10,6 +10,7 @@ import { createStreamingSlice } from './live/streamingSlice';
 import { createSubagentsSlice } from './live/subagentsSlice';
 import { createStatusSlice } from './live/statusSlice';
 import { createTurnLifecycleSlice } from './live/turnLifecycleSlice';
+import { createClonesSlice } from './live/clonesSlice';
 import { createEventsSlice } from './live/eventReducers';
 
 /**
@@ -76,5 +77,6 @@ export const useLiveStore = create<LiveState>()((...args) => ({
   ...createSubagentsSlice(...args),
   ...createStatusSlice(...args),
   ...createTurnLifecycleSlice(...args),
+  ...createClonesSlice(...args),
   ...createEventsSlice(...args),
 }));

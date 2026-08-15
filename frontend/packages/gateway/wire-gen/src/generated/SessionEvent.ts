@@ -49,4 +49,14 @@ thread_id: number, tool_use_id: string, subagent_type: string | null, descriptio
  * subagent outlives the launching turn (the client must not sweep it at
  * turn end) and is finished by its completion notification.
  */
-background: boolean, } | { "kind": "subagent_finished", session_id: string, tool_use_id: string, } | { "kind": "status_updated", session_id: string, snapshot: StatusSnapshot, };
+background: boolean, } | { "kind": "subagent_finished", session_id: string, tool_use_id: string, } | { "kind": "status_updated", session_id: string, snapshot: StatusSnapshot, } | { "kind": "repository_clone_completed", repo_owner: string, repo_name: string, clone_root: string, 
+/**
+ * `<clone_root>/<repo_name>`. The clone is renamed onto this path
+ * atomically, so its existence means a finished clone, never a partial
+ * one.
+ */
+destination_path: string, } | { "kind": "repository_clone_failed", repo_owner: string, repo_name: string, clone_root: string, destination_path: string, 
+/**
+ * Why it failed, as `gh` reported it — shown to the user verbatim.
+ */
+message: string, };

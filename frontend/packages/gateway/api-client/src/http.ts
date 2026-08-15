@@ -1,5 +1,6 @@
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
+  CloneRepositoryRequest,
   CreateLaunchOptionRequest,
   CreateCloneRootRequest,
   CreateSendRequest,
@@ -80,6 +81,19 @@ export interface ApiClientOptions {
  * `clone_root_duplicate` means a clone root was registered twice with the same
  * path. The Settings dialog shows an inline "already registered" hint on this
  * code instead of a generic failure toast.
+ *
+ * `clone_root_not_registered` means a clone was requested into a directory that
+ * is not one of the registered clone roots — the root must be spelled exactly as
+ * `GET /api/clone-roots` returns it, so a path that was only just typed has to
+ * be registered first and cloned under the spelling that registration returned.
+ *
+ * `clone_dest_exists` means `<clone_root>/<repo_name>` already exists, so the
+ * clone was refused with no job started (there is no fallback naming, so the way
+ * past it is a different clone root).
+ *
+ * Both surface inline on the PR row that asked for the clone, showing the
+ * server's own message; the codes keep the two cases apart from a generic
+ * failure.
  */
 export type ApiErrorCode =
   | 'resume_unavailable'
@@ -88,6 +102,8 @@ export type ApiErrorCode =
   | 'send_not_cancellable'
   | 'send_not_releasable'
   | 'clone_root_duplicate'
+  | 'clone_root_not_registered'
+  | 'clone_dest_exists'
   | 'open_cwd_path_not_allowed'
   | 'open_cwd_unknown_handler'
   | 'open_cwd_command_not_found'
@@ -520,6 +536,27 @@ export class ApiClient {
   deleteLaunchOption(id: number): Promise<void> {
     return this.requestNoContent(`/api/launch-options/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  /**
+   * `POST /api/repositories/clone` — clone a repository the user has no local
+   * clone of into a registered clone root (`202`, no body).
+   *
+   * The clone runs as a background job on the server: the outcome arrives on
+   * `/ws` as `repository_clone_completed` / `repository_clone_failed`, never in
+   * this response. Requesting a destination that is already being cloned joins
+   * that job rather than starting a second one, so a double-click is harmless.
+   *
+   * An unregistered `clone_root` is a `400` with code
+   * `clone_root_not_registered`; an existing `<clone_root>/<repo_name>` is a
+   * `409` with code `clone_dest_exists`. Both surface as {@link ApiError}.
+   */
+  cloneRepository(body: CloneRepositoryRequest): Promise<void> {
+    return this.requestNoContent('/api/repositories/clone', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
   }
 

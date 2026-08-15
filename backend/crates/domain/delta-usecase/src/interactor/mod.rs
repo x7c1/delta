@@ -221,6 +221,16 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// event pump — which allocates the permission row inside the actor — seeds
     /// it there through the actor's [`Deref`](std::ops::Deref) to the core.
     pub(in crate::interactor) permission_index: std::sync::Mutex<HashMap<i64, SessionId>>,
+    /// The repository clones in flight in this process, keyed by destination
+    /// path, so a second request for a destination already being cloned joins
+    /// the running job instead of starting a second `gh` process on the same
+    /// directory.
+    ///
+    /// Deliberately in-memory, and deliberately unrelated to sessions: no
+    /// session path reads it, so a clone in flight can never delay a spawn, and
+    /// a restart simply forgets the job (see the `clone_repository` module for
+    /// what that costs and how the leftovers are cleaned up).
+    pub(in crate::interactor) clone_jobs: repository::CloneJobs,
 }
 
 /// The public entry point: wraps the shared [`InteractorCore`] and routes
@@ -304,6 +314,7 @@ where
             event_sink: None,
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             permission_index: std::sync::Mutex::new(HashMap::new()),
+            clone_jobs: repository::CloneJobs::default(),
         });
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }
@@ -457,6 +468,21 @@ impl GhCli for UnavailableGhCli {
 
     async fn search_prs(&self, _lens: PullRequestLens) -> crate::error::Result<Vec<PullRequest>> {
         Ok(Vec::new())
+    }
+
+    async fn clone_repo(
+        &self,
+        owner: &str,
+        name: &str,
+        _destination: &str,
+    ) -> crate::error::Result<()> {
+        // Unlike the queries, a clone cannot degrade into "nothing to show":
+        // the caller asked for a directory to appear on disk. Fail loudly and
+        // name the missing wiring, so a mis-configured server says so instead
+        // of announcing a clone that never ran as finished.
+        Err(crate::error::Error::Gh(format!(
+            "no gh driver has been injected into the interactor, so {owner}/{name} cannot be cloned"
+        )))
     }
 }
 

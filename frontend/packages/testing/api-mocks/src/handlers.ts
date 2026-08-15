@@ -1,5 +1,6 @@
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import type {
+  CloneRepositoryRequest,
   CreateLaunchOptionRequest,
   CreateCloneRootRequest,
   LaunchOption,
@@ -77,6 +78,25 @@ function decodeBase64Url(token: string): string | null {
 }
 
 /**
+ * Where a clone lands: `<clone_root>/<repo_name>`, the server's one rule with
+ * no fallback naming.
+ */
+function cloneDestination(cloneRoot: string, repoName: string): string {
+  // Trailing slashes go, so a bare `/` root yields `/<name>` — the same join
+  // the server does, and the same one the PR tab predicts.
+  return `${cloneRoot.replace(/\/+$/, '')}/${repoName}`;
+}
+
+/**
+ * Whether the mock filesystem already has a directory at `path`. Standing in
+ * for the real server's destination-exists check, using the same little tree the
+ * workdir picker browses.
+ */
+function mockDirectoryExists(path: string): boolean {
+  return workdirListing(path) !== null;
+}
+
+/**
  * The response the real server gives when a closed session cannot be resumed
  * because its transcript is gone: `409` with the stable `resume_unavailable`
  * code the frontend branches on. Shared by the `open` and `sends` handlers.
@@ -146,6 +166,29 @@ export function createMockApi(): MockApi {
     }
     return latest;
   };
+
+  /**
+   * Repository-tab entries for the clones made during this mock session, so a
+   * landed clone shows up in `GET /api/repositories` the way a real one would.
+   */
+  const clonedRepositoryEntries = (): RepositoriesResponse['repositories'] =>
+    store.clonedRepos.map((entry) => ({
+      identity_key: `github.com/${entry.key}`,
+      display_name: entry.key,
+      recently_used_clone_path: entry.path,
+      clones: [
+        {
+          path: entry.path,
+          // A just-cloned repository has never been launched in, which is
+          // exactly what a `null` last-opened means.
+          last_opened_at: null,
+          last_branch: null,
+          last_launch_option_ids: [],
+          last_worktree_enabled: false,
+          last_worktree_start_point: null,
+        },
+      ],
+    }));
 
   const handlers: RequestHandler[] = [
     http.get('*/api/sessions', ({ request }) => {
@@ -586,16 +629,51 @@ export function createMockApi(): MockApi {
     // exercisable.
     http.get('*/api/repositories', () => {
       const responseBody: RepositoriesResponse = {
-        repositories: mockRepositories(),
+        repositories: [...mockRepositories(), ...clonedRepositoryEntries()],
       };
       return HttpResponse.json(responseBody);
     }),
 
+    // Clone a repository into a registered clone root. Reproduces the real
+    // server's refusals (an unregistered root, an occupied destination) and
+    // otherwise answers 202 having done nothing: the mock has no filesystem, so
+    // a clone "lands" only when a scripted `repository_clone_completed` event is
+    // applied — see `applyEvent`.
+    http.post('*/api/repositories/clone', async ({ request }) => {
+      const payload = (await request.json()) as CloneRepositoryRequest;
+      const cloneRoot = payload?.clone_root ?? '';
+      if (!store.cloneRoots.some((root) => root.path === cloneRoot)) {
+        return HttpResponse.json(
+          {
+            error: `not a registered clone root: ${cloneRoot}`,
+            code: 'clone_root_not_registered',
+          },
+          { status: 400 },
+        );
+      }
+      const destination = cloneDestination(cloneRoot, payload.repo_name);
+      // The mock's stand-in for the filesystem: the workdir tree plus whatever
+      // this session has already cloned. Either counts as "already there".
+      const occupied =
+        mockDirectoryExists(destination) ||
+        store.clonedRepos.some((entry) => entry.path === destination);
+      if (occupied) {
+        return HttpResponse.json(
+          {
+            error: `clone destination already exists: ${destination}`,
+            code: 'clone_dest_exists',
+          },
+          { status: 409 },
+        );
+      }
+      return new HttpResponse(null, { status: 202 });
+    }),
+
     // Pull requests for the PR tab. Each lens carries its own canned
     // list (the reviewer fixture pairs a clone-having row with a
-    // no-clone row so the "silently blocked + inline hint" path is
-    // exercisable; the author fixture seeds one of the user's own
-    // drafts). An unknown lens is a 400, mirroring the server.
+    // no-clone row so the inline clone panel is exercisable; the author
+    // fixture seeds one of the user's own drafts). An unknown lens is a
+    // 400, mirroring the server.
     http.get('*/api/prs', ({ request }) => {
       const url = new URL(request.url);
       const lens = url.searchParams.get('lens');
@@ -613,7 +691,16 @@ export function createMockApi(): MockApi {
       }
       const responseBody: PullRequestsResponse = {
         gh_available: true,
-        pull_requests,
+        // A repository cloned during this session has a local clone from here
+        // on, exactly as the real endpoint would report after the clone landed.
+        pull_requests: pull_requests.map((pr) => ({
+          ...pr,
+          has_local_clone:
+            pr.has_local_clone ||
+            store.clonedRepos.some(
+              (entry) => entry.key === `${pr.repo_owner}/${pr.repo_name}`,
+            ),
+        })),
       };
       return HttpResponse.json(responseBody);
     }),
@@ -1007,6 +1094,16 @@ export function createMockApi(): MockApi {
           for (const thread of entry.threads) {
             delete store.messagesByThread[thread.id];
           }
+        }
+        break;
+      }
+      case 'repository_clone_completed': {
+        // The clone landed. The real server would now find the working tree on
+        // disk; the mock records it so the PR and repository lists report it on
+        // the refetch the event triggers.
+        const key = `${event.repo_owner}/${event.repo_name}`;
+        if (!store.clonedRepos.some((entry) => entry.key === key)) {
+          store.clonedRepos.push({ key, path: event.destination_path });
         }
         break;
       }

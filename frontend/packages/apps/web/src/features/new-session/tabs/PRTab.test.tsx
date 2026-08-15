@@ -25,6 +25,7 @@ import {
   DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
   useComposerStore,
 } from '../../../store/composerStore';
+import { useLiveStore } from '../../../store/liveStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { Composer } from '../../composer/Composer';
 import { ProviderSelector } from '../../composer/ProviderSelector';
@@ -101,24 +102,28 @@ describe('PRTab', () => {
     });
   });
 
-  it('clicking a row whose repo has no local clone is a no-op + shows the inline hint', async () => {
+  it('clicking a row whose repo has no local clone opens the inline clone panel without touching the composer', async () => {
     renderTab();
-    // The "x7c1/other" fixture has `has_local_clone: false`. The row
-    // is rendered (so the inline hint is reachable) but `aria-disabled`
-    // and visually de-emphasised.
+    // The "x7c1/other" fixture has `has_local_clone: false`. The row is still
+    // de-emphasised (it cannot start a session yet) but is now the way out:
+    // clicking it expands the clone panel rather than doing nothing.
     await screen.findByTestId('pr-tab-reviewer');
     const rows = await screen.findAllByTestId('pr-tab-row');
     const noClone = rows.find(
       (row) => row.getAttribute('data-has-local-clone') === 'false',
     );
     expect(noClone).toBeDefined();
-    expect(noClone).toHaveAttribute('aria-disabled', 'true');
-    // The inline help row text mentions the unblock command.
+    expect(noClone).toHaveAttribute('aria-expanded', 'false');
     expect(noClone?.querySelector('[data-testid="pr-tab-row-no-clone-hint"]'))
       .not.toBeNull();
+    expect(screen.queryByTestId('pr-tab-clone-panel')).toBeNull();
 
     fireEvent.click(noClone!);
-    // No state change happened.
+
+    expect(await screen.findByTestId('pr-tab-clone-panel')).toBeInTheDocument();
+    expect(noClone).toHaveAttribute('aria-expanded', 'true');
+    // Opening the panel is not a pick: the composer is untouched until a clone
+    // actually lands.
     expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
     expect(useComposerStore.getState().newSessionWorktreeEnabled).toBe(false);
   });
@@ -440,6 +445,288 @@ describe('PRTab → new-session send (provider threading)', () => {
         },
       });
     });
+  });
+});
+
+describe('PRTab → inline clone panel', () => {
+  /** The no-clone reviewer fixture the mock backend seeds. */
+  const NO_CLONE_PR_URL = 'https://github.com/x7c1/other/pull/9';
+
+  beforeEach(() => {
+    useComposerStore.setState({
+      newSessionWorkdir: null,
+      newSessionWorkdirSource: DEFAULT_NEW_SESSION_WORKDIR_SOURCE,
+      newSessionWorktreeEnabled: false,
+      newSessionWorktreeStartPoint: { kind: 'head' },
+    });
+    // The clone state is live-channel state, so it survives across renders the
+    // way the store does; reset it so each test starts with no intent.
+    useLiveStore.setState({
+      cloneIntent: null,
+      cloneCompletion: null,
+      cloneFailure: null,
+    });
+  });
+
+  /** Open the no-clone row's clone panel and return it. */
+  async function openClonePanel(): Promise<HTMLElement> {
+    fireEvent.click(await screen.findByTitle(/No local clone/));
+    return screen.findByTestId('pr-tab-clone-panel');
+  }
+
+  it('offers a registration input when no clone root is registered, and registers before cloning', async () => {
+    // The mock backend seeds zero clone roots, which is the cold-start case:
+    // the user has never told Delta where clones live. Sending them to Settings
+    // mid-decision is the thing this panel exists to avoid, so registration is
+    // a step of the flow.
+    const requests: unknown[] = [];
+    server.use(
+      http.post('*/api/clone-roots', async ({ request }) => {
+        requests.push({ route: 'clone-roots', body: await request.json() });
+        return HttpResponse.json({ path: '/home/dev/code' }, { status: 201 });
+      }),
+      http.post('*/api/repositories/clone', async ({ request }) => {
+        requests.push({ route: 'clone', body: await request.json() });
+        return new HttpResponse(null, { status: 202 });
+      }),
+    );
+    renderTab();
+    const panel = await openClonePanel();
+
+    const input = within(panel).getByTestId('pr-tab-clone-root-input');
+    // Typed with a trailing slash, the way a shell completion hands it over.
+    // Registration canonicalises that away, and the clone has to follow the
+    // canonical spelling: the server matches a registered root verbatim, so
+    // cloning into the typed form would be refused as unregistered moments
+    // after registering it.
+    fireEvent.change(input, { target: { value: '/home/dev/code/' } });
+    // The destination is shown before committing, so "where will this land?" is
+    // answered without having to guess the naming rule.
+    expect(within(panel).getByTestId('pr-tab-clone-destination')).toHaveTextContent(
+      '/home/dev/code/other',
+    );
+
+    fireEvent.click(within(panel).getByTestId('pr-tab-clone-start'));
+
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]).toEqual({
+      route: 'clone-roots',
+      body: { path: '/home/dev/code/' },
+    });
+    expect(requests[1]).toEqual({
+      route: 'clone',
+      body: {
+        repo_owner: 'x7c1',
+        repo_name: 'other',
+        clone_root: '/home/dev/code',
+      },
+    });
+    // The intent is recorded only once the server accepted, and it names the
+    // destination the completion event will carry.
+    await waitFor(() =>
+      expect(useLiveStore.getState().cloneIntent).toMatchObject({
+        destination: '/home/dev/code/other',
+      }),
+    );
+  });
+
+  it('offers a selector defaulting to the most recently registered root when several exist', async () => {
+    // The list arrives newest-first, and the newest root is the one the user
+    // most likely means — but it stays a choice, because a machine with several
+    // clone roots has them for a reason.
+    let cloned: unknown;
+    server.use(
+      http.get('*/api/clone-roots', () =>
+        HttpResponse.json({
+          clone_roots: [{ path: '/home/dev/newest' }, { path: '/home/dev/older' }],
+        }),
+      ),
+      http.post('*/api/repositories/clone', async ({ request }) => {
+        cloned = await request.json();
+        return new HttpResponse(null, { status: 202 });
+      }),
+    );
+    renderTab();
+    const panel = await openClonePanel();
+
+    const select = within(panel).getByTestId('pr-tab-clone-root-select');
+    expect(select).toHaveValue('/home/dev/newest');
+    expect(within(panel).getByTestId('pr-tab-clone-destination')).toHaveTextContent(
+      '/home/dev/newest/other',
+    );
+
+    fireEvent.change(select, { target: { value: '/home/dev/older' } });
+    fireEvent.click(within(panel).getByTestId('pr-tab-clone-start'));
+
+    await waitFor(() =>
+      expect(cloned).toEqual({
+        repo_owner: 'x7c1',
+        repo_name: 'other',
+        clone_root: '/home/dev/older',
+      }),
+    );
+  });
+
+  it('auto-continues into the PR pick when the completion event lands while the intent is active', async () => {
+    server.use(
+      http.get('*/api/clone-roots', () =>
+        HttpResponse.json({ clone_roots: [{ path: '/home/dev/code' }] }),
+      ),
+      http.post('*/api/repositories/clone', () =>
+        new HttpResponse(null, { status: 202 }),
+      ),
+    );
+    renderTab();
+    const panel = await openClonePanel();
+    // Exactly one registered root: no choice to make, so the panel just names
+    // the destination.
+    expect(within(panel).getByTestId('pr-tab-clone-root-single')).toHaveTextContent(
+      '/home/dev/code',
+    );
+
+    fireEvent.click(within(panel).getByTestId('pr-tab-clone-start'));
+    await waitFor(() =>
+      expect(useLiveStore.getState().cloneIntent).not.toBeNull(),
+    );
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'repository_clone_completed',
+        repo_owner: 'x7c1',
+        repo_name: 'other',
+        clone_root: '/home/dev/code',
+        destination_path: '/home/dev/code/other',
+      });
+    });
+
+    // The whole point: the user asked for this PR, so the clone landing walks
+    // them straight into the pick — workdir plus the locked PR provenance —
+    // with the freshly cloned path as the working directory.
+    await waitFor(() => {
+      const state = useComposerStore.getState();
+      expect(state.newSessionWorkdir).toBe('/home/dev/code/other');
+      expect(state.newSessionWorktreeEnabled).toBe(true);
+      expect(state.newSessionWorkdirSource).toMatchObject({
+        kind: 'pr',
+        url: NO_CLONE_PR_URL,
+      });
+    });
+    // The one-shot signal is consumed, so re-mounting later cannot replay it.
+    expect(useLiveStore.getState().cloneCompletion).toBeNull();
+  });
+
+  it('leaves the composer alone when the completion event lands after the intent was superseded', async () => {
+    server.use(
+      http.get('*/api/clone-roots', () =>
+        HttpResponse.json({ clone_roots: [{ path: '/home/dev/code' }] }),
+      ),
+      http.post('*/api/repositories/clone', () =>
+        new HttpResponse(null, { status: 202 }),
+      ),
+    );
+    renderTab();
+    const panel = await openClonePanel();
+    fireEvent.click(within(panel).getByTestId('pr-tab-clone-start'));
+    await waitFor(() =>
+      expect(useLiveStore.getState().cloneIntent).not.toBeNull(),
+    );
+
+    // The user moves on: picks the PR that already has a clone. That pick is
+    // what the composer must keep — a clone finishing afterwards has no claim
+    // on it.
+    fireEvent.click(
+      await screen.findByTitle('https://github.com/x7c1/delta/pull/174'),
+    );
+    await waitFor(() =>
+      expect(useComposerStore.getState().newSessionWorkdir).toBe(
+        '/home/dev/projects/delta',
+      ),
+    );
+    expect(useLiveStore.getState().cloneIntent).toBeNull();
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'repository_clone_completed',
+        repo_owner: 'x7c1',
+        repo_name: 'other',
+        clone_root: '/home/dev/code',
+        destination_path: '/home/dev/code/other',
+      });
+    });
+
+    // Nothing moved: the superseded clone neither re-points the workdir nor
+    // steals the row highlight.
+    expect(useLiveStore.getState().cloneCompletion).toBeNull();
+    expect(useComposerStore.getState().newSessionWorkdir).toBe(
+      '/home/dev/projects/delta',
+    );
+    expect(useComposerStore.getState().newSessionWorkdirSource).toMatchObject({
+      kind: 'pr',
+      url: 'https://github.com/x7c1/delta/pull/174',
+    });
+  });
+
+  it('shows the refusal inline when the destination already exists', async () => {
+    server.use(
+      http.get('*/api/clone-roots', () =>
+        HttpResponse.json({ clone_roots: [{ path: '/home/dev/projects' }] }),
+      ),
+      http.post('*/api/repositories/clone', () =>
+        HttpResponse.json(
+          {
+            error: 'clone destination already exists: /home/dev/projects/other',
+            code: 'clone_dest_exists',
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    renderTab();
+    const panel = await openClonePanel();
+    fireEvent.click(within(panel).getByTestId('pr-tab-clone-start'));
+
+    expect(await screen.findByTestId('pr-tab-clone-error')).toHaveTextContent(
+      'already exists',
+    );
+    // A refused request starts nothing, so no row is left spinning.
+    expect(useLiveStore.getState().cloneIntent).toBeNull();
+  });
+
+  it('surfaces a failed clone job inline, leaving the row retryable', async () => {
+    server.use(
+      http.get('*/api/clone-roots', () =>
+        HttpResponse.json({ clone_roots: [{ path: '/home/dev/code' }] }),
+      ),
+      http.post('*/api/repositories/clone', () =>
+        new HttpResponse(null, { status: 202 }),
+      ),
+    );
+    renderTab();
+    const panel = await openClonePanel();
+    fireEvent.click(within(panel).getByTestId('pr-tab-clone-start'));
+    await waitFor(() =>
+      expect(useLiveStore.getState().cloneIntent).not.toBeNull(),
+    );
+
+    act(() => {
+      useLiveStore.getState().applyEvent({
+        kind: 'repository_clone_failed',
+        repo_owner: 'x7c1',
+        repo_name: 'other',
+        clone_root: '/home/dev/code',
+        destination_path: '/home/dev/code/other',
+        message: 'could not resolve host github.com',
+      });
+    });
+
+    expect(await screen.findByTestId('pr-tab-clone-error')).toHaveTextContent(
+      'could not resolve host github.com',
+    );
+    // The intent is retired, so the Clone button is live again — retrying is
+    // simply clicking it.
+    expect(useLiveStore.getState().cloneIntent).toBeNull();
+    expect(screen.getByTestId('pr-tab-clone-start')).not.toBeDisabled();
+    expect(useComposerStore.getState().newSessionWorkdir).toBeNull();
   });
 });
 

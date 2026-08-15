@@ -1,4 +1,5 @@
 import type { SessionEvent } from '@delta/wire-gen';
+import type { ClonesSlice } from './clonesSlice';
 import type { ConnectionSlice } from './connectionSlice';
 import type { SendsSlice } from './sendsSlice';
 import type { SpawnsSlice } from './spawnsSlice';
@@ -51,4 +52,5 @@ export type LiveState = ConnectionSlice &
   SubagentsSlice &
   StatusSlice &
   TurnLifecycleSlice &
+  ClonesSlice &
   EventsSlice;

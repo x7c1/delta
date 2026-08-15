@@ -205,6 +205,67 @@ list. Clone-root probing is not subject to those caps.
     controls. Per-session selections are not persisted yet, so today they are
     always `[]`, `false` and `null`.
 
+### `POST /api/repositories/clone`
+
+Clone a repository the user has no local clone of into one of their registered
+clone roots. This is what makes a PR row whose repository exists nowhere on this
+machine actionable: `gh` is already authenticated (the PR tab is gated on it) and
+the clone roots already say where clones belong, so nothing else has to be asked.
+
+Request:
+
+```json
+{
+  "repo_owner": "x7c1",
+  "repo_name": "delta",
+  "clone_root": "/home/dev/projects"
+}
+```
+
+`clone_root` must be a registered clone root, spelled exactly as
+[`GET /api/clone-roots`](#get-apiclone-roots) returns it. The destination is
+exactly `<clone_root>/<repo_name>` and the request never names it: there is no
+fallback naming, so either that path is free or the request is refused.
+
+- **202 Accepted** — no body. The clone runs as a background job and reports
+  through the [`repository_clone_completed` /
+  `repository_clone_failed`](live-channels.md#repository-clones) events on `/ws`;
+  nothing about the outcome is in this response.
+- **400** (body `code: "clone_root_not_registered"`) — `clone_root` is not
+  registered. Register it first with `POST /api/clone-roots`, then retry with the
+  path that registration's `201` returned: registration canonicalises what it is
+  given (trailing slashes trimmed) while the match here is verbatim, so a retry
+  that reuses the typed `/home/dev/projects/` is refused again.
+- **400** (no code) — `repo_owner` or `repo_name` is not a single path component
+  (blank, or carrying `/`, `\`, `..`, or a NUL).
+- **409** (body `code: "clone_dest_exists"`) — `<clone_root>/<repo_name>` already
+  exists. No job starts.
+
+How a clone runs, and what that guarantees:
+
+- The clone is assembled in a temporary sibling inside the same clone root
+  (`<clone_root>/.delta-clone-tmp-<repo_name>`) and renamed onto the destination
+  when it succeeds. A rename within one directory is atomic, so the destination
+  is never observed half-cloned — it either does not exist or is a finished
+  clone. On failure the temporary directory is removed, so a retry is simply the
+  same request again.
+- Jobs are tracked **in memory, keyed by destination path**. A second request for
+  a destination that is already being cloned *joins* the running job: it also
+  answers `202`, starts no second `gh` process, and is served by that job's one
+  completion event. Requests for different repositories run concurrently.
+- The registry is not persisted. A server restart forgets in-flight jobs, and the
+  temporary directory such a death leaves behind is removed when the next job for
+  that destination starts.
+- The job is independent of every session lifecycle: starting a session while a
+  clone runs neither waits for it nor delays it.
+
+Because the job registry lives only in the server's memory, and the *intent*
+behind a clone (which PR the user meant to open once it lands) lives only in the
+browser's, a page reload while a clone is running loses that intent by design.
+The row still reads as "no local clone" until the next refetch, and clicking it
+again re-issues the request — which the dedupe turns into a join of the job that
+is still running, not a second clone.
+
 ### `GET /api/clone-roots`
 
 List the registered clone roots, newest first. A clone root is a directory where

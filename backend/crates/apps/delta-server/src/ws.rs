@@ -4,9 +4,10 @@
 //! receives every session event as JSON — whatever
 //! [`SessionEvent`](delta_usecase::SessionEvent) currently declares, with
 //! each variant's payload documented for clients in
-//! `docs/guides/api/live-channels.md`. Every event is id-routed by
-//! `session_id`; focus is purely client-side, so there is no server-side
-//! focus event.
+//! `docs/guides/api/live-channels.md`. Almost every event is id-routed by
+//! `session_id` — the repository-clone pair carries none, reporting a
+//! workspace-level job with no session behind it; focus is purely
+//! client-side, so there is no server-side focus event.
 //!
 //! Domain [`SessionEvent`](delta_usecase::SessionEvent)s are converted to
 //! their wire twin [`WireSessionEvent`] at this boundary; the wire crate owns

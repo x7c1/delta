@@ -310,6 +310,47 @@ pub enum SessionEvent {
         session_id: SessionId,
         snapshot: StatusSnapshot,
     },
+    /// An asynchronous repository clone finished successfully: the clone the
+    /// browser asked for with `POST /api/repositories/clone` now exists at
+    /// `destination_path`.
+    ///
+    /// **Not session-scoped** — the only event family here that is not. Cloning
+    /// a repository is a workspace-level command with no session behind it, and
+    /// the browser still needs the answer because the job outlives the `202` its
+    /// request got. A client keys it by the repository the request named
+    /// (`repo_owner`/`repo_name`) and refetches the PR list and the repository
+    /// list, whose `has_local_clone` / clone rows this flips.
+    ///
+    /// Fire-and-forget like every event here, and the job registry behind it is
+    /// in-memory only: a client that misses this learns nothing about the clone
+    /// until it refetches, and a server restart forgets the job outright.
+    RepositoryCloneCompleted {
+        repo_owner: String,
+        repo_name: String,
+        /// The registered clone root the destination sits in — echoed back so a
+        /// client that offered a choice of roots can tell which one it went to.
+        clone_root: String,
+        /// `<clone_root>/<repo_name>`: the finished working tree. The clone is
+        /// renamed onto this path atomically, so this path existing means the
+        /// clone is complete, never half-written.
+        destination_path: String,
+    },
+    /// An asynchronous repository clone failed. Same shape and delivery
+    /// semantics as [`Self::RepositoryCloneCompleted`], plus the reason.
+    ///
+    /// `destination_path` does NOT exist when this arrives — the clone is
+    /// assembled in a temporary sibling directory that is removed on failure —
+    /// so a retry is simply the same request again.
+    RepositoryCloneFailed {
+        repo_owner: String,
+        repo_name: String,
+        clone_root: String,
+        destination_path: String,
+        /// Why the clone failed, as the `gh` invocation reported it. Shown to
+        /// the user verbatim: "no such repository" and "no network" call for
+        /// different reactions, and only the message distinguishes them.
+        message: String,
+    },
 }
 
 /// A snapshot of a session's usage state, as its provider's own edge reported

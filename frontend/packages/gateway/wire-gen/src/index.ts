@@ -53,6 +53,7 @@ export type { RepositoriesResponse } from './generated/RepositoriesResponse';
 export type { CloneRoot } from './generated/CloneRoot';
 export type { CloneRootsResponse } from './generated/CloneRootsResponse';
 export type { CreateCloneRootRequest } from './generated/CreateCloneRootRequest';
+export type { CloneRepositoryRequest } from './generated/CloneRepositoryRequest';
 export type { PullRequest } from './generated/PullRequest';
 export type { PullRequestsResponse } from './generated/PullRequestsResponse';
 export type { ProviderAvailability } from './generated/ProviderAvailability';

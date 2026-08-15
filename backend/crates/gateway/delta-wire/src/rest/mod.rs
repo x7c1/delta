@@ -8,6 +8,8 @@
 //! TypeScript by the `export-ts` binary, so the browser types can never drift
 //! from the Rust contract.
 
+mod clone_repository_request;
+pub use clone_repository_request::WireCloneRepositoryRequest;
 mod clone_root_create_request;
 pub use clone_root_create_request::WireCreateCloneRootRequest;
 mod clone_roots_response;

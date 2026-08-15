@@ -11,7 +11,7 @@ use crate::hooks::{
     UserPromptSubmitPayload, UserPromptSubmitResponse,
 };
 use crate::rest::{
-    WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
+    WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
     WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
     WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest,
@@ -149,6 +149,14 @@ declare_endpoints! {
     /// distinct repo Delta has launched a session under, with its known clones
     /// bundled by origin URL and ordered by recency.
     ListRepositories: GET "/api/repositories", response = WireRepositoriesResponse;
+
+    /// Clones a repository the user has no local clone of into one of their
+    /// registered clone roots, so a PR whose repository exists nowhere on this
+    /// machine stops being a dead end. Answers `202` and runs the clone as a
+    /// background job, which reports through the `repository_clone_completed` /
+    /// `repository_clone_failed` events on `/ws`.
+    CloneRepository: POST "/api/repositories/clone",
+        request = WireCloneRepositoryRequest;
 
     /// The registered clone roots.
     ListCloneRoots: GET "/api/clone-roots", response = WireCloneRootsResponse;

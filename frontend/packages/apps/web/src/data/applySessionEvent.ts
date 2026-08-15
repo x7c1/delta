@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
 import type { SessionEvent } from '@delta/wire-gen';
 import {
+  invalidateRepositoriesAndPullRequests,
   invalidateSessions,
   invalidateSessionSends,
   invalidateSessionThreads,
@@ -31,6 +32,12 @@ import { useLiveStore } from '../store/liveStore';
  * `focusedSessionId` selects whose thread tree to refresh. Events for a
  * non-focused session still refresh the session list and that session's
  * open-send list, but never touch the focused transcript.
+ *
+ * The repository-clone events are the one family naming no session at all: they
+ * report a workspace-level job, so they are routed by repository rather than by
+ * focus — refreshing the repository and PR lists, and leaving it to the live
+ * store to decide (from the active clone intent) whether this browser is the one
+ * that was waiting for it.
  */
 export function applySessionEvent(
   event: SessionEvent,
@@ -45,7 +52,12 @@ export function applySessionEvent(
   // below under a guard.
   store.applyEvent(event);
 
-  const isFocused = focusedSessionId !== null && event.session_id === focusedSessionId;
+  // Almost every event names the session it concerns; the repository-clone pair
+  // does not (cloning is a workspace-level job with no session behind it), so
+  // the field is read through a presence check rather than off the bare union.
+  const eventSessionId = 'session_id' in event ? event.session_id : null;
+  const isFocused =
+    focusedSessionId !== null && eventSessionId === focusedSessionId;
 
   const refreshFocusedThreads = () => {
     if (focusedSessionId !== null) {
@@ -210,6 +222,16 @@ export function applySessionEvent(
       // 404. No session-list refetch: a message-less spawning session was
       // never listed, so the list cannot lose a row for it.
       removeSessionSends(queryClient, event.session_id);
+      break;
+    case 'repository_clone_completed':
+    case 'repository_clone_failed':
+      // A clone job reported. Refetch the repository list and both PR lenses
+      // unconditionally — even for a failure, and even when this browser never
+      // asked for the clone: `has_local_clone` is a fact about the filesystem,
+      // and another tab (or another window) may have been the one to change it.
+      // Whether this browser *acts* on the completion is the clone slice's
+      // decision, made from the active intent, not this refetch's.
+      invalidateRepositoriesAndPullRequests(queryClient);
       break;
   }
 }

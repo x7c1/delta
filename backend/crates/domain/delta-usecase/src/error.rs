@@ -79,6 +79,29 @@ pub enum Error {
     #[error("clone root already registered: {0}")]
     CloneRootDuplicate(String),
 
+    /// A clone was requested into a directory that is not a registered clone
+    /// root. Delta only ever writes clones into roots the user registered, so an
+    /// unregistered destination is refused before any `gh` process starts.
+    /// Surfaced as `400` with a stable code so the browser can say *why* rather
+    /// than showing a generic failure.
+    #[error("not a registered clone root: {0}")]
+    CloneRootNotRegistered(String),
+
+    /// The destination a clone would land on (`<clone_root>/<repo_name>`)
+    /// already exists. Delta never clones onto an existing path — there is no
+    /// fallback naming — so the request is refused with no job started.
+    /// Surfaced as `409` with a stable code so the row can show an inline
+    /// "already there" message.
+    #[error("clone destination already exists: {0}")]
+    CloneDestinationExists(String),
+
+    /// A clone request named an owner or repository that cannot be part of a
+    /// path: blank, or carrying a path separator, a `..` segment, or a NUL.
+    /// Refused as `400` — the destination is built by joining the name onto the
+    /// clone root, so accepting one would let a request write outside the root.
+    #[error("invalid repository reference: {0}")]
+    InvalidRepositoryRef(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),
