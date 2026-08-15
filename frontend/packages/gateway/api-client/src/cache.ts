@@ -43,6 +43,26 @@ export function invalidateSessions(queryClient: QueryClient): void {
   void queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
 }
 
+/**
+ * Mark the repository list and both PR lenses stale so they refetch.
+ *
+ * Used when a repository clone lands: whether a clone exists is exactly what
+ * `has_local_clone` on a PR row and the clone rows of the repository list
+ * report, so both are wrong until they re-read. Both lenses are invalidated
+ * because a newly-cloned repository can own PRs under either.
+ */
+export function invalidateRepositoriesAndPullRequests(
+  queryClient: QueryClient,
+): void {
+  void queryClient.invalidateQueries({ queryKey: queryKeys.repositories });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.pullRequests('reviewer'),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.pullRequests('author'),
+  });
+}
+
 /** Mark a single session's thread tree stale so it refetches. */
 export function invalidateSessionThreads(
   queryClient: QueryClient,

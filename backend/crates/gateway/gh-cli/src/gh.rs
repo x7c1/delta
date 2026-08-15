@@ -123,6 +123,34 @@ impl GhCli for Gh {
         }
         parse_search_response(&output.stdout).map_err(Into::into)
     }
+
+    async fn clone_repo(
+        &self,
+        owner: &str,
+        name: &str,
+        destination: &str,
+    ) -> delta_usecase::Result<()> {
+        // `gh repo clone <owner>/<name> <dir>` rather than `git clone <url>`:
+        // gh resolves the host and supplies the authenticated credentials, so a
+        // private repository the account can see clones without Delta ever
+        // handling a token. `destination` is always an absolute path derived
+        // from a registered clone root, so it can never be mistaken for a flag.
+        let slug = format!("{owner}/{name}");
+        let output = Command::new("gh")
+            .args(["repo", "clone", &slug, destination])
+            .output()
+            .await
+            .map_err(Error::from)?;
+        if !output.status.success() {
+            return Err(Error::Command {
+                command: format!("gh repo clone {slug}"),
+                status: output.status.to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            }
+            .into());
+        }
+        Ok(())
+    }
 }
 
 /// Build the GitHub-search query string the GraphQL `search` resolver

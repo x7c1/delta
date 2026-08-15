@@ -2,6 +2,10 @@ import type { StateCreator } from 'zustand';
 import type { SessionEvent } from '@delta/wire-gen';
 import type { EventsSlice, LiveState } from './liveState';
 import {
+  reduceRepositoryCloneCompleted,
+  reduceRepositoryCloneFailed,
+} from './clonesSlice';
+import {
   reduceExternalInput,
   reducePermissionRequested,
   reducePermissionResolved,
@@ -66,6 +70,8 @@ const EVENT_REDUCERS: {
   session_opened: reduceSessionOpened,
   session_closed: reduceSessionClosed,
   status_updated: reduceStatusUpdated,
+  repository_clone_completed: reduceRepositoryCloneCompleted,
+  repository_clone_failed: reduceRepositoryCloneFailed,
 };
 
 export const createEventsSlice: StateCreator<LiveState, [], [], EventsSlice> = (

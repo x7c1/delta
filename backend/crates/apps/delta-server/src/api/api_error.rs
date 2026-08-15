@@ -38,6 +38,19 @@ const SEND_NOT_RELEASABLE_CODE: &str = "send_not_releasable";
 /// of a generic failure toast on this code.
 const CLONE_ROOT_DUPLICATE_CODE: &str = "clone_root_duplicate";
 
+/// Stable machine-readable code for a clone requested into a directory that is
+/// not a registered clone root. The PR tab's inline clone panel shows the
+/// message on the row that asked for the clone rather than as a toast; the code
+/// is what keeps this refusal identifiable to a client that wants to word it
+/// itself, instead of an anonymous `400`.
+const CLONE_ROOT_NOT_REGISTERED_CODE: &str = "clone_root_not_registered";
+
+/// Stable machine-readable code for a clone whose destination
+/// (`<clone_root>/<repo_name>`) already exists. The clone panel shows the
+/// message inline on the row; there is no fallback naming, so the way past it
+/// is a different clone root, not a retry.
+const CLONE_DEST_EXISTS_CODE: &str = "clone_dest_exists";
+
 /// Stable machine-readable code for a `POST /api/open-cwd` request whose
 /// `path` is not in the known-cwd allowlist. The frontend surfaces the
 /// generic "opening failed" message on this code — the click site should
@@ -140,6 +153,26 @@ impl IntoResponse for ApiError {
                     Error::CloneRootDuplicate(_) => {
                         (StatusCode::CONFLICT, Some(CLONE_ROOT_DUPLICATE_CODE))
                     }
+                    // A clone aimed somewhere the user never registered as a
+                    // home for clones. The caller can fix it (register the root,
+                    // or pick a registered one), so `400` with a stable code so
+                    // the clone panel can say which of the two it is.
+                    Error::CloneRootNotRegistered(_) => (
+                        StatusCode::BAD_REQUEST,
+                        Some(CLONE_ROOT_NOT_REGISTERED_CODE),
+                    ),
+                    // Something already occupies the one path this clone could
+                    // land on: a conflict with the state of the filesystem, not
+                    // a malformed request, so `409` — with a stable code so the
+                    // row shows the specific reason instead of a generic error.
+                    Error::CloneDestinationExists(_) => {
+                        (StatusCode::CONFLICT, Some(CLONE_DEST_EXISTS_CODE))
+                    }
+                    // An owner/name that cannot be one path component. The click
+                    // site never produces one (these come from gh's own PR rows),
+                    // so this only fires against a hand-crafted request: `400`
+                    // with no code, since no UI branches on it.
+                    Error::InvalidRepositoryRef(_) => (StatusCode::BAD_REQUEST, None),
                     // The browser's selection could not be turned into a key
                     // sequence (malformed, or an unsupported sub-case): the
                     // caller sent a bad answer, so `400`.

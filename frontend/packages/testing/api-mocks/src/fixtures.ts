@@ -633,6 +633,16 @@ export interface MockStore {
    * serialising.
    */
   cloneRoots: { path: string; created_at: string }[];
+  /**
+   * Repositories cloned during this mock session, keyed `<owner>/<repo>`.
+   *
+   * The real server learns that a clone exists by looking at the filesystem;
+   * the mock has none, so a `repository_clone_completed` event records the
+   * clone here and both `GET /api/prs` and `GET /api/repositories` read it —
+   * which is what makes a PR row's `has_local_clone` actually flip on the
+   * refetch that event triggers.
+   */
+  clonedRepos: { key: string; path: string }[];
 }
 
 /**
@@ -762,6 +772,7 @@ export function seedData(): MockStore {
     // needs a registered root creates it the way the UI does: through the
     // mock's own `POST /api/clone-roots` handler.
     cloneRoots: [],
+    clonedRepos: [],
   };
 }
 
@@ -893,8 +904,8 @@ export function gitBranches(path: string): {
  *  and `author` lens fixtures. The first PR is on a repo with a
  *  registered local clone (`x7c1/delta`, see `mockRepositories`); the
  *  second is on a repo with no local clone (`x7c1/other`) so the
- *  no-clone "silently blocked + inline hint" path is exercisable
- *  alongside the happy path. */
+ *  no-clone path — the inline clone panel — is exercisable alongside
+ *  the happy path. */
 export function mockReviewerPullRequests(): {
   number: number;
   title: string;

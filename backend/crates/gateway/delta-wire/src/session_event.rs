@@ -143,6 +143,33 @@ pub enum WireSessionEvent {
         session_id: String,
         snapshot: WireStatusSnapshot,
     },
+    /// An asynchronous repository clone (`POST /api/repositories/clone`)
+    /// finished: the working tree now exists at `destination_path`.
+    ///
+    /// The one event family on this stream carrying **no `session_id`** —
+    /// cloning is a workspace-level command with no session behind it. Clients
+    /// key it by `repo_owner`/`repo_name` and refetch the PR and repository
+    /// lists, whose `has_local_clone` / clone rows it flips.
+    RepositoryCloneCompleted {
+        repo_owner: String,
+        repo_name: String,
+        clone_root: String,
+        /// `<clone_root>/<repo_name>`. The clone is renamed onto this path
+        /// atomically, so its existence means a finished clone, never a partial
+        /// one.
+        destination_path: String,
+    },
+    /// An asynchronous repository clone failed. `destination_path` does not
+    /// exist when this arrives (the clone is assembled in a temporary sibling
+    /// directory, removed on failure), so retrying is the same request again.
+    RepositoryCloneFailed {
+        repo_owner: String,
+        repo_name: String,
+        clone_root: String,
+        destination_path: String,
+        /// Why it failed, as `gh` reported it — shown to the user verbatim.
+        message: String,
+    },
 }
 
 /// The wire form of a session's usage snapshot. Every field is optional (a
@@ -359,6 +386,30 @@ impl From<SessionEvent> for WireSessionEvent {
                 session_id: session_id.0,
                 snapshot: WireStatusSnapshot::from(snapshot),
             },
+            SessionEvent::RepositoryCloneCompleted {
+                repo_owner,
+                repo_name,
+                clone_root,
+                destination_path,
+            } => Self::RepositoryCloneCompleted {
+                repo_owner,
+                repo_name,
+                clone_root,
+                destination_path,
+            },
+            SessionEvent::RepositoryCloneFailed {
+                repo_owner,
+                repo_name,
+                clone_root,
+                destination_path,
+                message,
+            } => Self::RepositoryCloneFailed {
+                repo_owner,
+                repo_name,
+                clone_root,
+                destination_path,
+                message,
+            },
         }
     }
 }
@@ -406,7 +457,9 @@ fn sample_events() -> Vec<WireSessionEvent> {
             | WireSessionEvent::AssistantStreaming { .. }
             | WireSessionEvent::SubagentStarted { .. }
             | WireSessionEvent::SubagentFinished { .. }
-            | WireSessionEvent::StatusUpdated { .. } => {}
+            | WireSessionEvent::StatusUpdated { .. }
+            | WireSessionEvent::RepositoryCloneCompleted { .. }
+            | WireSessionEvent::RepositoryCloneFailed { .. } => {}
         }
     }
 
@@ -516,6 +569,19 @@ fn sample_events() -> Vec<WireSessionEvent> {
                 total_cost_usd: Some(0.1234),
                 current_dir: Some("/work".to_owned()),
             },
+        },
+        WireSessionEvent::RepositoryCloneCompleted {
+            repo_owner: "x7c1".to_owned(),
+            repo_name: "delta".to_owned(),
+            clone_root: "/home/dev/projects".to_owned(),
+            destination_path: "/home/dev/projects/delta".to_owned(),
+        },
+        WireSessionEvent::RepositoryCloneFailed {
+            repo_owner: "x7c1".to_owned(),
+            repo_name: "delta".to_owned(),
+            clone_root: "/home/dev/projects".to_owned(),
+            destination_path: "/home/dev/projects/delta".to_owned(),
+            message: "could not resolve host github.com".to_owned(),
         },
     ];
     for event in &samples {
@@ -748,7 +814,57 @@ mod tests {
                 "subagent_started",
                 "subagent_finished",
                 "status_updated",
+                "repository_clone_completed",
+                "repository_clone_failed",
             ],
+        );
+    }
+
+    #[test]
+    fn a_repository_clone_event_serializes_without_a_session_id() {
+        // The clone events are the exception to the "every frame names its
+        // session" rule, so pin the absence: a client narrowing the union on
+        // `session_id` must not find one here by accident.
+        let value = json(&WireSessionEvent::from(
+            SessionEvent::RepositoryCloneCompleted {
+                repo_owner: "x7c1".into(),
+                repo_name: "delta".into(),
+                clone_root: "/home/dev/projects".into(),
+                destination_path: "/home/dev/projects/delta".into(),
+            },
+        ));
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "kind": "repository_clone_completed",
+                "repo_owner": "x7c1",
+                "repo_name": "delta",
+                "clone_root": "/home/dev/projects",
+                "destination_path": "/home/dev/projects/delta",
+            }),
+        );
+    }
+
+    #[test]
+    fn a_failed_repository_clone_carries_the_reason() {
+        assert_eq!(
+            json(&WireSessionEvent::from(
+                SessionEvent::RepositoryCloneFailed {
+                    repo_owner: "x7c1".into(),
+                    repo_name: "delta".into(),
+                    clone_root: "/home/dev/projects".into(),
+                    destination_path: "/home/dev/projects/delta".into(),
+                    message: "repository not found".into(),
+                }
+            )),
+            serde_json::json!({
+                "kind": "repository_clone_failed",
+                "repo_owner": "x7c1",
+                "repo_name": "delta",
+                "clone_root": "/home/dev/projects",
+                "destination_path": "/home/dev/projects/delta",
+                "message": "repository not found",
+            }),
         );
     }
 

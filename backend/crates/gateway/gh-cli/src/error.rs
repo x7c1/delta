@@ -14,8 +14,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// reported through [`delta_usecase::GhCli::is_authenticated`] as
 /// `false`, so the use case can degrade gracefully. Errors here are
 /// genuine failures (a JSON parse error, an I/O error spawning the
-/// process, or the PR-search call exiting non-zero despite a successful
-/// auth check) that should bubble up rather than be silently swallowed.
+/// process, or a `gh` call exiting non-zero despite a successful auth
+/// check) that should bubble up rather than be silently swallowed.
 #[derive(Debug, Error)]
 pub enum Error {
     /// Spawning `gh` itself failed for a reason other than "binary not
@@ -23,9 +23,10 @@ pub enum Error {
     /// instead).
     #[error("spawn gh: {0}")]
     Io(#[from] std::io::Error),
-    /// The PR-search call (`gh api graphql`) exited non-zero. Its stderr
-    /// is surfaced so a rate-limit / auth-rotated failure is debuggable
-    /// from logs.
+    /// A `gh` call — the PR search (`gh api graphql`) or a clone
+    /// (`gh repo clone`) — exited non-zero. Its stderr is surfaced so a
+    /// rate-limit / auth-rotated / unreachable-host failure is
+    /// debuggable from logs.
     #[error("gh {command}: {status}: {stderr}")]
     Command {
         command: String,

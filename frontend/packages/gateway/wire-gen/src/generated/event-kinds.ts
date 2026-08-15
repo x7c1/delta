@@ -22,6 +22,8 @@ export const EVENT_KINDS = [
   'subagent_started',
   'subagent_finished',
   'status_updated',
+  'repository_clone_completed',
+  'repository_clone_failed',
 ] as const satisfies readonly SessionEvent['kind'][];
 
 export type SessionEventKind = (typeof EVENT_KINDS)[number];

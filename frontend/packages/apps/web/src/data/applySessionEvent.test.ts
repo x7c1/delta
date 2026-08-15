@@ -485,4 +485,62 @@ describe('applySessionEvent', () => {
       pendingCount: 1,
     });
   });
+
+  it('refetches the repository and PR lists on a clone outcome, with no session in the event', () => {
+    // The clone events name no session — routing them by `session_id` would
+    // throw, and nothing about them is focus-dependent. They refetch because
+    // whether a clone exists is a fact about the filesystem that this browser
+    // (or another one) may have just changed.
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      {
+        kind: 'repository_clone_completed',
+        repo_owner: 'x7c1',
+        repo_name: 'delta',
+        clone_root: '/home/dev/projects',
+        destination_path: '/home/dev/projects/delta',
+      },
+      queryClient,
+      null,
+      null,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.repositories,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.pullRequests('reviewer'),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.pullRequests('author'),
+    });
+  });
+
+  it('refetches the same lists on a failed clone', () => {
+    // A failure changes nothing on disk, but the lists are refetched anyway:
+    // this browser cannot tell whether the failure was the only thing that
+    // happened, and a stale "no clone" row is worse than one extra fetch.
+    const queryClient = new QueryClient();
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+
+    applySessionEvent(
+      {
+        kind: 'repository_clone_failed',
+        repo_owner: 'x7c1',
+        repo_name: 'delta',
+        clone_root: '/home/dev/projects',
+        destination_path: '/home/dev/projects/delta',
+        message: 'could not resolve host github.com',
+      },
+      queryClient,
+      null,
+      null,
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: queryKeys.repositories,
+    });
+  });
 });

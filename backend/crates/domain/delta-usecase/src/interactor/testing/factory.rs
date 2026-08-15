@@ -76,6 +76,25 @@ pub(crate) fn interactor_with_git_and_gh(
     interactor_with_git(git_worktree).with_gh_cli(gh_cli as Arc<dyn crate::ports::GhCli>)
 }
 
+/// Build a test interactor with a shared [`FakeGhCli`] **and** the async event
+/// seam, returning the receiver alongside it.
+///
+/// What the repository-clone tests need: the clone runs on a spawned task and
+/// reports its outcome on the seam, so the receiver is the only way to observe
+/// that a job finished at all — and the shared gh fake is where the test scripts
+/// (and afterwards inspects) the `gh repo clone` invocation.
+pub(crate) fn interactor_with_gh_and_event_sink(
+    gh_cli: Arc<FakeGhCli>,
+) -> (TestInteractor, crate::ports::AsyncEventReceiver) {
+    let (sink, receiver) = crate::ports::AsyncEventSink::channel();
+    (
+        interactor()
+            .with_gh_cli(gh_cli as Arc<dyn crate::ports::GhCli>)
+            .with_event_sink(sink),
+        receiver,
+    )
+}
+
 /// Build a test interactor with a Codex [`AgentAdapterFactory`] wired in, for
 /// the terminal-less Codex session-creation tests. Everything else is the
 /// default fake set.

@@ -19,14 +19,14 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use delta_wire::rest::{
-    WireCloneRootsResponse, WireCreateCloneRootRequest, WireCreateLaunchOptionRequest,
-    WireCreateSendRequest, WireErrorBody, WireGitBranchesResponse, WireGitRepoResponse,
-    WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
-    WirePermissionDecisionRequest, WireProvidersResponse, WirePullRequestsResponse,
-    WireQuestionAnswerRequest, WireQuestionCancelRequest, WireRepositoriesResponse,
-    WireSendResponse, WireSendsResponse, WireSessionsResponse, WireThreadsResponse,
-    WireUpdateLaunchOptionRequest, WireVersionResponse, WireWorkdirListResponse,
-    WireWorkdirRecentResponse,
+    WireCloneRepositoryRequest, WireCloneRootsResponse, WireCreateCloneRootRequest,
+    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireErrorBody, WireGitBranchesResponse,
+    WireGitRepoResponse, WireLaunchOptionsResponse, WireMessagesResponse, WireNewSessionResponse,
+    WireOpenCwdRequest, WirePermissionDecisionRequest, WireProvidersResponse,
+    WirePullRequestsResponse, WireQuestionAnswerRequest, WireQuestionCancelRequest,
+    WireRepositoriesResponse, WireSendResponse, WireSendsResponse, WireSessionsResponse,
+    WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
+    WireWorkdirListResponse, WireWorkdirRecentResponse,
 };
 use delta_wire::{event_kinds, export_config, WireCommsFrame, WireSessionEvent};
 use ts_rs::TS;
@@ -66,6 +66,7 @@ fn main() {
     WireRepositoriesResponse::export_all(&config).expect("export RepositoriesResponse.ts");
     WireCloneRootsResponse::export_all(&config).expect("export CloneRootsResponse.ts");
     WireCreateCloneRootRequest::export_all(&config).expect("export CreateCloneRootRequest.ts");
+    WireCloneRepositoryRequest::export_all(&config).expect("export CloneRepositoryRequest.ts");
     WirePullRequestsResponse::export_all(&config).expect("export PullRequestsResponse.ts");
     WireProvidersResponse::export_all(&config).expect("export ProvidersResponse.ts");
     WireGitRepoResponse::export_all(&config).expect("export GitRepoResponse.ts");

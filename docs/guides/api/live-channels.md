@@ -22,11 +22,13 @@ held to that union by a `delta-wire` test that fails until every `kind` the enum
 serializes appears here — presence only: what a bullet claims about an event is
 not machine-checked.
 
-The stream is process-wide: every connected browser receives every event, and
+The stream is process-wide: every connected browser receives every event. Almost
 every event carries the `session_id` it concerns so the browser can route it to
-the right session. Which session the user is looking at (focus) is purely
-client-side; the server emits no focus event. There is no client→server message
-protocol on this socket.
+the right session; the exception is the [repository-clone
+events](#repository-clones), which announce a workspace-level job that has no
+session behind it and are keyed by repository instead. Which session the user is
+looking at (focus) is purely client-side; the server emits no focus event. There
+is no client→server message protocol on this socket.
 
 Nothing here is replayed, and delivery is not guaranteed. A socket that connects
 mid-session receives only what happens from then on, and a subscriber that falls
@@ -341,6 +343,49 @@ which frames arrive, and a client must handle each event whenever it lands.
   - `context_used_percentage` is computed by the provider's own edge and
     forwarded verbatim, never recomputed here; it is `null` when the provider
     does not expose enough to say, which reads as "no bar".
+
+### Repository clones
+
+```json
+{ "kind": "repository_clone_completed",
+  "repo_owner": "x7c1",
+  "repo_name": "delta",
+  "clone_root": "/home/dev/projects",
+  "destination_path": "/home/dev/projects/delta" }
+
+{ "kind": "repository_clone_failed",
+  "repo_owner": "x7c1",
+  "repo_name": "delta",
+  "clone_root": "/home/dev/projects",
+  "destination_path": "/home/dev/projects/delta",
+  "message": "could not resolve host github.com" }
+```
+
+The outcome of a
+[`POST /api/repositories/clone`](workdirs.md#post-apirepositoriesclone) job.
+That request answers `202` and returns long before the clone finishes, so these
+are the only way a client learns what happened.
+
+- **These two carry no `session_id`.** Cloning a repository is a workspace-level
+  command with no session behind it, so a client that routes frames by session
+  must special-case them rather than assume the field is there. They are keyed
+  by `repo_owner`/`repo_name` — the same pair the request named.
+- `repository_clone_completed` — the clone exists at `destination_path`. Because
+  the clone is renamed onto that path atomically, its existence means a finished
+  working tree, never a partial one. The client refetches the PR list and the
+  repository list, whose `has_local_clone` and clone rows this flips, and can use
+  `destination_path` directly as the working directory without waiting for that
+  refetch.
+- `repository_clone_failed` — the clone did not happen, and `message` is `gh`'s
+  own words for why ("no such repository" and "no network" want different
+  reactions from the user, and only the message separates them).
+  `destination_path` does **not** exist when this arrives, so retrying is simply
+  the same request again.
+- `clone_root` is echoed back so a client that offered a choice of roots can tell
+  which one the clone went to.
+- Both are fire-and-forget like everything else here, and the job registry behind
+  them is in-memory only: a client that misses one learns nothing until it
+  refetches, and a server restart forgets in-flight jobs outright.
 
 ## `GET /pty?session_id=<id>` (WebSocket)
 

@@ -114,7 +114,7 @@ test('picking a PR with Codex selected sends provider "codex" alongside the work
   await expect(page.getByTestId('pending-item')).toHaveCount(1);
 });
 
-test('a PR whose repo has no local clone is silently un-clickable with an inline hint', async ({
+test('a PR whose repo has no local clone opens the inline clone panel instead of pre-filling the composer', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -127,32 +127,33 @@ test('a PR whose repo has no local clone is silently un-clickable with an inline
     .locator('[data-testid="pr-tab-row"][data-has-local-clone="false"]')
     .first();
   await expect(noCloneRow).toBeVisible();
-  await expect(noCloneRow).toHaveAttribute('aria-disabled', 'true');
+  await expect(noCloneRow).toHaveAttribute('aria-expanded', 'false');
   await expect(
     noCloneRow.getByTestId('pr-tab-row-no-clone-hint'),
-  ).toContainText('gh repo clone');
+  ).toContainText('click to clone');
 
-  // Capture the composer's chip text BEFORE the forced click. The
-  // Repository tab's mount-time auto-pick has already written its
-  // default clone (the first registered repo — `delta` in this
-  // fixture) into the composer store, so the chip is visible from
-  // the start.
+  // Capture the composer's chip text BEFORE the click. The Repository
+  // tab's mount-time auto-pick has already written its default clone
+  // (the first registered repo — `delta` in this fixture) into the
+  // composer store, so the chip is visible from the start.
   const chipBefore = await page.getByTestId('workdir-chip').textContent();
   expect(chipBefore).not.toBeNull();
 
-  // Clicking does NOT pre-fill the composer. Playwright's normal
-  // `.click()` honours `aria-disabled` and would wait it out, but
-  // here we deliberately attempt the click to verify the handler is
-  // a no-op: a forced click still routes through React's onClick.
-  await noCloneRow.click({ force: true });
+  await noCloneRow.click();
 
-  // Asserting the chip didn't change is the direct contract —
-  // `not.toBeVisible()` was an indirect proxy that became wrong once
-  // mount auto-picks a default. Use `toHaveText`'s built-in polling
-  // so we let any (incorrect) state change settle before checking.
+  // The click opens the clone panel — the dialog stays put, and the
+  // mock backend registers no clone roots, so the panel offers the
+  // registration input rather than a root to pick.
+  await expect(page.getByTestId('pr-tab-clone-panel')).toBeVisible();
+  await expect(page.getByTestId('pr-tab-clone-root-input')).toBeVisible();
+  await expect(noCloneRow).toHaveAttribute('aria-expanded', 'true');
+
+  // Opening the panel is not a pick: the composer is untouched until a
+  // clone actually lands. Use `toHaveText`'s built-in polling so any
+  // (incorrect) state change would have settled before we check.
   await expect(page.getByTestId('workdir-chip')).toHaveText(chipBefore!);
-  // The no-clone fixture is `x7c1/other`; its repo name must not
-  // appear in the chip (the click was a no-op).
+  // The no-clone fixture is `x7c1/other`; its repo name must not appear
+  // in the chip.
   await expect(page.getByTestId('workdir-chip')).not.toContainText('other');
 });
 

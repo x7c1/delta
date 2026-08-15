@@ -30,7 +30,7 @@ use serde::Deserialize;
 
 use delta_usecase::{AgentProvider, PullRequestLens, SessionId, ThreadId};
 use delta_wire::rest::{
-    WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
+    WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
     WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
     WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
     WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest,
@@ -271,6 +271,29 @@ pub(crate) async fn list_repositories(
             .map(WireRepositoryEntry::from)
             .collect(),
     }))
+}
+
+/// `POST /api/repositories/clone` — clone a repository into a registered clone
+/// root.
+///
+/// Accepts (`202`) and runs the clone as a background job: cloning takes far
+/// longer than a request should, so the outcome arrives on `/ws` as
+/// `repository_clone_completed` / `repository_clone_failed` rather than in this
+/// response. The refusals happen here, before any job exists: an unregistered
+/// `clone_root` is a `400` with code `clone_root_not_registered`, and an
+/// already-occupied `<clone_root>/<repo_name>` is a `409` with code
+/// `clone_dest_exists` — there is no fallback naming, so Delta refuses rather
+/// than cloning next to it. A second request for a destination already being
+/// cloned joins that job (also `202`) instead of starting a second `gh`.
+pub(crate) async fn clone_repository(
+    State(state): State<AppState>,
+    Json(req): Json<WireCloneRepositoryRequest>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .interactor()
+        .clone_repository(&req.repo_owner, &req.repo_name, &req.clone_root)
+        .await?;
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// `GET /api/clone-roots` — the registered clone roots.

@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-query';
 import type { SessionId, ThreadId } from '@delta/model';
 import type {
+  CloneRepositoryRequest,
   CreateLaunchOptionRequest,
   CreateCloneRootRequest,
   GitBranchesResponse,
@@ -532,6 +533,26 @@ export function useAddCloneRootMutation(
         queryKey: queryKeys.repositories,
       });
     },
+  });
+}
+
+/**
+ * Request a repository clone (`POST /api/repositories/clone`).
+ *
+ * Deliberately invalidates nothing on success: the request only *starts* a job,
+ * so nothing on the server has changed yet when it answers `202`. The
+ * `repository_clone_completed` event is what flips `has_local_clone`, and the
+ * event router refetches from there.
+ *
+ * Error presentation is the call site's job — a refused clone (an unregistered
+ * root, an occupied destination) belongs inline on the row that asked for it, so
+ * this hook touches no notification surface.
+ */
+export function useCloneRepositoryMutation(
+  client: ApiClient,
+): UseMutationResult<void, Error, CloneRepositoryRequest> {
+  return useMutation({
+    mutationFn: (body: CloneRepositoryRequest) => client.cloneRepository(body),
   });
 }
 

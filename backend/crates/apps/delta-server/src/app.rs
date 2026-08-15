@@ -56,6 +56,7 @@ pub fn router(state: AppState) -> Router {
         .bind(endpoint::WorkdirGitBranches, api::workdir_git_branches)
         .bind(endpoint::OpenCwd, api::open_cwd)
         .bind(endpoint::ListRepositories, api::list_repositories)
+        .bind(endpoint::CloneRepository, api::clone_repository)
         .bind(endpoint::ListCloneRoots, api::list_clone_roots)
         .bind(endpoint::CreateCloneRoot, api::create_clone_root)
         .bind(endpoint::DeleteCloneRoot, api::delete_clone_root)
@@ -83,6 +84,8 @@ mod tests {
     use axum::body::{to_bytes, Body};
     use axum::http::{Request, StatusCode};
     use delta_bootstrap::Config;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use tower::ServiceExt;
 
     async fn test_state() -> AppState {
@@ -276,11 +279,21 @@ mod tests {
     /// "unavailable", so the PR-route smoke tests are independent of
     /// whether `gh` happens to be installed on the test host.
     async fn test_state_with_unavailable_gh() -> AppState {
+        test_state_with_gh_stub().await.0
+    }
+
+    /// Like [`test_state_with_unavailable_gh`], but also hands back the counter
+    /// of `clone_repo` invocations the stub has seen.
+    ///
+    /// The clone route's refusals are meant to start no job at all, and "no job"
+    /// is only observable as "gh was never invoked" — this counter is that
+    /// observation.
+    async fn test_state_with_gh_stub() -> (AppState, Arc<AtomicUsize>) {
         // Mirror `test_state()`'s config exactly, then override the
         // wired Interactor's gh driver with a deterministic stub.
-        use std::sync::Arc;
-
-        struct UnavailableGh;
+        struct UnavailableGh {
+            clone_calls: Arc<AtomicUsize>,
+        }
         #[async_trait::async_trait]
         impl delta_usecase::GhCli for UnavailableGh {
             async fn is_authenticated(&self) -> bool {
@@ -292,7 +305,22 @@ mod tests {
             ) -> delta_usecase::Result<Vec<delta_usecase::PullRequest>> {
                 Ok(Vec::new())
             }
+            async fn clone_repo(
+                &self,
+                _owner: &str,
+                _name: &str,
+                _destination: &str,
+            ) -> delta_usecase::Result<()> {
+                self.clone_calls.fetch_add(1, Ordering::SeqCst);
+                // The route tests only care that a job did (or did not) start;
+                // what the clone then does is the use case's own tests' subject.
+                Err(delta_usecase::Error::Gh("stubbed clone".into()))
+            }
         }
+        let clone_calls = Arc::new(AtomicUsize::new(0));
+        let gh = Arc::new(UnavailableGh {
+            clone_calls: Arc::clone(&clone_calls),
+        });
         let config = delta_bootstrap::Config {
             database_path: ":memory:".into(),
             session_workdir_base: "/tmp/delta-test-session".into(),
@@ -304,8 +332,11 @@ mod tests {
         let interactor = delta_bootstrap::build(&config, delta_usecase::NullCommsLog::arc())
             .await
             .unwrap()
-            .with_gh_cli(Arc::new(UnavailableGh) as Arc<dyn delta_usecase::GhCli>);
-        AppState::from_interactor(interactor, &config.tmux_socket)
+            .with_gh_cli(gh as Arc<dyn delta_usecase::GhCli>);
+        (
+            AppState::from_interactor(interactor, &config.tmux_socket),
+            clone_calls,
+        )
     }
 
     #[tokio::test]
@@ -734,6 +765,129 @@ mod tests {
         let bytes = to_bytes(list.into_body(), usize::MAX).await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body["clone_roots"].as_array().unwrap().len(), 0);
+    }
+
+    /// Register `path` as a clone root through the real endpoint, so the clone
+    /// tests set their fixture up the same way a user would.
+    async fn register_clone_root(app: &axum::Router, path: &str) {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/clone-roots")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(r#"{{"path":"{path}"}}"#)))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    /// The error body's `code`, for asserting on a machine-readable refusal.
+    async fn error_code(response: axum::response::Response) -> Option<String> {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        body["code"].as_str().map(str::to_owned)
+    }
+
+    #[tokio::test]
+    async fn clone_repository_rejects_an_unregistered_clone_root_and_starts_no_job() {
+        let (state, clone_calls) = test_state_with_gh_stub().await;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        // Note: never registered. The directory existing is not enough — Delta
+        // writes clones only where the user said clones go.
+
+        let response = router(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/repositories/clone")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"repo_owner":"x7c1","repo_name":"delta","clone_root":"{root}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            error_code(response).await.as_deref(),
+            Some("clone_root_not_registered"),
+        );
+        assert_eq!(
+            clone_calls.load(Ordering::SeqCst),
+            0,
+            "a refused request must start no clone job",
+        );
+    }
+
+    #[tokio::test]
+    async fn clone_repository_rejects_an_existing_destination_with_409_and_starts_no_job() {
+        let (state, clone_calls) = test_state_with_gh_stub().await;
+        let app = router(state);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        register_clone_root(&app, root).await;
+        // `<root>/delta` is taken. There is no fallback naming, so the request
+        // is refused rather than landing somewhere else.
+        std::fs::create_dir(tmp.path().join("delta")).unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/repositories/clone")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"repo_owner":"x7c1","repo_name":"delta","clone_root":"{root}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            error_code(response).await.as_deref(),
+            Some("clone_dest_exists"),
+        );
+        assert_eq!(
+            clone_calls.load(Ordering::SeqCst),
+            0,
+            "a refused request must start no clone job",
+        );
+    }
+
+    #[tokio::test]
+    async fn clone_repository_accepts_a_registered_root_with_202() {
+        let (state, _clone_calls) = test_state_with_gh_stub().await;
+        let app = router(state);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_str().unwrap();
+        register_clone_root(&app, root).await;
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/repositories/clone")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"repo_owner":"x7c1","repo_name":"delta","clone_root":"{root}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Accepted, not completed: the clone outlives this response and reports
+        // on `/ws`.
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
     }
 
     #[tokio::test]

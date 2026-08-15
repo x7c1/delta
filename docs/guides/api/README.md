@@ -73,7 +73,9 @@ status codes and error bodies — is documented here only.
     segment that cannot be parsed such as a non-integer thread id — plain-text
     body), or rejected by a handler for a structurally valid body whose target is
     ambiguous, contradictory, or names something the server will not act on (see
-    [sends.md — `POST /api/sends`](sends.md#post-apisends) — JSON body).
+    [sends.md — `POST /api/sends`](sends.md#post-apisends) — JSON body). A few
+    carry a `code` too, e.g. `clone_root_not_registered` from
+    [`POST /api/repositories/clone`](workdirs.md#post-apirepositoriesclone).
   - `403 Forbidden` — a path the server is not permitted to read, as opposed to
     one that does not exist. Returned by the directory browse
     ([workdirs.md — `GET /api/workdir/list`](workdirs.md#get-apiworkdirlist)).
@@ -82,8 +84,9 @@ status codes and error bodies — is documented here only.
     body's `code` says which case it is: `resume_unavailable` (the session's
     local transcript file is gone, so `claude --resume <id>` has nothing to
     replay), `permission_not_pending`, `question_not_pending`,
-    `send_not_cancellable`, `send_not_releasable`, or `clone_root_duplicate`.
-    Nothing is mutated in any of these cases.
+    `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`, or
+    `clone_dest_exists` (the one path a clone could land on is already taken —
+    there is no fallback naming). Nothing is mutated in any of these cases.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not

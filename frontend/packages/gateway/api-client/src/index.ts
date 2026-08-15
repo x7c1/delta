@@ -54,6 +54,7 @@ export {
   useCloneRootsQuery,
   useAddCloneRootMutation,
   useRemoveCloneRootMutation,
+  useCloneRepositoryMutation,
   useOpenCwdMutation,
   useVersionQuery,
   useProvidersQuery,
@@ -61,6 +62,7 @@ export {
 export {
   appendMessage,
   appendSessionSend,
+  invalidateRepositoriesAndPullRequests,
   invalidateSessions,
   invalidateSessionThreads,
   invalidateSessionSends,
