@@ -11,13 +11,32 @@
 //! *history* lives here instead. The requeue budget is the one such rule: the
 //! table says "requeue this orphaned send", and this file decides whether that
 //! send has already had its retry — parking it if it has, so a send whose echo
-//! can never match stops re-dispatching instead of looping forever.
+//! can never match stops re-dispatching instead of looping forever. Every
+//! producer of [`OrphanedSend::Requeue`] shares that budget, the echo-deadline
+//! watchdog ([`crate::interactor::echo_deadline`]) included.
 
 use crate::agent::{AgentEvent, TurnStatus};
 use crate::error::Result;
 use crate::interactor::session_actor::actor::SessionContext;
 use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcript, Workspace};
 use crate::turn::{turn_input_for_agent_event, OrphanedSend, TurnInput, TurnState};
+
+/// What the [`OrphanedSend::Requeue`] disposition actually did with the send,
+/// once the budget had its say.
+///
+/// The table only ever asks for a requeue; whether the send got one is history,
+/// and history lives here. Reported to the callers that must branch on the
+/// answer — the echo-deadline sweep clears the pane with an `Escape` only when
+/// the send really is back in the queue about to be re-typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::interactor) enum RequeueOutcome {
+    /// The send is `queued` again and re-dispatches on the next idle flush.
+    Requeued,
+    /// The budget was spent, so the send was parked instead: its row is
+    /// `cancelled` and its text was handed back via
+    /// [`SessionEvent::SendParked`].
+    Parked,
+}
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
 where
@@ -34,6 +53,21 @@ where
         &mut self,
         input: TurnInput,
     ) -> Result<TurnState> {
+        Ok(self.apply_turn_input_reporting(input).await?.0)
+    }
+
+    /// [`Self::apply_turn_input`], additionally reporting what became of an
+    /// orphaned send the table asked to requeue (`None` when the transition
+    /// orphaned nothing, or orphaned it with a different disposition).
+    ///
+    /// Only the echo-deadline sweep needs the answer — it injects an `Escape`
+    /// into the pane before the flush re-types, and only a genuinely requeued
+    /// send is the one about to be re-typed — so every other call site keeps
+    /// the plain signature above.
+    pub(in crate::interactor) async fn apply_turn_input_reporting(
+        &mut self,
+        input: TurnInput,
+    ) -> Result<(TurnState, Option<RequeueOutcome>)> {
         let id = self.id;
         // Capture the source state before the table mutates it so the log line
         // records the full from -> to edge, not just the destination.
@@ -59,6 +93,7 @@ where
             );
         }
 
+        let mut requeue_outcome = None;
         match result.orphaned {
             None => {}
             Some(OrphanedSend::Requeue(send_id)) => {
@@ -73,8 +108,10 @@ where
                          re-dispatches when the session is next idle"
                     );
                     self.store.requeue_send(send_id).await?;
+                    requeue_outcome = Some(RequeueOutcome::Requeued);
                 } else {
                     self.park_unechoable_send(send_id).await?;
+                    requeue_outcome = Some(RequeueOutcome::Parked);
                 }
             }
             Some(OrphanedSend::Cancel(send_id)) => {
@@ -105,7 +142,7 @@ where
                 }
             }
         }
-        Ok(result.next)
+        Ok((result.next, requeue_outcome))
     }
 
     /// Park a send that has spent its requeue budget: cancel the row and

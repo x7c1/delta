@@ -1200,6 +1200,37 @@ describe('liveStore.applyEvent notices', () => {
     expect(noticeOf(notices(), 'sess-1', 'send_parked')).toBeNull();
   });
 
+  it('drops the parked send’s tracked twin, which no turn end would ever drain', () => {
+    // The echo-deadline watchdog parks a send whose turn NEVER started: no
+    // `turn_completed` / `turn_interrupted` can follow, and the server row is
+    // already out of the open list. If the park did not drop the local twin
+    // here, the chip would spin forever with nothing left to drain it.
+    useLiveStore.getState().recordLocalSend(localSend({ sendId: 42 }));
+
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+
+    expect(useLiveStore.getState().localSends).toEqual({});
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).not.toBeNull();
+  });
+
+  it('leaves another send’s tracked twin alone when one is parked', () => {
+    useLiveStore.getState().recordLocalSend(localSend({ sendId: 7 }));
+
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+
+    expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['7']);
+  });
+
   it('clears a parked-send notice when the session closes', () => {
     useLiveStore.getState().applyEvent({
       kind: 'send_parked',

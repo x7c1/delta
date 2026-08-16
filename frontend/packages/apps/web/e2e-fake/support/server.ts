@@ -92,8 +92,15 @@ export interface ServerHandle {
    * was never a graceful shutdown) and relaunch against the SAME database,
    * tmux socket, and scripted-agent wrappers, polling `/health` until the new
    * generation is ready. The relaunched generation logs to the next log file.
+   *
+   * `env` REPLACES the extra environment applied on top of the per-run
+   * defaults, so `restart()` with no argument always returns the server to
+   * exactly the suite's shared configuration. Pass overrides only for a
+   * server-wide setting a single spec must change (e.g. shrinking a watchdog
+   * deadline the whole process shares), and restore them in an `afterEach` so
+   * a failure cannot leak the setting into the specs that follow.
    */
-  restart(): Promise<void>;
+  restart(env?: Record<string, string>): Promise<void>;
   /** Kill the server and tmux, copy transcripts out, and remove the temp dir. */
   teardown(): Promise<void>;
 }
@@ -309,6 +316,8 @@ export async function bootServer(): Promise<ServerHandle> {
 
   let generation = 0;
   let child: ChildProcess | null = null;
+  /** Per-spec environment layered over the defaults; see `restart`. */
+  let envOverrides: Record<string, string> = {};
 
   const spawnGeneration = async (): Promise<void> => {
     generation += 1;
@@ -331,6 +340,13 @@ export async function bootServer(): Promise<ServerHandle> {
           DELTA_CODEX_BIN: codexWrapper,
           DELTA_LAUNCH_DEADLINE_MS: '3000',
           DELTA_PERMISSION_DECISION_TIMEOUT_MS: '3000',
+          // The echo watchdog stays near its production generosity for the
+          // shared suite: several specs deliberately hold a send `dispatched`
+          // with no echo (cancel, restart) and must not have it retried or
+          // parked out from under them. The spec that exercises the watchdog
+          // shrinks this for its own server generation via `restart`.
+          DELTA_ECHO_DEADLINE_MS: '60000',
+          ...envOverrides,
         },
       });
       child = proc;
@@ -365,7 +381,8 @@ export async function bootServer(): Promise<ServerHandle> {
 
   return {
     port: BACKEND_PORT,
-    async restart(): Promise<void> {
+    async restart(env: Record<string, string> = {}): Promise<void> {
+      envOverrides = env;
       await killChild();
       await spawnGeneration();
     },

@@ -206,8 +206,8 @@ impl AppState {
     /// assistant reply that Claude Code flushes to the JSONL *after* the `Stop`
     /// hook fires, which the hook sync misses.
     ///
-    /// The same tick also runs two registry sweeps that must execute outside any
-    /// hook handler:
+    /// The same tick also runs three registry sweeps that must execute outside
+    /// any hook handler:
     ///
     /// - **Resume dispatch**: types the held first prompt of every resume that
     ///   `SessionStart(source=resume)` marked ready and that has since settled.
@@ -225,9 +225,14 @@ impl AppState {
     ///   `claude --resume` that never reached `SessionStart(resume)`) can no
     ///   longer stall the UI on "pending" forever (the `SessionEnd` hook catches
     ///   the exited case immediately; this catches the hang-forever case).
+    /// - **Echo watchdog**: releases any dispatched send whose keystrokes were
+    ///   swallowed with no trace at all — no echo, no turn boundary, nothing —
+    ///   retrying it once and then parking it with its text handed back, so a
+    ///   TUI dialog eating a paste can no longer leave the queue stuck on a
+    ///   permanent "in progress".
     ///
-    /// Both sweeps share this loop rather than owning their own tasks — all are
-    /// cheap periodic passes over the same registry.
+    /// All three sweeps share this loop rather than owning their own tasks —
+    /// all are cheap periodic passes over the same registry.
     ///
     /// The task clones the `Arc`-shared interactor and the broadcast sender, so
     /// it stays alive independently of any request. A poll or reap error is
@@ -275,6 +280,25 @@ impl AppState {
                     }
                     Err(err) => {
                         tracing::warn!(error = %err, "spawn watchdog reap failed");
+                    }
+                }
+                // Echo watchdog: release any send whose keystrokes vanished
+                // without a trace — no echo, no turn boundary, no signal of any
+                // kind — before its deadline, retrying it once and parking it
+                // (text handed back) if that retry is swallowed too. This is
+                // the one recovery that cannot be event-driven, since the
+                // failure it covers produces no event to react to; the ticks
+                // are what make the silence observable. `Instant::now()` is the
+                // live clock here; tests drive `sweep_echo_deadlines` directly
+                // with an injected `now`.
+                match interactor.sweep_echo_deadlines(now).await {
+                    Ok(dispatched_events) => {
+                        for event in dispatched_events {
+                            let _ = events.send(event);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "echo deadline sweep failed");
                     }
                 }
                 match interactor.poll_transcript().await {

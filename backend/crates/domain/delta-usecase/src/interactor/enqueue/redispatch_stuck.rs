@@ -42,6 +42,15 @@ where
             self.tmux.send_line(&pane, &send.text).await?;
             count += 1;
         }
+        if count > 0 {
+            // The wait for the echo starts over from these keystrokes, so the
+            // echo-deadline watchdog must measure from here — otherwise a
+            // compaction long enough to have consumed the deadline would leave
+            // the freshly re-typed send looking overdue the instant it lands.
+            // (This path costs no requeue budget: the statuses stay
+            // `Dispatched` and the turn machine is untouched.)
+            self.state.restamp_awaiting_echo();
+        }
         Ok(count)
     }
 

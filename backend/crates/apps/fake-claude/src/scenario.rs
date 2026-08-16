@@ -42,7 +42,7 @@
 //! | `dequeue_prompt` | Replay the oldest enqueued prompt now that the turn has freed: fire its own `UserPromptSubmit`, then write it as a plain user line (`promptSource: "queued"`) — the same path a TUI-typed prompt takes. |
 //! | `delay { ms }` | Sleep. Only for delays the scenario itself is about (e.g. holding a turn open); synchronization belongs to the `await_*` steps. |
 //! | `hang` | Block forever (a launch or turn that never progresses). |
-//! | `swallow_prompt` | Consume one prompt from the pane input without firing `UserPromptSubmit` and without writing the transcript — models Claude Code's TUI swallowing the keystroke into the auto-`/compact` routine. The dispatched send stays `Dispatched` behind a missing echo until something re-types it. |
+//! | `swallow_prompt` | Consume one prompt from the pane input without firing `UserPromptSubmit` and without writing the transcript — models Claude Code's TUI eating a keystroke, whether into the auto-`/compact` routine or into an interactive dialog it put up on its own. The dispatched send stays `Dispatched` behind a missing echo until something re-types it. Repeat the step to swallow a re-type too. |
 //! | `compact_group` | Write the four-line `/compact` group (caveat + bare command-name + summary + stdout) sharing one `promptId`. The summary line is the `isCompactSummary:true` record that drives `Effect::AutoCompactFinished` on the server. |
 //!
 //! How the file is found, in priority order:
@@ -131,10 +131,21 @@ pub enum Step {
     /// Consume one prompt from the pane input without firing
     /// `UserPromptSubmit` and without writing anything to the transcript.
     ///
-    /// Models the auto-`/compact` race: the user's keystroke reaches Claude
-    /// Code's TUI just as the compaction routine starts, so the prompt is
-    /// swallowed and no echo ever fires. The send Delta dispatched stays
-    /// `Dispatched` behind a missing echo until something re-types it.
+    /// Models every way Claude Code's TUI can eat a keystroke whole, which
+    /// look identical from Delta's side — no echo ever fires and the
+    /// dispatched send stays `Dispatched` until something re-types it:
+    ///
+    /// - the auto-`/compact` race (the keystroke arrives just as the
+    ///   compaction routine starts), which the compact re-dispatch recovers
+    ///   once the summary lands;
+    /// - an interactive dialog Claude Code raised on its own between turns,
+    ///   which swallows the pasted text and answers itself with the trailing
+    ///   Enter, leaving NO signal at all — only the echo-deadline watchdog
+    ///   recovers that one, so a scenario models it by swallowing and then
+    ///   simply not writing anything.
+    ///
+    /// Two consecutive steps swallow the watchdog's re-type as well, which is
+    /// how a scenario drives the send all the way to being parked.
     SwallowPrompt,
     /// Write the four-line group Claude Code produces for an auto- or
     /// manually-triggered `/compact` (a caveat / command-name / summary /

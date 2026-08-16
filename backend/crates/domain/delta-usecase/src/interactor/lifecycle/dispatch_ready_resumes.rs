@@ -115,6 +115,12 @@ where
             let _ = self
                 .apply_turn_input(crate::turn::TurnInput::DispatchFailed)
                 .await;
+        } else {
+            // The turn machine entered `AwaitingEcho` back when the send was
+            // enqueued, but its keystrokes only reached the pane now — so the
+            // echo-deadline watchdog measures the wait from here, not from an
+            // enqueue that preceded a resume of unknown length.
+            self.state.restamp_awaiting_echo();
         }
         // No queued-send flush here: on success the held prompt's turn
         // machine is `AwaitingEcho`, so a pre-existing `queued` row stays

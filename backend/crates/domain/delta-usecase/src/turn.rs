@@ -68,7 +68,10 @@
 //!   every attempt, so the caller (`interactor::turn_input`) grants each send a
 //!   finite requeue budget and parks it once the budget is spent. The count is
 //!   history rather than turn state, so it lives on `SessionRuntime` (the
-//!   session actor's runtime state), not in this pure table.
+//!   session actor's runtime state), not in this pure table. The
+//!   [`TurnInput::EchoDeadline`] watchdog rides this same disposition, so
+//!   "nothing was ever heard about this send" recovers through exactly the
+//!   machinery a mismatched echo does.
 //! - [`OrphanedSend::Cancel`] — the send can never be delivered (its pane is
 //!   gone or its dispatch failed). Cancelling clears it from the open list so
 //!   the failure surfaces instead of wedging the queue.
@@ -122,6 +125,23 @@ pub enum TurnInput {
     /// [`TurnState::Idle`] with [`OrphanedSend::Cancel`], so any queued sends
     /// behind it promote naturally on the next idle dispatch.
     Cancel { send_id: i64 },
+    /// The echo-deadline watchdog fired for a dispatched send: nothing at all
+    /// has been heard about it for longer than the deadline.
+    ///
+    /// Every other input here is an *event* — a hook, an ingested transcript
+    /// line, a browser command. That is exactly why a send whose keystrokes
+    /// vanish without a trace (a TUI modal swallowing the paste and eating the
+    /// trailing Enter, a human pressing Escape in the attached pane) used to
+    /// wedge the queue forever: no event ever arrives, so no transition ever
+    /// runs and [`TurnState::AwaitingEcho`] is never left. This input turns
+    /// "no signal at all" into a signal, making the absence itself observable
+    /// after a bounded wait.
+    ///
+    /// It is deliberately **not** anomalous in any state: firing on the
+    /// outstanding send is the designed-for outcome, and firing late (the echo
+    /// settled while the sweep was in flight, or a `Stop`/`Cancel` beat it) is
+    /// an ordinary race whose stale no-op needs no warning.
+    EchoDeadline { send_id: i64 },
 }
 
 /// A send abandoned by a transition, with what the caller must do about it.
@@ -205,6 +225,11 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // bug (or a stale message routed past the actor's guard). Converge on
         // Idle and flag it loudly.
         (S::Idle, I::Cancel { .. }) => Transition::to(S::Idle).anomaly(),
+        // A deadline that lost its race: the send it named settled (matched,
+        // cancelled, or orphaned by a turn end) between the sweep reading the
+        // state and this transition. Nothing outstanding, nothing to do — and
+        // nothing worth warning about, since the race is expected.
+        (S::Idle, I::EchoDeadline { .. }) => Transition::to(S::Idle),
 
         // ---- AwaitingEcho --------------------------------------------------
         // A second dispatch while one is outstanding violates the
@@ -278,6 +303,29 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
                 .anomaly()
             }
         }
+        // The deadline fired on the send this state is waiting for: its
+        // keystrokes left no trace at all. Return to `Idle` and requeue, which
+        // routes the send through the *existing* budget in
+        // `interactor::turn_input` — one re-type (preceded by an `Escape`, so a
+        // lingering modal is dismissed and a half-landed composer draft is
+        // discarded), and a park with the text handed back if that re-type is
+        // swallowed too. A deadline naming a different send is stale (that send
+        // settled and a newer one is outstanding): leave the current wait
+        // alone.
+        (
+            S::AwaitingEcho {
+                send_id: outstanding,
+            },
+            I::EchoDeadline { send_id },
+        ) => {
+            if send_id == outstanding {
+                Transition::orphaning(S::Idle, Requeue(outstanding))
+            } else {
+                Transition::to(S::AwaitingEcho {
+                    send_id: outstanding,
+                })
+            }
+        }
 
         // ---- InFlight ------------------------------------------------------
         // Dispatching mid-turn violates the single-outstanding rule (dispatch
@@ -326,6 +374,13 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // converge on the current state and flag it loudly.
         (S::InFlight { send_id }, I::Cancel { .. }) => {
             Transition::to(S::InFlight { send_id }).anomaly()
+        }
+        // The echo arrived (or an external prompt took the turn) while the
+        // sweep was in flight: the wait this deadline was measuring is over, so
+        // the deadline is stale. A no-op — re-typing here would double-submit a
+        // prompt the model is already answering.
+        (S::InFlight { send_id }, I::EchoDeadline { .. }) => {
+            Transition::to(S::InFlight { send_id })
         }
     }
 }
@@ -387,6 +442,7 @@ mod tests {
             I::Close,
             I::DispatchFailed,
             I::Cancel { send_id: 9 },
+            I::EchoDeadline { send_id: 9 },
         ]
     }
 
@@ -405,6 +461,7 @@ mod tests {
             (S::Idle, I::Close,                      S::Idle,                           None,                          false),
             (S::Idle, I::DispatchFailed,             S::Idle,                           None,                          true),
             (S::Idle, I::Cancel { send_id: 9 },      S::Idle,                           None,                          true),
+            (S::Idle, I::EchoDeadline { send_id: 9 },S::Idle,                           None,                          false),
             // AwaitingEcho { 7 }
             (S::AwaitingEcho { send_id: 7 }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   Some(Requeue(7)), true),
             (S::AwaitingEcho { send_id: 7 }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, Some(Requeue(7)), true),
@@ -414,6 +471,7 @@ mod tests {
             (S::AwaitingEcho { send_id: 7 }, I::Close,                      S::Idle,                          Some(Cancel(7)),  false),
             (S::AwaitingEcho { send_id: 7 }, I::DispatchFailed,             S::Idle,                          Some(Cancel(7)),  false),
             (S::AwaitingEcho { send_id: 7 }, I::Cancel { send_id: 9 },      S::AwaitingEcho { send_id: 7 },   None,             true),
+            (S::AwaitingEcho { send_id: 7 }, I::EchoDeadline { send_id: 9 },S::AwaitingEcho { send_id: 7 },   None,             false),
             // InFlight { Some(7) }
             (S::InFlight { send_id: Some(7) }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   None,                        true),
             (S::InFlight { send_id: Some(7) }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, None,                        true),
@@ -423,6 +481,7 @@ mod tests {
             (S::InFlight { send_id: Some(7) }, I::Close,                      S::Idle,                          Some(CancelIfUnmatched(7)),  false),
             (S::InFlight { send_id: Some(7) }, I::DispatchFailed,             S::Idle,                          Some(CancelIfUnmatched(7)),  true),
             (S::InFlight { send_id: Some(7) }, I::Cancel { send_id: 9 },      S::InFlight { send_id: Some(7) }, None,                        true),
+            (S::InFlight { send_id: Some(7) }, I::EchoDeadline { send_id: 9 },S::InFlight { send_id: Some(7) }, None,                        false),
             // InFlight { None }
             (S::InFlight { send_id: None }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   None, true),
             (S::InFlight { send_id: None }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, None, true),
@@ -432,6 +491,7 @@ mod tests {
             (S::InFlight { send_id: None }, I::Close,                      S::Idle,                          None, false),
             (S::InFlight { send_id: None }, I::DispatchFailed,             S::Idle,                          None, true),
             (S::InFlight { send_id: None }, I::Cancel { send_id: 9 },      S::InFlight { send_id: None },    None, true),
+            (S::InFlight { send_id: None }, I::EchoDeadline { send_id: 9 },S::InFlight { send_id: None },    None, false),
         ];
 
         // The table above must cover the whole product space exactly once.
@@ -517,6 +577,25 @@ mod tests {
                 anomalous: false,
             },
             "Claude's echo path stays byte-identical"
+        );
+    }
+
+    /// The echo deadline for the outstanding send is the one non-stale
+    /// deadline: it exits `AwaitingEcho` back to `Idle` and requeues the send
+    /// (through the caller's budget), WITHOUT the anomaly flag — the watchdog
+    /// firing is a designed-for outcome, not an impossible signal.
+    #[test]
+    fn matching_echo_deadline_requeues_the_outstanding_send() {
+        assert_eq!(
+            transition(
+                S::AwaitingEcho { send_id: 7 },
+                I::EchoDeadline { send_id: 7 }
+            ),
+            Transition {
+                next: S::Idle,
+                orphaned: Some(Requeue(7)),
+                anomalous: false,
+            }
         );
     }
 

@@ -124,11 +124,13 @@ which frames arrive, and a client must handle each event whenever it lands.
   [sends.md](sends.md) for the two dispatch paths), so it has no
   queued→dispatched transition to announce.
 - `send_parked` — a dispatched send was abandoned. Delta correlates a send with
-  the `UserPromptSubmit` it produces by text; a mismatch returns the send to
-  `queued` to be re-typed on the next idle, and after the second failed echo the
-  send is *parked*: the row is cancelled — so it leaves the open-send list and
-  its chip stops spinning — and `text` carries the composed message back, so the
-  client can tell the user it was never delivered instead of dropping it
+  the `UserPromptSubmit` it produces by text; an echo that mismatches — or one
+  that never arrives at all, caught by the
+  [echo deadline](sends.md#when-no-echo-ever-arrives) — returns the send to
+  `queued` to be re-typed on the next idle, and after the second failed attempt
+  the send is *parked*: the row is cancelled — so it leaves the open-send list
+  and its chip stops spinning — and `text` carries the composed message back, so
+  the client can tell the user it was never delivered instead of dropping it
   silently. Session-scoped, not thread-scoped. A client that was disconnected
   when the park happened cannot recover that text afterwards. Pane-backed
   sessions only: parking is the echo-correlation path's failure mode, and an

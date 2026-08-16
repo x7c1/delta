@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
 import type { PendingPermission, PendingQuestion } from '@delta/wire-gen';
 import type { EventReducer } from './eventReducer';
+import type { SendsSlice } from './sendsSlice';
 
 /** The notices state alone, the only fields this module's reducers touch. */
 type NoticesState = Pick<NoticesSlice, 'notices'>;
@@ -655,14 +656,27 @@ export const reduceExternalInput: EventReducer<
 // recorded for EVERY session, focused or not: the user's own message
 // was dropped, and they must find out when they come back to that
 // session, not only if they happened to be watching it.
-export const reduceSendParked: EventReducer<NoticesState, 'send_parked'> = (
-  state,
-  event,
-) => ({
-  notices: withNotice(state.notices, event.session_id, {
+//
+// The park is also terminal for the send itself, so its tracked local twin is
+// dropped here — the same reconciliation the cancel mutation does with
+// `forgetLocalSend`. Without it the twin would render as an in-progress chip
+// forever: the server row is gone from the open list (so nothing overrides the
+// twin), and a park needs no turn to end — the echo-deadline watchdog parks a
+// send whose turn NEVER started — so no turn-end sweep would ever drain it.
+export const reduceSendParked: EventReducer<
+  NoticesState & Pick<SendsSlice, 'localSends'>,
+  'send_parked'
+> = (state, event) => {
+  const notices = withNotice(state.notices, event.session_id, {
     kind: 'send_parked',
     sendId: event.send_id,
     text: event.text,
     at: Date.now(),
-  }),
-});
+  });
+  if (!(event.send_id in state.localSends)) {
+    return { notices };
+  }
+  const localSends = { ...state.localSends };
+  delete localSends[event.send_id];
+  return { notices, localSends };
+};

@@ -760,6 +760,37 @@ where
         }
         Ok(events)
     }
+
+    /// Give up on every dispatched send whose `UserPromptSubmit` echo — and
+    /// every other signal — never arrived before its deadline (the echo
+    /// watchdog sweep). See the
+    /// [`echo_deadline`](crate::interactor::echo_deadline) module for why a
+    /// time-driven input is the only thing that can recover this class.
+    ///
+    /// The owning actor retries such a send once (preceded by an `Escape` into
+    /// the pane) and parks it on the second deadline, flushing the queue behind
+    /// it either way; the returned [`SessionEvent::SendDispatched`]s are the
+    /// promotions those flushes produced, for the caller to broadcast. `now` is
+    /// injected so the sweep is deterministic under test; the server owns the
+    /// periodic tick that calls this.
+    pub async fn sweep_echo_deadlines(&self, now: Instant) -> Result<Vec<SessionEvent>> {
+        let mut pending = Vec::new();
+        for id in self.sessions.ids() {
+            let (tx, rx) = oneshot::channel();
+            if self
+                .sessions
+                .post_existing(&id, SessionInput::EchoDeadlineTick { now, reply: tx })
+            {
+                pending.push(rx);
+            }
+        }
+        let mut events = Vec::new();
+        for rx in pending {
+            let Ok(result) = rx.await else { continue };
+            events.extend(result?);
+        }
+        Ok(events)
+    }
 }
 
 #[cfg(test)]
