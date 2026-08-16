@@ -156,14 +156,14 @@ Operation × state coverage (deadline vs the states `AwaitingEcho` can meet):
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] Against a real Claude session driven by Delta: attach to the pane,
+- [x] Against a real Claude session driven by Delta: attach to the pane,
       open an interactive TUI dialog (e.g. the model selector) and leave it
       up, then send from the browser. Observe either self-heal (Escape +
       re-type after the first deadline, answered once) or, if the dialog is
       re-opened to swallow the retry too, the parked notice with the
       original text — and in both cases a subsequent send flows. The
       permanent "In progress / 1 queued" state can no longer be produced.
-- [ ] A normal real-session send is delivered exactly once (no double-typing
+- [x] A normal real-session send is delivered exactly once (no double-typing
       from a racing deadline) and the transcript shows a single prompt.
 
 ## Out of scope
