@@ -162,41 +162,84 @@ kill_port() {
   fi
 }
 
+# One in-place status line for wait_until_listening on interactive terminals:
+#
+#   [delta] Waiting for delta-server on port 7878 (12s) — Compiling delta-usecase v0.3.0
+#
+# The trailing part is the launcher's newest log line (ANSI codes, leading
+# indentation, and carriage returns stripped), which is what names the work the
+# wait is actually blocked on — cargo compiling a crate, pnpm installing, the
+# workspace libraries building. Truncated to the terminal width because a
+# wrapped line breaks the \r redraw. Args: $1=label $2=port $3=waited-secs
+# $4=log-path
+draw_wait_status() {
+  local label="$1" port="$2" waited="$3" log="$4"
+  local tail_line cols max body
+  tail_line="$(tail -n 1 "$log" 2>/dev/null | sed -e $'s/\x1B\\[[0-9;]*m//g' -e 's/^[[:space:]]*//' | tr -d '\r')"
+  body="Waiting for $label on port $port (${waited}s)"
+  if [ -n "$tail_line" ]; then
+    body="$body — $tail_line"
+  fi
+  cols="$(tput cols 2>/dev/null || echo 120)"
+  max=$((cols - 8)) # visible width of the "[delta] " prefix
+  if [ "$max" -lt 20 ]; then max=20; fi
+  if [ "${#body}" -gt "$max" ]; then body="${body:0:max}"; fi
+  printf '\r\033[2K\033[1;36m[delta]\033[0m %s' "$body"
+}
+
 # Block until 127.0.0.1:$port is accepting connections, returning 0 as soon as it
 # is. This is what makes `dev.sh` return only once the loop is actually reachable
 # — historically it launched the server and dev server in the background and
 # exited immediately, so "I ran make dev but the browser won't open" was common
 # (the frontend's install+build had not finished binding the port yet).
 #
+# On an interactive terminal the wait redraws a single status line showing the
+# elapsed seconds and the launcher's newest log line (see draw_wait_status), so
+# it is visible what the wait is blocked on and that it is progressing. When
+# stdout is not a tty (piped, CI) it keeps the classic dot-per-second stream,
+# since an in-place \r redraw would garble line-oriented output.
+#
 # Fails fast (returns non-zero) if the launching process dies before the port
 # comes up, or if $timeout seconds elapse — in both cases the caller surfaces the
 # log. Args: $1=port $2=label $3=launcher-pid $4=timeout-secs $5=log-path
 wait_until_listening() {
   local port="$1" label="$2" pid="$3" timeout="$4" log="$5"
-  local waited=0
-  printf '\033[1;36m[delta]\033[0m Waiting for %s on port %s ' "$label" "$port"
+  local waited=0 tty=0
+  if [ -t 1 ]; then tty=1; fi
+  if [ "$tty" -eq 0 ]; then
+    printf '\033[1;36m[delta]\033[0m Waiting for %s on port %s ' "$label" "$port"
+  fi
   while true; do
     if port_in_use "$port"; then
-      printf ' ready.\n'
+      if [ "$tty" -eq 1 ]; then
+        printf '\r\033[2K'
+        log "$label is listening on port $port (${waited}s)."
+      else
+        printf ' ready.\n'
+      fi
       return 0
     fi
     # The launcher (its subshell) exiting means the port will never come up —
     # cargo build failed, pnpm errored, etc. Stop waiting and let the caller
     # show the log rather than spin until the timeout.
     if ! kill -0 "$pid" 2>/dev/null; then
-      printf ' failed.\n'
+      if [ "$tty" -eq 1 ]; then printf '\r\033[2K'; else printf ' failed.\n'; fi
       warn "$label exited before listening on port $port. Last 30 lines of $log:"
       tail -n 30 "$log" >&2 2>/dev/null || true
       return 1
     fi
     if [ "$waited" -ge "$timeout" ]; then
-      printf ' timed out.\n'
+      if [ "$tty" -eq 1 ]; then printf '\r\033[2K'; else printf ' timed out.\n'; fi
       warn "$label was not listening on port $port after ${timeout}s. Check $log."
       return 1
     fi
+    if [ "$tty" -eq 1 ]; then
+      draw_wait_status "$label" "$port" "$waited" "$log"
+    else
+      printf '.'
+    fi
     sleep 1
     waited=$((waited + 1))
-    printf '.'
   done
 }
 
