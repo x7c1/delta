@@ -39,6 +39,7 @@ pub use spawn::{PendingSpawn, ResumingSession, PENDING_SPAWN_DEADLINE, RESUME_RE
 pub use spawn::RESUME_DISPATCH_SETTLE;
 pub use streaming::StreamingMessage;
 pub use subagents::RunningSubagent;
+pub use turn::ECHO_DEADLINE;
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -76,6 +77,16 @@ pub struct SessionRuntime {
     /// The session's turn state. [`TurnState::Idle`] when no turn is in flight,
     /// which is also the implicit state of a session with no actor at all.
     turn: TurnState,
+    /// When the current [`TurnState::AwaitingEcho`] wait began, and `None`
+    /// whenever no send is being awaited — the echo-deadline watchdog's clock.
+    ///
+    /// Kept in lockstep with [`Self::turn`] by [`SessionRuntime::apply_turn`]
+    /// (and restarted by [`SessionRuntime::restamp_awaiting_echo`] on the two
+    /// paths that re-type an already-outstanding send). `Instant` is monotonic,
+    /// so the elapsed comparison is immune to system-clock changes, matching
+    /// the launch deadlines. NOT part of [`Self::is_empty`]: it is only ever
+    /// `Some` alongside a non-idle turn, which already pins the actor alive.
+    awaiting_echo_since: Option<Instant>,
     /// Oneshot waiters for permission requests the browser may decide, keyed
     /// by request-row id. Registered by the `PermissionRequest` hook (whose
     /// response blocks on the receiver), resolved by a browser decision, and

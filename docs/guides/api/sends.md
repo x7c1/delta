@@ -15,8 +15,10 @@ provider's adapter:
 
 - **Pane-backed (Claude Code)** — the text is typed into the session's tmux pane
   as keystrokes once the session is idle, and matched when its echo comes back
-  through the transcript. This is the path with a real `queued` stage: only one
-  send may be outstanding per turn, so anything composed mid-turn waits.
+  through the transcript (and released by the
+  [echo deadline](#when-no-echo-ever-arrives) when it never does). This is the
+  path with a real `queued` stage: only one send may be outstanding per turn, so
+  anything composed mid-turn waits.
 - **Adapter-backed (Codex)** — no pane, no keystrokes: the text rides a
   turn-start request on the `codex app-server` connection and is matched to the
   turn id that request returns, so the row goes `dispatched` → `matched` within
@@ -249,6 +251,41 @@ is still `queued`, so the guarded queued cancel already covers it.
   restored, is already released, or has since been cancelled.
 - **409** (body `code: "resume_unavailable"`) — the session had to be resumed and
   its transcript is gone. The marker is untouched, so the release can be retried.
+
+### When no echo ever arrives
+
+A pane-backed send is confirmed by its echo: the `UserPromptSubmit` hook coming
+back with the same text. Sometimes nothing comes back at all — Claude Code's TUI
+raises a dialog between turns and swallows the pasted text whole, answering
+itself with the trailing Enter, or someone presses `Escape` in the attached pane
+before the prompt submits. There is no signal to react to in any of those cases:
+no user message, no hook, no turn boundary. Left alone, the row would stay
+`dispatched` forever behind a permanent "in progress", with everything composed
+after it stuck `queued`.
+
+So silence is bounded. A send that has been awaiting its echo for longer than
+**60 seconds** is given up on by a background watchdog:
+
+1. **First deadline — one retry.** The turn is released to `idle` and the send
+   returns to `queued`, then re-types immediately: a single `Escape` into the
+   pane first (dismissing a lingering dialog and discarding any half-landed
+   composer draft), then the same text. If whatever swallowed the keystrokes has
+   gone, the echo matches and the send completes normally — the user sees only a
+   delayed answer.
+2. **Second deadline — parked.** A retry that is swallowed too spends the send's
+   retry budget (the same budget a mismatching echo spends). The row flips to
+   `cancelled` and leaves the open-send list, and `send_parked`
+   ([live-channels.md](live-channels.md)) carries the composed text back so the
+   browser can hand it to the user rather than dropping it silently. Anything
+   queued behind it dispatches on the spot.
+
+The deadline is deliberately far longer than the echo loop ever legitimately
+takes, so a slow-but-healthy send is never disturbed; a send re-typed by the
+auto-`/compact` recovery restarts the clock and spends no budget. It is
+overridable with `DELTA_ECHO_DEADLINE_MS` (milliseconds), which the fake
+end-to-end suite uses to exercise the retry-then-park path in seconds.
+Adapter-backed (Codex) sessions are unaffected: their sends are matched inside
+the turn-start call and never wait for an echo.
 
 ## Permissions
 

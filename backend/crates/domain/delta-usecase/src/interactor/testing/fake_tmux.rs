@@ -7,6 +7,21 @@ use async_trait::async_trait;
 use crate::error::Result;
 use crate::ports::TmuxDriver;
 
+/// One recorded input into a pane, in the order the interactor produced it.
+///
+/// `sent` and `keyed` each record their own call kind, which cannot show how
+/// the two INTERLEAVE — and some behaviour is exactly an interleaving: a send
+/// re-typed by the echo-deadline watchdog must be preceded by an `Escape` into
+/// the same pane, so that a lingering TUI dialog is dismissed before the text
+/// lands. This single ordered log is what lets a test assert that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PaneInput {
+    /// A `send_line`: one submitted line of text.
+    Line { pane: String, text: String },
+    /// A `send_keys`: the ordered tmux key names injected.
+    Keys { pane: String, keys: Vec<String> },
+}
+
 /// A single recorded `create_session` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreatedSession {
@@ -22,6 +37,10 @@ pub(crate) struct FakeTmux {
     /// The `(pane, keys)` pairs `send_keys` was called with, in order. Each
     /// entry's `keys` is the ordered list of tmux key names injected.
     pub(crate) keyed: Mutex<Vec<(String, Vec<String>)>>,
+    /// Every `send_line` and `send_keys` in ONE ordered log, so a test can
+    /// assert their interleaving (see [`PaneInput`]). The two vectors above
+    /// stay as they are: most tests only care about one kind.
+    pub(crate) pane_input: Mutex<Vec<PaneInput>>,
     /// The panes `clear_input` was called with, in order.
     pub(crate) cleared: Mutex<Vec<String>>,
     /// When set, `send_line` fails instead of recording the line, simulating a
@@ -65,6 +84,10 @@ impl TmuxDriver for FakeTmux {
             .lock()
             .unwrap()
             .push((pane.to_owned(), text.to_owned()));
+        self.pane_input.lock().unwrap().push(PaneInput::Line {
+            pane: pane.to_owned(),
+            text: text.to_owned(),
+        });
         Ok(())
     }
 
@@ -76,6 +99,10 @@ impl TmuxDriver for FakeTmux {
             pane.to_owned(),
             keys.iter().map(|k| (*k).to_owned()).collect(),
         ));
+        self.pane_input.lock().unwrap().push(PaneInput::Keys {
+            pane: pane.to_owned(),
+            keys: keys.iter().map(|k| (*k).to_owned()).collect(),
+        });
         Ok(())
     }
 

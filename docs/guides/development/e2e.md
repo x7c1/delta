@@ -85,15 +85,18 @@ The fixture owns the per-run temp database and tmux socket
 scripted-codex wrappers, a shortened launch watchdog
 (`DELTA_LAUNCH_DEADLINE_MS`), the dedicated backend
 port (7899), and the `/health` readiness poll; Playwright starts the Vite dev
-server (port 5198) proxied to that backend. Because a hard kill (SIGKILL,
-Ctrl-C) can skip teardown, the fixture also **sweeps at startup**: it kills any
-leftover `delta-e2e-fake-*` tmux server and removes any `delta-e2e-fake.*` temp
-dir from a crashed run, so leaks are bounded to one run. Each server generation
-logs to its own file under `test-results/e2e-fake/` (`server.log`,
-`server.2.log`, …), all uploaded by CI on failure. Nothing the e2e-fake run
-touches collides with `make dev` or the mock suite. It needs tmux, the
-Playwright chromium browser (see above), and built workspace libraries
-(`make build`).
+server (port 5198) proxied to that backend. A spec that needs a different
+server-wide setting (e.g. a shortened echo watchdog, `DELTA_ECHO_DEADLINE_MS`)
+passes it to `restart(env)` for its own server generation, and restores the
+shared configuration with a bare `restart()` in an `afterEach`. Because a hard
+kill (SIGKILL, Ctrl-C) can skip teardown, the fixture also **sweeps at
+startup**: it kills any leftover `delta-e2e-fake-*` tmux server and removes any
+`delta-e2e-fake.*` temp dir from a crashed run, so leaks are bounded to one
+run. Each server generation logs to its own file under
+`test-results/e2e-fake/` (`server.log`, `server.2.log`, …), all uploaded by CI
+on failure. Nothing the e2e-fake run touches collides with `make dev` or the
+mock suite. It needs tmux, the Playwright chromium browser (see above), and
+built workspace libraries (`make build`).
 
 **Writing a scenario.** Scenarios are JSON files in
 `packages/apps/web/e2e-fake/scenarios/`, executed step by step by the fake:

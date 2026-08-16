@@ -128,6 +128,10 @@ fn env_port() -> u16 {
 ///   the `PermissionRequest` hook response waits for a browser decision
 ///   before falling back to the TUI prompt, so the passthrough path can be
 ///   exercised quickly under test.
+/// - `DELTA_ECHO_DEADLINE_MS` shrinks (or stretches) how long a dispatched
+///   send waits for its `UserPromptSubmit` echo before the watchdog gives up
+///   on it, so the retry-then-park path for swallowed keystrokes can be
+///   exercised in seconds instead of minutes.
 fn launch_from_env() -> delta_usecase::LaunchConfig {
     let mut launch = delta_usecase::LaunchConfig::default();
     if let Ok(bin) = std::env::var("DELTA_CLAUDE_BIN") {
@@ -149,6 +153,13 @@ fn launch_from_env() -> delta_usecase::LaunchConfig {
         .map(std::time::Duration::from_millis)
     {
         launch.permission_decision_deadline = deadline;
+    }
+    if let Some(deadline) = std::env::var("DELTA_ECHO_DEADLINE_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(std::time::Duration::from_millis)
+    {
+        launch.echo_deadline = deadline;
     }
     launch
 }

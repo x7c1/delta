@@ -32,7 +32,7 @@ pub(crate) use fake_external_opener::FakeExternalOpener;
 pub(crate) use fake_gh_cli::{FakeGhCli, CLONE_MARKER};
 pub(crate) use fake_git_worktree::FakeGitWorktree;
 pub(crate) use fake_store::FakeStore;
-pub(crate) use fake_tmux::FakeTmux;
+pub(crate) use fake_tmux::{FakeTmux, PaneInput};
 pub(crate) use fake_transcript::FakeTranscript;
 pub(crate) use fake_workspace::FakeWorkspace;
 pub(crate) use hooks::{session_start, submit, submit_for, submit_in};

@@ -286,6 +286,9 @@ where
         SessionInput::ReapTick { now, reply } => {
             let _ = reply.send(ctx.reap_stale_launch(now).await);
         }
+        SessionInput::EchoDeadlineTick { now, reply } => {
+            let _ = reply.send(ctx.sweep_echo_deadline(now).await);
+        }
         SessionInput::QueryPane { reply } => {
             let _ = reply.send(ctx.state.handle().map(|h| h.pane.clone()));
         }

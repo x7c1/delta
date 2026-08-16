@@ -232,6 +232,17 @@ pub(in crate::interactor) enum SessionInput {
         now: Instant,
         reply: Reply<Vec<SessionEvent>>,
     },
+    /// Give up on this session's outstanding send if its `UserPromptSubmit`
+    /// echo — and every other signal — has failed to arrive by its deadline as
+    /// of `now`, retrying or parking it and flushing the queue behind it.
+    /// Replies with the [`SessionEvent::SendDispatched`] to broadcast when that
+    /// flush promoted a send.
+    ///
+    /// [`SessionEvent::SendDispatched`]: crate::ports::SessionEvent::SendDispatched
+    EchoDeadlineTick {
+        now: Instant,
+        reply: Reply<Option<SessionEvent>>,
+    },
 
     // ---- Queries (runtime reads) -------------------------------------------
     /// The pane driving the session, if open (the PTY bridge's routing key).

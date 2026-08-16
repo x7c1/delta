@@ -2,7 +2,9 @@
 
 use std::time::Duration;
 
-use crate::interactor::session_actor::runtime::{PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE};
+use crate::interactor::session_actor::runtime::{
+    ECHO_DEADLINE, PENDING_SPAWN_DEADLINE, RESUME_READY_DEADLINE,
+};
 
 /// The command Delta launches in each tmux session by default.
 pub const DEFAULT_SESSION_COMMAND: &str = "claude";
@@ -27,8 +29,9 @@ pub const PERMISSION_DECISION_DEADLINE: Duration = Duration::from_secs(50);
 ///   `PATH`) without changing any spawn logic — the command line built around
 ///   it is identical.
 /// - The deadlines let a test shrink the launch watchdog (and the permission
-///   decision wait) from their generous production values so a "never came
-///   up" / "never decided" path can be exercised in seconds.
+///   decision wait, and the echo watchdog) from their generous production
+///   values so a "never came up" / "never decided" / "never echoed" path can
+///   be exercised in seconds.
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
     /// The program launched in each tmux session (`claude` by default). Used
@@ -46,6 +49,9 @@ pub struct LaunchConfig {
     /// browser decision before falling back to the TUI prompt. Defaults to
     /// [`PERMISSION_DECISION_DEADLINE`]; see that constant.
     pub permission_decision_deadline: Duration,
+    /// How long a dispatched send may wait for its echo before the watchdog
+    /// gives up on it. Defaults to [`ECHO_DEADLINE`]; see that constant.
+    pub echo_deadline: Duration,
 }
 
 impl Default for LaunchConfig {
@@ -55,6 +61,7 @@ impl Default for LaunchConfig {
             pending_spawn_deadline: PENDING_SPAWN_DEADLINE,
             resume_ready_deadline: RESUME_READY_DEADLINE,
             permission_decision_deadline: PERMISSION_DECISION_DEADLINE,
+            echo_deadline: ECHO_DEADLINE,
         }
     }
 }
@@ -73,5 +80,6 @@ mod tests {
             config.permission_decision_deadline,
             PERMISSION_DECISION_DEADLINE
         );
+        assert_eq!(config.echo_deadline, ECHO_DEADLINE);
     }
 }
