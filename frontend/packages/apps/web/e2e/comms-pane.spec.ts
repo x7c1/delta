@@ -128,3 +128,51 @@ test('a Claude session keeps the terminal pane, not the comms one', async ({
   await expect(page.getByRole('separator', { name: 'Resize terminal' })).toBeVisible();
   await expect(page.getByTestId('comms-pane')).toHaveCount(0);
 });
+
+test('the comms log leaks no scrollable overflow past its own scroll box', async ({
+  page,
+}) => {
+  // Every frame row carries absolutely positioned `sr-only` direction spans.
+  // Unless they are anchored INSIDE the pane's scroll container, they escape
+  // its clip (the scroller is a static box), pile up below the viewport at
+  // their unscrolled row positions, and hand the workspace shell thousands of
+  // px of invisible scrollable overflow — the raw material for the whole-app
+  // shift pinned in workspace-shell.spec.ts. A viewport shorter than the
+  // scripted exchange makes the leak measurable: rows must overflow the pane
+  // for their spans to land below the shell's bottom edge.
+  await useManualEventControl(page);
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await page.goto('/');
+
+  const codexRow = rowByBranch(page, 'feat/codex-adapter');
+  await scrollUntilVisible(page, codexRow);
+  await codexRow.click();
+
+  // Baseline first: at this tiny viewport the shell already carries a few px
+  // of ordinary min-height overflow that has nothing to do with the comms
+  // pane, so the assertion below is a delta, not an absolute zero.
+  const shellOverflow = () =>
+    page
+      .getByTestId('workspace-shell')
+      .evaluate((shell) => shell.scrollHeight - shell.clientHeight);
+  const baseline = await shellOverflow();
+
+  await page.getByRole('button', { name: 'Comms' }).click();
+  await expect(page.getByTestId('comms-frame').first()).toBeVisible();
+
+  // The pane itself must be the thing that scrolls…
+  const paneOverflow = await page
+    .getByTestId('comms-pane')
+    .evaluate((pane) => {
+      const scroller = pane.parentElement;
+      if (!scroller) {
+        throw new Error('the comms pane is not inside a Panel body');
+      }
+      return scroller.scrollHeight - scroller.clientHeight;
+    });
+  expect(paneOverflow).toBeGreaterThan(0);
+
+  // …and none of that below-the-fold content may register as scrollable
+  // overflow on the workspace shell.
+  expect(await shellOverflow()).toBe(baseline);
+});

@@ -482,7 +482,13 @@ export function WorkspaceScreen() {
   ) : null;
 
   return (
-    <div className="relative flex h-full overflow-hidden">
+    // `overflow-clip`, not `overflow-hidden`: hidden still makes this box a
+    // scroll container, so any ancestor-walking scroll (scrollIntoView from a
+    // timeline jump, a focus) can shift the entire shell whenever some
+    // descendant leaks scrollable overflow past its pane — the app then sits
+    // half off-screen with no scrollbar to bring it back. clip removes the
+    // scroll box outright: the shell cannot be scrolled by anything.
+    <div data-testid="workspace-shell" className="relative flex h-full overflow-clip">
       {/* Left: navigator (session → thread tree) */}
       <div className="w-72 shrink-0">
         <NavigatorPane
