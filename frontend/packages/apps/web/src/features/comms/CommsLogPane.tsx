@@ -217,7 +217,16 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
         </button>
       }
     >
-      <div data-testid="comms-pane" className="min-w-0">
+      {/* `relative`: the rows' `sr-only` direction spans are absolutely
+          positioned, and the Panel body that scrolls this content is a static
+          box — without a positioned ancestor INSIDE the scroll container they
+          would anchor to the Panel's outer wrapper, escape the scroller's clip
+          entirely, and stretch the workspace shell's scrollable overflow by the
+          full unclipped height of the log (thousands of px on a long session).
+          Any ancestor-walking scroll (a transcript scrollIntoView, a focus)
+          then has room to shift the whole app upward. Anchoring them here
+          keeps every absolutely-positioned descendant inside the scroll box. */}
+      <div data-testid="comms-pane" className="relative min-w-0">
         {note !== null && (
           <p data-testid="comms-empty-note" className="p-3 text-caption text-terminal-fg/70">
             {note}
