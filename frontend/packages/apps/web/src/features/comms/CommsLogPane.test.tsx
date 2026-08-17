@@ -8,6 +8,7 @@ import {
   buildCommsRows,
   CommsLogPane,
   formatFrameTime,
+  MAX_FRAMES,
   prettyPayload,
 } from './CommsLogPane';
 
@@ -68,6 +69,39 @@ function deliver(...frames: CommsFrame[]): void {
     for (const one of frames) {
       connected?.onFrame(one);
     }
+  });
+}
+
+/** The Panel's scrollable body — the pane's own parent element. */
+function paneBody(): HTMLElement {
+  const body = screen.getByTestId('comms-pane').parentElement;
+  if (body === null) {
+    throw new Error('the pane is not inside a Panel body');
+  }
+  return body;
+}
+
+/**
+ * Stub the three scroll metrics the follow logic reads and writes. jsdom lays
+ * nothing out (and hardcodes `scrollTop` to 0), so without this the pane could
+ * neither tell where the reader is nor move the view.
+ */
+function stubScrollMetrics(body: HTMLElement): void {
+  let scrollTop = 0;
+  Object.defineProperty(body, 'scrollTop', {
+    configurable: true,
+    get: () => scrollTop,
+    set: (value: number) => {
+      scrollTop = value;
+    },
+  });
+  Object.defineProperty(body, 'scrollHeight', {
+    configurable: true,
+    value: 1000,
+  });
+  Object.defineProperty(body, 'clientHeight', {
+    configurable: true,
+    value: 100,
   });
 }
 
@@ -271,26 +305,8 @@ describe('CommsLogPane', () => {
 
   it('follows the tail as frames arrive, and stops once the reader scrolls up', () => {
     render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
-    // The Panel's scrollable body is the pane's own parent element. jsdom lays
-    // nothing out (and hardcodes `scrollTop` to 0), so the three metrics the
-    // follow logic reads and writes are stubbed here.
-    const body = screen.getByTestId('comms-pane').parentElement;
-    if (body === null) {
-      throw new Error('the pane is not inside a Panel body');
-    }
-    let scrollTop = 0;
-    Object.defineProperty(body, 'scrollTop', {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-    Object.defineProperty(body, 'scrollHeight', {
-      configurable: true,
-      value: 1000,
-    });
-    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 100 });
+    const body = paneBody();
+    stubScrollMetrics(body);
 
     // A pane opened mid-session replays hundreds of frames; the newest end is the
     // one worth looking at, so the view lands there rather than on the oldest.
@@ -303,6 +319,27 @@ describe('CommsLogPane', () => {
     fireEvent.scroll(body);
     deliver(frame({ seq: 1 }));
     expect(body.scrollTop).toBe(200);
+  });
+
+  it('keeps following the tail after the frame cap starts trimming the log', () => {
+    // Once the pane holds MAX_FRAMES, every new frame evicts an old one and the
+    // frame COUNT stops changing — only the array's contents do. Following keyed
+    // on the count fires for the last time at the cap and then never again,
+    // which on a chatty stream (one Codex turn is hundreds of deltas) kills
+    // tail-following for good midway through a session.
+    render(<CommsLogPane sessionId={'sess-1' as SessionId} attachable />);
+    const body = paneBody();
+    stubScrollMetrics(body);
+
+    deliver(...Array.from({ length: MAX_FRAMES }, (_, seq) => frame({ seq })));
+    expect(body.scrollTop).toBe(1000);
+
+    // The reader sits a line off the end — within the stick threshold, so the
+    // pane is still following when the next frame lands.
+    body.scrollTop = 990;
+    fireEvent.scroll(body);
+    deliver(frame({ seq: MAX_FRAMES }));
+    expect(body.scrollTop).toBe(1000);
   });
 
   it('closes the pane from its close button', () => {

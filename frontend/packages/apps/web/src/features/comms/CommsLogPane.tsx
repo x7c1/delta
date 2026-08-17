@@ -19,7 +19,7 @@ import { useNavStore } from '../../store/navStore';
  * a long session, so it is deliberately generous — the interesting part of a log
  * is always its recent end.
  */
-const MAX_FRAMES = 1000;
+export const MAX_FRAMES = 1000;
 
 /**
  * How close to the bottom still counts as "following the tail", in pixels.
@@ -161,6 +161,11 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
   // frame that arrives afterwards lands below the fold — so a log whose whole
   // point is "what is the wire doing right now" would show its least
   // interesting end and never move.
+  //
+  // Keyed on the array, not its length: once the log holds [`MAX_FRAMES`],
+  // every new frame evicts an old one and the COUNT stops changing — a
+  // length-keyed effect would fire for the last time at the cap and following
+  // would silently die midway through any chatty session.
   useLayoutEffect(() => {
     if (!stickRef.current) {
       return;
@@ -169,7 +174,7 @@ export function CommsLogPane({ sessionId, attachable }: CommsLogPaneProps) {
     if (el !== null) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [frames.length]);
+  }, [frames]);
 
   const rows = useMemo(() => buildCommsRows(frames), [frames]);
 
