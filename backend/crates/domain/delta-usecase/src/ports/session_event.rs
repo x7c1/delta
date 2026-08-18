@@ -235,54 +235,69 @@ pub enum SessionEvent {
         final_: bool,
         delta: String,
     },
-    /// A subagent (the `Agent`/`Task` tool) started running inside the main
-    /// turn.
+    /// A subagent started running: an `Agent`/`Task` tool call the model made
+    /// inside a turn (the historical and current names for the same tool), or
+    /// the background agent Claude Code forks for a slash command's skill,
+    /// which arrives with NO turn in flight at all — so a consumer must not
+    /// scope the entry to the current turn.
     ///
     /// A subagent runs in its own transcript that Delta never tails, so the
     /// main conversation pane shows nothing while it works — this event is the
-    /// only live signal that one is running. Detected from the main session's
-    /// `PreToolUse` hook with `tool_name` in `{Agent, Task}` (the historical and
-    /// current names for the same tool); the nested tool calls a subagent makes
-    /// reach the same hook but never match those names, so they do not flip the
-    /// indicator. Correlated to its [`Self::SubagentFinished`] by `tool_use_id`.
+    /// only live signal that one is running. Both kinds are detected by folding
+    /// the PARENT session's transcript — an `Agent`/`Task` `tool_use` block, or
+    /// a `<forked-skill-launch>` element on a `local_command` line — not from a
+    /// hook: a nested subagent's `tool_use` is written to the subagent's own
+    /// JSONL, so it can never light the parent's indicator, and a forked skill
+    /// fires no hook for its launch at all. `PreToolUse(Agent)` only forces an
+    /// immediate sync so the indicator lights without waiting for the ambient
+    /// tail. Correlated to its [`Self::SubagentFinished`] by `tool_use_id`.
     ///
     /// The [`Self::SubagentStarted::background`] flag distinguishes the two
     /// lifecycles. A FOREGROUND (synchronous) subagent finishes when its
     /// matching `PostToolUse(Agent)` fires. A BACKGROUND subagent
-    /// (`run_in_background: true`) returns immediately at launch — its
-    /// `PostToolUse` does NOT finish it — and finishes only when its completion
+    /// (`run_in_background: true`, and always so for a forked skill) returns
+    /// immediately at launch — its `PostToolUse` does NOT finish it, and a
+    /// forked skill fires none — and finishes only when its completion
     /// `<task-notification>` is folded during transcript sync.
     SubagentStarted {
         session_id: SessionId,
-        /// The thread that launched the subagent, resolved (via
-        /// `SessionStore::in_progress_turn_thread`) the same way `TurnStarted`
-        /// resolves its thread. A BACKGROUND subagent outlives its launching
-        /// turn, so the browser needs the thread to keep that thread's running
-        /// indicator lit (and its unread badge suppressed) until the subagent
-        /// finishes — not just for the duration of the turn. The matching
-        /// [`Self::SubagentFinished`] carries no thread; the browser maps the
-        /// `tool_use_id` back to this entry's thread.
+        /// The thread that launched the subagent: the thread the fold attributed
+        /// the launch line to — the launching turn's thread for a tool call, and
+        /// for a forked skill the thread its local command was attributed to
+        /// (that command is already a finished turn). A BACKGROUND subagent
+        /// outlives its launching turn, so the browser needs the thread to keep
+        /// that thread's running indicator lit (and its unread badge suppressed)
+        /// until the subagent finishes — not just for the duration of the turn.
+        /// The matching [`Self::SubagentFinished`] carries no thread; the
+        /// browser maps the `tool_use_id` back to this entry's thread.
         thread_id: ThreadId,
-        /// The `tool_use_id` of the `Agent`/`Task` call (the correlation key).
+        /// The launch's correlation key: the `tool_use_id` of the `Agent`/`Task`
+        /// call, or the synthetic `forked-skill:<agentId>` minted for a forked
+        /// skill, which makes no tool call.
         tool_use_id: String,
-        /// The subagent type (e.g. `general-purpose`), if the call carried one.
+        /// The subagent type (e.g. `general-purpose`), a forked skill's skill
+        /// name, or `None` if the launch carried neither.
         subagent_type: Option<String>,
-        /// The short task description, if the call carried one, for display.
+        /// The short task description, if the launch carried one, for display.
         description: Option<String>,
-        /// Whether the launch carried `run_in_background: true`. A background
+        /// Whether the launch runs in the background — `run_in_background: true`
+        /// for a tool call, and always true for a forked skill. A background
         /// subagent outlives the launching turn and is finished by its
         /// completion notification, not by its immediate `PostToolUse`.
         background: bool,
     },
-    /// A subagent (the `Agent`/`Task` tool) finished running.
+    /// A subagent finished running.
     ///
     /// For a FOREGROUND subagent, detected from the main session's `PostToolUse`
-    /// hook with `tool_name` in `{Agent, Task}`. For a BACKGROUND subagent, it
-    /// is emitted when the completion `<task-notification>` is folded during
-    /// transcript sync (`Effect::SubagentCompleted`). Either way it is
-    /// correlated to its [`Self::SubagentStarted`] by `tool_use_id`; a finish
-    /// for an id that was never tracked (or was already cleared at turn end) is
-    /// a no-op and emits nothing.
+    /// hook with `tool_name` in `{Agent, Task}`. For a BACKGROUND subagent — a
+    /// `run_in_background: true` tool call, or a forked skill — it is emitted
+    /// when the completion `<task-notification>` is folded during transcript
+    /// sync (`Effect::SubagentCompleted`), or by the process-gone sweep if the
+    /// session ends before that notification can be folded (see
+    /// `sweep_running_subagents`). Either way it is correlated to its
+    /// [`Self::SubagentStarted`] by `tool_use_id`; a finish for an id that was
+    /// never tracked (or was already cleared at turn end) is a no-op and emits
+    /// nothing.
     SubagentFinished {
         session_id: SessionId,
         tool_use_id: String,

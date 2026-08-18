@@ -45,7 +45,8 @@ final: boolean, delta: string, } | { "kind": "subagent_started", session_id: str
  */
 thread_id: number, tool_use_id: string, subagent_type: string | null, description: string | null, 
 /**
- * Whether the launch carried `run_in_background: true`. A background
+ * Whether the launch runs in the background — `run_in_background: true`
+ * for a tool call, and always true for a forked skill. A background
  * subagent outlives the launching turn (the client must not sweep it at
  * turn end) and is finished by its completion notification.
  */

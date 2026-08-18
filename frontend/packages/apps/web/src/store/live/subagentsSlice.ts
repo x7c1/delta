@@ -7,11 +7,15 @@ import type { EventReducer } from './eventReducer';
 type SubagentsState = Pick<SubagentsSlice, 'runningSubagents'>;
 
 /**
- * A subagent (the `Agent`/`Task` tool) currently running inside a session's
- * turn. A subagent runs in its own transcript that Delta never tails, so the
- * conversation pane shows nothing while it works — this is the only live signal
- * that one is running, surfaced as a badge on the navigator row and an indicator
- * near the conversation tail.
+ * A subagent currently running for a session: an `Agent`/`Task` tool call the
+ * model made inside a turn, or the background agent Claude Code forks for a
+ * slash command's skill (which makes no tool call at all, so the server tracks
+ * it under a synthetic `forked-skill:<agentId>` id, and which arrives with no
+ * turn in flight — so an entry must never be scoped to one). A subagent runs in
+ * its own transcript that Delta never tails, so the conversation pane shows
+ * nothing while it works — this is the only live signal that one is running,
+ * surfaced as a badge on the navigator row and an indicator near the
+ * conversation tail.
  *
  * Added by `subagent_started`, removed by the matching `subagent_finished`
  * (correlated by {@link toolUseId}), and re-seeded from the sends envelope's
@@ -20,10 +24,11 @@ type SubagentsState = Pick<SubagentsSlice, 'runningSubagents'>;
  *
  * The {@link background} flag drives the turn-end sweep. A FOREGROUND subagent
  * is swept when the turn ends / the session closes (it cannot outlive its
- * turn). A BACKGROUND subagent (`run_in_background: true`) outlives the
- * launching turn — the immediate `subagent_finished` of the launch never
- * arrives, and its real completion (a `subagent_finished` driven by the
- * completion notification) lands much later — so the turn-end sweep KEEPS it.
+ * turn). A BACKGROUND subagent (`run_in_background: true`, and every forked
+ * skill) outlives the launching turn — the immediate `subagent_finished` of the
+ * launch never arrives, and its real completion (a `subagent_finished` driven by
+ * the completion notification) lands much later — so the turn-end sweep KEEPS
+ * it.
  */
 export interface SubagentActivity {
   /**
@@ -35,14 +40,21 @@ export interface SubagentActivity {
    * this entry is what maps the finishing `tool_use_id` back to its thread.
    */
   threadId: ThreadId;
-  /** The `Agent`/`Task` call's `tool_use_id` (its stable correlation key). */
+  /**
+   * The launch's `tool_use_id` (its stable correlation key) — synthetic for a
+   * forked skill, which has no tool call of its own.
+   */
   toolUseId: string;
-  /** The subagent type (e.g. `general-purpose`), or null if none was given. */
+  /**
+   * The subagent type (e.g. `general-purpose`), a forked skill's skill name, or
+   * null if none was given.
+   */
   subagentType: string | null;
   /** The short task description for display, or null if none was given. */
   description: string | null;
   /**
-   * Whether the launch carried `run_in_background: true`. A background subagent
+   * Whether the launch runs in the background — `run_in_background: true` for a
+   * tool call, and always true for a forked skill. A background subagent
    * survives the turn-end sweep; a foreground one is dropped at turn end.
    */
   background: boolean;
@@ -50,9 +62,11 @@ export interface SubagentActivity {
 
 export interface SubagentsSlice {
   /**
-   * The subagents currently running in each session's turn, keyed by session id
-   * and kept in start order. Added by `subagent_started`, removed by the
-   * matching `subagent_finished`, swept on turn end / close, and re-seeded from
+   * The subagents currently running for each session, keyed by session id and
+   * kept in start order — NOT scoped to a turn: a background entry (and every
+   * forked skill is one) outlives the turn that launched it. Added by
+   * `subagent_started`, removed by the matching `subagent_finished`, swept on
+   * turn end / close (foreground entries only), and re-seeded from
    * the sends envelope after a reconnect (see {@link SubagentActivity}). A
    * session with none running has no entry (the empty list is dropped).
    */
@@ -78,9 +92,10 @@ export interface SubagentsSlice {
  * Drop the FOREGROUND running subagents of one session at turn end, KEEPING any
  * background entries, and return the changed slice (empty object when nothing
  * changed). A foreground subagent cannot outlive the turn that spawned it, so
- * it is swept; a background subagent (`run_in_background: true`) deliberately
- * outlives the launching turn and is removed only by its completion
- * `subagent_finished`, so it is kept.
+ * it is swept; a background subagent (`run_in_background: true`, or a forked
+ * skill — whose launching slash-command turn is already over when the start
+ * arrives) deliberately outlives the launching turn and is removed only by its
+ * completion `subagent_finished`, so it is kept.
  */
 export function dropForegroundSubagentsForSession(
   state: SubagentsState,
@@ -138,7 +153,8 @@ export const createSubagentsSlice: StateCreator<
     }),
 });
 
-// A subagent (the `Agent`/`Task` tool) started in the main turn. It
+// A subagent started: an `Agent`/`Task` tool call inside a turn, or a
+// forked skill, which arrives with no turn in flight at all. It
 // runs in its own (untailed) transcript, so this is the only live
 // signal — add it to the session's running set so the navigator badge
 // and conversation indicator appear. Keyed by `tool_use_id`: a
@@ -169,10 +185,10 @@ export const reduceSubagentStarted: EventReducer<
   };
 };
 
-// The subagent completed (foreground `PostToolUse(Agent)`). Drop it
-// by `tool_use_id`; when it was the session's last running subagent,
-// drop the now-empty entry so the indicator disappears. A finish for
-// an id not tracked (already swept at turn end) changes nothing.
+// The subagent completed. Drop it by `tool_use_id`; when it was the
+// session's last running subagent, drop the now-empty entry so the
+// indicator disappears. A finish for an id not tracked (already swept
+// at turn end) changes nothing.
 export const reduceSubagentFinished: EventReducer<
   SubagentsState,
   'subagent_finished'

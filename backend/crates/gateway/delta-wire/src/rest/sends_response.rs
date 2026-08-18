@@ -120,8 +120,10 @@ impl From<PendingQuestion> for WirePendingQuestion {
     }
 }
 
-/// A subagent (the `Agent`/`Task` tool) currently running inside the session's
-/// turn, as reported on the REST surface.
+/// A subagent currently running for the session, as reported on the REST
+/// surface: an `Agent`/`Task` tool call inside a turn, or the background agent
+/// Claude Code forks for a slash command's skill, which runs with no turn in
+/// flight at all.
 ///
 /// The queryable counterpart of the `subagent_started` event (minus the session
 /// id the URL already names): the start/finish events are lost for a client
@@ -135,15 +137,18 @@ pub struct WireRunningSubagent {
     /// until the subagent finishes, which for a background subagent outlives the
     /// launching turn.
     pub thread_id: i64,
-    /// The `tool_use_id` of the `Agent`/`Task` call (its stable key).
+    /// The launch's `tool_use_id`, its stable key — synthetic
+    /// (`forked-skill:<agentId>`) for a forked skill, which makes no tool call.
     pub tool_use_id: String,
-    /// The subagent type (e.g. `general-purpose`), if the call carried one.
+    /// The subagent type (e.g. `general-purpose`), a forked skill's skill name,
+    /// or null if the launch carried none.
     pub subagent_type: Option<String>,
-    /// The short task description, if the call carried one, for display.
+    /// The short task description, if the launch carried one, for display.
     pub description: Option<String>,
-    /// Whether the launch carried `run_in_background: true`. A reconnecting
-    /// client carries this so its turn-end sweep keeps a surviving background
-    /// subagent while dropping foreground ones.
+    /// Whether the launch runs in the background — `run_in_background: true` for
+    /// a tool call, and always true for a forked skill. A reconnecting client
+    /// carries this so its turn-end sweep keeps a surviving background subagent
+    /// while dropping foreground ones.
     pub background: bool,
 }
 

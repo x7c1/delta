@@ -250,7 +250,7 @@ export function TranscriptPane({
       ? state.streamingMessages[activeThread.session_id] ?? null
       : null,
   );
-  // The focused session's running subagents (the `Agent`/`Task` tool), if any.
+  // The focused session's running subagents, if any.
   // A subagent runs in its own transcript Delta never tails, so nothing else
   // appears at the conversation tail while it works — this drives a small
   // running indicator near the live bubble so the user knows it is active.

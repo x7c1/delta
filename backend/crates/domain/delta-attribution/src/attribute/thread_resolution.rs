@@ -40,7 +40,7 @@ pub(super) fn resolve_line_thread(
         // caller feeds into the turn machine as a `Stop`). The correlation is
         // namespace-tolerant: Claude Code may record the command-name line in
         // its fully-qualified `/<namespace>:<command>` form (e.g.
-        // `/dev-workflow:review-pr`) even when the user — and thus the
+        // `/example:review-pr`) even when the user — and thus the
         // dispatched send — used the short `/<command>` form (`/review-pr`), so
         // matching compares BARE command names rather than raw text. The line
         // is command machinery, so it inherits `carry_thread` and never resets
@@ -143,7 +143,8 @@ pub(super) fn resolve_line_thread(
         // and `<task-id>` — and Claude Code's user-message body sometimes
         // ships only one of them. Prefer `<tool-use-id>` (the existing key,
         // recorded at launch time); fall back to `<task-id>` (recorded
-        // later via `PostToolUse(Agent)`). A match consumes the entry and
+        // later via `PostToolUse(Agent)` for a tool launch, already at
+        // launch for a forked skill). A match consumes the entry and
         // emits `SubagentCompleted` so the persisted correlation is
         // cleared. When neither key matches a recorded launch — the launch
         // fell in an earlier window no longer seeded into

@@ -390,6 +390,7 @@ fn a_background_task_completion_is_attributed_to_its_launching_thread() {
             Effect::SubagentLaunched {
                 tool_use_id: "toolu-bg".into(),
                 thread_id: CHILD,
+                task_id: None,
             },
             Effect::SubagentIndicatorStarted {
                 tool_use_id: "toolu-bg".into(),
@@ -433,6 +434,7 @@ fn a_denied_background_launch_completes_from_its_errored_tool_result() {
             Effect::SubagentLaunched {
                 tool_use_id: "toolu-bg".into(),
                 thread_id: MAIN,
+                task_id: None,
             },
             Effect::SubagentIndicatorStarted {
                 tool_use_id: "toolu-bg".into(),
@@ -574,6 +576,7 @@ fn a_modern_agent_tool_use_with_no_run_in_background_flag_is_treated_as_backgrou
             Effect::SubagentLaunched {
                 tool_use_id: "toolu-modern".into(),
                 thread_id: CHILD,
+                task_id: None,
             },
             Effect::SubagentIndicatorStarted {
                 tool_use_id: "toolu-modern".into(),
@@ -616,6 +619,7 @@ fn a_task_notification_carrying_only_task_id_resolves_via_the_tool_result_upgrad
             Effect::SubagentLaunched {
                 tool_use_id: "toolu-bg".into(),
                 thread_id: MAIN,
+                task_id: None,
             },
             Effect::SubagentIndicatorStarted {
                 tool_use_id: "toolu-bg".into(),
@@ -660,6 +664,7 @@ fn a_task_notification_carrying_only_tool_use_id_still_completes() {
             Effect::SubagentLaunched {
                 tool_use_id: "toolu-bg".into(),
                 thread_id: MAIN,
+                task_id: None,
             },
             Effect::SubagentIndicatorStarted {
                 tool_use_id: "toolu-bg".into(),
@@ -855,7 +860,7 @@ fn a_local_command_group_folds_to_meta_resolves_its_send_and_ends_the_turn() {
 fn a_namespaced_local_command_name_line_matches_a_short_form_send() {
     // Like the previous test, but the user typed the SHORT form `/review-pr`
     // (so Delta dispatched send 7 with that exact text) while Claude expanded it
-    // to its fully-qualified namespaced form `/dev-workflow:review-pr` in the
+    // to its fully-qualified namespaced form `/example:review-pr` in the
     // transcript command-name line. A raw-text equality would fail to correlate
     // and leave send 7 wedged forever; the bare-command-name correlation must
     // match the two forms and end the turn exactly as the short-vs-short case.
@@ -865,7 +870,7 @@ fn a_namespaced_local_command_name_line_matches_a_short_form_send() {
         AttributionState::new(MAIN, Some(send(7, MAIN, "/review-pr"))),
         vec![
             local_command_caveat_line("caveat", "pcmd"),
-            local_command_name_line("cmdname", "pcmd", "/dev-workflow:review-pr"),
+            local_command_name_line("cmdname", "pcmd", "/example:review-pr"),
             local_command_stdout_line("stdout", "pcmd"),
         ],
     );
@@ -1184,4 +1189,217 @@ fn a_real_prompt_after_a_local_command_is_an_ordinary_user_turn() {
         ]
     );
     assert!(outcome.state.outstanding.is_empty());
+}
+
+// --- Forked skills -------------------------------------------------------------
+
+#[test]
+fn a_forked_skill_launch_lights_a_background_indicator_and_records_the_launch() {
+    // The reported bug: a session started with a slash command that forks its
+    // skill into a background agent (`/review-pr`, recorded as
+    // `/example:review-pr`) showed NO running indicator for the minutes
+    // the skill worked. The forked skill is launched by the CLI harness, not
+    // by the model, so the parent transcript carries no `tool_use` block at
+    // all — only the `<forked-skill-launch>` element on the local-command
+    // system line. Folding that element must record the launch (so the later
+    // `<task-notification>` correlates back) AND light a BACKGROUND indicator
+    // (so it survives the degenerate turn end the same group emits).
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(MAIN, Some(send(7, MAIN, "/review-pr"))),
+        vec![
+            local_command_caveat_line("caveat", "pcmd"),
+            local_command_name_line("cmdname", "pcmd", "/example:review-pr"),
+            forked_skill_launch_line("forked", "a7046b32df40e1b3e", "example:review-pr"),
+        ],
+    );
+
+    assert_eq!(
+        outcome.effects,
+        vec![
+            Effect::SendMatched {
+                send_id: 7,
+                matched_uuid: MessageUuid::from("cmdname"),
+            },
+            Effect::LocalCommandTurnEnded,
+            Effect::SubagentLaunched {
+                tool_use_id: "forked-skill:a7046b32df40e1b3e".into(),
+                thread_id: MAIN,
+                // The forked skill knows its background-task id up front: the
+                // payload's `agentId` IS the `<task-id>` its completion
+                // notification will carry.
+                task_id: Some("a7046b32df40e1b3e".into()),
+            },
+            Effect::SubagentIndicatorStarted {
+                tool_use_id: "forked-skill:a7046b32df40e1b3e".into(),
+                thread_id: MAIN,
+                subagent_type: Some("example:review-pr".into()),
+                description: Some("/example:review-pr".into()),
+                background: true,
+            },
+        ]
+    );
+    // The launch is seeded with its task_id, so a notification folded in the
+    // SAME window matches by `<task-id>` without any store round-trip.
+    assert_eq!(
+        outcome
+            .state
+            .launched_threads
+            .get("forked-skill:a7046b32df40e1b3e")
+            .and_then(|launch| launch.task_id.clone()),
+        Some("a7046b32df40e1b3e".into())
+    );
+    // The launch line is machinery: it never tears the turn off its thread.
+    assert_eq!(outcome.state.carry_thread, MAIN);
+}
+
+#[test]
+fn a_forked_skill_launch_is_attributed_to_the_launching_thread() {
+    // The launching thread is `carry_thread` — the thread the group's lines and
+    // the later `<task-notification>` are attributed to — so the indicator, the
+    // messages and the unread suppression all agree even when the command was
+    // run from a sub-thread.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(CHILD, None),
+        vec![forked_skill_launch_line(
+            "forked",
+            "agent-1",
+            "example:review-pr",
+        )],
+    );
+
+    assert_eq!(message(&outcome, "forked").thread_id, CHILD);
+    assert_eq!(
+        outcome.effects,
+        vec![
+            Effect::SubagentLaunched {
+                tool_use_id: "forked-skill:agent-1".into(),
+                thread_id: CHILD,
+                task_id: Some("agent-1".into()),
+            },
+            Effect::SubagentIndicatorStarted {
+                tool_use_id: "forked-skill:agent-1".into(),
+                thread_id: CHILD,
+                subagent_type: Some("example:review-pr".into()),
+                description: Some("/example:review-pr".into()),
+                background: true,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_forked_skill_completion_notification_clears_the_launch_by_task_id() {
+    // The real forked-skill completion shape: a `<task-notification>` carrying
+    // only `<task-id>` (the `agentId`), no `<tool-use-id>` — there never was a
+    // tool_use. It must resolve against the launch seeded above and emit
+    // `SubagentCompleted` keyed by the SAME synthetic id the indicator was lit
+    // under, so the running entry is finished.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(MAIN, None),
+        vec![
+            forked_skill_launch_line("forked", "agent-1", "example:review-pr"),
+            task_notification_line_with_task_id_only("u-note", "agent-1"),
+            assistant_line("a-after", "the review landed"),
+        ],
+    );
+
+    assert_eq!(
+        outcome.effects.last(),
+        Some(&Effect::SubagentCompleted {
+            tool_use_id: "forked-skill:agent-1".into(),
+        })
+    );
+    assert!(
+        outcome.state.launched_threads.is_empty(),
+        "the completion consumed the forked-skill launch"
+    );
+}
+
+#[test]
+fn a_line_with_no_forked_skill_launch_element_emits_no_launch_effects() {
+    // The ordinary local-command group — a slash command that does NOT fork a
+    // skill — must stay exactly as it was: a degenerate finished turn with no
+    // subagent effects whatsoever.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(MAIN, None),
+        vec![
+            local_command_caveat_line("caveat", "pcmd"),
+            local_command_name_line("cmdname", "pcmd", "/review-pr"),
+            local_command_stdout_line("stdout", "pcmd"),
+        ],
+    );
+
+    assert!(
+        outcome.effects.is_empty(),
+        "a local command with no forked-skill launch emits nothing, got {:?}",
+        outcome.effects
+    );
+    assert!(outcome.state.launched_threads.is_empty());
+}
+
+#[test]
+fn a_forked_skill_launch_with_an_unusable_body_emits_no_launch_effects() {
+    // Both degenerate bodies: unparsable JSON, and JSON naming no `agentId`.
+    // Without the correlation key nothing can be tracked, so the fold must
+    // stay silent rather than mint a launch that can never be completed.
+    for body in [
+        "not json at all",
+        r#"{"skillName":"example:review-pr"}"#,
+        r#"{"agentId":""}"#,
+    ] {
+        let outcome = attribute_lines(
+            &session(),
+            MAIN,
+            AttributionState::new(MAIN, None),
+            vec![forked_skill_launch_line_with_body("forked", body)],
+        );
+        assert!(
+            outcome.effects.is_empty(),
+            "body {body:?} must emit no effects, got {:?}",
+            outcome.effects
+        );
+        assert!(outcome.state.launched_threads.is_empty());
+    }
+}
+
+#[test]
+fn a_quoted_forked_skill_element_on_a_human_or_assistant_line_mints_no_launch() {
+    // The payload is plain text, so a human prompt or an assistant reply can
+    // QUOTE it — and in practice does: Delta is developed inside Delta, and its
+    // own task docs and test fixtures carry a verbatim
+    // `<forked-skill-launch>` element that a session working on this repo
+    // routinely reads back into the transcript. Only the harness-written
+    // `local_command` line (`Role::Meta` after parsing) may light an indicator:
+    // a launch minted from a quote would be BACKGROUND, so it would survive
+    // every turn-end sweep and stay lit until the session closed, with no
+    // `<task-notification>` able to ever clear it.
+    let quoted = "look at this line: <forked-skill-launch>\
+                  {\"agentId\":\"a7046b32df40e1b3e\",\
+                  \"skillName\":\"example:review-pr\"}</forked-skill-launch>";
+    for line in [
+        user_line("u-quote", quoted),
+        assistant_line("a-quote", quoted),
+    ] {
+        let uuid = line.uuid.clone();
+        let outcome = attribute_lines(
+            &session(),
+            MAIN,
+            AttributionState::new(MAIN, None),
+            vec![line],
+        );
+        assert!(
+            outcome.effects.is_empty(),
+            "a quoted element on {uuid:?} must emit no effects, got {:?}",
+            outcome.effects
+        );
+        assert!(outcome.state.launched_threads.is_empty());
+    }
 }
