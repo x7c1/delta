@@ -217,26 +217,33 @@ where
                 Effect::SubagentLaunched {
                     tool_use_id,
                     thread_id,
+                    task_id,
                 } => {
                     // Persist the launching thread so a completion notification
                     // landing in a later sync window can be attributed to it.
                     self.store
                         .record_subagent_launch(session_id, &tool_use_id, thread_id)
                         .await?;
-                    // For a background subagent the immediate `PostToolUse`
-                    // hook may have ALREADY arrived (and likely has — the call
-                    // returned synchronously at launch). The hook recorded the
-                    // launching tool's `agentId` on the in-memory running entry
-                    // but could not yet persist it on the launch row, which did
-                    // not exist until just now. Flush that pending upgrade so a
-                    // later `<task-notification>` whose `<tool-use-id>` element
-                    // was stripped can still match by `<task-id>` from the
-                    // reseeded launch map.
-                    if let Some(task_id) = self
-                        .state
-                        .pending_subagent_task_id(&tool_use_id)
-                        .map(str::to_owned)
-                    {
+                    // The background-task id, from whichever source knows it.
+                    // A FORKED SKILL knows it at launch (its
+                    // `<forked-skill-launch>` payload carries `agentId`), so
+                    // the effect ships it and the row is complete in one step.
+                    // For a TOOL-launched background subagent the immediate
+                    // `PostToolUse` hook may have ALREADY arrived (and likely
+                    // has — the call returned synchronously at launch): the
+                    // hook recorded the launching tool's `agentId` on the
+                    // in-memory running entry but could not yet persist it on
+                    // the launch row, which did not exist until just now.
+                    // Either way the row must end up carrying it, so a later
+                    // `<task-notification>` whose `<tool-use-id>` element was
+                    // stripped can still match by `<task-id>` from the reseeded
+                    // launch map.
+                    let task_id = task_id.or_else(|| {
+                        self.state
+                            .pending_subagent_task_id(&tool_use_id)
+                            .map(str::to_owned)
+                    });
+                    if let Some(task_id) = task_id {
                         self.store
                             .upgrade_subagent_task_id(session_id, &tool_use_id, &task_id)
                             .await?;
@@ -250,13 +257,16 @@ where
                     background,
                 } => {
                     // Parent transcript ingest is the source of truth for the
-                    // running-subagent indicator. The matching `tool_use` block
-                    // only appears in the parent's JSONL when the launch is a
-                    // PARENT launch (a nested subagent's tool_use is written to
-                    // the subagent's own JSONL, not the parent's), so this path
-                    // can never light a parent indicator for a nested launch —
-                    // which is what made the older PreToolUse-driven mechanism
-                    // get stuck for depth>=2 subagent trees.
+                    // running-subagent indicator — for the model's `Agent`/`Task`
+                    // calls and for a forked skill alike (the latter writes no
+                    // tool_use, only a `<forked-skill-launch>` element the fold
+                    // reads). The matching launch signal only appears in the
+                    // parent's JSONL when the launch is a PARENT launch (a nested
+                    // subagent's tool_use is written to the subagent's own JSONL,
+                    // not the parent's), so this path can never light a parent
+                    // indicator for a nested launch — which is what made the older
+                    // PreToolUse-driven mechanism get stuck for depth>=2 subagent
+                    // trees.
                     //
                     // `start_subagent` de-duplicates by `tool_use_id`, so
                     // re-ingesting the same line (e.g. after a cursor rewind in
@@ -317,12 +327,14 @@ where
                     self.store
                         .clear_subagent_launch(session_id, &tool_use_id)
                         .await?;
-                    // This is the BACKGROUND subagent's end signal. A background
-                    // `Agent`/`Task` was started by `PreToolUse` and survived its
-                    // immediate `PostToolUse` and the turn-end sweep; its
-                    // completion `<task-notification>` is what finishes it. Drop
-                    // the running entry and broadcast `SubagentFinished` so the
-                    // navigator badge / conversation indicator clears. The finish
+                    // This is the BACKGROUND subagent's end signal, for both
+                    // launch kinds: a background `Agent`/`Task` (lit by the
+                    // ingest of its tool_use above) survived its immediate
+                    // `PostToolUse` and the turn-end sweep, and a forked skill
+                    // fires no `PostToolUse` at all — for either, the completion
+                    // `<task-notification>` is what finishes it. Drop the running
+                    // entry and broadcast `SubagentFinished` so the navigator
+                    // badge / conversation indicator clears. The finish
                     // is id-keyed and kind-agnostic, so a background `Bash`
                     // (which also yields `SubagentCompleted` but never STARTED an
                     // indicator) is a harmless no-op here.

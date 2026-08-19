@@ -281,6 +281,34 @@ pub(crate) fn local_command_stdout_line(uuid: &str, prompt_id: &str) -> Transcri
     }
 }
 
+/// The `type: "system"` / `subtype: "local_command"` line Claude Code writes
+/// when a slash command forks its skill into a BACKGROUND agent (e.g.
+/// `/review-pr`, recorded as `/example:review-pr`). The gateway parser
+/// folds that subtype to `Role::Meta` and surfaces its top-level `content`, so
+/// this mirrors the parsed shape: the command's `<local-command-stdout>`
+/// followed by the `<forked-skill-launch>` element carrying the launch payload.
+/// The real line carries no `promptId` (so it is not a member of the
+/// local-command group), which this builder reproduces.
+pub(crate) fn forked_skill_launch_line(
+    uuid: &str,
+    agent_id: &str,
+    skill_name: &str,
+) -> TranscriptMessage {
+    TranscriptMessage {
+        role: Role::Meta,
+        ..user_line(
+            uuid,
+            &format!(
+                "<local-command-stdout>Running in the background as @{skill_name}\
+                 </local-command-stdout>\n\
+                 <forked-skill-launch>{{\"agentId\":\"{agent_id}\",\
+                 \"skillName\":\"{skill_name}\",\
+                 \"description\":\"/{skill_name}\"}}</forked-skill-launch>"
+            ),
+        )
+    }
+}
+
 /// The unknown-command notice Claude Code writes when the user types a slash
 /// command it does not recognize (e.g. `/review-pr` when no such command
 /// exists): a `type: "system"` / `subtype: "informational"` line whose top-level

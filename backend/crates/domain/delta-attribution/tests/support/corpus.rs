@@ -124,6 +124,11 @@ pub enum GoldenEffect {
     SubagentLaunched {
         tool_use_id: String,
         thread_id: i64,
+        /// Present only for a launch that already knows its background-task id
+        /// (a forked skill); a `tool_use`-driven launch learns it later, so it
+        /// is omitted from the golden file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task_id: Option<String>,
     },
     SubagentCompleted {
         tool_use_id: String,
@@ -181,9 +186,11 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                 Effect::SubagentLaunched {
                     tool_use_id,
                     thread_id,
+                    task_id,
                 } => GoldenEffect::SubagentLaunched {
                     tool_use_id: tool_use_id.clone(),
                     thread_id: thread_id.value(),
+                    task_id: task_id.clone(),
                 },
                 Effect::SubagentCompleted { tool_use_id } => GoldenEffect::SubagentCompleted {
                     tool_use_id: tool_use_id.clone(),

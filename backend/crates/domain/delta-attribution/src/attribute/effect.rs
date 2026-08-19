@@ -53,26 +53,47 @@ pub enum Effect {
         send_id: i64,
         matched_uuid: MessageUuid,
     },
-    /// A background task (an async-by-default `Agent`/`Task`, or a Bash with
-    /// `run_in_background: true`) was first seen launching on an assistant
-    /// line: persist `(tool_use_id -> thread_id)` so its later
-    /// `<task-notification>` — which may arrive in a different sync window —
-    /// can be attributed back to the launching thread.
+    /// A background task was first seen launching: persist
+    /// `(tool_use_id -> thread_id)` so its later `<task-notification>` — which
+    /// may arrive in a different sync window — can be attributed back to the
+    /// launching thread. Two shapes reach here:
+    ///
+    /// - an async-by-default `Agent`/`Task`, or a Bash with
+    ///   `run_in_background: true`, seen as a `tool_use` block on an assistant
+    ///   line; and
+    /// - a **forked skill**, launched by the CLI harness itself when a slash
+    ///   command runs its skill in the background. It writes no `tool_use`
+    ///   block at all — only a `<forked-skill-launch>` element on the
+    ///   local-command system line — so its `tool_use_id` is synthesized from
+    ///   the payload's `agentId` (see
+    ///   [`claude_format::ForkedSkillLaunch::tool_use_id`]).
+    ///
+    /// `task_id` is the background-task identifier when the launch ALREADY
+    /// knows it — the forked-skill payload carries its `agentId` up front. It
+    /// is `None` for a `tool_use`-driven launch, which learns the id only
+    /// later from the launching tool's `tool_result` (via the
+    /// `PostToolUse(Agent)` hook, or the fold-time recovery that mirrors it).
+    ///
+    /// [`claude_format::ForkedSkillLaunch::tool_use_id`]: crate::claude_format::ForkedSkillLaunch::tool_use_id
     SubagentLaunched {
         tool_use_id: String,
         thread_id: ThreadId,
+        task_id: Option<String>,
     },
     /// A background task's `<task-notification>` was folded and matched a
     /// recorded launch: clear the persisted `(tool_use_id -> thread_id)`
     /// correlation now that it has been consumed.
     SubagentCompleted { tool_use_id: String },
-    /// An `Agent`/`Task` tool_use block was seen in the PARENT session's
-    /// transcript: light up the running-subagent indicator for it. Emitted
-    /// regardless of `run_in_background` — a foreground subagent and a
-    /// background one both need the indicator while they run, and they only
-    /// differ in how the indicator is cleared (the matching `PostToolUse` for a
-    /// foreground entry, the completion `<task-notification>` for a background
-    /// one).
+    /// A subagent launch was seen in the PARENT session's transcript: light up
+    /// the running-subagent indicator for it. Two signals produce it — an
+    /// `Agent`/`Task` tool_use block, and the `<forked-skill-launch>` element a
+    /// slash command's background skill is launched by (which writes no
+    /// tool_use at all). A tool_use is emitted regardless of
+    /// `run_in_background` — a foreground subagent and a background one both
+    /// need the indicator while they run, and they only differ in how the
+    /// indicator is cleared (the matching `PostToolUse` for a foreground entry,
+    /// the completion `<task-notification>` for a background one); a forked
+    /// skill is always background.
     ///
     /// This is the parent-transcript-driven source of truth for the indicator,
     /// replacing the older PreToolUse-driven mechanism. A nested subagent's own

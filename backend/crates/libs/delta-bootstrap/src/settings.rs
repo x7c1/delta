@@ -93,11 +93,11 @@ pub fn render_session_settings(port: u16) -> String {
                 ]
             }],
             // PostToolUse fires when a tool call completes. Delta acts on it
-            // only for the subagent (`Agent`/`Task`) case: paired with the
-            // PreToolUse start, it bounds the window a subagent is running so
-            // the browser can show a running indicator while the subagent works
-            // in its own (untailed) transcript. Every other tool's PostToolUse
-            // is an empty 200.
+            // only for the subagent (`Agent`/`Task`) case: it closes a
+            // FOREGROUND subagent's running indicator, and for a background
+            // launch (which returns at once) it records the `agentId` that the
+            // later completion notification is matched by. Every other tool's
+            // PostToolUse is an empty 200.
             "PostToolUse": [{
                 "matcher": "*",
                 "hooks": [

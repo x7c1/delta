@@ -178,10 +178,13 @@ Request:
 
 Fires for every tool call, before it runs. Delta records the request — the
 payload carries the `tool_use_id` needed to resolve the resulting notice later —
-and detects a subagent (the `Agent`/`Task` tool) starting, broadcasting
-`subagent_started` so the browser can show a running indicator while it works in
-its own, untailed transcript. This hook never returns allow/deny: the TUI owns
-that decision, and the browser is notified by
+and, for an `Agent`/`Task` call, syncs the transcript immediately so the
+browser's running indicator lights up without waiting for the next ambient sync.
+That parent-transcript ingest — not this hook — is what broadcasts
+`subagent_started`, which is how a forked skill (a slash command's background
+skill) lights the indicator too: its launch is no tool call, so it fires no
+`PreToolUse` for the browser to learn about. This hook never returns allow/deny:
+the TUI owns that decision, and the browser is notified by
 [`POST /hooks/permission-request`](#post-hookspermission-request) instead — which
 fires only when a dialog actually appears.
 
@@ -205,9 +208,12 @@ notice auto-cleared.
 ### `POST /hooks/post-tool-use`
 
 Fires when a tool call completes, carrying the same `tool_use_id` its
-`PreToolUse` carried. Delta acts on it only for the subagent case: it closes that
-subagent's running window and broadcasts `subagent_finished`. Every other tool's
-`PostToolUse` changes no runtime state.
+`PreToolUse` carried. Delta acts on it only for the subagent case: a FOREGROUND
+subagent's running window is closed and `subagent_finished` broadcast, while a
+background launch — whose call returns immediately, so this fires long before the
+work ends — instead has the `agentId` from its `tool_response` recorded as the
+fallback correlation key its completion notification is matched by. Every other
+tool's `PostToolUse` changes no runtime state.
 
 Request:
 

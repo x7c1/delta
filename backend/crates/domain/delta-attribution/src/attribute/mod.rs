@@ -7,12 +7,15 @@
 //! large per-line phases it delegates to — `content_blocks` (permission /
 //! background-launch / indicator handling for a line's content blocks) and
 //! `thread_resolution` (the thread the line is attributed to, and the send /
-//! subagent effects that follow).
+//! subagent effects that follow) — plus `forked_skill`, the harness-launched
+//! background agent a slash command's skill runs as, which writes no
+//! `tool_use` block for `content_blocks` to see.
 
 mod attribute_lines;
 mod attributed;
 mod content_blocks;
 mod effect;
+mod forked_skill;
 mod outstanding_send;
 mod state;
 mod subagent_launch;
