@@ -6,6 +6,7 @@ use crate::claude_format;
 use crate::transcript_message::TranscriptMessage;
 
 use super::content_blocks::process_content_blocks;
+use super::forked_skill::process_forked_skill_launch;
 use super::thread_resolution::resolve_line_thread;
 use super::{Attributed, AttributionState, Effect};
 
@@ -43,7 +44,8 @@ use super::{Attributed, AttributionState, Effect};
 ///   Recent Claude Code versions sometimes drop `<tool-use-id>` from the
 ///   notification body while keeping `<task-id>`, so the lookup falls back to
 ///   the `<task-id>` element matched against each entry's persisted `task_id`
-///   (learned at `PostToolUse(Agent)` time). Only when neither key matches a
+///   (learned at `PostToolUse(Agent)` time for a tool launch, and already known
+///   at launch for a forked skill). Only when neither key matches a
 ///   recorded launch (the launch fell in an earlier, no-longer-seeded window,
 ///   or both elements were stripped) does it fall back to inheriting
 ///   `carry_thread`.
@@ -55,6 +57,14 @@ use super::{Attributed, AttributionState, Effect};
 /// thread) and emitted as [`Effect::SubagentLaunched`] for the caller to
 /// persist; the matching notification later clears it via
 /// [`Effect::SubagentCompleted`].
+///
+/// A **forked skill** — the background agent the CLI harness starts for a slash
+/// command whose skill runs in the background — reaches the same effects from a
+/// different signal: it writes no `tool_use` block at all, only a
+/// `<forked-skill-launch>` element on the command's system line (see
+/// [`process_forked_skill_launch`]). Its `agentId` is known at launch, so the
+/// `SubagentLaunched` it emits already carries the `task_id` its completion
+/// `<task-notification>` will be matched by.
 pub fn attribute_lines(
     session_id: &SessionId,
     main_thread: ThreadId,
@@ -114,6 +124,20 @@ pub fn attribute_lines(
             && !trimmed_content.is_empty();
 
         process_content_blocks(&mut state, &mut effects, &line.content);
+
+        // A forked skill writes no `tool_use` block, so the pass above cannot
+        // see it — only its `<forked-skill-launch>` element can. Pass the
+        // PARSED `line.role`, not the reclassified `role`: the gate must see
+        // the harness's own `Role::Meta` line, so an element merely QUOTED on a
+        // human or assistant line cannot mint a phantom, never-completing
+        // launch.
+        process_forked_skill_launch(
+            session_id,
+            &mut state,
+            &mut effects,
+            line.role,
+            trimmed_content,
+        );
 
         // A genuine human turn is a user line with author-written text.
         // Claude delivers tool results as `role: user` lines too, but those

@@ -1,12 +1,15 @@
-//! [`RunningSubagent`]: the subagents (`Agent`/`Task` tool calls) currently
-//! running in the session's turn, and their start/finish/upgrade tracking.
+//! [`RunningSubagent`]: the subagents currently running for the session — the
+//! model's `Agent`/`Task` tool calls, and the background agent a slash
+//! command's skill is forked into — and their start/finish/upgrade tracking.
 
 use delta_model::ThreadId;
 
 use super::SessionRuntime;
 
-/// A subagent (the `Agent`/`Task` tool) currently running inside the session's
-/// main turn.
+/// A subagent currently running for the session: an `Agent`/`Task` tool call
+/// the model made inside a turn, or the background agent Claude Code forked for
+/// a slash command's skill — which runs with no turn in flight at all (see
+/// below), so this type is not scoped to the in-flight turn.
 ///
 /// A subagent runs in its own transcript that Delta never tails, so the main
 /// conversation pane shows nothing while it works. This is the queryable
@@ -30,13 +33,23 @@ use super::SessionRuntime;
 /// `Effect::SubagentCompleted`). The [`Self::background`] flag drives both
 /// distinctions.
 ///
+/// A **forked skill** — the background agent Claude Code starts for a slash
+/// command whose skill runs in the background — is always a background entry,
+/// and its lifecycle matters most: the local command that launched it is folded
+/// as a degenerate, already-finished turn, so the turn-based half of the running
+/// indicator is legitimately dark and this entry is the ONLY thing keeping the
+/// session's row lit while the skill works. It fires no `PreToolUse` /
+/// `PostToolUse` at all (there is no tool call), so it is started by the fold of
+/// its `<forked-skill-launch>` element and finished by its `<task-notification>`.
+///
 /// [`PendingPermission`]: super::PendingPermission
 /// [`PendingQuestion`]: super::PendingQuestion
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningSubagent {
-    /// The thread that launched the subagent, resolved (via
-    /// `SessionStore::in_progress_turn_thread`) the same way the in-flight
-    /// turn's thread is. A reconnecting client carries this so it can keep the
+    /// The thread that launched the subagent — the thread the transcript fold
+    /// attributed the launch line to, which for a forked skill is the thread of
+    /// its already-finished local command rather than any in-flight turn's.
+    /// A reconnecting client carries this so it can keep the
     /// launching thread's running indicator lit — and its unread badge
     /// suppressed — until the subagent finishes, which for a BACKGROUND
     /// subagent outlives the launching turn.
@@ -44,25 +57,31 @@ pub struct RunningSubagent {
     /// The `tool_use_id` of the `Agent`/`Task` call, the primary key that
     /// finishes it — the matching `PostToolUse` for a foreground entry, or the
     /// completion `<task-notification>` carrying this same id for a background
-    /// entry.
+    /// entry. A forked skill makes no tool call, so its key is the synthetic
+    /// `forked-skill:<agentId>` the fold mints from its launch payload.
     pub tool_use_id: String,
-    /// The background-task identifier the launching tool's `tool_result`
-    /// reports for a BACKGROUND subagent. Learned via the `PostToolUse(Agent)`
-    /// hook (which reads `agentId` from the result content) and used as a
+    /// The background-task identifier of a BACKGROUND subagent. For a tool
+    /// call it is reported by the launching tool's `tool_result`, learned via
+    /// the `PostToolUse(Agent)` hook (which reads `agentId` from the result
+    /// content); a forked skill's launch payload carries it up front. Used as a
     /// fallback correlation key when matching a `<task-notification>` whose
     /// `<tool-use-id>` element was stripped from the user-message body — the
     /// notification's `<task-id>` element still routes back here. `None` until
     /// that hook has run, and stays `None` for foreground subagents (their
-    /// `PostToolUse` finishes the entry directly, so the fallback key is
-    /// never needed).
+    /// `PostToolUse` finishes the entry directly, so the fallback key is never
+    /// needed) and for a forked skill (whose id is persisted straight onto the
+    /// launch row at launch — that row is where the fallback lookup reads it
+    /// from, so the running entry itself never needs a copy).
     pub task_id: Option<String>,
     /// The subagent type from the tool input (e.g. `general-purpose`), if the
-    /// call carried one.
+    /// launch carried one; a forked skill reports its skill name here (e.g.
+    /// `example:review-pr`).
     pub subagent_type: Option<String>,
-    /// The short task description from the tool input, if the call carried one,
-    /// for display next to the indicator.
+    /// The short task description from the launch, if it carried one, for
+    /// display next to the indicator.
     pub description: Option<String>,
-    /// Whether the launch carried `run_in_background: true`. A background
+    /// Whether the launch runs in the background — `run_in_background: true`
+    /// for a tool call, and always true for a forked skill. A background
     /// subagent survives the immediate `PostToolUse` and the turn-end sweep; a
     /// foreground one is finished on its `PostToolUse` and swept at turn end.
     pub background: bool,
@@ -97,13 +116,16 @@ impl SessionRuntime {
         std::mem::take(&mut self.running_subagents)
     }
 
-    /// Record a subagent (`Agent`/`Task` tool call) as started, returning
-    /// whether it was newly added.
+    /// Record a subagent as started — an `Agent`/`Task` tool call, or a forked
+    /// skill under its synthetic `forked-skill:<agentId>` id — returning whether
+    /// it was newly added.
     ///
-    /// Keyed by `tool_use_id`: a duplicate `PreToolUse` for an already-tracked
-    /// id is a no-op (returns `false`), so a retried hook delivery cannot list
-    /// the same subagent twice. New entries are appended so the set stays in
-    /// start order for display.
+    /// Keyed by `tool_use_id`: a start for an already-tracked id is a no-op
+    /// (returns `false`). Both start signals are folded out of the parent
+    /// transcript, so this is what makes re-ingesting a launch line (a cursor
+    /// rewind after a restart, say) idempotent rather than listing the same
+    /// subagent twice. New entries are appended so the set stays in start order
+    /// for display.
     pub fn start_subagent(&mut self, subagent: RunningSubagent) -> bool {
         if self
             .running_subagents

@@ -307,6 +307,44 @@ pub fn local_command_stdout_line(uuid: &str, prompt_id: &str) -> TranscriptMessa
     )
 }
 
+/// The `type: "system"` / `subtype: "local_command"` line Claude Code writes
+/// when a slash command forks its skill into a BACKGROUND agent (e.g.
+/// `/review-pr`, recorded as `/example:review-pr`). The gateway parser
+/// folds the subtype to `Role::Meta` and surfaces the top-level `content`, so
+/// this mirrors the parsed shape: the command's `<local-command-stdout>` plus
+/// the `<forked-skill-launch>` element carrying the launch payload.
+///
+/// It deliberately carries NO `promptId` — the real line does not — so it is
+/// not a member of the local-command `promptId` group, and the fold must
+/// recognize it by content alone.
+pub fn forked_skill_launch_line(uuid: &str, agent_id: &str, skill_name: &str) -> TranscriptMessage {
+    meta_line(
+        uuid,
+        &format!(
+            "<local-command-stdout>Running in the background as @{skill_name}\
+             </local-command-stdout>\n\
+             <forked-skill-launch>{{\"agentId\":\"{agent_id}\",\
+             \"skillName\":\"{skill_name}\",\
+             \"description\":\"/{skill_name}\"}}</forked-skill-launch>"
+        ),
+    )
+}
+
+/// A `<forked-skill-launch>` line whose element body Delta cannot use: the
+/// caller supplies the raw body (malformed JSON, or JSON naming no `agentId`).
+/// Without the correlation key nothing can be tracked, so the fold must emit
+/// no effects — and log, so a Claude Code format change surfaces there rather
+/// than as a silently dark indicator.
+pub fn forked_skill_launch_line_with_body(uuid: &str, body: &str) -> TranscriptMessage {
+    meta_line(
+        uuid,
+        &format!(
+            "<local-command-stdout>Running in the background</local-command-stdout>\n\
+             <forked-skill-launch>{body}</forked-skill-launch>"
+        ),
+    )
+}
+
 /// The unknown-command notice Claude Code writes when the user types a slash
 /// command it does not recognize (e.g. `/review-pr` when no such command
 /// exists): a `type: "system"` / `subtype: "informational"` line whose top-level

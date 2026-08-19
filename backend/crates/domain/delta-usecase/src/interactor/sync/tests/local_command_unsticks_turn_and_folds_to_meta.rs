@@ -116,7 +116,7 @@ async fn local_command_unsticks_turn_and_folds_to_meta() {
 
 /// Namespace variant of the above: the user typed the SHORT form `/review-pr`
 /// (so Delta dispatched a send with that exact text), but Claude Code expands it
-/// to its fully-qualified namespaced form `/dev-workflow:review-pr` in the
+/// to its fully-qualified namespaced form `/example:review-pr` in the
 /// transcript command-name line. A raw-text correlation would never match, so
 /// the send would wedge the single-outstanding queue forever. The
 /// bare-command-name correlation must still consume the send, release the queued
@@ -147,7 +147,7 @@ async fn namespaced_local_command_unsticks_short_form_send_and_folds_to_meta() {
     ix.transcript_fake().push(local_command_name_line(
         "cmdname",
         "pcmd",
-        "/dev-workflow:review-pr",
+        "/example:review-pr",
     ));
     ix.transcript_fake()
         .push(local_command_stdout_line("stdout", "pcmd"));

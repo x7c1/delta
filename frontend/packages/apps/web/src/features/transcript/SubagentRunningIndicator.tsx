@@ -2,7 +2,7 @@ import { Spinner } from '@delta/ui-kit';
 import type { SubagentActivity } from '../../store/liveStore';
 
 export interface SubagentRunningIndicatorProps {
-  /** The subagents running in the focused session's turn, oldest first. */
+  /** The subagents running for the thread in view, oldest first. */
   subagents: SubagentActivity[];
 }
 
@@ -15,7 +15,7 @@ function subagentLabel(subagent: SubagentActivity): string {
 
 /**
  * A small "subagent running" indicator shown at the conversation tail while one
- * or more subagents (the `Agent`/`Task` tool) work.
+ * or more subagents work.
  *
  * A subagent runs in its own transcript that Delta never tails, so nothing else
  * appears in the conversation pane while it works — without this the user would
@@ -32,8 +32,8 @@ export function SubagentRunningIndicator({
   }
   return (
     // Left-indented (`ml-6`) to line up with the tool-call cards in the
-    // transcript: the running subagent is itself a tool (`Agent`/`Task`) in
-    // flight, so it reads as a nested step rather than top-level prose.
+    // transcript: a running subagent is a nested step in flight, so it reads
+    // that way rather than as top-level prose.
     <div
       className="ml-6 mr-0 px-3 pt-1.5 pb-2"
       data-testid="subagent-running-indicator"

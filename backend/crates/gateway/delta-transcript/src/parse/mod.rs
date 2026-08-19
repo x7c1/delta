@@ -479,6 +479,29 @@ mod tests {
     }
 
     #[test]
+    fn forked_skill_launch_line_folds_to_meta_and_surfaces_its_launch_element() {
+        // The raw line Claude Code writes when a slash command forks its skill
+        // into a BACKGROUND agent (shape taken verbatim from a v2.1.234
+        // transcript; only the skill name is a placeholder):
+        // the same `type: "system"` / `subtype: "local_command"` line, whose
+        // top-level content carries the command's stdout AND a
+        // `<forked-skill-launch>` element. That element is the ONLY trace of the
+        // launch — the harness starts it, so no `tool_use` block is ever written
+        // — and attribution reads it to light the running-subagent indicator, so
+        // it must survive parsing intact. Note the absent `promptId`: the line is
+        // not a member of the local-command group.
+        let line = r#"{"uuid":"s3","type":"system","subtype":"local_command","content":"<local-command-stdout>Running in the background as @example-review-pr</local-command-stdout>\n<forked-skill-launch>{\"agentId\":\"a7046b32df40e1b3e\",\"skillName\":\"example:review-pr\",\"description\":\"/example:review-pr\"}</forked-skill-launch>","level":"info","isMeta":false}"#;
+        let msg = parse_line(line).unwrap().unwrap();
+        assert_eq!(msg.role, Role::Meta);
+        assert_eq!(msg.prompt_id, None);
+        let text = msg.flatten_text().expect("the content is surfaced");
+        assert!(
+            text.contains(r#"<forked-skill-launch>{"agentId":"a7046b32df40e1b3e""#),
+            "the forked-skill launch element must reach attribution intact, got {text:?}"
+        );
+    }
+
+    #[test]
     fn non_unknown_command_informational_subtype_with_top_level_content_stays_contentless() {
         // Guard against surfacing noise: a `type: "system"` / `informational`
         // line whose content is NOT the unknown-command notice (e.g. an

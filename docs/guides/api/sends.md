@@ -187,9 +187,13 @@ disconnected: events fired during the gap are never replayed.
     [the queue semantics](#the-pending-permission-queue).
   - `question` is the `AskUserQuestion` currently presenting its options, or
     `null`. `tool_input` is the raw `{"questions":[…]}` payload as JSON text.
-  - `running_subagents` lists the `Agent`/`Task` calls still running, oldest
-    first; empty when none is. `background` is `true` for a
-    `run_in_background` launch, which can outlive the turn that started it.
+  - `running_subagents` lists the subagents still running, oldest first; empty
+    when none is. Both launch kinds appear: the model's `Agent`/`Task` calls,
+    and the forked skill a slash command runs in the background (whose
+    `tool_use_id` is the synthetic `forked-skill:<agentId>` — see
+    [`subagent_started`](live-channels.md#streaming-and-subagents)).
+    `background` is `true` for a `run_in_background` launch and for every forked
+    skill, either of which can outlive the turn that started it.
 
   A `queued` send may carry `restored_at` (see `Send` in
   [shapes.md](shapes.md#send)): it was recovered at boot from a dead

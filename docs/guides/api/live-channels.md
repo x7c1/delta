@@ -271,18 +271,30 @@ which frames arrive, and a client must handle each event whenever it lands.
   ends (`turn_completed` / `turn_interrupted`), whether or not a `final`
   chunk ever arrived — an interrupted message never gets one — after which the
   persisted assistant message from the transcript sync takes over.
-- `subagent_started` — a subagent (the `Agent`/`Task` tool) started running
-  inside the turn. Its own transcript is never tailed, so this is the only live
-  signal that one is running. `tool_use_id` is the correlation key to its
+- `subagent_started` — a subagent started running. Its own transcript is never
+  tailed, so this is the only live signal that one is running. Two kinds of
+  launch produce it: the model calling the `Agent`/`Task` tool, and a **forked
+  skill** — the background agent Claude Code itself starts for a slash command
+  whose skill runs in the background (e.g. `/review-pr`). A forked skill involves
+  no tool call at all, only a `<forked-skill-launch>` element on the command's
+  transcript line, so its `tool_use_id` is synthetic: `forked-skill:<agentId>`,
+  minted from that payload and used for the finish exactly like a real one. It
+  also arrives **outside any in-flight turn**: a slash command fires no echo and
+  no `Stop`, so its turn is already over by the time the launch is folded — a
+  client must not require a preceding `turn_started`, nor treat "no turn
+  running" as licence to drop the entry, or the row goes inert for the minutes
+  the skill works. `tool_use_id` is the correlation key to its
   `subagent_finished`, `subagent_type` and `description` are display fields that
-  are `null` when the call carried none, and `thread_id` is the thread that
-  launched it — a background subagent outlives its launching turn, so the client
-  needs the thread to keep that thread's running indicator lit (and its unread
-  badge suppressed) until the finish arrives. `background` says which lifecycle
-  applies: a foreground subagent finishes with its matching `PostToolUse`, while
-  a `run_in_background: true` one returns immediately at launch and finishes only
-  when its completion notification is folded during transcript sync, so the
-  client must not sweep it at turn end.
+  are `null` when the launch carried none (a forked skill reports its skill name
+  and the command as those), and `thread_id` is the thread that launched it — a
+  background subagent outlives its launching turn, so the client needs the thread
+  to keep that thread's running indicator lit (and its unread badge suppressed)
+  until the finish arrives. `background` says which lifecycle applies: a
+  foreground subagent finishes with its matching `PostToolUse`, while a
+  `run_in_background: true` one — and every forked skill, which is always
+  background — returns immediately at launch and finishes only when its
+  completion notification is folded during transcript sync, so the client must
+  not sweep it at turn end.
 - `subagent_finished` — the subagent correlated by `tool_use_id` finished. It
   carries no thread; the client maps the id back to the `subagent_started` that
   named one. A finish for an id that was never tracked, or was already cleared,

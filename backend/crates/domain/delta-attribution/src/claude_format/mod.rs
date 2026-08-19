@@ -6,6 +6,9 @@
 //! flags (e.g. `is_queued_command`) are already detected by the transcript
 //! parser in the gateway; these cover the conventions that are plain strings.
 
+mod forked_skill_launch;
+pub use forked_skill_launch::{forked_skill_launch, has_forked_skill_launch, ForkedSkillLaunch};
+
 /// Prefix Claude Code writes to the transcript when the user interrupts the
 /// in-flight turn. It appears as a `role: user` line whose only text block is
 /// either `[Request interrupted by user]` (plain mid-response interrupt) or
@@ -72,10 +75,10 @@ pub fn is_local_command_output(trimmed_text: &str) -> bool {
 
 /// Normalize a slash-command token to its bare command name: strip a single
 /// leading `/`, then — if a namespace prefix is present — drop everything up to
-/// and including the LAST `:` (so `dev-workflow:` is discarded). The remainder
+/// and including the LAST `:` (so `example:` is discarded). The remainder
 /// is returned unchanged when there is no `:`.
 ///
-/// Examples: `/dev-workflow:review-pr` -> `review-pr`; `/review-pr` ->
+/// Examples: `/example:review-pr` -> `review-pr`; `/review-pr` ->
 /// `review-pr`; `review-pr` -> `review-pr`.
 fn bare_command_name(token: &str) -> &str {
     let without_slash = token.strip_prefix('/').unwrap_or(token);
@@ -90,7 +93,7 @@ fn bare_command_name(token: &str) -> &str {
 ///
 /// When a user types a short command such as `/review-pr`, Delta dispatches the
 /// send with exactly that text, but Claude Code expands the short form to its
-/// fully-qualified namespaced form (e.g. `/dev-workflow:review-pr`) in the
+/// fully-qualified namespaced form (e.g. `/example:review-pr`) in the
 /// transcript's bare command-name line. A raw `send.text == name_line` equality
 /// therefore never matches, leaving the outstanding send wedged in the
 /// single-outstanding queue and the turn stuck in `AwaitingEcho` forever. So the
@@ -413,16 +416,14 @@ pub fn is_subagent_tool(tool_name: &str) -> bool {
     SUBAGENT_TOOL_NAMES.contains(&tool_name)
 }
 
-/// Read an optional non-empty string field out of a tool-input value.
+/// Read an optional non-empty string field out of a JSON payload — an
+/// `Agent`/`Task` tool input, or a `<forked-skill-launch>` body.
 ///
-/// Returns `None` when the input is not an object, the key is missing, the
+/// Returns `None` when the payload is not an object, the key is missing, the
 /// value is not a string, or the string is empty — so a malformed or partial
-/// `Agent` input degrades to "no label" rather than failing.
-pub fn tool_input_string_field<'a>(
-    tool_use_input: &'a serde_json::Value,
-    key: &str,
-) -> Option<&'a str> {
-    tool_use_input.get(key)?.as_str().filter(|s| !s.is_empty())
+/// payload degrades to "no label" rather than failing.
+pub fn json_string_field<'a>(payload: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    payload.get(key)?.as_str().filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
@@ -586,7 +587,7 @@ mod tests {
 
     #[test]
     fn bare_command_name_strips_slash_and_namespace_prefix() {
-        assert_eq!(bare_command_name("/dev-workflow:review-pr"), "review-pr");
+        assert_eq!(bare_command_name("/example:review-pr"), "review-pr");
         assert_eq!(bare_command_name("/review-pr"), "review-pr");
         assert_eq!(bare_command_name("review-pr"), "review-pr");
     }
@@ -598,7 +599,7 @@ mod tests {
         // in the transcript command-name line.
         assert!(local_command_name_line_matches_send(
             "/review-pr",
-            "/dev-workflow:review-pr"
+            "/example:review-pr"
         ));
         // Identical short-vs-short and full-vs-full both match.
         assert!(local_command_name_line_matches_send(
@@ -606,23 +607,23 @@ mod tests {
             "/review-pr"
         ));
         assert!(local_command_name_line_matches_send(
-            "/dev-workflow:review-pr",
-            "/dev-workflow:review-pr"
+            "/example:review-pr",
+            "/example:review-pr"
         ));
         // Symmetry: a fully-qualified send against a short line matches too.
         assert!(local_command_name_line_matches_send(
-            "/dev-workflow:review-pr",
+            "/example:review-pr",
             "/review-pr"
         ));
         // Different commands do NOT match even under a shared namespace.
         assert!(!local_command_name_line_matches_send(
             "/review-pr",
-            "/dev-workflow:other"
+            "/example:other"
         ));
         // Args after the command are ignored (single-outstanding-send rule).
         assert!(local_command_name_line_matches_send(
             "/review-pr 123",
-            "/dev-workflow:review-pr"
+            "/example:review-pr"
         ));
         // Empty / no-first-token inputs return false.
         assert!(!local_command_name_line_matches_send("", "/review-pr"));

@@ -14,12 +14,16 @@
 //!   browser; the hook is passive (an empty 200) so it never mutates the TUI.
 //! - `PreToolUse` fires for every tool call; Delta records the request (it
 //!   carries the `tool_use_id` needed to resolve the notice later) and does not
-//!   notify the browser — the TUI decides allow/deny. It is also where Delta
-//!   detects a subagent (`Agent`/`Task`) starting, so the browser can show a
-//!   running indicator while it works in its own (untailed) transcript.
-//! - `PostToolUse` fires when a tool call completes; Delta acts on it only to
-//!   close a subagent's running window (matched on the same `tool_use_id`),
-//!   broadcasting `SubagentFinished`.
+//!   notify the browser — the TUI decides allow/deny. For an `Agent`/`Task`
+//!   call it also syncs the transcript at once, so the running indicator lights
+//!   up without waiting for the next ambient sync; the indicator itself is
+//!   driven by parent-transcript ingest, not by this hook.
+//! - `PostToolUse` fires when a tool call completes; Delta acts on it only for
+//!   the subagent case: a FOREGROUND subagent's running window is closed
+//!   (matched on the same `tool_use_id`) and `SubagentFinished` broadcast, while
+//!   a background launch — which returns at once, long before the work ends —
+//!   only has its `agentId` recorded as the fallback key its completion
+//!   notification is matched by.
 //! - `PermissionRequest` fires only when an interactive permission dialog
 //!   actually appears (a human answer is genuinely pending); Delta notifies the
 //!   browser, correlating it to the request recorded at `PreToolUse`.

@@ -111,9 +111,12 @@ pub enum WireSessionEvent {
         is_final: bool,
         delta: String,
     },
-    /// A subagent (the `Agent`/`Task` tool) started running inside the main
-    /// turn (its own transcript is never tailed, so this is the only live
-    /// signal). Correlated to its `subagent_finished` by `tool_use_id`.
+    /// A subagent started running (its own transcript is never tailed, so this
+    /// is the only live signal): an `Agent`/`Task` tool call inside a turn, or
+    /// the background agent Claude Code forks for a slash command's skill, which
+    /// arrives with NO turn in flight at all — so a client must not scope an
+    /// entry to the current turn. Correlated to its `subagent_finished` by
+    /// `tool_use_id`.
     SubagentStarted {
         session_id: String,
         /// The thread that launched the subagent, so the client keeps that
@@ -125,13 +128,14 @@ pub enum WireSessionEvent {
         tool_use_id: String,
         subagent_type: Option<String>,
         description: Option<String>,
-        /// Whether the launch carried `run_in_background: true`. A background
+        /// Whether the launch runs in the background — `run_in_background: true`
+        /// for a tool call, and always true for a forked skill. A background
         /// subagent outlives the launching turn (the client must not sweep it at
         /// turn end) and is finished by its completion notification.
         background: bool,
     },
-    /// A subagent (the `Agent`/`Task` tool) finished running, correlated to its
-    /// `subagent_started` by `tool_use_id`.
+    /// A subagent finished running, correlated to its `subagent_started` by
+    /// `tool_use_id`.
     SubagentFinished {
         session_id: String,
         tool_use_id: String,

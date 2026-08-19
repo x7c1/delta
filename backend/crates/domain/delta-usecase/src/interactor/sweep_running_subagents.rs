@@ -1,13 +1,15 @@
 //! Sweeping lingering running subagents when the session's `claude` process is
 //! confirmed gone.
 //!
-//! The "Subagent running" indicator is lit from parent-transcript ingest for
-//! every `Agent`/`Task` tool_use. A FOREGROUND entry is swept when the turn
-//! returns to idle; a BACKGROUND entry deliberately outlives its launching turn
-//! and is cleared only when its completion `<task-notification>` is folded
-//! (`Effect::SubagentCompleted` → [`SessionRuntime::finish_subagent`]). That
-//! notification-driven clear works only while the process is alive to keep
-//! producing transcript lines.
+//! The "Subagent running" indicator is lit from parent-transcript ingest: for
+//! every `Agent`/`Task` tool_use, and for the `<forked-skill-launch>` element a
+//! harness-forked skill leaves instead of one (always a BACKGROUND entry, so
+//! this sweep is the only thing that can clear it once the process is gone). A
+//! FOREGROUND entry is swept when the turn returns to idle; a BACKGROUND entry
+//! deliberately outlives its launching turn and is cleared only when its
+//! completion `<task-notification>` is folded (`Effect::SubagentCompleted` →
+//! [`SessionRuntime::finish_subagent`]). That notification-driven clear works
+//! only while the process is alive to keep producing transcript lines.
 //!
 //! Once the process is gone no more of this session's transcript is ingested,
 //! so a background entry's notification can never be folded — its indicator
@@ -50,9 +52,10 @@ where
     ///
     /// On the resume point: a resume never rebuilds the in-memory
     /// `running_subagents` set from persisted launch rows. `sync_transcript`
-    /// reads only NEW lines past a per-session line cursor, and the `Agent`
-    /// tool_use line that lit the indicator sits behind that cursor, so it is
-    /// never re-folded; the persisted launch rows are read back only by
+    /// reads only NEW lines past a per-session line cursor, and the line that
+    /// lit the indicator — the `Agent`/`Task` tool_use, or the
+    /// `<forked-skill-launch>` element — sits behind that cursor, so it is never
+    /// re-folded; the persisted launch rows are read back only by
     /// `outstanding_subagent_launches`, which reseeds the attribution fold's
     /// thread map for a late completion notification, not the indicator set.
     /// Clearing the launch row here therefore removes the last trace, and there

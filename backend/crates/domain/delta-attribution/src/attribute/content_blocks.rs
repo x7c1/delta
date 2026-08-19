@@ -115,6 +115,12 @@ pub(super) fn process_content_blocks(
                 effects.push(Effect::SubagentLaunched {
                     tool_use_id: id.clone(),
                     thread_id: state.carry_thread,
+                    // Never known at launch — it arrives with the launching
+                    // tool's `tool_result` and upgrades the launch row then.
+                    // Unlike the `launched_threads` entry above, which can
+                    // carry an id an earlier fold already learned, the effect
+                    // reports only what THIS line taught.
+                    task_id: None,
                 });
             }
             _ => {}
@@ -131,10 +137,10 @@ pub(super) fn process_content_blocks(
         // parent indicator and can never get stuck.
         if let ContentBlock::ToolUse { id, name, input } = block {
             if claude_format::is_subagent_tool(name) {
-                let subagent_type = claude_format::tool_input_string_field(input, "subagent_type")
-                    .map(str::to_owned);
+                let subagent_type =
+                    claude_format::json_string_field(input, "subagent_type").map(str::to_owned);
                 let description =
-                    claude_format::tool_input_string_field(input, "description").map(str::to_owned);
+                    claude_format::json_string_field(input, "description").map(str::to_owned);
                 let background = claude_format::launches_in_background(name, input);
                 effects.push(Effect::SubagentIndicatorStarted {
                     tool_use_id: id.clone(),
