@@ -41,3 +41,13 @@ jobs:
         run: |
           last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           .github/scripts/validate-release-pr-title.sh "$PR_TITLE" "$last_tag"
+
+      # The summary region of the body is what release.yml publishes as the
+      # GitHub Release, so a release must not merge without it. This
+      # workflow also runs on `edited`, so writing the summary re-runs the
+      # check and turns it green with no further push.
+      - name: Validate release summary
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: .github/scripts/validate-release-summary.sh "$PR_BODY"

@@ -15,8 +15,18 @@ set -euo pipefail
 # branch from the GitHub API, and rewrites the compare link in its
 # body to point at the permanent tag (vX.Y.Z).
 #
+# The rewrite is confined to the machine-generated changelog region of the
+# body (layout: docs/guides/release.md), so a hand-written summary that
+# happens to mention the release branch is left untouched.
+#
 # Environment variables:
 #   GH_TOKEN - GitHub token for API access (required).
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=release-pr-lookup.sh
+source "${SCRIPT_DIR}/release-pr-lookup.sh"
+# shellcheck source=release-summary.sh
+source "${SCRIPT_DIR}/release-summary.sh"
 
 main() {
     local version="$1"
@@ -37,19 +47,34 @@ main() {
     echo "Rewriting links on PR #${pr_number} (head ${branch})..."
 
     body=$(gh pr view "$pr_number" --json body --jq '.body')
-    body=$(echo "$body" | sed "s|\.\.\.${branch}|...v${version}|g")
+    body=$(rewrite_compare_link "$body" "$branch" "$version")
 
-    echo "$body" | gh pr edit "$pr_number" --body-file -
+    # printf, not echo: the body now opens with hand-written text, which
+    # may start with `-n` and be swallowed as an echo option.
+    printf '%s\n' "$body" | gh pr edit "$pr_number" --body-file -
     echo "Done."
 }
 
-find_release_pr() {
-    local version="$1"
-    gh pr list \
-        --state merged \
-        --search "Release v${version} in:title" \
-        --json number \
-        --jq '.[0].number // empty'
+# Point the compare link at the tag instead of the (now deleted) release
+# branch, rewriting only the region below the marker. A body written before
+# the marker existed carries no summary, so it is rewritten whole.
+rewrite_compare_link() {
+    local body="$1"
+    local branch="$2"
+    local version="$3"
+    local marker head tail
+
+    marker=$(changelog_marker)
+    if [[ "$body" == *"$marker"* ]]; then
+        head="${body%%"$marker"*}${marker}"
+        tail="${body#*"$marker"}"
+    else
+        head=""
+        tail="$body"
+    fi
+
+    printf '%s%s\n' "$head" \
+        "$(printf '%s' "$tail" | sed "s|\.\.\.${branch}|...v${version}|g")"
 }
 
 main "$@"

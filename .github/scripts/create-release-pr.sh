@@ -21,6 +21,10 @@ set -euo pipefail
 #     Cargo.toml, while the branch name is intentionally decoupled and
 #     fixed for the lifetime of the PR.
 #
+# The body is split into a human region (the release summary, preserved
+# verbatim across runs) and the machine-generated changelog below the
+# marker — see docs/guides/release.md for the layout.
+#
 # In every code path, the chosen version is run through
 # validate-release-pr-title.sh — the same logic the required check uses on
 # pull_request events — so the bot can never produce a title that the
@@ -36,6 +40,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=generate-changelog.sh
 source "${SCRIPT_DIR}/generate-changelog.sh"
+# shellcheck source=release-summary.sh
+source "${SCRIPT_DIR}/release-summary.sh"
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 CARGO_TOML="${REPO_ROOT}/backend/Cargo.toml"
@@ -163,6 +169,11 @@ create_release_pr() {
     local last_tag="$3"
     local changelog="$4"
     local repo_url="$5"
+    local summary
+
+    # A brand-new PR has no body to preserve, so its summary region starts
+    # from the placeholder the developer overwrites.
+    summary=$(summary_placeholder)
 
     configure_bot_identity
 
@@ -181,7 +192,7 @@ create_release_pr() {
         --title "Release v${version}" \
         --label "release" \
         --head "$branch" \
-        --body "$(render_pr_body "$branch" "$version" "$last_tag" "$changelog" "$repo_url")"
+        --body "$(render_pr_body "$branch" "$version" "$last_tag" "$changelog" "$repo_url" "$summary")"
 }
 
 update_release_pr() {
@@ -191,6 +202,12 @@ update_release_pr() {
     local last_tag="$4"
     local changelog="$5"
     local repo_url="$6"
+    local summary
+
+    # Read the summary before rebuilding the branch: it lives in the PR
+    # body, which is the only place a hand-written summary survives the
+    # force-push below.
+    summary=$(preserved_summary "$pr_number")
 
     configure_bot_identity
 
@@ -209,18 +226,45 @@ update_release_pr() {
 
     gh pr edit "$pr_number" \
         --title "Release v${version}" \
-        --body "$(render_pr_body "$branch" "$version" "$last_tag" "$changelog" "$repo_url")"
+        --body "$(render_pr_body "$branch" "$version" "$last_tag" "$changelog" "$repo_url" "$summary")"
 }
 
-# PR body layout: changelog first, then a compare link against last_tag
-# pointing at the release branch (rewritten to point at the tag once the
-# release workflow has run — see update-release-pr-links.sh).
+# The summary region of the PR's current body, or a fresh placeholder when
+# it carries none.
+preserved_summary() {
+    local pr_number="$1"
+    local body summary
+
+    # Check the fetch explicitly rather than leaning on `set -e`: this
+    # function runs inside a command substitution, and those do not inherit
+    # errexit. Left unchecked, a failed API call would read as an empty body
+    # — i.e. as "no summary yet" — and update_release_pr's `gh pr edit` would replace
+    # a hand-written summary with the placeholder. Returning non-zero makes
+    # the caller's own assignment fail, which does abort the script.
+    if ! body=$(gh pr view "$pr_number" --json body --jq '.body'); then
+        echo "::error::Could not read the body of release PR #${pr_number}; refusing to regenerate it, as that would drop any hand-written release summary." >&2
+        return 1
+    fi
+
+    summary=$(summary_region "$body")
+    if [ -z "$summary" ]; then
+        summary_placeholder
+        return
+    fi
+    printf '%s\n' "$summary"
+}
+
+# PR body layout (documented in docs/guides/release.md): the summary
+# region, the marker, then the changelog and a compare link against
+# last_tag pointing at the release branch (rewritten to point at the tag
+# once the release workflow has run — see update-release-pr-links.sh).
 render_pr_body() {
     local branch="$1"
     local version="$2"
     local last_tag="$3"
     local changelog="$4"
     local repo_url="$5"
+    local summary="$6"
     local compare=""
 
     if [ -n "$last_tag" ]; then
@@ -230,6 +274,10 @@ render_pr_body() {
     fi
 
     cat <<EOF
+${summary}
+
+$(changelog_marker)
+
 ${changelog}
 ${compare}
 EOF

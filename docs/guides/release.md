@@ -8,18 +8,55 @@ merging that PR.
 
 Delta uses a "merge the PR" release model. A bot opens and updates one
 rolling release PR against `main`; merging it triggers the `Release`
-workflow, which creates the matching `vX.Y.Z` tag and a GitHub Release.
+workflow, which creates the matching `vX.Y.Z` tag and a GitHub Release. The
+Release body is a summary written by hand in the release PR; the generated
+per-commit changelog stays on the PR.
 
 ## Normal flow (patch bump)
 
 1. The `Create Release PR` workflow opens or refreshes a single open PR
    titled `Release vX.Y.Z` on every push to `main`. By default `X.Y.Z` is
    the last tag patch-bumped (e.g. `v0.1.0` → `Release v0.1.1`).
-2. The PR body carries the changelog since the previous tag (auto-generated
-   from `git log` via `generate-changelog.sh`).
-3. Merge the PR when you want to cut the release. The `Release` workflow
+2. The PR body has two parts: a summary region you write by hand, and the
+   changelog since the previous tag below it (auto-generated from `git log`
+   via `generate-changelog.sh`). See [Release summary](#release-summary).
+3. Write the summary. The PR cannot be merged while it is unwritten.
+4. Merge the PR when you want to cut the release. The `Release` workflow
    then runs after CI completes on `main`, creates the `vX.Y.Z` tag, and
-   publishes a GitHub Release with the same changelog.
+   publishes a GitHub Release carrying that summary plus links back to the
+   release PR and the compare view.
+
+## Release summary
+
+The release PR body is split in two by a marker line:
+
+```markdown
+## Summary
+
+<!-- release-summary:todo -->
+_Write the release summary here. It becomes the body of the GitHub Release.
+Delete the marker comment above once written._
+
+<!-- changelog:auto -->
+
+## Features
+
+- feat: ...
+```
+
+- Everything **above** `<!-- changelog:auto -->` is yours. The bot carries it
+  through verbatim every time it regenerates the body, so it survives the
+  force-pushes that rebuild the release branch on each push to `main`.
+- Everything from the marker down is regenerated from `git log` on every push
+  to `main`; edits made there are overwritten.
+
+Because the summary is the body of the GitHub Release, the release is gated on
+it: `Validate Release PR` fails while the summary is empty or still carries the
+`<!-- release-summary:todo -->` sentinel. That workflow also runs on body
+edits, so saving the summary re-runs the check and turns it green without any
+further push. If a release nonetheless reaches the `Release` workflow without
+a summary, that workflow fails before creating the tag rather than publishing
+a Release without one.
 
 ## Promoting to minor or major
 
@@ -82,10 +119,12 @@ stays in sync with every force-push.
   release-labelled PR's title is edited, so promoting the title is
   picked up immediately rather than waiting for the next main push.
 - `.github/workflows/validate-release-pr.yml` — on every release PR edit,
-  enforces the allowed title transitions above.
+  enforces the allowed title transitions above and fails while the release
+  summary is unwritten.
 - `.github/workflows/release.yml` — when CI completes successfully on
-  `main`, checks whether the workspace version changed; if it did, creates
-  the matching tag and GitHub Release.
+  `main`, checks whether the workspace version changed; if it did, reads the
+  summary from the merged release PR and then creates the matching tag and
+  GitHub Release.
 
 For the underlying setup (the `RELEASE_PAT` secret, why a user PAT is
 required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
@@ -101,6 +140,13 @@ required instead of `GITHUB_TOKEN`), see "Release automation setup" below.
 - The `Release` workflow gates on a green CI: a red `main` will never tag
   a release. Fix CI first and the next successful CI run cuts the
   release automatically.
+- If `Release` failed because the summary was missing, no tag was created.
+  Write the summary into the merged release PR's body (a merged PR's
+  description is still editable) and re-run the failed run from the Actions
+  tab — before another commit lands on `main`. The version-change check
+  compares the workspace version against the previous commit, so once the
+  bump is no longer the newest change the automation stops seeing a version
+  change and will not cut that release on its own.
 
 ## Release automation setup
 
