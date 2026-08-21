@@ -2,7 +2,9 @@
 //!
 //! [`SqliteStore`] owns Delta's schema and persists the thread overlay: the
 //! session row, threads, the message cache, the send FIFO and permission
-//! history. The schema is applied as a migration when the store is opened.
+//! history. The schema is defined by the migration ladder in [`migrations`] and
+//! brought up to date when the store is opened — a fresh database replays the
+//! whole ladder, an existing one only the steps above its stamped version.
 //!
 //! SQLite runs in-process and Delta wraps a single local session, so the
 //! connection is guarded by an async mutex and queries run inline. The amount
@@ -10,10 +12,10 @@
 
 mod content_record;
 mod error;
-mod schema;
+mod migrations;
 mod store;
 mod time;
 
 pub use error::{Error, Result};
-pub use schema::SCHEMA_VERSION;
+pub use migrations::SCHEMA_VERSION;
 pub use store::SqliteStore;
