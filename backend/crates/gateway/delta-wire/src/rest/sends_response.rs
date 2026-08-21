@@ -7,6 +7,7 @@ use delta_usecase::{
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::file_change::WireFileChangeDetail;
 use crate::send::WireSend;
 
 /// The phase of a session's turn state machine, as reported on the REST
@@ -79,6 +80,25 @@ pub struct WirePendingPermission {
     pub tool_name: String,
     /// The tool input, serialized as JSON text.
     pub tool_input: String,
+    /// What allowing the request would do to files on disk, when the provider
+    /// stated it. The same detail the `permission_requested` event carries, so a
+    /// client that missed that event rebuilds the *same* card from this refetch
+    /// rather than one degraded to the input summary.
+    ///
+    /// Absent from the envelope entirely when nothing is known, which is every
+    /// request that is not a file change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub file_change: Option<WireFileChangeDetail>,
+    /// A directory the request also asks to be allowed to write under for the
+    /// rest of the session, when the provider asked for one — the same field the
+    /// `permission_requested` event carries, and independent of `file_change` in
+    /// the same way: a request can carry this and no change set at all.
+    ///
+    /// Absent from the envelope entirely when the provider asked for no root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub grant_root: Option<String>,
 }
 
 impl From<&PendingPermission> for WirePendingPermission {
@@ -87,6 +107,8 @@ impl From<&PendingPermission> for WirePendingPermission {
             request_id: pending.request_id,
             tool_name: pending.tool_name.clone(),
             tool_input: pending.tool_input_json.clone(),
+            file_change: pending.file_change.as_ref().map(WireFileChangeDetail::from),
+            grant_root: pending.grant_root.clone(),
         }
     }
 }
@@ -212,6 +234,7 @@ mod tests {
     use super::*;
 
     use delta_model::ThreadId;
+    use delta_usecase::{AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind};
 
     #[test]
     fn turn_state_serializes_with_snake_case_phase_and_optional_send_id() {
@@ -271,6 +294,10 @@ mod tests {
     }
 
     /// One pending dialog: reported as the head, with a depth of 1.
+    ///
+    /// It carries no file-change detail (a `Bash` call changes nothing up front,
+    /// and the Claude path never states one), so the envelope is byte-for-byte
+    /// the one it has always been — no `file_change` key at all.
     #[test]
     fn sends_response_reports_the_pending_permission_dialog() {
         let body = WireSendsResponse::new(
@@ -282,6 +309,8 @@ mod tests {
                     request_id: 3,
                     tool_name: "Bash".to_owned(),
                     tool_input_json: "{\"command\":\"rm -rf scratch\"}".to_owned(),
+                    file_change: None,
+                    grant_root: None,
                 }],
                 pending_question: None,
                 running_subagents: Vec::new(),
@@ -304,6 +333,85 @@ mod tests {
         );
     }
 
+    /// A file-change dialog: the envelope carries the same detail the
+    /// `permission_requested` event does, so a client that missed the event
+    /// rebuilds the same card from a refetch instead of one degraded to the
+    /// input summary.
+    #[test]
+    fn sends_response_reports_a_pending_file_change_with_its_detail() {
+        let body = WireSendsResponse::new(
+            Vec::new(),
+            SessionLiveState {
+                turn: TurnState::InFlight { send_id: None },
+                in_progress_thread: Some(ThreadId(2)),
+                pending_permissions: vec![PendingPermission {
+                    request_id: 4,
+                    tool_name: "file_change".to_owned(),
+                    tool_input_json: "{\"itemId\":\"fc_1\"}".to_owned(),
+                    file_change: Some(AgentFileChangeDetail {
+                        changes: vec![AgentFileChange {
+                            path: "src/lib.rs".to_owned(),
+                            kind: Some(AgentFileChangeKind::Update),
+                            diff: "@@ -1 +1 @@".to_owned(),
+                        }],
+                        reason: None,
+                    }),
+                    grant_root: None,
+                }],
+                pending_question: None,
+                running_subagents: Vec::new(),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(body).unwrap()["permission"],
+            serde_json::json!({
+                "request_id": 4,
+                "tool_name": "file_change",
+                "tool_input": "{\"itemId\":\"fc_1\"}",
+                "file_change": {
+                    "changes": [
+                        { "path": "src/lib.rs", "kind": "update", "diff": "@@ -1 +1 @@" },
+                    ],
+                    "reason": null,
+                },
+            }),
+        );
+    }
+
+    /// A dialog whose change set could not be correlated but which asks for a
+    /// write root: the envelope reports the root on its own. The re-seed must
+    /// not be the surface that loses it — a reconnecting user answering from a
+    /// refetched card is agreeing to writes under a whole tree, and this is the
+    /// only place that card learns so.
+    #[test]
+    fn sends_response_reports_a_grant_root_without_a_change_set() {
+        let body = WireSendsResponse::new(
+            Vec::new(),
+            SessionLiveState {
+                turn: TurnState::InFlight { send_id: None },
+                in_progress_thread: Some(ThreadId(2)),
+                pending_permissions: vec![PendingPermission {
+                    request_id: 5,
+                    tool_name: "file_change".to_owned(),
+                    tool_input_json: "{\"itemId\":\"fc_2\"}".to_owned(),
+                    file_change: None,
+                    grant_root: Some("/repo".to_owned()),
+                }],
+                pending_question: None,
+                running_subagents: Vec::new(),
+            },
+        );
+        assert_eq!(
+            serde_json::to_value(body).unwrap()["permission"],
+            serde_json::json!({
+                "request_id": 5,
+                "tool_name": "file_change",
+                "tool_input": "{\"itemId\":\"fc_2\"}",
+                "grant_root": "/repo",
+            }),
+        );
+    }
+
     /// Several pending dialogs (a parallel tool-call fan-out): the envelope
     /// reports the QUEUE HEAD plus the depth, so a client that missed every
     /// event rebuilds both the dialog and its "N approvals pending" indication
@@ -314,6 +422,8 @@ mod tests {
             request_id,
             tool_name: "exec_command".to_owned(),
             tool_input_json: format!("{{\"command\":\"{command}\"}}"),
+            file_change: None,
+            grant_root: None,
         };
         let body = WireSendsResponse::new(
             Vec::new(),

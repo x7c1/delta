@@ -73,7 +73,8 @@
 use serde_json::Value;
 
 use delta_usecase::{
-    AgentEvent, AgentPermissionRequest, AgentTokenUsage, RateLimitWindow, TurnStatus,
+    AgentEvent, AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind,
+    AgentPermissionRequest, AgentTokenUsage, RateLimitWindow, TurnStatus,
 };
 
 use crate::wire::{Notification, ServerRequest};
@@ -137,6 +138,27 @@ const METHOD_REASONING_SUMMARY_TEXT_DELTA: &str = "item/reasoning/summaryTextDel
 /// projects to nothing; the part boundary it marks is reproduced by
 /// [`REASONING_PART_SEPARATOR`] when the completed item is translated.
 const METHOD_REASONING_SUMMARY_PART_ADDED: &str = "item/reasoning/summaryPartAdded";
+
+/// The notification (`FileChangePatchUpdatedNotification`) that **revises** a
+/// file-change item's proposed patch after `item/started` announced it:
+/// `{ itemId, threadId, turnId, changes }`. It carries the whole replacement
+/// change list, so a tracker that only read `item/started` would show a stale
+/// diff on the approval raised afterwards.
+const METHOD_FILE_CHANGE_PATCH_UPDATED: &str = "item/fileChange/patchUpdated";
+
+/// The `FileUpdateChange` field naming the path that changes.
+const CHANGE_PATH_FIELD: &str = "path";
+/// The `FileUpdateChange` field carrying the unified diff of the change.
+const CHANGE_DIFF_FIELD: &str = "diff";
+/// The `FileUpdateChange` field carrying the change's kind — a
+/// `PatchChangeKind`, i.e. an *object* whose `type` is the discriminant, not a
+/// bare string.
+const CHANGE_KIND_FIELD: &str = "kind";
+/// The `PatchChangeKind` discriminant field (`add` / `delete` / `update`).
+const CHANGE_KIND_TYPE_FIELD: &str = "type";
+/// The array of `FileUpdateChange`s, carried both by a `FileChangeThreadItem`
+/// and by [`METHOD_FILE_CHANGE_PATCH_UPDATED`] under the same key.
+const CHANGES_FIELD: &str = "changes";
 
 /// The server → client approval request for a command execution (a `turn/start`
 /// turn). Response is a binary `{decision}`, so Delta models it.
@@ -210,6 +232,12 @@ pub fn translate_notification(n: &Notification) -> Vec<AgentEvent> {
         | "item/plan/delta"
         | "item/commandExecution/outputDelta"
         | "item/mcpToolCall/progress" => Vec::new(),
+        // The revised patch of a file-change item projects to no neutral event
+        // of its own (the item's completion carries the final change set), but
+        // it is not ignored either: the adapter reads it through
+        // [`file_change_item`] so an approval raised afterwards shows the
+        // revised diff rather than the one `item/started` announced.
+        METHOD_FILE_CHANGE_PATCH_UPDATED => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -436,18 +464,133 @@ fn command_execution_approval(r: &ServerRequest) -> AgentPermissionRequest {
             .unwrap_or_else(|| COMMAND_EXECUTION_TOOL_NAME.to_owned()),
         input_json: r.params.clone(),
         tool_use_id: string_field(&r.params, "itemId"),
+        // A command execution changes no files up front, so there is nothing to
+        // correlate: the command itself already names what it would do.
+        file_change: None,
+        // Only a file-change approval asks for a write root.
+        grant_root: None,
     }
 }
 
 /// The neutral permission request a file-change approval projects to. Its params
 /// carry no command or file path (only `itemId` / `grantRoot` / `reason`), so a
 /// stable kind label names the interaction and the full params ride `input_json`.
+///
+/// The paths, kinds and diffs the card actually wants are **not** here: they
+/// arrived earlier, on the `item/started` for the same `itemId`. Correlating the
+/// two needs per-session state, which a pure translator has none of, so this
+/// leaves [`AgentPermissionRequest::file_change`] unset and the adapter completes
+/// it through [`with_file_change_detail`] when it knows the item. An approval
+/// whose item was never seen keeps the `None` — the deliberate fallback to the
+/// input summary.
+///
+/// `grantRoot` is the exception that is read here and not correlated: it belongs
+/// to the approval itself, not to the item, so it is lifted onto
+/// [`AgentPermissionRequest::grant_root`] straight away and reaches the card
+/// even when no item is ever found for the `itemId`. It is also the broadest
+/// thing the request asks for — writes anywhere under that root for the rest of
+/// the session, well past the files the item lists — so it is the last thing
+/// that may go missing.
 fn file_change_approval(r: &ServerRequest) -> AgentPermissionRequest {
     AgentPermissionRequest {
         request_id: request_id_of(&r.id),
         tool_name: FILE_CHANGE_TOOL_NAME.to_owned(),
         input_json: r.params.clone(),
         tool_use_id: string_field(&r.params, "itemId"),
+        file_change: None,
+        grant_root: string_field(&r.params, "grantRoot"),
+    }
+}
+
+/// Complete a file-change approval with the change set correlated from its item,
+/// so the browser card can name the affected files and show their diffs.
+///
+/// The `reason` comes from the approval's own params (which already ride
+/// `input_json`) while the changes come from the item — the two halves of the
+/// same question, joined here. Called only with changes an item actually stated;
+/// a request left untouched keeps `file_change: None` and falls back to the input
+/// summary.
+pub fn with_file_change_detail(
+    request: &mut AgentPermissionRequest,
+    changes: Vec<AgentFileChange>,
+) {
+    let reason = string_field(&request.input_json, "reason");
+    request.file_change = Some(AgentFileChangeDetail { changes, reason });
+}
+
+/// The file-change item a notification announces, as `(item id, changes)` — the
+/// pair the adapter keys its correlation map by.
+///
+/// Two notifications state a file-change item's proposed patch, and both are
+/// read here so the map is correct at the moment an approval arrives:
+///
+/// - `item/started` for a `fileChange` item (`params.item`, a
+///   `FileChangeThreadItem`) — the first statement of the patch;
+/// - [`METHOD_FILE_CHANGE_PATCH_UPDATED`] (`params.itemId` / `params.changes`) —
+///   a **replacement** of it, so the caller overwrites rather than merges.
+///
+/// `None` for every other notification, for an item of another type, and for an
+/// item with no id: nothing to correlate, so nothing is tracked.
+pub fn file_change_item(n: &Notification) -> Option<(String, Vec<AgentFileChange>)> {
+    let (id, changes) = match n.method.as_str() {
+        "item/started" => {
+            let item = item_of(&n.params)?;
+            if string_field(item, "type").as_deref() != Some(FILE_CHANGE_ITEM_TYPE) {
+                return None;
+            }
+            (string_field(item, "id")?, item.get(CHANGES_FIELD))
+        }
+        METHOD_FILE_CHANGE_PATCH_UPDATED => (
+            string_field(&n.params, "itemId")?,
+            n.params.get(CHANGES_FIELD),
+        ),
+        _ => return None,
+    };
+    Some((id, file_changes(changes)))
+}
+
+/// The id of the item an `item/completed` announces, so the adapter can drop the
+/// correlation entry the item no longer needs. `None` for any other notification
+/// (or a completed item with no id).
+pub fn completed_item_id(n: &Notification) -> Option<String> {
+    match n.method.as_str() {
+        "item/completed" => string_field(item_of(&n.params)?, "id"),
+        _ => None,
+    }
+}
+
+/// Project a `FileUpdateChange` array into the neutral change list.
+///
+/// An entry missing its required `path` is skipped: a change Delta cannot name
+/// is worse than no row at all, since the card's whole job is to say which file
+/// is affected. A missing `diff` degrades to the empty string (the expander then
+/// has nothing to show) rather than dropping the path.
+fn file_changes(changes: Option<&Value>) -> Vec<AgentFileChange> {
+    let Some(changes) = changes.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    changes
+        .iter()
+        .filter_map(|change| {
+            Some(AgentFileChange {
+                path: string_field(change, CHANGE_PATH_FIELD)?,
+                kind: file_change_kind(change.get(CHANGE_KIND_FIELD)),
+                diff: string_field(change, CHANGE_DIFF_FIELD).unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+/// Map a `PatchChangeKind` onto the neutral kind. The wire shape is an object
+/// tagged by `type` (`{"type":"update","move_path":null}`), not a bare string.
+/// A kind this build does not model — including an absent or malformed one —
+/// yields `None`, so the path and diff still show without a fabricated label.
+fn file_change_kind(kind: Option<&Value>) -> Option<AgentFileChangeKind> {
+    match string_field(kind?, CHANGE_KIND_TYPE_FIELD)?.as_str() {
+        "add" => Some(AgentFileChangeKind::Add),
+        "update" => Some(AgentFileChangeKind::Update),
+        "delete" => Some(AgentFileChangeKind::Delete),
+        _ => None,
     }
 }
 
@@ -1434,6 +1577,11 @@ mod tests {
                 );
                 assert_eq!(req.tool_use_id, Some("fc-3".to_owned()));
                 assert_eq!(req.input_json["grantRoot"], "/repo");
+                assert_eq!(
+                    req.grant_root.as_deref(),
+                    Some("/repo"),
+                    "the broadest ask is lifted out of the params, not left buried in them"
+                );
             }
             other => panic!("expected an approval, got {other:?}"),
         }
@@ -1476,5 +1624,189 @@ mod tests {
             }
             other => panic!("expected unsupported, got {other:?}"),
         }
+    }
+
+    // --- File-change correlation ---------------------------------------------
+
+    fn update_change(path: &str, diff: &str) -> Value {
+        json!({ "path": path, "kind": { "type": "update" }, "diff": diff })
+    }
+
+    #[test]
+    fn an_item_started_file_change_yields_its_id_and_changes() {
+        let n = notification(
+            "item/started",
+            json!({
+                "item": {
+                    "id": "fc-1",
+                    "type": "fileChange",
+                    "status": "inProgress",
+                    "changes": [
+                        { "path": "a.rs", "kind": { "type": "add" }, "diff": "+a" },
+                        { "path": "b.rs", "kind": { "type": "delete" }, "diff": "-b" },
+                        update_change("c.rs", "~c"),
+                    ],
+                },
+            }),
+        );
+
+        assert_eq!(
+            file_change_item(&n),
+            Some((
+                "fc-1".to_owned(),
+                vec![
+                    AgentFileChange {
+                        path: "a.rs".to_owned(),
+                        kind: Some(AgentFileChangeKind::Add),
+                        diff: "+a".to_owned(),
+                    },
+                    AgentFileChange {
+                        path: "b.rs".to_owned(),
+                        kind: Some(AgentFileChangeKind::Delete),
+                        diff: "-b".to_owned(),
+                    },
+                    AgentFileChange {
+                        path: "c.rs".to_owned(),
+                        kind: Some(AgentFileChangeKind::Update),
+                        diff: "~c".to_owned(),
+                    },
+                ],
+            )),
+        );
+    }
+
+    #[test]
+    fn an_item_of_another_type_is_not_tracked() {
+        let n = notification(
+            "item/started",
+            json!({ "item": { "id": "m1", "type": "agentMessage" } }),
+        );
+
+        assert_eq!(file_change_item(&n), None);
+    }
+
+    #[test]
+    fn a_patch_update_yields_the_replacement_changes() {
+        let n = notification(
+            METHOD_FILE_CHANGE_PATCH_UPDATED,
+            json!({
+                "itemId": "fc-1",
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "changes": [update_change("a.rs", "revised")],
+            }),
+        );
+
+        assert_eq!(
+            file_change_item(&n),
+            Some((
+                "fc-1".to_owned(),
+                vec![AgentFileChange {
+                    path: "a.rs".to_owned(),
+                    kind: Some(AgentFileChangeKind::Update),
+                    diff: "revised".to_owned(),
+                }],
+            )),
+        );
+        assert!(
+            translate_notification(&n).is_empty(),
+            "the revision itself projects to no neutral event"
+        );
+    }
+
+    #[test]
+    fn an_unmodeled_kind_keeps_the_path_and_diff_without_a_label() {
+        // A newer server naming a kind this build does not model must not cost
+        // the user the path — that is the part the answer usually turns on.
+        let n = notification(
+            "item/started",
+            json!({
+                "item": {
+                    "id": "fc-1",
+                    "type": "fileChange",
+                    "changes": [
+                        { "path": "a.rs", "kind": { "type": "teleport" }, "diff": "?" },
+                        { "kind": { "type": "add" }, "diff": "no path" },
+                    ],
+                },
+            }),
+        );
+
+        assert_eq!(
+            file_change_item(&n),
+            Some((
+                "fc-1".to_owned(),
+                vec![AgentFileChange {
+                    path: "a.rs".to_owned(),
+                    kind: None,
+                    diff: "?".to_owned(),
+                }],
+            )),
+            "an unknown kind loses its label; a change with no path is dropped entirely"
+        );
+    }
+
+    #[test]
+    fn a_completed_item_reports_the_id_to_forget() {
+        let completed = notification(
+            "item/completed",
+            json!({ "item": { "id": "fc-1", "type": "fileChange", "changes": [] } }),
+        );
+        let started = notification(
+            "item/started",
+            json!({ "item": { "id": "fc-1", "type": "fileChange", "changes": [] } }),
+        );
+
+        assert_eq!(completed_item_id(&completed), Some("fc-1".to_owned()));
+        assert_eq!(
+            completed_item_id(&started),
+            None,
+            "only a completion retires an entry"
+        );
+    }
+
+    #[test]
+    fn completing_a_file_change_approval_joins_its_changes_with_its_reason() {
+        // The changes come from the item, the reason from the approval's own
+        // params — the two halves of the same question.
+        let request = ServerRequest {
+            id: json!("srv-9"),
+            method: METHOD_FILE_CHANGE_APPROVAL.to_owned(),
+            params: json!({
+                "threadId": "thr_1",
+                "turnId": "turn_1",
+                "itemId": "fc-1",
+                "startedAtMs": 0,
+                "reason": "extra write access",
+            }),
+        };
+        let ServerRequestKind::Approval(mut approval) = classify_server_request(&request) else {
+            panic!("a file-change approval is modeled");
+        };
+        assert_eq!(
+            approval.file_change, None,
+            "the pure classification cannot correlate; that is the adapter's job"
+        );
+
+        with_file_change_detail(
+            &mut approval,
+            vec![AgentFileChange {
+                path: "a.rs".to_owned(),
+                kind: Some(AgentFileChangeKind::Update),
+                diff: "~a".to_owned(),
+            }],
+        );
+
+        assert_eq!(
+            approval.file_change,
+            Some(AgentFileChangeDetail {
+                changes: vec![AgentFileChange {
+                    path: "a.rs".to_owned(),
+                    kind: Some(AgentFileChangeKind::Update),
+                    diff: "~a".to_owned(),
+                }],
+                reason: Some("extra write access".to_owned()),
+            }),
+        );
     }
 }

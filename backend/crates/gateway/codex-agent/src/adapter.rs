@@ -119,18 +119,22 @@ use tokio::task::JoinHandle;
 
 use delta_usecase::{
     AgentAdapter, AgentCapabilities, AgentContentSource, AgentEvent, AgentEventStream,
-    AgentProvider, AgentSessionHandle, CommsDirection, CommsEntry, CommsFrameKind, CommsLogSink,
-    ContentSourceRequest, ContextInjectionCapability, Error as UsecaseError, EventCapability,
-    ForkCapability, InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest,
-    PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability,
-    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    AgentFileChange, AgentPermissionRequest, AgentProvider, AgentSessionHandle, CommsDirection,
+    CommsEntry, CommsFrameKind, CommsLogSink, ContentSourceRequest, ContextInjectionCapability,
+    Error as UsecaseError, EventCapability, ForkCapability, InterruptCapability, LaunchCapability,
+    LaunchOptionSpec, LaunchRequest, PermissionCapability, PermissionDecision, PtyHandle,
+    Result as UsecaseResult, ResumeCapability, ResumeRequest, SendReceipt, SendRequest,
+    SessionEndReason, SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability,
+    TerminalCapability, TranscriptCapability,
 };
 
+use crate::file_change_items::FileChangeItems;
 use crate::translate::{
-    classify_server_request, is_turn_completed, started_turn_id, translate_notification,
-    AccountRateLimits, ServerRequestKind,
+    classify_server_request, completed_item_id, file_change_item, is_turn_completed,
+    started_turn_id, translate_notification, with_file_change_detail, AccountRateLimits,
+    ServerRequestKind,
 };
+use crate::wire::Notification;
 use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEvent};
 
 /// Codex's static capability profile — the single source of truth returned by
@@ -233,20 +237,42 @@ struct CodexSession {
     /// just an echo of what Delta sent, and its `thread.gitInfo` is null (see
     /// [`resolved_model`]), so the launch site is Delta's own to supply.
     model: Option<String>,
+    /// The state the adapter's request path and the session's translation task
+    /// both reach into, as the pushed frames move it.
+    shared: SharedSessionState,
+    /// The translation task, aborted when the session is dropped so it never
+    /// outlives the adapter.
+    task: JoinHandle<()>,
+}
+
+/// The per-session state the adapter and its translation task **share**: the
+/// task maintains it as frames arrive, and the adapter's own methods read it
+/// when a caller asks something of the session.
+///
+/// Grouped rather than passed field by field because they travel together — one
+/// clone hands the whole of it to the spawned task — and because they answer
+/// the same question in three parts: what this thread currently has open.
+#[derive(Clone, Default)]
+struct SharedSessionState {
     /// Open approval requests: neutral `request_id` → the verbatim wire id the
-    /// response must echo. Shared with the translation task, which inserts an
-    /// entry when it surfaces a `PermissionRequested`.
+    /// response must echo. The translation task inserts an entry when it
+    /// surfaces a `PermissionRequested`; `resolve_permission` removes it when it
+    /// answers.
     approvals: Arc<Mutex<HashMap<String, Value>>>,
     /// The id of the turn currently in flight on this thread, if any. Real
     /// `turn/interrupt` params are `{threadId, turnId}`, so the adapter must know
     /// which turn to interrupt. Captured from the `turn/start` response (and
     /// re-affirmed by the `turn/started` notification), and cleared on
-    /// `turn/completed`. Shared with the translation task, which maintains it as
-    /// the pushed `turn/*` frames arrive.
+    /// `turn/completed`.
     current_turn_id: Arc<Mutex<Option<String>>>,
-    /// The translation task, aborted when the session is dropped so it never
-    /// outlives the adapter.
-    task: JoinHandle<()>,
+    /// The file-change items seen on this thread but not yet finished, keyed by
+    /// the Codex item id an approval request names.
+    ///
+    /// This is what turns a file-change approval — whose params carry no path,
+    /// kind or diff — into a card the user can actually answer: the details
+    /// arrived earlier on the item's `item/started`, and this map is the join
+    /// between the two (see [`FileChangeItems`]).
+    file_change_items: Arc<Mutex<FileChangeItems>>,
 }
 
 impl Drop for CodexSession {
@@ -321,8 +347,7 @@ impl CodexAppServerAdapter {
         let _ = tx.send(AgentEvent::SessionStarted {
             provider_session_id: thread_id.clone(),
         });
-        let approvals: Arc<Mutex<HashMap<String, Value>>> = Arc::new(Mutex::new(HashMap::new()));
-        let current_turn_id: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let shared = SharedSessionState::default();
         let task = tokio::spawn(translate_loop(
             session_id.clone(),
             events,
@@ -332,8 +357,7 @@ impl CodexAppServerAdapter {
             // task would never exit.
             Arc::downgrade(&self.conn),
             Arc::clone(self.conn.comms_log()),
-            Arc::clone(&approvals),
-            Arc::clone(&current_turn_id),
+            shared.clone(),
         ));
         self.sessions
             .lock()
@@ -345,8 +369,7 @@ impl CodexAppServerAdapter {
                     tx,
                     rx: Some(rx),
                     model,
-                    approvals,
-                    current_turn_id,
+                    shared,
                     task,
                 },
             );
@@ -366,6 +389,31 @@ impl CodexAppServerAdapter {
             .expect("sessions mutex poisoned")
             .get(key)
             .and_then(|session| session.model.clone())
+    }
+
+    /// How many file-change items this session is currently correlating for its
+    /// approval cards (see [`FileChangeItems`]). `0` for an unknown or closed
+    /// session.
+    ///
+    /// The map is live display state with a lifecycle — entries go when the item
+    /// completes, when the turn ends, and when the connection is lost — so this
+    /// exists to make that lifecycle *observable* rather than taken on trust: a
+    /// long session accumulating diffs is a leak, and the only way to assert it
+    /// does not is to be able to count them.
+    pub fn tracked_file_change_items(&self, key: &str) -> usize {
+        self.sessions
+            .lock()
+            .expect("sessions mutex poisoned")
+            .get(key)
+            .map(|session| {
+                session
+                    .shared
+                    .file_change_items
+                    .lock()
+                    .expect("file change items mutex poisoned")
+                    .len()
+            })
+            .unwrap_or(0)
     }
 
     /// The comms-log scope for a still-known session: Delta's conversation id,
@@ -403,6 +451,7 @@ impl CodexAppServerAdapter {
             .get(key)
         {
             *session
+                .shared
                 .current_turn_id
                 .lock()
                 .expect("current turn id mutex poisoned") = turn_id;
@@ -827,6 +876,7 @@ impl AgentAdapter for CodexAppServerAdapter {
             let sessions = self.sessions.lock().expect("sessions mutex poisoned");
             sessions.get(&handle.key).and_then(|session| {
                 session
+                    .shared
                     .current_turn_id
                     .lock()
                     .expect("current turn id mutex poisoned")
@@ -874,6 +924,7 @@ impl AgentAdapter for CodexAppServerAdapter {
                 .get(&handle.key)
                 .ok_or_else(|| UsecaseError::Agent(format!("unknown session `{}`", handle.key)))?;
             let removed = session
+                .shared
                 .approvals
                 .lock()
                 .expect("approvals mutex poisoned")
@@ -995,8 +1046,7 @@ async fn translate_loop(
     tx: UnboundedSender<AgentEvent>,
     conn: Weak<AppServerConnection>,
     comms: Arc<dyn CommsLogSink>,
-    approvals: Arc<Mutex<HashMap<String, Value>>>,
-    current_turn_id: Arc<Mutex<Option<String>>>,
+    shared: SharedSessionState,
 ) {
     while let Some(event) = events.recv().await {
         record_inbound(&comms, &session_id, &event);
@@ -1009,6 +1059,14 @@ async fn translate_loop(
             // Distinct from `close()`'s `SessionEndReason::Closed`: that is an
             // orderly teardown Delta asked for, this is a loss it must react to.
             ThreadEvent::ConnectionLost => {
+                // Nothing tracked can still be answered on a dead wire, and the
+                // diffs are the bulky part of the map, so release them before
+                // the session's terminal event goes out.
+                shared
+                    .file_change_items
+                    .lock()
+                    .expect("file change items mutex poisoned")
+                    .clear();
                 let _ = tx.send(AgentEvent::SessionEnded {
                     reason: SessionEndReason::ProcessExited,
                 });
@@ -1034,14 +1092,19 @@ async fn translate_loop(
                 // already set it), and a `turn/completed` clears it so a later
                 // interrupt does not reference a finished turn.
                 if let Some(turn_id) = started_turn_id(&notification) {
-                    *current_turn_id
+                    *shared
+                        .current_turn_id
                         .lock()
                         .expect("current turn id mutex poisoned") = Some(turn_id);
                 } else if is_turn_completed(&notification) {
-                    *current_turn_id
+                    *shared
+                        .current_turn_id
                         .lock()
                         .expect("current turn id mutex poisoned") = None;
                 }
+                // Done before the notification is translated so an approval
+                // that follows in the same batch already sees it.
+                maintain_file_change_items(&shared.file_change_items, &notification);
                 for event in translate_notification(&notification) {
                     if tx.send(event).is_err() {
                         return;
@@ -1049,8 +1112,10 @@ async fn translate_loop(
                 }
             }
             ThreadEvent::ServerRequest(request) => match classify_server_request(&request) {
-                ServerRequestKind::Approval(permission) => {
-                    approvals
+                ServerRequestKind::Approval(mut permission) => {
+                    attach_file_changes(&shared.file_change_items, &mut permission);
+                    shared
+                        .approvals
                         .lock()
                         .expect("approvals mutex poisoned")
                         .insert(permission.request_id.clone(), request.id.clone());
@@ -1090,6 +1155,65 @@ async fn translate_loop(
                 }
             },
         }
+    }
+}
+
+/// Fold one pushed notification into the session's file-change correlation map.
+///
+/// Three frames move it, and each is a different fact about the same patch:
+///
+/// - an `item/started` for a `fileChange` item, or an
+///   `item/fileChange/patchUpdated`, **states** the item's change set (the
+///   latter replacing what the former announced);
+/// - an `item/completed` **retires** that item's entry — the patch is applied or
+///   abandoned, so no approval can still be waiting on it;
+/// - a `turn/completed` **empties** the map: nothing proposed by a turn that has
+///   ended is still awaiting an answer, and this is the sweep that stops a
+///   long-running session from accumulating every diff it ever showed.
+fn maintain_file_change_items(items: &Arc<Mutex<FileChangeItems>>, notification: &Notification) {
+    let mut items = items.lock().expect("file change items mutex poisoned");
+    if let Some((item_id, changes)) = file_change_item(notification) {
+        items.record(item_id, changes);
+    }
+    if let Some(item_id) = completed_item_id(notification) {
+        items.forget(&item_id);
+    }
+    if is_turn_completed(notification) {
+        items.clear();
+    }
+}
+
+/// Complete an approval request with the change set of the item it gates, when
+/// that item is known.
+///
+/// The lookup is by the request's `tool_use_id` — the Codex `itemId` — so a
+/// command-execution approval (whose item is never tracked) and a file-change
+/// approval whose item was missed both simply find nothing and keep
+/// `file_change: None`. That `None` is the deliberate fallback: the browser card
+/// then renders the request's own params exactly as it did before this
+/// correlation existed, rather than an empty or invented detail block.
+///
+/// An item that names **no** file takes the same fallback, and that is what
+/// makes "a detail is present" mean "these files would change" everywhere
+/// downstream. An item can end up naming none — a `changes: []` array, or one
+/// whose every entry was dropped for lacking a path — and a detail minted from
+/// it would say nothing the input summary does not, while obliging every client
+/// (not just Delta's own card) to carry an empty-state branch the wire contract
+/// promises it will never need.
+fn attach_file_changes(
+    items: &Arc<Mutex<FileChangeItems>>,
+    permission: &mut AgentPermissionRequest,
+) {
+    let Some(item_id) = permission.tool_use_id.clone() else {
+        return;
+    };
+    let changes: Option<Vec<AgentFileChange>> = items
+        .lock()
+        .expect("file change items mutex poisoned")
+        .get(&item_id)
+        .filter(|changes| !changes.is_empty());
+    if let Some(changes) = changes {
+        with_file_change_detail(permission, changes);
     }
 }
 

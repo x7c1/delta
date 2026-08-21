@@ -136,6 +136,8 @@ async fn death_mid_turn_settles_the_turn_and_every_pending_approval() {
                     tool_name: "Bash".to_owned(),
                     input_json: json!({ "command": format!("cat {token}") }),
                     tool_use_id: None,
+                    file_change: None,
+                    grant_root: None,
                 },
             })
             .expect("the pump's stream is live");

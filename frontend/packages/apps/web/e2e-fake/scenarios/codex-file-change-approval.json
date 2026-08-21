@@ -1,0 +1,40 @@
+{
+  "thread_id": "thr_codex_file_change",
+  "model": "fake-codex-model",
+  "turn": {
+    "turn_id": "turn_codex_file_change",
+    "emit": [
+      { "type": "turn_started" },
+      {
+        "type": "item_started",
+        "item": {
+          "id": "fc_1",
+          "type": "fileChange",
+          "status": "inProgress",
+          "changes": [
+            {
+              "path": "src/greeting.rs",
+              "kind": { "type": "update" },
+              "diff": "@@ -1 +1 @@\n-fn greet() { \"hi\" }\n+fn greet() { \"hello\" }"
+            }
+          ]
+        }
+      },
+      {
+        "type": "request_approval",
+        "method": "item/fileChange/requestApproval",
+        "params": { "itemId": "fc_1", "reason": "write access to the worktree" }
+      },
+      { "type": "await_approvals" },
+      {
+        "type": "item_completed",
+        "item": {
+          "id": "item_reply",
+          "type": "agentMessage",
+          "text": "the greeting was updated"
+        }
+      },
+      { "type": "turn_completed", "status": "completed" }
+    ]
+  }
+}

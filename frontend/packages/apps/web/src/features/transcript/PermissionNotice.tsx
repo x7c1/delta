@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Button } from '@delta/ui-kit';
+import { Button, Collapsible } from '@delta/ui-kit';
 import { ApiError } from '@delta/api-client';
-import type { PermissionDecision } from '@delta/wire-gen';
+import type {
+  FileChangeDetail,
+  FileChangeKind,
+  PermissionDecision,
+} from '@delta/wire-gen';
 import { useApiClient } from '../../data/apiContext';
 import type { PermissionNotice as Notice } from '../../store/liveStore';
 
@@ -32,6 +36,78 @@ export function toolInputSummary(toolInputJson: string): string {
   return summary.length > SUMMARY_MAX_CHARS
     ? `${summary.slice(0, SUMMARY_MAX_CHARS)}…`
     : summary;
+}
+
+/**
+ * The human word for each change kind. A kind the server could not classify
+ * arrives as `null` and simply gets no label — the path and diff are what the
+ * answer turns on, and inventing a word for an unmodeled kind would be worse
+ * than saying nothing.
+ */
+const CHANGE_KIND_LABEL: Record<FileChangeKind, string> = {
+  add: 'new file',
+  update: 'edit',
+  delete: 'delete',
+};
+
+/**
+ * What a file-change request would do on disk: the affected paths and their
+ * change kinds always visible, the provider's stated reason when it gave one,
+ * and the diff behind an expand control.
+ *
+ * The diff is deliberately NOT inline. A single approval can carry hundreds of
+ * diff lines, and the question the user is answering — "should this agent write
+ * to these files?" — is usually settled by the paths alone; burying the
+ * Allow/Deny buttons under a wall of patch text would make the common answer
+ * harder to give, not easier.
+ */
+function FileChangeSummary({ detail }: { detail: FileChangeDetail }) {
+  const diffs = detail.changes.filter((change) => change.diff.length > 0);
+  return (
+    <div
+      className="flex flex-col gap-1.5"
+      data-testid="permission-notice-file-change"
+    >
+      <ul className="flex flex-col gap-0.5">
+        {detail.changes.map((change, index) => (
+          <li
+            key={`${change.path}-${index}`}
+            className="flex items-baseline gap-1.5"
+          >
+            <span className="break-all font-mono text-code text-fg">
+              {change.path}
+            </span>
+            {change.kind !== null && (
+              <span className="shrink-0 text-caption text-fg-muted">
+                {CHANGE_KIND_LABEL[change.kind]}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {detail.reason !== null && (
+        <p className="text-fg-muted" data-testid="permission-notice-reason">
+          {detail.reason}
+        </p>
+      )}
+      {diffs.length > 0 && (
+        <Collapsible
+          summary={`Diff (${diffs.length} ${diffs.length === 1 ? 'file' : 'files'})`}
+        >
+          {diffs.map((change, index) => (
+            <div key={`${change.path}-${index}`} className="mb-1.5 last:mb-0">
+              <div className="break-all font-mono text-code text-fg-subtle">
+                {change.path}
+              </div>
+              <pre className="whitespace-pre-wrap font-mono text-code text-fg-muted">
+                {change.diff}
+              </pre>
+            </div>
+          ))}
+        </Collapsible>
+      )}
+    </div>
+  );
 }
 
 export interface PermissionNoticeCardProps {
@@ -131,6 +207,21 @@ const HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN = false;
  *   connection died with the dialog open. Say so, and offer only Dismiss —
  *   an "Open terminal" button would open a pane this provider does not have.
  *
+ * When the request would change files and the provider said which, the card
+ * shows those paths and their change kinds instead of a truncated blob of
+ * request params, with the diff behind an expand control (see
+ * {@link FileChangeSummary}). Without that detail — a Claude permission, a
+ * command execution, or a file change the server could not correlate — it falls
+ * back to summarizing the tool input, exactly as it always has. That is a
+ * property of the data, not a provider test.
+ *
+ * A request that also asks for a write root states it on its own line, in BOTH
+ * of those branches. It is the broadest thing an Allow here grants — writes
+ * anywhere under that root for the rest of the session, not just the listed
+ * files — so it is deliberately not folded into the path list, where it would
+ * read as one more file being edited, and deliberately not hidden when the
+ * change set is missing, which is when the user has least else to go on.
+ *
  * A provider that accepts a session-scoped allow gets a third affirmative
  * button, which answers this request AND tells the provider to stop asking for
  * comparable ones for the rest of the session. It is the remedy for the case
@@ -195,6 +286,15 @@ export function PermissionNoticeCard({
   // user knows the queue is not empty when this card clears.
   const remaining = Math.max(notice.pendingCount - 1, 0);
 
+  // The file-change detail, if this request has one worth rendering. A detail
+  // that names no file is treated as no detail at all: the block's whole job is
+  // to say WHICH files are affected, so with none it could say nothing the
+  // input summary does not already say.
+  const fileChange =
+    notice.fileChange && notice.fileChange.changes.length > 0
+      ? notice.fileChange
+      : undefined;
+
   return (
     <div
       className="flex flex-col gap-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-secondary"
@@ -212,9 +312,24 @@ export function PermissionNoticeCard({
           </span>
         )}
       </p>
-      <p className="break-all font-mono text-code text-fg-muted">
-        {toolInputSummary(notice.toolInput)}
-      </p>
+      {fileChange ? (
+        <FileChangeSummary detail={fileChange} />
+      ) : (
+        <p className="break-all font-mono text-code text-fg-muted">
+          {toolInputSummary(notice.toolInput)}
+        </p>
+      )}
+      {/* Outside the branch above on purpose: a write root can arrive with or
+          without a change set, and it outlives this one request either way. */}
+      {notice.grantRoot && (
+        <p className="text-warning" data-testid="permission-notice-grant-root">
+          Also asks to allow writes anywhere under{' '}
+          <span className="break-all font-mono text-code">
+            {notice.grantRoot}
+          </span>{' '}
+          for the rest of the session.
+        </p>
+      )}
       {fallback ? (
         canAnswerInTerminal ? (
           <>

@@ -108,13 +108,18 @@ where
         // Express the request as the provider-neutral fact and let the
         // permission reducer raise the queryable mirror and produce the notice
         // broadcast. The `tool_use_id` is `None`: the `PermissionRequest` hook
-        // payload carries none (the row records none too).
+        // payload carries none (the row records none too). `file_change` and
+        // `grant_root` are `None` for the same reason — the hook states the tool
+        // and its input and nothing about a proposed patch or a write root, so
+        // the notice renders from the input alone, exactly as it always has.
         let event = AgentEvent::PermissionRequested {
             request: AgentPermissionRequest {
                 request_id: request.id.to_string(),
                 tool_name: tool_name.to_owned(),
                 input_json: parse_tool_input(tool_input_json),
                 tool_use_id: None,
+                file_change: None,
+                grant_root: None,
             },
         };
         let events = reduce_permission_event(self.state, self.id, &event);
