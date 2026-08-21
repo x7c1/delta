@@ -10,7 +10,7 @@ check_command: 'cd backend && cargo fmt --all -- --check && cargo build && cargo
 assignee: null
 branch: task/0821-0601-refactor-sqlite-migration-ladder
 created_at: 2026-08-21T06:01:04Z
-updated_at: 2026-08-21T07:30:00Z
+updated_at: 2026-08-21T07:45:00Z
 ---
 
 # refactor(sqlite): migrate an existing database forward instead of demanding a reset
@@ -242,7 +242,7 @@ construction.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] The real development database opens unchanged against the new binary —
+- [x] The real development database opens unchanged against the new binary —
       the session list, threads, and pending sends are all still there, and no
       `delta.db.bak-*` file was created.
 
