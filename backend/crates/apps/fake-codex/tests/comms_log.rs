@@ -20,9 +20,9 @@
 //!    turn up.
 //!
 //! That the recording is observability only — that it adds, drops, or reorders
-//! no neutral event — is pinned by `full_loop.rs`, which drives the same stack
-//! with a real [`CommsLogHub`] wired and asserts its event streams frame for
-//! frame.
+//! no neutral event — is pinned by `full_loop/comms_log_stream.rs`, which
+//! drives the same stack with a real [`CommsLogHub`] wired and asserts its
+//! event streams frame for frame.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};

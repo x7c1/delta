@@ -19,7 +19,7 @@ serde_json = { workspace = true }
 codex-agent = { workspace = true }
 delta-usecase = { workspace = true }
 agent-contract = { workspace = true }
-# The full-loop e2e (`full_loop.rs`) drives the whole backend — the real
+# The full-loop e2e (`tests/full_loop/`) drives the whole backend — the real
 # `router`/`AppState` with real gateways — against this fake binary, so it needs
 # the server and the concrete gateways the composition root wires. The gateways
 # are inert on the Codex path (no tmux pane, no transcript file, no workdir

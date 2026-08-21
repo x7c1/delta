@@ -12,7 +12,7 @@
 //! pump settles everything it strands. These tests cover the operation × state
 //! matrix at the use-case layer, where the exact state transitions and browser
 //! signals are observable (the real-stack proof, over a killed `fake-codex`,
-//! lives in `fake-codex/tests/full_loop.rs`):
+//! lives in `fake-codex/tests/full_loop/session_death.rs`):
 //!
 //! - death **mid-turn with pending approvals** → every dialog clears
 //!   client-visibly, no row is left `pending` (each carries the reason it was
