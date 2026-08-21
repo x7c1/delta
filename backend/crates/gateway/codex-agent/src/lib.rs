@@ -67,6 +67,7 @@ mod adapter;
 mod content;
 mod error;
 mod factory;
+mod file_change_items;
 pub mod schema;
 mod translate;
 pub mod wire;

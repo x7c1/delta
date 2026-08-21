@@ -150,6 +150,12 @@ pub(crate) fn project_hook(
                     tool_name,
                     input_json: tool_input,
                     tool_use_id,
+                    // The hook states the tool and its input, never a proposed
+                    // patch or a write root, so there is no file-change detail
+                    // and no root to carry: an Edit or Write already names its
+                    // path in `tool_input`, which is what the notice summarises.
+                    file_change: None,
+                    grant_root: None,
                 },
             };
             (event, Some(open))

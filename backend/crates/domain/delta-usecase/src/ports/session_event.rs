@@ -2,6 +2,8 @@
 
 use delta_model::{AgentProvider, MessageUuid, SessionId, ThreadId};
 
+use crate::agent::AgentFileChangeDetail;
+
 /// An event the Interactor emits for the browser to render.
 ///
 /// This is the domain view of the event: it carries no serialization
@@ -152,6 +154,24 @@ pub enum SessionEvent {
         /// what the tool is about to do (e.g. the command a `Bash` call runs)
         /// next to its Allow/Deny buttons.
         tool_input_json: String,
+        /// What allowing the request would do to files on disk, when the
+        /// provider stated it before asking — the paths, how each changes, the
+        /// diffs, and the provider's own reason.
+        ///
+        /// `None` whenever nothing is known (every request that is not a file
+        /// change, and a file change whose detail the adapter could not
+        /// correlate); the notice then renders from `tool_input_json` alone,
+        /// exactly as it did before this field existed.
+        file_change: Option<AgentFileChangeDetail>,
+        /// A directory the request also asks to be allowed to write under for
+        /// the rest of the session, when the provider asked for one. `None`
+        /// when it asked for no such root.
+        ///
+        /// Carried beside `file_change` rather than inside it: it is the
+        /// broader of the two asks (a standing permission over a whole tree,
+        /// not the files this one request lists) and it survives a correlation
+        /// that failed, so the notice can state it either way.
+        grant_root: Option<String>,
     },
     /// Claude Code's built-in `AskUserQuestion` tool is presenting a
     /// multiple-choice question, so the user must pick an option in the TUI.

@@ -62,6 +62,54 @@ pub struct AgentTokenUsage {
     pub total_input_tokens: Option<u64>,
 }
 
+/// How one file would change if a permission request is allowed.
+///
+/// Deliberately a small, closed vocabulary rather than a passthrough of any one
+/// provider's spelling: these three are what a patch can do to a path, and a
+/// request that names something else degrades to no kind at all (see
+/// [`AgentFileChange::kind`]) instead of inventing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentFileChangeKind {
+    /// The file does not exist yet and would be created.
+    Add,
+    /// An existing file's contents would be edited.
+    Update,
+    /// The file would be removed.
+    Delete,
+}
+
+/// One file a permission request would change, in provider-neutral form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFileChange {
+    /// The path that would change, exactly as the provider named it.
+    pub path: String,
+    /// How it would change, or `None` when the provider named a kind this build
+    /// does not model — the path and the diff are still worth showing, so an
+    /// unknown kind loses the label rather than the whole entry.
+    pub kind: Option<AgentFileChangeKind>,
+    /// The unified diff of the proposed change, as the provider produced it.
+    pub diff: String,
+}
+
+/// What a permission request would do to files on disk, when the provider says
+/// so before asking.
+///
+/// This is *display* detail for a live prompt: it exists so the approval card
+/// can name the files it is gating and show the diff, instead of a truncated
+/// blob of request params. It is `Some` only when the provider actually stated
+/// the change set — the adapter never synthesises an empty detail, so a `None`
+/// means "nothing is known here" and the card falls back to its input summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFileChangeDetail {
+    /// The files the request would change, in the order the provider listed
+    /// them.
+    pub changes: Vec<AgentFileChange>,
+    /// The provider's own explanation for why it is asking (Codex's `reason`,
+    /// e.g. a request for write access outside the sandbox). `None` when the
+    /// provider offered none.
+    pub reason: Option<String>,
+}
+
 /// A tool-permission request surfaced by the agent, in provider-neutral form.
 ///
 /// This is distinct from [`delta_model::PermissionRequest`], which is the
@@ -79,6 +127,24 @@ pub struct AgentPermissionRequest {
     /// The provider's id for the tool call this request gates, when the
     /// provider exposes one (Claude's `tool_use_id`; `None` when absent).
     pub tool_use_id: Option<String>,
+    /// What the request would do to files on disk, when the provider stated it
+    /// (see [`AgentFileChangeDetail`]). `None` for every request that is not a
+    /// file change, and for a file change whose detail the adapter could not
+    /// correlate — both render from [`Self::input_json`] alone, exactly as they
+    /// did before this existed.
+    pub file_change: Option<AgentFileChangeDetail>,
+    /// A directory the request *also* asks to be allowed to write under for the
+    /// remainder of the session, when the provider asked for one (Codex's
+    /// `grantRoot`). `None` whenever it asked for no such root.
+    ///
+    /// A sibling of [`Self::file_change`], deliberately not a part of it, for
+    /// two reasons. It is a **broader** ask — the detail names the files this
+    /// one request would touch, this asks for a standing permission over a
+    /// whole tree — and it arrives on the request's own params rather than from
+    /// a correlated item, so nesting it would hide it in exactly the case where
+    /// the card has least else to go on: a change set that could not be
+    /// correlated.
+    pub grant_root: Option<String>,
 }
 
 /// The neutral event stream the core reasons over, regardless of provider.

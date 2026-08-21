@@ -79,6 +79,8 @@ async fn codex_permission_round_trips_through_the_pump() {
                 tool_name: "Bash".to_owned(),
                 input_json: json!({ "command": "ls" }),
                 tool_use_id: None,
+                file_change: None,
+                grant_root: None,
             },
         })
         .expect("the pump's stream is live");
@@ -199,6 +201,8 @@ async fn session_with_a_pending_approval(
                 tool_name: "Bash".to_owned(),
                 input_json: json!({ "command": "ls" }),
                 tool_use_id: None,
+                file_change: None,
+                grant_root: None,
             },
         })
         .expect("the pump's stream is live");

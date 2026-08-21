@@ -33,7 +33,8 @@ pub use capabilities::{
 };
 pub use content_source::{AgentContentSource, NullContentSource};
 pub use event::{
-    AgentEvent, AgentPermissionRequest, AgentTokenUsage, SessionEndReason, TurnStatus,
+    AgentEvent, AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind,
+    AgentPermissionRequest, AgentTokenUsage, SessionEndReason, TurnStatus,
 };
 pub use factory::AgentAdapterFactory;
 pub use provider::AgentProvider;

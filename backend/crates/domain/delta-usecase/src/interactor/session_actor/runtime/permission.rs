@@ -4,6 +4,7 @@
 
 use tokio::sync::oneshot;
 
+use crate::agent::AgentFileChangeDetail;
 use crate::interactor::PermissionDecision;
 
 use super::SessionRuntime;
@@ -30,6 +31,18 @@ pub struct PendingPermission {
     pub tool_name: String,
     /// The tool input, serialized as JSON text.
     pub tool_input_json: String,
+    /// What allowing this request would do to files on disk, when the provider
+    /// stated it. Mirrored here — not only broadcast — because the envelope is
+    /// what re-seeds the card after a reconnect: a client that missed the event
+    /// must get the same detail from the refetch, or the card it rebuilds would
+    /// silently degrade to the input summary.
+    pub file_change: Option<AgentFileChangeDetail>,
+    /// A directory the request also asks to be allowed to write under for the
+    /// rest of the session, when the provider asked for one. Mirrored for the
+    /// same reason as [`Self::file_change`], and all the more so: it is the
+    /// broadest thing the dialog grants, so a re-seeded card that dropped it
+    /// would understate what the user is about to allow.
+    pub grant_root: Option<String>,
 }
 
 impl SessionRuntime {

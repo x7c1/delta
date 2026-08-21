@@ -1,6 +1,10 @@
 import type { StateCreator } from 'zustand';
 import type { SessionId, ThreadId } from '@delta/model';
-import type { PendingPermission, PendingQuestion } from '@delta/wire-gen';
+import type {
+  FileChangeDetail,
+  PendingPermission,
+  PendingQuestion,
+} from '@delta/wire-gen';
 import type { EventReducer } from './eventReducer';
 import type { SendsSlice } from './sendsSlice';
 
@@ -13,6 +17,25 @@ export interface QueuedPermissionRequest {
   toolName: string;
   /** The tool input, serialized as JSON text (shown summarized). */
   toolInput: string;
+  /**
+   * What allowing the request would do to files on disk, when the provider
+   * stated it: the affected paths, how each changes, the diffs, and the
+   * provider's reason. `undefined` whenever nothing is known — every request
+   * that is not a file change, and a file change whose detail the server could
+   * not correlate — and the card then falls back to summarizing
+   * {@link toolInput}.
+   */
+  fileChange?: FileChangeDetail;
+  /**
+   * A directory the request also asks to be allowed to write under for the rest
+   * of the session, when the provider asked for one. `undefined` when it asked
+   * for no such root.
+   *
+   * Independent of {@link fileChange} and broader than it: a request can carry
+   * this with no change set at all, which is exactly the case where the card
+   * would otherwise show only the input summary.
+   */
+  grantRoot?: string;
 }
 
 /**
@@ -43,6 +66,10 @@ export interface PermissionNotice {
   toolName: string;
   /** The tool input, serialized as JSON text (shown summarized). */
   toolInput: string;
+  /** See {@link QueuedPermissionRequest.fileChange}. */
+  fileChange?: FileChangeDetail;
+  /** See {@link QueuedPermissionRequest.grantRoot}. */
+  grantRoot?: string;
   /** True once the user dismissed the card; the entry stays for de-dup. */
   dismissed: boolean;
   /**
@@ -393,6 +420,8 @@ export const createNoticesSlice: StateCreator<
           requestId: permission.request_id,
           toolName: permission.tool_name,
           toolInput: permission.tool_input,
+          fileChange: permission.file_change,
+          grantRoot: permission.grant_root,
           dismissed: false,
           queued,
           pendingCount: Math.max(pendingCount, 1 + queued.length),
@@ -496,6 +525,8 @@ export const reducePermissionRequested: EventReducer<
     requestId: event.request_id,
     toolName: event.tool_name,
     toolInput: event.tool_input,
+    fileChange: event.file_change,
+    grantRoot: event.grant_root,
   };
   const current = noticeOf(state.notices, event.session_id, 'permission');
   if (current === null) {

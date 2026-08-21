@@ -54,12 +54,18 @@ interface RenderOptions {
   providerHasAllowForSession?: boolean;
   /** What the decision POST rejects with (no failure = a 204). */
   failWith?: unknown;
+  /**
+   * Fields to override on the rendered notice — how a case swaps the default
+   * `Bash` request for one carrying file-change detail.
+   */
+  noticeOverrides?: Partial<PermissionNotice>;
 }
 
 function renderCard({
   providerHasTerminal,
   providerHasAllowForSession,
   failWith,
+  noticeOverrides,
 }: RenderOptions = {}) {
   const client = new ApiClient({ baseUrl: 'http://localhost' });
   const decide = vi
@@ -74,7 +80,7 @@ function renderCard({
   render(
     <ApiProvider client={client}>
       <PermissionNoticeCard
-        notice={notice()}
+        notice={{ ...notice(), ...noticeOverrides }}
         providerHasTerminal={providerHasTerminal}
         providerHasAllowForSession={providerHasAllowForSession}
         onOpenTerminal={onOpenTerminal}
@@ -243,5 +249,225 @@ describe('PermissionNoticeCard session-scoped allow', () => {
     fireEvent.click(allow);
     await waitFor(() => expect(decide).toHaveBeenCalledTimes(2));
     expect(decide).toHaveBeenLastCalledWith(7, 'allow');
+  });
+});
+
+describe('PermissionNoticeCard file-change detail', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A notice for a request that would edit one file and create another. */
+  const fileChangeNotice = (
+    reason: string | null = 'write access',
+  ): Partial<PermissionNotice> => ({
+    toolName: 'file_change',
+    toolInput: '{"itemId":"fc_1","turnId":"turn_1"}',
+    fileChange: {
+      changes: [
+        {
+          path: 'src/lib.rs',
+          kind: 'update',
+          diff: '@@ -1 +1 @@\n-old\n+new',
+        },
+        { path: 'src/added.rs', kind: 'add', diff: '+fresh' },
+      ],
+      reason,
+    },
+  });
+
+  it('names the affected files and how each one changes', () => {
+    // The failure this replaces: every file-change prompt rendered as the same
+    // truncated blob of request params, so the user could not tell one from the
+    // next — let alone what it would write.
+    renderCard({ noticeOverrides: fileChangeNotice() });
+
+    expect(screen.getByText('src/lib.rs')).toBeInTheDocument();
+    expect(screen.getByText('src/added.rs')).toBeInTheDocument();
+    expect(screen.getByText('edit')).toBeInTheDocument();
+    expect(screen.getByText('new file')).toBeInTheDocument();
+    // The params blob it replaces is gone, not shown alongside.
+    expect(screen.queryByText(/itemId/)).not.toBeInTheDocument();
+  });
+
+  it("shows the provider's own reason when it gave one", () => {
+    renderCard({ noticeOverrides: fileChangeNotice() });
+
+    expect(screen.getByTestId('permission-notice-reason')).toHaveTextContent(
+      'write access',
+    );
+  });
+
+  it('omits the reason line entirely when the provider gave none', () => {
+    renderCard({ noticeOverrides: fileChangeNotice(null) });
+
+    expect(
+      screen.queryByTestId('permission-notice-reason'),
+    ).not.toBeInTheDocument();
+    // The paths are still there: no reason is not no detail.
+    expect(screen.getByText('src/lib.rs')).toBeInTheDocument();
+  });
+
+  it('keeps the diff behind an expand control', () => {
+    // A single approval can carry hundreds of diff lines; inline they would push
+    // the Allow/Deny buttons off screen, making the common answer harder to give.
+    renderCard({ noticeOverrides: fileChangeNotice() });
+
+    expect(screen.queryByText(/-old/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Diff \(2 files\)/ }));
+
+    expect(screen.getByText(/-old/)).toBeInTheDocument();
+    expect(screen.getByText(/\+fresh/)).toBeInTheDocument();
+  });
+
+  it('falls back to the input summary when there is no detail', () => {
+    // A Claude permission, a command execution, and a file change whose item the
+    // server could not correlate all land here — the card renders exactly what
+    // it always did, with no empty detail block.
+    renderCard();
+
+    expect(screen.getByText('rm -rf scratch')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('permission-notice-file-change'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Diff/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('falls back to the input summary when the detail names no file', () => {
+    // An empty change list says nothing the summary does not, so it is treated
+    // as no detail rather than rendered as an empty block.
+    renderCard({
+      noticeOverrides: {
+        toolName: 'file_change',
+        fileChange: { changes: [], reason: null },
+      },
+    });
+
+    expect(screen.getByText('rm -rf scratch')).toBeInTheDocument();
+    expect(
+      screen.queryByTestId('permission-notice-file-change'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('states a requested write root as the broader grant it is', () => {
+    // The root is not one of the listed paths: it is a standing permission over
+    // a whole tree. Folded into the file list it would read as one more file
+    // being edited, which understates what the Allow actually grants.
+    renderCard({
+      noticeOverrides: { ...fileChangeNotice(), grantRoot: '/repo' },
+    });
+
+    expect(screen.getByTestId('permission-notice-grant-root')).toHaveTextContent(
+      'Also asks to allow writes anywhere under /repo for the rest of the session.',
+    );
+    expect(
+      screen.getByTestId('permission-notice-file-change'),
+    ).not.toHaveTextContent('/repo');
+  });
+
+  it('states the write root even with no detail to show it beside', () => {
+    // The change set could not be correlated, so the card is back to the JSON
+    // summary — and that is exactly when dropping the broadest thing the Allow
+    // grants would be worst, since nothing else on the card names a scope.
+    renderCard({
+      noticeOverrides: {
+        toolName: 'file_change',
+        toolInput: '{"itemId":"fc_1"}',
+        grantRoot: '/repo',
+      },
+    });
+
+    expect(
+      screen.queryByTestId('permission-notice-file-change'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId('permission-notice-grant-root'),
+    ).toHaveTextContent('/repo');
+  });
+
+  it('shows no write-root line when the provider asked for no root', () => {
+    renderCard({ noticeOverrides: fileChangeNotice() });
+
+    expect(
+      screen.queryByTestId('permission-notice-grant-root'),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('PermissionNoticeCard truncated summary', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * A command of the shape that motivated this: a provider that found the patch
+   * helper on `PATH` and shells out to it, so the approval arrives as a command
+   * execution and the patch body — the only part that says what would be
+   * written — sits well past the summary limit.
+   */
+  const APPLY_PATCH_COMMAND =
+    `zsh -lc "printf '%s\\n' '*** Begin Patch' '*** Update File: notes.txt' ` +
+    `'@@' '-before' '+after' '*** End Patch' | ` +
+    `~/.cache/agent/apply-patch/apply_patch-x86_64-unknown-linux-gnu"`;
+
+  /** The control that reveals the untruncated text. */
+  const fullTextToggle = () =>
+    screen.queryByRole('button', { name: /Full text/ });
+
+  it('offers the full command behind an expand control when the line is clipped', () => {
+    // The clipped line still reads as it always did; the part the answer turns
+    // on is one click away instead of unreachable.
+    expect(APPLY_PATCH_COMMAND.length).toBeGreaterThan(120);
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({ command: APPLY_PATCH_COMMAND }),
+      },
+    });
+
+    expect(
+      screen.getByText(`${APPLY_PATCH_COMMAND.slice(0, 120)}…`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(APPLY_PATCH_COMMAND)).not.toBeInTheDocument();
+
+    const toggle = fullTextToggle();
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle as HTMLElement);
+
+    expect(screen.getByText(APPLY_PATCH_COMMAND)).toBeInTheDocument();
+  });
+
+  it('adds no expand control when the command fits on the line', () => {
+    // The default notice's `rm -rf scratch` is far short of the limit: nothing
+    // was cut, so a control promising "the full text" would open onto the text
+    // already on screen.
+    renderCard();
+
+    expect(screen.getByText('rm -rf scratch')).toBeInTheDocument();
+    expect(fullTextToggle()).not.toBeInTheDocument();
+  });
+
+  it('expands the JSON fallback of an uncorrelated file change too', () => {
+    // No provider test anywhere in this path: the rule is that a clipped summary
+    // can be opened, so the params blob a file-change approval falls back to
+    // when its item could not be correlated gets the same treatment.
+    const toolInput = JSON.stringify({
+      itemId: `fc_${'0'.repeat(140)}`,
+      turnId: 'turn_1',
+    });
+    expect(toolInput.length).toBeGreaterThan(120);
+    renderCard({ noticeOverrides: { toolName: 'file_change', toolInput } });
+
+    expect(
+      screen.queryByTestId('permission-notice-file-change'),
+    ).not.toBeInTheDocument();
+
+    const toggle = fullTextToggle();
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle as HTMLElement);
+
+    expect(screen.getByText(toolInput)).toBeInTheDocument();
   });
 });

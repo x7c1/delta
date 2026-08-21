@@ -161,6 +161,8 @@ where
                 tool_name: request.tool_name,
                 input_json: request.input_json,
                 tool_use_id: request.tool_use_id,
+                file_change: request.file_change,
+                grant_root: request.grant_root,
             },
         };
         for event in reduce_permission_event(self.state, self.id, &event) {
