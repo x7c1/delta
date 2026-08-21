@@ -396,3 +396,78 @@ describe('PermissionNoticeCard file-change detail', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe('PermissionNoticeCard truncated summary', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * A command of the shape that motivated this: a provider that found the patch
+   * helper on `PATH` and shells out to it, so the approval arrives as a command
+   * execution and the patch body — the only part that says what would be
+   * written — sits well past the summary limit.
+   */
+  const APPLY_PATCH_COMMAND =
+    `zsh -lc "printf '%s\\n' '*** Begin Patch' '*** Update File: notes.txt' ` +
+    `'@@' '-before' '+after' '*** End Patch' | ` +
+    `~/.cache/agent/apply-patch/apply_patch-x86_64-unknown-linux-gnu"`;
+
+  /** The control that reveals the untruncated text. */
+  const fullTextToggle = () =>
+    screen.queryByRole('button', { name: /Full text/ });
+
+  it('offers the full command behind an expand control when the line is clipped', () => {
+    // The clipped line still reads as it always did; the part the answer turns
+    // on is one click away instead of unreachable.
+    expect(APPLY_PATCH_COMMAND.length).toBeGreaterThan(120);
+    renderCard({
+      noticeOverrides: {
+        toolInput: JSON.stringify({ command: APPLY_PATCH_COMMAND }),
+      },
+    });
+
+    expect(
+      screen.getByText(`${APPLY_PATCH_COMMAND.slice(0, 120)}…`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(APPLY_PATCH_COMMAND)).not.toBeInTheDocument();
+
+    const toggle = fullTextToggle();
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle as HTMLElement);
+
+    expect(screen.getByText(APPLY_PATCH_COMMAND)).toBeInTheDocument();
+  });
+
+  it('adds no expand control when the command fits on the line', () => {
+    // The default notice's `rm -rf scratch` is far short of the limit: nothing
+    // was cut, so a control promising "the full text" would open onto the text
+    // already on screen.
+    renderCard();
+
+    expect(screen.getByText('rm -rf scratch')).toBeInTheDocument();
+    expect(fullTextToggle()).not.toBeInTheDocument();
+  });
+
+  it('expands the JSON fallback of an uncorrelated file change too', () => {
+    // No provider test anywhere in this path: the rule is that a clipped summary
+    // can be opened, so the params blob a file-change approval falls back to
+    // when its item could not be correlated gets the same treatment.
+    const toolInput = JSON.stringify({
+      itemId: `fc_${'0'.repeat(140)}`,
+      turnId: 'turn_1',
+    });
+    expect(toolInput.length).toBeGreaterThan(120);
+    renderCard({ noticeOverrides: { toolName: 'file_change', toolInput } });
+
+    expect(
+      screen.queryByTestId('permission-notice-file-change'),
+    ).not.toBeInTheDocument();
+
+    const toggle = fullTextToggle();
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle as HTMLElement);
+
+    expect(screen.getByText(toolInput)).toBeInTheDocument();
+  });
+});

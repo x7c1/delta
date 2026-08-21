@@ -10,7 +10,7 @@ check_command: 'cd backend && cargo fmt --all -- --check && cargo build && cargo
 assignee: null
 branch: task/0821-1011-feat-file-change-approval-detail
 created_at: 2026-08-21T10:11:44Z
-updated_at: 2026-08-21T12:00:00Z
+updated_at: 2026-08-21T12:40:00Z
 ---
 
 # feat(permission): show the affected paths and diff on a file-change approval
@@ -50,6 +50,27 @@ This matters in practice: a dogfooding session on 2026-08-18 raised 13
 file-change approvals in a single turn, each rendered as an interchangeable
 120-character JSON blob. The session-scoped allow shipped separately and reduced
 the *number* of prompts; this task makes the remaining prompts answerable.
+
+**A second half surfaced from live use of the first.** Codex does not always
+edit through the structured patch tool. In a real session it created a file that
+way — raising a proper `fileChange` approval with the detail this task adds — and
+then probed for the `apply_patch` executable on `PATH` and shelled out to it for
+every subsequent edit:
+
+    zsh -lc "printf '%s\n' '*** Begin Patch' '*** Update File: notes.txt' '@@' \
+      '-before' '+after' '*** End Patch' | .../apply_patch"
+
+Those arrive as **command-execution** approvals, so no `item/started` file-change
+item exists to correlate and there is nothing for the detail path to attach. The
+patch is nevertheless right there in the command string — and invisible, because
+the card truncates its summary at 120 characters, which in that example cuts off
+exactly where the patch body begins. The user is asked to approve an edit whose
+content is on screen but clipped.
+
+So the same failure this task exists to fix reappears one branch over, for the
+same reason: a one-line summary is the only rendering a permission ever gets. The
+fix is symmetric — give the summary the expand affordance the diff already has,
+so any request whose summary had to be truncated can be read in full.
 
 ### Required shape of the change
 
@@ -130,6 +151,22 @@ the *number* of prompts; this task makes the remaining prompts answerable.
    does today; that is a property of the data, not a `provider === 'codex'`
    test.
 
+9. **Let a truncated summary be expanded to its full text.** `toolInputSummary`
+   (`PermissionNotice.tsx`) clips at `SUMMARY_MAX_CHARS = 120`. When it clips,
+   the card must offer the untruncated text behind the same `Collapsible` the
+   diff uses — one affordance, one mental model. When it does not clip, add no
+   control: a short command must look exactly as it does today.
+
+   This is **frontend-only**. The full text already reaches the browser in
+   `tool_input`; nothing on the wire or in either adapter changes.
+
+   **Do not special-case `apply_patch`, and do not parse the command string.**
+   Detecting a patch in a command and rendering it as a diff would be Codex-
+   specific, string-match dependent, and would break the moment an edit arrives
+   via `sed` or a heredoc. The generic rule — long summaries can be opened —
+   serves every provider and every long command, including the JSON fallback a
+   file-change approval takes when correlation fails.
+
 ## Acceptance criteria
 
 ### Automated (pipeline-verified)
@@ -156,6 +193,13 @@ the *number* of prompts; this task makes the remaining prompts answerable.
       the affected path rather than a JSON blob.
 - [x] `grep` finds no provider-id literal (`"codex"` / `'codex'`) introduced by
       this change in the permission path, in either Rust or TypeScript.
+- [x] A test asserts a command approval whose command exceeds the summary limit
+      renders the clipped line plus an expand control, and the full command text
+      once expanded.
+- [x] A test asserts a command approval short enough not to be clipped renders no
+      expand control at all.
+- [x] A test asserts a file-change approval that fell back to the JSON summary
+      gets the same expand treatment when that summary was clipped.
 
 ### Manual / on-hardware (verified by a human before merge)
 
