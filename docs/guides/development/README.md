@@ -104,6 +104,23 @@ every persisted conversation is "closed" until it is resumed. Authentication is
 assumed — the server relies on a cached Claude Code token (or
 `CLAUDE_CODE_OAUTH_TOKEN`) and never runs interactive OAuth.
 
+### Reading the SQLite schema
+
+The schema has no single file to open: it is built by replaying the migration
+ladder in `backend/crates/gateway/delta-sqlite/src/migrations/`, one module per
+schema subject. To read the whole thing at once, dump it from a database the
+ladder built:
+
+```bash
+sqlite3 delta.db .schema
+```
+
+That is true by construction — it is the schema delta is actually running
+against, including every migration step this particular file has been through.
+`sqlite3 delta.db 'PRAGMA user_version'` shows which generation it is stamped
+at. For when a change needs a migration step and when it may ask for a reset,
+see the [compatibility policy](../compatibility.md).
+
 ## Frontend (`frontend/`)
 
 The `frontend/` directory is the pnpm workspace root. pnpm is provided by
