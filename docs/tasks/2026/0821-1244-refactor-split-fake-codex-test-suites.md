@@ -6,11 +6,11 @@ base_ref: null
 perspectives: [completeness, clarity, rust-module-structure]
 max_refine_rounds: 3
 retries_remaining: 1
-check_command: 'make check'
+check_command: 'make check && ! grep -rq "allow(dead_code)" backend/crates/apps/fake-codex/tests/full_loop backend/crates/apps/fake-codex/tests/adapter_contract && [ "$(find backend/crates/apps/fake-codex/tests/full_loop backend/crates/apps/fake-codex/tests/adapter_contract -name "*.rs" -exec wc -l {} \; | sort -rn | head -1 | cut -d" " -f1)" -lt 1000 ] && [ "$(ls backend/crates/apps/fake-codex/tests/*.rs | wc -l)" -eq 2 ] && [ "$(cd backend && cargo test -p fake-codex --test full_loop -- --list | grep -c ": test$")" -eq 22 ] && [ "$(cd backend && cargo test -p fake-codex --test adapter_contract -- --list | grep -c ": test$")" -eq 30 ]'
 assignee: null
 branch: task/0821-1244-refactor-split-fake-codex-test-suites
 created_at: 2026-08-21T12:44:19Z
-updated_at: 2026-08-21T13:56:00Z
+updated_at: 2026-08-21T14:12:00Z
 ---
 
 # refactor(fake-codex): split the full-loop and adapter-contract suites into directory modules
@@ -112,28 +112,42 @@ preserved verbatim. Do the same thing here.
 
 ### Automated (pipeline-verified)
 
+Each item below is backed by a gate appended to `check_command` after the
+canonical `make check`; the gates are additions to the canonical gate, never a
+hand-copy of it.
+
 - [x] `backend/crates/apps/fake-codex/tests/full_loop.rs` and
       `tests/adapter_contract.rs` no longer exist as single files; the two
       suites are directory-module targets rooted at `tests/full_loop/main.rs`
       and `tests/adapter_contract/main.rs`, and both compile and pass under
-      `cargo test` (run by `make check`).
-- [x] Both suites still run as exactly two test binaries — the split introduces
-      no new top-level `tests/*.rs` target — and the crate builds clean under
-      `cargo fmt --all -- --check` and `cargo clippy --all-targets -- -D warnings`.
+      `cargo test`.
+- [x] Both suites still run as exactly two test binaries: `tests/` holds
+      exactly two top-level `*.rs` targets (`comms_log.rs`, `round_trip.rs`)
+      plus the two directories, so the split added no new binary.
+- [x] The suites hold the same number of tests as before the split — the
+      `--list` count is 22 for `full_loop` and 30 for `adapter_contract` — so
+      no test was dropped or silently renamed out of its target.
 - [x] The other two suites in the crate (`tests/comms_log.rs`,
       `tests/round_trip.rs`) still compile and pass unchanged.
+- [x] No file under `tests/full_loop/` or `tests/adapter_contract/` reaches
+      1000 lines.
+- [x] No `#[allow(dead_code)]` appears anywhere under `tests/full_loop/` or
+      `tests/adapter_contract/` — in a single-binary target an unused helper
+      means the helper is misplaced, so the lint must stay unmuted.
+- [x] The crate builds clean under `cargo fmt --all -- --check` and
+      `cargo clippy --all-targets -- -D warnings`.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] The diff is a pure move: `cargo test -p fake-codex` reports the same test
-      counts as before the split (22 in `full_loop`, 30 in `adapter_contract`),
-      with the same test names, and no assertion, scenario JSON, or doc comment
-      body is rewritten in the process.
-- [ ] No file under `tests/full_loop/` or `tests/adapter_contract/` is back in
-      four-digit line counts, and each file's name says which behaviour it
-      covers.
-- [ ] No `#[allow(dead_code)]` (item-level or crate-level) was introduced in
-      either new directory module.
+- [ ] Reading the diff confirms it is a move: no test body, assertion, or
+      scenario JSON differs from the pre-split original. (Doc comments are the
+      deliberate exception — five prose references that were valid inside a
+      single file no longer resolved across module boundaries and were
+      corrected; they are listed in the PR body.) This is the reviewer's
+      judgement call and is the reason the whole change was scoped as a pure
+      move.
+- [ ] Each new file's name says which behaviour it covers, so a reader looking
+      for one loop can pick the file without opening several.
 
 ## Out of scope
 
