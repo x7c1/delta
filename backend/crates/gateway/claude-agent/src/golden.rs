@@ -386,8 +386,13 @@ impl From<&AgentEvent> for GoldenEvent {
                 decision,
             } => GoldenEvent::PermissionResolved {
                 request_id: request_id.clone(),
+                // The golden name of each decision. Spelled out per variant
+                // (rather than folded through `is_allow()`) because this is a
+                // recorded transcript: two decisions that differ must never
+                // print the same word.
                 decision: match decision {
                     PermissionDecision::Allow => "allow",
+                    PermissionDecision::AllowForSession => "allow_for_session",
                     PermissionDecision::Deny => "deny",
                 },
             },

@@ -27,8 +27,8 @@ pub use agent::{
     ContentSourceRequest, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest, PermissionCapability,
     PtyHandle, ResumeCapability, ResumeRequest, SendReceipt, SendRequest, SessionEndReason,
-    SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
-    TurnStatus,
+    SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
+    TranscriptCapability, TurnStatus,
 };
 pub use error::{Error, Result};
 pub use interactor::{

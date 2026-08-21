@@ -59,8 +59,8 @@ use delta_usecase::{
     AgentSessionHandle, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest, PaneTokenMinter,
     PermissionCapability, PtyHandle, Result, ResumeCapability, ResumeRequest, SendReceipt,
-    SendRequest, SessionEndReason, SessionIdentityCapability, SteerCapability, TerminalCapability,
-    TmuxDriver, TranscriptCapability,
+    SendRequest, SessionEndReason, SessionIdentityCapability, SessionScopedAllowCapability,
+    SteerCapability, TerminalCapability, TmuxDriver, TranscriptCapability,
 };
 
 /// Claude's static capability profile — the single source of truth returned by
@@ -71,7 +71,8 @@ use delta_usecase::{
 ///
 /// Today's Claude reality: a tmux-hosted PTY, a Delta-pinned session id, resume
 /// via `--resume`, events reconstructed from hooks + the JSONL transcript,
-/// hook-carried permission decisions, hidden per-turn context via the
+/// hook-carried permission decisions that answer one request each, hidden
+/// per-turn context via the
 /// `UserPromptSubmit` hook, interrupt by injecting the `Escape` keystroke, and
 /// an attachable pane. Fork/steer are unused in v1.
 pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
@@ -81,6 +82,11 @@ pub const CLAUDE_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     events: EventCapability::HookAndTranscript,
     transcript: TranscriptCapability::JsonlFile,
     permission: PermissionCapability::HookDecision,
+    // The permission hook's response carries a per-request `behavior` and has no
+    // session-scoped form, so Delta cannot express one here at all — declared
+    // rather than left implicit, so the browser never offers a button whose
+    // press this provider would have to refuse.
+    session_scoped_allow: SessionScopedAllowCapability::Unsupported,
     context_injection: ContextInjectionCapability::HiddenPerTurn,
     interrupt: InterruptCapability::PaneKeystroke,
     terminal: TerminalCapability::AttachablePty,

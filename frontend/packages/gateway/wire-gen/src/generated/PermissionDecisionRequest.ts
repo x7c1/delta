@@ -5,6 +5,8 @@ import type { PermissionDecision } from "./PermissionDecision";
  * Request body for `POST /api/permissions/{id}/decision`: resolve the
  * pending permission request the notice is showing. A `409` reply means the
  * request is no longer awaiting a browser decision (it was already decided,
- * or its hook wait timed out and the interactive TUI prompt owns it now).
+ * or its hook wait timed out and the interactive TUI prompt owns it now); a
+ * `400 permission_decision_unsupported` means the request is still pending but
+ * this session's provider has no meaning for the decision value sent.
  */
 export type PermissionDecisionRequest = { decision: PermissionDecision, };

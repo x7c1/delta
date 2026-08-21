@@ -38,18 +38,18 @@ test('a parallel approval fan-out surfaces one dialog at a time until the turn c
 
   // Answering promotes the next request into the same card. No refetch, no
   // reload: the dialog is never absent while approvals are pending.
-  await notice.getByRole('button', { name: 'Allow' }).click();
+  await notice.getByRole('button', { name: 'Allow', exact: true }).click();
   await expect(notice).toContainText('cat beta.txt');
   await expect(remaining).toContainText('+1 more');
 
-  await notice.getByRole('button', { name: 'Allow' }).click();
+  await notice.getByRole('button', { name: 'Allow', exact: true }).click();
   await expect(notice).toContainText('cat gamma.txt');
   // The last one: nothing is queued behind it, so no count is shown.
   await expect(remaining).toHaveCount(0);
 
   // With every approval answered the provider finishes the turn — the deadlock
   // is gone: the notice clears, the reply lands, and nothing is left pending.
-  await notice.getByRole('button', { name: 'Allow' }).click();
+  await notice.getByRole('button', { name: 'Allow', exact: true }).click();
   await expect(notice).toHaveCount(0);
   await expect(page.getByText('all three files read')).toBeVisible();
   await expect(page.getByTestId('pending-item')).toHaveCount(0);

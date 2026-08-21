@@ -16,6 +16,14 @@ const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 /// provider's `has_terminal` capability on this code.
 const PERMISSION_NOT_PENDING_CODE: &str = "permission_not_pending";
 
+/// Stable machine-readable code for a permission decision whose *value* the
+/// session's provider cannot express — today a session-scoped allow against a
+/// provider that does not declare the capability. Distinct from
+/// [`PERMISSION_NOT_PENDING_CODE`] and a `400` rather than a `409`: the request
+/// is still pending and a plain allow or deny would be honoured, so the frontend
+/// keeps the decision buttons rather than switching to a fallback.
+const PERMISSION_DECISION_UNSUPPORTED_CODE: &str = "permission_decision_unsupported";
+
 /// Stable machine-readable code for an answer to a question that is no longer
 /// pending (already answered, its turn ended, or no live pane). The frontend
 /// switches the card to the answer-in-the-terminal fallback on this code.
@@ -126,6 +134,16 @@ impl IntoResponse for ApiError {
                     Error::PermissionNotPending(_) => {
                         (StatusCode::CONFLICT, Some(PERMISSION_NOT_PENDING_CODE))
                     }
+                    // The request is still pending; it is the decision *value*
+                    // this session's provider has no meaning for (a
+                    // session-scoped allow where the capability is not
+                    // declared). A malformed request, not a state conflict, so
+                    // `400` — and nothing was mutated, so the same request is
+                    // still answerable with a decision the provider does have.
+                    Error::PermissionDecisionUnsupported(_) => (
+                        StatusCode::BAD_REQUEST,
+                        Some(PERMISSION_DECISION_UNSUPPORTED_CODE),
+                    ),
                     // The question exists (or existed) but cannot be answered
                     // from the UI anymore: a conflict with current state, with a
                     // stable code so the frontend keeps the terminal fallback.

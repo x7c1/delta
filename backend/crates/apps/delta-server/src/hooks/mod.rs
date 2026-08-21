@@ -41,8 +41,8 @@ use axum::response::IntoResponse;
 use axum::Json;
 
 use delta_usecase::{
-    AgentProvider, MessageDisplayHook, PermissionDecision, RateLimitWindow, SessionEndHook,
-    SessionEvent, SessionId, SessionStartHook, StatusSnapshot, StopHook, UserPromptSubmitHook,
+    AgentProvider, MessageDisplayHook, RateLimitWindow, SessionEndHook, SessionEvent, SessionId,
+    SessionStartHook, StatusSnapshot, StopHook, UserPromptSubmitHook,
 };
 use delta_wire::hooks::{
     MessageDisplayPayload, PermissionRequestPayload, PermissionRequestResponse, PostToolUsePayload,
@@ -177,10 +177,12 @@ pub async fn permission_request(
                 ?decision,
                 "PermissionRequest: browser decision returned to Claude Code"
             );
-            Json(PermissionRequestResponse::decided(
-                decision == PermissionDecision::Allow,
-            ))
-            .into_response()
+            // The hook contract has exactly two `behavior` values, so the
+            // decision collapses to "was this an allow?". Only a decision this
+            // response can express ever reaches here: a session-scoped one has
+            // no `behavior` to render, and is rejected up front with
+            // `Error::PermissionDecisionUnsupported` (a `400`).
+            Json(PermissionRequestResponse::decided(decision.is_allow())).into_response()
         }
         // Timed out, or the waiter was dropped: no decision to report. The
         // empty 200 is the deliberate passthrough — Claude Code continues

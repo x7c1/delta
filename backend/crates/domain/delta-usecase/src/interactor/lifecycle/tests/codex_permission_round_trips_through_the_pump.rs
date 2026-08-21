@@ -26,7 +26,7 @@ use serde_json::json;
 use crate::agent::{AgentEvent, AgentPermissionRequest};
 use crate::interactor::testing::*;
 use crate::interactor::PermissionDecision;
-use crate::SendTarget;
+use crate::{AgentCapabilities, SendTarget, SessionScopedAllowCapability};
 
 /// Poll `f` until it returns `Some`, or panic after a short deadline. The event
 /// pump runs on a background task, so its effect on the runtime mirror lands
@@ -163,5 +163,122 @@ async fn deciding_an_unknown_codex_permission_is_a_conflict() {
     assert!(
         matches!(result, Err(crate::error::Error::PermissionNotPending(9999))),
         "an unknown permission id is PermissionNotPending, got {result:?}"
+    );
+}
+
+/// Stand up a Codex session on `factory`, surface one approval, and return the
+/// interactor plus the Delta row id the browser would decide by.
+///
+/// The two session-scoped tests below differ only in the capability the factory
+/// declares, so everything up to the decision is shared: whatever they then
+/// observe is caused by that one difference and nothing else.
+async fn session_with_a_pending_approval(
+    factory: std::sync::Arc<FakeAgentFactory>,
+) -> (TestInteractor, i64) {
+    let events = factory.event_sender();
+    let ix = interactor_with_codex_factory(factory);
+    let (send, _) = ix
+        .enqueue_send(
+            SendTarget::NewSession {
+                provider: AgentProvider::Codex,
+                workdir: None,
+                launch_option_ids: Vec::new(),
+                worktree: None,
+            },
+            "go",
+            None,
+        )
+        .await
+        .unwrap();
+    let session_id = send.session_id.clone();
+
+    events
+        .send(AgentEvent::PermissionRequested {
+            request: AgentPermissionRequest {
+                request_id: "srv-1".to_owned(),
+                tool_name: "Bash".to_owned(),
+                input_json: json!({ "command": "ls" }),
+                tool_use_id: None,
+            },
+        })
+        .expect("the pump's stream is live");
+
+    let sid = session_id.clone();
+    let pending = wait_for("the permission mirror to rise", || {
+        let ix = &ix;
+        let sid = sid.clone();
+        async move { ix.live_state_for(&sid).await.pending_permission().cloned() }
+    })
+    .await;
+    (ix, pending.request_id)
+}
+
+/// A provider that declares the session-scoped allow is handed it **verbatim**:
+/// the adapter sees `AllowForSession`, not a plain `Allow`.
+///
+/// That distinction is the whole feature. Delta cannot see the grant the
+/// provider then holds — the scope lives in its session — so the neutral
+/// decision arriving intact at the trait boundary is the last thing Delta itself
+/// can check.
+#[tokio::test]
+async fn a_session_scoped_allow_reaches_a_declaring_adapter_verbatim() {
+    let factory = FakeAgentFactory::new("thr_scope", Some("turn_scope"));
+    let log = factory.log();
+    let (ix, row_id) = session_with_a_pending_approval(factory).await;
+
+    ix.decide_permission(row_id, PermissionDecision::AllowForSession)
+        .await
+        .expect("the declaring provider accepts a session-scoped allow");
+
+    assert_eq!(
+        *log.lock().unwrap().resolves,
+        [("srv-1".to_owned(), PermissionDecision::AllowForSession)],
+        "the adapter is handed the session-scoped decision, not a downgraded allow"
+    );
+}
+
+/// The same decision against an adapter-backed provider that does **not**
+/// declare the capability is refused, and refused inertly: the adapter is never
+/// called, so nothing about the provider's session changed, and the request is
+/// still answerable with a decision the provider does have.
+///
+/// Adapter-backed is the point here. The refusal is not "Claude versus Codex" —
+/// it is driven by the declared capability alone, so a future structured
+/// provider that answers over an adapter but knows only per-request decisions
+/// gets the same treatment with no new branch.
+#[tokio::test]
+async fn a_session_scoped_allow_is_refused_by_an_adapter_that_does_not_declare_it() {
+    let factory = FakeAgentFactory::with_capabilities(
+        "thr_no_scope",
+        Some("turn_no_scope"),
+        AgentCapabilities {
+            session_scoped_allow: SessionScopedAllowCapability::Unsupported,
+            ..FAKE_AGENT_CAPABILITIES
+        },
+    );
+    let log = factory.log();
+    let (ix, row_id) = session_with_a_pending_approval(factory).await;
+
+    let err = ix
+        .decide_permission(row_id, PermissionDecision::AllowForSession)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, crate::error::Error::PermissionDecisionUnsupported(id) if id == row_id),
+        "the decision value is refused, not the request state, got {err:?}"
+    );
+    assert!(
+        log.lock().unwrap().resolves.is_empty(),
+        "a refused decision must never reach the provider"
+    );
+
+    // The claim the routing layer took was handed back, so the user's next click
+    // is not met with a spurious conflict.
+    ix.decide_permission(row_id, PermissionDecision::Allow)
+        .await
+        .expect("the request is still answerable after a refused decision");
+    assert_eq!(
+        *log.lock().unwrap().resolves,
+        [("srv-1".to_owned(), PermissionDecision::Allow)],
     );
 }

@@ -489,6 +489,14 @@ where
     /// the entry in place and the actor rejects the decision (its open agent, and
     /// with it the wire to answer on, is gone). In every case a UI decision can
     /// no longer take effect, and the caller surfaces that as a conflict.
+    ///
+    /// Returns [`Error::PermissionDecisionUnsupported`] when the decision itself
+    /// is one this session's provider cannot express (a session-scoped allow
+    /// against a provider that does not declare it). That verdict is reached
+    /// before anything is claimed or written, so the claim taken above is handed
+    /// **back**: unlike every other failure here the request is still pending and
+    /// still answerable, and a client that retries with a plain allow must not
+    /// meet a spurious `409` left behind by the rejected attempt.
     pub async fn decide_permission(
         &self,
         request_id: i64,
@@ -500,12 +508,20 @@ where
             .expect("permission index poisoned")
             .remove(&request_id)
             .ok_or(Error::PermissionNotPending(request_id))?;
-        self.request(&session_id, |reply| SessionInput::DecidePermission {
-            request_id,
-            decision,
-            reply,
-        })
-        .await
+        let outcome = self
+            .request(&session_id, |reply| SessionInput::DecidePermission {
+                request_id,
+                decision,
+                reply,
+            })
+            .await;
+        if matches!(outcome, Err(Error::PermissionDecisionUnsupported(_))) {
+            self.permission_index
+                .lock()
+                .expect("permission index poisoned")
+                .insert(request_id, session_id);
+        }
+        outcome
     }
 
     /// Abandon the waiter for a permission request whose hook wait timed out.

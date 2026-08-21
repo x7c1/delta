@@ -1631,6 +1631,40 @@ async fn codex_file_change_permission_full_loop_deny() {
     permission_full_loop("deny", "decline", file_change_step(), "file_change").await;
 }
 
+/// The command-execution loop answered with the **session-scoped** allow: the
+/// browser posts `allow_for_session` and the exact wire value `acceptForSession`
+/// — not a downgraded `accept` — is what reaches the provider.
+///
+/// The value matters more than the status code here. Delta cannot observe the
+/// grant the provider then holds (the scope lives entirely in its session), so
+/// the only thing that proves the user's choice survived the whole stack is the
+/// literal string the fake echoes back from the response it received.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_command_execution_permission_full_loop_allow_for_session() {
+    permission_full_loop(
+        "allow_for_session",
+        "acceptForSession",
+        command_execution_step(),
+        "date",
+    )
+    .await;
+}
+
+/// The same session-scoped allow over a **file-change** approval. Both approval
+/// kinds share one `{ "decision": … }` reply path in the adapter, and this is
+/// what pins that the shared path really does serve both — a mapping added for
+/// command execution alone would pass the test above and fail here.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_file_change_permission_full_loop_allow_for_session() {
+    permission_full_loop(
+        "allow_for_session",
+        "acceptForSession",
+        file_change_step(),
+        "file_change",
+    )
+    .await;
+}
+
 /// A blocking command-execution approval step, with the real method + params;
 /// `command` names the tool the browser sees.
 fn command_execution_step() -> &'static str {
@@ -1656,9 +1690,10 @@ fn file_change_step() -> &'static str {
 /// provider token, and `expected_tool` as the tool name), decides via
 /// `POST /api/permissions/{id}/decision`, and then asserts (a) the decision
 /// settled over the broadcast (`PermissionResolved` + `TurnCompleted`) and (b)
-/// the fake received the exact `accept`/`decline` — it echoes the received
-/// decision as an assistant message, which the test reads back from the
-/// persisted transcript.
+/// the fake received exactly `expected_echo` — the Codex wire value the neutral
+/// decision maps to (`accept`, `acceptForSession` or `decline`) — because the
+/// fake echoes the received decision verbatim as an assistant message, which the
+/// test reads back from the persisted transcript.
 async fn permission_full_loop(
     decision_wire: &str,
     expected_echo: &str,
@@ -1762,9 +1797,10 @@ async fn permission_full_loop(
         }
     }
 
-    // The fake received the exact accept/decline: it echoes the decision it was
-    // handed as an assistant message, which persisted through the same content
-    // path as any other reply.
+    // The fake received the exact wire value, not one collapsed into a
+    // neighbour on the way down: it echoes the decision it was handed as an
+    // assistant message, which persisted through the same content path as any
+    // other reply.
     let (status, body) = get(&app, &format!("/api/threads/{thread_id}/messages")).await;
     assert_eq!(status, StatusCode::OK, "messages fetched: {body:?}");
     let messages = body["messages"].as_array().unwrap();

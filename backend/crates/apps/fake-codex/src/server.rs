@@ -378,15 +378,21 @@ impl Server<'_> {
         Ok(())
     }
 
-    /// React to one approval decision (`accept`/`decline`) for `request_id`.
+    /// React to one approval decision for `request_id` — `accept`,
+    /// `acceptForSession` or `decline`.
     ///
-    /// Echoes the received decision back as a completed assistant message — so
-    /// every value that round-tripped to the server is observable end-to-end —
-    /// and then, if the suspended turn's gate is now open, plays the parked
-    /// remainder. Under [`ApprovalGate::AllAnswered`] the turn stays suspended
-    /// while any approval is still outstanding, which is exactly the real
-    /// behavior a parallel fan-out has: the turn cannot finish until every
+    /// Echoes the received decision back **verbatim** as a completed assistant
+    /// message — so every value that round-tripped to the server is observable
+    /// end-to-end — and then, if the suspended turn's gate is now open, plays
+    /// the parked remainder. Under [`ApprovalGate::AllAnswered`] the turn stays
+    /// suspended while any approval is still outstanding, which is exactly the
+    /// real behavior a parallel fan-out has: the turn cannot finish until every
     /// request has an answer.
+    ///
+    /// The decision is deliberately not validated against a known set: a fake
+    /// that only recognised the values Delta sends today would turn "Delta sent
+    /// something new" into "the fake said unknown", hiding the very drift these
+    /// tests exist to catch.
     ///
     /// A no-op when no turn is suspended (a fire-and-forget approval nothing
     /// gates on): the decision is logged by the caller and nothing else happens.

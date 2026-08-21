@@ -75,7 +75,11 @@ status codes and error bodies — is documented here only.
     ambiguous, contradictory, or names something the server will not act on (see
     [sends.md — `POST /api/sends`](sends.md#post-apisends) — JSON body). A few
     carry a `code` too, e.g. `clone_root_not_registered` from
-    [`POST /api/repositories/clone`](workdirs.md#post-apirepositoriesclone).
+    [`POST /api/repositories/clone`](workdirs.md#post-apirepositoriesclone), or
+    `permission_decision_unsupported` from
+    [`POST /api/permissions/{id}/decision`](sends.md#post-apipermissionsiddecision)
+    (a decision value this session's provider cannot express — nothing is
+    mutated).
   - `403 Forbidden` — a path the server is not permitted to read, as opposed to
     one that does not exist. Returned by the directory browse
     ([workdirs.md — `GET /api/workdir/list`](workdirs.md#get-apiworkdirlist)).

@@ -199,7 +199,7 @@ which frames arrive, and a client must handle each event whenever it lands.
 - `permission_requested` — a tool permission prompt is imminent. `tool_name` is
   the tool about to run and `tool_input` its input as JSON **text** (the client
   parses it only for display), so the notice can show what the tool is about to
-  do next to its Allow/Deny buttons. `request_id` is the row
+  do next to its decision buttons. `request_id` is the row
   [`POST /api/permissions/{id}/decision`](sends.md#post-apipermissionsiddecision)
   decides. One per request, so a provider raising several approvals at once (a
   parallel tool-call fan-out) emits several: they form a FIFO queue whose arrival
@@ -220,16 +220,18 @@ which frames arrive, and a client must handle each event whenever it lands.
   transcript only after the question is answered.
 - `permission_resolved` — a previously-requested permission, or a question, was
   settled. Emitted when the browser decides via
-  `POST /api/permissions/{id}/decision`, or when the `tool_result` correlated
-  with the open request is ingested — which is also how an answer given in the
-  TUI clears the card. An auto-approved tool resolves almost immediately, while
-  a genuine prompt yields no result until a human answers, so the notice
-  persists until then. It settles exactly the named `request_id`: with several
-  approvals pending, the others stay pending and answerable, and the next one is
-  raised by the follow-up `permission_requested` described above. A session whose
-  agent process ended is the one case where *every* pending request is settled at
-  once — one of these each, with no promotion, since none of them can be answered
-  any more (see [sends.md](sends.md#the-pending-permission-queue)).
+  `POST /api/permissions/{id}/decision` (with any decision value — the event
+  carries no decision, only that the request is settled), or when the
+  `tool_result` correlated with the open request is ingested — which is also how
+  an answer given in the TUI clears the card. An auto-approved tool resolves
+  almost immediately, while a genuine prompt yields no result until a human
+  answers, so the notice persists until then. It settles exactly the named
+  `request_id`: with several approvals pending, the others stay pending and
+  answerable, and the next one is raised by the follow-up
+  `permission_requested` described above. A session whose agent process ended is
+  the one case where *every* pending request is settled at once — one of these
+  each, with no promotion, since none of them can be answered any more (see
+  [sends.md](sends.md#the-pending-permission-queue)).
 
 ### Streaming and subagents
 

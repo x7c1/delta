@@ -162,6 +162,16 @@ export interface TranscriptPaneProps {
    * to its own documented default.
    */
   providerHasTerminal?: boolean;
+  /**
+   * Whether the focused session's provider accepts a session-scoped permission
+   * decision (`ProviderCapabilities.has_allow_for_session`), forwarded to the
+   * permission notice so it only offers that button where pressing it would
+   * work. Relayed unresolved for the same reason as
+   * {@link TranscriptPaneProps.providerHasTerminal} — `undefined` means the
+   * capability is not known, and the notice owns what that resolves to (which,
+   * unlike the terminal flag, is `false`).
+   */
+  providerHasAllowForSession?: boolean;
 }
 
 /**
@@ -181,6 +191,7 @@ export function TranscriptPane({
   workdirMandatory = false,
   paneToggleButton = null,
   providerHasTerminal,
+  providerHasAllowForSession,
 }: TranscriptPaneProps) {
   const client = useApiClient();
   const setActiveThread = useNavStore((state) => state.setActiveThread);
@@ -884,6 +895,7 @@ export function TranscriptPane({
     <PermissionNoticeCard
       notice={permission}
       providerHasTerminal={providerHasTerminal}
+      providerHasAllowForSession={providerHasAllowForSession}
       onOpenTerminal={() => setTerminalOpen(true)}
       onDismiss={() => dismissPermission(activeThread.session_id)}
     />

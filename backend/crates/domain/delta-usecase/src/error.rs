@@ -45,6 +45,21 @@ pub enum Error {
     #[error("permission request {0} is not awaiting a decision")]
     PermissionNotPending(i64),
 
+    /// A permission decision the session's provider has no meaning for — today
+    /// a session-scoped allow posted against a provider that does not declare
+    /// [`SessionScopedAllowCapability::Supported`](crate::SessionScopedAllowCapability::Supported).
+    /// Surfaced as `400` rather than `409`: nothing is wrong with current
+    /// state — the request stays pending and answerable with a plain allow or
+    /// deny, and no decision reaches the provider — it is the body's decision
+    /// value this provider cannot express. Refused rather than degraded into a
+    /// plain allow, which would keep prompting a user who asked to stop being
+    /// prompted with nothing on screen saying why.
+    #[error(
+        "permission request {0} cannot be answered with this decision: \
+         the session's provider does not support it"
+    )]
+    PermissionDecisionUnsupported(i64),
+
     /// An answer arrived for a question no longer pending: the id is unknown,
     /// it was already answered, or its turn ended. Surfaced as `409` so the
     /// browser falls back to the answer-in-the-terminal guidance.

@@ -42,6 +42,16 @@ has_terminal: boolean,
  */
 has_comms_log: boolean, 
 /**
+ * Whether this provider understands a permission decision scoped to the
+ * whole session (`allow_for_session`), rather than only to the one request
+ * being answered. Derived from the internal
+ * [`SessionScopedAllowCapability`]. The permission notice offers its
+ * session-scoped button only where this is `true` — a button that would
+ * earn a `400 permission_decision_unsupported` when pressed is worse than
+ * no button, so an unknown capability hides it.
+ */
+has_allow_for_session: boolean, 
+/**
  * How this provider reads a registered launch option's `(name, value?)`
  * pair. Settings words its launch-option form from this, so a user
  * registering an option for a field-style provider is told to write

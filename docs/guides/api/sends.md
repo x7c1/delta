@@ -361,11 +361,29 @@ Request:
 { "decision": "allow" }
 ```
 
-`decision` is `allow` or `deny`.
+`decision` is `allow`, `allow_for_session`, or `deny`.
+
+`allow_for_session` permits this request **and** comparable ones for the rest of
+the provider's session, so a turn that raises a dozen approvals in a row need not
+be clicked through one by one. It is accepted only by a provider whose
+`has_allow_for_session` capability is `true` (see
+[settings.md — `GET /api/providers`](settings.md#get-apiproviders)) — the scope
+is a grant the provider holds inside its own session, and Delta neither records
+nor replays it. On Delta's side the request row records only that the tool call
+was permitted, exactly as for a plain `allow`.
 
 - **204 No Content** — the decision was recorded and handed to the agent. When
   the answered request was the queue head and others are still pending, the next
   one is raised as a fresh `permission_requested`.
+- **400** (body `code: "permission_decision_unsupported"`) — the request is still
+  pending, but this session's provider has no meaning for the decision value
+  sent: `allow_for_session` against a provider whose `has_allow_for_session` is
+  `false`. Deliberately refused rather than downgraded to a plain `allow`, which
+  would keep prompting a user who asked to stop being prompted with nothing said
+  about why. **Nothing is mutated**: no decision reaches the agent, the row stays
+  `pending`, and the same request is still answerable with `allow` or `deny` —
+  so the browser drops just the control that produced the error and leaves the
+  rest of the card usable.
 - **409** (body `code: "permission_not_pending"`) — the request is no longer
   awaiting a browser decision: it was already decided, its hook wait timed out
   and the interactive TUI prompt owns it now, or its adapter-backed session
@@ -374,9 +392,12 @@ Request:
   [the queue semantics](#the-pending-permission-queue)). A retry of a decision
   that already failed downstream (the **500** a dying agent connection can
   produce) answers the same 409: the server's claim on the request is taken
-  before the decision is routed and is never restored, so the failed attempt
-  already spent it. The browser replaces the decision buttons with guidance
-  chosen by the provider's `has_terminal` capability (see
+  before the decision is routed and is not restored, so the failed attempt
+  already spent it. The **400** above is the sole exception — that verdict is
+  reached before the decision is routed anywhere, so the claim is handed back
+  and a retry with `allow` or `deny` still succeeds. On this **409** the browser
+  replaces the decision buttons with guidance chosen by the provider's
+  `has_terminal` capability (see
   [settings.md — `GET /api/providers`](settings.md#get-apiproviders)): a session
   that has a terminal is pointed at the prompt waiting there, while a
   terminal-less one — where the question survives nowhere the user can reach —

@@ -208,3 +208,72 @@ async fn a_second_decision_for_the_same_request_is_a_conflict() {
         "the first decision stands"
     );
 }
+
+/// A session-scoped allow is refused for a provider that does not declare the
+/// capability — and refused *without consequences*.
+///
+/// The pane-backed (Claude) path answers through the permission hook, whose
+/// response carries a per-request `behavior` and has no session-scoped form.
+/// Delta could quietly send `allow` instead; it deliberately does not, because a
+/// user who asked to stop being prompted would go on being prompted with nothing
+/// on screen explaining why.
+///
+/// So the refusal has to be inert: the hook is left blocked (it never sees a
+/// decision it cannot express), the row stays `pending`, and — the part that is
+/// easy to get wrong — the routing claim taken on the way in is handed back, so
+/// the very same request is still answerable. Without that last piece the user's
+/// mis-aimed click would poison the dialog: the follow-up Allow would meet a
+/// `409` and the live prompt would hang.
+#[tokio::test]
+async fn a_session_scoped_allow_is_refused_and_leaves_the_request_answerable() {
+    let ix = interactor();
+    ix.on_user_prompt_submit(submit("seed")).await.unwrap();
+    let session = SessionId::from("sess-1");
+
+    let mut wait = ix
+        .on_permission_request(
+            &session,
+            "Bash",
+            r#"{"command":"ls"}"#,
+            SEED_TRANSCRIPT_PATH,
+        )
+        .await
+        .unwrap();
+
+    let err = ix
+        .decide_permission(wait.request_id, PermissionDecision::AllowForSession)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err, Error::PermissionDecisionUnsupported(id) if id == wait.request_id),
+        "the decision value is refused, not the request state, got {err:?}"
+    );
+
+    // The blocked hook was not woken: nothing was sent down the waiter, so the
+    // agent is still waiting for an answer it can act on.
+    assert!(
+        wait.decision.try_recv().is_err(),
+        "the hook must not receive a decision it cannot express"
+    );
+    // And the row is untouched.
+    {
+        let g = ix.store().inner.lock().unwrap();
+        let row = g
+            .permissions
+            .iter()
+            .find(|r| r.id == wait.request_id)
+            .unwrap();
+        assert_eq!(
+            row.status,
+            PermissionStatus::Pending,
+            "a refused decision writes nothing"
+        );
+        assert!(row.decided_at.is_none());
+    }
+
+    // The same request still answers to a decision this provider does have.
+    ix.decide_permission(wait.request_id, PermissionDecision::Allow)
+        .await
+        .unwrap();
+    assert_eq!(wait.decision.await.unwrap(), PermissionDecision::Allow);
+}

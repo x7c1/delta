@@ -47,7 +47,7 @@
 //! | `agent_message_delta { item_id, delta }` | Emit an `item/agentMessage/delta` notification (`{ itemId, delta, turnId }`) — a streaming fragment of an assistant message. |
 //! | `turn_started` | Emit a `turn/started` notification. |
 //! | `turn_completed { status }` | Emit a `turn/completed` notification carrying `status` (e.g. `completed`, `interrupted`, `failed`). |
-//! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the received `accept`/`decline` as an assistant message before playing the rest of the turn. |
+//! | `request_approval { method?, params?, blocking? }` | Emit a server → client request (default method `item/commandExecution/requestApproval`, the real command-execution approval) with a freshly minted id. With `blocking: false` (default) the fake emits and continues. With `blocking: true` the fake **suspends** the turn after emitting it and resumes only once the client answers; on resuming it echoes the decision string it received — `accept`, `acceptForSession` or `decline`, verbatim and unvalidated — as an assistant message before playing the rest of the turn. |
 //! | `await_approvals` | **Suspend** the turn until *every* approval emitted so far has been answered. Each answer is echoed as an assistant message the moment it arrives; the parked remainder plays once the last outstanding approval is answered. A no-op when nothing is outstanding. |
 //! | `exit` | **Die.** The fake exits immediately, without emitting anything further — so the client's reader sees its stdout close, exactly as when a real `codex app-server` process is killed or crashes mid-turn. Everything scripted after this step never plays. |
 //! | `notification { method, params? }` | Emit an arbitrary notification (escape hatch for shapes not covered above). |
@@ -123,8 +123,9 @@ pub enum Emit {
         /// When true, the fake **suspends** the turn after emitting this approval
         /// and resumes only once the client answers it — so a scenario can gate a
         /// turn on a real decision, and the fake, on resuming, echoes the
-        /// accept/decline it received as an assistant message (observable proof
-        /// the decision round-tripped). Default false keeps the fire-and-forget
+        /// decision string it received as an assistant message (observable proof
+        /// the decision round-tripped, and the only way a test can see *which*
+        /// value went over the wire). Default false keeps the fire-and-forget
         /// behavior (emit and continue without waiting).
         #[serde(default)]
         blocking: bool,
