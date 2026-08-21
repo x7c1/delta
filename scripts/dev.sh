@@ -30,7 +30,8 @@
 # Usage:
 #   scripts/dev.sh [WORKDIR]   # bring the loop up (default WORKDIR: .tmp/session)
 #   scripts/dev.sh --down      # tear the loop down (same as scripts/stop.sh)
-#   scripts/dev.sh --reset     # tear down, then delete the SQLite database so the
+#   scripts/dev.sh --reset     # tear down, then delete the SQLite database — and
+#                              # the pre-migration snapshots taken from it — so the
 #                              # next start recreates an empty schema (same as
 #                              # scripts/reset.sh). Honors DELTA_DB_PATH.
 #   scripts/dev.sh --help
@@ -113,14 +114,25 @@ down() {
   log "Down."
 }
 
-# Tear everything down, then delete the SQLite database (and its WAL/SHM
-# sidecars) so the next start recreates an empty schema. The server applies the
-# schema on open via `CREATE TABLE/INDEX IF NOT EXISTS`, so a fresh file is all
-# it takes. The server must be stopped first (down) so it is not still writing.
+# Tear everything down, then delete the SQLite database (its WAL/SHM sidecars,
+# and the `.bak-v*` pre-migration snapshots the ladder took from it) so the next
+# start recreates an empty schema. The server builds the schema on open by
+# replaying its migration ladder, so a fresh file is all it takes.
+#
+# The snapshots have to go with the database that produced them. The ladder skips
+# taking a backup when `<db>.bak-v<source version>` already exists — that file is
+# assumed to be a snapshot of *this* database, from a migration that failed and
+# rolled back. A reset starts a new database at the same path, so a snapshot left
+# behind by the old one would silently suppress the backup for a later destructive
+# migration, and the surviving file would be a snapshot of data that no longer
+# exists. Deleting them here is deliberate and is the only place they are removed.
+#
+# The server must be stopped first (down) so it is not still writing.
 reset() {
   down
-  log "Deleting SQLite database: $DELTA_DB ..."
-  rm -f "$DELTA_DB" "$DELTA_DB-wal" "$DELTA_DB-shm"
+  log "Deleting SQLite database: $DELTA_DB (with its WAL/SHM sidecars and .bak-v* snapshots) ..."
+  # An unmatched `.bak-v*` glob stays literal and `rm -f` ignores it.
+  rm -f "$DELTA_DB" "$DELTA_DB-wal" "$DELTA_DB-shm" "$DELTA_DB".bak-v*
   log "Database reset. The next 'scripts/dev.sh' will recreate an empty schema."
 }
 

@@ -1,249 +1,97 @@
-//! Schema migrations and the `SCHEMA_VERSION` startup gate.
+//! The startup schema gate, and what a later migration step does to rows that
+//! were already there.
+//!
+//! The ladder's own mechanics — ordering, transactions, backups — are tested in
+//! `crate::migrations::tests` against synthetic ladders. What is pinned here is
+//! the store's behaviour around them: which databases it opens, which it
+//! refuses, and that a row written at the current baseline still reads back
+//! correctly (with any newly added column NULL) once a later step has been
+//! applied over it. That last part is the real shape of every past additive
+//! column change — `send.restored_at`, the `message` metadata columns,
+//! `subagent_launch.task_id`, the provider columns — now that they are all part
+//! of the v3 baseline and can no longer be simulated by dropping them.
 
 use delta_model::{AgentProvider, ContentBlock, Message, MessageUuid, Role, SendStatus, SessionId};
-use delta_usecase::NewSession;
 
 use super::super::SqliteStore;
 use super::new_session;
+use crate::migrations::{migrate, Step};
+use crate::SCHEMA_VERSION;
 
-/// A database created before `send.restored_at` existed must gain the column
-/// on open and load its pre-existing rows with the field as NULL — never
-/// crashing on the now-wider `send_from_row` and never losing the row's other
-/// data. NULL is exactly the "not restored" meaning, so pre-upgrade queued
-/// rows keep dispatching normally.
-#[tokio::test]
-async fn opening_a_pre_restored_at_database_migrates_and_loads_old_rows_as_null() {
-    let dir = std::env::temp_dir().join(format!("delta-migrate-restored-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    let (session_id, queued_id) = {
-        // Build the database, record a queued send, then physically drop the
-        // column so the file is a faithful pre-`restored_at` snapshot.
-        let legacy = SqliteStore::open(path_str).unwrap();
-        let (session, main) = legacy.register_session(new_session()).await.unwrap();
-        let queued = legacy
-            .enqueue_queued_send(&session.id, main, None, "held", None)
-            .await
-            .unwrap();
-        let conn = legacy.conn.lock().await;
-        conn.execute_batch("ALTER TABLE send DROP COLUMN restored_at")
-            .unwrap();
-        (session.id, queued.id)
-    };
-
-    // Re-opening applies the guarded ALTER; the old row loads as unrestored
-    // and stays on the normal queued path.
-    let store = SqliteStore::open(path_str).unwrap();
-    let queued = store.send(queued_id).await.unwrap().unwrap();
-    assert_eq!(queued.status, SendStatus::Queued);
-    assert_eq!(
-        queued.restored_at, None,
-        "a pre-migration row is unrestored"
-    );
-    assert_eq!(
-        store
-            .next_queued_send(&session_id)
-            .await
-            .unwrap()
-            .expect("a pre-migration queued row still dispatches normally")
-            .id,
-        queued_id,
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-/// An existing database created before `session.last_activity_at` existed must
-/// gain the column and be backfilled on open, without losing data.
-#[tokio::test]
-async fn opening_a_pre_column_database_migrates_and_backfills() {
-    let dir = std::env::temp_dir().join(format!("delta-migrate-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    // Build a "legacy" database the way it shipped *before* the column: open it
-    // through the store (which now adds `last_activity_at`), then physically
-    // drop the column so the file looks pre-migration. This keeps every other
-    // table identical to the real old schema rather than hand-rolling a partial
-    // copy. SQLite's `DROP COLUMN` also removes the dependent expression index,
-    // so the file is a faithful pre-`last_activity_at` snapshot.
-    {
-        let legacy = SqliteStore::open(path_str).unwrap();
-        legacy
-            .register_session(NewSession {
-                id: "with-msgs".into(),
-                cwd: "/w".into(),
-                transcript_path: "/tmp/with.jsonl".into(),
-                branch_at_launch: None,
-                repo_root: None,
-                repository_display_name: None,
-            })
-            .await
-            .unwrap();
-        let (no_msgs, _) = legacy
-            .register_session(NewSession {
-                id: "no-msgs".into(),
-                cwd: "/w".into(),
-                transcript_path: "/tmp/no.jsonl".into(),
-                branch_at_launch: None,
-                repo_root: None,
-                repository_display_name: None,
-            })
-            .await
-            .unwrap();
-        let main = legacy
-            .main_thread_id(&SessionId::from("with-msgs"))
-            .await
-            .unwrap();
-        let msg = |uuid: &str, at: &str| Message {
-            uuid: MessageUuid::from(uuid),
-            session_id: SessionId::from("with-msgs"),
-            thread_id: main,
-            role: Role::User,
-            linear_parent_uuid: None,
-            semantic_parent_uuid: None,
-            prompt_id: None,
-            seq: 0,
-            content_text: Some("hi".into()),
-            content: vec![ContentBlock::Text { text: "hi".into() }],
-            created_at: Some(at.into()),
-            model: None,
-            git_branch: None,
-            cwd: None,
-            response_time_ms: None,
-            provider_item_id: None,
-        };
-        legacy
-            .upsert_messages(&[
-                msg("m1", "2026-01-05T00:00:00Z"),
-                msg("m2", "2026-01-09T00:00:00Z"),
-            ])
-            .await
-            .unwrap();
-        let _ = no_msgs;
-        let conn = legacy.conn.lock().await;
-        // Strip the column so the file is a faithful pre-migration snapshot to
-        // re-open. The expression index references the column, so drop it first.
-        conn.execute_batch(
-            "DROP INDEX ix_session_recency; \
-             ALTER TABLE session DROP COLUMN last_activity_at;",
-        )
-        .unwrap();
-    }
-
-    // Opening through the store applies the guarded ALTER + backfill.
-    let store = SqliteStore::open(path_str).unwrap();
-
-    // The message-bearing session is backfilled to its MAX(message.created_at).
-    assert_eq!(
-        store
-            .last_activity_at(&SessionId::from("with-msgs"))
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("2026-01-09T00:00:00Z"),
-    );
-    // The message-less session stays NULL (the navigator orders it on its own
-    // created_at).
-    assert_eq!(
-        store
-            .last_activity_at(&SessionId::from("no-msgs"))
-            .await
-            .unwrap(),
+/// Apply a synthetic next-version step to an open store, standing in for the
+/// first real migration that will ride a later change.
+///
+/// The step is additive and touches only the named table, so nothing else in the
+/// store's behaviour can explain a row that fails to read back afterwards.
+async fn apply_next_step(store: &SqliteStore, sql: &'static str) {
+    let conn = store.conn.lock().await;
+    let steps = [Step::additive(SCHEMA_VERSION + 1, sql)];
+    migrate(
+        &conn,
+        &steps,
+        SCHEMA_VERSION,
+        SCHEMA_VERSION + 1,
+        // In-memory: there is no file to snapshot, and an additive step would
+        // not ask for one anyway.
         None,
-    );
-
-    // Re-opening the now-migrated database is a clean no-op (the column already
-    // exists, so the guarded ALTER does not run again).
-    drop(store);
-    let reopened = SqliteStore::open(path_str).unwrap();
-    assert_eq!(
-        reopened
-            .last_activity_at(&SessionId::from("with-msgs"))
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("2026-01-09T00:00:00Z"),
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
+    )
+    .expect("the synthetic step applies");
 }
 
-/// A database created before the per-message metadata columns
-/// (`model`/`git_branch`/`cwd`/`response_time_ms`) must gain them on open and
-/// load its pre-existing rows with those fields as NULL — never crashing on the
-/// now-wider `message_from_row` and never losing the row's other data.
+/// Read a nullable TEXT column with no bound parameters, straight from SQLite —
+/// the added columns below have no domain read path.
+async fn read_optional_text(store: &SqliteStore, sql: &str) -> Option<String> {
+    let conn = store.conn.lock().await;
+    conn.query_row(sql, [], |row| row.get(0)).unwrap()
+}
+
+/// A queued send recorded before a later step must survive it, keep every field
+/// it had, and stay on the normal dispatch path — a newly added column reading
+/// NULL is exactly the "this row predates the column" meaning.
 #[tokio::test]
-async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
-    let dir = std::env::temp_dir().join(format!("delta-migrate-meta-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    let (session_id, main) = {
-        // Build the database, insert a message carrying metadata, then physically
-        // drop the four metadata columns so the file is a faithful pre-metadata
-        // snapshot. Dropping after the insert proves the row predates the columns.
-        let legacy = SqliteStore::open(path_str).unwrap();
-        let (session, main) = legacy.register_session(new_session()).await.unwrap();
-        legacy
-            .upsert_messages(&[Message {
-                uuid: MessageUuid::from("a-1"),
-                session_id: session.id.clone(),
-                thread_id: main,
-                role: Role::Assistant,
-                linear_parent_uuid: None,
-                semantic_parent_uuid: None,
-                prompt_id: None,
-                seq: 0,
-                content_text: Some("answer".into()),
-                content: vec![ContentBlock::Text {
-                    text: "answer".into(),
-                }],
-                created_at: Some("2026-01-01T00:00:00Z".into()),
-                model: Some("will-be-stripped".into()),
-                git_branch: Some("will-be-stripped".into()),
-                cwd: Some("will-be-stripped".into()),
-                response_time_ms: Some(9400.0),
-                provider_item_id: None,
-            }])
-            .await
-            .unwrap();
-        let conn = legacy.conn.lock().await;
-        // The FTS update trigger fires on a message UPDATE; DROP COLUMN does not
-        // rewrite rows, so the columns can be removed without touching it.
-        conn.execute_batch(
-            "ALTER TABLE message DROP COLUMN model; \
-             ALTER TABLE message DROP COLUMN git_branch; \
-             ALTER TABLE message DROP COLUMN cwd; \
-             ALTER TABLE message DROP COLUMN response_time_ms;",
-        )
+async fn a_send_recorded_before_a_later_step_survives_and_still_dispatches() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    let queued = store
+        .enqueue_queued_send(&session.id, main, None, "held", None)
+        .await
         .unwrap();
-        (session.id, main)
-    };
 
-    // Re-opening applies the guarded ALTERs; the old row loads with NULL metadata
-    // (the read path does not crash on the now-present-again columns) and keeps
-    // its other fields intact.
-    let store = SqliteStore::open(path_str).unwrap();
-    let view = store.thread_messages(main).await.unwrap();
-    assert_eq!(view.len(), 1);
-    assert_eq!(view[0].uuid, MessageUuid::from("a-1"));
-    assert_eq!(view[0].content_text.as_deref(), Some("answer"));
-    assert_eq!(view[0].model, None, "a pre-migration row has no model");
-    assert_eq!(view[0].git_branch, None);
-    assert_eq!(view[0].cwd, None);
-    assert_eq!(view[0].response_time_ms, None);
+    apply_next_step(&store, "ALTER TABLE send ADD COLUMN dispatch_note TEXT;").await;
 
-    // A fresh upsert of the same uuid now fills the metadata, proving the
-    // migrated columns are writable.
+    let reloaded = store.send(queued.id).await.unwrap().unwrap();
+    assert_eq!(reloaded.status, SendStatus::Queued);
+    assert_eq!(reloaded.text, "held");
+    assert_eq!(
+        reloaded.restored_at, None,
+        "a queued send that was never restored stays unrestored"
+    );
+    assert_eq!(
+        store
+            .next_queued_send(&session.id)
+            .await
+            .unwrap()
+            .expect("the pre-migration queued row still dispatches normally")
+            .id,
+        queued.id,
+    );
+    assert_eq!(
+        read_optional_text(&store, "SELECT dispatch_note FROM send").await,
+        None,
+        "the column added by the later step reads NULL on the older row",
+    );
+}
+
+/// A message ingested before a later step must keep its body and its metadata,
+/// and load through the normal read path with the newly added column NULL.
+#[tokio::test]
+async fn a_message_ingested_before_a_later_step_keeps_its_metadata() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
     store
         .upsert_messages(&[Message {
             uuid: MessageUuid::from("a-1"),
-            session_id: session_id.clone(),
+            session_id: session.id.clone(),
             thread_id: main,
             role: Role::Assistant,
             linear_parent_uuid: None,
@@ -256,6 +104,48 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
             }],
             created_at: Some("2026-01-01T00:00:00Z".into()),
             model: Some("claude-opus-4-8".into()),
+            git_branch: Some("main".into()),
+            cwd: Some("/work".into()),
+            response_time_ms: Some(9400.0),
+            provider_item_id: None,
+        }])
+        .await
+        .unwrap();
+
+    apply_next_step(&store, "ALTER TABLE message ADD COLUMN token_cost REAL;").await;
+
+    let view = store.thread_messages(main).await.unwrap();
+    assert_eq!(view.len(), 1);
+    assert_eq!(view[0].uuid, MessageUuid::from("a-1"));
+    assert_eq!(view[0].content_text.as_deref(), Some("answer"));
+    assert_eq!(view[0].model.as_deref(), Some("claude-opus-4-8"));
+    assert_eq!(view[0].git_branch.as_deref(), Some("main"));
+    assert_eq!(view[0].cwd.as_deref(), Some("/work"));
+    assert_eq!(view[0].response_time_ms, Some(9400.0));
+    assert_eq!(view[0].provider_item_id, None);
+    assert_eq!(
+        read_optional_text(&store, "SELECT CAST(token_cost AS TEXT) FROM message").await,
+        None,
+        "the column added by the later step reads NULL on the older row",
+    );
+
+    // The row is still writable through the normal upsert path afterwards.
+    store
+        .upsert_messages(&[Message {
+            uuid: MessageUuid::from("a-1"),
+            session_id: session.id.clone(),
+            thread_id: main,
+            role: Role::Assistant,
+            linear_parent_uuid: None,
+            semantic_parent_uuid: None,
+            prompt_id: None,
+            seq: 0,
+            content_text: Some("edited".into()),
+            content: vec![ContentBlock::Text {
+                text: "edited".into(),
+            }],
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+            model: Some("claude-opus-4-8".into()),
             git_branch: None,
             cwd: None,
             response_time_ms: Some(1234.0),
@@ -264,200 +154,108 @@ async fn opening_a_pre_metadata_database_migrates_and_loads_old_rows_as_null() {
         .await
         .unwrap();
     let view = store.thread_messages(main).await.unwrap();
-    assert_eq!(view[0].model.as_deref(), Some("claude-opus-4-8"));
+    assert_eq!(view[0].content_text.as_deref(), Some("edited"));
     assert_eq!(view[0].response_time_ms, Some(1234.0));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
-/// An existing database created before `subagent_launch.task_id` existed must
-/// gain the column on open, with pre-existing rows surfacing `task_id: None`.
-/// This is the additive-column smoke test that pins the recovery path the
-/// task-id-fallback fix relies on for already-deployed databases.
+/// An outstanding subagent launch recorded before a later step keeps its
+/// thread attribution — the whole point of the row — and can still be upgraded
+/// with the task id the `PostToolUse(Agent)` hook learns later.
 #[tokio::test]
-async fn opening_a_pre_subagent_task_id_database_migrates_and_loads_old_rows_as_null() {
-    let dir = std::env::temp_dir().join(format!("delta-subagent-migrate-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    // Build a "legacy" database: open through the store (which now adds
-    // `task_id`), seed a launch row, then physically drop the column so the
-    // file looks pre-migration.
-    let main = {
-        let legacy = SqliteStore::open(path_str).unwrap();
-        legacy.register_session(new_session()).await.unwrap();
-        let main = legacy
-            .main_thread_id(&SessionId::from("sess-1"))
-            .await
-            .unwrap();
-        legacy
-            .record_subagent_launch(&SessionId::from("sess-1"), "toolu_legacy", main)
-            .await
-            .unwrap();
-        // Strip the column so the file is a faithful pre-migration snapshot.
-        let conn = legacy.conn.lock().await;
-        conn.execute_batch("ALTER TABLE subagent_launch DROP COLUMN task_id;")
-            .unwrap();
-        main
-    };
-
-    // Re-opening applies the guarded ALTER. The legacy row keeps its
-    // thread_id and surfaces a NULL task_id, so the fold still seeds the
-    // launch correctly — it just lacks the fallback correlation key, which is
-    // the historical behaviour anyway.
-    let store = SqliteStore::open(path_str).unwrap();
-    let launches = store
-        .outstanding_subagent_launches(&SessionId::from("sess-1"))
+async fn a_subagent_launch_recorded_before_a_later_step_keeps_its_thread() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+    store
+        .record_subagent_launch(&session.id, "toolu_legacy", main)
         .await
         .unwrap();
-    let legacy = launches
+
+    apply_next_step(
+        &store,
+        "ALTER TABLE subagent_launch ADD COLUMN launched_by TEXT;",
+    )
+    .await;
+
+    let launches = store
+        .outstanding_subagent_launches(&session.id)
+        .await
+        .unwrap();
+    let launch = launches
         .get("toolu_legacy")
-        .expect("legacy launch survives migration");
-    assert_eq!(legacy.thread_id, main);
+        .expect("the launch survives the migration");
+    assert_eq!(launch.thread_id, main);
     assert!(
-        legacy.task_id.is_none(),
-        "a pre-migration row migrates as NULL task_id"
+        launch.task_id.is_none(),
+        "a launch whose PostToolUse has not landed yet has no task id"
     );
 
-    // A subsequent upgrade fills the column for new launches.
     store
-        .upgrade_subagent_task_id(&SessionId::from("sess-1"), "toolu_legacy", "agent_abc")
+        .upgrade_subagent_task_id(&session.id, "toolu_legacy", "agent_abc")
         .await
         .unwrap();
     let after = store
-        .outstanding_subagent_launches(&SessionId::from("sess-1"))
+        .outstanding_subagent_launches(&session.id)
         .await
         .unwrap();
     assert_eq!(
         after.get("toolu_legacy").and_then(|l| l.task_id.clone()),
         Some("agent_abc".to_owned())
     );
-
-    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(
+        read_optional_text(&store, "SELECT launched_by FROM subagent_launch").await,
+        None,
+        "the column added by the later step reads NULL on the older row",
+    );
 }
 
-/// An existing database created before the multi-provider columns
-/// (`session.provider`/`provider_session_id`/`provider_thread_id` and
-/// `launch_option.provider`) existed must gain them on open, with every
-/// pre-existing row reading back as a Claude row: `provider = 'claude'` and the
-/// nullable provider-minted ids NULL. These columns are additive and unused by
-/// the C1 runtime — this test pins that an already-deployed database opens
-/// cleanly and its rows keep their historical (Claude) meaning after migration.
-///
-/// The "legacy" file is built by hand with the original pre-additive table
-/// shapes (`session`/`launch_option` carrying only their base columns) and
-/// `user_version = 0`, then opened through the store: the guarded
-/// `ADDITIVE_COLUMNS` steps add every additive column — the provider ones under
-/// test plus the earlier ones (`last_activity_at`, `default_enabled`, …) — so
-/// this exercises the real recovery path a genuinely old database takes.
-/// (`DROP COLUMN` cannot faithfully undo the columns here: SQLite's schema
-/// re-parse chokes on the `--plugin-dir` token already present in the
-/// `launch_option` comment.)
+/// A session and a launch option written before a later step still read back as
+/// Claude rows: `provider = 'claude'` and no provider-minted ids. These columns
+/// carry a constant `NOT NULL DEFAULT`, so the historical meaning survives any
+/// later step without a backfill.
 #[tokio::test]
-async fn opening_a_pre_provider_database_migrates_and_loads_old_rows_as_claude() {
-    let dir = std::env::temp_dir().join(format!("delta-provider-migrate-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    // Build a faithful pre-additive database directly: only the base columns,
-    // `user_version = 0` (untouched), one session and one launch-option row.
-    {
-        let conn = rusqlite::Connection::open(path_str).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE session (
-               id              TEXT PRIMARY KEY,
-               cwd             TEXT NOT NULL,
-               transcript_path TEXT,
-               title           TEXT,
-               status          TEXT NOT NULL
-                                 CHECK (status IN ('spawning','active','ended','failed')),
-               created_at      TEXT NOT NULL
-             ) STRICT;
-             CREATE TABLE launch_option (
-               id         INTEGER PRIMARY KEY,
-               label      TEXT,
-               name       TEXT NOT NULL,
-               value      TEXT,
-               created_at TEXT NOT NULL
-             ) STRICT;
-             INSERT INTO session (id, cwd, transcript_path, title, status, created_at)
-               VALUES ('sess-1', '/work', '/tmp/t.jsonl', NULL, 'active', '2026-01-01T00:00:00Z');
-             INSERT INTO launch_option (label, name, value, created_at)
-               VALUES ('plugins', '--plugin-dir', '/plug', '2026-01-01T00:00:00Z');",
+async fn a_session_written_before_a_later_step_stays_a_claude_row() {
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, _main) = store.register_session(new_session()).await.unwrap();
+    store
+        .create_launch_option(
+            Some("plugins"),
+            "--plugin-dir",
+            Some("/plug"),
+            false,
+            AgentProvider::Claude,
         )
+        .await
         .unwrap();
-    }
 
-    // Opening through the store applies the guarded ALTERs; it must open cleanly.
-    let store = SqliteStore::open(path_str).unwrap();
+    apply_next_step(&store, "ALTER TABLE session ADD COLUMN closed_at TEXT;").await;
 
-    // The domain read now surfaces the provider fields (added to `Session` in
-    // C3a): a pre-migration row loads as a Claude session with no
-    // provider-minted ids, and `map_session` does not choke on the now-wider
-    // column set.
-    let session = store
-        .session(&SessionId::from("sess-1"))
+    let reloaded = store
+        .session(&session.id)
         .await
         .unwrap()
-        .expect("pre-provider session still loads");
-    assert_eq!(session.provider, AgentProvider::Claude);
-    assert_eq!(session.provider_session_id, None);
-    assert_eq!(session.provider_thread_id, None);
-
-    // Also confirm the migrated values straight from SQLite, including
-    // `launch_option.provider`, which has no domain read path yet.
-    let conn = store.conn.lock().await;
-    let (provider, provider_session_id, provider_thread_id): (
-        String,
-        Option<String>,
-        Option<String>,
-    ) = conn
-        .query_row(
-            "SELECT provider, provider_session_id, provider_thread_id \
-             FROM session WHERE id = 'sess-1'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .unwrap();
+        .expect("the session still loads");
+    assert_eq!(reloaded.provider, AgentProvider::Claude);
+    assert_eq!(reloaded.provider_session_id, None);
+    assert_eq!(reloaded.provider_thread_id, None);
     assert_eq!(
-        provider, "claude",
-        "a pre-migration session is a Claude row"
-    );
-    assert_eq!(
-        provider_session_id, None,
-        "a pre-migration Claude session has no provider-minted session id"
-    );
-    assert_eq!(
-        provider_thread_id, None,
-        "a pre-migration Claude session has no provider-minted thread id"
+        read_optional_text(&store, "SELECT closed_at FROM session").await,
+        None,
+        "the column added by the later step reads NULL on the older row",
     );
 
-    let option_provider: String = conn
-        .query_row(
-            "SELECT provider FROM launch_option WHERE name = '--plugin-dir'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        option_provider, "claude",
-        "a pre-migration launch option is a Claude option"
-    );
-    drop(conn);
-
-    // Re-opening the now-migrated database is a clean no-op (the columns already
-    // exist, so the guarded ALTERs do not run again).
-    SqliteStore::open(path_str).unwrap();
-
-    std::fs::remove_dir_all(&dir).ok();
+    let options = store
+        .list_launch_options()
+        .await
+        .expect("the launch option registry still loads");
+    assert_eq!(options.len(), 1);
+    assert_eq!(options[0].provider, AgentProvider::Claude);
 }
 
-// SCHEMA_VERSION startup gate. The four cases below are the contract from the
-// compatibility policy doc (subdomain 1): a fresh DB stamps current; a pre-gate
-// v0.1.0 DB is silently rescued; any other non-matching version is refused with
-// an error naming `make reset`; a current DB opens normally.
+// The startup gate. The cases below are the contract from the compatibility
+// policy doc (subdomain 1): a fresh DB is built by replaying the ladder and
+// stamped current; a current DB opens with nothing applied; a pre-gate v0.1.0
+// DB, a DB stamped below the ladder's baseline, and a DB from a newer binary
+// are all refused with an error naming `make reset`.
 
 /// Read the on-disk `PRAGMA user_version` from a freshly-opened connection,
 /// so the gate's effect on a file can be observed independently of the store
@@ -468,11 +266,21 @@ fn read_user_version(path: &str) -> u32 {
         .unwrap()
 }
 
+/// Every `delta.db.bak-*` snapshot sitting next to the database.
+fn backup_files(dir: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".bak-v"))
+        .collect();
+    names.sort();
+    names
+}
+
 #[tokio::test]
 async fn schema_gate_stamps_a_fresh_database_with_the_current_version() {
-    let dir = std::env::temp_dir().join(format!("delta-schema-fresh-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("fresh.sqlite");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fresh.sqlite");
     let path_str = path.to_str().unwrap();
 
     // Sanity: the file does not exist yet, so the open is genuinely creating
@@ -480,104 +288,28 @@ async fn schema_gate_stamps_a_fresh_database_with_the_current_version() {
     assert!(!path.exists());
 
     let store = SqliteStore::open(path_str).unwrap();
-    // The store works as usual (the schema steps ran).
+    // The store works as usual — the whole ladder replayed, so the schema is
+    // there.
     store.register_session(new_session()).await.unwrap();
     drop(store);
 
-    // The gate stamped the file current, so a re-open takes the match path.
+    // The last step stamped the file current, so a re-open takes the match path.
     assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
     let reopened = SqliteStore::open(path_str).unwrap();
     let again = reopened.session(&SessionId::from("sess-1")).await.unwrap();
     assert!(again.is_some(), "the stamped DB re-opens normally");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
+/// A database already at the current version must be opened with nothing
+/// applied: no step runs, no snapshot is written, and the stamp is left alone.
+/// This is what makes the migration machinery safe to land inert.
 #[tokio::test]
-async fn schema_gate_rescues_a_pre_gate_v0_1_0_database() {
-    let dir = std::env::temp_dir().join(format!("delta-schema-rescue-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("legacy.sqlite");
+async fn schema_gate_opens_a_current_database_without_applying_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("current.sqlite");
     let path_str = path.to_str().unwrap();
 
-    // Build a "shipped-as-v0.1.0" DB: open it through the store, write some
-    // overlay state, then reset `user_version` to 0 so the file looks exactly
-    // like one created before the gate landed. The `session` table is present,
-    // which is the marker the rescue branch keys off.
-    {
-        let store = SqliteStore::open(path_str).unwrap();
-        store.register_session(new_session()).await.unwrap();
-        let conn = store.conn.lock().await;
-        conn.execute_batch("PRAGMA user_version = 0").unwrap();
-    }
-    assert_eq!(read_user_version(path_str), 0);
-
-    // Re-opening must NOT error — the rescue branch silently bumps the marker
-    // and continues. The pre-existing overlay row is still there afterwards.
-    let store = SqliteStore::open(path_str).unwrap();
-    assert!(store
-        .session(&SessionId::from("sess-1"))
-        .await
-        .unwrap()
-        .is_some());
-    drop(store);
-
-    // The file is now stamped current, so a second re-open is the match path.
-    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
-
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-#[tokio::test]
-async fn schema_gate_refuses_a_non_matching_version() {
-    let dir = std::env::temp_dir().join(format!("delta-schema-mismatch-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("future.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    // Build a DB then force `user_version` to a value that is neither 0 nor
-    // the current SCHEMA_VERSION. This stands in for both "future binary
-    // wrote it" and "stale overlay against newer binary" — the gate makes no
-    // distinction; it refuses both.
-    {
-        let store = SqliteStore::open(path_str).unwrap();
-        store.register_session(new_session()).await.unwrap();
-        let conn = store.conn.lock().await;
-        let foreign = crate::SCHEMA_VERSION + 1;
-        conn.execute_batch(&format!("PRAGMA user_version = {foreign}"))
-            .unwrap();
-    }
-
-    let err = match SqliteStore::open(path_str) {
-        Ok(_) => panic!("expected mismatched version to be refused"),
-        Err(err) => err,
-    };
-    match &err {
-        crate::Error::SchemaMismatch { found, expected } => {
-            assert_eq!(*expected, crate::SCHEMA_VERSION);
-            assert_eq!(*found, crate::SCHEMA_VERSION + 1);
-        }
-        other => panic!("expected SchemaMismatch, got {other:?}"),
-    }
-    // The error's `Display` is what reaches the user — it must name
-    // `make reset` so the remediation is obvious without consulting docs.
-    let rendered = err.to_string();
-    assert!(
-        rendered.contains("make reset"),
-        "error message must name `make reset`: {rendered}"
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
-}
-
-#[tokio::test]
-async fn schema_gate_opens_a_current_database_unchanged() {
-    let dir = std::env::temp_dir().join(format!("delta-schema-match-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("current.sqlite");
-    let path_str = path.to_str().unwrap();
-
-    // First open stamps the file current; a second open is the match branch.
+    // First open replays the ladder; a second open is the match branch.
     {
         let store = SqliteStore::open(path_str).unwrap();
         store.register_session(new_session()).await.unwrap();
@@ -591,10 +323,149 @@ async fn schema_gate_opens_a_current_database_unchanged() {
         .unwrap()
         .expect("the registered session survives a re-open");
     assert_eq!(session.id.as_str(), "sess-1");
-
-    // The version did not change (idempotent on the match path).
     drop(store);
-    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
 
-    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(
+        read_user_version(path_str),
+        crate::SCHEMA_VERSION,
+        "the version is not rewritten on the match path"
+    );
+    assert!(
+        backup_files(dir.path()).is_empty(),
+        "an up-to-date database is never snapshotted: {:?}",
+        backup_files(dir.path()),
+    );
+}
+
+/// A `user_version = 0` database that already has delta's tables predates the
+/// gate entirely. Its real shape is unknown, so the baseline cannot be replayed
+/// onto it and there is no version to migrate forward from: refuse to open,
+/// naming `make reset`.
+#[tokio::test]
+async fn schema_gate_refuses_a_pre_gate_v0_1_0_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a "shipped-as-v0.1.0" DB: open it through the store, write some
+    // overlay state, then reset `user_version` to 0 so the file looks exactly
+    // like one created before the gate landed. The `session` table is present,
+    // which is the marker the refusal keys off.
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch("PRAGMA user_version = 0").unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 0);
+
+    let err = match SqliteStore::open(path_str) {
+        Ok(_) => panic!("expected an unstamped overlay to be refused"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, crate::Error::UnstampedOverlay),
+        "expected UnstampedOverlay, got {err:?}"
+    );
+    // The error's `Display` is what reaches the user — it must name
+    // `make reset` so the remediation is obvious without consulting docs.
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("make reset"),
+        "error message must name `make reset`: {rendered}"
+    );
+
+    // Nothing was written on the way out: the refusal happens before any step.
+    assert_eq!(read_user_version(path_str), 0);
+    assert!(backup_files(dir.path()).is_empty());
+}
+
+/// A database stamped *below* the ladder's oldest step — v0.2.x and v0.3.0 both
+/// shipped stamping 1 — has no step that carries it forward, because those
+/// generations were squashed into the baseline rather than reconstructed.
+/// Replaying the baseline over it would apply nothing (`IF NOT EXISTS` over
+/// tables that already exist) and then stamp the older shape as current, so the
+/// gate refuses it instead, naming `make reset`.
+#[tokio::test]
+async fn schema_gate_refuses_a_database_older_than_the_ladders_baseline() {
+    let baseline = crate::migrations::registry()[0].to_version;
+    assert!(
+        baseline > 1,
+        "this case only exists while the ladder starts above 1",
+    );
+    let stale = baseline - 1;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("stale.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a database with delta's tables and stamp it one generation below the
+    // baseline, the way a v0.3.0 overlay reaches this binary.
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch(&format!("PRAGMA user_version = {stale}"))
+            .unwrap();
+    }
+
+    let err = match SqliteStore::open(path_str) {
+        Ok(_) => panic!("expected a pre-baseline overlay to be refused"),
+        Err(err) => err,
+    };
+    match &err {
+        crate::Error::PreBaselineOverlay {
+            found,
+            baseline: reported,
+        } => {
+            assert_eq!(*found, stale);
+            assert_eq!(*reported, baseline);
+        }
+        other => panic!("expected PreBaselineOverlay, got {other:?}"),
+    }
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("make reset"),
+        "error message must name `make reset`: {rendered}"
+    );
+
+    // Nothing was written on the way out — above all, the file was not stamped
+    // current while still carrying its older shape.
+    assert_eq!(read_user_version(path_str), stale);
+    assert!(backup_files(dir.path()).is_empty());
+}
+
+/// A database stamped *above* this binary's version was written by a newer
+/// delta. The ladder only runs forward, so this stays a hard refusal.
+#[tokio::test]
+async fn schema_gate_refuses_a_database_from_a_newer_binary() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("future.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store.register_session(new_session()).await.unwrap();
+        let conn = store.conn.lock().await;
+        let foreign = crate::SCHEMA_VERSION + 1;
+        conn.execute_batch(&format!("PRAGMA user_version = {foreign}"))
+            .unwrap();
+    }
+
+    let err = match SqliteStore::open(path_str) {
+        Ok(_) => panic!("expected a newer version to be refused"),
+        Err(err) => err,
+    };
+    match &err {
+        crate::Error::SchemaMismatch { found, expected } => {
+            assert_eq!(*expected, crate::SCHEMA_VERSION);
+            assert_eq!(*found, crate::SCHEMA_VERSION + 1);
+        }
+        other => panic!("expected SchemaMismatch, got {other:?}"),
+    }
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("make reset"),
+        "error message must name `make reset`: {rendered}"
+    );
 }

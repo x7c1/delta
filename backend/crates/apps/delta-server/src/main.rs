@@ -31,16 +31,21 @@ async fn main() -> anyhow::Result<()> {
     // (subdomain 3) and the `claude_version` module docs for the contract.
     claude_version::log_claude_version(&config.launch.claude_bin);
 
-    // A SCHEMA_VERSION mismatch is the one startup error that demands a clear,
-    // user-facing message (the remediation is `make reset`) rather than a
-    // generic anyhow trace. Print the inner store error to stderr verbatim
-    // (its `Display` already names `make reset`) and exit non-zero; every
-    // other failure keeps the default `anyhow` propagation.
+    // A refused overlay is the startup error that demands a clear, user-facing
+    // message (the remediation is `make reset`) rather than a generic anyhow
+    // trace. The migration ladder migrates an out-of-date database forward on
+    // its own, so what reaches here is only what it cannot fix: a database
+    // written by a newer binary, one that predates the version stamp entirely,
+    // or one stamped below the ladder's squashed baseline. Print the inner store
+    // error to stderr verbatim (its `Display` already names the remediation) and
+    // exit non-zero; every other failure keeps the default `anyhow` propagation.
     let state = match AppState::build(&config).await {
         Ok(state) => state,
         Err(err) => {
             if let Some(delta_bootstrap::Error::Store(
-                store_err @ delta_bootstrap::StoreError::SchemaMismatch { .. },
+                store_err @ (delta_bootstrap::StoreError::SchemaMismatch { .. }
+                | delta_bootstrap::StoreError::UnstampedOverlay
+                | delta_bootstrap::StoreError::PreBaselineOverlay { .. }),
             )) = err.downcast_ref::<delta_bootstrap::Error>()
             {
                 eprintln!("delta-server: {store_err}");
