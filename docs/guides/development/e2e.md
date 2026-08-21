@@ -121,6 +121,6 @@ emitted approval has been answered) is documented in
 Both fakes also back backend-only integration tests (part of `cargo test`) that
 prove the same loops without a browser:
 `backend/crates/apps/fake-claude/tests/full_loop.rs`, which skips where tmux is
-missing, and `backend/crates/apps/fake-codex/tests/full_loop.rs`, where the
+missing, and `backend/crates/apps/fake-codex/tests/full_loop/`, where the
 adapter path's turn controls — the parallel approval fan-out included — are
 pinned.
