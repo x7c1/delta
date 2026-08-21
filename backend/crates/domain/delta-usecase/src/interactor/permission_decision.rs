@@ -21,8 +21,47 @@ use crate::ports::{GitWorktree, SessionEvent, SessionStore, TmuxDriver, Transcri
 /// The browser's answer to a pending permission request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionDecision {
+    /// Permit this one request.
     Allow,
+    /// Permit this request *and* comparable ones for the rest of the provider's
+    /// session, so the user stops being asked again for the same kind of work.
+    ///
+    /// Only a provider declaring
+    /// [`SessionScopedAllowCapability::Supported`](crate::SessionScopedAllowCapability::Supported)
+    /// may be answered with this; the decision path rejects it for any other
+    /// (see [`Error::PermissionDecisionUnsupported`]) rather than quietly
+    /// degrading it to [`Allow`](Self::Allow), which would keep prompting a user
+    /// who asked not to be prompted and say nothing about why.
+    ///
+    /// The grant itself lives in the provider's session: Delta records that this
+    /// request was permitted and nothing more — it never tracks or replays which
+    /// scopes a provider is holding.
+    AllowForSession,
+    /// Refuse this request.
     Deny,
+}
+
+impl PermissionDecision {
+    /// Whether this decision permits the request it answers.
+    ///
+    /// Both allow variants do; they differ only in how long the provider keeps
+    /// honouring the answer, which is a provider-side scope Delta does not own.
+    /// Every "is this an allow?" test goes through here so a future decision
+    /// variant has to state its side rather than inheriting `false` from a `==`
+    /// comparison it was never considered by.
+    pub fn is_allow(self) -> bool {
+        match self {
+            PermissionDecision::Allow | PermissionDecision::AllowForSession => true,
+            PermissionDecision::Deny => false,
+        }
+    }
+
+    /// Whether answering with this decision requires the provider to understand
+    /// a session-scoped grant (see
+    /// [`AgentCapabilities::supports_session_scoped_allow`](crate::AgentCapabilities::supports_session_scoped_allow)).
+    pub fn needs_session_scope(self) -> bool {
+        matches!(self, PermissionDecision::AllowForSession)
+    }
 }
 
 impl<T, X, S, W, G> SessionContext<'_, T, X, S, W, G>
@@ -63,12 +102,24 @@ where
                 .await;
         }
 
+        // The hook path is the pane-backed (Claude) one, whose hook response
+        // carries a per-request `behavior` and nothing wider. A session-scoped
+        // decision has no form here, so reject it before anything is claimed or
+        // written — the backstop that keeps the hook handler from ever having to
+        // render a decision its contract cannot express, even for a client that
+        // posts one directly instead of using the (capability-gated) button.
+        if decision.needs_session_scope() {
+            return Err(Error::PermissionDecisionUnsupported(request_id));
+        }
+
         let sender = self
             .state
             .take_permission_waiter(request_id)
             .ok_or(Error::PermissionNotPending(request_id))?;
 
-        let allowed = decision == PermissionDecision::Allow;
+        // Only `Allow` / `Deny` can be here — a session-scoped decision was
+        // refused above — so this is the same boolean the row always recorded.
+        let allowed = decision.is_allow();
         let Some(request) = self
             .store
             .decide_permission_request(request_id, allowed)
@@ -143,10 +194,26 @@ where
             .cloned()
             .ok_or(Error::PermissionNotPending(request_id))?;
 
+        // A session-scoped decision only exists for a provider that declares it.
+        // Checked against the live adapter's own profile — the same value the
+        // browser was handed on `GET /api/providers` — and checked *before* the
+        // row is touched, so a rejected decision leaves the request exactly as
+        // pending and as answerable as it was.
+        if decision.needs_session_scope()
+            && !agent.adapter.capabilities().supports_session_scoped_allow()
+        {
+            return Err(Error::PermissionDecisionUnsupported(request_id));
+        }
+
         // Record the row disposition. A row that is no longer `pending` (resolved
         // out from under us) is left untouched — the decision still reaches the
         // provider below, which is what actually gates the tool.
-        let allowed = decision == PermissionDecision::Allow;
+        //
+        // A session-scoped allow lands here as a plain `true`, deliberately: the
+        // row's question is whether this tool call was permitted, and the scope
+        // is a grant the provider holds in its own session, not state Delta owns
+        // or replays. Nothing is lost by not widening the column.
+        let allowed = decision.is_allow();
         self.store
             .decide_permission_request(request_id, allowed)
             .await?;

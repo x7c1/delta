@@ -33,6 +33,7 @@ vocabulary the Settings launch-option form tells the user to write in). Always
         "capabilities": {
           "has_terminal": true,
           "has_comms_log": false,
+          "has_allow_for_session": false,
           "launch_option_style": "cli_flag"
         }
       }
@@ -51,6 +52,13 @@ vocabulary the Settings launch-option form tells the user to write in). Always
       with this provider; its sessions get the comms-log pane (`/comms`).
       Complementary with `has_terminal`, not independent — see
       [live-channels.md](live-channels.md).
+    - `has_allow_for_session` — the provider understands a permission decision
+      scoped to the whole session (`allow_for_session`), not just the one
+      request being answered; its approval notices offer that extra button.
+      Sending the value to a provider whose flag is `false` is a
+      `400 permission_decision_unsupported` (see
+      [sends.md](sends.md#post-apipermissionsiddecision)), so a client that
+      cannot resolve the capability must not offer the control.
     - `launch_option_style` — how the provider reads a registered launch
       option's `(name, value?)` pair: `cli_flag` (`name` is a command-line
       flag, e.g. `--permission-mode`) or `request_field` (`name` is a field of

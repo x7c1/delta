@@ -269,7 +269,11 @@ The response then blocks Claude Code until one of two things happens:
   ```
 
   `behavior` is `allow` or `deny`, and the tool proceeds or is denied without the
-  TUI prompt appearing.
+  TUI prompt appearing. There is no session-scoped form here, which is why a
+  provider answering through this hook declares `has_allow_for_session: false`
+  and the decision endpoint refuses that value up front with a `400` instead of
+  quietly sending `allow` (see
+  [sends.md](sends.md#post-apipermissionsiddecision)).
 
 - **The deadline passes** — 50 seconds, kept under Claude Code's own 60-second
   hook timeout so the fallback is Delta's passthrough rather than Claude

@@ -18,6 +18,16 @@ const UNANSWERABLE_GUIDANCE =
 
 const NOT_PENDING = new ApiError(409, 'not pending', 'permission_not_pending');
 
+/** The 400 a provider without the session-scoped capability answers with. */
+const DECISION_UNSUPPORTED = new ApiError(
+  400,
+  'unsupported decision',
+  'permission_decision_unsupported',
+);
+
+/** The label of the session-scoped affirmative button. */
+const ALLOW_FOR_SESSION = 'Allow for session';
+
 function notice(): PermissionNotice {
   return {
     kind: 'permission',
@@ -36,11 +46,21 @@ interface RenderOptions {
    * unknown-capability case — that is what the component's default covers.
    */
   providerHasTerminal?: boolean;
+  /**
+   * Whether the provider accepts a session-scoped allow. Omitted deliberately
+   * in the unknown-capability case — the component's default covers that, and
+   * it is the opposite of the terminal flag's.
+   */
+  providerHasAllowForSession?: boolean;
   /** What the decision POST rejects with (no failure = a 204). */
   failWith?: unknown;
 }
 
-function renderCard({ providerHasTerminal, failWith }: RenderOptions = {}) {
+function renderCard({
+  providerHasTerminal,
+  providerHasAllowForSession,
+  failWith,
+}: RenderOptions = {}) {
   const client = new ApiClient({ baseUrl: 'http://localhost' });
   const decide = vi
     .spyOn(client, 'decidePermission')
@@ -56,6 +76,7 @@ function renderCard({ providerHasTerminal, failWith }: RenderOptions = {}) {
       <PermissionNoticeCard
         notice={notice()}
         providerHasTerminal={providerHasTerminal}
+        providerHasAllowForSession={providerHasAllowForSession}
         onOpenTerminal={onOpenTerminal}
         onDismiss={onDismiss}
       />
@@ -148,5 +169,79 @@ describe('PermissionNoticeCard conflict fallback', () => {
 
     fireEvent.click(allow);
     await waitFor(() => expect(decide).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe('PermissionNoticeCard session-scoped allow', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('offers the session-scoped button when the provider declares the capability', async () => {
+    // has_allow_for_session: true — the button is offered alongside Allow and
+    // Deny, and posts the distinct `allow_for_session` decision. Posting a
+    // plain `allow` instead would look identical on screen and quietly lose the
+    // whole point: the user would go on being asked.
+    const { decide } = renderCard({ providerHasAllowForSession: true });
+
+    fireEvent.click(screen.getByRole('button', { name: ALLOW_FOR_SESSION }));
+
+    await waitFor(() =>
+      expect(decide).toHaveBeenCalledWith(7, 'allow_for_session'),
+    );
+  });
+
+  it('hides the session-scoped button when the provider declares it unsupported', () => {
+    // has_allow_for_session: false — the endpoint would answer 400 for this
+    // provider, so the control must not be on screen at all.
+    renderCard({ providerHasAllowForSession: false });
+
+    expect(
+      screen.queryByRole('button', { name: ALLOW_FOR_SESSION }),
+    ).not.toBeInTheDocument();
+    // The decisions this provider does have are untouched.
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument();
+  });
+
+  it('hides the session-scoped button while the capability is unknown', () => {
+    // No `providerHasAllowForSession`: the providers query is unresolved, it
+    // failed, or it does not list this session's provider. The default here is
+    // the OPPOSITE of the terminal flag's (see
+    // HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN): this one gates a button that acts,
+    // and a button that fails when pressed is worse than an absent one.
+    renderCard();
+
+    expect(
+      screen.queryByRole('button', { name: ALLOW_FOR_SESSION }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Allow' })).toBeInTheDocument();
+  });
+
+  it('retires only the session-scoped button when the server refuses the decision', async () => {
+    // Reachable on stale capability data (the profile changed under a long-lived
+    // tab). The request itself is untouched and still pending, so the card must
+    // not fall back to guidance — it drops the one control that cannot work and
+    // leaves the answers that can.
+    const { decide } = renderCard({
+      providerHasAllowForSession: true,
+      failWith: DECISION_UNSUPPORTED,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: ALLOW_FOR_SESSION }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: ALLOW_FOR_SESSION }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText(TERMINAL_GUIDANCE)).not.toBeInTheDocument();
+    expect(screen.queryByText(UNANSWERABLE_GUIDANCE)).not.toBeInTheDocument();
+
+    const allow = screen.getByRole('button', { name: 'Allow' });
+    expect(allow).not.toBeDisabled();
+    fireEvent.click(allow);
+    await waitFor(() => expect(decide).toHaveBeenCalledTimes(2));
+    expect(decide).toHaveBeenLastCalledWith(7, 'allow');
   });
 });

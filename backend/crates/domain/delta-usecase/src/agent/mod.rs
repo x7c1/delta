@@ -28,7 +28,8 @@ pub use adapter::{
 pub use capabilities::{
     AgentCapabilities, ContextInjectionCapability, EventCapability, ForkCapability,
     InterruptCapability, LaunchCapability, PermissionCapability, ResumeCapability,
-    SessionIdentityCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    SessionIdentityCapability, SessionScopedAllowCapability, SteerCapability, TerminalCapability,
+    TranscriptCapability,
 };
 pub use content_source::{AgentContentSource, NullContentSource};
 pub use event::{

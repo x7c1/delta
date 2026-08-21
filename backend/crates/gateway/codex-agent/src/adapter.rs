@@ -43,13 +43,16 @@
 //! `item/commandExecution/requestApproval` and `item/fileChange/requestApproval`
 //! (classified in [`crate::translate`]) — surface as
 //! [`AgentEvent::PermissionRequested`]; the adapter remembers the verbatim wire
-//! id so [`AgentAdapter::resolve_permission`] can answer it with the frozen
-//! decision mapping (allow → `accept`, deny → `decline`) and emit
-//! [`AgentEvent::PermissionResolved`]. Both response types share the same
-//! `{ "decision": … }` shape (`CommandExecutionRequestApprovalResponse` and
+//! id so [`AgentAdapter::resolve_permission`] can answer it with the decision
+//! mapping (allow → `accept`, session-scoped allow → `acceptForSession`, deny →
+//! `decline`) and emit [`AgentEvent::PermissionResolved`]. Both response types
+//! share the same `{ "decision": … }` shape
+//! (`CommandExecutionRequestApprovalResponse` and
 //! `FileChangeRequestApprovalResponse` in the vendored schema), so one reply path
-//! serves both; v1 does not use the `acceptForSession` / execpolicy / network
-//! amendment decision variants. That trait method — reachable through
+//! serves both approval kinds and the session-scoped value needs no second path.
+//! The remaining decision variants — execpolicy and network-policy amendments,
+//! and `cancel` — are still unused: each would need a neutral projection Delta
+//! does not have. That trait method — reachable through
 //! `Arc<dyn AgentAdapter>` — is the Codex analogue of the Claude adapter's
 //! ingestion seam: it is how a browser decision reaches the provider, routed by
 //! the core from the Delta permission-row id back to the adapter-scoped token.
@@ -121,7 +124,7 @@ use delta_usecase::{
     ForkCapability, InterruptCapability, LaunchCapability, LaunchOptionSpec, LaunchRequest,
     PermissionCapability, PermissionDecision, PtyHandle, Result as UsecaseResult, ResumeCapability,
     ResumeRequest, SendReceipt, SendRequest, SessionEndReason, SessionIdentityCapability,
-    SteerCapability, TerminalCapability, TranscriptCapability,
+    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
 };
 
 use crate::translate::{
@@ -138,7 +141,8 @@ use crate::{codex_content_source, AppServerConnection, StartedThread, ThreadEven
 ///
 /// Codex reality: a JSON-RPC app-server, a provider-assigned thread id, resume
 /// via `thread/resume`, structured pushed turn/item events, a transcript that is
-/// only the pushed stream, permission decisions answered over the wire, hidden
+/// only the pushed stream, permission decisions answered over the wire —
+/// including one scoped to the whole session — hidden
 /// per-turn context via `thread/inject_items`, interrupt via `turn/interrupt`,
 /// and no terminal to attach. Fork/steer are unused in v1.
 pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
@@ -148,6 +152,10 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     events: EventCapability::StructuredTurnEvents,
     transcript: TranscriptCapability::EventStreamOnly,
     permission: PermissionCapability::AdapterDecision,
+    // Both approval response schemas carry `acceptForSession` next to `accept`
+    // and `decline`, so an allow can be widened to the whole thread — see
+    // [`DECISION_ACCEPT_FOR_SESSION`].
+    session_scoped_allow: SessionScopedAllowCapability::Supported,
     context_injection: ContextInjectionCapability::HiddenPerTurn,
     interrupt: InterruptCapability::Rpc,
     terminal: TerminalCapability::NoTerminal,
@@ -183,6 +191,15 @@ const WRITABLE_ROOTS_KEY: &str = "sandbox_workspace_write.writable_roots";
 
 /// The Codex decision wire value for an allow.
 const DECISION_ACCEPT: &str = "accept";
+/// The Codex decision wire value for an allow that stands for the rest of the
+/// session: the provider stops asking for comparable requests on this thread.
+///
+/// The grant lives entirely in the provider's session — Delta sends this value
+/// and holds nothing about it afterwards, so a restart or a resume simply asks
+/// again. Carried by both approval response schemas
+/// (`CommandExecutionRequestApprovalResponse` / `FileChangeRequestApprovalResponse`),
+/// which is what lets the one reply path below serve both approval kinds.
+const DECISION_ACCEPT_FOR_SESSION: &str = "acceptForSession";
 /// The Codex decision wire value for a deny.
 const DECISION_DECLINE: &str = "decline";
 /// JSON-RPC "method not found", reused to reject an unmodeled server request.
@@ -835,7 +852,8 @@ impl AgentAdapter for CodexAppServerAdapter {
     }
 
     /// Answer an open approval request with a decision, mapping it to the Codex
-    /// wire value (allow → `accept`, deny → `decline`), and emit
+    /// wire value (allow → `accept`, session-scoped allow → `acceptForSession`,
+    /// deny → `decline`), and emit
     /// [`AgentEvent::PermissionResolved`].
     ///
     /// This is the Codex counterpart to the Claude adapter's ingestion seam: the
@@ -869,6 +887,7 @@ impl AgentAdapter for CodexAppServerAdapter {
         })?;
         let decision_value = match decision {
             PermissionDecision::Allow => DECISION_ACCEPT,
+            PermissionDecision::AllowForSession => DECISION_ACCEPT_FOR_SESSION,
             PermissionDecision::Deny => DECISION_DECLINE,
         };
         // Both approval kinds that reach here — command execution and file change

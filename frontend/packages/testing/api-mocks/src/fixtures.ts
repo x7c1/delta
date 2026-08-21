@@ -1084,6 +1084,9 @@ export function mockCommsFrames(): CommsFrame[] {
  * `has_comms_log: true` — its right-pane window is the frame log instead) and
  * takes them as session-start request fields. The workspace picks the right pane
  * from those two flags, and Settings words its launch-option form from the style.
+ * Codex also accepts a session-scoped permission decision
+ * (`has_allow_for_session: true`), which is what puts the "Allow for session"
+ * button on its approval notices and keeps it off Claude's.
  * A test that needs an unavailable provider overrides this handler (see
  * `createHandlers`).
  */
@@ -1096,6 +1099,7 @@ export function mockProviders(): ProviderAvailability[] {
       capabilities: {
         has_terminal: true,
         has_comms_log: false,
+        has_allow_for_session: false,
         launch_option_style: 'cli_flag',
       },
     },
@@ -1106,6 +1110,7 @@ export function mockProviders(): ProviderAvailability[] {
       capabilities: {
         has_terminal: false,
         has_comms_log: true,
+        has_allow_for_session: true,
         launch_option_style: 'request_field',
       },
     },

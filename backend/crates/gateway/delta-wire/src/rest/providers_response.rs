@@ -1,6 +1,8 @@
 //! The wire form of the provider-availability listing (`GET /api/providers`).
 
 use delta_model::ProviderAvailability;
+#[cfg(doc)]
+use delta_usecase::SessionScopedAllowCapability;
 use delta_usecase::{AgentCapabilities, LaunchCapability, TerminalCapability};
 use serde::Serialize;
 use ts_rs::TS;
@@ -43,6 +45,14 @@ pub struct WireProviderCapabilities {
     /// So the two flags are complementary, not independent: the right pane is the
     /// terminal when [`Self::has_terminal`], and the comms log when this is set.
     pub has_comms_log: bool,
+    /// Whether this provider understands a permission decision scoped to the
+    /// whole session (`allow_for_session`), rather than only to the one request
+    /// being answered. Derived from the internal
+    /// [`SessionScopedAllowCapability`]. The permission notice offers its
+    /// session-scoped button only where this is `true` — a button that would
+    /// earn a `400 permission_decision_unsupported` when pressed is worse than
+    /// no button, so an unknown capability hides it.
+    pub has_allow_for_session: bool,
     /// How this provider reads a registered launch option's `(name, value?)`
     /// pair. Settings words its launch-option form from this, so a user
     /// registering an option for a field-style provider is told to write
@@ -76,6 +86,7 @@ impl From<AgentCapabilities> for WireProviderCapabilities {
         WireProviderCapabilities {
             has_terminal: matches!(capabilities.terminal, TerminalCapability::AttachablePty),
             has_comms_log: matches!(capabilities.launch, LaunchCapability::JsonRpcAppServer),
+            has_allow_for_session: capabilities.supports_session_scoped_allow(),
             launch_option_style: capabilities.launch.into(),
         }
     }
@@ -156,7 +167,7 @@ mod tests {
     use delta_usecase::{
         ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
         LaunchCapability, PermissionCapability, ResumeCapability, SessionIdentityCapability,
-        SteerCapability, TranscriptCapability,
+        SessionScopedAllowCapability, SteerCapability, TranscriptCapability,
     };
 
     /// A capability profile with the given terminal surface and launch
@@ -170,6 +181,7 @@ mod tests {
             events: EventCapability::HookAndTranscript,
             transcript: TranscriptCapability::JsonlFile,
             permission: PermissionCapability::HookDecision,
+            session_scoped_allow: SessionScopedAllowCapability::Unsupported,
             context_injection: ContextInjectionCapability::HiddenPerTurn,
             interrupt: InterruptCapability::PaneKeystroke,
             terminal,
@@ -202,6 +214,7 @@ mod tests {
                         "capabilities": {
                             "has_terminal": true,
                             "has_comms_log": false,
+                            "has_allow_for_session": false,
                             "launch_option_style": "cli_flag"
                         }
                     }
@@ -276,6 +289,39 @@ mod tests {
             LaunchCapability::PtyCommand,
         ));
         assert!(!projected.has_terminal);
+    }
+
+    /// The session-scoped allow is its own declared capability, not something
+    /// derived from how the provider is launched or which surface it offers: a
+    /// profile that does not declare it projects to `false` however it is
+    /// launched, and declaring it is the only thing that flips the flag.
+    #[test]
+    fn the_session_scoped_allow_flag_follows_its_own_capability() {
+        let undeclared = caps(
+            TerminalCapability::NoTerminal,
+            LaunchCapability::JsonRpcAppServer,
+        );
+        assert!(
+            !WireProviderCapabilities::from(undeclared).has_allow_for_session,
+            "an adapter-backed provider does not get the capability for free"
+        );
+
+        let declared = AgentCapabilities {
+            session_scoped_allow: SessionScopedAllowCapability::Supported,
+            ..undeclared
+        };
+        assert!(WireProviderCapabilities::from(declared).has_allow_for_session);
+
+        // And it is independent of the terminal surface too: a PTY provider that
+        // declared it would report it.
+        let pty_declared = AgentCapabilities {
+            session_scoped_allow: SessionScopedAllowCapability::Supported,
+            ..caps(
+                TerminalCapability::AttachablePty,
+                LaunchCapability::PtyCommand,
+            )
+        };
+        assert!(WireProviderCapabilities::from(pty_declared).has_allow_for_session);
     }
 
     /// The launch-option style follows the launch capability, not the terminal

@@ -3,4 +3,4 @@
 /**
  * The browser's answer to a pending permission request.
  */
-export type PermissionDecision = "allow" | "deny";
+export type PermissionDecision = "allow" | "allow_for_session" | "deny";

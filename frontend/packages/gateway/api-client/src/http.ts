@@ -61,6 +61,13 @@ export interface ApiClientOptions {
  * Allow/Deny buttons for guidance chosen by the provider's `has_terminal`
  * capability.
  *
+ * `permission_decision_unsupported` means the request is still pending but this
+ * session's provider has no meaning for the decision value sent — today, a
+ * session-scoped allow (`allow_for_session`) against a provider whose
+ * `has_allow_for_session` capability is false. Nothing was mutated, so callers
+ * drop the control that produced it and leave the remaining decisions usable,
+ * rather than falling back as they do for `permission_not_pending`.
+ *
  * `question_not_pending` means an `AskUserQuestion` can no longer be answered
  * from the UI (already answered, its turn ended, or no live pane). Callers
  * branch on this to keep the answer-in-the-terminal fallback.
@@ -98,6 +105,7 @@ export interface ApiClientOptions {
 export type ApiErrorCode =
   | 'resume_unavailable'
   | 'permission_not_pending'
+  | 'permission_decision_unsupported'
   | 'question_not_pending'
   | 'send_not_cancellable'
   | 'send_not_releasable'
@@ -339,6 +347,13 @@ export class ApiClient {
    * so the tool proceeds (or is denied) without touching the TUI prompt. A
    * `409` with code `permission_not_pending` means no browser decision can
    * reach the request anymore, surfaced as {@link ApiError}.
+   *
+   * `'allow_for_session'` is **not** accepted by every provider: only one whose
+   * `ProviderCapabilities.has_allow_for_session` is `true`. Sending it to any
+   * other is a `400` with code `permission_decision_unsupported` — nothing is
+   * mutated and the request stays answerable with `'allow'` or `'deny'`, so a
+   * caller offering that choice gates it on the capability and treats the `400`
+   * as "retire that option", not as a dead request.
    */
   decidePermission(
     requestId: number,

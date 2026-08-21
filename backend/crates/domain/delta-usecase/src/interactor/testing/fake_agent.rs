@@ -18,8 +18,9 @@ use crate::agent::{
     AgentEventStream, AgentProvider, AgentSessionHandle, ContentSourceRequest,
     ContextInjectionCapability, EventCapability, ForkCapability, InterruptCapability,
     LaunchCapability, LaunchRequest, PermissionCapability, PtyHandle, ResumeCapability,
-    ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability, SteerCapability,
-    TerminalCapability, TranscriptCapability, TurnStatus,
+    ResumeRequest, SendReceipt, SendRequest, SessionIdentityCapability,
+    SessionScopedAllowCapability, SteerCapability, TerminalCapability, TranscriptCapability,
+    TurnStatus,
 };
 use crate::error::{Error, Result};
 use crate::interactor::PermissionDecision;
@@ -73,6 +74,11 @@ pub(crate) struct FakeAgentAdapter {
     tx: mpsc::UnboundedSender<AgentEvent>,
     /// The receiver handed out once by [`AgentAdapter::events`].
     rx: Mutex<Option<mpsc::UnboundedReceiver<AgentEvent>>>,
+    /// The profile this adapter reports. Normally [`FAKE_AGENT_CAPABILITIES`];
+    /// a test that needs a provider *lacking* a capability hands in a variant,
+    /// which is how the capability-gated paths are exercised from both sides
+    /// without inventing a second fake provider.
+    capabilities: AgentCapabilities,
 }
 
 impl FakeAgentAdapter {
@@ -82,6 +88,7 @@ impl FakeAgentAdapter {
         log: Arc<Mutex<FakeAgentLog>>,
         tx: mpsc::UnboundedSender<AgentEvent>,
         rx: mpsc::UnboundedReceiver<AgentEvent>,
+        capabilities: AgentCapabilities,
     ) -> Arc<Self> {
         Arc::new(Self {
             thread_id,
@@ -89,6 +96,7 @@ impl FakeAgentAdapter {
             log,
             tx,
             rx: Mutex::new(Some(rx)),
+            capabilities,
         })
     }
 }
@@ -96,13 +104,17 @@ impl FakeAgentAdapter {
 /// The Codex-shaped capability profile both the fake adapter and the fake
 /// factory report — one declaration, mirroring how the real gateway's adapter
 /// and factory read one `CODEX_CAPABILITIES` const.
-const FAKE_AGENT_CAPABILITIES: AgentCapabilities = AgentCapabilities {
+pub(crate) const FAKE_AGENT_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     launch: LaunchCapability::JsonRpcAppServer,
     session_identity: SessionIdentityCapability::ProviderReturnsId,
     resume: ResumeCapability::Supported,
     events: EventCapability::StructuredTurnEvents,
     transcript: TranscriptCapability::EventStreamOnly,
     permission: PermissionCapability::AdapterDecision,
+    // Mirrors the real Codex adapter, whose approval responses carry
+    // `acceptForSession`: the session-scoped allow must be exercisable against
+    // the fake, or every test of that path would pass for the wrong reason.
+    session_scoped_allow: SessionScopedAllowCapability::Supported,
     context_injection: ContextInjectionCapability::HiddenPerTurn,
     interrupt: InterruptCapability::Rpc,
     terminal: TerminalCapability::NoTerminal,
@@ -117,7 +129,7 @@ impl AgentAdapter for FakeAgentAdapter {
     }
 
     fn capabilities(&self) -> AgentCapabilities {
-        FAKE_AGENT_CAPABILITIES
+        self.capabilities
     }
 
     async fn launch(&self, req: LaunchRequest) -> Result<AgentSessionHandle> {
@@ -323,6 +335,9 @@ enum ConnectOutcome {
 /// existing single-connect tests keep working regardless of call order).
 pub(crate) struct FakeAgentFactory {
     outcome: ConnectOutcome,
+    /// The profile this factory and every adapter it builds report — one
+    /// declaration for both, mirroring the real gateway.
+    capabilities: AgentCapabilities,
     log: Arc<Mutex<FakeAgentLog>>,
     /// The sender the currently-built adapter drains through `events()`; a test
     /// pushes live [`AgentEvent`]s here to drive the session's event pump. Swapped
@@ -339,12 +354,24 @@ impl FakeAgentFactory {
     /// A factory whose `connect` yields an adapter minting `thread_id` and
     /// returning `turn_id` from each send.
     pub(crate) fn new(thread_id: impl Into<String>, turn_id: Option<&str>) -> Arc<Self> {
+        Self::with_capabilities(thread_id, turn_id, FAKE_AGENT_CAPABILITIES)
+    }
+
+    /// Like [`Self::new`], but reporting `capabilities` instead of the default
+    /// Codex-shaped profile — for tests that need an adapter-backed provider
+    /// which does NOT declare some capability.
+    pub(crate) fn with_capabilities(
+        thread_id: impl Into<String>,
+        turn_id: Option<&str>,
+        capabilities: AgentCapabilities,
+    ) -> Arc<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             outcome: ConnectOutcome::Adapter {
                 thread_id: thread_id.into(),
                 turn_id: turn_id.map(str::to_owned),
             },
+            capabilities,
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
             event_tx: Mutex::new(event_tx),
             pending_rx: Mutex::new(Some(event_rx)),
@@ -356,6 +383,7 @@ impl FakeAgentFactory {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         Arc::new(Self {
             outcome: ConnectOutcome::Fail,
+            capabilities: FAKE_AGENT_CAPABILITIES,
             log: Arc::new(Mutex::new(FakeAgentLog::default())),
             event_tx: Mutex::new(event_tx),
             pending_rx: Mutex::new(Some(event_rx)),
@@ -384,7 +412,7 @@ impl AgentAdapterFactory for FakeAgentFactory {
     }
 
     fn capabilities(&self) -> AgentCapabilities {
-        FAKE_AGENT_CAPABILITIES
+        self.capabilities
     }
 
     async fn connect(&self) -> Result<Arc<dyn AgentAdapter>> {
@@ -410,6 +438,7 @@ impl AgentAdapterFactory for FakeAgentFactory {
                     Arc::clone(&self.log),
                     self.event_tx.lock().unwrap().clone(),
                     rx,
+                    self.capabilities,
                 );
                 Ok(adapter as Arc<dyn AgentAdapter>)
             }

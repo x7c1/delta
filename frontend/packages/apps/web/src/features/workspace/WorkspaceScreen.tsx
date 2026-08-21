@@ -527,6 +527,13 @@ export function WorkspaceScreen() {
             // while the providers query is unresolved, if it failed, or if it
             // does not list this session's provider.
             providerHasTerminal={focusedCapabilities?.has_terminal}
+            // Likewise raw: the notice hides its session-scoped button unless
+            // the capability is known to be present, so `undefined` is a
+            // meaningful third state here and must not be flattened on the way
+            // down.
+            providerHasAllowForSession={
+              focusedCapabilities?.has_allow_for_session
+            }
           />
         ) : (
           <div className="flex h-full items-center justify-center text-secondary text-fg-subtle">

@@ -82,6 +82,29 @@ pub enum PermissionCapability {
     ProviderUiOnly,
 }
 
+/// Whether the provider understands an allow that stands for the rest of the
+/// session, rather than only for the one request being answered.
+///
+/// Deliberately *not* folded into [`PermissionCapability`]: that one answers
+/// **where** a decision is made (adapter reply, hook response, or nowhere Delta
+/// can reach), which is a different question from **which decisions exist**. A
+/// provider could answer over an adapter and still know only per-request
+/// decisions, so the two vary independently and are declared independently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionScopedAllowCapability {
+    /// The provider accepts an allow scoped to the whole session, and stops
+    /// asking for comparable requests afterwards (Codex's `acceptForSession`).
+    /// The scope lives entirely in the provider's session — Delta neither
+    /// records which grants are outstanding nor replays them.
+    Supported,
+    /// Every decision answers exactly one request (Claude's permission hook,
+    /// whose response `behavior` has no session-scoped form). Delta rejects a
+    /// session-scoped decision for such a provider rather than degrading it
+    /// into a plain allow, which would keep prompting a user who asked not to
+    /// be prompted, with nothing said about why.
+    Unsupported,
+}
+
 /// How out-of-band context is injected for a turn without polluting the visible
 /// prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,6 +175,7 @@ pub struct AgentCapabilities {
     pub events: EventCapability,
     pub transcript: TranscriptCapability,
     pub permission: PermissionCapability,
+    pub session_scoped_allow: SessionScopedAllowCapability,
     pub context_injection: ContextInjectionCapability,
     pub interrupt: InterruptCapability,
     pub terminal: TerminalCapability,
@@ -168,6 +192,21 @@ impl AgentCapabilities {
     /// determines which session paths (spawn, resume, dispatch) apply.
     pub fn is_adapter_backed(&self) -> bool {
         self.launch.is_adapter_backed()
+    }
+
+    /// Whether this provider understands
+    /// [`PermissionDecision::AllowForSession`]. The single predicate both the
+    /// wire projection (what the UI is told) and the decision path (what the
+    /// server accepts) read, so the button the browser offers and the decision
+    /// the server honours can never disagree.
+    ///
+    /// [`PermissionDecision::AllowForSession`]:
+    ///     crate::interactor::PermissionDecision::AllowForSession
+    pub fn supports_session_scoped_allow(&self) -> bool {
+        matches!(
+            self.session_scoped_allow,
+            SessionScopedAllowCapability::Supported
+        )
     }
 }
 
@@ -195,6 +234,7 @@ mod tests {
             events: EventCapability::HookAndTranscript,
             transcript: TranscriptCapability::JsonlFile,
             permission: PermissionCapability::HookDecision,
+            session_scoped_allow: SessionScopedAllowCapability::Unsupported,
             context_injection: ContextInjectionCapability::HiddenPerTurn,
             interrupt: InterruptCapability::PaneKeystroke,
             terminal: TerminalCapability::AttachablePty,
@@ -207,5 +247,16 @@ mod tests {
             ..base
         };
         assert!(adapter_backed.is_adapter_backed());
+
+        // The session-scoped allow is declared on its own field, independent of
+        // how the provider is launched: an adapter-backed profile that has not
+        // declared it still refuses the decision.
+        assert!(!base.supports_session_scoped_allow());
+        assert!(!adapter_backed.supports_session_scoped_allow());
+        assert!(AgentCapabilities {
+            session_scoped_allow: SessionScopedAllowCapability::Supported,
+            ..base
+        }
+        .supports_session_scoped_allow());
     }
 }

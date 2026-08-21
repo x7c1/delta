@@ -45,6 +45,15 @@ export interface PermissionNoticeCardProps {
    * {@link HAS_TERMINAL_WHEN_UNKNOWN} for how that case is resolved.
    */
   providerHasTerminal?: boolean;
+  /**
+   * Whether the session's provider accepts a session-scoped allow
+   * (`ProviderCapabilities.has_allow_for_session`), which decides whether the
+   * "Allow for session" button is offered at all — never a `provider === '…'`
+   * check. `undefined` means the capability is not known (the providers query is
+   * still in flight, it failed, or it does not list this session's provider);
+   * see {@link HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN}.
+   */
+  providerHasAllowForSession?: boolean;
   /** Open the embedded terminal (the fallback's "answer there" affordance). */
   onOpenTerminal: () => void;
   /** Dismiss the notice without deciding. */
@@ -72,6 +81,24 @@ export interface PermissionNoticeCardProps {
  * capability in hand there is no honest alternative to the historical default.
  */
 const HAS_TERMINAL_WHEN_UNKNOWN = true;
+
+/**
+ * What an unknown `has_allow_for_session` capability falls back to: `false`,
+ * i.e. no session-scoped button.
+ *
+ * Deliberately the OPPOSITE default to {@link HAS_TERMINAL_WHEN_UNKNOWN}, and
+ * the asymmetry is the point: that flag chooses between two pieces of *advice*,
+ * so guessing wrong costs a sentence of misleading text. This one gates a button
+ * that performs an action, and a provider without the capability answers
+ * `400 permission_decision_unsupported` when it is pressed. A control that fails
+ * on click is worse than one that was never there, so the button appears only
+ * where the capability is known to be present.
+ *
+ * The cost of guessing wrong in this direction is small and self-correcting: the
+ * user answers with a plain Allow, exactly as before this button existed, and
+ * the button appears as soon as the providers query resolves.
+ */
+const HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN = false;
 
 /**
  * The permission notice card: tool name, an input summary, and Allow/Deny
@@ -103,25 +130,41 @@ const HAS_TERMINAL_WHEN_UNKNOWN = true;
  *   request was already resolved (a second tab answered it) or the agent
  *   connection died with the dialog open. Say so, and offer only Dismiss —
  *   an "Open terminal" button would open a pane this provider does not have.
+ *
+ * A provider that accepts a session-scoped allow gets a third affirmative
+ * button, which answers this request AND tells the provider to stop asking for
+ * comparable ones for the rest of the session. It is the remedy for the case
+ * that motivated it — a single turn raising a dozen approvals in a row, each
+ * needing its own click — and it is gated on the capability, not the provider
+ * name, so it appears wherever the capability is declared.
  */
 export function PermissionNoticeCard({
   notice,
   providerHasTerminal,
+  providerHasAllowForSession,
   onOpenTerminal,
   onDismiss,
 }: PermissionNoticeCardProps) {
   const client = useApiClient();
   // posting: a decision POST is in flight (buttons disabled).
   // fallback: the decision can no longer take effect; show the guidance.
+  // scopeRefused: the server rejected the session-scoped decision as one this
+  //   provider cannot express — only reachable on stale capability data, and
+  //   handled by retiring that one button rather than the whole card, since
+  //   Allow and Deny are still perfectly good answers.
   const [posting, setPosting] = useState(false);
   const [fallback, setFallback] = useState(false);
+  const [scopeRefused, setScopeRefused] = useState(false);
   const canAnswerInTerminal = providerHasTerminal ?? HAS_TERMINAL_WHEN_UNKNOWN;
+  const canAllowForSession =
+    providerHasAllowForSession ?? HAS_ALLOW_FOR_SESSION_WHEN_UNKNOWN;
 
   // A new request resets the card: the previous request's posting/fallback
   // state belongs to the previous question.
   useEffect(() => {
     setPosting(false);
     setFallback(false);
+    setScopeRefused(false);
   }, [notice.requestId]);
 
   const decide = (decision: PermissionDecision) => {
@@ -130,6 +173,17 @@ export function PermissionNoticeCard({
       setPosting(false);
       if (err instanceof ApiError && err.code === 'permission_not_pending') {
         setFallback(true);
+        return;
+      }
+      if (
+        err instanceof ApiError &&
+        err.code === 'permission_decision_unsupported'
+      ) {
+        // The capability the button was offered on is not (or no longer) true
+        // for this session's provider. The request itself is untouched and
+        // still pending, so drop just the control that cannot work and leave
+        // the user with the answers that can.
+        setScopeRefused(true);
         return;
       }
       // A transient failure: log and leave the buttons usable for a retry.
@@ -195,6 +249,16 @@ export function PermissionNoticeCard({
           <Button size="sm" disabled={posting} onClick={() => decide('allow')}>
             Allow
           </Button>
+          {canAllowForSession && !scopeRefused && (
+            <Button
+              size="sm"
+              disabled={posting}
+              data-testid="permission-notice-allow-for-session"
+              onClick={() => decide('allow_for_session')}
+            >
+              Allow for session
+            </Button>
+          )}
           <Button size="sm" disabled={posting} onClick={() => decide('deny')}>
             Deny
           </Button>
