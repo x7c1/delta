@@ -71,8 +71,11 @@ regress:
 ## Backend (`backend/`)
 
 Quality gate — `make build`, `make test`, and `make lint` each cover both
-parts; `make check` runs the whole gate (build, test, lint, plus the frontend
-typecheck) for both parts at once, which is what to run before opening a PR.
+parts and stay fast, for the inner loop. `make check` is the pre-PR gate: it
+runs the whole thing for both parts at once (build, test, lint, the frontend
+typecheck, the generated-bindings freshness check) **plus both Playwright
+suites**, so passing it means CI will pass. It needs tmux, because `make
+e2e-fake` drives the real backend through one.
 
 Run the server (from `backend/`):
 
@@ -128,8 +131,9 @@ corepack from the `packageManager` field — run `corepack enable` once if pnpm 
 not on your PATH. Install dependencies once with `pnpm install` from `frontend/`.
 
 The quality gate (build, typecheck, test, and `lint` = ESLint +
-dependency-cruiser) is covered by `make check`, or the individual `make build` /
-`make test` / `make lint` targets.
+dependency-cruiser) is covered by `make check` — which also runs both Playwright
+suites — or by the individual `make build` / `make test` / `make lint` targets
+when a faster loop is wanted.
 
 ### Generated wire bindings (`@delta/wire-gen`)
 
