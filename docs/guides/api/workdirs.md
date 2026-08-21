@@ -90,7 +90,9 @@ Response:
   error. `default_branch` is the repository's default branch short name when
   known, `null` otherwise.
 
-- **400** — `path` is missing or blank.
+- **400** — `path` is missing or blank. Surrounding whitespace is trimmed before
+  both the blank check and the lookup, so `"  "` is blank and `"  /projects/app  "`
+  resolves like `"/projects/app"`.
 
 ### `GET /api/workdir/git/branches`
 
@@ -114,7 +116,8 @@ Response:
   `origin/HEAD` symref, and reflect a fresh fetch. `default_branch` is `null`
   when it is not known.
 
-- **400** — `path` is missing or blank, or is not inside a git repository.
+- **400** — `path` is missing or blank (whitespace is trimmed first, as above),
+  or is not inside a git repository.
 - **500** — the fetch itself failed (e.g. no network, or the remote refused).
 
 ### `POST /api/open-cwd`
@@ -296,7 +299,9 @@ Request:
 
 `path` must be non-blank and absolute. Trailing slashes are trimmed for
 canonicalisation, so `/home/dev/projects/` and `/home/dev/projects` register the
-same row. The path is NOT required to exist or to contain git repositories at
+same row. Blank means empty, whitespace-only, or nothing but slashes; the bare
+root `/` is the one all-slash path that is not blank, and it registers as `/`.
+The path is NOT required to exist or to contain git repositories at
 registration time — a future-state clone root is allowed.
 
 - **201 Created**:
