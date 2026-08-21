@@ -34,31 +34,53 @@ jobs:
         id: version-check
         run: ./scripts/check-version-change.sh
 
-      - name: Generate changelog
+      # The Release body is the summary a developer wrote in the release PR,
+      # not the per-commit changelog — that stays on the PR itself (layout:
+      # docs/guides/release.md). This step runs before the tag is cut, so a
+      # missing summary aborts the run instead of publishing a Release
+      # nobody can read.
+      - name: Resolve release summary
         if: steps.version-check.outputs.changed == 'true'
-        id: changelog
+        id: summary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEW_VERSION: ${{ steps.version-check.outputs.version }}
         run: |
+          source .github/scripts/release-summary.sh
+          source .github/scripts/release-pr-lookup.sh
+
           repo_url=$(gh repo view --json url --jq '.url')
           last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          changelog=$(.github/scripts/generate-changelog.sh "$last_tag" "$repo_url")
-          # Append a compare link against the previous tag. The release
-          # PR description carries the same link but pointing at the
-          # release branch; update-release-pr-links.sh rewrites that
-          # one to the tag after the release lands.
-          compare=""
-          if [ -n "$last_tag" ]; then
-            compare=$(printf '## Changelog\n\n- [%s...v%s](%s/compare/%s...v%s)' \
-              "$last_tag" "$NEW_VERSION" \
-              "$repo_url" "$last_tag" "$NEW_VERSION")
+
+          pr_number=$(find_release_pr "$NEW_VERSION")
+          if [ -z "$pr_number" ]; then
+            echo "::error::No merged release PR found for v${NEW_VERSION}; its summary region is what this Release publishes. See docs/guides/release.md."
+            exit 1
           fi
+
+          # Fetch in a statement of its own so a failed API call aborts the
+          # step rather than reading as an unwritten summary.
+          pr_body=$(gh pr view "$pr_number" --json body --jq '.body')
+          summary=$(summary_region "$pr_body")
+          if summary_is_unwritten "$summary"; then
+            echo "::error::Release PR #${pr_number} carries no release summary. Write it above the '$(changelog_marker)' marker in the PR body and delete the '$(summary_sentinel)' comment, then re-run this workflow. See docs/guides/release.md."
+            exit 1
+          fi
+
+          # Randomize the heredoc delimiter: the summary is free-form prose
+          # and must not be able to terminate its own output block.
+          delimiter="RELEASE_BODY_$(openssl rand -hex 16)"
+
           {
-            echo 'body<<CHANGELOG_EOF'
-            printf '%s\n' "$changelog"
-            printf '%s\n' "$compare"
-            echo 'CHANGELOG_EOF'
+            echo "body<<${delimiter}"
+            printf '%s\n\n---\n\n' "$summary"
+            printf -- '- Full changelog: %s/pull/%s\n' "$repo_url" "$pr_number"
+            if [ -n "$last_tag" ]; then
+              printf -- '- Compare: [%s...v%s](%s/compare/%s...v%s)\n' \
+                "$last_tag" "$NEW_VERSION" \
+                "$repo_url" "$last_tag" "$NEW_VERSION"
+            fi
+            echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
@@ -67,7 +89,7 @@ jobs:
         with:
           tag_name: v${{ steps.version-check.outputs.version }}
           name: Release v${{ steps.version-check.outputs.version }}
-          body: ${{ steps.changelog.outputs.body }}
+          body: ${{ steps.summary.outputs.body }}
 
       - name: Rewrite release PR links to point at the tag
         if: steps.version-check.outputs.changed == 'true'
