@@ -325,7 +325,10 @@ export function useProvidersQuery(
 /**
  * Whether the selected directory is a git repository (`GET /api/workdir/git`),
  * for the new-session picker's worktree option. Cheap (no network), so it runs
- * as soon as a directory is selected — `enabled` gates it on a non-empty path.
+ * as soon as a directory is selected — the query is gated on the caller's
+ * `enabled` and on `path !== null`, i.e. on a directory having been picked at
+ * all. The picker only ever stores an absolute path or `null`, so the blank
+ * `path` the endpoint rejects with a `400` never reaches it.
  *
  * `retry` is disabled so a non-2xx surfaces immediately: the picker simply
  * hides the worktree option when this errors or reports `repo_root: null`.

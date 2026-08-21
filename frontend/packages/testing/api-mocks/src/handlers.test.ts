@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HttpHandler } from 'msw';
 import type {
+  CloneRoot,
   GitBranchesResponse,
   GitRepoResponse,
   SendResponse,
@@ -466,6 +467,127 @@ describe('git workdir mocks', () => {
       handlers,
       '/api/workdir/git/branches',
       'http://localhost/api/workdir/git/branches?path=%2Fhome%2Fdev%2Fscratch',
+    );
+    expect(response.status).toBe(400);
+  });
+
+  // `path` is required on both git endpoints, and the server decides that on a
+  // trimmed value (`WorkdirGitQuery::require_path`). These pin the mock to the
+  // same rule: a mock that answers 200 where the real server answers 400 lets a
+  // frontend bug pass every mock-backed test and fail only against the backend.
+  it.each([
+    ['omitted', ''],
+    ['empty', '?path='],
+    ['whitespace-only', '?path=%20%20'],
+  ])('rejects the repo probe for a %s path with 400', async (_label, query) => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runGet(
+      handlers,
+      '/api/workdir/git',
+      `http://localhost/api/workdir/git${query}`,
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it.each([
+    ['omitted', ''],
+    ['empty', '?path='],
+    ['whitespace-only', '?path=%20%20'],
+  ])(
+    'rejects the branches endpoint for a %s path with 400',
+    async (_label, query) => {
+      const handlers = createHandlers() as HttpHandler[];
+      const response = await runGet(
+        handlers,
+        '/api/workdir/git/branches',
+        `http://localhost/api/workdir/git/branches${query}`,
+      );
+      expect(response.status).toBe(400);
+    },
+  );
+
+  it('trims a padded path before resolving it, as the server does', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const padded = encodeURIComponent(`  ${MOCK_GIT_REPO_ROOT}  `);
+    const response = await runGet(
+      handlers,
+      '/api/workdir/git',
+      `http://localhost/api/workdir/git?path=${padded}`,
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as GitRepoResponse;
+    expect(body.repo_root).toBe(MOCK_GIT_REPO_ROOT);
+  });
+});
+
+/**
+ * The clone-root mock canonicalises a submitted `path` exactly as the server's
+ * `create_clone_root` does — trailing slashes stripped, the bare root left
+ * alone, the result rejected when it comes out blank. These assert the same
+ * input classes the server-side tests in `delta-server`'s `app.rs` name.
+ */
+describe('clone-root mock canonicalisation', () => {
+  it.each([
+    ['empty', ''],
+    ['whitespace-only', '   '],
+    ['double-slash', '//'],
+    ['all-slashes', '///'],
+  ])('rejects a %s path with 400', async (_label, path) => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runPost(
+      handlers,
+      '/api/clone-roots',
+      'http://localhost/api/clone-roots',
+      { path },
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it('registers the bare filesystem root, which is not blank', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runPost(
+      handlers,
+      '/api/clone-roots',
+      'http://localhost/api/clone-roots',
+      { path: '/' },
+    );
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as CloneRoot;
+    expect(body.path).toBe('/');
+  });
+
+  it('strips a trailing slash so both spellings are the same row', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const created = await runPost(
+      handlers,
+      '/api/clone-roots',
+      'http://localhost/api/clone-roots',
+      { path: '/home/dev/projects/' },
+    );
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as CloneRoot;
+    expect(body.path).toBe('/home/dev/projects');
+
+    // The unslashed spelling now collides with it, which is what "the same row"
+    // means on a server whose clone-root table keys on the path.
+    const duplicate = await runPost(
+      handlers,
+      '/api/clone-roots',
+      'http://localhost/api/clone-roots',
+      { path: '/home/dev/projects' },
+    );
+    expect(duplicate.status).toBe(409);
+    const duplicateBody = (await duplicate.json()) as { code?: string };
+    expect(duplicateBody.code).toBe('clone_root_duplicate');
+  });
+
+  it('rejects a relative path with 400', async () => {
+    const handlers = createHandlers() as HttpHandler[];
+    const response = await runPost(
+      handlers,
+      '/api/clone-roots',
+      'http://localhost/api/clone-roots',
+      { path: 'home/dev/projects' },
     );
     expect(response.status).toBe(400);
   });

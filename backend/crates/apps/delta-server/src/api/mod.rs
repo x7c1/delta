@@ -315,7 +315,9 @@ pub(crate) async fn list_clone_roots(
 ///
 /// `path` must be a non-blank absolute path (starting with `/`). Trailing
 /// slashes are trimmed for canonicalisation, so `/home/dev/projects/` and
-/// `/home/dev/projects` register the same row. The path is NOT required to
+/// `/home/dev/projects` register the same row. Blank input — empty,
+/// whitespace-only, or nothing but slashes — is a `400`; the bare root `/` is
+/// not blank and registers like any other path. The path is NOT required to
 /// exist or to contain git repos at registration time — a future-state clone
 /// root is allowed. Duplicate paths return `409` with code
 /// `clone_root_duplicate` so the Settings dialog can show an inline hint.
@@ -324,15 +326,16 @@ pub(crate) async fn create_clone_root(
     Json(req): Json<WireCreateCloneRootRequest>,
 ) -> Result<(StatusCode, Json<WireCloneRoot>), ApiError> {
     let trimmed = req.path.trim();
-    // Strip trailing slashes (except a bare root `/`) so the user-typed form
-    // is canonicalised before the PRIMARY KEY check sees it.
-    let canonical = {
-        let stripped = trimmed.trim_end_matches('/');
-        if stripped.is_empty() {
-            "/"
-        } else {
-            stripped
-        }
+    // Strip trailing slashes so the user-typed form is canonicalised before the
+    // PRIMARY KEY check sees it. Only the bare `/` is exempt: it is the one
+    // all-slash spelling this contract takes as a deliberate root, while `"//"`
+    // and `"///"` strip down to nothing, blank like `""` and `"   "`.
+    // Canonicalising before the blankness check below is what rejects those
+    // instead of quietly registering `/`.
+    let canonical = if trimmed == "/" {
+        "/"
+    } else {
+        trimmed.trim_end_matches('/')
     };
     if canonical.is_empty() {
         return Err(ApiError::BadRequest(
@@ -436,9 +439,12 @@ pub(crate) struct WorkdirGitQuery {
 }
 
 impl WorkdirGitQuery {
-    /// The required `path`, or a `400` when it is missing or blank.
+    /// The required `path` with surrounding whitespace trimmed, or a `400` when
+    /// it is missing or blank. Nothing downstream trims it — the git gateway
+    /// trims git's output, never the path it is handed — so the trim has to
+    /// happen here for the callers to receive a usable path.
     fn require_path(&self) -> Result<&str, ApiError> {
-        match self.path.as_deref() {
+        match self.path.as_deref().map(str::trim) {
             Some(path) if !path.is_empty() => Ok(path),
             _ => Err(ApiError::BadRequest(
                 "a `path` query parameter is required".to_owned(),
@@ -452,8 +458,8 @@ impl WorkdirGitQuery {
 /// Returns `{ repo_root, default_branch }`: `repo_root` is the repository root
 /// containing `path` (`null` when it is not inside a git repository), and
 /// `default_branch` is that repository's default branch when known. No fetch, so
-/// this is cheap to call as the picker's selection changes. A missing `path` is
-/// a `400`.
+/// this is cheap to call as the picker's selection changes. A missing or blank
+/// `path` is a `400`.
 pub(crate) async fn workdir_git(
     State(state): State<AppState>,
     Query(query): Query<WorkdirGitQuery>,
@@ -468,7 +474,8 @@ pub(crate) async fn workdir_git(
 /// Resolves the repository containing `path`, fetches the remote, and returns
 /// `{ default_branch, remote_branches }` so a branch picker can offer a base for
 /// a worktree. A `path` that is not inside a git repository is a `400` (the
-/// `not a git repository` use-case error), and a missing `path` is also a `400`.
+/// `not a git repository` use-case error), and a missing or blank `path` is also
+/// a `400`.
 pub(crate) async fn workdir_git_branches(
     State(state): State<AppState>,
     Query(query): Query<WorkdirGitQuery>,
@@ -799,4 +806,33 @@ pub(crate) async fn cancel_question(
         .cancel_question(&SessionId::from(id), req.request_id)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `require_path` hands its callers a trimmed path. Asserting on the
+    /// returned slice pins that directly, without a gateway stub whose only job
+    /// would be to record the string it received.
+    #[test]
+    fn require_path_returns_a_trimmed_path() {
+        let query = WorkdirGitQuery {
+            path: Some("  /projects/app  ".to_owned()),
+        };
+        assert_eq!(query.require_path().ok(), Some("/projects/app"));
+    }
+
+    /// Missing, empty, and whitespace-only `path` values are all "blank" as far
+    /// as the documented contract is concerned.
+    #[test]
+    fn require_path_rejects_a_blank_path() {
+        for path in [None, Some(String::new()), Some("   ".to_owned())] {
+            let query = WorkdirGitQuery { path: path.clone() };
+            assert!(
+                matches!(query.require_path(), Err(ApiError::BadRequest(_))),
+                "expected a 400 for {path:?}",
+            );
+        }
+    }
 }

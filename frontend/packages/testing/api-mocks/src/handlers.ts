@@ -714,22 +714,37 @@ export function createMockApi(): MockApi {
     }),
 
     // Whether the queried directory is a git repository, for the new-session
-    // worktree option. Like the real endpoint this never errors: a non-git path
-    // reports `repo_root: null`. A path under the mock repo reports its root and
-    // default branch, so the worktree toggle's show/hide is exercisable.
+    // worktree option. A non-git path is not an error — it reports
+    // `repo_root: null` — but `path` is required: a missing or blank one is the
+    // same 400 the real endpoint's `require_path` returns, and the value is
+    // trimmed before it is resolved. A path under the mock repo reports its root
+    // and default branch, so the worktree toggle's show/hide is exercisable.
     http.get('*/api/workdir/git', ({ request }) => {
       const url = new URL(request.url);
-      const path = url.searchParams.get('path') ?? MOCK_WORKDIR_HOME;
+      const path = url.searchParams.get('path')?.trim() ?? '';
+      if (path.length === 0) {
+        return HttpResponse.json(
+          { error: 'a `path` query parameter is required' },
+          { status: 400 },
+        );
+      }
       const responseBody: GitRepoResponse = gitRepoInfo(path);
       return HttpResponse.json(responseBody);
     }),
 
     // The repository's remote branches (the lazily-fetched start-point list). A
     // non-git path is a 400, exactly as the real endpoint rejects it, so the
-    // picker's inline-error path is exercisable.
+    // picker's inline-error path is exercisable; a missing or blank `path` is
+    // the same 400 for the same reason as above.
     http.get('*/api/workdir/git/branches', ({ request }) => {
       const url = new URL(request.url);
-      const path = url.searchParams.get('path') ?? MOCK_WORKDIR_HOME;
+      const path = url.searchParams.get('path')?.trim() ?? '';
+      if (path.length === 0) {
+        return HttpResponse.json(
+          { error: 'a `path` query parameter is required' },
+          { status: 400 },
+        );
+      }
       const branches = gitBranches(path);
       if (!branches) {
         return HttpResponse.json(
@@ -817,7 +832,11 @@ export function createMockApi(): MockApi {
     http.post('*/api/clone-roots', async ({ request }) => {
       const payload = (await request.json()) as CreateCloneRootRequest;
       const rawPath = typeof payload?.path === 'string' ? payload.path.trim() : '';
-      const canonical = rawPath.replace(/\/+$/, '') || (rawPath ? '/' : '');
+      // Only the bare `/` is exempt from the stripping: it is the one all-slash
+      // spelling the contract takes as a deliberate root, while `'//'` and
+      // `'///'` strip down to nothing, blank like `''` and `'   '`. Same rule
+      // as the server's `create_clone_root`.
+      const canonical = rawPath === '/' ? '/' : rawPath.replace(/\/+$/, '');
       if (canonical.length === 0) {
         return HttpResponse.json(
           { error: 'a clone root must have a non-blank `path`' },

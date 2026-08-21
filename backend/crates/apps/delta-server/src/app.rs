@@ -918,6 +918,107 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// A blank `path` is a `400`, whether it is empty, whitespace-only, or
+    /// spelled entirely with slashes. Registering `/` by accident is not
+    /// harmless: `GET /api/repositories` scans every registered root's depth-1
+    /// children on every call, so a `/` row would re-read the filesystem root
+    /// each time and list whichever top-level directories happen to be clones.
+    #[tokio::test]
+    async fn create_clone_root_rejects_a_blank_path() {
+        for path in ["", "   ", "//", "///"] {
+            let response = router(test_state().await)
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/clone-roots")
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(r#"{{"path":"{path}"}}"#)))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "expected a 400 for the blank path {path:?}",
+            );
+        }
+    }
+
+    /// The bare root is non-blank and absolute, so rejecting blanks must not
+    /// take it with them: `/` stays a registrable clone root.
+    #[tokio::test]
+    async fn create_clone_root_accepts_the_filesystem_root() {
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/clone-roots")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"/"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["path"].as_str(), Some("/"));
+    }
+
+    /// A trailing slash is still canonicalised away, so the user-typed
+    /// `/home/dev/projects/` and `/home/dev/projects` stay the same row.
+    #[tokio::test]
+    async fn create_clone_root_canonicalises_a_trailing_slash() {
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/clone-roots")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"path":"/home/dev/projects/"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["path"].as_str(), Some("/home/dev/projects"));
+    }
+
+    /// A whitespace-only `path` is blank, so it is refused at the query boundary
+    /// rather than handed to git. (`require_path`'s trimming and its
+    /// missing/empty cases are unit-tested in `crate::api`; these two tests pin
+    /// that each endpoint actually routes through it.)
+    #[tokio::test]
+    async fn workdir_git_rejects_a_blank_path() {
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workdir/git?path=%20%20")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn workdir_git_branches_rejects_a_blank_path() {
+        let response = router(test_state().await)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/workdir/git/branches?path=%20%20")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
     #[tokio::test]
     async fn delete_unknown_clone_root_is_idempotent() {
         // No registration first. The DELETE replies 204 anyway: a Settings

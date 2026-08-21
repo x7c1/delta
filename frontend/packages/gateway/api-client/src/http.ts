@@ -486,6 +486,10 @@ export class ApiClient {
    * selected (used to decide whether to offer the worktree option). The picker
    * builds the query string with the same `encodeURIComponent` style as
    * {@link getWorkdirList}.
+   *
+   * A non-git path is NOT an error — it answers `repo_root: null`. The one
+   * failure is a blank `path` (the server trims before checking), which is a
+   * `400` surfaced as {@link ApiError}.
    */
   getGitRepoInfo(path: string): Promise<GitRepoResponse> {
     return this.request<GitRepoResponse>(
@@ -497,7 +501,8 @@ export class ApiClient {
    * `GET /api/workdir/git/branches` — the remote branches of the repository
    * containing `path`, reflecting a fresh `git fetch` (so it is slow-ish; call
    * it lazily, only when the user opens the remote-branch picker). A non-git
-   * path is a `400`, surfaced as {@link ApiError}.
+   * path is a `400`, and so is a blank one (the server trims before checking);
+   * both are surfaced as {@link ApiError}.
    */
   getGitBranches(path: string): Promise<GitBranchesResponse> {
     return this.request<GitBranchesResponse>(
