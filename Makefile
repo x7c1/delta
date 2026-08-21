@@ -78,12 +78,21 @@ lint:
 	cd backend && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
 	cd frontend && pnpm -r lint
 
-## check: full pre-PR gate — backend fmt/build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint
+## check: full pre-PR gate — everything CI runs: backend fmt/build/test/clippy + generated-bindings freshness + frontend build/typecheck/test/lint + both Playwright suites (needs tmux)
+# The point of this target is that passing it means CI will pass, so it has to
+# stay a superset of what the workflow runs — including BOTH Playwright suites.
+# `e2e` is the mock-backed one and `e2e-fake` drives the real backend through
+# tmux with the scripted fake agent binaries; they run different specs, so
+# leaving either out lets a suite fail in CI that a green local gate claimed to
+# cover. For a quick inner-loop check, reach for `build` / `test` / `lint`
+# instead — those stay fast on purpose.
 .PHONY: check
 check:
 	cd backend && cargo fmt --all -- --check && cargo build && cargo test && cargo clippy --all-targets -- -D warnings
 	$(MAKE) gen-check
 	cd frontend && pnpm -r build && pnpm -r typecheck && pnpm -r test && pnpm -r lint
+	$(MAKE) e2e
+	$(MAKE) e2e-fake
 
 ## e2e: run the headless Playwright suite (one-time: `pnpm --filter @delta/web exec playwright install --with-deps chromium`)
 # Pin a dedicated mock-server port so the suite never collides with a dev server
