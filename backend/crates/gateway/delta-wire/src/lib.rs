@@ -28,6 +28,8 @@ pub use comms_frame::{WireCommsDirection, WireCommsFrame, WireCommsFrameKind};
 mod content_block;
 pub use content_block::WireContentBlock;
 pub mod endpoint;
+mod file_change;
+pub use file_change::{WireFileChange, WireFileChangeDetail, WireFileChangeKind};
 pub mod hooks;
 mod message;
 pub use message::{WireMessage, WireRole};

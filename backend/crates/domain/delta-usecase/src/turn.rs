@@ -717,6 +717,8 @@ mod agent_event_mapping_tests {
                     tool_name: "tool".to_owned(),
                     input_json: json!({}),
                     tool_use_id: None,
+                    file_change: None,
+                    grant_root: None,
                 },
             },
             AgentEvent::PermissionResolved {

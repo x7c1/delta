@@ -187,6 +187,19 @@ which frames arrive, and a client must handle each event whenever it lands.
   "tool_name": "Bash",
   "tool_input": "{\"command\":\"rm -i x\"}" }
 
+{ "kind": "permission_requested",
+  "session_id": "sess-1",
+  "request_id": 3,
+  "tool_name": "file_change",
+  "tool_input": "{\"itemId\":\"fc_1\"}",
+  "file_change": {
+    "changes": [
+      { "path": "src/lib.rs", "kind": "update", "diff": "@@ -1 +1 @@\n-old\n+new" }
+    ],
+    "reason": "write access"
+  },
+  "grant_root": "/repo" }
+
 { "kind": "question_asked",
   "session_id": "sess-1",
   "request_id": 2,
@@ -209,6 +222,23 @@ which frames arrive, and a client must handle each event whenever it lands.
   always has a dialog on screen while approvals are pending; a client already
   tracking the queue treats the repeat as a no-op. See
   [the queue semantics](sends.md#the-pending-permission-queue).
+  `file_change` is present **only** when the provider stated what allowing the
+  request would write, which lets the client name the affected files instead of
+  summarizing `tool_input`: `changes` lists each `path`, its `kind`
+  (`add` / `update` / `delete`, or `null` for a kind Delta does not model) and
+  its unified `diff`, and `reason` is the provider's own explanation (`null`
+  when it gave none). The key is **absent** for every request that carries no
+  such statement — every Claude permission, every command execution, and a file
+  change whose detail could not be resolved — and the client falls back to
+  `tool_input` there. Treat its absence as "nothing is known", never as
+  "nothing would change".
+  `grant_root` is a **separate and broader** ask, present only when the provider
+  requested one: writes anywhere under that directory for the remainder of the
+  session, not just the files `file_change` lists. It is independent of
+  `file_change` — a request can carry `grant_root` with no `file_change` at all,
+  which is what a file-change approval whose detail could not be resolved looks
+  like — so render it as its own statement of scope rather than as another entry
+  in `changes`. Absent when the provider asked for no root.
 - `question_asked` — Claude Code's `AskUserQuestion` tool is presenting a
   multiple-choice question. `tool_input` is the raw `{"questions":[…]}` payload
   as JSON text, which the client parses to render the question card, and

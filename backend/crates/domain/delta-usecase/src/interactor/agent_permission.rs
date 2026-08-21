@@ -69,6 +69,8 @@ pub(in crate::interactor) fn reduce_permission_event(
                 request_id,
                 tool_name: request.tool_name.clone(),
                 tool_input_json,
+                file_change: request.file_change.clone(),
+                grant_root: request.grant_root.clone(),
             };
             state.enqueue_pending_permission(pending.clone());
             vec![permission_requested_event(session_id, &pending)]
@@ -111,6 +113,8 @@ pub(in crate::interactor) fn permission_requested_event(
         request_id: pending.request_id,
         tool_name: pending.tool_name.clone(),
         tool_input_json: pending.tool_input_json.clone(),
+        file_change: pending.file_change.clone(),
+        grant_root: pending.grant_root.clone(),
     }
 }
 
@@ -134,19 +138,33 @@ fn parse_request_id(request_id: &str) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::AgentPermissionRequest;
+    use crate::agent::{
+        AgentFileChange, AgentFileChangeDetail, AgentFileChangeKind, AgentPermissionRequest,
+    };
     use crate::interactor::session_actor::runtime::{PendingPermission, PendingQuestion};
     use crate::interactor::PermissionDecision;
     use crate::turn::TurnInput;
     use delta_model::ThreadId;
 
     fn requested(request_id: &str, tool_name: &str, input: serde_json::Value) -> AgentEvent {
+        requested_with(request_id, tool_name, input, None, None)
+    }
+
+    fn requested_with(
+        request_id: &str,
+        tool_name: &str,
+        input: serde_json::Value,
+        file_change: Option<AgentFileChangeDetail>,
+        grant_root: Option<String>,
+    ) -> AgentEvent {
         AgentEvent::PermissionRequested {
             request: AgentPermissionRequest {
                 request_id: request_id.to_owned(),
                 tool_name: tool_name.to_owned(),
                 input_json: input,
                 tool_use_id: None,
+                file_change,
+                grant_root,
             },
         }
     }
@@ -182,6 +200,8 @@ mod tests {
                 request_id: 7,
                 tool_name: "Bash".to_owned(),
                 tool_input_json: r#"{"command":"rm -i x"}"#.to_owned(),
+                file_change: None,
+                grant_root: None,
             }),
             "the dialog is mirrored for the sends envelope"
         );
@@ -192,6 +212,96 @@ mod tests {
                 request_id: 7,
                 tool_name: "Bash".to_owned(),
                 tool_input_json: r#"{"command":"rm -i x"}"#.to_owned(),
+                file_change: None,
+                grant_root: None,
+            }]
+        );
+    }
+
+    /// A provider that states what its request would do to files carries that
+    /// detail all the way through: onto the queryable mirror (which re-seeds a
+    /// reconnecting browser) and onto the notice broadcast. The reducer is a
+    /// pass-through here — it neither invents a detail nor drops one — which is
+    /// what keeps the two surfaces showing the same card.
+    #[test]
+    fn a_file_change_detail_reaches_both_the_mirror_and_the_notice() {
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        let detail = AgentFileChangeDetail {
+            changes: vec![AgentFileChange {
+                path: "src/lib.rs".to_owned(),
+                kind: Some(AgentFileChangeKind::Update),
+                diff: "@@ -1 +1 @@".to_owned(),
+            }],
+            reason: Some("write access".to_owned()),
+        };
+        let event = requested_with(
+            "9",
+            "file_change",
+            serde_json::json!({ "itemId": "fc_1" }),
+            Some(detail.clone()),
+            None,
+        );
+
+        let events = reduce_permission_event(&mut state, &session, &event);
+
+        assert_eq!(
+            state
+                .live_state()
+                .pending_permission()
+                .and_then(|pending| pending.file_change.clone()),
+            Some(detail.clone()),
+            "the envelope's re-seed carries the detail"
+        );
+        assert_eq!(
+            events,
+            vec![SessionEvent::PermissionRequested {
+                session_id: session,
+                request_id: 9,
+                tool_name: "file_change".to_owned(),
+                tool_input_json: r#"{"itemId":"fc_1"}"#.to_owned(),
+                file_change: Some(detail),
+                grant_root: None,
+            }]
+        );
+    }
+
+    /// A request that also asks for a write root carries that to both surfaces
+    /// **without** a detail to ride on. This is the case the field's placement
+    /// exists for: the change set could not be correlated, so the card has only
+    /// the input summary — and the broadest thing the dialog grants must still
+    /// reach it, or the user allows a whole tree while reading about one item.
+    #[test]
+    fn a_grant_root_reaches_both_surfaces_without_a_file_change_detail() {
+        let mut state = SessionRuntime::default();
+        let session = SessionId::from("sess-1");
+        let event = requested_with(
+            "11",
+            "file_change",
+            serde_json::json!({ "itemId": "fc_unknown" }),
+            None,
+            Some("/repo".to_owned()),
+        );
+
+        let events = reduce_permission_event(&mut state, &session, &event);
+
+        assert_eq!(
+            state
+                .live_state()
+                .pending_permission()
+                .and_then(|pending| pending.grant_root.clone()),
+            Some("/repo".to_owned()),
+            "the envelope's re-seed states the root too"
+        );
+        assert_eq!(
+            events,
+            vec![SessionEvent::PermissionRequested {
+                session_id: session,
+                request_id: 11,
+                tool_name: "file_change".to_owned(),
+                tool_input_json: r#"{"itemId":"fc_unknown"}"#.to_owned(),
+                file_change: None,
+                grant_root: Some("/repo".to_owned()),
             }]
         );
     }
@@ -344,6 +454,8 @@ mod tests {
                     request_id: 2,
                     tool_name: "Bash".to_owned(),
                     tool_input_json: r#"{"n":2}"#.to_owned(),
+                    file_change: None,
+                    grant_root: None,
                 },
             ],
             "the settle is followed by the promoted head's own notice"

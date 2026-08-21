@@ -71,8 +71,21 @@ const SCENARIO_DIR = path.join(HERE, '..', 'scenarios');
  * scenario from `FAKE_CODEX_SCENARIO` (one file, read at process start), not from
  * the prompt like `fake-claude` — so the run pins one Codex scenario here and the
  * Codex specs share it.
+ *
+ * A spec that needs a different Codex turn restarts the server with its own
+ * `FAKE_CODEX_SCENARIO` (see {@link ServerHandle.restart} and
+ * {@link scenarioPath}); the wrapper below defers to an inherited value, so the
+ * override reaches the fake through the server it is spawned from.
  */
 const CODEX_SCENARIO = path.join(SCENARIO_DIR, 'codex-parallel-approvals.json');
+
+/**
+ * The absolute path of a scenario file by name (without the `.json`), for a spec
+ * pinning its own Codex turn through `restart({ FAKE_CODEX_SCENARIO })`.
+ */
+export function scenarioPath(name: string): string {
+  return path.join(SCENARIO_DIR, `${name}.json`);
+}
 
 // The per-run state (server.log, transcripts) lives in a temp dir deleted on
 // teardown, which is useless once CI tears the runner down. Mirror the
@@ -309,7 +322,9 @@ export async function bootServer(): Promise<ServerHandle> {
   fs.writeFileSync(
     codexWrapper,
     `#!/bin/sh\n` +
-      `export FAKE_CODEX_SCENARIO='${CODEX_SCENARIO}'\n` +
+      // The run's shared scenario, unless the server that spawned this wrapper
+      // was started with one of its own (a spec pinning its own Codex turn).
+      `export FAKE_CODEX_SCENARIO="\${FAKE_CODEX_SCENARIO:-${CODEX_SCENARIO}}"\n` +
       `exec '${FAKE_CODEX_BIN}' "$@"\n`,
     { mode: 0o755 },
   );

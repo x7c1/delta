@@ -178,7 +178,12 @@ disconnected: events fired during the gap are never replayed.
   - `permission` is the **head** of the session's pending tool-permission queue
     — the dialog to show — or `null` when nothing is pending. Answer it with
     [`POST /api/permissions/{id}/decision`](#post-apipermissionsiddecision).
-    `tool_input` is the tool's input serialized as JSON *text*.
+    `tool_input` is the tool's input serialized as JSON *text*. It also carries
+    the optional `file_change` detail and `grant_root` the
+    [`permission_requested`](live-channels.md#permissions-and-questions) event
+    carries, with the same shapes and the same absent-means-unknown rule, so a
+    client that missed the event rebuilds the identical dialog from this
+    refetch.
   - `permission_count` is how many permission requests are pending in total,
     the head included (`0` when `permission` is `null`). It exceeds 1 when a
     provider raises several approvals at once — an adapter-backed provider runs

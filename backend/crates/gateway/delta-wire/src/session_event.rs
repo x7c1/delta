@@ -4,6 +4,7 @@ use delta_usecase::{RateLimitWindow, SessionEvent, StatusSnapshot};
 use serde::Serialize;
 use ts_rs::TS;
 
+use crate::file_change::WireFileChangeDetail;
 use crate::session::WireAgentProvider;
 
 /// JSON shape of a session event on the `/ws` stream.
@@ -79,6 +80,31 @@ pub enum WireSessionEvent {
         /// The tool input, serialized as JSON text, so the notice can show
         /// what the tool is about to do next to its Allow/Deny buttons.
         tool_input: String,
+        /// What allowing the request would do to files on disk, when the
+        /// provider stated it before asking — so the card can name the files
+        /// and show the diff instead of a truncated blob of request params.
+        ///
+        /// Absent from the frame entirely when nothing is known, which is every
+        /// request that is not a file change: the card then renders from
+        /// `tool_input` alone, byte-for-byte the frame it has always been.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        file_change: Option<WireFileChangeDetail>,
+        /// A directory the request also asks to be allowed to write under for
+        /// the rest of the session, when the provider asked for one.
+        ///
+        /// A **broader** ask than `file_change`, and independent of it: that
+        /// names the files this one request would touch, while this is a
+        /// standing permission over a whole tree. It is present or absent on its
+        /// own — including on a request that carries no `file_change` at all —
+        /// so a client must render it separately rather than as another path in
+        /// the change list.
+        ///
+        /// Absent from the frame entirely when the provider asked for no root,
+        /// which is every request that is not a file change.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        grant_root: Option<String>,
     },
     /// Claude Code's `AskUserQuestion` tool is presenting a multiple-choice
     /// question; the user picks an option in the TUI.
@@ -315,11 +341,15 @@ impl From<SessionEvent> for WireSessionEvent {
                 request_id,
                 tool_name,
                 tool_input_json,
+                file_change,
+                grant_root,
             } => Self::PermissionRequested {
                 session_id: session_id.0,
                 request_id,
                 tool_name,
                 tool_input: tool_input_json,
+                file_change: file_change.as_ref().map(WireFileChangeDetail::from),
+                grant_root,
             },
             SessionEvent::QuestionAsked {
                 session_id,
@@ -515,6 +545,8 @@ fn sample_events() -> Vec<WireSessionEvent> {
             request_id: 1,
             tool_name: "Bash".to_owned(),
             tool_input: "{\"command\":\"ls\"}".to_owned(),
+            file_change: None,
+            grant_root: None,
         },
         WireSessionEvent::QuestionAsked {
             session_id: session_id(),
@@ -597,6 +629,7 @@ fn sample_events() -> Vec<WireSessionEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_change::{WireFileChange, WireFileChangeKind};
 
     use delta_model::{AgentProvider, MessageUuid, SessionId, ThreadId};
 
@@ -660,6 +693,9 @@ mod tests {
         );
     }
 
+    /// The Claude path (and every non-file-change request): with no detail to
+    /// carry, the frame is byte-for-byte the one it has always been — the
+    /// `file_change` key is absent, not `null`.
     #[test]
     fn permission_requested_and_resolved_serialize_as_tagged_events() {
         assert_eq!(
@@ -668,6 +704,8 @@ mod tests {
                 request_id: 7,
                 tool_name: "Bash".into(),
                 tool_input: "{\"command\":\"rm -i x\"}".into(),
+                file_change: None,
+                grant_root: None,
             }),
             serde_json::json!({
                 "kind": "permission_requested",
@@ -686,6 +724,70 @@ mod tests {
                 "kind": "permission_resolved",
                 "session_id": "sess-1",
                 "request_id": 7,
+            }),
+        );
+    }
+
+    /// A file-change request carries the detail the card renders: the affected
+    /// paths, how each changes, the diff, and the provider's stated reason.
+    #[test]
+    fn a_file_change_permission_carries_its_paths_kinds_and_diffs() {
+        assert_eq!(
+            json(&WireSessionEvent::PermissionRequested {
+                session_id: "sess-1".into(),
+                request_id: 7,
+                tool_name: "file_change".into(),
+                tool_input: "{\"itemId\":\"fc_1\"}".into(),
+                file_change: Some(WireFileChangeDetail {
+                    changes: vec![WireFileChange {
+                        path: "src/lib.rs".into(),
+                        kind: Some(WireFileChangeKind::Update),
+                        diff: "@@ -1 +1 @@".into(),
+                    }],
+                    reason: Some("write access".into()),
+                }),
+                grant_root: None,
+            }),
+            serde_json::json!({
+                "kind": "permission_requested",
+                "session_id": "sess-1",
+                "request_id": 7,
+                "tool_name": "file_change",
+                "tool_input": "{\"itemId\":\"fc_1\"}",
+                "file_change": {
+                    "changes": [
+                        { "path": "src/lib.rs", "kind": "update", "diff": "@@ -1 +1 @@" },
+                    ],
+                    "reason": "write access",
+                },
+            }),
+        );
+    }
+
+    /// A `grant_root` rides the frame on its own, with no `file_change` beside
+    /// it — the shape an approval takes when its change set could not be
+    /// correlated. It must still cross: it is the broadest thing the dialog
+    /// grants (writes anywhere under that root for the rest of the session), so
+    /// a frame that dropped it would understate the request precisely where the
+    /// client has nothing else to show.
+    #[test]
+    fn a_grant_root_crosses_even_with_no_change_set_beside_it() {
+        assert_eq!(
+            json(&WireSessionEvent::PermissionRequested {
+                session_id: "sess-1".into(),
+                request_id: 8,
+                tool_name: "file_change".into(),
+                tool_input: "{\"itemId\":\"fc_2\"}".into(),
+                file_change: None,
+                grant_root: Some("/repo".into()),
+            }),
+            serde_json::json!({
+                "kind": "permission_requested",
+                "session_id": "sess-1",
+                "request_id": 8,
+                "tool_name": "file_change",
+                "tool_input": "{\"itemId\":\"fc_2\"}",
+                "grant_root": "/repo",
             }),
         );
     }
