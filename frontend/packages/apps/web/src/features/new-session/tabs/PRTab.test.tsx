@@ -28,7 +28,7 @@ import {
 import { useLiveStore } from '../../../store/liveStore';
 import { useSettingsStore } from '../../../store/settingsStore';
 import { Composer } from '../../composer/Composer';
-import { ProviderSelector } from '../../composer/ProviderSelector';
+import { ProviderTabs } from '../../composer/ProviderTabs';
 import { PRTab } from './PRTab';
 
 const server = setupServer(...createHandlers());
@@ -376,7 +376,7 @@ describe('PRTab → new-session send (provider threading)', () => {
     render(
       <QueryClientProvider client={queryClient}>
         <ApiProvider client={client}>
-          <ProviderSelector />
+          <ProviderTabs />
           <PRTab />
           <Composer mode={{ kind: 'new-session' }} />
         </ApiProvider>
