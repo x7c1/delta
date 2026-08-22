@@ -235,6 +235,10 @@ impl IntoResponse for ApiError {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Some(OPEN_CWD_SPAWN_FAILED_CODE),
                     ),
+                    // A template with a blank label or blank body: the caller
+                    // can fix it, so 400 with the message naming the offending
+                    // field.
+                    Error::InvalidPromptTemplate(_) => (StatusCode::BAD_REQUEST, None),
                     // A selected launch option the provider's adapter will not
                     // apply (a Delta-owned field, or the same field twice):
                     // the caller can fix it, so 400 with the adapter's message

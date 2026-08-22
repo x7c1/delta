@@ -6,6 +6,7 @@ import type {
   Message,
   PendingPermission,
   PendingQuestion,
+  PromptTemplate,
   ProviderAvailability,
   RunningSubagent,
   Send,
@@ -625,6 +626,14 @@ export interface MockStore {
   /** Id assigned to the next created launch option. */
   nextLaunchOptionId: number;
   /**
+   * Registered prompt templates, oldest first (the settings-screen registry the
+   * composer inserts from). Global rather than provider-scoped: the text is
+   * prose, so it reads the same on every provider.
+   */
+  promptTemplates: PromptTemplate[];
+  /** Id assigned to the next created prompt template. */
+  nextPromptTemplateId: number;
+  /**
    * Registered clone roots, newest first (the settings-screen "Clone roots"
    * section). Each is a directory whose direct children every
    * `GET /api/repositories` call probes for git clones. Kept with `created_at`
@@ -767,6 +776,35 @@ export function seedData(): MockStore {
       },
     ],
     nextLaunchOptionId: 4,
+    // Seeded templates so the settings screen and the composer's insert menu are
+    // developable with no backend. Oldest first, as the server returns them. The
+    // second is deliberately multi-paragraph and long (> 200 characters) so list
+    // rendering is exercised against a realistic body rather than a one-liner.
+    promptTemplates: [
+      {
+        id: 1,
+        label: 'Merge when green',
+        text: 'Once CI is green, merge the PR and then update the plan doc.',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 2,
+        label: 'Review checklist',
+        text: [
+          'Review the diff on this branch with a critic\'s eye.',
+          '',
+          'Check, in order:',
+          '- correctness first: off-by-one errors, error paths that swallow a failure, and anything that can panic on user input;',
+          '- then the tests: does every new branch have one, and does a failing assertion say what broke?',
+          '',
+          'Report what you found as a short list, worst first, and leave the code alone until I say so.',
+        ].join('\n'),
+        created_at: '2026-01-02T00:00:00Z',
+        updated_at: '2026-01-03T00:00:00Z',
+      },
+    ],
+    nextPromptTemplateId: 3,
     // Empty by default — the Settings dialog's "Clone roots" section renders
     // its zero-state. The store lives inside `createMockApi`, so a test that
     // needs a registered root creates it the way the UI does: through the

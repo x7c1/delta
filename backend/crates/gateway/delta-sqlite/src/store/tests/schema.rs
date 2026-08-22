@@ -251,6 +251,63 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
     assert_eq!(options[0].provider, AgentProvider::Claude);
 }
 
+/// A database written by the previous generation — stamped 3, with no
+/// `prompt_template` table — is migrated forward on open: the new table is
+/// created, the file is re-stamped, and the launch options that were already
+/// registered are still there.
+#[tokio::test]
+async fn a_v3_database_gains_the_prompt_template_table_and_keeps_its_launch_options() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v3.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a v3 file: open at the current version, register a launch option,
+    // then undo the v4 step (drop the table, restamp) so the file is exactly
+    // what the previous generation left behind.
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store
+            .create_launch_option(
+                Some("plugins"),
+                "--plugin-dir",
+                Some("/opt/plugins"),
+                true,
+                AgentProvider::Claude,
+            )
+            .await
+            .unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch("DROP TABLE prompt_template; PRAGMA user_version = 3;")
+            .unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 3);
+
+    let store = SqliteStore::open(path_str).unwrap();
+
+    // The pending step ran and the file is current again.
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    // The registry the migration was *not* about is untouched.
+    let options = store.list_launch_options().await.unwrap();
+    assert_eq!(options.len(), 1, "the pre-existing launch option survives");
+    assert_eq!(options[0].name, "--plugin-dir");
+    assert_eq!(options[0].value.as_deref(), Some("/opt/plugins"));
+    assert!(options[0].default_enabled);
+
+    // The new table exists and is usable — empty, since the ladder creates it
+    // rather than backfilling anything.
+    assert!(store.list_prompt_templates().await.unwrap().is_empty());
+    let created = store
+        .create_prompt_template("Merge", "Once CI is green, merge.")
+        .await
+        .unwrap();
+    assert_eq!(
+        store.list_prompt_templates().await.unwrap(),
+        vec![created],
+        "the migrated database writes and reads templates normally"
+    );
+}
+
 // The startup gate. The cases below are the contract from the compatibility
 // policy doc (subdomain 1): a fresh DB is built by replaying the ladder and
 // stamped current; a current DB opens with nothing applied; a pre-gate v0.1.0

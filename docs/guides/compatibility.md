@@ -70,10 +70,11 @@ side, and nothing delta does to its overlay touches them:
 But the other half exists **only** in the overlay and cannot be rebuilt from
 anything: the thread structure (`thread_id`, `semantic_parent_uuid`, the
 thread rows themselves), the outgoing-send queue, the permission decision
-history, the registered launch options and clone roots. `make reset` deletes
-all of that. Every branch the user has ever made, and every send still
-waiting to be dispatched, is gone — and no re-ingest brings it back. The
-cost of a reset is therefore **not** low, which is why the ladder exists.
+history, the registered launch options, prompt templates and clone roots.
+`make reset` deletes all of that. Every branch the user has ever made, and
+every send still waiting to be dispatched, is gone — and no re-ingest brings
+it back. The cost of a reset is therefore **not** low, which is why the ladder
+exists.
 
 ### Operational safety net: the startup gate
 

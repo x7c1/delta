@@ -117,6 +117,15 @@ pub enum Error {
     #[error("invalid repository reference: {0}")]
     InvalidRepositoryRef(String),
 
+    /// A prompt template was submitted with a blank `label` or a blank `text`
+    /// (blank meaning empty once surrounding whitespace is trimmed). Surfaced as
+    /// `400`: an unnamed template is unpickable and an empty one inserts
+    /// nothing, so neither is worth storing. Only the *check* trims — the stored
+    /// text keeps its own leading and trailing whitespace, since a template may
+    /// deliberately end with a newline.
+    #[error("invalid prompt template: {0}")]
+    InvalidPromptTemplate(String),
+
     /// A driver (tmux) failure.
     #[error("tmux driver error: {0}")]
     Tmux(String),

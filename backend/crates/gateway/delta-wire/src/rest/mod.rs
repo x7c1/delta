@@ -32,6 +32,12 @@ mod open_cwd_request;
 pub use open_cwd_request::WireOpenCwdRequest;
 mod permission_decision_request;
 pub use permission_decision_request::{WirePermissionDecision, WirePermissionDecisionRequest};
+mod prompt_template_create_request;
+pub use prompt_template_create_request::WireCreatePromptTemplateRequest;
+mod prompt_template_update_request;
+pub use prompt_template_update_request::WireUpdatePromptTemplateRequest;
+mod prompt_templates_response;
+pub use prompt_templates_response::{WirePromptTemplate, WirePromptTemplatesResponse};
 mod providers_response;
 pub use providers_response::{
     WireLaunchOptionStyle, WireProviderAvailability, WireProviderCapabilities,

@@ -596,4 +596,108 @@ describe('ApiClient', () => {
     expect(url).toBe('http://localhost/api/launch-options/7');
     expect(init.method).toBe('DELETE');
   });
+
+  it('lists prompt templates from GET /api/prompt-templates', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        prompt_templates: [
+          {
+            id: 1,
+            label: 'Merge when green',
+            text: 'Once CI is green, merge.\n',
+            created_at: '2026-01-01T00:00:00Z',
+            updated_at: '2026-01-01T00:00:00Z',
+          },
+        ],
+      }),
+    );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.getPromptTemplates();
+    expect(result.prompt_templates).toHaveLength(1);
+    expect(result.prompt_templates[0].label).toBe('Merge when green');
+    // The body crosses the wire byte for byte, trailing newline included.
+    expect(result.prompt_templates[0].text).toBe('Once CI is green, merge.\n');
+    expect(fetchFn).toHaveBeenCalledWith(
+      'http://localhost/api/prompt-templates',
+      undefined,
+    );
+  });
+
+  it('posts a new prompt template and returns the created record', async () => {
+    const created = {
+      id: 7,
+      label: 'Review',
+      text: 'Review the diff.\n',
+      created_at: '2026-01-02T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+    };
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(created, 201));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.createPromptTemplate({
+      label: 'Review',
+      text: 'Review the diff.\n',
+    });
+    expect(result).toEqual(created);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/prompt-templates');
+    expect(init.method).toBe('POST');
+    // The request body is serialised verbatim: no client-side trimming.
+    expect(JSON.parse(init.body)).toEqual({
+      label: 'Review',
+      text: 'Review the diff.\n',
+    });
+  });
+
+  it('patches a prompt template via PATCH /api/prompt-templates/{id}', async () => {
+    const updated = {
+      id: 7,
+      label: 'Review carefully',
+      text: 'Review the diff line by line.',
+      created_at: '2026-01-02T00:00:00Z',
+      updated_at: '2026-01-03T00:00:00Z',
+    };
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(updated));
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    const result = await client.updatePromptTemplate(7, {
+      label: 'Review carefully',
+      text: 'Review the diff line by line.',
+    });
+    expect(result).toEqual(updated);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/prompt-templates/7');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body)).toEqual({
+      label: 'Review carefully',
+      text: 'Review the diff line by line.',
+    });
+  });
+
+  it('surfaces a 400 from POST /api/prompt-templates as an ApiError', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(
+          { error: 'a prompt template must have a non-blank `label`' },
+          400,
+        ),
+      );
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(
+      client.createPromptTemplate({ label: '   ', text: 'body' }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('deletes a prompt template via DELETE /api/prompt-templates/{id}', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(noContent());
+    const client = new ApiClient({ baseUrl: 'http://localhost', fetchFn });
+
+    await expect(client.deletePromptTemplate(7)).resolves.toBeUndefined();
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://localhost/api/prompt-templates/7');
+    expect(init.method).toBe('DELETE');
+  });
 });
