@@ -11,15 +11,16 @@ import { AGENT_PROVIDERS, DEFAULT_PROVIDER } from '../providers';
  */
 export type SettingsCategoryId =
   | 'launch-options'
+  | 'prompt-templates'
   | 'clone-roots'
   | 'appearance'
   | 'default-provider';
 
 /**
- * The default category on a fresh install: Launch options. It is the older,
- * more prominent of the two existing categories, so leading with it preserves
- * the dialog's prior landing experience for users opening Settings for the
- * first time after this restructure.
+ * The default category on a fresh install: Launch options. It is the oldest and
+ * most prominent of the categories, so leading with it preserves the dialog's
+ * prior landing experience for users opening Settings for the first time after
+ * this restructure.
  */
 export const DEFAULT_SETTINGS_CATEGORY: SettingsCategoryId = 'launch-options';
 
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS_CATEGORY: SettingsCategoryId = 'launch-options';
  */
 const SETTINGS_CATEGORY_IDS: readonly SettingsCategoryId[] = [
   'launch-options',
+  'prompt-templates',
   'clone-roots',
   'appearance',
   'default-provider',
