@@ -15,9 +15,9 @@ export const COMPOSER_RAIL_ITEM_CLASS =
 
 export interface ComposerRailProps {
   /**
-   * The leftmost slot, reserved for the prompt-template button. Nothing renders
-   * it yet; the slot exists so the button lands at the rail's left end without
-   * reshuffling what is already on it.
+   * The leftmost slot, holding the prompt-template button. That button renders
+   * in BOTH composer modes, so in the app this slot is always filled — it is
+   * what gives the rail its height in a thread, where there are no tabs.
    */
   templateSlot?: ReactNode;
   /**
@@ -40,15 +40,24 @@ export interface ComposerRailProps {
  * overlap the notices card stacked above the composer.
  *
  * The rail itself draws nothing: the transcript shows through wherever it has
- * no item, and with no items at all (a thread) it collapses to zero height, so
- * nothing reserves space until there is something to put there.
+ * no item. With no items at all it collapses to zero height, but that is only
+ * reachable in isolation — the app always fills `templateSlot`, so the rail
+ * stands at one item's height in both composer modes and the composer card's
+ * top edge never shifts as the tabs come and go.
  */
 export function ComposerRail({
   templateSlot = null,
   providerTabs = null,
 }: ComposerRailProps) {
   return (
-    <div className="flex items-end gap-1" data-testid="composer-rail">
+    // `relative` makes the rail the anchor for panels an item opens (today the
+    // prompt-template popover), instead of each item's own box. That box is only
+    // a few pixels wide, so a panel measured against it can only be bounded by
+    // the viewport — which ignores the navigator and terminal panes flanking
+    // this one, and lets a wide panel spill out of the pane and under them. The
+    // rail spans exactly the composer card, so anchoring here is what makes
+    // "never wider than the card" expressible as `max-w-full`.
+    <div className="relative flex items-end gap-1" data-testid="composer-rail">
       {templateSlot}
       {providerTabs}
     </div>
