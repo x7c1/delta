@@ -17,7 +17,9 @@ import { NEW_SESSION_FOCUS, useNavStore } from '../../store/navStore';
 import { useComposerStore } from '../../store/composerStore';
 import { noticeOf, useLiveStore } from '../../store/liveStore';
 import { Composer } from '../composer/Composer';
-import { ProviderSelector } from '../composer/ProviderSelector';
+import { ComposerRail } from '../composer/ComposerRail';
+import { ProviderTabs } from '../composer/ProviderTabs';
+import { ProviderUnavailableNotice } from '../composer/ProviderUnavailableNotice';
 import { PendingQueue } from '../composer/PendingQueue';
 import {
   usePendingSends,
@@ -1064,78 +1066,93 @@ export function TranscriptPane({
           </div>
         )}
 
-        {/* Composer card: the new-session launch pickers (which parameterize the
-            spawn) sit directly above the input they configure. The focused
-            session's context-window usage rides the card's TOP EDGE as a thin
-            ambient fill (the border doubles as the track), filled from the left
-            to `used_percentage`%, with the numeric `NN%` small at the edge —
-            right where the user is about to send. Omitted entirely when no
-            snapshot is available (or after `/compact`), rather than shown at 0%. */}
-        <div
-          className={`relative ${FLOATING_CARD_CLASS} px-3 py-2`}
-          data-testid="composer-card"
-        >
-          {contextUsage !== undefined && (
-            <div
-              className="pointer-events-none absolute inset-x-0 top-0"
-              data-testid="composer-context-bar"
-            >
-              {/* The card's top border is the track; this fill runs along it from
-                  the RIGHT edge leftward to the usage percentage, so the bar's
-                  growing tip stays next to the `%` readout. A real DOM bar. */}
+        {/* The composer card and the rail on its top edge, stacked with no gap
+            so the rail's items rest on the card's top border. The pair is ONE
+            flex child of the overlay, so the overlay's `gap-2` falls above the
+            rail (between the notices card and the rail) and the rail's height
+            is measured with the rest of the overlay — see {@link ComposerRail}
+            for why it must stay in normal flow. */}
+        <div className="flex flex-col">
+          {/* Empty in a thread (it then collapses to zero height): the provider
+              is fixed once a session runs. */}
+          <ComposerRail providerTabs={newSession ? <ProviderTabs /> : null} />
+          {/* Composer card: the new-session launch pickers (which parameterize the
+              spawn) sit directly above the input they configure. The focused
+              session's context-window usage rides the card's TOP EDGE as a thin
+              ambient fill (the border doubles as the track), filled from the left
+              to `used_percentage`%, with the numeric `NN%` small at the edge —
+              right where the user is about to send. Omitted entirely when no
+              snapshot is available (or after `/compact`), rather than shown at 0%. */}
+          <div
+            className={`relative ${FLOATING_CARD_CLASS} px-3 py-2`}
+            data-testid="composer-card"
+          >
+            {contextUsage !== undefined && (
               <div
-                className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-fg-muted"
-                style={{ width: `${Math.min(100, Math.max(0, contextUsage))}%` }}
-                data-testid="composer-context-fill"
-                role="meter"
-                aria-label="Context window usage"
-                aria-valuenow={Math.round(
-                  Math.min(100, Math.max(0, contextUsage)),
-                )}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              />
-              <span className="group/ctx pointer-events-auto absolute right-0.5 top-0.5 z-10">
-                <span
-                  className="cursor-help px-1 py-1 text-caption leading-none tabular-nums text-fg-subtle"
-                  data-testid="composer-context-label"
-                  tabIndex={0}
+                className="pointer-events-none absolute inset-x-0 top-0"
+                data-testid="composer-context-bar"
+              >
+                {/* The card's top border is the track; this fill runs along it
+                    from the RIGHT edge leftward to the usage percentage, so the
+                    bar's growing tip stays next to the `%` readout. A real DOM
+                    bar. The rail above never reaches down onto this line: its
+                    items have no bottom border and no negative margin. */}
+                <div
+                  className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-fg-muted"
+                  style={{
+                    width: `${Math.min(100, Math.max(0, contextUsage))}%`,
+                  }}
+                  data-testid="composer-context-fill"
+                  role="meter"
                   aria-label="Context window usage"
-                >
-                  {Math.round(contextUsage)}%
+                  aria-valuenow={Math.round(
+                    Math.min(100, Math.max(0, contextUsage)),
+                  )}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                />
+                <span className="group/ctx pointer-events-auto absolute right-0.5 top-0.5 z-10">
+                  <span
+                    className="cursor-help px-1 py-1 text-caption leading-none tabular-nums text-fg-subtle"
+                    data-testid="composer-context-label"
+                    tabIndex={0}
+                    aria-label="Context window usage"
+                  >
+                    {Math.round(contextUsage)}%
+                  </span>
+                  {/* Opens upward (the bar sits at the very top of the composer)
+                      so it never covers the textarea below. */}
+                  <span
+                    role="note"
+                    data-testid="composer-context-popover"
+                    className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-caption text-fg-muted shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
+                  >
+                    Context window usage
+                  </span>
                 </span>
-                {/* Opens upward (the bar sits at the very top of the composer)
-                    so it never covers the textarea below. */}
-                <span
-                  role="note"
-                  data-testid="composer-context-popover"
-                  className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 hidden w-max max-w-xs rounded-md border border-border-default bg-surface px-2.5 py-1.5 text-caption text-fg-muted shadow-lg group-hover/ctx:block group-focus-within/ctx:block"
-                >
-                  Context window usage
-                </span>
-              </span>
+              </div>
+            )}
+            {/* Flow content sits in its own `space-y-2` wrapper so the absolute
+                context bar above is not counted as a spacing sibling (which would
+                push the composer down by a row gap). */}
+            <div className="space-y-2">
+              {/* Why the provider tabs on the rail are disabled, in the server's
+                  words. It leads the card's stack, directly under the tabs it
+                  explains — the tabs themselves have no room for a reason. */}
+              {newSession && <ProviderUnavailableNotice />}
+              {/* A directory is chosen: show it as a chip with a ✎ to change it
+                  (the ✎ reopens the picker without resetting the selection). The
+                  chip renders nothing when no directory is selected, so there is
+                  no button to (re)open the picker from here — that is done via
+                  "New". */}
+              {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
+              {/* Below the directory chip: when the selected directory is a git
+                  repo, an opt-in to start the session in a fresh worktree (with a
+                  start-point choice). Renders nothing for a non-git directory. */}
+              {newSession && <WorktreeOptions />}
+              {newSession && <LaunchOptionsPicker />}
+              {composer}
             </div>
-          )}
-          {/* Flow content sits in its own `space-y-2` wrapper so the absolute
-              context bar above is not counted as a spacing sibling (which would
-              push the composer down by a row gap). */}
-          <div className="space-y-2">
-            {/* The provider axis leads the new-session card: it selects the
-                backend the session launches on and (in later slices) gates the
-                capability-dependent controls below it. */}
-            {newSession && <ProviderSelector />}
-            {/* A directory is chosen: show it as a chip with a ✎ to change it
-                (the ✎ reopens the picker without resetting the selection). The
-                chip renders nothing when no directory is selected, so there is
-                no button to (re)open the picker from here — that is done via
-                "New". */}
-            {newSession && <WorkdirChip onEdit={openWorkdirDialog} />}
-            {/* Below the directory chip: when the selected directory is a git
-                repo, an opt-in to start the session in a fresh worktree (with a
-                start-point choice). Renders nothing for a non-git directory. */}
-            {newSession && <WorktreeOptions />}
-            {newSession && <LaunchOptionsPicker />}
-            {composer}
           </div>
         </div>
       </>

@@ -2343,6 +2343,171 @@ describe('TranscriptPane', () => {
   });
 });
 
+describe('TranscriptPane composer rail', () => {
+  beforeEach(() => {
+    useNavStore.setState({
+      activeThreadId: MAIN_THREAD_ID,
+      activeThreadJumpTarget: null,
+      focusedSessionId: SESSION_ID,
+      preNewSessionFocus: null,
+    });
+    useLiveStore.setState({
+      sending: [],
+      localSends: {},
+      spawns: [],
+      notices: {},
+      streamingMessages: {},
+      runningSubagents: {},
+      contextUsage: {},
+      rateLimits: {},
+    });
+    useComposerStore.setState({
+      drafts: {},
+      branchOrigin: null,
+      newSessionWorkdir: null,
+      workdirDialogOpen: false,
+    });
+  });
+
+  /**
+   * Render the pane with the composer, either in a thread or in the new-session
+   * state. `readOnly` shows the closed-session notice, which is the cheapest way
+   * to put the notices card above the composer.
+   */
+  function renderRailPane({ newSession = false, readOnly = false } = {}) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const client = new ApiClient({ baseUrl: 'http://localhost' });
+    const active = mockThreads.find((t) => t.id === MAIN_THREAD_ID)!;
+    if (newSession) {
+      useNavStore.setState({ focusedSessionId: NEW_SESSION_FOCUS });
+    }
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider client={client}>
+          <TranscriptPane
+            threads={mockThreads}
+            activeThread={newSession ? null : active}
+            readOnly={readOnly}
+            newSession={newSession}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('carries the provider tabs on the rail, not in the card stack', async () => {
+    renderRailPane({ newSession: true });
+
+    const rail = await screen.findByTestId('composer-rail');
+    expect(within(rail).getByTestId('provider-selector')).toBeInTheDocument();
+    // The card's flow stack no longer opens with the selector — the provider
+    // axis moved out of the card entirely.
+    const card = screen.getByTestId('composer-card');
+    expect(within(card).queryByTestId('provider-selector')).toBeNull();
+  });
+
+  it('spells the unavailability reason out inside the card', async () => {
+    server.use(
+      http.get('*/api/providers', () =>
+        HttpResponse.json({
+          providers: [
+            {
+              provider: 'claude',
+              available: true,
+              detail: null,
+              capabilities: {
+                has_terminal: true,
+                launch_option_style: 'cli_flag',
+              },
+            },
+            {
+              provider: 'codex',
+              available: false,
+              detail: "The 'codex' binary for codex was not found on PATH.",
+              capabilities: {
+                has_terminal: false,
+                launch_option_style: 'request_field',
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    renderRailPane({ newSession: true });
+
+    // A rail tab has room for a name, not a sentence: the reason stays in the
+    // card, where the explanation lived before the tabs moved out.
+    const notice = await screen.findByTestId('provider-unavailable-notice');
+    expect(screen.getByTestId('composer-card')).toContainElement(notice);
+    expect(screen.getByTestId('composer-rail')).not.toContainElement(notice);
+  });
+
+  it('renders an empty rail in a thread', async () => {
+    renderRailPane();
+
+    // The provider is fixed once a session runs, so nothing occupies the rail
+    // yet — it collapses to zero height rather than reserving a strip.
+    const rail = await screen.findByTestId('composer-rail');
+    expect(within(rail).queryByTestId('provider-selector')).toBeNull();
+    expect(rail.children).toHaveLength(0);
+  });
+
+  it('keeps the rail in the measured overlay, in normal flow above the card', async () => {
+    renderRailPane({ newSession: true });
+
+    const overlay = await screen.findByTestId('bottom-overlay');
+    const rail = screen.getByTestId('composer-rail');
+    const card = screen.getByTestId('composer-card');
+
+    // The overlay's ResizeObserver measures this subtree and drives the body's
+    // bottom reserve from it (see "dynamic bottom reserve" above), so the rail
+    // only gets counted while it stays a flow descendant: an absolutely
+    // positioned rail would leave the last turn hidden underneath it.
+    expect(overlay).toContainElement(rail);
+    for (
+      let node: HTMLElement | null = rail;
+      node !== null && node !== overlay;
+      node = node.parentElement
+    ) {
+      expect(node.className).not.toMatch(/(^|\s)(absolute|fixed)(\s|$)/);
+    }
+
+    // Rail directly above the card, in the same stack and in that order.
+    const stack = rail.parentElement!;
+    expect(card.parentElement).toBe(stack);
+    expect(Array.from(stack.children)).toEqual([rail, card]);
+  });
+
+  it('stacks the notices card above the rail with the overlay gap', async () => {
+    renderRailPane({ readOnly: true });
+
+    const overlay = await screen.findByTestId('bottom-overlay');
+    const notices = await screen.findByTestId('bottom-notices');
+    const rail = screen.getByTestId('composer-rail');
+
+    // The rail+card stack is ONE overlay child, so the overlay's gap falls
+    // between the notices card and the rail — never between rail and card.
+    expect(overlay.className).toContain('gap-2');
+    expect(Array.from(overlay.children)).toEqual([notices, rail.parentElement]);
+  });
+
+  it('rests every rail item on the card border without reaching past it', async () => {
+    renderRailPane({ newSession: true });
+
+    // A rail item has no bottom border and no negative margin, so the card's
+    // top border — and the context-usage fill riding it — stays uncovered.
+    const rail = await screen.findByTestId('composer-rail');
+    const items = Array.from(rail.children);
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(item.className).not.toMatch(/(^|\s|:)-m[btxy]?-/);
+      expect(item.className).toContain('border-b-0');
+    }
+  });
+});
+
 describe('TranscriptPane composer context bar', () => {
   beforeEach(() => {
     useNavStore.setState({
