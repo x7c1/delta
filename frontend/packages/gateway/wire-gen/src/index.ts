@@ -71,6 +71,10 @@ export type { LaunchOption } from './generated/LaunchOption';
 export type { LaunchOptionsResponse } from './generated/LaunchOptionsResponse';
 export type { CreateLaunchOptionRequest } from './generated/CreateLaunchOptionRequest';
 export type { UpdateLaunchOptionRequest } from './generated/UpdateLaunchOptionRequest';
+export type { PromptTemplate } from './generated/PromptTemplate';
+export type { PromptTemplatesResponse } from './generated/PromptTemplatesResponse';
+export type { CreatePromptTemplateRequest } from './generated/CreatePromptTemplateRequest';
+export type { UpdatePromptTemplateRequest } from './generated/UpdatePromptTemplateRequest';
 export type { ErrorBody } from './generated/ErrorBody';
 export type { VersionResponse } from './generated/VersionResponse';
 

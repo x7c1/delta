@@ -11,8 +11,8 @@ use async_trait::async_trait;
 
 use delta_attribution::SubagentLaunch;
 use delta_model::{
-    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, Send, Session, SessionId,
-    Thread, ThreadId,
+    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PromptTemplate, Send,
+    Session, SessionId, Thread, ThreadId,
 };
 use delta_usecase::{
     CloneRoot, NewSession, RecentWorkdir, RepositoryCloneRow, SessionPageCursor, SessionPageRow,
@@ -405,6 +405,36 @@ impl SessionStore for SqliteStore {
 
     async fn delete_launch_option(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         self.delete_launch_option(id).await
+    }
+
+    async fn list_prompt_templates(
+        &self,
+    ) -> std::result::Result<Vec<PromptTemplate>, delta_usecase::Error> {
+        self.list_prompt_templates().await
+    }
+
+    async fn create_prompt_template(
+        &self,
+        label: &str,
+        text: &str,
+    ) -> std::result::Result<PromptTemplate, delta_usecase::Error> {
+        self.create_prompt_template(label, text).await
+    }
+
+    async fn update_prompt_template(
+        &self,
+        id: i64,
+        label: &str,
+        text: &str,
+    ) -> std::result::Result<Option<PromptTemplate>, delta_usecase::Error> {
+        self.update_prompt_template(id, label, text).await
+    }
+
+    async fn delete_prompt_template(
+        &self,
+        id: i64,
+    ) -> std::result::Result<(), delta_usecase::Error> {
+        self.delete_prompt_template(id).await
     }
 
     async fn list_clone_roots(&self) -> std::result::Result<Vec<CloneRoot>, delta_usecase::Error> {

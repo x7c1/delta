@@ -23,6 +23,7 @@ mod lifecycle;
 mod listing;
 mod open_cwd;
 mod permission_decision;
+mod prompt_templates;
 mod provider_availability;
 mod pull_requests;
 mod question_keys;

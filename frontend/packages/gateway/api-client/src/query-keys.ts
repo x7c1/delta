@@ -49,6 +49,12 @@ export const queryKeys = {
   gitBranches: (path: string) => ['git-branches', path] as const,
   /** The registered launch options (`GET /api/launch-options`). */
   launchOptions: ['launch-options'] as const,
+  /**
+   * The registered prompt templates (`GET /api/prompt-templates`). A single
+   * global entry: templates are provider-independent, so there is nothing to
+   * key them by.
+   */
+  promptTemplates: ['prompt-templates'] as const,
   /** The registered clone roots (`GET /api/clone-roots`). */
   cloneRoots: ['clone-roots'] as const,
   /** The Delta workspace version (`GET /api/version`) for the navigator footer. */

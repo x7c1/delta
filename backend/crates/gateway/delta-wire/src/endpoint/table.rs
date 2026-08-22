@@ -12,13 +12,15 @@ use crate::hooks::{
 };
 use crate::rest::{
     WireCloneRepositoryRequest, WireCloneRoot, WireCloneRootsResponse, WireCreateCloneRootRequest,
-    WireCreateLaunchOptionRequest, WireCreateSendRequest, WireGitBranchesResponse,
-    WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse, WireMessagesResponse,
-    WireNewSessionResponse, WireOpenCwdRequest, WirePermissionDecisionRequest,
+    WireCreateLaunchOptionRequest, WireCreatePromptTemplateRequest, WireCreateSendRequest,
+    WireGitBranchesResponse, WireGitRepoResponse, WireLaunchOption, WireLaunchOptionsResponse,
+    WireMessagesResponse, WireNewSessionResponse, WireOpenCwdRequest,
+    WirePermissionDecisionRequest, WirePromptTemplate, WirePromptTemplatesResponse,
     WireProvidersResponse, WirePullRequestsResponse, WireQuestionAnswerRequest,
     WireQuestionCancelRequest, WireRepositoriesResponse, WireSendResponse, WireSendsResponse,
-    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest, WireVersionResponse,
-    WireWorkdirListResponse, WireWorkdirRecentResponse,
+    WireSessionsResponse, WireThreadsResponse, WireUpdateLaunchOptionRequest,
+    WireUpdatePromptTemplateRequest, WireVersionResponse, WireWorkdirListResponse,
+    WireWorkdirRecentResponse,
 };
 use crate::{WireCommsFrame, WireSessionEvent};
 
@@ -199,6 +201,26 @@ declare_endpoints! {
 
     /// Deletes a launch option.
     DeleteLaunchOption: DELETE "/api/launch-options/{id}";
+
+    /// The prompt-template registry: the named blocks of instruction text the
+    /// user inserts into the composer instead of retyping them. Global, not
+    /// provider-scoped — the text is prose, so it reads the same on every
+    /// provider.
+    ListPromptTemplates: GET "/api/prompt-templates",
+        response = WirePromptTemplatesResponse;
+
+    /// Registers a prompt template.
+    CreatePromptTemplate: POST "/api/prompt-templates",
+        request = WireCreatePromptTemplateRequest,
+        response = WirePromptTemplate;
+
+    /// Replaces a prompt template's content (`label` and `text`) in place.
+    UpdatePromptTemplate: PATCH "/api/prompt-templates/{id}",
+        request = WireUpdatePromptTemplateRequest,
+        response = WirePromptTemplate;
+
+    /// Deletes a prompt template.
+    DeletePromptTemplate: DELETE "/api/prompt-templates/{id}";
 
     /// The Delta workspace version for the browser footer. Pre-formatted
     /// server-side, so the browser never has to know how to render `+dev.<sha>`.
