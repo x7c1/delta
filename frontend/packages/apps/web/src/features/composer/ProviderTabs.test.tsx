@@ -23,7 +23,9 @@ import { ApiClient } from '@delta/api-client';
 import { ApiProvider } from '../../data/apiContext';
 import { useComposerStore } from '../../store/composerStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import { ProviderSelector } from './ProviderSelector';
+import { ComposerRail } from './ComposerRail';
+import { ProviderTabs } from './ProviderTabs';
+import { ProviderUnavailableNotice } from './ProviderUnavailableNotice';
 
 const server = setupServer(...createHandlers());
 
@@ -61,6 +63,12 @@ function useProvidersAvailability(
   );
 }
 
+/**
+ * Render the provider control the way the composer composes it: the tabs on the
+ * rail, and the reasons (too long for a tab) below it, standing in for the
+ * composer card. Both halves read one availability verdict set, so the pair is
+ * exercised together.
+ */
 function renderSelector() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -69,13 +77,14 @@ function renderSelector() {
   return render(
     <QueryClientProvider client={queryClient}>
       <ApiProvider client={client}>
-        <ProviderSelector />
+        <ComposerRail providerTabs={<ProviderTabs />} />
+        <ProviderUnavailableNotice />
       </ApiProvider>
     </QueryClientProvider>,
   );
 }
 
-describe('ProviderSelector', () => {
+describe('ProviderTabs', () => {
   beforeEach(() => {
     // A fresh, not-yet-seeded new-session compose state, and the default
     // provider preference back at Claude so each test starts from a known seed.
@@ -101,6 +110,42 @@ describe('ProviderSelector', () => {
     expect(claudeName.className).toContain('text-provider-claude');
     const codexName = within(codex).getByText('Codex');
     expect(codexName.className).toContain('text-provider-codex');
+  });
+
+  it('rides the rail as one item resting on the card top border', () => {
+    renderSelector();
+
+    // The tabs live on the rail, not in the card's stack.
+    const rail = screen.getByTestId('composer-rail');
+    const tabs = screen.getByTestId('provider-selector');
+    expect(rail).toContainElement(tabs);
+
+    // A rail item rests ON the card's top border: top/left/right borders and
+    // rounded top corners, no bottom border of its own. This item is the one
+    // that reaches 1px down onto that border (`-mb-px`, painted above the card
+    // with `relative z-10`) so its selected tab can open into the card — which
+    // only works because provider tabs exist in new-session mode alone, where
+    // the context-usage fill never rides the border.
+    expect(tabs.className).toContain('border-b-0');
+    expect(tabs.className).toContain('rounded-t-md');
+    expect(tabs.className).toContain('-mb-px');
+    expect(tabs.className).toContain('relative');
+    expect(tabs.className).toContain('z-10');
+    // Nothing on the rail is absolutely positioned: the rail is measured with
+    // the rest of the bottom overlay only while it stays in normal flow.
+    expect(tabs.className).not.toContain('absolute');
+    expect(rail.className).not.toContain('absolute');
+
+    // The selected tab is the open one: card fill, no bottom border, so it
+    // merges with the card. The unselected tab is closed: sunken fill plus its
+    // own bottom border continuing the card's line beneath it.
+    const claude = screen.getByTestId('provider-option-claude');
+    const codex = screen.getByTestId('provider-option-codex');
+    expect(claude.className).toMatch(/(^|\s)bg-surface(\s|$)/);
+    expect(claude.className).toContain('font-medium');
+    expect(claude.className).not.toMatch(/(^|\s)border-b(\s|$)/);
+    expect(codex.className).toContain('bg-surface-elevated');
+    expect(codex.className).toMatch(/(^|\s)border-b(\s|$)/);
   });
 
   it('reflects the store selection: Claude checked by default', () => {
@@ -225,6 +270,15 @@ describe('ProviderSelector', () => {
     ).getByRole('radio');
     expect(claudeRadio).toBeEnabled();
     expect(claudeRadio).toBeChecked();
+
+    // The disabled tab also stays flat under the pointer: a hover lift would
+    // advertise a click the disabled radio refuses. The available one keeps it.
+    expect(screen.getByTestId('provider-option-codex').className).not.toContain(
+      'hover:',
+    );
+    expect(screen.getByTestId('provider-option-claude').className).toContain(
+      'cursor-pointer',
+    );
   });
 
   it('does not select a disabled provider on click', async () => {

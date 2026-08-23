@@ -14,6 +14,7 @@ import { COMPOSER_MAX_HEIGHT } from './autoGrow';
 import { useAutoGrow } from './useAutoGrow';
 import { useLiveStore } from '../../store/liveStore';
 import { useNavStore } from '../../store/navStore';
+import { useOptionalComposerDraftTarget } from './composerDraftTarget';
 import { useSubmitSend } from './useSubmitSend';
 
 /**
@@ -37,6 +38,18 @@ export type ComposerMode =
 
 export interface ComposerProps {
   mode: ComposerMode;
+}
+
+/**
+ * The `composerStore.drafts` key a composer in `mode` reads and writes: the
+ * active thread's id, or the new-session sentinel when no thread exists yet.
+ *
+ * Exported because the controls stacked around the card (the rail's
+ * prompt-template button) edit the same draft, and must not re-derive the key
+ * from a second copy of this rule.
+ */
+export function composerDraftKey(mode: ComposerMode): ThreadId {
+  return mode.kind === 'thread' ? mode.activeThread.id : NEW_SESSION_DRAFT_KEY;
 }
 
 /**
@@ -69,14 +82,18 @@ function SendIcon({ className }: { className?: string }) {
  */
 export function Composer({ mode }: ComposerProps) {
   const submitSend = useSubmitSend();
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // The textarea is shared upward when the composer is mounted inside a
+  // {@link ComposerDraftTargetProvider}, so the rail's prompt-template button
+  // can read the caret and hand focus back after an insert. Standing alone (no
+  // provider) the composer keeps its own ref and behaves exactly as before.
+  const draftTarget = useOptionalComposerDraftTarget();
+  const localTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const textareaRef = draftTarget?.textareaRef ?? localTextareaRef;
 
   const isNew = mode.kind === 'new-session';
   const activeThread = mode.kind === 'thread' ? mode.activeThread : null;
   const readOnly = mode.kind === 'thread' ? mode.readOnly : false;
-  const draftKey: ThreadId = activeThread
-    ? activeThread.id
-    : NEW_SESSION_DRAFT_KEY;
+  const draftKey: ThreadId = composerDraftKey(mode);
 
   const draft = useComposerStore((state) => state.drafts[draftKey] ?? '');
   const setDraft = useComposerStore((state) => state.setDraft);
@@ -304,6 +321,13 @@ export function Composer({ mode }: ComposerProps) {
           ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(draftKey, event.target.value)}
+          // Record that the caret has actually been placed here at least once —
+          // see {@link ComposerDraftTarget.everFocusedRef} for what reads it.
+          onFocus={() => {
+            if (draftTarget) {
+              draftTarget.everFocusedRef.current = true;
+            }
+          }}
           placeholder={placeholder}
           rows={2}
           // Auto-grow replaces the manual `resize-y` handle: the height is driven

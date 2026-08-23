@@ -11,6 +11,7 @@ mod clone_roots;
 mod launch_options;
 mod messages;
 mod permissions;
+mod prompt_templates;
 mod sends;
 mod session_store;
 mod sessions;

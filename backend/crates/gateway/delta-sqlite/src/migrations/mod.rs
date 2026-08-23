@@ -75,6 +75,7 @@ mod clone_root;
 mod launch_option;
 mod message;
 mod permission;
+mod prompt_template;
 mod runner;
 mod send;
 mod session;
@@ -102,7 +103,7 @@ use crate::error::{Error, Result};
 /// Bump this in the same change that appends a step, and never on its own —
 /// [`validate`] fails the build's test suite if the two disagree in either
 /// direction.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Every subject's steps, in the order the registry lays them out within a
 /// version. Table-creating subjects come before the subjects that reference
@@ -117,6 +118,7 @@ const SUBJECTS: &[&[Step]] = &[
     launch_option::STEPS,
     subagent::STEPS,
     clone_root::STEPS,
+    prompt_template::STEPS,
 ];
 
 /// The whole ladder, flattened and ordered by [`Step::to_version`].

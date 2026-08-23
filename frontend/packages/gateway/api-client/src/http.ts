@@ -3,6 +3,7 @@ import type {
   CloneRepositoryRequest,
   CreateLaunchOptionRequest,
   CreateCloneRootRequest,
+  CreatePromptTemplateRequest,
   CreateSendRequest,
   GitBranchesResponse,
   GitRepoResponse,
@@ -13,6 +14,8 @@ import type {
   OpenCwdRequest,
   PermissionDecision,
   PermissionDecisionRequest,
+  PromptTemplate,
+  PromptTemplatesResponse,
   ProvidersResponse,
   PullRequestsResponse,
   QuestionAnswerRequest,
@@ -26,6 +29,7 @@ import type {
   SessionsResponse,
   ThreadsResponse,
   UpdateLaunchOptionRequest,
+  UpdatePromptTemplateRequest,
   VersionResponse,
   WorkdirListResponse,
   WorkdirRecentResponse,
@@ -555,6 +559,61 @@ export class ApiClient {
    */
   deleteLaunchOption(id: number): Promise<void> {
     return this.requestNoContent(`/api/launch-options/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * `GET /api/prompt-templates` — the registered prompt templates (named blocks
+   * of instruction text for the composer), oldest first. Global rather than
+   * provider-scoped: the text is prose, so the same template applies to every
+   * provider.
+   */
+  getPromptTemplates(): Promise<PromptTemplatesResponse> {
+    return this.request<PromptTemplatesResponse>('/api/prompt-templates');
+  }
+
+  /**
+   * `POST /api/prompt-templates` — register a prompt template. `label` and
+   * `text` are both required and must be non-blank once trimmed; a blank one is
+   * a `400`, surfaced as {@link ApiError}. `text` is stored verbatim, so its own
+   * leading/trailing newlines survive. Returns the created record.
+   */
+  createPromptTemplate(
+    body: CreatePromptTemplateRequest,
+  ): Promise<PromptTemplate> {
+    return this.request<PromptTemplate>('/api/prompt-templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `PATCH /api/prompt-templates/{id}` — replace a template's `label` and
+   * `text` in place (id and `created_at` are preserved, `updated_at` is
+   * re-stamped). Both fields are required: this is a full replacement of the
+   * editable content, not a partial patch. A blank field is a `400` and an
+   * unknown id a `404`, both surfaced as {@link ApiError}. Returns the updated
+   * record.
+   */
+  updatePromptTemplate(
+    id: number,
+    body: UpdatePromptTemplateRequest,
+  ): Promise<PromptTemplate> {
+    return this.request<PromptTemplate>(`/api/prompt-templates/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  /**
+   * `DELETE /api/prompt-templates/{id}` — remove a registered prompt template
+   * (204). Deleting an unknown id is a no-op, so this is idempotent.
+   */
+  deletePromptTemplate(id: number): Promise<void> {
+    return this.requestNoContent(`/api/prompt-templates/${id}`, {
       method: 'DELETE',
     });
   }

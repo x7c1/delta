@@ -30,6 +30,8 @@ mod permission_request;
 pub use permission_request::PermissionRequest;
 mod permission_status;
 pub use permission_status::PermissionStatus;
+mod prompt_template;
+pub use prompt_template::PromptTemplate;
 mod provider_availability;
 pub use provider_availability::ProviderAvailability;
 mod role;

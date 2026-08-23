@@ -6,13 +6,23 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use delta_attribution::SubagentLaunch;
 use delta_model::{
-    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus, Role,
-    Send, SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
+    AgentProvider, LaunchOption, Message, MessageUuid, PermissionRequest, PermissionStatus,
+    PromptTemplate, Role, Send, SendStatus, Session, SessionId, SessionStatus, Thread, ThreadId,
 };
 
 use crate::error::{Error, Result};
 use crate::ports::{CloneRoot, NewSession, RepositoryCloneRow, SessionPageRow, SessionStore};
 use crate::SessionPageCursor;
+
+/// The creation timestamp every fake-created row carries. Fixed so assertions
+/// can name it; the real store stamps the wall clock.
+const FAKE_CREATED_AT: &str = "2026-01-01T00:00:00Z";
+
+/// The timestamp a fake update re-stamps `updated_at` with. Distinct from
+/// [`FAKE_CREATED_AT`] so a test can tell an edited row from an untouched one —
+/// which the real store's second-resolution clock cannot guarantee within a
+/// single test.
+const FAKE_UPDATED_AT: &str = "2026-01-02T00:00:00Z";
 
 /// Derive a thread's `root_message_uuid` the way the SQL store does: the
 /// `semantic_parent_uuid` of the thread's first semantically parented message,
@@ -45,6 +55,8 @@ pub(crate) struct FakeStoreInner {
     pub(crate) transcript_lines_read: HashMap<SessionId, usize>,
     pub(crate) launch_options: Vec<LaunchOption>,
     pub(crate) next_launch_option_id: i64,
+    pub(crate) prompt_templates: Vec<PromptTemplate>,
+    pub(crate) next_prompt_template_id: i64,
     /// Outstanding background-task launches keyed by `(session_id,
     /// tool_use_id)`, mirroring the SQL `subagent_launch` table. The value is
     /// the `SubagentLaunch` carrying the launching thread plus the optional
@@ -951,7 +963,7 @@ impl SessionStore for FakeStore {
             name: name.to_owned(),
             value: value.map(str::to_owned),
             default_enabled,
-            created_at: "2026-01-01T00:00:00Z".into(),
+            created_at: FAKE_CREATED_AT.into(),
             provider,
         };
         g.launch_options.push(option.clone());
@@ -976,6 +988,56 @@ impl SessionStore for FakeStore {
     async fn delete_launch_option(&self, id: i64) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         g.launch_options.retain(|o| o.id != id);
+        Ok(())
+    }
+
+    async fn list_prompt_templates(&self) -> Result<Vec<PromptTemplate>> {
+        let g = self.inner.lock().unwrap();
+        // Oldest first (ascending created_at, then id), mirroring the SQL store.
+        let mut out = g.prompt_templates.clone();
+        out.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(out)
+    }
+
+    async fn create_prompt_template(&self, label: &str, text: &str) -> Result<PromptTemplate> {
+        let mut g = self.inner.lock().unwrap();
+        g.next_prompt_template_id += 1;
+        let template = PromptTemplate {
+            id: g.next_prompt_template_id,
+            label: label.to_owned(),
+            text: text.to_owned(),
+            created_at: FAKE_CREATED_AT.to_owned(),
+            updated_at: FAKE_CREATED_AT.to_owned(),
+        };
+        g.prompt_templates.push(template.clone());
+        Ok(template)
+    }
+
+    async fn update_prompt_template(
+        &self,
+        id: i64,
+        label: &str,
+        text: &str,
+    ) -> Result<Option<PromptTemplate>> {
+        let mut g = self.inner.lock().unwrap();
+        match g.prompt_templates.iter_mut().find(|t| t.id == id) {
+            Some(template) => {
+                template.label = label.to_owned();
+                template.text = text.to_owned();
+                template.updated_at = FAKE_UPDATED_AT.to_owned();
+                Ok(Some(template.clone()))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn delete_prompt_template(&self, id: i64) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.prompt_templates.retain(|t| t.id != id);
         Ok(())
     }
 

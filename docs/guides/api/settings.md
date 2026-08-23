@@ -1,13 +1,14 @@
-# Providers, launch options and version (`/api/*`)
+# Providers, launch options, prompt templates and version (`/api/*`)
 
 ## Overview
 
 The REST routes behind the Settings screen and the provider selector: which
 agent providers this host can launch and what each of them can do, the registry
-of custom launch options a session can be started with, and the server's own
-version string for the browser footer. Applying a launch option to a session is
-part of a `new_session` send ([sends.md](sends.md#post-apisends)); conventions
-and error semantics are in [README.md](README.md).
+of custom launch options a session can be started with, the registry of prompt
+templates the composer inserts from, and the server's own version string for the
+browser footer. Applying a launch option to a session is part of a
+`new_session` send ([sends.md](sends.md#post-apisends)); conventions and error
+semantics are in [README.md](README.md).
 
 ## Providers
 
@@ -171,6 +172,109 @@ Remove a registered launch option.
 
 - **204 No Content** — the option is gone. Deleting an unknown id is a no-op, so
   this is idempotent and never answers `404`.
+
+## Prompt templates
+
+A prompt template is a `(label, text)` record naming one reusable block of
+instruction text — the long instructions a user would otherwise retype or paste
+into the composer ("once CI is green, merge and then update the plan doc…").
+`label` names it in the picker; `text` is what gets inserted into the composer at
+the cursor.
+
+Unlike launch options the registry is **global**: the text is prose addressed to
+whichever agent is driving the session, not argv or a session-start request
+field, so there is no `provider` and the same template is offered on every
+session. Delta never interprets the text — there are no placeholders and no
+variable expansion.
+
+`text` is stored verbatim, including leading and trailing whitespace and
+newlines: a template may deliberately end with a newline, and that is exactly
+where insertion makes it matter. Trimming happens only to decide whether a
+submitted `label` or `text` is blank.
+
+### `GET /api/prompt-templates`
+
+List the registered templates, oldest first (`created_at` ascending, `id`
+ascending on ties). Registration order is stable, so editing a template never
+moves it in the list.
+
+- **200**:
+
+  ```json
+  {
+    "prompt_templates": [
+      {
+        "id": 1,
+        "label": "Merge when green",
+        "text": "Once CI is green, merge and then update the plan doc.\n",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-02T00:00:00Z"
+      }
+    ]
+  }
+  ```
+
+  `updated_at` equals `created_at` until the template is first edited.
+
+### `POST /api/prompt-templates`
+
+Register a prompt template.
+
+Request:
+
+```json
+{
+  "label": "Merge when green",
+  "text": "Once CI is green, merge and then update the plan doc.\n"
+}
+```
+
+- `label` (required) — what the template is called in the picker. Must be
+  non-blank.
+- `text` (required) — the body inserted into the composer. Must be non-blank.
+
+Response:
+
+- **201 Created** — the created record, so the client can render it without a
+  refetch:
+
+  ```json
+  {
+    "id": 1,
+    "label": "Merge when green",
+    "text": "Once CI is green, merge and then update the plan doc.\n",
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z"
+  }
+  ```
+
+- **400** — a `label` or `text` that is empty or nothing but whitespace. A body
+  that is *surrounded* by whitespace is not blank and is accepted as written.
+
+### `PATCH /api/prompt-templates/{id}`
+
+Replace a registered template's content in place. Both fields are required —
+this is a full replacement of the editable content, not a partial patch, so a
+client cannot blank one by omitting it. The template's `id` and `created_at` are
+preserved (a delete-and-recreate would churn both and move the row to the end of
+the list), and `updated_at` is re-stamped.
+
+Request:
+
+```json
+{ "label": "Merge when green", "text": "Merge once CI is green.\n" }
+```
+
+- **200** — the updated record, in the same shape as the create response.
+- **400** — a blank `label` or `text`, as on the create.
+- **404** — no prompt template with that id.
+
+### `DELETE /api/prompt-templates/{id}`
+
+Remove a registered prompt template.
+
+- **204 No Content** — the template is gone. Deleting an unknown id is a no-op,
+  so this is idempotent and never answers `404`.
 
 ## Server version
 
