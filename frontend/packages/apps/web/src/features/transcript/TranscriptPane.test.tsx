@@ -2497,17 +2497,26 @@ describe('TranscriptPane composer rail', () => {
     expect(Array.from(overlay.children)).toEqual([notices, rail.parentElement]);
   });
 
-  it('rests every rail item on the card border without reaching past it', async () => {
+  it('rests every rail item on the card border, reaching past it only for the open provider tab', async () => {
     renderRailPane({ newSession: true });
 
-    // A rail item has no bottom border and no negative margin, so the card's
-    // top border — and the context-usage fill riding it — stays uncovered.
+    // A rail item draws no bottom border of its own, so the card's top border
+    // — and, in a thread, the context-usage fill riding it — stays uncovered.
+    // The provider tabs are the one sanctioned exception: that item reaches
+    // 1px down (`-mb-px`) so its selected tab can open into the card, which is
+    // safe because tabs only exist in new-session mode, where no fill rides
+    // the border. Every other item keeps clear of the line.
     const rail = await screen.findByTestId('composer-rail');
     const items = Array.from(rail.children);
     expect(items.length).toBeGreaterThan(0);
+    const tabs = screen.getByTestId('provider-selector');
     for (const item of items) {
-      expect(item.className).not.toMatch(/(^|\s|:)-m[btxy]?-/);
       expect(item.className).toContain('border-b-0');
+      if (item === tabs) {
+        expect(item.className).toContain('-mb-px');
+      } else {
+        expect(item.className).not.toMatch(/(^|\s|:)-m[btxy]?-/);
+      }
     }
   });
 });

@@ -1107,8 +1107,10 @@ export function TranscriptPane({
                   {/* The card's top border is the track; this fill runs along it
                       from the RIGHT edge leftward to the usage percentage, so the
                       bar's growing tip stays next to the `%` readout. A real DOM
-                      bar. The rail above never reaches down onto this line: its
-                      items have no bottom border and no negative margin. */}
+                      bar. The rail above never reaches down onto this line in a
+                      thread: the only item that overlaps the border (the
+                      provider tabs) exists in new-session mode, where there is
+                      no fill to cover. */}
                   <div
                     className="absolute right-0 top-0 h-0.5 rounded-tr-md bg-fg-muted"
                     style={{
