@@ -121,23 +121,31 @@ describe('ProviderTabs', () => {
     expect(rail).toContainElement(tabs);
 
     // A rail item rests ON the card's top border: top/left/right borders and
-    // rounded top corners, but no bottom border and no negative margin, so the
-    // card's border — and the context-usage fill riding it — stays uncovered.
+    // rounded top corners, no bottom border of its own. This item is the one
+    // that reaches 1px down onto that border (`-mb-px`, painted above the card
+    // with `relative z-10`) so its selected tab can open into the card — which
+    // only works because provider tabs exist in new-session mode alone, where
+    // the context-usage fill never rides the border.
     expect(tabs.className).toContain('border-b-0');
     expect(tabs.className).toContain('rounded-t-md');
-    expect(tabs.className).not.toMatch(/(^|\s|:)-m[btxy]?-/);
+    expect(tabs.className).toContain('-mb-px');
+    expect(tabs.className).toContain('relative');
+    expect(tabs.className).toContain('z-10');
     // Nothing on the rail is absolutely positioned: the rail is measured with
     // the rest of the bottom overlay only while it stays in normal flow.
     expect(tabs.className).not.toContain('absolute');
     expect(rail.className).not.toContain('absolute');
 
-    // The selected tab is marked by fill/color/weight alone — it does not draw
-    // over the card's top border to "merge" with the card.
+    // The selected tab is the open one: card fill, no bottom border, so it
+    // merges with the card. The unselected tab is closed: sunken fill plus its
+    // own bottom border continuing the card's line beneath it.
     const claude = screen.getByTestId('provider-option-claude');
     const codex = screen.getByTestId('provider-option-codex');
     expect(claude.className).toMatch(/(^|\s)bg-surface(\s|$)/);
     expect(claude.className).toContain('font-medium');
+    expect(claude.className).not.toMatch(/(^|\s)border-b(\s|$)/);
     expect(codex.className).toContain('bg-surface-elevated');
+    expect(codex.className).toMatch(/(^|\s)border-b(\s|$)/);
   });
 
   it('reflects the store selection: Claude checked by default', () => {

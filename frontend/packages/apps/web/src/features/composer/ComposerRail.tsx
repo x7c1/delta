@@ -2,12 +2,14 @@ import type { ReactNode } from 'react';
 
 /**
  * The chrome a rail item shares: a small box that RESTS ON the composer card's
- * top border rather than punching through it. No bottom border and no negative
- * margin, so the card's own top border runs uninterrupted beneath the item —
- * which is what makes it read as attached to the card, and what keeps the
- * context-usage fill intact: that fill rides the card's top border (see
- * `composer-context-bar` in `TranscriptPane`), so an item that overlapped
- * downward would cover the very line it sits on. No shadow either — one would
+ * top border rather than punching through it. No bottom border of its own, so
+ * the card's top border runs beneath the item — which is what makes it read as
+ * attached to the card, and what keeps the context-usage fill intact: that fill
+ * rides the card's top border (see `composer-context-bar` in `TranscriptPane`),
+ * so an item that overlapped downward in a thread would cover the very line it
+ * sits on. The provider tabs (new-session mode only, where that fill can never
+ * be present) are the one item that does reach 1px down, so their selected tab
+ * can open into the card — see `ProviderTabs`. No shadow either — one would
  * fall onto the card's top face and break the "attached" read.
  */
 export const COMPOSER_RAIL_ITEM_CLASS =

@@ -84,7 +84,19 @@ export function ProviderTabs() {
       // adjacent tabs (an internal divider separates them) rather than two
       // detached boxes. `overflow-hidden` keeps the tab fills inside the item's
       // rounded top corners.
-      className={cn(COMPOSER_RAIL_ITEM_CLASS, 'flex overflow-hidden')}
+      //
+      // This item is the one rail item allowed to reach 1px DOWN onto the card's
+      // top border (`-mb-px`, painted above the card via `relative z-10`): the
+      // selected tab "opens" into the card by drawing no bottom border there,
+      // while the unselected tabs redraw the border line themselves, so the
+      // open/closed distinction is structural rather than a subtle fill
+      // difference. Safe only because the tabs exist in new-session mode alone,
+      // where the context-usage fill (which rides that same border in a thread)
+      // can never be present.
+      className={cn(
+        COMPOSER_RAIL_ITEM_CLASS,
+        'relative z-10 -mb-px flex overflow-hidden',
+      )}
       role="radiogroup"
       aria-labelledby="provider-selector-heading"
       data-testid="provider-selector"
@@ -105,13 +117,14 @@ export function ProviderTabs() {
               // seam between them is drawn here rather than by a gap.
               index > 0 && 'border-l border-border-default',
               available ? 'cursor-pointer' : 'cursor-not-allowed opacity-50',
-              // The selected tab is distinguished by fill, color and weight
-              // only: it deliberately does NOT erase the card's top border
-              // beneath it, which would also cut the context-usage fill that
-              // rides that border.
+              // The selected tab is the "open" one: it shares the card's fill
+              // and draws no bottom border, so the card's top border disappears
+              // beneath it and the tab merges with the card. Each unselected
+              // tab is "closed": a sunken fill plus its own bottom border that
+              // continues the card's line under it.
               selected
                 ? 'bg-surface text-fg font-medium'
-                : 'bg-surface-elevated text-fg-muted',
+                : 'border-b border-border-default bg-surface-elevated text-fg-muted',
               // Only a tab that can actually be picked lifts on hover. An
               // unavailable provider stays flat: brightening it would advertise
               // a click that its disabled radio refuses.
