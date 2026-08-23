@@ -75,10 +75,25 @@ vocabulary — a CLI flag and its argument for Claude (`--plugin-dir
 for. The registry is provider-scoped: the session-start picker only offers
 options whose `provider` matches the session being started.
 
+Most rows are the user's own. Some are **built in**: Delta declares a short
+catalog of the combinations in daily use per provider (Claude `--model opus`,
+Codex `approvalsReviewer auto_review`, …) and materializes it into the registry
+at startup, so those rows are already there the first time Settings is opened —
+and come back by themselves after a database reset. A built-in is an ordinary
+row in every way that matters to a client: an ordinary `id` that a session-start
+selection carries like any other. What differs is ownership of its content —
+`label`, `name` and `value` come from Delta's catalog — so it cannot be deleted
+(`409`, below), while its `default_enabled` flag is the user's to set like any
+other row's. `builtin` marks these rows. Building on one means duplicating it
+into a row of your own; there is no endpoint for editing, adding to or hiding
+the catalog.
+
 ### `GET /api/launch-options`
 
-List the registered launch options, newest first, for the Settings screen to
-manage.
+List the registered launch options for the Settings screen to manage: the rows
+Delta ships first, in catalog order, then the user's own newest first. The
+leading built-in block is fixed-length, so a built-in's position never moves as
+the user adds or removes their own rows.
 
 - **200**:
 
@@ -92,7 +107,8 @@ manage.
         "value": "/opt/p",
         "default_enabled": true,
         "created_at": "2026-01-01T00:00:00Z",
-        "provider": "claude"
+        "provider": "claude",
+        "builtin": false
       }
     ]
   }
@@ -100,7 +116,9 @@ manage.
 
   `label` and `value` are `null` when absent (a valueless option carries no
   `value`). `default_enabled` marks the option to start pre-checked in the
-  session-start picker. `provider` is `claude` or `codex`.
+  session-start picker. `provider` is `claude` or `codex`. `builtin` is `true`
+  for a row Delta ships and `false` for one the user registered; the catalog key
+  behind a built-in is internal and never on the wire.
 
 ### `POST /api/launch-options`
 
@@ -144,9 +162,13 @@ string.
     "value": "/opt/p",
     "default_enabled": true,
     "created_at": "2026-01-01T00:00:00Z",
-    "provider": "claude"
+    "provider": "claude",
+    "builtin": false
   }
   ```
+
+  `builtin` is always `false` here: anything registered through this endpoint is
+  the user's own row. There is no way to create a built-in.
 
 - **400** — a blank `name`.
 
@@ -156,6 +178,10 @@ Set a registered option's `default_enabled` flag in place. Updating in place
 preserves the option's `id` and `created_at` (a delete-and-recreate would churn
 both); `name`, `value`, `label` and `provider` are immutable through this
 endpoint.
+
+This applies to a built-in exactly as it does to the user's own row: ticking
+`default_enabled` on a shipped option is the point of shipping it, and it is the
+one field of a built-in that is not Delta's.
 
 Request:
 
@@ -172,6 +198,11 @@ Remove a registered launch option.
 
 - **204 No Content** — the option is gone. Deleting an unknown id is a no-op, so
   this is idempotent and never answers `404`.
+- **409 Conflict** (`code: launch_option_builtin`) — the option is **built in**
+  (`builtin: true`) and stays registered. Delta's declared catalog owns those
+  rows, so a removed row would simply reappear at the next startup; a built-in
+  that does not suit is left unticked, and registering your own row is the
+  supported way to differ.
 
 ## Prompt templates
 

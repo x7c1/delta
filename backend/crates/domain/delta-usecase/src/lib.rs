@@ -61,8 +61,8 @@ pub use turn::{
 // depend on the use-case surface without reaching across to delta-model for
 // these identifiers and value types.
 pub use delta_model::{
-    LaunchOption, Message, MessageUuid, PromptTemplate, ProviderAvailability, Send, Session,
-    SessionId, Thread, ThreadId,
+    LaunchOption, LaunchOptionPreset, Message, MessageUuid, PromptTemplate, ProviderAvailability,
+    Send, Session, SessionId, Thread, ThreadId,
 };
 
 // Re-export the neutral persistence-pipeline effect type. It originates in

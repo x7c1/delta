@@ -30,7 +30,7 @@ import type {
   CloneRoot,
   PromptTemplate,
 } from '@delta/wire-gen';
-import { Button, cn, Dialog, ProviderName, Spinner } from '@delta/ui-kit';
+import { Badge, Button, cn, Dialog, ProviderName, Spinner } from '@delta/ui-kit';
 import { useApiClient } from '../../data/apiContext';
 import { useThemeContext } from '../../hooks/themeContext';
 import { useNavStore } from '../../store/navStore';
@@ -339,6 +339,10 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   const [name, setName] = useState('');
   const [value, setValue] = useState('');
   const [defaultEnabled, setDefaultEnabled] = useState(false);
+  // Focused after a Duplicate, so the copy lands with the cursor already in the
+  // field that is actually going to be edited — a duplicated row differs from
+  // its original in its value far more often than in its name.
+  const valueInputRef = useRef<HTMLTextAreaElement | null>(null);
   // Seeded from the persisted default-provider setting, the same source the
   // new-session provider selector reads: a Codex-first user would otherwise
   // land on Claude's (for them, likely empty) list every time they open
@@ -367,6 +371,24 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
   // be submitted (the server rejects it too, but gating here avoids a round-trip
   // and keeps the button state honest).
   const canSubmit = name.trim().length > 0 && !createLaunchOption.isPending;
+
+  /**
+   * Seed the add form from an existing row, built-in or the user's own.
+   *
+   * This is the supported way to build on a row Delta ships: those are not
+   * editable, and a real Codex `config` value carries machine-specific paths, so
+   * the flow is "duplicate the shipped row, add your paths, register yours" —
+   * safer than selecting a JSON value out of the page by hand.
+   *
+   * `default_enabled` is deliberately not copied: pre-checking a row the user
+   * has not finished writing would arm it for the next session they start.
+   */
+  const onDuplicate = (option: LaunchOption) => {
+    setLabel(option.label ?? '');
+    setName(option.name);
+    setValue(option.value ?? '');
+    valueInputRef.current?.focus();
+  };
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -481,13 +503,22 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
           <label className="text-caption font-medium text-fg-muted" htmlFor="lo-value">
             Value (optional)
           </label>
-          <input
+          {/* A textarea, not a one-line input: a Codex `config` value is a JSON
+              object that does not fit on one line, and Duplicate drops exactly
+              such a value in here to be edited. Monospaced because every value
+              is read in the provider's own vocabulary, resizable and internally
+              scrolling so a long one neither clips nor pushes the button off
+              screen. A textarea does not submit on Enter, so the form's own
+              button stays the only way to submit — which is what a multi-line
+              value needs. */}
+          <textarea
             id="lo-value"
-            type="text"
+            ref={valueInputRef}
+            rows={3}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={copy.valueExample}
-            className="rounded border border-border-default bg-surface px-2 py-1 text-secondary text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
+            className="resize-y overflow-auto rounded border border-border-default bg-surface px-2 py-1 font-mono text-code text-fg placeholder:text-fg-subtle focus:border-accent-hover focus:outline-none"
           />
         </div>
         <label className="flex items-center gap-2 text-caption font-medium text-fg-muted">
@@ -558,6 +589,7 @@ function LaunchOptionsSection({ active }: { active: boolean }) {
                 deleteLaunchOption.isPending &&
                 deleteLaunchOption.variables === option.id
               }
+              onDuplicate={() => onDuplicate(option)}
             />
           ))}
         </ul>
@@ -1370,54 +1402,111 @@ interface LaunchOptionRowProps {
   toggling: boolean;
   onDelete: () => void;
   deleting: boolean;
+  onDuplicate: () => void;
 }
 
+/**
+ * One row of the launch-option registry.
+ *
+ * Two things distinguish a row Delta ships (`builtin`): a badge, and no delete
+ * control at all. Omitted rather than disabled — a button that cannot be pressed
+ * only invites the question why — and the server refuses the call anyway with a
+ * `409`. The `default_enabled` checkbox stays live on those rows: ticking a
+ * shipped option is the point of shipping it.
+ *
+ * Every row shows its value in full, wrapped, however long it is: saying what
+ * the row will pass to the agent is the row's whole purpose, so there is nothing
+ * to gain by putting that behind a click. It stays selectable, so a registered
+ * JSON `config` value can be read and copied straight out of the row.
+ */
 function LaunchOptionRow({
   option,
   onToggleDefault,
   toggling,
   onDelete,
   deleting,
+  onDuplicate,
 }: LaunchOptionRowProps) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-border-default px-3 py-2">
-      {/* No provider name here: the list is already scoped to one, so a
-          per-row repeat is noise. */}
-      <div className="min-w-0">
-        {option.label && (
-          <div className="truncate text-caption font-medium text-fg-muted">
-            {option.label}
+    <li
+      className="flex flex-col gap-2 rounded-lg border border-border-default px-3 py-2"
+      data-testid={`launch-option-row-${option.id}`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        {/* No provider name here: the list is already scoped to one, so a
+            per-row repeat is noise. */}
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            {option.label && (
+              <span className="truncate text-caption font-medium text-fg-muted">
+                {option.label}
+              </span>
+            )}
+            {/* Next to the name rather than the label, because a shipped row is
+                not guaranteed a label and the badge must never have nothing to
+                hang off. */}
+            {option.builtin && (
+              <Badge
+                tone="info"
+                title="Shipped with Delta: its name and value come from Delta, and it cannot be deleted."
+                className="shrink-0"
+              >
+                Built-in
+              </Badge>
+            )}
           </div>
-        )}
-        <div className="truncate font-mono text-code text-fg">
-          <span>{option.name}</span>
-          {option.value !== null && (
-            <span className="text-fg-muted"> {option.value}</span>
+          <div
+            className="truncate font-mono text-code text-fg"
+            title={option.name}
+          >
+            {option.name}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <label className="flex items-center gap-1.5 text-caption text-fg-muted">
+            <input
+              type="checkbox"
+              checked={option.default_enabled}
+              onChange={(event) => onToggleDefault(event.target.checked)}
+              disabled={toggling}
+              aria-label={`Enable launch option ${option.name} by default`}
+              className="h-3.5 w-3.5"
+            />
+            Default
+          </label>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onDuplicate}
+            aria-label={`Duplicate launch option ${option.name}`}
+          >
+            Duplicate
+          </Button>
+          {/* Omitted, not disabled, on a row Delta ships. */}
+          {!option.builtin && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onDelete}
+              disabled={deleting}
+              aria-label={`Delete launch option ${option.name}`}
+            >
+              Delete
+            </Button>
           )}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <label className="flex items-center gap-1.5 text-caption text-fg-muted">
-          <input
-            type="checkbox"
-            checked={option.default_enabled}
-            onChange={(event) => onToggleDefault(event.target.checked)}
-            disabled={toggling}
-            aria-label={`Enable launch option ${option.name} by default`}
-            className="h-3.5 w-3.5"
-          />
-          Default
-        </label>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onDelete}
-          disabled={deleting}
-          aria-label={`Delete launch option ${option.name}`}
+      {option.value !== null && (
+        // Wrapped and selectable, with its own scroll so a very long value
+        // cannot make one row dominate the list. `break-all` because a JSON
+        // blob or a path has no spaces to wrap at.
+        <pre
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-surface-sunken px-2 py-1 font-mono text-code text-fg"
+          data-testid={`launch-option-value-${option.id}`}
         >
-          Delete
-        </Button>
-      </div>
+          {option.value}
+        </pre>
+      )}
     </li>
   );
 }

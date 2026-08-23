@@ -103,7 +103,7 @@ use crate::error::{Error, Result};
 /// Bump this in the same change that appends a step, and never on its own —
 /// [`validate`] fails the build's test suite if the two disagree in either
 /// direction.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Every subject's steps, in the order the registry lays them out within a
 /// version. Table-creating subjects come before the subjects that reference

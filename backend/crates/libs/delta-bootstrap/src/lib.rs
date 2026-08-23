@@ -27,13 +27,15 @@ pub use delta_usecase::LaunchConfig;
 use std::sync::Arc;
 
 use binary_detector::PathBinaryDetector;
-use claude_agent::CLAUDE_CAPABILITIES;
-use codex_agent::{CodexAdapterFactory, CodexLaunchConfig, CODEX_CAPABILITIES};
+use claude_agent::{CLAUDE_CAPABILITIES, CLAUDE_LAUNCH_OPTION_CATALOG};
+use codex_agent::{
+    CodexAdapterFactory, CodexLaunchConfig, CODEX_CAPABILITIES, CODEX_LAUNCH_OPTION_CATALOG,
+};
 use delta_sqlite::SqliteStore;
 use delta_transcript::JsonlTranscript;
 use delta_usecase::{
     AgentAdapterFactory, AgentCapabilities, AgentProvider, BinaryDetector, BoxedInteractor,
-    CommsLogSink, ExternalOpener, GhCli, Interactor,
+    CommsLogSink, ExternalOpener, GhCli, Interactor, LaunchOptionPreset,
 };
 use external_opener::SystemOpener;
 use gh_cli::Gh;
@@ -69,6 +71,43 @@ pub fn provider_capabilities(provider: AgentProvider) -> AgentCapabilities {
         AgentProvider::Claude => CLAUDE_CAPABILITIES,
         AgentProvider::Codex => CODEX_CAPABILITIES,
     }
+}
+
+/// The launch options Delta *ships* for a provider, resolved the same way as
+/// [`provider_capabilities`].
+///
+/// Each provider's catalog is declared in its own gateway adapter, beside the
+/// `launch_option_style` capability that says which vocabulary the entries'
+/// `name` is read in — the same rule that keeps the capability profile in the
+/// adapter that owns the behaviour. This accessor is the one place that knows
+/// every catalog, so the composition root can materialize all of them into the
+/// registry at startup without any layer above the gateways naming a provider.
+///
+/// An exhaustive `match`, deliberately: a new provider has to decide here what
+/// it ships (an empty slice is a perfectly good answer) rather than silently
+/// shipping nothing.
+pub fn launch_option_catalog(provider: AgentProvider) -> &'static [LaunchOptionPreset] {
+    match provider {
+        AgentProvider::Claude => CLAUDE_LAUNCH_OPTION_CATALOG,
+        AgentProvider::Codex => CODEX_LAUNCH_OPTION_CATALOG,
+    }
+}
+
+/// Every provider's shipped launch options, concatenated.
+///
+/// Reconciliation takes the whole declared set at once: its closing sweep —
+/// "drop the shipped rows the catalog no longer declares" — is registry-wide,
+/// so feeding it one provider at a time would make each pass retire the other
+/// provider's rows.
+///
+/// Public because it is also the honest expectation for a test that asserts what
+/// a freshly-built store holds: the count comes from the catalogs themselves, so
+/// adding a preset does not break an unrelated assertion.
+pub fn all_launch_option_presets() -> Vec<LaunchOptionPreset> {
+    AgentProvider::ALL
+        .iter()
+        .flat_map(|provider| launch_option_catalog(*provider).iter().copied())
+        .collect()
 }
 
 /// Default name of Delta's dedicated tmux socket (`tmux -L <socket>`).
@@ -155,6 +194,15 @@ impl Config {
 /// that moment and why the rows are restored rather than requeued or
 /// cancelled.
 ///
+/// Boot-time launch-option reconcile: the launch options Delta *ships* — the
+/// declared per-provider catalogs, read through [`launch_option_catalog`] — are
+/// materialized into the registry here too, so a shipped option is already a
+/// real row the first time Settings is opened, and reappears by itself after a
+/// database reset. Idempotent, and it preserves each row's `default_enabled`
+/// flag, which is the user's — see the use case's
+/// `reconcile_builtin_launch_options` for why that one field is the only thing
+/// it has to protect.
+///
 /// [`SessionStore::restore_all_dispatched`]: delta_usecase::SessionStore::restore_all_dispatched
 pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<AppInteractor> {
     let store = SqliteStore::open(&config.database_path)?;
@@ -191,7 +239,7 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     // Real PATH probe for the provider-availability endpoint. Constructing it
     // touches no filesystem; the first probe per binary does, then memoises.
     let binary_detector: Arc<dyn BinaryDetector> = Arc::new(PathBinaryDetector::new());
-    Ok(Interactor::new(
+    let interactor = Interactor::new(
         Box::new(tmux) as Box<dyn delta_usecase::TmuxDriver>,
         Box::new(transcript) as Box<dyn delta_usecase::Transcript>,
         Box::new(store) as Box<dyn delta_usecase::SessionStore>,
@@ -207,7 +255,16 @@ pub async fn build(config: &Config, comms_log: Arc<dyn CommsLogSink>) -> Result<
     .with_external_opener(external_opener)
     .with_adapter_factory(codex_adapter_factory)
     .with_codex_bin(codex_bin)
-    .with_binary_detector(binary_detector))
+    .with_binary_detector(binary_detector);
+    // Boot-time launch-option reconcile (see this function's doc), in the same
+    // place as the send sweep above. The whole declared catalog in one call,
+    // because reconciliation's closing sweep is registry-wide — see
+    // `all_launch_option_presets`.
+    interactor
+        .reconcile_builtin_launch_options(&all_launch_option_presets())
+        .await
+        .map_err(Error::BuiltinLaunchOptions)?;
+    Ok(interactor)
 }
 
 /// The Codex launch configuration sourced from the environment.
@@ -285,6 +342,96 @@ mod tests {
             provider_capabilities(AgentProvider::Codex),
             CODEX_CAPABILITIES,
         );
+    }
+
+    /// Every provider's catalog reaches the concatenation, declares only
+    /// entries for the provider it is registered under, and contributes no
+    /// duplicate key.
+    ///
+    /// The only place all the catalogs are visible at once, so it is where
+    /// those three are checked: the key is the reconciliation identity, so two
+    /// catalogs colliding on one would collapse into a single registry row, and
+    /// a stray provider would put a CLI flag in front of a Codex picker (or a
+    /// `thread/start` field in front of a Claude one). Each adapter's own tests
+    /// cover only what is specific to its provider's vocabulary.
+    #[test]
+    fn every_providers_catalog_is_declared_with_a_unique_key() {
+        let presets = all_launch_option_presets();
+        for provider in AgentProvider::ALL {
+            let declared = launch_option_catalog(provider);
+            assert!(
+                declared
+                    .iter()
+                    .all(|preset| presets.iter().any(|each| each.key == preset.key)),
+                "{}'s catalog is missing from the concatenation",
+                provider.as_str()
+            );
+            assert!(
+                declared.iter().all(|preset| preset.provider == provider),
+                "{}'s catalog declares an entry for another provider",
+                provider.as_str()
+            );
+        }
+
+        let mut keys: Vec<&str> = presets.iter().map(|preset| preset.key).collect();
+        let declared = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(
+            keys.len(),
+            declared,
+            "two shipped launch options share a key: {keys:?}"
+        );
+    }
+
+    /// [`build`] materializes every declared preset, so a shipped launch option
+    /// is in the registry before the browser has asked for anything — and a
+    /// second boot against the same file leaves the same rows, ids included.
+    ///
+    /// This is what makes the shipped rows come back by themselves after a
+    /// `make reset`, and the ids stable across an ordinary restart.
+    #[tokio::test]
+    async fn build_materializes_the_declared_launch_option_catalog() {
+        use delta_usecase::SessionStore;
+
+        let dir = std::env::temp_dir().join(format!("delta-bootstrap-lo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("builtin-launch-options.sqlite");
+        let _ = std::fs::remove_file(&path);
+        let config = Config {
+            database_path: path.to_str().unwrap().to_owned(),
+            ..test_config()
+        };
+
+        build(&config, NullCommsLog::arc()).await.unwrap();
+        let first = SqliteStore::open(&config.database_path)
+            .unwrap()
+            .list_launch_options()
+            .await
+            .unwrap();
+
+        let declared = all_launch_option_presets();
+        assert_eq!(first.len(), declared.len());
+        for preset in &declared {
+            let row = first
+                .iter()
+                .find(|row| row.builtin_key.as_deref() == Some(preset.key))
+                .unwrap_or_else(|| panic!("`{}` was not materialized", preset.key));
+            assert_eq!(row.label.as_deref(), Some(preset.label));
+            assert_eq!(row.name, preset.name);
+            assert_eq!(row.value.as_deref(), preset.value);
+            assert_eq!(row.provider, preset.provider);
+            assert!(!row.default_enabled, "offered, not imposed");
+        }
+
+        // A second boot is a no-op, ids included.
+        build(&config, NullCommsLog::arc()).await.unwrap();
+        let second = SqliteStore::open(&config.database_path)
+            .unwrap()
+            .list_launch_options()
+            .await
+            .unwrap();
+        assert_eq!(first, second);
     }
 
     /// The boot-time send reconcile is wired into [`build`] itself, not just

@@ -167,6 +167,9 @@ pub const CODEX_CAPABILITIES: AgentCapabilities = AgentCapabilities {
     steer: SteerCapability::None,
 };
 
+mod launch_option_catalog;
+pub use launch_option_catalog::CODEX_LAUNCH_OPTION_CATALOG;
+
 /// `thread/start` fields Delta fills in itself, which a user-registered launch
 /// option must never overwrite.
 ///

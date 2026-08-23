@@ -174,11 +174,14 @@ describe('SettingsView', () => {
     renderSettings();
     const list = await findList();
     // The section opens on the configured default provider (Claude, per the
-    // beforeEach), so only the two Claude fixtures are listed — the Codex one
-    // (`model`) is filtered out.
+    // beforeEach), so only the Claude fixtures are listed — the user's two flags
+    // plus the shipped `--model opus` — and the Codex ones (`model`, `config`)
+    // are filtered out.
     expect(within(list).getByText('--permission-mode')).toBeInTheDocument();
     expect(within(list).getByText('--plugin-dir')).toBeInTheDocument();
+    expect(within(list).getByText('--model')).toBeInTheDocument();
     expect(within(list).queryByText('model')).toBeNull();
+    expect(within(list).queryByText('config')).toBeNull();
   });
 
   it('opens scoped to the configured default provider', async () => {
@@ -196,18 +199,18 @@ describe('SettingsView', () => {
     renderSettings();
     const list = await findList();
     // Sanity: the new flag is not present before submission.
-    expect(within(list).queryByText('--model')).toBeNull();
+    expect(within(list).queryByText('--append-system-prompt')).toBeNull();
 
     fireEvent.change(screen.getByLabelText('Name (the flag)'), {
-      target: { value: '--model' },
+      target: { value: '--append-system-prompt' },
     });
     fireEvent.change(screen.getByLabelText('Value (optional)'), {
-      target: { value: 'opus' },
+      target: { value: 'Be brief.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
 
     await waitFor(() =>
-      expect(within(list).getByText('--model')).toBeInTheDocument(),
+      expect(within(list).getByText('--append-system-prompt')).toBeInTheDocument(),
     );
   });
 
@@ -390,6 +393,160 @@ describe('SettingsView', () => {
 
     await waitFor(() => expect(target).not.toBeInTheDocument());
     expect(within(list).getByText('--plugin-dir')).toBeInTheDocument();
+  });
+
+  it('badges a built-in row and gives it no delete control', async () => {
+    renderSettings();
+    const list = await findList();
+    // The shipped Claude row (`--model opus`) against the user's own
+    // `--plugin-dir`: one badge, one Delete, never both on either.
+    const shipped = within(list).getByTestId('launch-option-row-100');
+    const mine = within(list).getByTestId('launch-option-row-1');
+
+    expect(within(shipped).getByText('Built-in')).toBeInTheDocument();
+    expect(
+      within(shipped).queryByRole('button', {
+        name: 'Delete launch option --model',
+      }),
+    ).toBeNull();
+
+    expect(within(mine).queryByText('Built-in')).toBeNull();
+    expect(
+      within(mine).getByRole('button', {
+        name: 'Delete launch option --plugin-dir',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the default_enabled checkbox operable on a built-in row', async () => {
+    // Ticking a shipped option is the point of shipping it, so the one control
+    // a built-in row keeps must actually round-trip.
+    renderSettings();
+    const list = await findList();
+    const toggle = within(list).getByRole('checkbox', {
+      name: 'Enable launch option --model by default',
+    });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(
+        within(list).getByRole('checkbox', {
+          name: 'Enable launch option --model by default',
+        }),
+      ).toBeChecked(),
+    );
+  });
+
+  it('shows a long value in full with no control to reveal it', async () => {
+    // The shipped Codex `config` row: a JSON object far wider than the row.
+    // The rendered text must still be the whole value — not a truncation of it —
+    // and getting to it must take no interaction.
+    useSettingsStore.setState({ defaultProvider: 'codex' });
+    renderSettings();
+    const list = await findList();
+    const row = within(list).getByTestId('launch-option-row-101');
+
+    expect(
+      within(row).getByTestId('launch-option-value-101').textContent,
+    ).toBe(
+      '{"model_reasoning_summary": "auto", "sandbox_workspace_write": {"writable_roots": ["/home/dev/repos/delta", "/home/dev/repos/scratch"]}}',
+    );
+    expect(within(row).queryByRole('button', { name: /value/i })).toBeNull();
+  });
+
+  it('shows a short value in full too, with no control to hide it', async () => {
+    // The same treatment regardless of length: no threshold decides which rows
+    // show their value.
+    renderSettings();
+    const list = await findList();
+    const row = within(list).getByTestId('launch-option-row-2');
+
+    expect(within(row).getByTestId('launch-option-value-2').textContent).toBe(
+      'auto',
+    );
+    expect(within(row).queryByRole('button', { name: /value/i })).toBeNull();
+  });
+
+  it('populates the add form from a built-in row via Duplicate', async () => {
+    useSettingsStore.setState({ defaultProvider: 'codex' });
+    renderSettings();
+    const list = await findList();
+
+    fireEvent.click(
+      within(within(list).getByTestId('launch-option-row-101')).getByRole(
+        'button',
+        { name: 'Duplicate launch option config' },
+      ),
+    );
+
+    expect(screen.getByLabelText('Label (optional)')).toHaveValue(
+      'Config: reasoning summary',
+    );
+    expect(screen.getByLabelText('Name (the field)')).toHaveValue(
+      'config',
+    );
+    expect(screen.getByLabelText('Value (optional)')).toHaveValue(
+      '{"model_reasoning_summary": "auto", "sandbox_workspace_write": {"writable_roots": ["/home/dev/repos/delta", "/home/dev/repos/scratch"]}}',
+    );
+  });
+
+  it('populates the add form from a user row via Duplicate', async () => {
+    renderSettings();
+    const list = await findList();
+
+    fireEvent.click(
+      within(within(list).getByTestId('launch-option-row-1')).getByRole(
+        'button',
+        { name: 'Duplicate launch option --plugin-dir' },
+      ),
+    );
+
+    expect(screen.getByLabelText('Label (optional)')).toHaveValue('My plugins');
+    expect(screen.getByLabelText('Name (the flag)')).toHaveValue('--plugin-dir');
+    expect(screen.getByLabelText('Value (optional)')).toHaveValue(
+      '/home/dev/plugins',
+    );
+  });
+
+  it('submits a multi-line value from the add form verbatim', async () => {
+    // The value control is a textarea, so a JSON object spread over several
+    // lines can be entered — and must reach the server exactly as typed, since
+    // Codex parses it.
+    const multiline = '{\n  "model_reasoning_summary": "auto"\n}';
+    let body: unknown = null;
+    server.use(
+      http.post('*/api/launch-options', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(
+          {
+            id: 42,
+            label: null,
+            name: 'config',
+            value: multiline,
+            default_enabled: false,
+            created_at: '2026-01-04T00:00:00Z',
+            provider: 'codex',
+            builtin: false,
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    renderSettings();
+    await findList();
+
+    const valueInput = screen.getByLabelText('Value (optional)');
+    expect(valueInput.tagName).toBe('TEXTAREA');
+    fireEvent.change(screen.getByLabelText('Name (the flag)'), {
+      target: { value: 'config' },
+    });
+    fireEvent.change(valueInput, { target: { value: multiline } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add option' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toMatchObject({ name: 'config', value: multiline });
   });
 
   it('closes the settings overlay via Close', async () => {

@@ -147,6 +147,21 @@ pub enum Error {
     #[error("launch option rejected: {0}")]
     LaunchOptionRejected(String),
 
+    /// A delete was requested for a launch option Delta *ships* (a row carrying
+    /// a `builtin_key`). The declared catalog is the source of truth for those
+    /// rows, so they are not the user's to remove: a shipped option that does
+    /// not suit is left unticked, and registering your own row is the supported
+    /// way to differ.
+    ///
+    /// Surfaced as `409`, not `400`: the request value is a perfectly good id
+    /// and the same call against a user row is honoured — it is the *target's*
+    /// current state that forbids the operation, the line
+    /// [`Self::PermissionNotPending`] already draws. `PATCH` on the same row
+    /// still succeeds; ticking `default_enabled` on a shipped option is the
+    /// point of shipping it.
+    #[error("launch option {0} is built in and cannot be deleted")]
+    LaunchOptionIsBuiltin(i64),
+
     /// A worktree was requested for a fresh session, but the selected working
     /// directory is not inside a git repository. The caller named a directory
     /// that cannot host a worktree, so this is surfaced as `400`.

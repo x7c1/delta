@@ -15,8 +15,8 @@ impl SqliteStore {
     ) -> std::result::Result<Vec<CloneRoot>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         // Newest first: the most recently added clone root is the one a user is
-        // most likely to be looking for in the Settings list (mirroring
-        // `list_launch_options`).
+        // most likely to be looking for in the Settings list (the same reason
+        // `list_launch_options` orders the user's own rows that way).
         let mut stmt = conn
             .prepare(
                 "SELECT path, created_at FROM clone_root \
