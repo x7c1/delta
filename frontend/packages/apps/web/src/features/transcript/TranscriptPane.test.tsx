@@ -2444,14 +2444,18 @@ describe('TranscriptPane composer rail', () => {
     expect(screen.getByTestId('composer-rail')).not.toContainElement(notice);
   });
 
-  it('renders an empty rail in a thread', async () => {
+  it('carries only the template button in a thread', async () => {
     renderRailPane();
 
-    // The provider is fixed once a session runs, so nothing occupies the rail
-    // yet — it collapses to zero height rather than reserving a strip.
+    // The provider is fixed once a session runs, so the tabs are gone — but the
+    // prompt-template button rides the rail in BOTH modes, so the strip keeps
+    // its height instead of collapsing as the tabs come and go.
     const rail = await screen.findByTestId('composer-rail');
     expect(within(rail).queryByTestId('provider-selector')).toBeNull();
-    expect(rail.children).toHaveLength(0);
+    expect(
+      within(rail).getByTestId('prompt-templates-button'),
+    ).toBeInTheDocument();
+    expect(rail.children).toHaveLength(1);
   });
 
   it('keeps the rail in the measured overlay, in normal flow above the card', async () => {
