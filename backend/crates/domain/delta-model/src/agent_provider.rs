@@ -26,6 +26,21 @@ pub enum AgentProvider {
 }
 
 impl AgentProvider {
+    /// Every provider Delta knows, in declaration order.
+    ///
+    /// Exists so a caller that must do something *for each* provider — read
+    /// every provider's capability profile, reconcile every provider's shipped
+    /// launch options — iterates one shared list instead of writing its own,
+    /// which is how such lists quietly fall out of step with each other. This is
+    /// still a hand-written list, and nothing makes the compiler verify that it
+    /// is complete — a new variant left out of it would compile. What guards it
+    /// is position: it sits immediately above [`Self::as_str`], whose `match` is
+    /// over `Self` and therefore exhaustive, so a new variant stops the compiler
+    /// a few lines below and the author is already editing here. ([`Self::parse`]
+    /// matches on the wire token rather than on the variant, so it catches
+    /// nothing.)
+    pub const ALL: [AgentProvider; 2] = [AgentProvider::Claude, AgentProvider::Codex];
+
     /// The stable wire token persisted for this provider (the value stored in
     /// the `session.provider` column, `'claude'` for the historical default).
     pub fn as_str(self) -> &'static str {
@@ -55,9 +70,20 @@ mod tests {
 
     #[test]
     fn provider_enum_round_trips() {
-        for p in [AgentProvider::Claude, AgentProvider::Codex] {
+        for p in AgentProvider::ALL {
             assert_eq!(AgentProvider::parse(p.as_str()).unwrap(), p);
         }
+    }
+
+    /// [`AgentProvider::ALL`] lists each variant exactly once — the property
+    /// every "for each provider" caller leans on. Spelled out as the expected
+    /// tokens rather than derived from `ALL` itself, so the list has to be
+    /// updated deliberately.
+    #[test]
+    fn all_lists_every_provider_once() {
+        let mut tokens: Vec<&str> = AgentProvider::ALL.iter().map(|p| p.as_str()).collect();
+        tokens.sort_unstable();
+        assert_eq!(tokens, vec!["claude", "codex"]);
     }
 
     #[test]

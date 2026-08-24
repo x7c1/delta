@@ -53,6 +53,11 @@ const CLONE_ROOT_DUPLICATE_CODE: &str = "clone_root_duplicate";
 /// itself, instead of an anonymous `400`.
 const CLONE_ROOT_NOT_REGISTERED_CODE: &str = "clone_root_not_registered";
 
+/// Stable machine-readable code for a delete aimed at a launch option Delta
+/// ships. The Settings list renders no delete control on such a row, so a
+/// client only meets this from a stale list.
+const LAUNCH_OPTION_BUILTIN_CODE: &str = "launch_option_builtin";
+
 /// Stable machine-readable code for a clone whose destination
 /// (`<clone_root>/<repo_name>`) already exists. The clone panel shows the
 /// message inline on the row; there is no fallback naming, so the way past it
@@ -244,6 +249,13 @@ impl IntoResponse for ApiError {
                     // the caller can fix it, so 400 with the adapter's message
                     // naming the offending key.
                     Error::LaunchOptionRejected(_) => (StatusCode::BAD_REQUEST, None),
+                    // A delete aimed at a launch option Delta ships. A 409,
+                    // not a 400: the id is fine and the same call against a
+                    // user row is honoured — it is the target's state that
+                    // forbids the delete.
+                    Error::LaunchOptionIsBuiltin(_) => {
+                        (StatusCode::CONFLICT, Some(LAUNCH_OPTION_BUILTIN_CODE))
+                    }
                     // Everything else is an internal failure.
                     Error::Tmux(_)
                     | Error::Agent(_)

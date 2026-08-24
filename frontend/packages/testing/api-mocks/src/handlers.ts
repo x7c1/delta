@@ -782,9 +782,19 @@ export function createMockApi(): MockApi {
     // The launch-option registry for the settings screen: list, create, delete.
     // Backed by the shared in-memory store so a created option lists and a
     // deleted one disappears, mirroring the real server's SQLite-backed CRUD.
+    // The rows Delta ships are seeded like any other, so the mock exercises the
+    // same badge / no-delete / 409 paths the real server produces.
     http.get('*/api/launch-options', () => {
-      // Newest first (descending id), as the server returns them.
-      const launch_options = [...store.launchOptions].sort((a, b) => b.id - a.id);
+      // The server's order: the rows Delta ships first (ascending id, i.e.
+      // declared-catalog order), then the user's own newest first (descending
+      // id).
+      const launch_options = [...store.launchOptions].sort((a, b) =>
+        a.builtin !== b.builtin
+          ? Number(b.builtin) - Number(a.builtin)
+          : a.builtin
+            ? a.id - b.id
+            : b.id - a.id,
+      );
       const body: LaunchOptionsResponse = { launch_options };
       return HttpResponse.json(body);
     }),
@@ -811,6 +821,9 @@ export function createMockApi(): MockApi {
         // Omitted `provider` defaults to Claude, matching the real server's
         // back-compat behavior.
         provider: payload.provider ?? 'claude',
+        // Anything registered through the API is the user's own; only Delta's
+        // startup reconcile writes a shipped row.
+        builtin: false,
       };
       store.launchOptions.push(option);
       return HttpResponse.json(option, { status: 201 });
@@ -833,6 +846,20 @@ export function createMockApi(): MockApi {
 
     http.delete('*/api/launch-options/:id', ({ params }) => {
       const id = Number(params.id);
+      const target = store.launchOptions.find((o) => o.id === id);
+      if (target?.builtin) {
+        // A row Delta ships is not the user's to remove: a 409, and the row
+        // stays. The Settings UI omits the control entirely, so this only
+        // answers a stale list — but it has to answer it the way the real
+        // server does, or that path could never be driven without a backend.
+        return HttpResponse.json(
+          {
+            error: `launch option ${id} is built in and cannot be deleted`,
+            code: 'launch_option_builtin',
+          },
+          { status: 409 },
+        );
+      }
       // Deleting an unknown id is a no-op (idempotent), like the real server.
       store.launchOptions = store.launchOptions.filter((o) => o.id !== id);
       return new HttpResponse(null, { status: 204 });

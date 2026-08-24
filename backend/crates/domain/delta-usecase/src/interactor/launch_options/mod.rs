@@ -1,14 +1,18 @@
 //! Launch-option registry use cases: list, create, and delete the custom agent
 //! launch options the user can later multi-select when starting a session, plus
-//! resolving a selection at session start ([`resolve`]).
+//! resolving a selection at session start ([`resolve`]) and reconciling the
+//! options Delta *ships* into the registry at startup.
 //!
-//! Each CRUD operation is a thin pass-through to the [`SessionStore`] port —
-//! the registry has no cross-record invariants to enforce — kept together here
-//! so the surface lives in one place.
+//! List and create are thin pass-throughs to the [`SessionStore`] port — the
+//! registry has no cross-record invariants to enforce. The two exceptions both
+//! come from Delta shipping rows of its own: a delete aimed at one of those is
+//! refused here, and the startup reconcile is the only writer of their content.
+//! Kept together so the surface lives in one place.
 //!
 //! [`SessionStore`]: crate::ports::SessionStore
 
 mod crud;
+mod reconcile_builtin;
 mod resolve;
 
 #[cfg(test)]

@@ -251,10 +251,32 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
     assert_eq!(options[0].provider, AgentProvider::Claude);
 }
 
-/// A database written by the previous generation — stamped 3, with no
-/// `prompt_template` table — is migrated forward on open: the new table is
-/// created, the file is re-stamped, and the launch options that were already
-/// registered are still there.
+/// SQL that undoes every ladder step above `version`, leaving a
+/// current-generation database looking exactly like one an older binary left
+/// behind — the starting point a "migrates forward" test needs.
+///
+/// One place rather than inline per test, so a new step is accounted for once.
+/// Forgetting to extend it does not silently weaken a test: the re-migration
+/// then re-applies a step whose effect is still present and fails loudly (a
+/// duplicate column, a table that already exists).
+fn downgrade_sql(version: u32) -> String {
+    // v5 added `launch_option.builtin_key` plus its unique index.
+    let mut sql = String::from(
+        "DROP INDEX IF EXISTS ux_launch_option_builtin_key;\n\
+         ALTER TABLE launch_option DROP COLUMN builtin_key;\n",
+    );
+    // v4 added the `prompt_template` table.
+    if version < 4 {
+        sql.push_str("DROP TABLE prompt_template;\n");
+    }
+    sql.push_str(&format!("PRAGMA user_version = {version};"));
+    sql
+}
+
+/// A database written by the pre-ladder generation — stamped 3, with no
+/// `prompt_template` table and no `launch_option.builtin_key` — is migrated
+/// forward on open: the pending steps run, the file is re-stamped, and the
+/// launch options that were already registered are still there.
 #[tokio::test]
 async fn a_v3_database_gains_the_prompt_template_table_and_keeps_its_launch_options() {
     let dir = tempfile::tempdir().unwrap();
@@ -262,8 +284,8 @@ async fn a_v3_database_gains_the_prompt_template_table_and_keeps_its_launch_opti
     let path_str = path.to_str().unwrap();
 
     // Build a v3 file: open at the current version, register a launch option,
-    // then undo the v4 step (drop the table, restamp) so the file is exactly
-    // what the previous generation left behind.
+    // then undo every later step so the file is exactly what the previous
+    // generation left behind.
     {
         let store = SqliteStore::open(path_str).unwrap();
         store
@@ -277,8 +299,7 @@ async fn a_v3_database_gains_the_prompt_template_table_and_keeps_its_launch_opti
             .await
             .unwrap();
         let conn = store.conn.lock().await;
-        conn.execute_batch("DROP TABLE prompt_template; PRAGMA user_version = 3;")
-            .unwrap();
+        conn.execute_batch(&downgrade_sql(3)).unwrap();
     }
     assert_eq!(read_user_version(path_str), 3);
 
@@ -306,6 +327,76 @@ async fn a_v3_database_gains_the_prompt_template_table_and_keeps_its_launch_opti
         vec![created],
         "the migrated database writes and reads templates normally"
     );
+}
+
+/// A database written at version 4 — the generation before `builtin_key` — is
+/// migrated forward on open: the column and its unique index arrive, the file is
+/// re-stamped, and every launch option that was already registered survives as
+/// the **user's own** (`builtin_key` null), never mistaken for a row Delta
+/// ships.
+///
+/// That last part is what keeps the delete refusal honest across an upgrade: a
+/// pre-existing row wrongly marked as Delta's would become undeletable.
+#[tokio::test]
+async fn a_v4_database_gains_builtin_key_and_keeps_its_launch_options_as_the_users_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v4.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    {
+        let store = SqliteStore::open(path_str).unwrap();
+        store
+            .create_launch_option(
+                Some("plugins"),
+                "--plugin-dir",
+                Some("/opt/plugins"),
+                true,
+                AgentProvider::Claude,
+            )
+            .await
+            .unwrap();
+        let conn = store.conn.lock().await;
+        conn.execute_batch(&downgrade_sql(4)).unwrap();
+    }
+    assert_eq!(read_user_version(path_str), 4);
+
+    let store = SqliteStore::open(path_str).unwrap();
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    let options = store.list_launch_options().await.unwrap();
+    assert_eq!(options.len(), 1, "the pre-existing launch option survives");
+    assert_eq!(options[0].name, "--plugin-dir");
+    assert!(options[0].default_enabled, "and keeps its own flag");
+    assert_eq!(
+        options[0].builtin_key, None,
+        "a row that predates the column is the user's own, not Delta's"
+    );
+
+    // The new column is usable: a preset materializes and the unique index the
+    // upsert relies on is in place (a second upsert updates rather than
+    // duplicates).
+    let shipped = store
+        .upsert_builtin_launch_option(
+            "claude:model-opus",
+            "Opus",
+            "--model",
+            Some("opus"),
+            AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    let again = store
+        .upsert_builtin_launch_option(
+            "claude:model-opus",
+            "Opus",
+            "--model",
+            Some("opus"),
+            AgentProvider::Claude,
+        )
+        .await
+        .unwrap();
+    assert_eq!(again.id, shipped.id);
+    assert_eq!(store.list_launch_options().await.unwrap().len(), 2);
 }
 
 // The startup gate. The cases below are the contract from the compatibility

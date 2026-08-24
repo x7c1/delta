@@ -15,6 +15,16 @@ pub enum Error {
     /// rows shadowing `UserPromptSubmit` correlation.
     #[error("failed to requeue dispatched sends at boot: {0}")]
     BootReconcile(#[from] delta_usecase::Error),
+
+    /// The boot-time launch-option reconcile failed: the sweep that
+    /// materializes Delta's declared launch-option presets into the registry
+    /// could not run. Fatal at startup rather than logged and skipped — it is
+    /// a plain write against a store that has just been opened and migrated, so
+    /// a failure here means something is wrong with the database, not with the
+    /// catalog. Carrying on would open Settings with an arbitrary subset of the
+    /// shipped options present.
+    #[error("failed to reconcile built-in launch options at boot: {0}")]
+    BuiltinLaunchOptions(delta_usecase::Error),
 }
 
 /// Convenience result alias for this crate.

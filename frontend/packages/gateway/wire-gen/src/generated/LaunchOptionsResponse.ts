@@ -2,7 +2,7 @@
 import type { LaunchOption } from "./LaunchOption";
 
 /**
- * Response for `GET /api/launch-options`: the registered launch options,
- * newest first.
+ * Response for `GET /api/launch-options`: the registered launch options, the
+ * rows Delta ships first, then the user's own newest first.
  */
 export type LaunchOptionsResponse = { launch_options: Array<LaunchOption>, };

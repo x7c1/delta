@@ -19,6 +19,14 @@
 //! The registry is session-independent — the user manages it once and later
 //! multi-selects which options to apply when starting a session.
 //!
+//! Most rows are the user's own. A row whose `builtin_key` is set is one Delta
+//! *ships* — materialized from a [`crate::LaunchOptionPreset`] at startup so
+//! the short list of combinations in daily use is already there — and its
+//! `label`, `name` and `value` belong to the declared catalog rather than to
+//! the user. It is otherwise an ordinary row: an ordinary id that flows through
+//! the picker and the launch path unchanged, and a `default_enabled` flag only
+//! the user sets.
+//!
 //! Each option belongs to a single [`AgentProvider`]: Claude's argv flags mean
 //! nothing to Codex and vice-versa, so the session-start picker only offers the
 //! options registered for the provider the new session will launch on.
@@ -46,7 +54,20 @@ pub struct LaunchOption {
     /// Whether this option starts pre-checked in the session-start picker. The
     /// user can still uncheck it in place for an individual session; this only
     /// seeds the initial selection.
+    ///
+    /// On a shipped row ([`Self::builtin_key`] non-null) this is the one field
+    /// that stays entirely the user's business: reconciliation never touches it.
     pub default_enabled: bool,
     /// ISO-8601 timestamp.
     pub created_at: String,
+    /// `None` for a row the user registered; `Some(key)` for one Delta ships
+    /// (see [`crate::LaunchOptionPreset`]).
+    ///
+    /// It is both the marker and the reconciliation key. A non-null row's
+    /// [`Self::label`], [`Self::name`] and [`Self::value`] are owned by the
+    /// declared catalog — startup reconciliation overwrites them from the
+    /// preset this key names — which is harmless because the REST layer cannot
+    /// edit those three anyway (`PATCH` carries only `default_enabled`). The
+    /// API also refuses to delete such a row, and the UI badges it.
+    pub builtin_key: Option<String>,
 }

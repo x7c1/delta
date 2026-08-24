@@ -10,5 +10,17 @@ import type { AgentProvider } from "./AgentProvider";
  * `default_enabled` marks it to start pre-checked in the session-start picker.
  * `provider` is the provider the option applies to; the session-start picker
  * only offers options matching the new session's provider.
+ * `builtin` marks a row Delta ships rather than one the user registered.
  */
-export type LaunchOption = { id: number, label: string | null, name: string, value: string | null, default_enabled: boolean, created_at: string, provider: AgentProvider, };
+export type LaunchOption = { id: number, label: string | null, name: string, value: string | null, default_enabled: boolean, created_at: string, provider: AgentProvider, 
+/**
+ * Whether Delta ships this option (as opposed to the user having
+ * registered it). A shipped option's `label`, `name` and `value` come from
+ * Delta's declared catalog and cannot be edited or deleted — `DELETE`
+ * answers `409` — while `default_enabled` stays the user's to set.
+ *
+ * Deliberately a boolean rather than the internal catalog key: the only
+ * thing a client does with this is badge the row and drop its delete
+ * control, so exposing the key would be a contract nobody needs.
+ */
+builtin: boolean, };

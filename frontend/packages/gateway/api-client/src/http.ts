@@ -515,8 +515,11 @@ export class ApiClient {
   }
 
   /**
-   * `GET /api/launch-options` — the registered custom launch options (`claude`
-   * CLI flag records), newest first, for the settings screen to manage.
+   * `GET /api/launch-options` — the registered launch options for the settings
+   * screen to manage: the rows Delta ships first, in its declared-catalog
+   * order, then the ones the user registered, newest first. Each row's
+   * `builtin` flag tells the two apart; a built-in cannot be deleted (see
+   * {@link deleteLaunchOption}).
    */
   getLaunchOptions(): Promise<LaunchOptionsResponse> {
     return this.request<LaunchOptionsResponse>('/api/launch-options');
@@ -541,6 +544,9 @@ export class ApiClient {
    * `PATCH /api/launch-options/{id}` — set a launch option's `default_enabled`
    * flag in place (id and `created_at` are preserved). An unknown id is a `404`,
    * surfaced as {@link ApiError}. Returns the updated record.
+   *
+   * Works on a row Delta ships too: `default_enabled` is the one field of a
+   * built-in that is the user's to set.
    */
   updateLaunchOption(
     id: number,
@@ -556,6 +562,10 @@ export class ApiClient {
   /**
    * `DELETE /api/launch-options/{id}` — remove a registered launch option
    * (204). Deleting an unknown id is a no-op, so this is idempotent.
+   *
+   * A row Delta ships (`builtin: true`) is refused with a `409`, surfaced as an
+   * {@link ApiError}: the declared catalog owns those rows. The Settings list
+   * renders no delete control on them, so this only answers a stale list.
    */
   deleteLaunchOption(id: number): Promise<void> {
     return this.requestNoContent(`/api/launch-options/${id}`, {

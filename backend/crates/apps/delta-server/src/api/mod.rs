@@ -487,12 +487,13 @@ pub(crate) async fn workdir_git_branches(
     Ok(Json(WireGitBranchesResponse::from(remote)))
 }
 
-/// `GET /api/launch-options` — the registered custom launch options.
+/// `GET /api/launch-options` — the registered launch options.
 ///
-/// Returns the flat `(label?, name, value?)` records the user has registered as
-/// custom `claude` CLI flags, newest first, for the settings screen to list and
-/// manage. Selecting which to apply when starting a session is a separate
-/// concern handled elsewhere.
+/// Returns the flat `(label?, name, value?)` records for the settings screen to
+/// list and manage: the rows Delta ships first, in declared-catalog order, then
+/// the ones the user registered, newest first. `builtin` tells the two apart.
+/// Selecting which to apply when starting a session is a separate concern
+/// handled elsewhere.
 pub(crate) async fn list_launch_options(
     State(state): State<AppState>,
 ) -> Result<Json<WireLaunchOptionsResponse>, ApiError> {
@@ -553,6 +554,11 @@ pub(crate) async fn create_launch_option(
 /// delete+recreate would churn both); `name`, `value`, and `label` are immutable
 /// through this endpoint. Returns the updated record so the client can render it
 /// without a refetch, or `404` when no option has that id.
+///
+/// Applies to a row Delta ships exactly as it does to the user's own. That the
+/// three content fields are immutable *here* is precisely what lets startup
+/// refresh a shipped row's `label`/`name`/`value` from the declared catalog
+/// without ever overwriting something the user typed.
 pub(crate) async fn update_launch_option(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -570,8 +576,12 @@ pub(crate) async fn update_launch_option(
 
 /// `DELETE /api/launch-options/{id}` — remove a registered launch option.
 ///
-/// Deleting an unknown id is a no-op, so this is idempotent and always replies
-/// `204`.
+/// Deleting an unknown id is a no-op, so this is idempotent and replies `204`.
+/// A row Delta ships is refused with a `409` (see
+/// [`delta_usecase::Error::LaunchOptionIsBuiltin`]): the declared catalog owns
+/// those, so a removed row would simply reappear at the next startup. `PATCH` on
+/// the same row still works — ticking `default_enabled` on a shipped option is
+/// the point of shipping it.
 pub(crate) async fn delete_launch_option(
     State(state): State<AppState>,
     Path(id): Path<i64>,

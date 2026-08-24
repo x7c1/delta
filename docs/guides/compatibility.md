@@ -76,6 +76,12 @@ every send still waiting to be dispatched, is gone — and no re-ingest brings
 it back. The cost of a reset is therefore **not** low, which is why the ladder
 exists.
 
+One narrow exception inside that list: the **built-in** launch options — the
+rows Delta declares and materializes at startup — are rebuildable, because the
+declared catalog, not the database, is their source of truth. They come back by
+themselves on the next boot after a reset. Only their `default_enabled` flags,
+which the user set, are lost with everything else.
+
 ### Operational safety net: the startup gate
 
 A monotonically incremented `SCHEMA_VERSION` constant lives in the

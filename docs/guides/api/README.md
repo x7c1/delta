@@ -89,9 +89,10 @@ status codes and error bodies — is documented here only.
     body's `code` says which case it is: `resume_unavailable` (the session's
     local transcript file is gone, so `claude --resume <id>` has nothing to
     replay), `permission_not_pending`, `question_not_pending`,
-    `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`, or
+    `send_not_cancellable`, `send_not_releasable`, `clone_root_duplicate`,
     `clone_dest_exists` (the one path a clone could land on is already taken —
-    there is no fallback naming). Nothing is mutated in any of these cases.
+    there is no fallback naming), or `launch_option_builtin` (a delete aimed at
+    a launch option Delta ships). Nothing is mutated in any of these cases.
   - `415 Unsupported Media Type` — a request body sent with a non-JSON
     `Content-Type`.
   - `422 Unprocessable Entity` — a syntactically valid JSON body that does not

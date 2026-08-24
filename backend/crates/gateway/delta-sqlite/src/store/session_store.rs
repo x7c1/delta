@@ -394,6 +394,13 @@ impl SessionStore for SqliteStore {
             .await
     }
 
+    async fn launch_option(
+        &self,
+        id: i64,
+    ) -> std::result::Result<Option<LaunchOption>, delta_usecase::Error> {
+        self.launch_option(id).await
+    }
+
     async fn set_launch_option_default_enabled(
         &self,
         id: i64,
@@ -405,6 +412,25 @@ impl SessionStore for SqliteStore {
 
     async fn delete_launch_option(&self, id: i64) -> std::result::Result<(), delta_usecase::Error> {
         self.delete_launch_option(id).await
+    }
+
+    async fn upsert_builtin_launch_option(
+        &self,
+        builtin_key: &str,
+        label: &str,
+        name: &str,
+        value: Option<&str>,
+        provider: AgentProvider,
+    ) -> std::result::Result<LaunchOption, delta_usecase::Error> {
+        self.upsert_builtin_launch_option(builtin_key, label, name, value, provider)
+            .await
+    }
+
+    async fn delete_builtin_launch_options_except(
+        &self,
+        keys: &[&str],
+    ) -> std::result::Result<usize, delta_usecase::Error> {
+        self.delete_builtin_launch_options_except(keys).await
     }
 
     async fn list_prompt_templates(

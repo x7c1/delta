@@ -941,10 +941,19 @@ impl SessionStore for FakeStore {
 
     async fn list_launch_options(&self) -> Result<Vec<LaunchOption>> {
         let g = self.inner.lock().unwrap();
-        // Newest first (descending id), mirroring the SQL store's ordering.
+        // Delta-shipped rows first (ascending id), then the user's own newest
+        // first, mirroring the SQL store's ordering.
         let mut out = g.launch_options.clone();
-        out.sort_by_key(|o| std::cmp::Reverse(o.id));
+        out.sort_by_key(|o| match &o.builtin_key {
+            Some(_) => (0, o.id),
+            None => (1, -o.id),
+        });
         Ok(out)
+    }
+
+    async fn launch_option(&self, id: i64) -> Result<Option<LaunchOption>> {
+        let g = self.inner.lock().unwrap();
+        Ok(g.launch_options.iter().find(|o| o.id == id).cloned())
     }
 
     async fn create_launch_option(
@@ -965,6 +974,7 @@ impl SessionStore for FakeStore {
             default_enabled,
             created_at: FAKE_CREATED_AT.into(),
             provider,
+            builtin_key: None,
         };
         g.launch_options.push(option.clone());
         Ok(option)
@@ -989,6 +999,55 @@ impl SessionStore for FakeStore {
         let mut g = self.inner.lock().unwrap();
         g.launch_options.retain(|o| o.id != id);
         Ok(())
+    }
+
+    async fn upsert_builtin_launch_option(
+        &self,
+        builtin_key: &str,
+        label: &str,
+        name: &str,
+        value: Option<&str>,
+        provider: AgentProvider,
+    ) -> Result<LaunchOption> {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(existing) = g
+            .launch_options
+            .iter_mut()
+            .find(|o| o.builtin_key.as_deref() == Some(builtin_key))
+        {
+            // The declared catalog owns these three; `default_enabled`,
+            // `created_at` and the id stay exactly as they are.
+            existing.label = Some(label.to_owned());
+            existing.name = name.to_owned();
+            existing.value = value.map(str::to_owned);
+            existing.provider = provider;
+            return Ok(existing.clone());
+        }
+        g.next_launch_option_id += 1;
+        let option = LaunchOption {
+            id: g.next_launch_option_id,
+            label: Some(label.to_owned()),
+            name: name.to_owned(),
+            value: value.map(str::to_owned),
+            // Offered, never imposed: a freshly materialized preset starts off.
+            default_enabled: false,
+            created_at: FAKE_CREATED_AT.into(),
+            provider,
+            builtin_key: Some(builtin_key.to_owned()),
+        };
+        g.launch_options.push(option.clone());
+        Ok(option)
+    }
+
+    async fn delete_builtin_launch_options_except(&self, keys: &[&str]) -> Result<usize> {
+        let mut g = self.inner.lock().unwrap();
+        let before = g.launch_options.len();
+        g.launch_options.retain(|o| match &o.builtin_key {
+            // The user's own rows are never in scope of a catalog change.
+            None => true,
+            Some(key) => keys.contains(&key.as_str()),
+        });
+        Ok(before - g.launch_options.len())
     }
 
     async fn list_prompt_templates(&self) -> Result<Vec<PromptTemplate>> {

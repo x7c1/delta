@@ -621,7 +621,11 @@ export interface MockStore {
   nextSendId: number;
   /** Ordinal of the next mock spawn (see {@link mockSpawnSessionId}). */
   nextSpawnOrdinal: number;
-  /** Registered launch options, newest first (the settings-screen registry). */
+  /**
+   * Registered launch options (the settings-screen registry). Listed the way the
+   * server returns them: the rows Delta ships first (ascending `id`, i.e.
+   * declared-catalog order), then the user's own newest first (descending `id`).
+   */
   launchOptions: LaunchOption[];
   /** Id assigned to the next created launch option. */
   nextLaunchOptionId: number;
@@ -744,9 +748,38 @@ export function seedData(): MockStore {
     nextSpawnOrdinal: 1,
     // Seeded options so the settings screen is developable with no backend:
     // two Claude flags (a valued flag and a valueless-value flag) plus one Codex
-    // option so the per-provider picker filter is exercisable without a backend.
-    // Newest first (descending id).
+    // option so the per-provider picker filter is exercisable without a backend,
+    // plus the two rows Delta ships that the UI has to treat differently — one
+    // Claude and one Codex, the latter carrying a long JSON `config` value, which
+    // is the row the copy-and-adapt flow is built around and the one that proves
+    // a value wider than the row is still shown in full.
+    //
+    // In list order: shipped rows first (ascending id), then the user's own
+    // newest first. The shipped ids are deliberately *higher* than the user
+    // rows', so a list handler that merely sorted by id could not pass for the
+    // real ordering by accident.
     launchOptions: [
+      {
+        id: 100,
+        label: 'Opus',
+        name: '--model',
+        value: 'opus',
+        default_enabled: false,
+        created_at: '2026-01-01T00:00:00Z',
+        provider: 'claude',
+        builtin: true,
+      },
+      {
+        id: 101,
+        label: 'Config: reasoning summary',
+        name: 'config',
+        value:
+          '{"model_reasoning_summary": "auto", "sandbox_workspace_write": {"writable_roots": ["/home/dev/repos/delta", "/home/dev/repos/scratch"]}}',
+        default_enabled: false,
+        created_at: '2026-01-01T00:00:00Z',
+        provider: 'codex',
+        builtin: true,
+      },
       {
         id: 3,
         label: 'Codex model',
@@ -755,6 +788,7 @@ export function seedData(): MockStore {
         default_enabled: false,
         created_at: '2026-01-03T00:00:00Z',
         provider: 'codex',
+        builtin: false,
       },
       {
         id: 2,
@@ -764,6 +798,7 @@ export function seedData(): MockStore {
         default_enabled: false,
         created_at: '2026-01-02T00:00:00Z',
         provider: 'claude',
+        builtin: false,
       },
       {
         id: 1,
@@ -773,6 +808,7 @@ export function seedData(): MockStore {
         default_enabled: true,
         created_at: '2026-01-01T00:00:00Z',
         provider: 'claude',
+        builtin: false,
       },
     ],
     nextLaunchOptionId: 4,
