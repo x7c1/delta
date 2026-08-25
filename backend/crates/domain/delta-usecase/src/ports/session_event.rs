@@ -46,15 +46,22 @@ pub enum SessionEvent {
     /// each send as it arrives, so it has no queued→dispatched transition to
     /// announce (see `docs/guides/api/sends.md` for the two dispatch paths).
     SendDispatched { session_id: SessionId, send_id: i64 },
-    /// A dispatched send was abandoned after its echo failed to match twice.
+    /// A dispatched send was abandoned after nothing was ever heard about it
+    /// twice running.
     ///
-    /// Delta correlates a send with the `UserPromptSubmit` it produces by
-    /// text; a mismatch returns the send to `queued` to be re-typed on the
-    /// next idle. The turn machine allows that retry once and then *parks* the
-    /// send: the row is cancelled (so it leaves the open-send list and the
-    /// pending chip stops spinning) and this event says so, carrying the
-    /// composed `text` back so the browser can show what was not delivered
-    /// instead of losing it silently.
+    /// A send's keystrokes go into the pane and Delta waits for the
+    /// `UserPromptSubmit` they produce. When no prompt submission arrives at
+    /// all — the paste was swallowed by a TUI modal, a human pressed Escape —
+    /// the echo deadline expires and returns the send to `queued` to be
+    /// re-typed on the next idle. The turn machine allows that retry once and
+    /// then *parks* the send: the row is cancelled (so it leaves the open-send
+    /// list and the pending chip stops spinning) and this event says so,
+    /// carrying the composed `text` back so the browser can show what was not
+    /// delivered instead of losing it silently.
+    ///
+    /// A prompt that *does* arrive consumes the outstanding send whatever text
+    /// it reports, so a send Claude Code rewrote on echo is delivered, never
+    /// parked. This event means silence, not a mismatch.
     ///
     /// Session-scoped, not thread-scoped: an undelivered message is the user's
     /// problem wherever they happen to be looking.

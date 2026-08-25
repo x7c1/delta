@@ -139,12 +139,15 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
   (see [sends.md](sends.md) for the two dispatch paths): an adapter-backed
   session (Codex) goes `dispatched` → `matched` inside the enqueue call, so its
   rows are effectively never observed in an open status.
-- `matched_uuid` is `null` until the send is correlated, and then carries the id
-  it was correlated with: the uuid of the transcript message it produced for a
-  pane-backed session, the provider's own turn id for an adapter-backed one — so
-  it is not always an id that
-  [`GET /api/threads/{id}/messages`](sessions.md#get-apithreadsidmessages)
-  returns.
+- `matched_uuid` carries the id the send was correlated with, once it was: the
+  uuid of the transcript message it produced for a pane-backed session, the
+  provider's own turn id for an adapter-backed one — so it is not always an id
+  that [`GET /api/threads/{id}/messages`](sessions.md#get-apithreadsidmessages)
+  returns. It is `null` while the send is still `queued` or `dispatched`, and
+  stays `null` on a `matched` pane-backed row that was delivered but attributed
+  to no message — Claude Code rewrote the prompt, so no transcript line carries
+  the send's text (see [sends.md](sends.md#overview)). So `null` never means
+  "not delivered"; `status` alone answers that.
 - `restored_at` is set only on a `queued` row recovered at boot from a
   `dispatched` state a dead server process left behind. Such a row never
   auto-dispatches; it waits for

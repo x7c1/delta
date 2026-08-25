@@ -10,14 +10,35 @@
 //!
 //! - [`TurnState::Idle`] — no turn in flight. The only state a queued send may
 //!   be dispatched from (the *single-outstanding* rule: at most one
-//!   `dispatched` send exists per session, so `UserPromptSubmit` correlation is
-//!   a comparison against that one outstanding send, not a FIFO scan).
+//!   `dispatched` send exists per session, so a `UserPromptSubmit` arriving
+//!   while a send is outstanding is *that* send's prompt — a positional fact,
+//!   needing neither a FIFO scan nor a text comparison).
 //! - [`TurnState::AwaitingEcho`] — Delta dispatched a send (its keystrokes were
 //!   typed, or are held for a resuming pane) and is waiting for the
 //!   `UserPromptSubmit` hook to echo it back.
 //! - [`TurnState::InFlight`] — a turn is running: either the echoed Delta send
 //!   (`send_id: Some`) or a prompt typed straight into the pane
 //!   (`send_id: None`).
+//!
+//! ## Position decides consumption; text decides attribution
+//!
+//! A Claude Code session gives Delta no round-trippable id for a prompt it
+//! typed into the pane: `UserPromptSubmit` carries only the prompt text. Two
+//! separate questions used to hang off one text comparison — *has the
+//! dispatched send's turn started?* and *which thread do this turn's
+//! transcript lines belong to?* — so every rewrite Claude Code applies between
+//! typing and recording (local-command folding, namespace expansion, the
+//! `[Image #N]` prefix) made the machine re-type a message that had already
+//! been delivered.
+//!
+//! They are now split. **Consumption is positional**: while a send is
+//! outstanding and its keystrokes really are in the pane (not held for a
+//! resuming session), the next `UserPromptSubmit` is that send's — whatever it
+//! says — so the caller feeds [`TurnInput::EchoMatched`]. **Attribution stays
+//! textual**: the transcript ingest still claims a user line for the send only
+//! when the text matches, so a rewritten prompt is at worst filed under the
+//! wrong thread, never delivered twice. A send consumed but never attributed
+//! settles as delivered at turn end ([`OrphanedSend::SettleIfUnmatched`]).
 //!
 //! ## Runtime-only, never persisted
 //!
@@ -37,7 +58,8 @@
 //! `dispatched` when the previous process died would survive into a world
 //! where no turn machine awaits its echo, and — being the oldest `dispatched`
 //! row — would shadow `UserPromptSubmit` correlation for every later send
-//! (each one mismatching against it and requeueing in a loop). The other half
+//! (each prompt consumed by that ghost instead of the send it belongs to).
+//! The other half
 //! of the invariant is therefore restored at boot: the composition root
 //! sweeps every persisted `dispatched` row back to `queued` **with the
 //! restored marker set** ([`SessionStore::restore_all_dispatched`]) before
@@ -56,29 +78,33 @@
 //! Some transitions abandon an outstanding (dispatched-but-unmatched) send.
 //! The table reports each such send with a disposition the caller executes:
 //!
-//! - [`OrphanedSend::Requeue`] — the send's turn never started (its echo never
-//!   arrived: the prompt was mangled by interleaved pane typing, or the turn
-//!   ended out from under it). Returning it to `queued` means a composed
-//!   message is never silently lost: it re-dispatches intact when the session
-//!   next goes idle. The worst case is benign duplication (the text was partly
-//!   consumed inside a mangled external prompt *and* re-typed cleanly later),
+//! - [`OrphanedSend::Requeue`] — **nothing was ever heard about the send**: no
+//!   prompt submission arrived while it was outstanding, so its keystrokes
+//!   never reached a prompt (a TUI modal swallowed the paste, a human pressed
+//!   Escape) or the turn ended out from under it. Returning it to `queued`
+//!   means a composed message is never silently lost: it re-dispatches intact
+//!   when the session next goes idle. The worst case is benign duplication
+//!   (the text was partly consumed by the pane *and* re-typed cleanly later),
 //!   which the user can see and recover from — whereas cancelling would drop
-//!   the message with no trace. This is the deliberate mismatch semantics.
-//!   *Bounded*, though: a send whose echo can never match would requeue on
-//!   every attempt, so the caller (`interactor::turn_input`) grants each send a
-//!   finite requeue budget and parks it once the budget is spent. The count is
-//!   history rather than turn state, so it lives on `SessionRuntime` (the
-//!   session actor's runtime state), not in this pure table. The
-//!   [`TurnInput::EchoDeadline`] watchdog rides this same disposition, so
-//!   "nothing was ever heard about this send" recovers through exactly the
-//!   machinery a mismatched echo does.
+//!   the message with no trace. *Bounded*, though: a send that keeps
+//!   disappearing would requeue on every attempt, so the caller
+//!   (`interactor::turn_input`) grants each send a finite requeue budget and
+//!   parks it once the budget is spent. The count is history rather than turn
+//!   state, so it lives on `SessionRuntime` (the session actor's runtime
+//!   state), not in this pure table. The [`TurnInput::EchoDeadline`] watchdog
+//!   is the main producer: it is what turns "no signal at all" into a signal.
+//!   A *mismatched* prompt no longer lands here — position consumes the send
+//!   instead of requeueing it.
 //! - [`OrphanedSend::Cancel`] — the send can never be delivered (its pane is
 //!   gone or its dispatch failed). Cancelling clears it from the open list so
 //!   the failure surfaces instead of wedging the queue.
-//! - [`OrphanedSend::CancelIfUnmatched`] — the send's turn ran (it was echoed)
-//!   and normally matched its transcript line before the turn ended; this is a
-//!   defensive sweep for the rare case it never did, so a stale `dispatched`
-//!   row cannot break the single-outstanding invariant for the next dispatch.
+//! - [`OrphanedSend::SettleIfUnmatched`] — the send's turn ran (a prompt
+//!   submission consumed it) and that turn has now ended. Normally its
+//!   transcript line matched it mid-turn, leaving nothing to do; when the line
+//!   never matched — Claude Code rewrote the prompt — the message was still
+//!   delivered, so the row settles as `matched` with no uuid rather than being
+//!   cancelled. Either way no stale `dispatched` row survives to shadow the
+//!   next dispatch's correlation.
 
 use crate::agent::{AgentEvent, TurnStatus};
 
@@ -101,12 +127,15 @@ pub enum TurnInput {
     /// Delta dispatched a send: its keystrokes were typed into the pane (or are
     /// held for a resuming pane), and its `UserPromptSubmit` echo is expected.
     Dispatch { send_id: i64 },
-    /// `UserPromptSubmit` arrived and its prompt text equals the outstanding
-    /// send's text — the dispatched send's turn is confirmed started.
+    /// `UserPromptSubmit` arrived while this send was the outstanding one and
+    /// its keystrokes were really in the pane — the dispatched send's turn is
+    /// confirmed started. Positional: the prompt text need not equal the send's
+    /// (Claude Code rewrites prompts), and the caller does not compare them.
     EchoMatched { send_id: i64 },
-    /// `UserPromptSubmit` arrived with no matching outstanding send: a prompt
-    /// typed straight into the pane (or a mismatched echo — see the orphan
-    /// semantics on [`OrphanedSend::Requeue`]).
+    /// `UserPromptSubmit` arrived with no send to consume: nothing was
+    /// outstanding, so the prompt was typed straight into the pane — or the
+    /// session is inside its resume window, where the outstanding send's
+    /// keystrokes are still held and so cannot be what submitted.
     ExternalPrompt,
     /// The `Stop` hook fired: the turn completed.
     Stop,
@@ -148,14 +177,15 @@ pub enum TurnInput {
 /// See the module docs for the disposition semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrphanedSend {
-    /// Return the send to `queued`: it never echoed, so it re-dispatches intact
-    /// when the session next goes idle.
+    /// Return the send to `queued`: no prompt was ever submitted for it, so it
+    /// re-dispatches intact when the session next goes idle.
     Requeue(i64),
     /// Cancel the send: it can never be delivered.
     Cancel(i64),
-    /// Cancel the send only if it is still `dispatched` (defensive sweep; it
-    /// normally matched its transcript line during the turn).
-    CancelIfUnmatched(i64),
+    /// Settle the send as delivered (`matched`, no uuid) if it is still
+    /// `dispatched`: its turn ran and has ended, so whether or not a transcript
+    /// line ever claimed it, the message went out.
+    SettleIfUnmatched(i64),
 }
 
 /// The result of applying one input: the next state, what to do with any
@@ -198,7 +228,7 @@ impl Transition {
 /// combination converges to the safest state and is flagged so the caller logs
 /// it, rather than wedging the session.
 pub fn transition(state: TurnState, input: TurnInput) -> Transition {
-    use OrphanedSend::{Cancel, CancelIfUnmatched, Requeue};
+    use OrphanedSend::{Cancel, Requeue, SettleIfUnmatched};
     use TurnInput as I;
     use TurnState as S;
 
@@ -206,8 +236,8 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // ---- Idle ----------------------------------------------------------
         (S::Idle, I::Dispatch { send_id }) => Transition::to(S::AwaitingEcho { send_id }),
         // An echo with nothing outstanding: impossible (the caller only emits
-        // EchoMatched after comparing against an outstanding send), but if it
-        // happens the turn is genuinely starting, so track it.
+        // EchoMatched for a send it read as outstanding), but if it happens the
+        // turn is genuinely starting, so track it.
         (S::Idle, I::EchoMatched { send_id }) => Transition::to(S::InFlight {
             send_id: Some(send_id),
         })
@@ -251,11 +281,16 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
                 Transition::orphaning(next, Requeue(old)).anomaly()
             }
         }
-        // The echo MISMATCHED: the prompt that submitted is not the send Delta
-        // typed (interleaved pane typing mangled it, most likely). Treat the
-        // prompt as the external input it textually is, and requeue the
-        // outstanding send so the composed message re-dispatches intact once
-        // this external turn ends. (Loud-log via `anomalous`.)
+        // A prompt that consumed no send while one is outstanding. Consumption
+        // is positional now, so a mismatched *text* no longer reaches this arm:
+        // the `UserPromptSubmit` handler emits `EchoMatched` whenever a send is
+        // outstanding and its keystrokes are in the pane. What is left is the
+        // resume window — the send's keystrokes are still held, so a prompt
+        // arriving now cannot be its — plus pure defence against a drifting
+        // caller. Both want the same conservative outcome: treat the prompt as
+        // the external input it is, and requeue the outstanding send so its
+        // composed message re-dispatches intact once this turn ends. (Loud-log
+        // via `anomalous`.)
         (S::AwaitingEcho { send_id }, I::ExternalPrompt) => {
             Transition::orphaning(S::InFlight { send_id: None }, Requeue(send_id)).anomaly()
         }
@@ -344,24 +379,26 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // its transcript line; nothing to orphan.
         (S::InFlight { .. }, I::ExternalPrompt) => Transition::to(S::InFlight { send_id: None }),
         // Turn end. A Delta send normally matched its transcript line during
-        // the turn; sweep it defensively in case that line never appeared, so
-        // a stale `dispatched` row cannot break the next dispatch's
-        // single-outstanding correlation.
+        // the turn, leaving this a no-op; when the line never matched (Claude
+        // Code rewrote the prompt) the send was still delivered — a prompt
+        // submission consumed it to get here — so it settles as delivered
+        // rather than being cancelled, and no stale `dispatched` row is left to
+        // break the next dispatch's single-outstanding correlation.
         (S::InFlight { send_id }, I::Stop) => match send_id {
-            Some(id) => Transition::orphaning(S::Idle, CancelIfUnmatched(id)),
+            Some(id) => Transition::orphaning(S::Idle, SettleIfUnmatched(id)),
             None => Transition::to(S::Idle),
         },
         (S::InFlight { send_id }, I::Interrupt) => match send_id {
-            Some(id) => Transition::orphaning(S::Idle, CancelIfUnmatched(id)),
+            Some(id) => Transition::orphaning(S::Idle, SettleIfUnmatched(id)),
             None => Transition::to(S::Idle),
         },
         (S::InFlight { send_id }, I::Close) => match send_id {
-            Some(id) => Transition::orphaning(S::Idle, CancelIfUnmatched(id)),
+            Some(id) => Transition::orphaning(S::Idle, SettleIfUnmatched(id)),
             None => Transition::to(S::Idle),
         },
         (S::InFlight { send_id }, I::DispatchFailed) => {
             let t = match send_id {
-                Some(id) => Transition::orphaning(S::Idle, CancelIfUnmatched(id)),
+                Some(id) => Transition::orphaning(S::Idle, SettleIfUnmatched(id)),
                 None => Transition::to(S::Idle),
             };
             t.anomaly()
@@ -416,7 +453,7 @@ pub fn turn_input_for_agent_event(event: &AgentEvent) -> Option<TurnInput> {
 
 #[cfg(test)]
 mod tests {
-    use super::OrphanedSend::{Cancel, CancelIfUnmatched, Requeue};
+    use super::OrphanedSend::{Cancel, Requeue, SettleIfUnmatched};
     use super::TurnInput as I;
     use super::TurnState as S;
     use super::*;
@@ -476,10 +513,10 @@ mod tests {
             (S::InFlight { send_id: Some(7) }, I::Dispatch { send_id: 9 },    S::AwaitingEcho { send_id: 9 },   None,                        true),
             (S::InFlight { send_id: Some(7) }, I::EchoMatched { send_id: 9 }, S::InFlight { send_id: Some(9) }, None,                        true),
             (S::InFlight { send_id: Some(7) }, I::ExternalPrompt,             S::InFlight { send_id: None },    None,                        false),
-            (S::InFlight { send_id: Some(7) }, I::Stop,                       S::Idle,                          Some(CancelIfUnmatched(7)),  false),
-            (S::InFlight { send_id: Some(7) }, I::Interrupt,                  S::Idle,                          Some(CancelIfUnmatched(7)),  false),
-            (S::InFlight { send_id: Some(7) }, I::Close,                      S::Idle,                          Some(CancelIfUnmatched(7)),  false),
-            (S::InFlight { send_id: Some(7) }, I::DispatchFailed,             S::Idle,                          Some(CancelIfUnmatched(7)),  true),
+            (S::InFlight { send_id: Some(7) }, I::Stop,                       S::Idle,                          Some(SettleIfUnmatched(7)),  false),
+            (S::InFlight { send_id: Some(7) }, I::Interrupt,                  S::Idle,                          Some(SettleIfUnmatched(7)),  false),
+            (S::InFlight { send_id: Some(7) }, I::Close,                      S::Idle,                          Some(SettleIfUnmatched(7)),  false),
+            (S::InFlight { send_id: Some(7) }, I::DispatchFailed,             S::Idle,                          Some(SettleIfUnmatched(7)),  true),
             (S::InFlight { send_id: Some(7) }, I::Cancel { send_id: 9 },      S::InFlight { send_id: Some(7) }, None,                        true),
             (S::InFlight { send_id: Some(7) }, I::EchoDeadline { send_id: 9 },S::InFlight { send_id: Some(7) }, None,                        false),
             // InFlight { None }
@@ -541,11 +578,13 @@ mod tests {
     ///
     /// Codex tracks its turn `ExternalPrompt`-style (`send_id: None`), because
     /// `turn/start` is the authoritative confirmation and there is no echo to
-    /// match. So at turn end (`Stop`) the transition orphans **nothing** — a
-    /// successful send is never cancelled. Claude's send rides `AwaitingEcho →
-    /// InFlight { Some }`, whose `Stop` defensively `CancelIfUnmatched`es the
-    /// send (a no-op once the echo matched it). Routing a Codex send through
-    /// Claude's path would therefore cancel a send Codex never echoes.
+    /// match. So at turn end (`Stop`) the transition orphans **nothing**, and
+    /// the send it already marked matched from the provider's turn id is left
+    /// alone. Claude's send rides `AwaitingEcho → InFlight { Some }`, whose
+    /// `Stop` sweeps it with `SettleIfUnmatched` (a no-op once the transcript
+    /// line matched it, and otherwise the settle that records the delivery).
+    /// Routing a Codex send through Claude's path would therefore hand it a
+    /// disposition for a row Codex has already settled its own way.
     #[test]
     fn codex_external_prompt_turn_end_orphans_nothing_unlike_claude() {
         // Codex: an external-prompt turn completing orphans nothing.
@@ -561,8 +600,8 @@ mod tests {
             "a completed Codex turn cancels nothing"
         );
 
-        // Claude (unchanged): a dispatched+echoed send is swept defensively at
-        // turn end. This is exactly why Codex must NOT take this path.
+        // Claude: a dispatched+consumed send is swept at turn end. This is
+        // exactly why Codex must NOT take this path.
         let claude_in_flight = transition(
             transition(S::Idle, I::Dispatch { send_id: 7 }).next,
             I::EchoMatched { send_id: 7 },
@@ -573,10 +612,10 @@ mod tests {
             transition(claude_in_flight, I::Stop),
             Transition {
                 next: S::Idle,
-                orphaned: Some(CancelIfUnmatched(7)),
+                orphaned: Some(SettleIfUnmatched(7)),
                 anomalous: false,
             },
-            "Claude's echo path stays byte-identical"
+            "Claude's echo path settles its own send at turn end"
         );
     }
 

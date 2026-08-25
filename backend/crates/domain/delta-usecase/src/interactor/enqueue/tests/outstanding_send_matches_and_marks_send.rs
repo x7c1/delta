@@ -1,3 +1,12 @@
+//! The ordinary path, where position and text agree: the prompt that submitted
+//! consumes the outstanding send (position) *and* its transcript line reads
+//! back as that send's own text (attribution), so the send is bound to a real
+//! message uuid and the turn is announced on the thread it was composed for.
+//!
+//! This is the full outcome a rewritten echo cannot reach: that one is consumed
+//! all the same, but settles as delivered with no uuid — see
+//! `turn_end_settles_a_consumed_send_as_delivered`.
+
 use delta_model::{MessageUuid, SendStatus, SessionId};
 
 use crate::interactor::context::{frame_branch_entry_context, frame_locator_context};

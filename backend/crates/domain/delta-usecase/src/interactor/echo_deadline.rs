@@ -1,8 +1,8 @@
 //! The echo-deadline watchdog: the last-resort recovery for a dispatched send
 //! whose keystrokes vanish without leaving any trace at all.
 //!
-//! Every other recovery Delta has is event-driven — a mismatched echo, a turn
-//! end, a compact summary, a browser cancel — and each needs *something* to
+//! Every other recovery Delta has is event-driven — a turn end, a compact
+//! summary, a browser cancel — and each needs *something* to
 //! arrive before it can act. The failure this file exists for produces nothing
 //! to arrive: Claude Code's TUI puts up an interactive modal between turns, the
 //! pasted text is swallowed whole (it appears in no scrollback, composer, or

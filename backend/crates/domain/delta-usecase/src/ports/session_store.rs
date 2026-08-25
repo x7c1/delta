@@ -395,11 +395,16 @@ pub trait SessionStore: std::marker::Send + Sync {
     /// The outstanding dispatched send for a session, if any.
     ///
     /// Under the single-outstanding dispatch rule at most one `dispatched` row
-    /// exists per session, so this *is* the send `UserPromptSubmit` correlation
-    /// and transcript attribution compare against (by trimmed-text equality at
-    /// the call sites). Defined as the oldest `dispatched` row so that, should
-    /// the invariant ever be violated, the comparison still deterministically
-    /// picks the earliest.
+    /// exists per session, so this *is* the send both `UserPromptSubmit`
+    /// correlation and transcript attribution work from — though they use it
+    /// differently. The hook **consumes** this send by position: its keystrokes
+    /// are already in the pane, so the prompt that submits is its own whatever
+    /// text the hook reports (Claude Code rewrites prompts), and no comparison
+    /// happens there. Attribution still claims a transcript line for it only by
+    /// trimmed-text equality, so a rewritten prompt leaves the row consumed but
+    /// unattributed until [`Self::settle_send_delivered`] finishes it at turn
+    /// end. Defined as the oldest `dispatched` row so that, should the
+    /// invariant ever be violated, both deterministically pick the earliest.
     async fn head_dispatched_send(&self, session_id: &SessionId) -> Result<Option<Send>>;
 
     /// All `dispatched` sends for a session, oldest first (ascending `id`).
@@ -415,6 +420,28 @@ pub trait SessionStore: std::marker::Send + Sync {
 
     /// Mark a dispatched send matched to a transcript message uuid.
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()>;
+
+    /// Settle a send as **delivered** without a transcript uuid — moving it to
+    /// `matched` only while it is still `dispatched` — returning whether a row
+    /// actually transitioned.
+    ///
+    /// The unattributed sibling of [`Self::mark_send_matched`]. Consumption of
+    /// a send is decided by *position* (a prompt submitted while that send was
+    /// the outstanding one), attribution by *text* (a transcript line equal to
+    /// it). When the two disagree — Claude Code rewrote the prompt between
+    /// typing and recording, so no ingested line ever equals the send's text —
+    /// the message was still delivered, and the turn it started has now ended.
+    /// Cancelling such a row would record a delivered message as undelivered
+    /// (and re-surface it to the user as a failure); leaving it `dispatched`
+    /// would shadow [`Self::head_dispatched_send`] for the next send. So it
+    /// settles as `matched` with `matched_uuid` left `NULL`: delivered, with no
+    /// transcript line claimed.
+    ///
+    /// The `WHERE status = 'dispatched'` guard makes it a no-op (returning
+    /// `false`) for a row that already matched its line, was cancelled or
+    /// parked, or does not exist — this only ever finishes a still-outstanding
+    /// row, never revives a terminal one.
+    async fn settle_send_delivered(&self, id: i64) -> Result<bool>;
 
     /// The thread of the latest already-persisted **user** message in a
     /// session, used as the carry-forward thread for following non-user lines.
@@ -898,6 +925,10 @@ impl SessionStore for Box<dyn SessionStore> {
 
     async fn mark_send_matched(&self, id: i64, matched_uuid: &MessageUuid) -> Result<()> {
         (**self).mark_send_matched(id, matched_uuid).await
+    }
+
+    async fn settle_send_delivered(&self, id: i64) -> Result<bool> {
+        (**self).settle_send_delivered(id).await
     }
 
     async fn latest_user_thread(&self, session_id: &SessionId) -> Result<Option<ThreadId>> {

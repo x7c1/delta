@@ -10,10 +10,13 @@
 //! The table is a pure function of (state, input), so anything that depends on
 //! *history* lives here instead. The requeue budget is the one such rule: the
 //! table says "requeue this orphaned send", and this file decides whether that
-//! send has already had its retry — parking it if it has, so a send whose echo
-//! can never match stops re-dispatching instead of looping forever. Every
-//! producer of [`OrphanedSend::Requeue`] shares that budget, the echo-deadline
-//! watchdog ([`crate::interactor::echo_deadline`]) included.
+//! send has already had its retry — parking it if it has, so a send nothing is
+//! ever heard about stops re-dispatching instead of looping forever. Every
+//! producer of [`OrphanedSend::Requeue`] shares that budget, and after prompt
+//! consumption became positional the echo-deadline watchdog
+//! ([`crate::interactor::echo_deadline`]) is essentially its only live one: a
+//! prompt that arrives consumes the outstanding send whatever its text says,
+//! so only genuine silence still requeues.
 
 use crate::agent::{AgentEvent, TurnStatus};
 use crate::error::Result;
@@ -123,22 +126,27 @@ where
                 self.state.forget_requeues(send_id);
                 self.store.cancel_send(send_id).await?;
             }
-            Some(OrphanedSend::CancelIfUnmatched(send_id)) => {
-                // The send normally matched its transcript line during the
-                // turn (leaving `dispatched`); this defensive sweep only fires
-                // when that line never appeared, so a stale `dispatched` row
-                // cannot shadow the next dispatch's correlation.
-                if let Some(head) = self.store.head_dispatched_send(self.id).await? {
-                    if head.id == send_id {
-                        tracing::warn!(
-                            session_id = %self.id,
-                            send_id,
-                            "turn ended but its send never matched a transcript line; \
-                             cancelling the stale dispatched row"
-                        );
-                        self.state.forget_requeues(send_id);
-                        self.store.cancel_send(send_id).await?;
-                    }
+            Some(OrphanedSend::SettleIfUnmatched(send_id)) => {
+                // The send normally matched its transcript line during the turn
+                // (leaving `dispatched`), which makes the guarded update a
+                // silent no-op. It only bites when that line never appeared —
+                // Claude Code rewrote the prompt, so nothing ingested equalled
+                // the send's text. The message still went out (a prompt
+                // submission is what consumed the send to reach `InFlight` at
+                // all) and its turn has now ended, so the row settles as
+                // *delivered* with no uuid: cancelling would report a delivered
+                // message as failed, and leaving it `dispatched` would shadow
+                // the next dispatch's correlation.
+                let settled = self.store.settle_send_delivered(send_id).await?;
+                if settled {
+                    tracing::info!(
+                        session_id = %id,
+                        send_id,
+                        "turn ended with its send unattributed: no transcript line matched \
+                         the dispatched text, so the send settles as delivered without a \
+                         matched uuid"
+                    );
+                    self.state.forget_requeues(send_id);
                 }
             }
         }

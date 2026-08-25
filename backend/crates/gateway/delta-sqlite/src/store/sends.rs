@@ -280,6 +280,25 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Settle a still-`dispatched` send as delivered, leaving `matched_uuid`
+    /// `NULL` because no transcript line claimed it. The status guard keeps a
+    /// row that already matched, was cancelled, or was parked untouched — see
+    /// the port docs for why "delivered but unattributed" is `matched` rather
+    /// than `cancelled`.
+    pub(super) async fn settle_send_delivered(
+        &self,
+        id: i64,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let affected = conn
+            .execute(
+                "UPDATE send SET status = 'matched' WHERE id = ?1 AND status = 'dispatched'",
+                params![id],
+            )
+            .map_err(Error::from)?;
+        Ok(affected > 0)
+    }
+
     pub(super) async fn cancel_send(
         &self,
         id: i64,

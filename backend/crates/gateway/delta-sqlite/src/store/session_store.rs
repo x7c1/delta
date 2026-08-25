@@ -245,6 +245,13 @@ impl SessionStore for SqliteStore {
         self.mark_send_matched(id, matched_uuid).await
     }
 
+    async fn settle_send_delivered(
+        &self,
+        id: i64,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        self.settle_send_delivered(id).await
+    }
+
     async fn latest_user_thread(
         &self,
         session_id: &SessionId,
