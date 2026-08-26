@@ -76,13 +76,18 @@ async fn unmatchable_send_is_never_redispatched() {
         "a consumed send's prompt is not external input; got {prompt_events:?}"
     );
 
-    // The turn ends. The send never matched a transcript line (nothing equals
-    // its text), but it WAS delivered, so it settles as `matched` — not
-    // cancelled, and not left `dispatched` to shadow the next send.
+    // The turn ends. Nothing in the transcript equals the send's text, but the
+    // rewritten user line consumed it by position when it was ingested, so the
+    // row is `matched` against that line — not cancelled, and not left
+    // `dispatched` to shadow the next send.
     ix.on_stop(stop()).await.unwrap();
     let settled = ix.store().send(send.id).await.unwrap().expect("send row");
     assert_eq!(settled.status, SendStatus::Matched);
-    assert_eq!(settled.matched_uuid, None, "delivered, but unattributed");
+    assert_eq!(
+        settled.matched_uuid.as_ref().map(|u| u.as_str()),
+        Some("u-0"),
+        "delivered, and bound to the line that came back for it",
+    );
 
     // Delivered exactly once: the now-idle session has nothing left to re-type.
     // Written as a literal so any future re-type has to be a deliberate edit

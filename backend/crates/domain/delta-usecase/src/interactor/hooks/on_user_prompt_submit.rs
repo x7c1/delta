@@ -47,18 +47,26 @@ where
     /// requeued the send, so the same text was typed again, one model turn per
     /// attempt) or wedging it as permanently "In Progress".
     ///
-    /// ## Which thread its lines belong to is still decided by TEXT
+    /// ## Which thread its lines belong to is decided by POSITION too
     ///
-    /// Attribution keeps using [`claude_format::prompt_echoes_send`] (exact
-    /// equality for a plain send, widened to absorb the image-attachment
-    /// rewrite): only a textual match resolves the send *this* prompt is,
-    /// which is what supplies the `additionalContext` locator quote and the
-    /// [`SessionEvent::TurnStarted`] announcement, and — inside
-    /// [`Self::sync_transcript`], by comparing ingested user lines — the
-    /// `mark_send_matched` that binds the send to a transcript uuid. A
-    /// consumed-but-unattributed send is settled as delivered when its turn
-    /// ends (`OrphanedSend::SettleIfUnmatched`), so the row never lingers
+    /// Transcript attribution consumes the same send by the same positional
+    /// argument (see `delta_attribution`'s `thread_resolution`): the send's user
+    /// line — and the reply that follows it — land on the send's thread even
+    /// when Claude Code rewrote the text, and `mark_send_matched` binds the send
+    /// to that line's uuid inside [`Self::sync_transcript`]. A consumed send
+    /// whose turn ends before any user line reaches the transcript is settled as
+    /// delivered (`OrphanedSend::SettleIfUnmatched`), so the row never lingers
     /// `dispatched` and is never reported as failed.
+    ///
+    /// [`claude_format::prompt_echoes_send`] (exact equality for a plain send,
+    /// widened to absorb the image-attachment rewrite) is left with the two
+    /// announcements made *here*, before any line has been ingested.
+    /// [`SessionEvent::TurnStarted`] needs it: it names a matched uuid, and only
+    /// a prompt that still reads as the send's own text can be paired with one
+    /// this early. The `additionalContext` locator quote (and the branch-entry
+    /// note) is keyed on the same verdict, which this change leaves as it was —
+    /// so a rewritten prompt still reaches Claude without its quote frame, even
+    /// though the line it produces is now attributed to the send's branch.
     ///
     /// [`SessionEvent::ExternalInput`] follows consumption, not text: it is
     /// emitted only when NO send was consumed. Announcing a rewritten echo as
@@ -107,9 +115,11 @@ where
             .as_ref()
             .filter(|_| !self.state.is_resuming())
             .cloned();
-        // ATTRIBUTION, by text: only a prompt that still reads as the send's
-        // own text resolves *which* send it is, which is what the locator-quote
-        // note and the turn announcement are keyed on.
+        // RECOGNITION, by text: the transcript fold attributes the send's lines
+        // by position, but the turn announcement made here names a matched uuid
+        // and so still needs the prompt to read as the send's own text. The
+        // locator-quote note below is keyed on the same verdict — unchanged
+        // here, so a rewritten prompt gets no quote frame.
         let attributed = outstanding
             .as_ref()
             .filter(|send| claude_format::prompt_echoes_send(&send.text, &hook.prompt))
@@ -146,8 +156,8 @@ where
                         "UserPromptSubmit does not equal the outstanding send's text \
                          (Claude Code rewrote the prompt, most likely): the send is the \
                          only thing that could have submitted here, so its turn starts \
-                         and it is NOT re-typed; only its thread attribution is left to \
-                         the transcript text"
+                         and it is NOT re-typed; its lines are still attributed to the \
+                         send's thread when the transcript catches up"
                     );
                 }
                 self.apply_turn_input(TurnInput::EchoMatched {

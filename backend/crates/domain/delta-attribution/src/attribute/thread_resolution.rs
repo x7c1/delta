@@ -28,7 +28,8 @@ pub(super) fn resolve_line_thread(
     is_human_turn: bool,
     is_task_notification: bool,
 ) -> (ThreadId, Option<MessageUuid>) {
-    // Compare against the head outstanding send; a match consumes it.
+    // Correlate against the head outstanding send: a human turn consumes it by
+    // POSITION, a command line by command name.
     if is_local_command_name_line {
         // The bare command-name line of a local-command group (e.g.
         // `/review-pr`). Delta dispatched it as a send and the turn machine
@@ -57,6 +58,9 @@ pub(super) fn resolve_line_thread(
             effects.push(Effect::SendMatched {
                 send_id: pending.id,
                 matched_uuid: line_uuid.clone(),
+                // The command name correlated, so the send is recognized in
+                // full: nothing to warn about.
+                attributed: true,
             });
             effects.push(Effect::LocalCommandTurnEnded);
         }
@@ -92,36 +96,48 @@ pub(super) fn resolve_line_thread(
             effects.push(Effect::SendMatched {
                 send_id: pending.id,
                 matched_uuid: line_uuid.clone(),
+                // The notice named the send's own command, so the send is
+                // recognized in full: nothing to warn about.
+                attributed: true,
             });
             effects.push(Effect::LocalCommandTurnEnded);
         }
         (state.carry_thread, None)
     } else if is_human_turn {
-        // Text-based correlation against the head outstanding send. Exact
-        // equality for a plain send; `prompt_echoes_send` additionally
-        // recognizes the rewrite Claude Code applies to an image-attachment
-        // send, whose swallowed path line comes back as a leading `[Image #N]`
-        // placeholder — a send exact equality alone could never match.
-        let head_matches = state
-            .outstanding
-            .front()
-            .is_some_and(|send| claude_format::prompt_echoes_send(&send.text, trimmed));
-        match head_matches
-            .then(|| state.outstanding.pop_front())
-            .flatten()
-        {
+        // POSITIONAL correlation against the head outstanding send, mirroring
+        // the rule the turn machine already consumes a send by (see
+        // `on_user_prompt_submit`): under the single-outstanding dispatch rule
+        // at most one send is outstanding and its keystrokes are already in the
+        // pane, so the first human user line to arrive while it is outstanding
+        // IS its echo — whatever the text turned out to be. Claude Code rewrites
+        // a prompt freely between the keystrokes landing and the transcript
+        // being written (the `[Image #N]` attachment placeholder, and shapes we
+        // have not catalogued yet), and a prompt genuinely typed into the pane
+        // in that window was credited to the send by the turn machine anyway.
+        // Deciding by text here would file the send's own user line — and the
+        // whole reply that follows it — on `main`, so from the send's thread the
+        // turn simply vanishes.
+        //
+        // The text comparison keeps exactly one job: `prompt_echoes_send` (exact
+        // equality for a plain send, widened to absorb the image-attachment
+        // rewrite) says whether the echo is recognizable as the send's text, and
+        // that verdict rides along as `SendMatched::attributed` so a new rewrite
+        // shape is visible in the log the first time it happens. It gates
+        // nothing.
+        match state.outstanding.pop_front() {
             Some(pending) => {
                 effects.push(Effect::SendMatched {
                     send_id: pending.id,
                     matched_uuid: line_uuid.clone(),
+                    attributed: claude_format::prompt_echoes_send(&pending.text, trimmed),
                 });
                 state.carry_thread = pending.thread_id;
                 (pending.thread_id, pending.semantic_parent_uuid)
             }
             None if is_queued_command => {
-                // A LEGACY `queued_command` attachment with no matching
-                // send is a programmatic injection, not stray pane typing,
-                // so it must not tear the active turn back to `main` —
+                // A LEGACY `queued_command` attachment arriving with NO
+                // outstanding send is a programmatic injection, not stray pane
+                // typing, so it must not tear the active turn back to `main` —
                 // inherit the current thread the way a non-human line does.
                 // (Harness-injected `<task-notification>` lines, which
                 // current claude delivers as plain user lines rather than
@@ -132,6 +148,9 @@ pub(super) fn resolve_line_thread(
                 (state.carry_thread, None)
             }
             None => {
+                // No send is outstanding, so nothing Delta dispatched can
+                // explain this line: it is input typed straight into the pane.
+                // It starts a new turn on `main` and resets the carry.
                 state.carry_thread = main_thread;
                 (main_thread, None)
             }

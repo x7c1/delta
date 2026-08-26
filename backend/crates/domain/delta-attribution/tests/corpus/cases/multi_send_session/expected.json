@@ -66,12 +66,14 @@
     {
       "kind": "send_matched",
       "send_id": 1,
-      "matched_uuid": "u0"
+      "matched_uuid": "u0",
+      "attributed": true
     },
     {
       "kind": "send_matched",
       "send_id": 2,
-      "matched_uuid": "u2"
+      "matched_uuid": "u2",
+      "attributed": true
     },
     {
       "kind": "resolve_permission",
@@ -81,7 +83,8 @@
     {
       "kind": "send_matched",
       "send_id": 3,
-      "matched_uuid": "u6"
+      "matched_uuid": "u6",
+      "attributed": true
     }
   ]
 }

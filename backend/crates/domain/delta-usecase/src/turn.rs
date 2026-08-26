@@ -20,7 +20,7 @@
 //!   (`send_id: Some`) or a prompt typed straight into the pane
 //!   (`send_id: None`).
 //!
-//! ## Position decides consumption; text decides attribution
+//! ## Position decides consumption and attribution; text only flags a rewrite
 //!
 //! A Claude Code session gives Delta no round-trippable id for a prompt it
 //! typed into the pane: `UserPromptSubmit` carries only the prompt text. Two
@@ -29,16 +29,20 @@
 //! transcript lines belong to?* — so every rewrite Claude Code applies between
 //! typing and recording (local-command folding, namespace expansion, the
 //! `[Image #N]` prefix) made the machine re-type a message that had already
-//! been delivered.
+//! been delivered, and filed the turn's lines under the wrong thread.
 //!
-//! They are now split. **Consumption is positional**: while a send is
-//! outstanding and its keystrokes really are in the pane (not held for a
-//! resuming session), the next `UserPromptSubmit` is that send's — whatever it
-//! says — so the caller feeds [`TurnInput::EchoMatched`]. **Attribution stays
-//! textual**: the transcript ingest still claims a user line for the send only
-//! when the text matches, so a rewritten prompt is at worst filed under the
-//! wrong thread, never delivered twice. A send consumed but never attributed
-//! settles as delivered at turn end ([`OrphanedSend::SettleIfUnmatched`]).
+//! Both are now answered by position. **Consumption is positional**: while a
+//! send is outstanding and its keystrokes really are in the pane (not held for
+//! a resuming session), the next `UserPromptSubmit` is that send's — whatever
+//! it says — so the caller feeds [`TurnInput::EchoMatched`]. **Attribution is
+//! positional too**: the transcript ingest claims the first human user line
+//! after the dispatch for that send by the same argument, binding the row to
+//! that line's uuid and attributing the line (and the reply that follows it) to
+//! the send's thread, rewritten text and all. Text keeps one job: reporting
+//! whether the echo came back verbatim, so a new rewrite shows up in the log. A
+//! send whose turn ends before any human line is ingested is claimed by no
+//! line, and settles as delivered at turn end
+//! ([`OrphanedSend::SettleIfUnmatched`]).
 //!
 //! ## Runtime-only, never persisted
 //!
@@ -99,12 +103,14 @@
 //!   gone or its dispatch failed). Cancelling clears it from the open list so
 //!   the failure surfaces instead of wedging the queue.
 //! - [`OrphanedSend::SettleIfUnmatched`] — the send's turn ran (a prompt
-//!   submission consumed it) and that turn has now ended. Normally its
-//!   transcript line matched it mid-turn, leaving nothing to do; when the line
-//!   never matched — Claude Code rewrote the prompt — the message was still
-//!   delivered, so the row settles as `matched` with no uuid rather than being
-//!   cancelled. Either way no stale `dispatched` row survives to shadow the
-//!   next dispatch's correlation.
+//!   submission consumed it) and that turn has now ended. Normally a transcript
+//!   line claimed the row mid-turn — a rewritten echo claims it just the same,
+//!   attribution being positional — leaving nothing to do; when no human line
+//!   was ingested at all before the turn ended (or a `/compact` swallowed it),
+//!   nothing claimed the row, yet the message was still delivered, so it
+//!   settles as `matched` with no uuid rather than being cancelled. Either way
+//!   no stale `dispatched` row survives to shadow the next dispatch's
+//!   correlation.
 
 use crate::agent::{AgentEvent, TurnStatus};
 
@@ -378,12 +384,13 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // its own TUI). The previous turn's send was echoed and matches via
         // its transcript line; nothing to orphan.
         (S::InFlight { .. }, I::ExternalPrompt) => Transition::to(S::InFlight { send_id: None }),
-        // Turn end. A Delta send normally matched its transcript line during
-        // the turn, leaving this a no-op; when the line never matched (Claude
-        // Code rewrote the prompt) the send was still delivered — a prompt
-        // submission consumed it to get here — so it settles as delivered
-        // rather than being cancelled, and no stale `dispatched` row is left to
-        // break the next dispatch's single-outstanding correlation.
+        // Turn end. A Delta send is normally claimed by a transcript line
+        // during the turn, leaving this a no-op; when no human line was
+        // ingested before the turn ended, nothing claimed it, yet the send was
+        // still delivered — a prompt submission consumed it to get here — so it
+        // settles as delivered rather than being cancelled, and no stale
+        // `dispatched` row is left to break the next dispatch's
+        // single-outstanding correlation.
         (S::InFlight { send_id }, I::Stop) => match send_id {
             Some(id) => Transition::orphaning(S::Idle, SettleIfUnmatched(id)),
             None => Transition::to(S::Idle),

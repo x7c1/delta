@@ -127,24 +127,25 @@ where
                 self.store.cancel_send(send_id).await?;
             }
             Some(OrphanedSend::SettleIfUnmatched(send_id)) => {
-                // The send normally matched its transcript line during the turn
-                // (leaving `dispatched`), which makes the guarded update a
-                // silent no-op. It only bites when that line never appeared —
-                // Claude Code rewrote the prompt, so nothing ingested equalled
-                // the send's text. The message still went out (a prompt
-                // submission is what consumed the send to reach `InFlight` at
-                // all) and its turn has now ended, so the row settles as
-                // *delivered* with no uuid: cancelling would report a delivered
-                // message as failed, and leaving it `dispatched` would shadow
-                // the next dispatch's correlation.
+                // A transcript line normally claimed the send during the turn
+                // (leaving `matched`), which makes the guarded update a silent
+                // no-op — a rewritten echo claims it just the same, since
+                // attribution is positional. It only bites when no human line
+                // was ingested at all before the turn ended: the turn stopped
+                // early, or a `/compact` swallowed the echo. The message still
+                // went out (a prompt submission is what consumed the send to
+                // reach `InFlight` at all) and its turn has now ended, so the
+                // row settles as *delivered* with no uuid: cancelling would
+                // report a delivered message as failed, and leaving it
+                // `dispatched` would shadow the next dispatch's correlation.
                 let settled = self.store.settle_send_delivered(send_id).await?;
                 if settled {
                     tracing::info!(
                         session_id = %id,
                         send_id,
-                        "turn ended with its send unattributed: no transcript line matched \
-                         the dispatched text, so the send settles as delivered without a \
-                         matched uuid"
+                        "turn ended with its send unattributed: no transcript user line was \
+                         ingested for it before the turn ended, so the send settles as \
+                         delivered without a matched uuid"
                     );
                     self.state.forget_requeues(send_id);
                 }

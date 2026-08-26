@@ -3,8 +3,12 @@
 //! back as that send's own text (attribution), so the send is bound to a real
 //! message uuid and the turn is announced on the thread it was composed for.
 //!
-//! This is the full outcome a rewritten echo cannot reach: that one is consumed
-//! all the same, but settles as delivered with no uuid — see
+//! What a rewritten echo cannot reach is the announcement, not the binding: it
+//! consumes the send the same way, binds the row to its uuid, and lands on the
+//! send's thread, but the text check fails, so the hook sends no `TurnStarted`
+//! naming a matched uuid — see
+//! `mismatched_prompt_consumes_the_outstanding_send`. The row is left with no
+//! uuid at all only when no human line is ingested before the turn ends — see
 //! `turn_end_settles_a_consumed_send_as_delivered`.
 
 use delta_model::{MessageUuid, SendStatus, SessionId};

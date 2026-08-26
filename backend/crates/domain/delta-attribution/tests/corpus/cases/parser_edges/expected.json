@@ -41,7 +41,8 @@
     {
       "kind": "send_matched",
       "send_id": 1,
-      "matched_uuid": "u1"
+      "matched_uuid": "u1",
+      "attributed": true
     }
   ]
 }
