@@ -39,7 +39,7 @@ pub(super) fn resolve_line_thread(
         // forever. This line is therefore the outstanding slash command's
         // outcome: consume the send (`SendMatched`) and end the degenerate
         // turn (`LocalCommandTurnEnded`, which the caller feeds into the turn
-        // machine as a `Stop`).
+        // machine as that send's own resolution).
         //
         // The recorded command NAME does not decide that. Claude Code may
         // write the line in its fully-qualified `/<namespace>:<command>` form
@@ -239,5 +239,7 @@ fn consume_slash_command_send(
         matched_uuid: line_uuid.clone(),
         attributed: attributed(&pending.text),
     });
-    effects.push(Effect::LocalCommandTurnEnded);
+    effects.push(Effect::LocalCommandTurnEnded {
+        send_id: pending.id,
+    });
 }

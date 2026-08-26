@@ -231,6 +231,28 @@ impl SessionRuntime {
         }
     }
 
+    /// Drop the held first prompt, keeping the resuming entry itself, and
+    /// report whether one was actually held.
+    ///
+    /// The counterpart to [`Self::hold_first_prompt`], for the case where the
+    /// held send stops being this resume's to type: a prompt submitted inside
+    /// the resume window cannot be the held send's (its keystrokes are still
+    /// here, not in the pane), so the turn machine requeues that send — and
+    /// the queue is now the single owner of the message. Leaving the text here
+    /// too would deliver it twice: the settle would type this copy AND the
+    /// next idle flush would dispatch the `queued` row. Dropping it makes the
+    /// settle take its "no held first prompt; flushing any queued send"
+    /// branch, so the row is typed exactly once, on the normal queued path.
+    ///
+    /// A no-op (returning `false`) when the session is not resuming or was
+    /// holding nothing, so the caller may fire it unconditionally.
+    pub fn drop_held_prompt(&mut self) -> bool {
+        match self.resuming.as_mut() {
+            Some(resuming) => resuming.held_prompt.take().is_some(),
+            None => false,
+        }
+    }
+
     /// Whether a not-yet-dispatched resume entry exists — the session is
     /// inside its resume-readiness window, from `open_session` until the
     /// settle tick dispatches (or the resume fails). While this is true the

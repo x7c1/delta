@@ -97,12 +97,16 @@ pub enum SessionEvent {
         thread_id: ThreadId,
         matched_uuid: MessageUuid,
     },
-    /// A prompt matched no outstanding send. Usually the user typed straight
-    /// into the pane, but a dispatched send whose echo came back mangled also
-    /// lands here.
+    /// A prompt **consumed** no outstanding send. Usually the user typed
+    /// straight into the pane; the other producer is the resume window, where
+    /// the outstanding send's keystrokes are still held and so cannot be what
+    /// submitted. A send whose echo came back mangled does NOT land here:
+    /// consumption is positional, so that prompt is still its send's — it is
+    /// simply announced by the turn end rather than by [`Self::TurnStarted`],
+    /// which needs the matched uuid only a verbatim echo can name this early.
     ///
     /// Pane-backed sessions only: an adapter-backed session has no pane to
-    /// type into and no echo to mismatch.
+    /// type into and no prompt hook to fire.
     ExternalInput {
         session_id: SessionId,
         prompt: String,

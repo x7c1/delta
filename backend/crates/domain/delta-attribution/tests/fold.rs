@@ -896,7 +896,7 @@ fn a_local_command_group_folds_to_meta_resolves_its_send_and_ends_the_turn() {
                 matched_uuid: MessageUuid::from("cmdname"),
                 attributed: true,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
         ]
     );
     assert!(
@@ -939,7 +939,7 @@ fn a_namespaced_local_command_name_line_matches_a_short_form_send() {
                 matched_uuid: MessageUuid::from("cmdname"),
                 attributed: true,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
         ]
     );
     assert!(
@@ -978,7 +978,7 @@ fn a_local_command_name_line_consumes_a_slash_command_send_of_another_name() {
                 matched_uuid: MessageUuid::from("cmdname"),
                 attributed: false,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
         ]
     );
     assert!(
@@ -1078,7 +1078,7 @@ fn an_unknown_command_notice_resolves_its_send_and_ends_the_turn() {
                 matched_uuid: MessageUuid::from("notice"),
                 attributed: true,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
         ]
     );
     assert!(
@@ -1110,7 +1110,7 @@ fn an_unknown_command_notice_matches_a_send_carrying_args() {
                 matched_uuid: MessageUuid::from("notice"),
                 attributed: true,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
         ]
     );
     assert!(outcome.state.outstanding.is_empty());
@@ -1141,7 +1141,7 @@ fn an_unknown_command_notice_consumes_a_slash_command_send_of_another_name() {
                 matched_uuid: MessageUuid::from("notice"),
                 attributed: false,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
         ]
     );
     assert!(
@@ -1297,7 +1297,7 @@ fn a_queued_replay_after_compact_matches_its_send_instead_of_folding_to_meta() {
         !outcome
             .effects
             .iter()
-            .any(|e| matches!(e, Effect::LocalCommandTurnEnded)),
+            .any(|e| matches!(e, Effect::LocalCommandTurnEnded { .. })),
         "the queued replay is a genuine human turn, not command machinery — \
          it must not end the turn as if a local command had consumed the send"
     );
@@ -1379,7 +1379,7 @@ fn a_real_prompt_after_a_local_command_is_an_ordinary_user_turn() {
                 matched_uuid: MessageUuid::from("cmdname"),
                 attributed: true,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
             Effect::SendMatched {
                 send_id: 8,
                 matched_uuid: MessageUuid::from("u-real"),
@@ -1422,7 +1422,7 @@ fn a_forked_skill_launch_lights_a_background_indicator_and_records_the_launch() 
                 matched_uuid: MessageUuid::from("cmdname"),
                 attributed: true,
             },
-            Effect::LocalCommandTurnEnded,
+            Effect::LocalCommandTurnEnded { send_id: 7 },
             Effect::SubagentLaunched {
                 tool_use_id: "forked-skill:a7046b32df40e1b3e".into(),
                 thread_id: MAIN,

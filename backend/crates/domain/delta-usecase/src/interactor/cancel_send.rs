@@ -68,8 +68,9 @@
 //! and dropped state back to Idle. The hook's
 //! [`head_dispatched_send`](crate::ports::SessionStore::head_dispatched_send)
 //! query returns `None` (the cancelled row is filtered), so the prompt
-//! classifies as [`TurnInput::ExternalPrompt`] — exactly the existing
-//! treatment for an untracked external prompt. No stuck state, no panic.
+//! classifies as [`TurnInput::PromptSubmitted`] consuming no send — exactly
+//! the existing treatment for an untracked external prompt. No stuck state, no
+//! panic.
 //!
 //! Routed through the owning session's actor (resolved from the send id in
 //! [`cancel_send`](crate::interactor::Interactor::cancel_send)) so the cancel
@@ -77,7 +78,7 @@
 //! send-state transition runs inside the actor.
 //!
 //! [`TurnInput::Cancel`]: crate::turn::TurnInput::Cancel
-//! [`TurnInput::ExternalPrompt`]: crate::turn::TurnInput::ExternalPrompt
+//! [`TurnInput::PromptSubmitted`]: crate::turn::TurnInput::PromptSubmitted
 //! [`TurnState::AwaitingEcho`]: crate::turn::TurnState::AwaitingEcho
 //! [`TurnState::Idle`]: crate::turn::TurnState::Idle
 //! [`TurnState::InFlight`]: crate::turn::TurnState::InFlight

@@ -68,7 +68,7 @@ async fn interrupt_reaches_the_adapter_and_keeps_the_session_open() {
         .unwrap();
     let session_id = send.session_id.clone();
 
-    // The turn is in flight (tracked ExternalPrompt-style, no send id).
+    // The turn is in flight (tracked as consuming no send, no send id).
     assert_eq!(
         ix.live_state_for(&session_id).await.turn,
         TurnState::InFlight { send_id: None },

@@ -120,7 +120,9 @@ pub enum GoldenEffect {
     },
     TurnInterrupted,
     TurnAborted,
-    LocalCommandTurnEnded,
+    LocalCommandTurnEnded {
+        send_id: i64,
+    },
     ResolvePermission {
         tool_use_id: String,
         allowed: bool,
@@ -181,7 +183,9 @@ pub fn golden_of(outcome: &Attributed) -> GoldenCase {
                 },
                 Effect::TurnInterrupted => GoldenEffect::TurnInterrupted,
                 Effect::TurnAborted => GoldenEffect::TurnAborted,
-                Effect::LocalCommandTurnEnded => GoldenEffect::LocalCommandTurnEnded,
+                Effect::LocalCommandTurnEnded { send_id } => {
+                    GoldenEffect::LocalCommandTurnEnded { send_id: *send_id }
+                }
                 Effect::ResolvePermission {
                     tool_use_id,
                     allowed,

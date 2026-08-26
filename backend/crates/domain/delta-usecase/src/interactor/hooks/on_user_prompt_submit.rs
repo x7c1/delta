@@ -34,11 +34,11 @@ where
     /// single-outstanding dispatch rule at most one `dispatched` send exists
     /// per session, and while it is outstanding its keystrokes are already in
     /// the pane — so a prompt arriving now is *that send's*, whatever it says.
-    /// The handler therefore feeds the turn machine
-    /// [`TurnInput::EchoMatched`] whenever a send is outstanding, and
-    /// [`TurnInput::ExternalPrompt`] only when there is none — or when the
-    /// session is still inside its resume window, where the send's keystrokes
-    /// are deliberately *held* and so cannot be what submitted.
+    /// The handler therefore feeds the turn machine one
+    /// [`TurnInput::PromptSubmitted`] naming the send it consumed: `Some(id)`
+    /// whenever a send is outstanding, and `None` only when there is none — or
+    /// when the session is still inside its resume window, where the send's
+    /// keystrokes are deliberately *held* and so cannot be what submitted.
     ///
     /// The trade is deliberate: a prompt genuinely typed into the pane while a
     /// Delta send is outstanding is credited to that send. Worst case the
@@ -139,31 +139,50 @@ where
         let (new_messages, resolved_events) = self.sync_transcript(&session).await?;
         events.extend(resolved_events);
 
+        // Report the two shapes worth a line in the log before moving the
+        // machine: a send consumed by a prompt that no longer spells its text
+        // (a rewrite Delta has not catalogued), and a prompt arriving while a
+        // send is outstanding but held.
+        match (&consumed, &outstanding) {
+            (Some(consumed), _) if attributed.is_none() => {
+                tracing::info!(
+                    session_id = %hook.session_id,
+                    send_id = consumed.id,
+                    expected = %consumed.text.trim(),
+                    got = %hook.prompt.trim(),
+                    "UserPromptSubmit does not equal the outstanding send's text \
+                     (Claude Code rewrote the prompt, most likely): the send is the \
+                     only thing that could have submitted here, so its turn starts \
+                     and it is NOT re-typed; its lines are still attributed to the \
+                     send's thread when the transcript catches up"
+                );
+            }
+            (None, Some(outstanding)) => {
+                tracing::debug!(
+                    session_id = %hook.session_id,
+                    send_id = outstanding.id,
+                    "UserPromptSubmit arrived while a send is outstanding but its \
+                     keystrokes are still held for the resume window; the prompt \
+                     cannot be that send's, so it is external input"
+                );
+            }
+            _ => {}
+        }
+
         // A prompt submission means a turn is now in flight — whether Delta
         // dispatched it or it was typed straight into the embedded pane. Feed
         // the turn machine AFTER the sync, so an interrupt marker of the
         // *previous* turn in the same batch is consumed first. The machine
         // moves to `InFlight` either way; which send (if any) it credits with
-        // the turn is the positional decision made above.
-        match consumed {
-            Some(consumed) => {
-                if attributed.is_none() {
-                    tracing::info!(
-                        session_id = %hook.session_id,
-                        send_id = consumed.id,
-                        expected = %consumed.text.trim(),
-                        got = %hook.prompt.trim(),
-                        "UserPromptSubmit does not equal the outstanding send's text \
-                         (Claude Code rewrote the prompt, most likely): the send is the \
-                         only thing that could have submitted here, so its turn starts \
-                         and it is NOT re-typed; its lines are still attributed to the \
-                         send's thread when the transcript catches up"
-                    );
-                }
-                self.apply_turn_input(TurnInput::EchoMatched {
-                    send_id: consumed.id,
-                })
-                .await?;
+        // the turn is the positional decision made above, carried as the
+        // input's `send_id`.
+        self.apply_turn_input(TurnInput::PromptSubmitted {
+            send_id: consumed.as_ref().map(|send| send.id),
+        })
+        .await?;
+
+        match &consumed {
+            Some(_) => {
                 // Announce the turn only when the text also resolved the send:
                 // `TurnStarted` carries the matched uuid and the thread to
                 // light up, both of them attribution facts. If the send's user
@@ -187,16 +206,6 @@ where
                 }
             }
             None => {
-                if let Some(outstanding) = &outstanding {
-                    tracing::debug!(
-                        session_id = %hook.session_id,
-                        send_id = outstanding.id,
-                        "UserPromptSubmit arrived while a send is outstanding but its \
-                         keystrokes are still held for the resume window; the prompt \
-                         cannot be that send's, so it is external input"
-                    );
-                }
-                self.apply_turn_input(TurnInput::ExternalPrompt).await?;
                 // This prompt consumed no send, so it really is input from
                 // outside Delta — except a background-task notification, which
                 // the harness injects as a prompt submission rather than typing

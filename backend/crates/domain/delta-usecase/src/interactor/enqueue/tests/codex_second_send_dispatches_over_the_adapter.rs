@@ -16,7 +16,7 @@ use crate::SendTarget;
 ///
 /// Asserts the second send (a) reaches the adapter (`factory.log().sends` records
 /// both prompts), (b) is written against the thread it targeted, (c) tracks the
-/// turn `ExternalPrompt`-style (`InFlight { send_id: None }`), (d) completes its
+/// turn as consuming no send (`InFlight { send_id: None }`), (d) completes its
 /// send row at the `turn/start` acknowledgement (`Matched`), and (e) produces no
 /// synchronous `SessionEvent`s (its frames arrive later over the running pump).
 #[tokio::test]
@@ -71,12 +71,12 @@ async fn codex_second_send_dispatches_over_the_adapter() {
         "the second send is written against the thread it targeted"
     );
 
-    // The turn is tracked ExternalPrompt-style: in flight with no send id, so a
+    // The turn is tracked as consuming no send: in flight with no send id, so a
     // later `TurnCompleted → Stop` cannot cancel this successful send.
     assert_eq!(
         ix.live_state_for(&session_id).await.turn,
         TurnState::InFlight { send_id: None },
-        "the second turn is tracked ExternalPrompt-style, like the first"
+        "the second turn is tracked as consuming no send, like the first"
     );
 
     // The send row was completed at the `turn/start` acknowledgement, not by an
@@ -195,12 +195,12 @@ async fn codex_branch_send_injects_context_and_reuses_branch_bookkeeping() {
         "the branch turn dispatched over the adapter after the opening turn"
     );
 
-    // The branch turn is tracked ExternalPrompt-style and its send row completes
+    // The branch turn is tracked as consuming no send and its send row completes
     // at the `turn/start` acknowledgement, like every Codex turn.
     assert_eq!(
         ix.live_state_for(&session_id).await.turn,
         TurnState::InFlight { send_id: None },
-        "the branch turn is tracked ExternalPrompt-style"
+        "the branch turn is tracked as consuming no send"
     );
     assert_eq!(
         ix.store().send(branch.id).await.unwrap().unwrap().status,

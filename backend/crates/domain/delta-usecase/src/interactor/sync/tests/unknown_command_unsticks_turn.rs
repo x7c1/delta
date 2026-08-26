@@ -2,6 +2,7 @@ use delta_model::{Role, SendStatus, SessionId};
 
 use crate::interactor::testing::*;
 use crate::ports::SessionEvent;
+use crate::turn::TurnState;
 
 /// When the user types a slash command Claude Code does not recognize (e.g.
 /// `/review-pr` when no such command exists), Claude rejects it entirely
@@ -21,6 +22,15 @@ use crate::ports::SessionEvent;
 /// the stuck pending chip, and (d) return the turn machine to `Idle` so a send
 /// composed during the command dispatches without the user sending anything
 /// first — mirroring the known-local-command unstick.
+///
+/// And (e) it must do all that *honestly*: the ingest tells the machine the
+/// command's own send was resolved (`TurnInput::CommandResolved`), which is a
+/// designed-for end of that send's degenerate turn. Routing it as a generic
+/// `Stop` instead landed on the defensive `(AwaitingEcho, Stop)` arm, which
+/// reads the same situation as lost keystrokes: one "anomalous turn
+/// transition" warning plus one "outstanding send never echoed" warning per
+/// resolved command, and a requeue claimed against a row the paired
+/// `SendMatched` had just marked. So no requeue may be spent here.
 #[tokio::test]
 async fn unknown_command_unsticks_turn() {
     let ix = interactor();
@@ -31,10 +41,11 @@ async fn unknown_command_unsticks_turn() {
     // The user runs `/review-pr` (which does not exist): Delta dispatches it (one
     // set of keystrokes) and the turn machine is now `AwaitingEcho` for that send
     // — an unknown command never echoes, so no `on_user_prompt_submit` follows.
-    ix.enqueue_send(to(main), "/review-pr", None).await.unwrap();
+    let (command, _) = ix.enqueue_send(to(main), "/review-pr", None).await.unwrap();
     // A follow-up prompt is composed during the command and held queued behind
     // the outstanding `/review-pr` send.
-    ix.enqueue_send(to(main), "now do something valid", None)
+    let (follow_up, _) = ix
+        .enqueue_send(to(main), "now do something valid", None)
         .await
         .unwrap();
     assert_eq!(
@@ -104,4 +115,32 @@ async fn unknown_command_unsticks_turn() {
         .expect("the follow-up is the lone dispatched send after the unknown command ends");
     assert_eq!(head.text, "now do something valid");
     assert_eq!(head.status, SendStatus::Dispatched);
+
+    // (e) The turn machine moved on to the follow-up's own wait — so the
+    // command's turn really did end — and neither send spent a requeue: the
+    // resolution is not the "keystrokes were lost" story the defensive `Stop`
+    // arm tells, so nothing was warned about and nothing was re-typed.
+    assert_eq!(
+        ix.live_state_for(&session).await.turn,
+        TurnState::AwaitingEcho {
+            send_id: follow_up.id
+        },
+        "the command's turn ended and the follow-up's began"
+    );
+    let (command_requeues, follow_up_requeues) = {
+        let (command_id, follow_up_id) = (command.id, follow_up.id);
+        ix.with_runtime(&session, move |state| {
+            (
+                state.requeues_spent(command_id),
+                state.requeues_spent(follow_up_id),
+            )
+        })
+        .await
+    };
+    assert_eq!(
+        (command_requeues, follow_up_requeues),
+        (0, 0),
+        "resolving a slash command claims no requeue: its send was delivered, \
+         not swallowed"
+    );
 }
