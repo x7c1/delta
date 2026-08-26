@@ -16,11 +16,15 @@ pub struct OutstandingSend {
     /// The dispatched prompt text. A human echo consumes this send by POSITION,
     /// so the text no longer decides consumption: it is what the echo line is
     /// compared against (by trimmed equality, widened for the image-attachment
-    /// rewrite) to compute the `attributed` flag on [`Effect::SendMatched`]. It
-    /// still correlates a local-command name line and an unknown-command notice
-    /// by command name.
+    /// rewrite) to compute the `attributed` flag on [`Effect::SendMatched`]. A
+    /// local-command name line and an unknown-command notice consume the send
+    /// positionally as well; they read this text only to check that it is a
+    /// slash command at all ([`claude_format::is_slash_command_send`], the guard
+    /// that keeps a command line from swallowing a plain-prompt send) and to
+    /// compute the same `attributed` flag, there by command name.
     ///
     /// [`Effect::SendMatched`]: crate::Effect::SendMatched
+    /// [`claude_format::is_slash_command_send`]: crate::claude_format::is_slash_command_send
     pub text: String,
     /// The background-task identifier learned for the matching subagent launch,
     /// when one has been observed. Unused for human-prompt echo correlation

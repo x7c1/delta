@@ -29,41 +29,33 @@ pub(super) fn resolve_line_thread(
     is_task_notification: bool,
 ) -> (ThreadId, Option<MessageUuid>) {
     // Correlate against the head outstanding send: a human turn consumes it by
-    // POSITION, a command line by command name.
+    // POSITION; a command line does too, but only when that send is itself a
+    // slash command (see `consume_slash_command_send`).
     if is_local_command_name_line {
         // The bare command-name line of a local-command group (e.g.
         // `/review-pr`). Delta dispatched it as a send and the turn machine
         // is `AwaitingEcho`, but a local command fires no `UserPromptSubmit`
         // echo and no `Stop` — so left alone the send wedges the queue
-        // forever. When this line correlates to the head outstanding send,
-        // treat it as a degenerate completed turn: consume the send
-        // (`SendMatched`) and end the turn (`LocalCommandTurnEnded`, which the
-        // caller feeds into the turn machine as a `Stop`). The correlation is
-        // namespace-tolerant: Claude Code may record the command-name line in
-        // its fully-qualified `/<namespace>:<command>` form (e.g.
-        // `/example:review-pr`) even when the user — and thus the
-        // dispatched send — used the short `/<command>` form (`/review-pr`), so
-        // matching compares BARE command names rather than raw text. The line
-        // is command machinery, so it inherits `carry_thread` and never resets
-        // to `main`. (If it does NOT match an outstanding send — e.g. a
-        // local command typed straight into the pane, never dispatched by
-        // Delta — there is nothing to resolve; it simply folds as `Meta`.)
-        let head_matches = state.outstanding.front().is_some_and(|send| {
-            claude_format::local_command_name_line_matches_send(&send.text, trimmed)
+        // forever. This line is therefore the outstanding slash command's
+        // outcome: consume the send (`SendMatched`) and end the degenerate
+        // turn (`LocalCommandTurnEnded`, which the caller feeds into the turn
+        // machine as a `Stop`).
+        //
+        // The recorded command NAME does not decide that. Claude Code may
+        // write the line in its fully-qualified `/<namespace>:<command>` form
+        // (e.g. `/example:review-pr`) even though the user — and thus the
+        // send — used the short `/<command>` form, and that is only the
+        // rewrite already catalogued. So the name comparison is demoted to
+        // `attributed`.
+        //
+        // The line is command machinery, so it inherits `carry_thread` and
+        // never resets to `main`. (With no outstanding slash-command send —
+        // a local command typed straight into the pane, or a plain prompt
+        // outstanding that this line cannot be the echo of — there is nothing
+        // to resolve; it simply folds as `Meta`.)
+        consume_slash_command_send(state, effects, line_uuid, |send_text| {
+            claude_format::local_command_name_line_matches_send(send_text, trimmed)
         });
-        if let Some(pending) = head_matches
-            .then(|| state.outstanding.pop_front())
-            .flatten()
-        {
-            effects.push(Effect::SendMatched {
-                send_id: pending.id,
-                matched_uuid: line_uuid.clone(),
-                // The command name correlated, so the send is recognized in
-                // full: nothing to warn about.
-                attributed: true,
-            });
-            effects.push(Effect::LocalCommandTurnEnded);
-        }
         (state.carry_thread, None)
     } else if is_unknown_command_notice {
         // The unknown-command notice (e.g. the user typed `/revew-pr`). Delta
@@ -71,37 +63,28 @@ pub(super) fn resolve_line_thread(
         // `AwaitingEcho`, but Claude rejects an unknown command client-side —
         // no `UserPromptSubmit` echo, no `Stop`, and no command group — so
         // left alone the send wedges the queue forever, exactly like a known
-        // local command. Treat it as a degenerate completed turn: when the
-        // notice's command matches the head outstanding send, consume the send
-        // (`SendMatched`) and end the turn (`LocalCommandTurnEnded`, which the
-        // caller feeds into the turn machine as a `Stop`). Correlate robustly:
-        // the send may carry args (`/review-pr 123`) while the notice names
-        // only the command (`/review-pr`), so match the notice's command
-        // against the send's FIRST whitespace-delimited token. The notice is
-        // machinery, so it inherits `carry_thread` and never resets to `main`.
-        // (If it matches no outstanding send — an unknown command typed
-        // straight into the pane, never dispatched by Delta — there is nothing
-        // to resolve; it simply surfaces as a `Role::System` notice.)
+        // local command. Same rule as the branch above: the notice is the
+        // outstanding slash command's outcome, so consume the send
+        // (`SendMatched`) and end the degenerate turn
+        // (`LocalCommandTurnEnded`).
+        //
+        // The name is a report here too, and a weak one: the notice names
+        // whatever Claude parsed out of a command it did not recognize, which
+        // for a typo is exactly the name that will not equal the send's. So
+        // `attributed` compares the notice's command against the send's FIRST
+        // whitespace-delimited token — tolerating args the send carries
+        // (`/review-pr 123`) that the notice drops — and a mismatch is
+        // logged, not acted on. A notice naming no command at all reports
+        // `false` for the same reason.
+        //
+        // The notice is machinery, so it inherits `carry_thread` and never
+        // resets to `main`. (With no outstanding slash-command send it simply
+        // surfaces as a `Role::System` notice.)
         let notice_command = claude_format::unknown_command_from_notice(trimmed);
-        let head_matches = notice_command.is_some_and(|command| {
-            state
-                .outstanding
-                .front()
-                .is_some_and(|send| send.text.split_whitespace().next() == Some(command))
+        consume_slash_command_send(state, effects, line_uuid, |send_text| {
+            notice_command
+                .is_some_and(|command| send_text.split_whitespace().next() == Some(command))
         });
-        if let Some(pending) = head_matches
-            .then(|| state.outstanding.pop_front())
-            .flatten()
-        {
-            effects.push(Effect::SendMatched {
-                send_id: pending.id,
-                matched_uuid: line_uuid.clone(),
-                // The notice named the send's own command, so the send is
-                // recognized in full: nothing to warn about.
-                attributed: true,
-            });
-            effects.push(Effect::LocalCommandTurnEnded);
-        }
         (state.carry_thread, None)
     } else if is_human_turn {
         // POSITIONAL correlation against the head outstanding send, mirroring
@@ -214,4 +197,47 @@ pub(super) fn resolve_line_thread(
     } else {
         (state.carry_thread, None)
     }
+}
+
+/// Consume the head outstanding send against a command line — the
+/// local-command name line or the unknown-command notice — and end the
+/// degenerate turn it stood for.
+///
+/// The correlation is POSITIONAL but guarded by KIND: the head send is
+/// consumed when it is itself a slash command
+/// ([`claude_format::is_slash_command_send`]), whatever command name the line
+/// ended up recording. That guard is not optional. A slash command produces
+/// no `UserPromptSubmit` echo, so nothing has consumed the send yet and this
+/// line is the only evidence it was submitted; a PLAIN-prompt send, by
+/// contrast, is consumed by the hook the moment it is submitted, so a command
+/// line arriving while one is outstanding means something else was typed into
+/// the pane — consuming the send there would drop the user's message on the
+/// floor. Such a send is left outstanding for its own echo (or, failing that,
+/// for the echo deadline to requeue it).
+///
+/// `attributed` reports whether the line names the send's own command; it
+/// gates nothing, and rides out on `Effect::SendMatched` so a name Delta
+/// cannot account for is visible in the log.
+fn consume_slash_command_send(
+    state: &mut AttributionState,
+    effects: &mut Vec<Effect>,
+    line_uuid: &MessageUuid,
+    attributed: impl FnOnce(&str) -> bool,
+) {
+    let head_is_slash_command = state
+        .outstanding
+        .front()
+        .is_some_and(|send| claude_format::is_slash_command_send(&send.text));
+    if !head_is_slash_command {
+        return;
+    }
+    let Some(pending) = state.outstanding.pop_front() else {
+        return;
+    };
+    effects.push(Effect::SendMatched {
+        send_id: pending.id,
+        matched_uuid: line_uuid.clone(),
+        attributed: attributed(&pending.text),
+    });
+    effects.push(Effect::LocalCommandTurnEnded);
 }

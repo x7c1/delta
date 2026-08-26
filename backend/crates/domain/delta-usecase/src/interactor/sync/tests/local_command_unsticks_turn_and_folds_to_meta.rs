@@ -117,10 +117,13 @@ async fn local_command_unsticks_turn_and_folds_to_meta() {
 /// Namespace variant of the above: the user typed the SHORT form `/review-pr`
 /// (so Delta dispatched a send with that exact text), but Claude Code expands it
 /// to its fully-qualified namespaced form `/example:review-pr` in the
-/// transcript command-name line. A raw-text correlation would never match, so
-/// the send would wedge the single-outstanding queue forever. The
-/// bare-command-name correlation must still consume the send, release the queued
-/// follow-up, return the turn to idle, and fold the group to meta.
+/// transcript command-name line. The recorded name must not change the outcome:
+/// the outstanding send is a slash command, so the name line consumes it by
+/// position however Claude spelled it — releasing the queued follow-up,
+/// returning the turn to idle, and folding the group to meta. (The bare-name
+/// comparison only decides the `attributed` flag this end-to-end path does not
+/// observe; were consumption keyed on it instead, the send would wedge the
+/// single-outstanding queue forever.)
 #[tokio::test]
 async fn namespaced_local_command_unsticks_short_form_send_and_folds_to_meta() {
     let ix = interactor();

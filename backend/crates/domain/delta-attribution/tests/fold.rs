@@ -912,9 +912,10 @@ fn a_namespaced_local_command_name_line_matches_a_short_form_send() {
     // Like the previous test, but the user typed the SHORT form `/review-pr`
     // (so Delta dispatched send 7 with that exact text) while Claude expanded it
     // to its fully-qualified namespaced form `/example:review-pr` in the
-    // transcript command-name line. A raw-text equality would fail to correlate
-    // and leave send 7 wedged forever; the bare-command-name correlation must
-    // match the two forms and end the turn exactly as the short-vs-short case.
+    // transcript command-name line. Consumption is positional either way; what
+    // this pins is that the bare-command-name comparison recognizes the two
+    // forms as the same command, so the send is reported as `attributed` and
+    // raises no rewrite warning.
     let outcome = attribute_lines(
         &session(),
         MAIN,
@@ -946,6 +947,81 @@ fn a_namespaced_local_command_name_line_matches_a_short_form_send() {
         "the namespaced command-name line consumed the short-form outstanding send"
     );
     assert_eq!(outcome.state.carry_thread, MAIN);
+}
+
+#[test]
+fn a_local_command_name_line_consumes_a_slash_command_send_of_another_name() {
+    // Delta dispatched `/review-pr` as send 7, but the command-name line Claude
+    // recorded names a DIFFERENT command (`/example:audit`) — a name rewrite
+    // Delta has not catalogued, or something pre-empting the paste in the pane.
+    // The send is still consumed: it was a slash command, so it produced no
+    // `UserPromptSubmit` echo and no `Stop`, and this command line is the only
+    // evidence it left. Deciding by name would leave send 7 wedged until the
+    // echo deadline retyped the command a second time. The mismatch is
+    // reported as `attributed: false` (the caller warns) rather than acted on.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(MAIN, Some(send(7, MAIN, "/review-pr"))),
+        vec![
+            local_command_caveat_line("caveat", "pcmd"),
+            local_command_name_line("cmdname", "pcmd", "/example:audit"),
+            local_command_stdout_line("stdout", "pcmd"),
+        ],
+    );
+
+    assert_eq!(
+        outcome.effects,
+        vec![
+            Effect::SendMatched {
+                send_id: 7,
+                matched_uuid: MessageUuid::from("cmdname"),
+                attributed: false,
+            },
+            Effect::LocalCommandTurnEnded,
+        ]
+    );
+    assert!(
+        outcome.state.outstanding.is_empty(),
+        "the command-name line consumed the outstanding slash-command send \
+         despite naming another command"
+    );
+    assert_eq!(outcome.state.carry_thread, MAIN);
+}
+
+#[test]
+fn a_local_command_name_line_leaves_a_plain_prompt_send_outstanding() {
+    // The guard the positional rule needs: send 7 is a PLAIN prompt, which
+    // Claude echoes back through `UserPromptSubmit` — so a local-command group
+    // showing up while it is outstanding cannot be its outcome. Somebody typed
+    // a command straight into the pane ahead of the send. Consuming send 7 here
+    // would mark the user's message delivered and drop it, so the group folds
+    // to meta and leaves the send outstanding for its own echo.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(CHILD, Some(send(7, CHILD, "hello world"))),
+        vec![
+            local_command_caveat_line("caveat", "pcmd"),
+            local_command_name_line("cmdname", "pcmd", "/review-pr"),
+            local_command_stdout_line("stdout", "pcmd"),
+        ],
+    );
+
+    assert_eq!(message(&outcome, "cmdname").role, delta_model::Role::Meta);
+    assert!(
+        outcome.effects.is_empty(),
+        "a plain-prompt send is neither consumed nor turn-ended by a command line"
+    );
+    assert_eq!(
+        outcome.state.outstanding.len(),
+        1,
+        "the plain-prompt send stays outstanding, waiting for its own echo"
+    );
+    assert_eq!(
+        outcome.state.carry_thread, CHILD,
+        "local-command machinery inherits the current thread, never resets to main"
+    );
 }
 
 #[test]
@@ -1016,8 +1092,9 @@ fn an_unknown_command_notice_resolves_its_send_and_ends_the_turn() {
 #[test]
 fn an_unknown_command_notice_matches_a_send_carrying_args() {
     // The dispatched send may carry args (`/review-pr 123`), while the notice
-    // names only the command (`/review-pr`). Correlation is on the send's first
-    // whitespace-delimited token, so the args must not defeat the match.
+    // names only the command (`/review-pr`). The name comparison is on the
+    // send's first whitespace-delimited token, so the args must not make the
+    // send look unrecognized.
     let outcome = attribute_lines(
         &session(),
         MAIN,
@@ -1037,6 +1114,71 @@ fn an_unknown_command_notice_matches_a_send_carrying_args() {
         ]
     );
     assert!(outcome.state.outstanding.is_empty());
+}
+
+#[test]
+fn an_unknown_command_notice_consumes_a_slash_command_send_of_another_name() {
+    // The unknown-notice analogue of
+    // `a_local_command_name_line_consumes_a_slash_command_send_of_another_name`:
+    // Delta dispatched `/review-pr 123` as send 7, and the notice names
+    // `/revew-pr` — the shape this branch must expect, since Claude echoes back
+    // whatever it parsed out of a command it did not recognize (extra
+    // characters landing in the pane between Delta's paste and its Enter are
+    // enough). The notice is still send 7's outcome, so it is consumed and the
+    // degenerate turn ends; only `attributed` records that the names differ.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(MAIN, Some(send(7, MAIN, "/review-pr 123"))),
+        vec![unknown_command_notice_line("notice", "/revew-pr")],
+    );
+
+    assert_eq!(
+        outcome.effects,
+        vec![
+            Effect::SendMatched {
+                send_id: 7,
+                matched_uuid: MessageUuid::from("notice"),
+                attributed: false,
+            },
+            Effect::LocalCommandTurnEnded,
+        ]
+    );
+    assert!(
+        outcome.state.outstanding.is_empty(),
+        "the notice consumed the outstanding slash-command send despite naming \
+         another command"
+    );
+}
+
+#[test]
+fn an_unknown_command_notice_leaves_a_plain_prompt_send_outstanding() {
+    // The same guard as on the local-command branch: send 7 is a PLAIN prompt,
+    // so it is echoed through `UserPromptSubmit` and an unknown-command notice
+    // cannot be its outcome — it is the rejection of a command typed straight
+    // into the pane. Consuming send 7 here would drop the user's message, so
+    // the notice merely surfaces and the send stays outstanding.
+    let outcome = attribute_lines(
+        &session(),
+        MAIN,
+        AttributionState::new(CHILD, Some(send(7, CHILD, "hello world"))),
+        vec![unknown_command_notice_line("notice", "/revew-pr")],
+    );
+
+    assert_eq!(message(&outcome, "notice").role, delta_model::Role::System);
+    assert!(
+        outcome.effects.is_empty(),
+        "a plain-prompt send is neither consumed nor turn-ended by a notice"
+    );
+    assert_eq!(
+        outcome.state.outstanding.len(),
+        1,
+        "the plain-prompt send stays outstanding, waiting for its own echo"
+    );
+    assert_eq!(
+        outcome.state.carry_thread, CHILD,
+        "the notice inherits the current thread, never resets to main"
+    );
 }
 
 #[test]
