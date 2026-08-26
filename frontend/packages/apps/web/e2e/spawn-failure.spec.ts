@@ -5,13 +5,15 @@ import { emitEvent, useManualEventControl } from './support/app';
 /**
  * A new session whose launch never comes up surfaces a recoverable failure.
  *
- * The user starts a new session (the pending chip appears). The session row is
- * created eagerly, so `POST /api/sends` returned its real id; the backend's
+ * The session row is created eagerly, so `POST /api/sends` returns its real id
+ * and the workspace switches to the starting session right away. The backend's
  * watchdog then reaps the spawn that never bound and emits `spawn_failed`
- * carrying that same id. The chip must stop looking stuck: it turns into a
- * distinct error row offering Retry and Dismiss. Dismiss clears it.
+ * carrying that same id — deleting the row the user is looking at. The failure
+ * therefore has to do two things: take the user back to the new-session screen,
+ * and stop the chip looking stuck — it becomes a distinct error row offering
+ * Retry and Dismiss. Dismiss clears it.
  */
-test('a failed spawn turns the pending chip into a Retry / Dismiss error row', async ({
+test('a failed spawn returns to the new-session screen with a Retry / Dismiss row', async ({
   page,
 }) => {
   await useManualEventControl(page);
@@ -29,6 +31,9 @@ test('a failed spawn turns the pending chip into a Retry / Dismiss error row', a
   await page.getByRole('textbox').fill('start something that never boots');
   await page.getByRole('button', { name: 'Send' }).click();
 
+  // The workspace focuses the accepted session at once: the new-session screen
+  // is gone and the starting session's first prompt is in its pending strip.
+  await expect(page.getByTestId('new-session-empty')).toHaveCount(0);
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
 
@@ -41,6 +46,9 @@ test('a failed spawn turns the pending chip into a Retry / Dismiss error row', a
     pane_token: 'pane-never-bound',
   });
 
+  // The focused session no longer exists, so focus goes back to the
+  // new-session screen — which is where the failure's card lives.
+  await expect(page.getByTestId('new-session-empty')).toBeVisible();
   await expect(pending).toContainText(/failed to start/i);
   await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
   const dismiss = page.getByRole('button', { name: 'Dismiss' });

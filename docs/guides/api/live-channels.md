@@ -48,9 +48,12 @@ persisted: a streaming preview, the latest `status_updated` snapshot, and the
 nothing until the provider's next report, and a missed `send_parked` still
 leaves its message in the open-send list, held for an explicit release, just
 without the note saying why it is waiting. A missed `spawn_failed` leaves the
-same kind of hole: a spawn that never registered has no row in
-`GET /api/sessions`, so the pending chip it would have cleared can only be
-closed by the client's own timeout.
+same kind of hole: a reaped spawn's row is deleted, so the session stops being
+listed in `GET /api/sessions` — observable on a refetch, but with nothing to say
+it was a failure. Delta's own browser, which focused that session the moment its
+send was accepted, holds no launch deadline of its own, so it keeps waiting on a
+session that is gone instead of raising the Retry / Dismiss card; picking another
+session (or reloading) is the way out.
 
 The groups below are a reading aid only: they say nothing about the order in
 which frames arrive, and a client must handle each event whenever it lands.
@@ -67,10 +70,14 @@ which frames arrive, and a client must handle each event whenever it lands.
 { "kind": "spawn_failed", "session_id": "sess-1", "pane_token": "delta-1" }
 ```
 
-- `session_registered` — emitted on the first `UserPromptSubmit` for a session
-  id. This also doubles as the "opened" signal for a freshly-spawned session: a
-  new spawn has no `session_id` until its first hook binds it, so its first
-  liveness signal is this registration rather than a separate `session_opened`.
+- `session_registered` — emitted when a freshly-spawned session's first hook
+  binds it: its row flips from `spawning` to `active`. The session was already
+  listed (and focusable) before this — it is listed from the moment its first
+  send was accepted, see [sessions.md](sessions.md) — so this is not the moment
+  it becomes visible, it is the moment it becomes *usable*: only now is a pane
+  mapped to it, so a send to it stops being refused with `session_spawning`.
+  It also doubles as the "opened" signal for such a session, which never emits a
+  separate `session_opened`.
 - `session_opened` — a known, previously-closed session became live again
   (resumed by id via `POST /api/sessions/{id}/open`). A brand-new session never
   emits this.
@@ -84,10 +91,12 @@ which frames arrive, and a client must handle each event whenever it lands.
 - `spawn_failed` — a freshly-spawned session ended, or outlived its deadline,
   before its first `UserPromptSubmit` ever bound it, so it never registered:
   emitted by the `SessionEnd` hook when the launch exited, by the watchdog
-  reaper when it timed out. Without it a launch that crashed or hung on auth
-  would leave the UI optimistically "pending" forever. `session_id` is the
-  Delta-minted id the browser correlates with its pending chip; `pane_token`
-  names the tmux session that was torn down.
+  reaper when it timed out. The contentless row is deleted, so the session stops
+  being listed; without the event a launch that crashed or hung on auth would
+  leave the browser sitting on a session that silently vanished. `session_id` is
+  the Delta-minted id the browser correlates with the session it focused on
+  acceptance (and with its pending chip); `pane_token` names the tmux session
+  that was torn down.
 
 ### Sends and turns
 

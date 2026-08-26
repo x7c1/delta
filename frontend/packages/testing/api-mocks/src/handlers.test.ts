@@ -343,7 +343,7 @@ describe('GET /api/sessions/{id}/sends mock', () => {
 });
 
 describe('new-session send mock (eager rows)', () => {
-  it('mints real session/thread/send ids and keeps the spawning row unlisted', async () => {
+  it('mints real session/thread/send ids and lists the spawning row', async () => {
     const { handlers } = createMockApi();
     const httpHandlers = handlers as HttpHandler[];
 
@@ -360,14 +360,57 @@ describe('new-session send mock (eager rows)', () => {
     expect(body.send.id).toBeGreaterThan(0);
     expect(body.send.status).toBe('dispatched');
 
-    // The spawning row stays out of the session list…
+    // The session is listed from the moment the send was accepted, reading
+    // `spawning` and not yet open — that is the row the workspace focuses.
     const page = await getSessionsPage(httpHandlers, '?limit=100');
-    expect(page.sessions.some((s) => s.session.id === sessionId)).toBe(false);
+    const listed = page.sessions.find((s) => s.session.id === sessionId);
+    expect(listed?.session.status).toBe('spawning');
+    expect(listed?.open).toBe(false);
 
-    // …but its open sends are already queryable, so the pending chip can
-    // render from "server" state across the spawn window.
+    // Its open sends are queryable too, so the first prompt's chip renders
+    // from "server" state across the spawn window.
     const sends = (await getOpenSends(httpHandlers, sessionId)).sends;
     expect(sends.map((s) => s.text)).toEqual(['kick off']);
+  });
+
+  it('refuses a second send while the row is still spawning', async () => {
+    // Pins the mock to the real server's refusal: without it a frontend that
+    // stopped disabling the starting composer would still pass every suite
+    // (see the guard in `handlers.ts` for why the server refuses).
+    const { handlers, applyEvent } = createMockApi();
+    const httpHandlers = handlers as HttpHandler[];
+
+    const first = (await (
+      await runPost(httpHandlers, '/api/sends', 'http://localhost/api/sends', {
+        new_session: true,
+        text: 'kick off',
+      })
+    ).json()) as SendResponse;
+
+    const refused = await runPost(
+      httpHandlers,
+      '/api/sends',
+      'http://localhost/api/sends',
+      { thread_id: first.send.thread_id, text: 'too early' },
+    );
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { code?: string }).code).toBe(
+      'session_spawning',
+    );
+
+    // The gate lifts with the spawn window: once the launch registers, the
+    // same send goes through.
+    applyEvent({
+      kind: 'session_registered',
+      session_id: first.send.session_id,
+    });
+    const accepted = await runPost(
+      httpHandlers,
+      '/api/sends',
+      'http://localhost/api/sends',
+      { thread_id: first.send.thread_id, text: 'now you are up' },
+    );
+    expect(accepted.status).toBe(201);
   });
 
   it('activates the row on session_registered and deletes it on spawn_failed', async () => {
@@ -385,18 +428,31 @@ describe('new-session send mock (eager rows)', () => {
     const registered = mockSpawnSessionId(1);
     const failed = mockSpawnSessionId(2);
 
+    // Both rows are listed from acceptance; registration only flips one of
+    // them to `active` + open.
+    let page = await getSessionsPage(httpHandlers, '?limit=100');
+    expect(
+      page.sessions
+        .filter((s) => [registered, failed].includes(s.session.id))
+        .map((s) => s.session.status),
+    ).toEqual(['spawning', 'spawning']);
+
     applyEvent({ kind: 'session_registered', session_id: registered });
-    const page = await getSessionsPage(httpHandlers, '?limit=100');
+    page = await getSessionsPage(httpHandlers, '?limit=100');
     const listed = page.sessions.find((s) => s.session.id === registered);
     expect(listed?.open).toBe(true);
+    expect(listed?.session.status).toBe('active');
 
-    // The reaped spawn disappears entirely: 404, exactly as the real server
-    // answers after deleting the contentless failed session.
+    // The reaped spawn disappears entirely: it leaves the session list, and
+    // its sends answer 404 — exactly as the real server does after deleting
+    // the contentless failed session.
     applyEvent({
       kind: 'spawn_failed',
       session_id: failed,
       pane_token: 'pane-x',
     });
+    page = await getSessionsPage(httpHandlers, '?limit=100');
+    expect(page.sessions.some((s) => s.session.id === failed)).toBe(false);
     const response = await runGet(
       httpHandlers,
       '/sends',

@@ -698,6 +698,52 @@ describe('liveStore spawn tracking', () => {
     expect(useLiveStore.getState().localSends).toEqual({});
   });
 
+  it('releases the tracked spawn when its session registers', () => {
+    // The launch bound: the spawn window is over. The workspace focused the
+    // session when its send was accepted and its row is listed by now, so the
+    // tracked entry has nothing left to do. Only that one entry goes.
+    trackOne();
+    trackOne('sess-spawn-2');
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-spawn-1',
+    });
+
+    expect(
+      useLiveStore.getState().spawns.map((spawn) => spawn.sessionId),
+    ).toEqual(['sess-spawn-2']);
+  });
+
+  it('keeps a failed spawn when a session_registered arrives for it', () => {
+    // A `failed` entry is the Retry / Dismiss card, and only the user's answer
+    // removes it — a registration for the same id must never take it away
+    // under them.
+    trackOne();
+    useLiveStore.getState().applyEvent({
+      kind: 'spawn_failed',
+      session_id: 'sess-spawn-1',
+      pane_token: 'pane-1',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-spawn-1',
+    });
+
+    expect(useLiveStore.getState().spawns[0].status).toBe('failed');
+  });
+
+  it('leaves tracked spawns alone on session_registered for another session', () => {
+    trackOne();
+
+    useLiveStore.getState().applyEvent({
+      kind: 'session_registered',
+      session_id: 'sess-someone-elses',
+    });
+    expect(useLiveStore.getState().spawns).toHaveLength(1);
+  });
+
   it('leaves tracked spawns alone on spawn_failed for an unknown session', () => {
     trackOne();
 

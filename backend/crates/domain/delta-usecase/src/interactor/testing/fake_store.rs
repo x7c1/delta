@@ -248,12 +248,8 @@ impl SessionStore for FakeStore {
                     .max();
                 (s.clone(), last_activity_at)
             })
-            // A `spawning` session that ingested nothing is excluded, mirroring
-            // the SQL page query (see `SqliteStore::list_sessions_page`).
-            .filter(|(s, _)| {
-                s.status != SessionStatus::Spawning
-                    || g.messages.iter().any(|m| m.session_id == s.id)
-            })
+            // Every row is listed, including a message-less `spawning` one,
+            // mirroring the SQL page query (see `SqliteStore::list_sessions_page`).
             .collect();
         let recency = |row: &SessionPageRow| -> String {
             row.1.clone().unwrap_or_else(|| row.0.created_at.clone())

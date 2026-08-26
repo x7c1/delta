@@ -257,13 +257,12 @@ impl SqliteStore {
     ) -> std::result::Result<Vec<SessionPageRow>, delta_usecase::Error> {
         let conn = self.conn.lock().await;
 
-        // A `spawning` session that has ingested nothing is excluded: its
-        // launch has not produced a single hook yet, so listing it would
-        // surface a row the browser cannot open, and the optimistic new-session
-        // pending chip would mis-bind to it before the spawn either activates
-        // (it then lists as `active`, exactly when it used to appear) or fails
-        // (the row is reaped). The message guard keeps the predicate honest if
-        // a spawning session ever held data.
+        // Every session row is listed, including a still-`spawning` one that
+        // has ingested nothing: the browser shows a session from the moment
+        // its first send is accepted, as a starting session, rather than
+        // parking the user on the new-session screen until the launch's first
+        // hook arrives. A spawn that never binds is reaped, so its row leaves
+        // the list again (the client hears `spawn_failed`).
         //
         // `recency` is the row's last activity, falling back to its own
         // `created_at` when message-less — read straight from the denormalized
@@ -279,19 +278,14 @@ impl SqliteStore {
         // (equivalent to a row-value tuple comparison) so each key's role stays
         // explicit. When there is no cursor, `:cursor_null = 1` short-circuits
         // the predicate to select from the top. ISO-8601 UTC timestamps compare
-        // correctly as text, so no datetime casting is needed. The message-less
-        // `spawning` exclusion uses `last_activity_at IS NULL` as a cheap
-        // necessary condition (a spawning session that ingested nothing has no
-        // activity), then confirms with the message guard.
+        // correctly as text, so no datetime casting is needed.
         let mut stmt = conn
             .prepare(&format!(
                 "SELECT {SESSION_COLS}, \
                  last_activity_at, \
                  COALESCE(last_activity_at, created_at) AS recency \
                  FROM session \
-                 WHERE NOT (status = 'spawning' AND last_activity_at IS NULL \
-                            AND NOT EXISTS (SELECT 1 FROM message m WHERE m.session_id = session.id)) \
-                   AND (:cursor_null = 1 \
+                 WHERE (:cursor_null = 1 \
                     OR recency < :r \
                     OR (recency = :r AND (created_at < :c OR (created_at = :c AND id < :i)))) \
                  ORDER BY recency DESC, created_at DESC, id DESC \

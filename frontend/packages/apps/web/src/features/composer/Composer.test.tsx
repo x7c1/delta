@@ -47,6 +47,7 @@ function renderComposer(activeThread: Thread = mainThread) {
             kind: 'thread',
             activeThread,
             readOnly: false,
+            spawning: false,
           }}
         />
       </ApiProvider>
@@ -115,6 +116,54 @@ describe('Composer', () => {
     expect(useNavStore.getState().activeThreadId).toBe(MAIN_THREAD_ID);
   });
 
+  it('offers no send while the session is still starting', async () => {
+    // A session is focusable from the moment its first send is accepted, so
+    // its composer is reachable while the launch is still coming up. The
+    // server refuses a send to it (`409 session_spawning`), so the composer
+    // says it is starting and neither the button nor Cmd/Ctrl+Enter can fire
+    // one — a send here would only leave a dead `failed` chip in the pending
+    // strip, a beat before the same send would have worked.
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
+          <Composer
+            mode={{
+              kind: 'thread',
+              activeThread: mainThread,
+              // A starting session has no live pane either, so it arrives
+              // read-only; `spawning` is what changes what the composer says.
+              readOnly: true,
+              spawning: true,
+            }}
+          />
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
+
+    const textarea = screen.getByRole('textbox');
+    expect(textarea).toHaveAttribute('placeholder', 'This session is starting…');
+
+    fireEvent.change(textarea, { target: { value: 'too early' } });
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+
+    // The keyboard path is gated by the same flag, so it cannot bypass the
+    // disabled button.
+    fireEvent.click(send);
+    fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true });
+    fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(useLiveStore.getState().sending).toHaveLength(0);
+    expect(useLiveStore.getState().localSends).toEqual({});
+  });
+
   it('enqueues an optimistic send on a closed (read-only) resume', async () => {
     render(
       <QueryClientProvider
@@ -128,6 +177,7 @@ describe('Composer', () => {
               kind: 'thread',
               activeThread: mainThread,
               readOnly: true,
+              spawning: false,
             }}
           />
         </ApiProvider>
@@ -164,7 +214,12 @@ describe('Composer', () => {
       >
         <ApiProvider client={new ApiClient({ baseUrl: 'http://localhost' })}>
           <Composer
-            mode={{ kind: 'thread', activeThread: subThread, readOnly: true }}
+            mode={{
+              kind: 'thread',
+              activeThread: subThread,
+              readOnly: true,
+              spawning: false,
+            }}
           />
         </ApiProvider>
       </QueryClientProvider>,
@@ -205,6 +260,7 @@ describe('Composer', () => {
               kind: 'thread',
               activeThread: mainThread,
               readOnly: true,
+              spawning: false,
             }}
           />
         </ApiProvider>
@@ -243,6 +299,7 @@ describe('Composer', () => {
               kind: 'thread',
               activeThread: mainThread,
               readOnly: true,
+              spawning: false,
             }}
           />
         </ApiProvider>
@@ -286,6 +343,7 @@ describe('Composer', () => {
               kind: 'thread',
               activeThread: mainThread,
               readOnly: true,
+              spawning: false,
             }}
           />
         </ApiProvider>

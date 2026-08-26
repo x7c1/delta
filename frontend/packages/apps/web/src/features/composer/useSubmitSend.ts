@@ -1,6 +1,11 @@
 import { useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Send, SendRequest } from '@delta/wire-gen';
-import { ApiError, useCreateSendMutation } from '@delta/api-client';
+import {
+  ApiError,
+  invalidateSessions,
+  useCreateSendMutation,
+} from '@delta/api-client';
 import { useApiClient } from '../../data/apiContext';
 import { useLiveStore, type SendingItem } from '../../store/liveStore';
 
@@ -17,8 +22,9 @@ import { useLiveStore, type SendingItem } from '../../store/liveStore';
  * 3. on success, swap the `sending` chip for a tracked local send keyed by the
  *    REAL ids the server returned — it keeps the chip alive after the send
  *    matches its transcript line, until the turn-end event lands — and, for a
- *    new-session target, track the spawn so the workspace can focus the new
- *    session by id and a failed launch can surface Retry / Dismiss;
+ *    new-session target, track the spawn (the workspace focuses the new session
+ *    by that id at once, and a failed launch surfaces Retry / Dismiss) and
+ *    refetch the session list the accepted send just added a row to;
  * 4. on failure, keep the chip as a recoverable `failed` row — except a
  *    `resume_unavailable` rejection, where the turn can never start (the
  *    transcript is gone): the chip is dropped outright and the session is
@@ -33,6 +39,7 @@ export function useSubmitSend(): (args: {
   body: SendRequest;
 }) => Promise<Send> {
   const client = useApiClient();
+  const queryClient = useQueryClient();
   const mutation = useCreateSendMutation(client);
   const beginSending = useLiveStore((state) => state.beginSending);
   const failSending = useLiveStore((state) => state.failSending);
@@ -87,6 +94,13 @@ export function useSubmitSend(): (args: {
             workdir: target.workdir,
             launchOptionIds: target.launchOptionIds,
           });
+          // The server wrote the session row before it launched anything, so
+          // the list is already stale: refetch it now rather than waiting for
+          // the `session_registered` broadcast a second or more later. The
+          // workspace focuses the spawn off the tracked entry above — this is
+          // what lets the focused session's own card, threads and transcript
+          // arrive right behind it.
+          invalidateSessions(queryClient);
         }
         return send;
       } catch (error) {
@@ -109,6 +123,7 @@ export function useSubmitSend(): (args: {
       removeSending,
       recordLocalSend,
       trackSpawn,
+      queryClient,
       markResumeUnavailable,
       failSending,
     ],

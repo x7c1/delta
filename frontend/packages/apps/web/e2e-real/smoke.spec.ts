@@ -35,9 +35,9 @@ test('a browser prompt round-trips through the real claude and survives reload',
   await page.goto('/');
   await startNewSession(page, prompt, workdir);
 
-  // Optimistically pending immediately after Send; the real spawn registers
-  // (SessionStart/UserPromptSubmit hooks bind it) and focus switches to the
-  // real session.
+  // Optimistically pending immediately after Send; the POST is accepted with
+  // real ids, so focus switches to the real session right away — before the
+  // real spawn registers (SessionStart/UserPromptSubmit hooks bind it later).
   const pending = page.getByTestId('pending-item');
   await expect(pending).toHaveCount(1);
   await expect(page.getByTestId('new-session-empty')).toHaveCount(0, {

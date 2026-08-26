@@ -10,6 +10,13 @@ use delta_wire::rest::WireErrorBody;
 /// error body so the frontend can distinguish it from a generic failure.
 const RESUME_UNAVAILABLE_CODE: &str = "resume_unavailable";
 
+/// Stable machine-readable code for a send aimed at a session whose launch has
+/// not bound yet. Such a session is listed (and focusable) from the moment its
+/// first send is accepted, so a stale client can reach its composer while it is
+/// still starting; the code lets the frontend say exactly that instead of
+/// rendering a generic failure.
+const SESSION_SPAWNING_CODE: &str = "session_spawning";
+
 /// Stable machine-readable code for a permission decision that can no longer
 /// take effect (already decided, or its hook wait timed out and fell back to
 /// the TUI prompt). The frontend switches the notice to guidance chosen by the
@@ -130,6 +137,14 @@ impl IntoResponse for ApiError {
                     // "cannot be resumed" message instead of a generic failure.
                     Error::ResumeUnavailable(_) => {
                         (StatusCode::CONFLICT, Some(RESUME_UNAVAILABLE_CODE))
+                    }
+                    // The session exists but its launch has not bound yet, so
+                    // there is nothing to dispatch into: a conflict with
+                    // current state (the same send succeeds once the launch
+                    // registers), reported with a stable code so the frontend
+                    // can say the session is still starting.
+                    Error::SessionSpawning(_) => {
+                        (StatusCode::CONFLICT, Some(SESSION_SPAWNING_CODE))
                     }
                     // The permission request exists (or existed) but no browser
                     // decision can reach it anymore: a conflict with current
@@ -280,5 +295,43 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    /// Render an error through the response mapping and read back the status
+    /// plus the body's stable `code`, which is the contract a client branches
+    /// on (see `docs/guides/api/sends.md`).
+    async fn rendered(err: delta_usecase::Error) -> (StatusCode, Option<String>) {
+        let response = ApiError::from(err).into_response();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let code = body
+            .get("code")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
+        (status, code)
+    }
+
+    /// A send to a session whose launch has not bound yet is a conflict with
+    /// current state, not a server fault: `409` with the `session_spawning`
+    /// code the browser words as "this session is still starting".
+    #[tokio::test]
+    async fn a_still_spawning_session_renders_a_conflict_with_its_code() {
+        let (status, code) = rendered(delta_usecase::Error::SessionSpawning("sess-1".into())).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(code.as_deref(), Some("session_spawning"));
+
+        // Distinct from the other send-time conflict, so a client can tell
+        // "still starting" (retry once it registers) from "cannot be resumed".
+        let (status, resume_code) =
+            rendered(delta_usecase::Error::ResumeUnavailable("sess-2".into())).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(resume_code.as_deref(), Some("resume_unavailable"));
     }
 }

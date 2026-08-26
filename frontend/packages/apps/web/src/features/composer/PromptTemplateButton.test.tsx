@@ -55,6 +55,7 @@ const THREAD_MODE: ComposerMode = {
   kind: 'thread',
   activeThread: mainThread,
   readOnly: false,
+  spawning: false,
 };
 
 /**
@@ -496,6 +497,8 @@ describe('PromptTemplateButton', () => {
  * - **closed** — the read-only "Send to resume this closed session…" composer.
  * - **resuming** — closed AND a submit in flight: the resume the backend is
  *   servicing, with further sends deferred behind it.
+ * - **spawning** — the session is listed and focusable but its launch has not
+ *   registered, so the server refuses a send and the composer offers none.
  */
 describe('PromptTemplateButton across session states', () => {
   const inFlightSend = {
@@ -524,6 +527,7 @@ describe('PromptTemplateButton across session states', () => {
         kind: 'thread',
         activeThread: mainThread,
         readOnly: true,
+        spawning: false,
       } as ComposerMode,
       sending: [],
     },
@@ -533,8 +537,19 @@ describe('PromptTemplateButton across session states', () => {
         kind: 'thread',
         activeThread: mainThread,
         readOnly: true,
+        spawning: false,
       } as ComposerMode,
       sending: [inFlightSend],
+    },
+    {
+      name: 'spawning',
+      mode: {
+        kind: 'thread',
+        activeThread: mainThread,
+        readOnly: true,
+        spawning: true,
+      } as ComposerMode,
+      sending: [],
     },
   ];
 
