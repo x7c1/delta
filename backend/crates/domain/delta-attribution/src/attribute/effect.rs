@@ -60,9 +60,15 @@ pub enum Effect {
     /// attribution — the line lands on the send's thread either way — and
     /// exists so a new rewrite shape surfaces in the logs instead of silently.
     /// The command branches (a local command's name line, an unknown-command
-    /// notice) correlate by command name and set it `true`.
+    /// notice) are positional too, guarded by kind: they consume the head send
+    /// only when it is itself a slash command
+    /// ([`claude_format::is_slash_command_send`]). There `attributed` reports
+    /// the command-NAME question — `true` when the line spells the send's own
+    /// command, `false` when Claude recorded a name Delta cannot account for
+    /// (or, for an unknown-command notice, no name at all).
     ///
     /// [`claude_format::prompt_echoes_send`]: crate::claude_format::prompt_echoes_send
+    /// [`claude_format::is_slash_command_send`]: crate::claude_format::is_slash_command_send
     SendMatched {
         send_id: i64,
         matched_uuid: MessageUuid,
