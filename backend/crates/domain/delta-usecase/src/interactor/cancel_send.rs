@@ -14,12 +14,12 @@
 //! browser's open-send list. The store guards the transition with
 //! `WHERE status = 'queued'` ([`cancel_queued_send`](crate::ports::SessionStore::cancel_queued_send)),
 //! so a send that left `queued` the instant between the browser's click and
-//! this handler is a clean conflict rather than a clobber. A *restored* send
-//! (recovered at boot from a dead process's `dispatched` state, see
-//! [`SessionStore::restore_all_dispatched`]) is covered by this same queued
-//! path — its status is still `queued`, only its restore marker differs — so
-//! the UI keeps the cancel affordance on restored rows with no extra case
-//! here.
+//! this handler is a clean conflict rather than a clobber. A *held* send —
+//! recovered at boot from a dead process's `dispatched` state (see
+//! [`SessionStore::restore_all_dispatched`]), or parked by the echo deadline
+//! (see [`SessionStore::hold_send_for_release`]) — is covered by this same
+//! queued path: its status is still `queued`, only its hold marker differs, so
+//! the UI keeps the cancel affordance on held rows with no extra case here.
 //!
 //! ## Dispatched
 //!

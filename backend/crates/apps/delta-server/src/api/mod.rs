@@ -179,7 +179,7 @@ pub(crate) async fn list_threads(
 /// Returns the sends still in flight for the session — status `queued`
 /// (held back until the session goes idle) or `dispatched` (typed into the
 /// pane, awaiting transcript correlation) — oldest first. A queued row may
-/// carry `restored_at`: it was recovered at boot from a dead process's
+/// carry `held_at`: it was recovered at boot from a dead process's
 /// `dispatched` state and never auto-dispatches — the browser renders it
 /// with explicit Send ([`release_send`]) and Cancel actions instead of the
 /// waiting label. This is the source of truth for the browser's send strip.
@@ -719,28 +719,29 @@ pub(crate) async fn cancel_send(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /api/sends/{id}/release` — release a *restored* send into the
-/// normal queued flow (204).
+/// `POST /api/sends/{id}/release` — release a *held* send into the normal
+/// queued flow (204).
 ///
-/// The boot-time reconcile recovers every send a dead server process left
-/// `dispatched` as `queued` with a `restored_at` marker: visible in the
-/// open-send list, but never auto-dispatched — the message may be days old
-/// and re-submitting it silently was rejected on review. This endpoint is
-/// the explicit "Send" action on such a row: it first ensures the owning
-/// session is open (resuming `claude --resume <id>` when it is closed, the
-/// normal state right after the restart that created the row), then clears
-/// the marker (a guarded UPDATE, so a race with a cancel is a clean
-/// conflict) and runs the session's normal queued dispatch — if the session
-/// was already open and idle the row types immediately (the
-/// `send_dispatched` event is broadcast); if the release resumed the
-/// session the row is typed by the resume-settle flush once the resumed
-/// pane accepts input; otherwise (mid-turn) it waits as an ordinary queued
-/// send for the turn-end trigger. The sibling Cancel action is the existing
-/// [`cancel_send`] — a restored row's status is still `queued`, so the
+/// Two paths leave a row `queued` with a `held_at` marker — visible in the
+/// open-send list, but never auto-dispatched: the boot-time reconcile,
+/// recovering every send a dead server process left `dispatched`, and the
+/// echo-deadline park, for a send whose keystrokes were swallowed without a
+/// trace twice running.
+///
+/// This endpoint is the explicit "Send" action on such a row: it first ensures
+/// the owning session is open (resuming `claude --resume <id>` when it is
+/// closed, the normal state right after a restart), then clears the marker (a
+/// guarded UPDATE, so a race with a cancel is a clean conflict) and runs the
+/// session's normal queued dispatch — if the session was already open and idle
+/// the row types immediately (the `send_dispatched` event is broadcast); if the
+/// release resumed the session the row is typed by the resume-settle flush once
+/// the resumed pane accepts input; otherwise (mid-turn) it waits as an ordinary
+/// queued send for the turn-end trigger. The sibling Cancel action is the
+/// existing [`cancel_send`] — a held row's status is still `queued`, so the
 /// guarded queued cancel already covers it.
 ///
 /// Replies `409` with code `send_not_releasable` when the send is unknown,
-/// was never restored, is already released, or has since been cancelled.
+/// was never held, is already released, or has since been cancelled.
 /// The browser drops its Send control and reconciles from the refetch on
 /// this code. An ensure-open failure surfaces on its own path — e.g. `409`
 /// `resume_unavailable` when the session's transcript is gone — before the

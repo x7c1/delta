@@ -187,7 +187,7 @@ impl Config {
 ///
 /// Boot-time send reconcile: every `dispatched` row surviving from the
 /// previous process is restored here — returned to `queued` with the
-/// `restored_at` marker set — before any session actor exists. A restored
+/// `held_at` marker set — before any session actor exists. A restored
 /// row stays visible in the open-send list but never auto-dispatches; the
 /// user explicitly releases (or cancels) it from the UI. See
 /// [`SessionStore::restore_all_dispatched`] for why the sweep is exact at
@@ -492,7 +492,7 @@ mod tests {
             "boot returns the orphaned dispatched row to queued"
         );
         assert!(
-            stale.restored_at.is_some(),
+            stale.held_at.is_some(),
             "the restored marker is set, so the row awaits an explicit release"
         );
     }

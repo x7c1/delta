@@ -108,8 +108,9 @@ declare_endpoints! {
     /// Cancels a still-queued send before it is dispatched into the pane.
     CancelSend: POST "/api/sends/{id}/cancel";
 
-    /// Releases a restored send — one recovered at boot from a dead process's
-    /// dispatched state — into the normal queued flow.
+    /// Releases a held send — one recovered at boot from a dead process's
+    /// dispatched state, or parked by the echo deadline — into the normal
+    /// queued flow.
     ReleaseSend: POST "/api/sends/{id}/release";
 
     /// Answers a pending tool-permission request from the browser, waking the

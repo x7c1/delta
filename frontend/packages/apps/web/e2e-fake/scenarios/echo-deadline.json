@@ -8,6 +8,10 @@
     { "type": "swallow_prompt" },
 
     { "type": "await_prompt" },
+    { "type": "reply", "text": "released message answered" },
+    { "type": "stop" },
+
+    { "type": "await_prompt" },
     { "type": "reply", "text": "follow-up answered" },
     { "type": "stop" }
   ]

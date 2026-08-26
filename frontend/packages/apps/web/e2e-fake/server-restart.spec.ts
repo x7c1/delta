@@ -11,7 +11,7 @@ import { fetchSends, latestSession } from './support/rest';
  * process died. Turn state is runtime-only and rebuilds `Idle` on boot, but
  * the send *row* is persistent — so the boot sweep
  * (`SessionStore::restore_all_dispatched`) turns every orphaned `dispatched`
- * row back into `queued` with `restored_at` set, and the row is deliberately
+ * row back into `queued` with `held_at` set, and the row is deliberately
  * *never* auto-resent: stale text must not be re-submitted into a conversation
  * that has moved on. The user decides, via an explicit Send
  * (`POST /api/sends/{id}/release`) or Cancel.
@@ -62,7 +62,7 @@ test('a dispatched send survives a server restart as a restored row and is relea
     const sends = await fetchSends(page, session.id);
     expect(sends.sends).toHaveLength(1);
     expect(sends.sends[0].status).toBe('dispatched');
-    expect(sends.sends[0].restored_at).toBeNull();
+    expect(sends.sends[0].held_at).toBeNull();
   }).toPass({ timeout: 15_000 });
 
   // SIGKILL the server (a hard death) and relaunch it against the SAME
@@ -82,21 +82,23 @@ test('a dispatched send survives a server restart as a restored row and is relea
 
   // The session reads as closed after the restart — turn state rebuilt `Idle` —
   // and the boot sweep recovered the orphaned `dispatched` row as a restored
-  // `queued` send: still one open send, now carrying `restored_at`.
+  // `queued` send: still one open send, now carrying `held_at`.
   await expect(async () => {
     const sends = await fetchSends(page, session.id);
     expect(sends.turn.state).toBe('idle');
     expect(sends.sends).toHaveLength(1);
     expect(sends.sends[0].status).toBe('queued');
-    expect(sends.sends[0].restored_at).not.toBeNull();
+    expect(sends.sends[0].held_at).not.toBeNull();
   }).toPass({ timeout: 20_000 });
 
   // The restored send is NOT auto-resent: it surfaces as a queued row with the
-  // "Restored after restart" badge and the explicit Send/Cancel controls,
-  // exactly once — the user decides whether the stale text goes through.
+  // neutral held badge and the explicit Send/Cancel controls, exactly once —
+  // the user decides whether the stale text goes through. The badge names the
+  // state rather than the cause, because the echo-deadline park leaves a row
+  // in exactly this one (see `echo-deadline.spec.ts`).
   const restoredRow = pending.filter({ hasText: 'this send was in flight at the crash' });
   await expect(restoredRow).toHaveCount(1, { timeout: 20_000 });
-  await expect(restoredRow.getByText('Restored after restart')).toBeVisible();
+  await expect(restoredRow.getByText('Held — send or cancel')).toBeVisible();
   const sendButton = restoredRow.getByRole('button', { name: 'Send' });
   await expect(sendButton).toBeVisible();
   await expect(restoredRow.getByRole('button', { name: 'Cancel' })).toBeVisible();

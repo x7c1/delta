@@ -22,8 +22,9 @@ use super::SessionRuntime;
 /// do arrive on the next attempt, and losing a composed message to a single
 /// hiccup would be worse than the retry. Not more than one: whatever ate them
 /// may still be there, each attempt costs a full model turn, and a send that
-/// vanished twice is better handed back to the user (parked, with its text)
-/// than re-typed forever. Two dispatches are enough to tell the two apart.
+/// vanished twice is better handed back to the user (parked — held in the
+/// queue until they release or cancel it) than re-typed forever. Two
+/// dispatches are enough to tell the two apart.
 pub const MAX_REQUEUES_PER_SEND: u32 = 1;
 
 /// How long a dispatched send may wait for its `UserPromptSubmit` echo before

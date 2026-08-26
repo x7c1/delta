@@ -130,10 +130,11 @@ export function applySessionEvent(
       }
       break;
     case 'send_parked':
-      // The server gave up delivering a composed message and cancelled its
-      // row, so the open-send list changed: refetch it (regardless of focus)
-      // to clear the pending chip that would otherwise spin forever. The
-      // "why" is already in the store as a notice.
+      // The server gave up delivering a composed message and put its row back
+      // in the queue, held for an explicit release, so the open-send list
+      // changed: refetch it (regardless of focus) so the chip that would
+      // otherwise spin forever becomes the held row with its Send and Cancel
+      // controls. The "why" is already in the store as a notice.
       invalidateSessionSends(queryClient, event.session_id);
       break;
     case 'external_input':

@@ -88,6 +88,10 @@ async fn unmatchable_send_is_never_redispatched() {
         Some("u-0"),
         "delivered, and bound to the line that came back for it",
     );
+    assert!(
+        settled.held_at.is_none(),
+        "a delivered send never picks up the park's hold marker",
+    );
 
     // Delivered exactly once: the now-idle session has nothing left to re-type.
     // Written as a literal so any future re-type has to be a deliberate edit
@@ -112,8 +116,8 @@ async fn unmatchable_send_is_never_redispatched() {
         "the settled send left the open-send list, so the pending chip clears"
     );
 
-    // Nothing was parked: parking hands the text back as *undelivered*, which
-    // this message no longer is.
+    // Nothing was parked: parking holds the message back as *undelivered*,
+    // which this one no longer is.
     let mut drained = Vec::new();
     while let Ok(event) = events.try_recv() {
         drained.push(event);

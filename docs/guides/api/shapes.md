@@ -128,7 +128,7 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
   "status": "queued",
   "matched_uuid": null,
   "created_at": "2026-01-01T00:00:00Z",
-  "restored_at": null
+  "held_at": null
 }
 ```
 
@@ -148,8 +148,10 @@ Any unmodelled block kind is preserved as `{ "type": "other" }`.
   to no message — no user line reached the transcript before that turn ended
   (see [sends.md](sends.md#overview)). So `null` never means "not delivered";
   `status` alone answers that.
-- `restored_at` is set only on a `queued` row recovered at boot from a
-  `dispatched` state a dead server process left behind. Such a row never
-  auto-dispatches; it waits for
-  [`POST /api/sends/{id}/release`](sends.md#post-apisendsidrelease). `null` on
-  the normal send path.
+- `held_at` marks a `queued` row as **held until the user releases it**: it
+  never auto-dispatches and waits for
+  [`POST /api/sends/{id}/release`](sends.md#post-apisendsidrelease) (or a
+  cancel). Two paths set it, and the row looks the same either way — the boot
+  reconcile, recovering a `dispatched` state a dead server process left behind,
+  and the [echo deadline's park](sends.md#when-no-echo-ever-arrives), for a send
+  whose keystrokes vanished twice running. `null` on the normal send path.

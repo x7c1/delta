@@ -61,12 +61,8 @@ impl Step {
     /// A step that rewrites, renames, drops, tightens or moves existing data.
     /// A pending set containing one of these triggers a pre-migration snapshot.
     ///
-    /// Nothing on the shipped ladder is destructive yet — it was built before
-    /// the first change that needs it, so that the change itself only has to
-    /// append a step. The runner's tests drive it, hence the `cfg_attr`: the
-    /// dead-code warning stays live for the test build, and comes back for the
-    /// library the moment the first real destructive step lands and is removed.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The shipped ladder's first destructive step is v6, the rename of the
+    /// send table's hold marker (see [`crate::migrations`]'s `send` module).
     pub const fn destructive(to_version: u32, sql: &'static str) -> Self {
         Self {
             to_version,

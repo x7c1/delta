@@ -31,9 +31,10 @@ use crate::error::Result;
 ///
 /// **Backup.** If the pending set contains at least one destructive step, a
 /// snapshot of the database is taken *before* anything is applied — see
-/// [`back_up`]. An additive-only upgrade writes no file. `db_path` is the file
-/// the connection was opened from, or `None` for an in-memory database (nothing
-/// on disk to snapshot).
+/// [`back_up`]. An additive-only upgrade writes no file, and neither does a
+/// replay from 0, which is building a fresh database rather than changing one.
+/// `db_path` is the file the connection was opened from, or `None` for an
+/// in-memory database (nothing on disk to snapshot).
 pub(crate) fn migrate(
     conn: &Connection,
     steps: &[Step],
@@ -85,6 +86,14 @@ pub(crate) fn migrate(
 /// The name carries the *source* version, so a given database writes each such
 /// file exactly once in its life however many times it is opened.
 ///
+/// **A replay from version 0 is skipped.** Such a run is not an upgrade: the
+/// file has never seen delta (the gate refuses an unstamped file that already
+/// holds delta's tables), so the whole ladder — the destructive steps included
+/// — is being replayed to *build* the schema, over nothing that could be lost.
+/// Without this, every fresh install would find a `delta.db.bak-v0` snapshot of
+/// an empty database sitting next to its brand-new one, and no way to tell it
+/// from a real pre-upgrade copy.
+///
 /// `VACUUM INTO` rather than a file copy: the database runs in WAL mode, so a
 /// plain copy can miss changes that have not been checkpointed back into the
 /// main file, while `VACUUM INTO` writes a consistent single-file snapshot
@@ -101,6 +110,10 @@ pub(crate) fn migrate(
 /// deletes them together with the database they were taken from — leaving them
 /// behind would make them look like snapshots of the database the reset created.
 fn back_up(conn: &Connection, db_path: Option<&str>, from_version: u32) -> Result<()> {
+    if from_version == 0 {
+        info!("skipping pre-migration backup: replaying the ladder onto a fresh database");
+        return Ok(());
+    }
     let Some(db_path) = db_path else {
         // An in-memory database has no file to snapshot, and `VACUUM INTO` would
         // happily write one anyway — a surprise nobody asked for. Say so and

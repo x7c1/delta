@@ -142,7 +142,7 @@ describe('applySessionEvent', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['messages', 5] });
   });
 
-  it('refetches the open sends on send_dispatched and touches nothing else', () => {
+  it('refetches the open sends on send_dispatched and leaves the transcript alone', () => {
     const queryClient = new QueryClient();
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
@@ -154,7 +154,9 @@ describe('applySessionEvent', () => {
     );
 
     // The queued→dispatched flip lives in the open-send list; the transcript
-    // has not changed (the echo has not even fired yet).
+    // has not changed (the echo has not even fired yet). The store's only
+    // reaction is retiring a parked-send notice for this very send (see
+    // `reduceSendDispatched`), which no send here has.
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['session-sends', FOCUSED],
     });
@@ -348,9 +350,9 @@ describe('applySessionEvent', () => {
     // return to that session rather than only if they were watching it.
     expect(
       noticeOf(useLiveStore.getState().notices, 'other-session', 'send_parked'),
-    ).toMatchObject({ sendId: 42, text: 'never delivered' });
-    // The row was cancelled server-side, so the pending chip must be refetched
-    // away rather than left spinning.
+    ).toMatchObject({ sendId: 42 });
+    // The row went back to the queue held for a release, so the open-send list
+    // must be refetched rather than left showing a spinning chip.
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: queryKeys.sessionSends('other-session'),
     });

@@ -15,7 +15,11 @@ import { createHandlers, mockSpawnSessionId, SESSION_ID } from '@delta/api-mocks
 import { ApiClient, queryKeys } from '@delta/api-client';
 import type { Send } from '@delta/wire-gen';
 import { ApiProvider } from '../../data/apiContext';
-import { useLiveStore, type SpawnItem } from '../../store/liveStore';
+import {
+  noticeOf,
+  useLiveStore,
+  type SpawnItem,
+} from '../../store/liveStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { PendingQueue } from './PendingQueue';
 import { usePendingSends, type PendingSurface } from './usePendingSends';
@@ -56,6 +60,7 @@ function reset() {
     localSends: {},
     spawns: [],
     activeTurns: {},
+    notices: {},
   });
   useNotificationStore.setState({ errors: [] });
 }
@@ -71,7 +76,7 @@ function serverSend(overrides: Partial<Send> = {}): Send {
     status: 'dispatched',
     matched_uuid: null,
     created_at: '2026-01-01T00:00:00Z',
-    restored_at: null,
+    held_at: null,
     ...overrides,
   };
 }
@@ -237,11 +242,17 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByText('unyielding')).toBeInTheDocument();
   });
 
-  it('renders a restored send with its label plus explicit Send and Cancel', () => {
-    // A queued row with a non-null restored_at was recovered at the server's
-    // boot from a dead process's dispatched state. It must NOT read as
-    // "sends when idle" (the server never auto-sends it); instead it carries
-    // the restored label and an explicit Send alongside the usual Cancel.
+  it('renders a held send with the neutral label plus explicit Send and Cancel', () => {
+    // A queued row with a non-null held_at is held: the server will not
+    // dispatch it on its own. It must NOT read as "sends when idle"; instead
+    // it carries the neutral held label and an explicit Send alongside the
+    // usual Cancel.
+    //
+    // The boot restore and the echo-deadline park leave a row in exactly this
+    // state, and the strip renders it from `held_at` alone — nothing in the
+    // row says which one produced it, so the label has to be neutral about the
+    // cause: naming the restart would be a lie on a parked row, which explains
+    // itself through the `send_parked` notice instead.
     renderStrip(
       { kind: 'thread', sessionId: SESSION_ID, threadId: 1 },
       (queryClient) => {
@@ -251,14 +262,17 @@ describe('PendingQueue server sends', () => {
               id: 5,
               text: 'composed before the restart',
               status: 'queued',
-              restored_at: '2026-01-02T00:00:00Z',
+              held_at: '2026-01-02T00:00:00Z',
             }),
           ],
         });
       },
     );
 
-    expect(screen.getByText('Restored after restart')).toBeInTheDocument();
+    expect(screen.getByText('Held — send or cancel')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Restored after restart'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText('queued — sends when idle'),
     ).not.toBeInTheDocument();
@@ -266,11 +280,11 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
-  it('Send releases a restored send and the refetch clears its restored state', async () => {
+  it('Send releases a held send and the refetch clears its held state', async () => {
     // The explicit release: Send hits the release endpoint; the refetch the
     // mutation triggers then reports the row dispatched (the server released
-    // it into the normal queued flow and it typed immediately), so the
-    // restored chip gives way to the ordinary awaiting-reply row.
+    // it into the normal queued flow and it typed immediately), so the held
+    // chip gives way to the ordinary awaiting-reply row.
     let released = false;
     const releaseUrls: string[] = [];
     server.use(
@@ -283,7 +297,7 @@ describe('PendingQueue server sends', () => {
                   id: 5,
                   text: 'held over',
                   status: 'queued',
-                  restored_at: '2026-01-02T00:00:00Z',
+                  held_at: '2026-01-02T00:00:00Z',
                 }),
           ],
           turn: released
@@ -309,12 +323,12 @@ describe('PendingQueue server sends', () => {
 
     renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
 
-    await screen.findByText('Restored after restart');
+    await screen.findByText('Held — send or cancel');
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
       expect(
-        screen.queryByText('Restored after restart'),
+        screen.queryByText('Held — send or cancel'),
       ).not.toBeInTheDocument();
     });
     expect(releaseUrls).toEqual(['/api/sends/5/release']);
@@ -322,6 +336,190 @@ describe('PendingQueue server sends', () => {
     expect(screen.getByText('held over')).toBeInTheDocument();
     expect(screen.getByText('awaiting reply')).toBeInTheDocument();
     expect(useNotificationStore.getState().errors).toHaveLength(0);
+  });
+
+  it('retires the parked-send notice when the row it points at is acted on', async () => {
+    // The notice says the message "is waiting in the queue below: send it
+    // again … or cancel it". Once the user does either, the row it points at
+    // is no longer waiting, so the card must go with it — a cancel especially,
+    // which the server broadcasts as nothing at all.
+    for (const action of ['Send', 'Cancel'] as const) {
+      server.use(
+        http.get('*/api/sessions/:id/sends', () =>
+          HttpResponse.json({
+            sends: [
+              serverSend({
+                id: 7,
+                text: 'swallowed twice',
+                status: 'queued',
+                held_at: '2026-01-02T00:00:00Z',
+              }),
+            ],
+            turn: { state: 'idle', send_id: null, thread_id: null },
+            permission: null,
+            question: null,
+            running_subagents: [],
+          }),
+        ),
+        http.post('*/api/sends/:id/release', () => new HttpResponse(null, { status: 204 })),
+        http.post('*/api/sends/:id/cancel', () => new HttpResponse(null, { status: 204 })),
+      );
+      useLiveStore.setState({
+        notices: {
+          [SESSION_ID]: [{ kind: 'send_parked', sendId: 7, at: 0 }],
+        },
+      });
+
+      const { unmount } = renderStrip({
+        kind: 'thread',
+        sessionId: SESSION_ID,
+        threadId: 1,
+      });
+
+      await screen.findByText('swallowed twice');
+      fireEvent.click(screen.getByRole('button', { name: action }));
+
+      await waitFor(() => {
+        expect(
+          noticeOf(useLiveStore.getState().notices, SESSION_ID, 'send_parked'),
+        ).toBeNull();
+      });
+      unmount();
+    }
+  });
+
+  it('keeps the parked-send notice when the release is refused', async () => {
+    // A refused release leaves the row held — `resume_unavailable` says the
+    // server never even reached the marker. Retiring the notice on the click
+    // would strand the user with a row still sitting in the queue and nothing
+    // left saying why it is there, so the card only goes once the server has
+    // actually accepted.
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [
+            serverSend({
+              id: 7,
+              text: 'swallowed twice',
+              status: 'queued',
+              held_at: '2026-01-02T00:00:00Z',
+            }),
+          ],
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/release', () =>
+        HttpResponse.json(
+          { error: 'session cannot be resumed', code: 'resume_unavailable' },
+          { status: 409 },
+        ),
+      ),
+    );
+    useLiveStore.setState({
+      notices: { [SESSION_ID]: [{ kind: 'send_parked', sendId: 7, at: 0 }] },
+    });
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('swallowed twice');
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(useNotificationStore.getState().errors).toHaveLength(1);
+    });
+    expect(useNotificationStore.getState().errors[0].title).toBe(
+      'Could not send the message',
+    );
+    // The row is still held, and the notice explaining why is still up.
+    expect(screen.getByText('Held — send or cancel')).toBeInTheDocument();
+    expect(
+      noticeOf(useLiveStore.getState().notices, SESSION_ID, 'send_parked'),
+    ).not.toBeNull();
+  });
+
+  it('keeps the parked-send notice when the cancel is refused', async () => {
+    // Same for the other control: a `send_not_cancellable` refusal means the
+    // row did not leave the queue, so the card must not disappear ahead of it.
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: [
+            serverSend({
+              id: 7,
+              text: 'swallowed twice',
+              status: 'queued',
+              held_at: '2026-01-02T00:00:00Z',
+            }),
+          ],
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/cancel', () =>
+        HttpResponse.json(
+          { error: 'not cancellable', code: 'send_not_cancellable' },
+          { status: 409 },
+        ),
+      ),
+    );
+    useLiveStore.setState({
+      notices: { [SESSION_ID]: [{ kind: 'send_parked', sendId: 7, at: 0 }] },
+    });
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('swallowed twice');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(useNotificationStore.getState().errors).toHaveLength(1);
+    });
+    expect(
+      noticeOf(useLiveStore.getState().notices, SESSION_ID, 'send_parked'),
+    ).not.toBeNull();
+  });
+
+  it('leaves another send’s parked notice alone when a held row is cancelled', async () => {
+    // The notice names one send. Cancelling a different row — the ordinary
+    // case, since the strip lists everything open — must not take it down.
+    let cancelled = false;
+    server.use(
+      http.get('*/api/sessions/:id/sends', () =>
+        HttpResponse.json({
+          sends: cancelled
+            ? []
+            : [serverSend({ id: 8, text: 'unrelated', status: 'queued' })],
+          turn: { state: 'idle', send_id: null, thread_id: null },
+          permission: null,
+          question: null,
+          running_subagents: [],
+        }),
+      ),
+      http.post('*/api/sends/:id/cancel', () => {
+        cancelled = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    useLiveStore.setState({
+      notices: { [SESSION_ID]: [{ kind: 'send_parked', sendId: 7, at: 0 }] },
+    });
+
+    renderStrip({ kind: 'thread', sessionId: SESSION_ID, threadId: 1 });
+
+    await screen.findByText('unrelated');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('unrelated')).not.toBeInTheDocument();
+    });
+    expect(
+      noticeOf(useLiveStore.getState().notices, SESSION_ID, 'send_parked'),
+    ).toMatchObject({ sendId: 7 });
   });
 
   it('surfaces a refused release through the notification store instead of failing silently', async () => {
@@ -337,7 +535,7 @@ describe('PendingQueue server sends', () => {
               id: 6,
               text: 'contested',
               status: 'queued',
-              restored_at: '2026-01-02T00:00:00Z',
+              held_at: '2026-01-02T00:00:00Z',
             }),
           ],
           turn: { state: 'idle', send_id: null, thread_id: null },

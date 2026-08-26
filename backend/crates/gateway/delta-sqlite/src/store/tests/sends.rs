@@ -137,7 +137,7 @@ async fn restore_all_dispatched_sweeps_every_session_and_spares_other_rows() {
         let send = store.send(id).await.unwrap().unwrap();
         assert_eq!(send.status, SendStatus::Queued);
         assert!(
-            send.restored_at.is_some(),
+            send.held_at.is_some(),
             "a restored row carries the marker so it awaits an explicit release"
         );
         assert!(
@@ -156,7 +156,7 @@ async fn restore_all_dispatched_sweeps_every_session_and_spares_other_rows() {
     let queued = store.send(queued.id).await.unwrap().unwrap();
     assert_eq!(queued.status, SendStatus::Queued);
     assert_eq!(
-        queued.restored_at, None,
+        queued.held_at, None,
         "a genuinely queued row is untouched — it keeps dispatching normally"
     );
 }
@@ -184,7 +184,7 @@ async fn next_queued_send_skips_restored_rows() {
     // The restored row still shows in the open-send list (the UI needs it).
     let open = store.open_sends(&session.id).await.unwrap();
     assert_eq!(open.len(), 1);
-    assert!(open[0].restored_at.is_some());
+    assert!(open[0].held_at.is_some());
 
     // A younger genuinely queued row is selected past the older restored one.
     let fresh = store
@@ -201,7 +201,64 @@ async fn next_queued_send_skips_restored_rows() {
 }
 
 #[tokio::test]
-async fn release_restored_send_clears_the_marker_only_for_queued_restored_rows() {
+async fn hold_send_for_release_only_holds_a_dispatched_row() {
+    // The park's half of the hold marker: one `dispatched` row goes back to
+    // `queued` with `held_at` set, and the status guard refuses every row
+    // that is no longer outstanding — so a park racing an echo (or a cancel)
+    // can never revive a settled send.
+    let store = SqliteStore::open_in_memory().unwrap();
+    let (session, main) = store.register_session(new_session()).await.unwrap();
+
+    let parked = store
+        .enqueue_send(&session.id, main, None, "parked", None)
+        .await
+        .unwrap();
+    assert_eq!(parked.status, SendStatus::Dispatched);
+    assert!(store.hold_send_for_release(parked.id).await.unwrap());
+
+    let held = store.send(parked.id).await.unwrap().unwrap();
+    assert_eq!(held.status, SendStatus::Queued);
+    assert!(held.held_at.is_some(), "the hold marker is stamped");
+    assert!(
+        store.next_queued_send(&session.id).await.unwrap().is_none(),
+        "a held row is skipped by the idle dispatch, exactly like a restored one"
+    );
+    let open = store.open_sends(&session.id).await.unwrap();
+    assert_eq!(open.len(), 1, "but it stays visible in the open-send list");
+    assert_eq!(open[0].id, parked.id);
+
+    // Holding twice is a no-op conflict: the row is `queued` now.
+    assert!(!store.hold_send_for_release(parked.id).await.unwrap());
+
+    // A matched row is never revived by a late park.
+    let matched = store
+        .enqueue_send(&session.id, main, None, "matched", None)
+        .await
+        .unwrap();
+    store
+        .mark_send_matched(matched.id, &MessageUuid::from("u-1"))
+        .await
+        .unwrap();
+    assert!(!store.hold_send_for_release(matched.id).await.unwrap());
+    assert_eq!(
+        store.send(matched.id).await.unwrap().unwrap().status,
+        SendStatus::Matched,
+    );
+
+    // Nor is a cancelled one.
+    let cancelled = store
+        .enqueue_send(&session.id, main, None, "cancelled", None)
+        .await
+        .unwrap();
+    store.cancel_send(cancelled.id).await.unwrap();
+    assert!(!store.hold_send_for_release(cancelled.id).await.unwrap());
+
+    // An unknown id reports no transition rather than erroring.
+    assert!(!store.hold_send_for_release(9999).await.unwrap());
+}
+
+#[tokio::test]
+async fn release_held_send_clears_the_marker_only_for_queued_held_rows() {
     let store = SqliteStore::open_in_memory().unwrap();
     let (session, main) = store.register_session(new_session()).await.unwrap();
 
@@ -213,12 +270,12 @@ async fn release_restored_send_clears_the_marker_only_for_queued_restored_rows()
 
     // The release clears the marker; the row re-enters the normal queued flow.
     assert!(
-        store.release_restored_send(restored.id).await.unwrap(),
+        store.release_held_send(restored.id).await.unwrap(),
         "a queued restored row releases"
     );
     let released = store.send(restored.id).await.unwrap().unwrap();
     assert_eq!(released.status, SendStatus::Queued);
-    assert_eq!(released.restored_at, None);
+    assert_eq!(released.held_at, None);
     assert_eq!(
         store
             .next_queued_send(&session.id)
@@ -230,14 +287,14 @@ async fn release_restored_send_clears_the_marker_only_for_queued_restored_rows()
     );
 
     // A second release is a no-op conflict: the row is already released.
-    assert!(!store.release_restored_send(restored.id).await.unwrap());
+    assert!(!store.release_held_send(restored.id).await.unwrap());
 
-    // A never-restored queued row is not releasable.
+    // A never-held queued row is not releasable.
     let plain = store
         .enqueue_queued_send(&session.id, main, None, "plain", None)
         .await
         .unwrap();
-    assert!(!store.release_restored_send(plain.id).await.unwrap());
+    assert!(!store.release_held_send(plain.id).await.unwrap());
 
     // A cancelled restored row is not releasable (the cancel won the race).
     let cancelled = store
@@ -246,10 +303,10 @@ async fn release_restored_send_clears_the_marker_only_for_queued_restored_rows()
         .unwrap();
     assert_eq!(store.restore_all_dispatched().await.unwrap(), 1);
     assert!(store.cancel_queued_send(cancelled.id).await.unwrap());
-    assert!(!store.release_restored_send(cancelled.id).await.unwrap());
+    assert!(!store.release_held_send(cancelled.id).await.unwrap());
 
     // An unknown id reports no transition rather than erroring.
-    assert!(!store.release_restored_send(9999).await.unwrap());
+    assert!(!store.release_held_send(9999).await.unwrap());
 }
 
 #[tokio::test]
