@@ -216,11 +216,15 @@ impl SessionStore for SqliteStore {
         self.restore_all_dispatched().await
     }
 
-    async fn release_restored_send(
+    async fn hold_send_for_release(
         &self,
         id: i64,
     ) -> std::result::Result<bool, delta_usecase::Error> {
-        self.release_restored_send(id).await
+        self.hold_send_for_release(id).await
+    }
+
+    async fn release_held_send(&self, id: i64) -> std::result::Result<bool, delta_usecase::Error> {
+        self.release_held_send(id).await
     }
 
     async fn head_dispatched_send(

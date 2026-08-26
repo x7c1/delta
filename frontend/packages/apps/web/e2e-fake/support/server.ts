@@ -9,7 +9,7 @@ import path from 'node:path';
  * The `delta-server` lifecycle, owned by the Playwright worker process.
  *
  * The server-restart semantics under test (a `dispatched` send a dead process
- * left behind, swept back to `queued` + `restored_at` at the next boot) cross
+ * left behind, swept back to `queued` + `held_at` at the next boot) cross
  * a server-process death, so a spec must be able to kill the server and bring
  * it back against the *same* database, tmux socket, and scripted-agent
  * wrappers. That is only possible if the test process holds the child-process

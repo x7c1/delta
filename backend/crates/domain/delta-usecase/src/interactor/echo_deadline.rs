@@ -17,8 +17,9 @@
 //! [`TurnInput::EchoDeadline`], and the recovery from there rides machinery
 //! that already exists — the requeue budget in
 //! [`turn_input`](crate::interactor::turn_input). One deadline returns the send
-//! to `queued` and re-types it; a second parks it (row `cancelled`, text handed
-//! back through [`SessionEvent::SendParked`]) and the queue behind it drains.
+//! to `queued` and re-types it; a second parks it (the row stays in the queue
+//! holding for an explicit release, with [`SessionEvent::SendParked`]
+//! explaining why) and the queue behind it drains past it.
 //! Two dispatches are enough to tell "the modal was up for a moment" from "the
 //! keystrokes can never land".
 //!

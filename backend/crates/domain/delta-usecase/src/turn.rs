@@ -71,11 +71,11 @@
 //! that nothing is outstanding. The restored row does not re-dispatch on its
 //! own — the message may be stale by the time the session reopens — it stays
 //! visible in the open-send list until the user explicitly releases it into
-//! the normal queued flow ([`SessionStore::release_restored_send`]) or
+//! the normal queued flow ([`SessionStore::release_held_send`]) or
 //! cancels it.
 //!
 //! [`SessionStore::restore_all_dispatched`]: crate::ports::SessionStore::restore_all_dispatched
-//! [`SessionStore::release_restored_send`]: crate::ports::SessionStore::release_restored_send
+//! [`SessionStore::release_held_send`]: crate::ports::SessionStore::release_held_send
 //!
 //! ## Orphaned sends
 //!
@@ -93,7 +93,9 @@
 //!   the message with no trace. *Bounded*, though: a send that keeps
 //!   disappearing would requeue on every attempt, so the caller
 //!   (`interactor::turn_input`) grants each send a finite requeue budget and
-//!   parks it once the budget is spent. The count is history rather than turn
+//!   parks it once the budget is spent — the row stays `queued` but stops
+//!   dispatching on its own, waiting for the user to release or cancel it, so
+//!   the bound costs no message either. The count is history rather than turn
 //!   state, so it lives on `SessionRuntime` (the session actor's runtime
 //!   state), not in this pure table. The [`TurnInput::EchoDeadline`] watchdog
 //!   is the main producer: it is what turns "no signal at all" into a signal.
@@ -405,8 +407,9 @@ pub fn transition(state: TurnState, input: TurnInput) -> Transition {
         // routes the send through the *existing* budget in
         // `interactor::turn_input` — one re-type (preceded by an `Escape`, so a
         // lingering modal is dismissed and a half-landed composer draft is
-        // discarded), and a park with the text handed back if that re-type is
-        // swallowed too. A deadline naming a different send is stale (that send
+        // discarded), and a park — the row held in the queue for an explicit
+        // release — if that re-type is swallowed too. A deadline naming a
+        // different send is stale (that send
         // settled and a newer one is outstanding): leave the current wait
         // alone.
         (

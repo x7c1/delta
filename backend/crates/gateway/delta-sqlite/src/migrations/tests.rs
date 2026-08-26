@@ -70,7 +70,7 @@ fn the_registry_orders_steps_by_version_keeping_declaration_order_within_one() {
         steps.windows(2).all(|w| w[0].to_version <= w[1].to_version),
         "the registry must hand the runner an ascending ladder",
     );
-    // The v3 baseline is the whole ladder today, and `session` is declared
+    // The v3 baseline is the ladder's lowest version, and `session` is declared
     // first, so its `CREATE TABLE` must be the very first statement replayed —
     // every other subject references it.
     assert!(
@@ -124,6 +124,62 @@ fn a_ladder_whose_top_disagrees_with_the_expected_version_fails_validation() {
 fn an_empty_ladder_fails_validation() {
     let err = validate(&[], 3).expect_err("an empty ladder must be rejected");
     assert!(err.to_string().contains("no steps"), "{err}");
+}
+
+// --- the shipped ladder's own steps ------------------------------------------
+
+#[test]
+fn the_v6_step_renames_the_send_hold_marker_and_carries_its_values_over() {
+    // The real registry, not a synthetic ladder: a database built to v5 holds
+    // the marker as `restored_at`, and the pending v6 step has to move the
+    // column *and* everything already stored in it.
+    let conn = Connection::open_in_memory().unwrap();
+    let steps = registry();
+    migrate(&conn, &steps, 0, 5, None).unwrap();
+
+    // Written straight through SQL rather than through the store: the store's
+    // send writes speak the *current* column name, and the point here is the
+    // shape that predates it.
+    conn.execute_batch(
+        "INSERT INTO session (id, cwd, status, created_at)
+         VALUES ('sess-1', '/work', 'active', '2026-01-01T00:00:00Z');
+         INSERT INTO thread (id, session_id, title, created_at)
+         VALUES (1, 'sess-1', 'main', '2026-01-01T00:00:00Z');
+         INSERT INTO send (id, session_id, thread_id, text, status, created_at, restored_at)
+         VALUES (1, 'sess-1', 1, 'held',  'queued', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z'),
+                (2, 'sess-1', 1, 'plain', 'queued', '2026-01-01T00:00:00Z', NULL);",
+    )
+    .unwrap();
+
+    migrate(&conn, &steps, 5, 6, None).unwrap();
+
+    assert_eq!(user_version(&conn), 6);
+    let columns = column_names(&conn, "send");
+    assert!(
+        columns.contains(&"held_at".to_owned()),
+        "the marker is readable under its new name: {columns:?}",
+    );
+    assert!(
+        !columns.contains(&"restored_at".to_owned()),
+        "and no longer under the old one: {columns:?}",
+    );
+
+    let marked: Option<String> = conn
+        .query_row("SELECT held_at FROM send WHERE id = 1", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        marked.as_deref(),
+        Some("2026-01-02T00:00:00Z"),
+        "a row already held keeps its stamp — the rename backfills nothing",
+    );
+    let unmarked: Option<String> = conn
+        .query_row("SELECT held_at FROM send WHERE id = 2", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(unmarked, None, "and an unheld row stays unheld");
 }
 
 // --- the runner --------------------------------------------------------------
@@ -294,6 +350,26 @@ fn an_additive_only_pending_set_writes_no_backup() {
     assert!(
         !std::path::Path::new(&format!("{path}.bak-v3")).exists(),
         "an additive-only upgrade must not write a snapshot",
+    );
+    drop(dir);
+}
+
+/// A replay from 0 builds a fresh database rather than changing one, so its
+/// destructive steps snapshot nothing — otherwise every fresh install would
+/// find a `<db>.bak-v0` copy of an empty database next to its new one.
+#[test]
+fn a_replay_onto_a_fresh_file_writes_no_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("fresh.db").to_str().unwrap().to_owned();
+    let conn = Connection::open(&path).unwrap();
+    let ladder = [baseline_step(), Step::destructive(4, REBUILD_NOTE)];
+
+    migrate(&conn, &ladder, 0, 4, Some(&path)).unwrap();
+
+    assert_eq!(user_version(&conn), 4, "the whole ladder replayed");
+    assert!(
+        !std::path::Path::new(&format!("{path}.bak-v0")).exists(),
+        "a fresh file has nothing to snapshot",
     );
     drop(dir);
 }

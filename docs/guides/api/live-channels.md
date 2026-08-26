@@ -43,11 +43,14 @@ permission queue's head and depth, pending question, running subagents), and fro
 [`GET /api/sessions`](sessions.md#get-apisessions), whose per-session `open` flag
 says what a missed `session_registered` / `session_opened` / `session_closed`
 would have said. What no refetch can rebuild is the little that is never
-persisted: a `send_parked` text, a streaming preview, and the latest
-`status_updated` snapshot — for status the client simply shows nothing until the
-provider's next report. A missed `spawn_failed` leaves the same kind of hole: a
-spawn that never registered has no row in `GET /api/sessions`, so the pending
-chip it would have cleared can only be closed by the client's own timeout.
+persisted: a streaming preview, the latest `status_updated` snapshot, and the
+*explanation* a `send_parked` carries — for status the client simply shows
+nothing until the provider's next report, and a missed `send_parked` still
+leaves its message in the open-send list, held for an explicit release, just
+without the note saying why it is waiting. A missed `spawn_failed` leaves the
+same kind of hole: a spawn that never registered has no row in
+`GET /api/sessions`, so the pending chip it would have cleared can only be
+closed by the client's own timeout.
 
 The groups below are a reading aid only: they say nothing about the order in
 which frames arrive, and a client must handle each event whenever it lands.
@@ -123,17 +126,18 @@ which frames arrive, and a client must handle each event whenever it lands.
   adapter-backed one (Codex) dispatches each send as it arrives (see
   [sends.md](sends.md) for the two dispatch paths), so it has no
   queued→dispatched transition to announce.
-- `send_parked` — a dispatched send was abandoned. Delta correlates a send with
-  the `UserPromptSubmit` it produces by text; an echo that mismatches — or one
-  that never arrives at all, caught by the
-  [echo deadline](sends.md#when-no-echo-ever-arrives) — returns the send to
-  `queued` to be re-typed on the next idle, and after the second failed attempt
-  the send is *parked*: the row is cancelled — so it leaves the open-send list
-  and its chip stops spinning — and `text` carries the composed message back, so
-  the client can tell the user it was never delivered instead of dropping it
-  silently. Session-scoped, not thread-scoped. A client that was disconnected
-  when the park happened cannot recover that text afterwards. Pane-backed
-  sessions only: parking is the echo-correlation path's failure mode, and an
+- `send_parked` — a dispatched send was given up on and put back in the queue,
+  held for an explicit release. This is silence, not a mismatch: nothing came
+  back at all, so the [echo deadline](sends.md#when-no-echo-ever-arrives)
+  returned the send to `queued` to be re-typed once, and that retry vanished
+  too. The row now carries `held_at`: it stays in the open-send list with
+  explicit Send and Cancel actions, and never auto-dispatches. The event is what
+  explains *why* that row is waiting; `text` repeats the composed message so a
+  client can name it without refetching the open-send list, which is where the
+  message itself now lives. Session-scoped, not thread-scoped. A client that was
+  disconnected when the park happened misses the explanation but not the
+  message: the next open-send refetch shows the held row. Pane-backed sessions
+  only: parking is the echo-correlation path's failure mode, and an
   adapter-backed session matches on the turn id its provider returns instead.
 - `turn_started` — a queued send was correlated with a transcript message,
   named by `matched_uuid`. `send_id` is the send that took the turn and

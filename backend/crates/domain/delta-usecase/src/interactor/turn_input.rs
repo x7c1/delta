@@ -44,9 +44,9 @@ use crate::turn::{turn_input_for_agent_event, OrphanedSend, TurnInput, TurnState
 pub(in crate::interactor) enum RequeueOutcome {
     /// The send is `queued` again and re-dispatches on the next idle flush.
     Requeued,
-    /// The budget was spent, so the send was parked instead: its row is
-    /// `cancelled` and its text was handed back via
-    /// [`SessionEvent::SendParked`].
+    /// The budget was spent, so the send was parked instead: its row is back
+    /// in the queue holding for an explicit release, and
+    /// [`SessionEvent::SendParked`] announced why.
     Parked,
 }
 
@@ -178,43 +178,60 @@ where
         Ok((result.next, requeue_outcome))
     }
 
-    /// Park a send that has spent its requeue budget: cancel the row and
-    /// announce why, instead of returning it to `queued` for another doomed
-    /// dispatch.
+    /// Park a send that has spent its requeue budget: hold the row in the
+    /// queue for an explicit release and announce why, instead of returning it
+    /// to `queued` for another doomed dispatch.
     ///
-    /// `cancelled` is reused deliberately — it is already the terminal status
-    /// for "this send will not be delivered", it already drops the row out of
-    /// the open-send list (so the pending chip clears rather than spinning),
-    /// and reusing it needs no schema change. What `cancelled` alone does NOT
-    /// carry is a reason, and a message vanishing with no explanation is the
-    /// failure mode this whole path exists to avoid — so the cancel is paired
-    /// with a [`SessionEvent::SendParked`] carrying the text, letting the
-    /// browser tell the user their message was not delivered and hand it back
-    /// for editing. The event goes out on the async seam because this runs
+    /// The row goes back to `queued` with the hold marker
+    /// ([`SessionStore::hold_send_for_release`]) — the same state the boot
+    /// restore leaves an orphaned row in. It therefore stays in the open-send
+    /// list, is skipped by every automatic dispatch trigger, and waits for the
+    /// user to release it (re-typed once) or cancel it. Cancelling instead
+    /// would leave the composed text alive only inside the broadcast event, so
+    /// a reload, a second tab, or a session switch lost the message for good —
+    /// the exact silent loss this path exists to prevent.
+    ///
+    /// The hold is still paired with a [`SessionEvent::SendParked`], because
+    /// the queue row alone says "waiting" and not *why*: the notice is how the
+    /// user learns their message was swallowed rather than merely slow. The
+    /// event keeps carrying the text — it saves a client a refetch — but the
+    /// row, not the event, is where the message now lives: Delta's own browser
+    /// renders the row and ignores this copy.
+    ///
+    /// The event goes out on the async seam because this runs
     /// deep inside a transition whose callers have no event channel; the
     /// server drains it onto the same broadcast the synchronous paths feed.
     ///
-    /// The row is read back before cancelling (it is the head dispatched row —
-    /// the only row [`OrphanedSend::Requeue`] ever names) so the event can
-    /// carry its text; if it is somehow gone, the cancel and the event still
-    /// happen, because a silent drop is never the fallback.
+    /// The row is read back before the hold so the event can carry its text.
+    /// If the guarded hold reports no transition the send is no longer
+    /// `dispatched` — it matched, settled, or was cancelled while the deadline
+    /// sweep ran — and there is nothing to hold and nothing to announce.
     async fn park_unechoable_send(&mut self, send_id: i64) -> Result<()> {
-        let parked = self
-            .store
-            .head_dispatched_send(self.id)
-            .await?
-            .filter(|head| head.id == send_id);
+        let parked = self.store.send(send_id).await?;
+        self.state.forget_requeues(send_id);
+        if !self.store.hold_send_for_release(send_id).await? {
+            tracing::info!(
+                session_id = %self.id,
+                send_id,
+                "the send whose echo deadline expired twice is no longer dispatched, so \
+                 there is nothing to park: it matched, settled, or was cancelled while \
+                 the sweep ran"
+            );
+            return Ok(());
+        }
         tracing::warn!(
             session_id = %self.id,
             send_id,
             "outstanding send never echoed again after its one re-dispatch; its echo \
-             appears unmatchable, so it is parked (cancelled) instead of requeued"
+             appears unmatchable, so it is parked — held in the queue until the user \
+             releases or cancels it — instead of requeued"
         );
-        self.state.forget_requeues(send_id);
-        self.store.cancel_send(send_id).await?;
         self.emit_async_event(SessionEvent::SendParked {
             session_id: self.id.clone(),
             send_id,
+            // `None` is unreachable once the guarded hold reports a
+            // transition: it only ever updates a row it found. Defaulting
+            // keeps the notice honest instead of panicking on an invariant.
             text: parked.map(|send| send.text).unwrap_or_default(),
         });
         Ok(())

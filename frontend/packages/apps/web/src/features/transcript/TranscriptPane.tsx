@@ -1041,18 +1041,17 @@ export function TranscriptPane({
                 <Badge className="shrink-0" tone="warning">
                   not delivered
                 </Badge>
+                {/* The message itself is no longer only here: the server put
+                    the send back in the queue, held for an explicit release,
+                    so the `PendingQueue` row rendered just below shows the text
+                    and carries the Send and Cancel actions. This notice only
+                    has to explain WHY it is waiting — hence no copy of the
+                    text, and no "copy it and try again". */}
                 <span className="min-w-0 flex-1 break-words text-fg-muted">
-                  This message never reached the session — the terminal kept
-                  answering something else, so Delta stopped re-sending it.
-                  Copy it and try again:
-                  {/* Scrolled, not clamped: this notice holds the only copy of
-                      the text left in the UI, so a `line-clamp` would leave a
-                      long message's tail unreadable and unselectable — the
-                      silent loss this notice exists to prevent. The height cap
-                      keeps it from pushing the composer off-screen. */}
-                  <span className="mt-1 block max-h-32 overflow-y-auto whitespace-pre-wrap text-fg-default">
-                    {sendParked.text}
-                  </span>
+                  A message never reached the session — the terminal swallowed
+                  it twice, so Delta stopped re-sending it. It is waiting in
+                  the queue below: send it again once the terminal is ready, or
+                  cancel it.
                 </span>
                 <Button
                   className="shrink-0"

@@ -51,7 +51,7 @@ async fn seed_closed_session_with_queued_send(ix: &TestInteractor) -> delta_mode
         .await
         .unwrap();
     assert_eq!(stale.status, SendStatus::Queued);
-    assert_eq!(stale.restored_at, None, "genuinely queued, not restored");
+    assert_eq!(stale.held_at, None, "genuinely queued, not restored");
     stale
 }
 
@@ -275,7 +275,7 @@ async fn resume_settle_flushes_the_queued_row_but_never_a_restored_one() {
     let restored = ix.store().send(restored.id).await.unwrap().unwrap();
     assert_eq!(restored.status, SendStatus::Queued);
     assert!(
-        restored.restored_at.is_some(),
+        restored.held_at.is_some(),
         "the restored row survives the settle untouched"
     );
 }

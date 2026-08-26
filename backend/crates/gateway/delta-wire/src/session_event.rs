@@ -31,10 +31,14 @@ pub enum WireSessionEvent {
     SessionClosed { session_id: String },
     /// A held (`queued`) send was promoted to `dispatched` and typed.
     SendDispatched { session_id: String, send_id: i64 },
-    /// A dispatched send was abandoned after its echo failed to match twice:
-    /// the row is cancelled and `text` carries the composed message back, so
-    /// the client can tell the user it was never delivered instead of dropping
-    /// it silently (or re-typing it forever).
+    /// A dispatched send was returned to the queue, held for an explicit
+    /// release, after nothing was heard about it twice running: the row is
+    /// `queued` with `held_at` set (so it stays in the open-send list with
+    /// Send and Cancel actions, and never auto-dispatches) instead of being
+    /// re-typed forever. The event is what explains *why* that row is waiting;
+    /// `text` repeats the composed message so a client can name it without
+    /// refetching the open-send list, which is where the message itself now
+    /// lives.
     SendParked {
         session_id: String,
         send_id: i64,

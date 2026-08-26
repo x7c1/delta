@@ -632,9 +632,9 @@ where
         .await
     }
 
-    /// Release a *restored* send — one the boot-time reconcile recovered from
-    /// a dead process's `dispatched` state — back into the normal queued
-    /// flow (see the module doc on
+    /// Release a *held* send — one the boot-time reconcile recovered from a
+    /// dead process's `dispatched` state, or one the echo deadline parked —
+    /// back into the normal queued flow (see the module doc on
     /// [`release_send`](crate::interactor::release_send)).
     ///
     /// Like a cancel, the release request carries only the send id (in its
@@ -642,8 +642,8 @@ where
     /// release then executes on that session's actor, ordered against its
     /// dispatch path. The actor first ensures the session is open — resuming
     /// it via `claude --resume <id>` when it is closed, the normal state
-    /// right after the restart that created the restored row — exactly as an
-    /// enqueue would. When the session was already open and idle the
+    /// right after the restart that produced a boot-restored row — exactly as
+    /// an enqueue would. When the session was already open and idle the
     /// released row dispatches immediately through the normal queued path;
     /// the returned [`SessionEvent`]s (a `SendDispatched`, when that
     /// happened) are broadcast by the transport so the browser sees the
@@ -652,12 +652,12 @@ where
     /// flush ([`Self::dispatch_ready_resumes`]).
     ///
     /// Returns [`Error::SendNotReleasable`] (`409`) when the send is
-    /// unknown, was never restored, is already released, or has since been
+    /// unknown, was never held, is already released, or has since been
     /// cancelled. The browser drops its Send control and reconciles from the
     /// next refetch on this error. An ensure-open failure — e.g.
     /// [`Error::ResumeUnavailable`] when the session's transcript is gone —
-    /// surfaces as-is, before the restored marker is touched, so the release
-    /// can be retried.
+    /// surfaces as-is, before the hold marker is touched, so the release can
+    /// be retried.
     pub async fn release_send(&self, send_id: i64) -> Result<Vec<SessionEvent>> {
         let Some(send) = self.store.send(send_id).await? else {
             return Err(Error::SendNotReleasable(send_id));
@@ -719,9 +719,9 @@ where
     /// settled, on the background tick (see the `ResumeTick` input docs). A
     /// settled resume with no held prompt instead flushes its session's
     /// oldest genuinely `queued` send — the resume window defers queued
-    /// dispatch, and this settle is what flushes it. Boot-restored sends are
-    /// not flushed here; they wait for an explicit release
-    /// ([`Self::release_send`]).
+    /// dispatch, and this settle is what flushes it. Held sends — restored at
+    /// boot or parked by the echo deadline — are not flushed here; they wait
+    /// for an explicit release ([`Self::release_send`]).
     ///
     /// Returns the [`SessionEvent::SendDispatched`]s those flushes produced,
     /// for the caller to broadcast so the browser sees each

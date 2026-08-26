@@ -20,12 +20,12 @@ fn send_from_row(row: &Row<'_>) -> Result<Send> {
         status: SendStatus::parse(&row.get::<_, String>(6)?)?,
         matched_uuid: row.get::<_, Option<String>>(7)?.map(MessageUuid::from),
         created_at: row.get(8)?,
-        restored_at: row.get(9)?,
+        held_at: row.get(9)?,
     })
 }
 
 const SEND_COLS: &str =
-    "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at, restored_at";
+    "id, session_id, thread_id, semantic_parent_uuid, text, locator_quote, status, matched_uuid, created_at, held_at";
 
 impl SqliteStore {
     pub(super) async fn enqueue_send(
@@ -63,7 +63,7 @@ impl SqliteStore {
             status: SendStatus::Dispatched,
             matched_uuid: None,
             created_at: now,
-            restored_at: None,
+            held_at: None,
         })
     }
 
@@ -102,7 +102,7 @@ impl SqliteStore {
             status: SendStatus::Queued,
             matched_uuid: None,
             created_at: now,
-            restored_at: None,
+            held_at: None,
         })
     }
 
@@ -132,7 +132,7 @@ impl SqliteStore {
                 &format!(
                     "SELECT {SEND_COLS} FROM send
                      WHERE session_id = ?1 AND status = 'queued'
-                       AND restored_at IS NULL
+                       AND held_at IS NULL
                      ORDER BY id LIMIT 1"
                 ),
                 params![session_id.as_str()],
@@ -198,7 +198,7 @@ impl SqliteStore {
         let now = now_iso8601();
         let affected = conn
             .execute(
-                "UPDATE send SET status = 'queued', restored_at = ?1
+                "UPDATE send SET status = 'queued', held_at = ?1
                  WHERE status = 'dispatched'",
                 params![now],
             )
@@ -206,15 +206,35 @@ impl SqliteStore {
         Ok(affected)
     }
 
-    pub(super) async fn release_restored_send(
+    /// The single-row sibling of [`Self::restore_all_dispatched`]: return one
+    /// still-`dispatched` send to `queued` with the hold marker set, reporting
+    /// whether a row changed. The `status = 'dispatched'` guard keeps a row
+    /// that has since matched, settled, or been cancelled untouched.
+    pub(super) async fn hold_send_for_release(
+        &self,
+        id: i64,
+    ) -> std::result::Result<bool, delta_usecase::Error> {
+        let conn = self.conn.lock().await;
+        let now = now_iso8601();
+        let affected = conn
+            .execute(
+                "UPDATE send SET status = 'queued', held_at = ?2
+                 WHERE id = ?1 AND status = 'dispatched'",
+                params![id, now],
+            )
+            .map_err(Error::from)?;
+        Ok(affected > 0)
+    }
+
+    pub(super) async fn release_held_send(
         &self,
         id: i64,
     ) -> std::result::Result<bool, delta_usecase::Error> {
         let conn = self.conn.lock().await;
         let affected = conn
             .execute(
-                "UPDATE send SET restored_at = NULL
-                 WHERE id = ?1 AND status = 'queued' AND restored_at IS NOT NULL",
+                "UPDATE send SET held_at = NULL
+                 WHERE id = ?1 AND status = 'queued' AND held_at IS NOT NULL",
                 params![id],
             )
             .map_err(Error::from)?;

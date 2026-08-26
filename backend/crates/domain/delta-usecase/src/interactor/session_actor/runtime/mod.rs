@@ -215,9 +215,10 @@ pub struct SessionRuntime {
     /// one-off swallow and the wrong one for keystrokes that vanish the same
     /// way every time, where each attempt burns another model turn.
     /// [`MAX_REQUEUES_PER_SEND`] caps the retries; past the cap the send is
-    /// parked (cancelled and surfaced) instead of requeued. A prompt that does
-    /// arrive consumes the send by position whatever its text says, so a
-    /// rewritten echo spends nothing here.
+    /// parked instead of requeued — held in the queue for the user's explicit
+    /// release, and surfaced. A prompt that does arrive consumes the send by
+    /// position whatever its text says, so a rewritten echo spends nothing
+    /// here.
     ///
     /// The count does not distinguish *why* the send went back to `queued`.
     /// The [`TurnInput::EchoDeadline`] watchdog is the everyday spender; the
@@ -227,8 +228,8 @@ pub struct SessionRuntime {
     /// arms spend it too: a turn ending, an interrupt, or a fresh dispatch
     /// arriving while a send is still awaiting its echo. That is the point —
     /// the net has to catch failure modes Delta has not thought of — and
-    /// firing early is bounded and legible: the send is parked with its text
-    /// handed back.
+    /// firing early is bounded and legible: the send is parked, which leaves
+    /// the message in the queue for the user to send or cancel.
     ///
     /// Runtime-only, like everything else here: a restart drops the counts,
     /// granting such a send one further re-dispatch before the cap

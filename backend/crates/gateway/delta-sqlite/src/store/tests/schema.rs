@@ -7,15 +7,20 @@
 //! refuses, and that a row written at the current baseline still reads back
 //! correctly (with any newly added column NULL) once a later step has been
 //! applied over it. That last part is the real shape of every past additive
-//! column change — `send.restored_at`, the `message` metadata columns,
+//! column change — `send.held_at`, the `message` metadata columns,
 //! `subagent_launch.task_id`, the provider columns — now that they are all part
 //! of the v3 baseline and can no longer be simulated by dropping them.
+//!
+//! The other shape pinned here is the *forward* one: a database built the way
+//! an older binary left it (see [`downgrade_sql`]) is opened and must come out
+//! current with its overlay intact — one test per generation the ladder still
+//! carries.
 
 use delta_model::{AgentProvider, ContentBlock, Message, MessageUuid, Role, SendStatus, SessionId};
 
 use super::super::SqliteStore;
 use super::new_session;
-use crate::migrations::{migrate, Step};
+use crate::migrations::{migrate, Step, UNDO_HELD_AT_RENAME};
 use crate::SCHEMA_VERSION;
 
 /// Apply a synthetic next-version step to an open store, standing in for the
@@ -63,8 +68,8 @@ async fn a_send_recorded_before_a_later_step_survives_and_still_dispatches() {
     assert_eq!(reloaded.status, SendStatus::Queued);
     assert_eq!(reloaded.text, "held");
     assert_eq!(
-        reloaded.restored_at, None,
-        "a queued send that was never restored stays unrestored"
+        reloaded.held_at, None,
+        "a queued send that was never held stays unheld"
     );
     assert_eq!(
         store
@@ -260,11 +265,17 @@ async fn a_session_written_before_a_later_step_stays_a_claude_row() {
 /// then re-applies a step whose effect is still present and fails loudly (a
 /// duplicate column, a table that already exists).
 fn downgrade_sql(version: u32) -> String {
+    // v6 renamed the send table's hold marker to `held_at`. The name it had
+    // before lives with the step that retired it — spelling it anywhere else
+    // is what the rename was for — so the undo comes from there.
+    let mut sql = format!("{UNDO_HELD_AT_RENAME}\n");
     // v5 added `launch_option.builtin_key` plus its unique index.
-    let mut sql = String::from(
-        "DROP INDEX IF EXISTS ux_launch_option_builtin_key;\n\
-         ALTER TABLE launch_option DROP COLUMN builtin_key;\n",
-    );
+    if version < 5 {
+        sql.push_str(
+            "DROP INDEX IF EXISTS ux_launch_option_builtin_key;\n\
+             ALTER TABLE launch_option DROP COLUMN builtin_key;\n",
+        );
+    }
     // v4 added the `prompt_template` table.
     if version < 4 {
         sql.push_str("DROP TABLE prompt_template;\n");
@@ -399,6 +410,64 @@ async fn a_v4_database_gains_builtin_key_and_keeps_its_launch_options_as_the_use
     assert_eq!(store.list_launch_options().await.unwrap().len(), 2);
 }
 
+/// A database written at version 5 — the generation before the hold marker was
+/// renamed — is migrated forward on open: the marker column becomes
+/// `send.held_at`, and a row that was already held comes back held, with the
+/// stamp it was held with and still out of the automatic dispatch path.
+///
+/// This is the ladder's first *destructive* step, so the upgrade also leaves
+/// the pre-migration snapshot behind — the copy that makes a rewrite of an
+/// existing shape recoverable if it turns out to have been wrong.
+#[tokio::test]
+async fn a_v5_database_renames_the_hold_marker_and_keeps_a_held_row_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("v5.sqlite");
+    let path_str = path.to_str().unwrap();
+
+    // Build a v5 file holding a parked send, then undo the rename so the file
+    // is exactly what the previous generation left behind.
+    let stamp = {
+        let store = SqliteStore::open(path_str).unwrap();
+        let (session, main) = store.register_session(new_session()).await.unwrap();
+        let dispatched = store
+            .enqueue_send(&session.id, main, None, "swallowed twice", None)
+            .await
+            .unwrap();
+        assert!(store.hold_send_for_release(dispatched.id).await.unwrap());
+        let held = store.send(dispatched.id).await.unwrap().unwrap();
+        let stamp = held.held_at.expect("the row is held before the downgrade");
+        let conn = store.conn.lock().await;
+        conn.execute_batch(&downgrade_sql(5)).unwrap();
+        stamp
+    };
+    assert_eq!(read_user_version(path_str), 5);
+
+    let store = SqliteStore::open(path_str).unwrap();
+    assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);
+
+    let session_id = SessionId::from("sess-1");
+    let open = store.open_sends(&session_id).await.unwrap();
+    assert_eq!(open.len(), 1, "the held row survives the rename");
+    assert_eq!(open[0].status, SendStatus::Queued);
+    assert_eq!(open[0].text, "swallowed twice");
+    assert_eq!(
+        open[0].held_at.as_deref(),
+        Some(stamp.as_str()),
+        "the marker moved with the column rather than being backfilled",
+    );
+    assert!(
+        store.next_queued_send(&session_id).await.unwrap().is_none(),
+        "so the row is still skipped by the automatic dispatch",
+    );
+
+    drop(store);
+    assert_eq!(
+        backup_files(dir.path()),
+        ["v5.sqlite.bak-v5"],
+        "a destructive step snapshots the database it is about to rewrite",
+    );
+}
+
 // The startup gate. The cases below are the contract from the compatibility
 // policy doc (subdomain 1): a fresh DB is built by replaying the ladder and
 // stamped current; a current DB opens with nothing applied; a pre-gate v0.1.0
@@ -440,6 +509,15 @@ async fn schema_gate_stamps_a_fresh_database_with_the_current_version() {
     // there.
     store.register_session(new_session()).await.unwrap();
     drop(store);
+
+    // The replay runs the ladder's destructive steps too, but over nothing
+    // that could be lost: an install must not find a snapshot of an empty
+    // database sitting next to its brand-new one.
+    assert!(
+        backup_files(dir.path()).is_empty(),
+        "a fresh database is never snapshotted: {:?}",
+        backup_files(dir.path()),
+    );
 
     // The last step stamped the file current, so a re-open takes the match path.
     assert_eq!(read_user_version(path_str), crate::SCHEMA_VERSION);

@@ -35,12 +35,14 @@ where
     /// `queued` and is dispatched by the next trigger that reaches this
     /// method: a turn end (`Stop`), an interrupt ingest, a resume settle
     /// (`dispatch_ready_resume`), a dispatched-send cancellation, a
-    /// restored-send release (`release_send`), or `enqueue_into_open`'s
-    /// idle-flush. *Restored* rows — recovered at boot from a dead process's
-    /// `dispatched` state — are invisible to this method entirely:
+    /// held-send release (`release_send`), or `enqueue_into_open`'s
+    /// idle-flush. *Held* rows — those carrying `held_at`, whether the
+    /// boot restore recovered them from a dead process's `dispatched` state or
+    /// the echo deadline parked them — are invisible to this method entirely:
     /// [`SessionStore::next_queued_send`] filters them out until the user
     /// explicitly releases them, so no trigger here can auto-resend a
-    /// possibly-stale message. Promotes before dispatch so the outstanding
+    /// possibly-stale message or re-type one the pane keeps swallowing.
+    /// Promotes before dispatch so the outstanding
     /// row is in place when the hook fires; on a dispatch failure the
     /// `DispatchFailed` turn input cancels the row so a failed send cannot
     /// wedge the queue.

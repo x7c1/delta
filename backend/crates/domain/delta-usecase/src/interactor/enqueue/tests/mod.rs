@@ -20,6 +20,7 @@ mod failed_dispatch_rolls_back_send_and_returns_error;
 mod image_attachment_send_matches_its_rewritten_echo;
 mod mismatched_prompt_consumes_the_outstanding_send;
 mod outstanding_send_matches_and_marks_send;
+mod parked_send_waits_in_the_queue_until_released;
 mod plain_send_mid_turn_is_queued;
 mod queued_branch_send_dispatches_after_interrupt;
 mod queued_send_dispatches_after_api_error;

@@ -10,6 +10,7 @@ import {
   reducePermissionRequested,
   reducePermissionResolved,
   reduceQuestionAsked,
+  reduceSendDispatched,
   reduceSendParked,
   reduceSessionOpened,
   reduceSessionRegistered,
@@ -31,10 +32,10 @@ import {
 /**
  * The per-event-kind reducers, each defined next to the slice whose state it
  * owns (and assignable here because its narrow state is a structural subset
- * of {@link LiveState}). A kind with no entry (`send_dispatched`,
- * `transcript_updated`) never touches live-store state — those events only
- * drive query-cache refetches in `applySessionEvent` — so `applyEvent` keeps
- * the identity-stable state for them.
+ * of {@link LiveState}). A kind with no entry (`transcript_updated`) never
+ * touches live-store state — those events only drive query-cache refetches in
+ * `applySessionEvent` — so `applyEvent` keeps the identity-stable state for
+ * them.
  */
 /**
  * A reducer as the dispatch map sees it: over the full store state. Written
@@ -65,6 +66,7 @@ const EVENT_REDUCERS: {
   subagent_started: reduceSubagentStarted,
   subagent_finished: reduceSubagentFinished,
   external_input: reduceExternalInput,
+  send_dispatched: reduceSendDispatched,
   send_parked: reduceSendParked,
   session_registered: reduceSessionRegistered,
   session_opened: reduceSessionOpened,

@@ -1182,9 +1182,10 @@ describe('liveStore.applyEvent notices', () => {
       send_id: 42,
       text: 'never delivered',
     });
+    // The notice records which send was parked; the message itself lives on
+    // the held server row, not in this notice.
     expect(noticeOf(notices(), 'sess-1', 'send_parked')).toMatchObject({
       sendId: 42,
-      text: 'never delivered',
     });
 
     useLiveStore.getState().applyEvent({
@@ -1229,6 +1230,66 @@ describe('liveStore.applyEvent notices', () => {
     });
 
     expect(Object.keys(useLiveStore.getState().localSends)).toEqual(['7']);
+  });
+
+  it('clears the parked-send notice once the released send dispatches', () => {
+    // The notice tells the user their message is waiting in the queue for
+    // them to send or cancel. A held row has no automatic trigger, so a
+    // `send_dispatched` for it can only be that release — the question has
+    // been answered and the card must not outlive the state it describes.
+    // Driven by the event rather than the button so it also lands for a
+    // release done in another tab.
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'send_dispatched',
+      session_id: 'sess-1',
+      send_id: 42,
+    });
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).toBeNull();
+  });
+
+  it('keeps the parked-send notice when a different send dispatches', () => {
+    // Ordinary traffic: the queue behind a held row dispatches past it, and
+    // the held row is still sitting there waiting for the user.
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+
+    useLiveStore.getState().applyEvent({
+      kind: 'send_dispatched',
+      session_id: 'sess-1',
+      send_id: 43,
+    });
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).toMatchObject({
+      sendId: 42,
+    });
+  });
+
+  it('forgets the parked-send notice for a cancelled row, and only that row', () => {
+    // A cancel is broadcast as nothing at all — the server flips the row to
+    // `cancelled` and drops it from the open list — so the strip's Cancel
+    // reports it here, the way it already drops the tracked local twin.
+    useLiveStore.getState().applyEvent({
+      kind: 'send_parked',
+      session_id: 'sess-1',
+      send_id: 42,
+      text: 'never delivered',
+    });
+
+    useLiveStore.getState().forgetParkedSend('sess-1', 43);
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).not.toBeNull();
+
+    useLiveStore.getState().forgetParkedSend('sess-1', 42);
+    expect(noticeOf(notices(), 'sess-1', 'send_parked')).toBeNull();
   });
 
   it('clears a parked-send notice when the session closes', () => {

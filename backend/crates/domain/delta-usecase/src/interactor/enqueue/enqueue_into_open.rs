@@ -37,8 +37,9 @@ where
         // the session is still inside its resume-readiness window this flush
         // is a no-op (typing into the not-yet-input-ready pane would lose the
         // keystrokes); the queued row is flushed at resume settle instead.
-        // Boot-restored rows are excluded by the queued selection — they wait
-        // for an explicit release, never for this flush.
+        // Held rows — restored at boot or parked by the echo deadline — are
+        // excluded by the queued selection: they wait for an explicit
+        // release, never for this flush.
         if self.state.turn() == TurnState::Idle {
             if let Some(event) = self.dispatch_queued_send().await? {
                 events.push(event);

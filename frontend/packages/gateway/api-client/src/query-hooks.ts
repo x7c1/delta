@@ -695,10 +695,11 @@ export function useCancelSendMutation(
 }
 
 /**
- * Release a restored send into the normal queued flow
- * (`POST /api/sends/{id}/release`); refresh the session's open-send list so
- * the chip's restored label gives way to the row's next truthful state
- * (dispatched, or plain queued when the session is closed or busy).
+ * Release a held send — one recovered at boot, or parked by the echo
+ * deadline — into the normal queued flow (`POST /api/sends/{id}/release`);
+ * refresh the session's open-send list so the chip's held label gives way to
+ * the row's next truthful state (dispatched, or plain queued when the session
+ * is closed or busy).
  *
  * The mutation carries the owning `sessionId` alongside the `sendId` so the
  * exact open-send query can be invalidated. A `409` (`send_not_releasable`)
