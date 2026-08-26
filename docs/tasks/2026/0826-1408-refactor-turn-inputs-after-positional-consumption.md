@@ -105,10 +105,13 @@ No wire or frontend change: `WireTurn.state` still reads `awaiting_echo` /
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Claude Code session, send an unknown slash command from Delta
+- [x] On a real Claude Code session, send an unknown slash command from Delta
       (e.g. `/nosuchcommand`): the send clears from the open list, and the
       server log shows **no** "anomalous turn transition" and **no**
-      "outstanding send never echoed" warning for it.
+      "outstanding send never echoed" warning for it. Verified 2026-08-26:
+      `/nosuchcommand` settled `matched` with the notice line's uuid, and the
+      server log carried no warning at all between the server start and the
+      resolution (the same command produced both warnings before this change).
 
 ## Out of scope
 
