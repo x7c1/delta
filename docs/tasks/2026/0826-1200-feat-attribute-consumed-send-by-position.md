@@ -120,13 +120,18 @@ a rewrite can be logged.
 
 ### Manual / on-hardware (verified by a human before merge)
 
-- [ ] On a real Claude Code session, send to a **branch** thread and make the
+- [x] On a real Claude Code session, send to a **branch** thread and make the
       hook prompt differ from the send text (type extra characters into the
       tmux pane in the 250 ms gap between Delta's paste and its Enter — a
       script polling `tmux capture-pane` for the pasted text does it
       reliably). The user line and the assistant reply appear in the branch
       thread's pane, the server logs one `attributed=false` warning, and the
-      send row is `matched` with the line's uuid.
+      send row is `matched` with the line's uuid. Verified 2026-08-26: the
+      rewritten user line and the reply were attributed to the branch thread
+      (not main), the server logged the hook-side "does not equal" info line
+      and the ingest-side "still attributed to the send's thread" warning
+      once each, and the row was `matched` with `matched_uuid` equal to the
+      line's uuid.
 
 ## Out of scope
 
