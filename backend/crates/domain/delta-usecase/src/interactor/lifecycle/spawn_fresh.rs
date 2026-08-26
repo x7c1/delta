@@ -79,20 +79,22 @@ where
     /// # Ordering
     ///
     /// The [`LaunchingSpawn`] is recorded *before* the launch task is spawned,
-    /// and the task's `LaunchFinished` — like the launch's own hooks — lands on
-    /// this same mailbox strictly after this message. So a send arriving
-    /// anywhere in the accept→launch window finds
+    /// and the task's `LaunchPrepared`/`LaunchFinished` — like the launch's own
+    /// hooks — land on this same mailbox strictly after this message. So a send
+    /// arriving anywhere in the accept→launch window finds
     /// [`SessionRuntime::is_launching_or_pending`] true and is refused with
     /// `session_spawning` exactly as one arriving against a pending spawn is.
     ///
     /// The record the first `UserPromptSubmit` binds is the [`PendingSpawn`],
-    /// which `LaunchFinished` installs — so what keeps that hook from being
-    /// misread as external input is the launch task posting `LaunchFinished`
-    /// the instant `create_session` returns, with nothing awaited in between.
-    /// `tmux new-session` returns once the pane's command has been started, and
-    /// `claude` still has its whole startup ahead of it before it can submit
-    /// the launch prompt, so the pending record is always in place first. Do
-    /// not add work between those two steps.
+    /// installed by the launch task's `LaunchPrepared` checkpoint — which it
+    /// awaits *before* creating the pane. That is what keeps the hook from being
+    /// misread as external input, and it is an ordering rather than a race: the
+    /// pane cannot exist until the pending spawn is recorded, so every hook the
+    /// launch triggers queues behind that record. Timing alone would not do it —
+    /// `tmux new-session` returns as soon as the pane's command has started, and
+    /// a fast agent (a test double is instant) can submit its launch prompt
+    /// before a record made afterwards lands. Keep the record strictly before
+    /// the pane.
     ///
     /// # The first prompt
     ///

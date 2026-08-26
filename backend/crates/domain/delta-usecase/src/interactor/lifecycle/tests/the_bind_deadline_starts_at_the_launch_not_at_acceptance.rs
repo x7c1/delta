@@ -13,8 +13,9 @@ use crate::{SendTarget, WorktreeSpec};
 /// pane at all, so however long that takes it must not be reaped — otherwise a
 /// slow `git fetch` would eat the whole deadline and a healthy session would be
 /// killed seconds after its agent finally started. So the watchdog ignores a
-/// launching session entirely, and the spawn it hands over is stamped at the
-/// launch rather than at acceptance.
+/// launching session entirely, and the spawn it hands over is stamped where the
+/// launch records it — just before the pane is created — rather than at
+/// acceptance.
 #[tokio::test]
 async fn the_bind_deadline_starts_at_the_launch_not_at_acceptance() {
     let gate = WorktreeGate::closed();

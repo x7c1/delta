@@ -882,31 +882,42 @@ mod test_seams {
             rx.await.ok()
         }
 
-        /// Wait until no session's launch preparation is still running.
+        /// Wait until no session's launch preparation is still running *and*
+        /// every actor has applied its report.
         ///
         /// A new-session send is answered *before* its launch is prepared: the
         /// worktree build, the trust seed and the tmux launch run on a
         /// background task. So a test that asserts on what the launch did —
         /// the created worktree, the spawned pane, the recorded pending spawn —
         /// has to let that task finish first. This is that wait, and it is the
-        /// deterministic alternative to sleeping: it polls each actor's runtime
-        /// state (through the mailbox, so the answer is never a half-applied
-        /// one) until every launching entry has been settled by its
-        /// `LaunchFinished`.
+        /// deterministic alternative to sleeping.
+        ///
+        /// It deliberately does not poll session state: the launch's records
+        /// move on their own schedule (the pending spawn is recorded mid-launch,
+        /// and the launch's first hook may consume it before the task reports
+        /// back), so no snapshot of that state means "the task is done". It
+        /// waits on [`InteractorCore::launches_in_flight`] instead, then flushes
+        /// every live actor's mailbox with a round-trip — the counter drops once
+        /// `LaunchFinished` has been *posted*, and the mailbox is FIFO, so
+        /// anything posted after that is handled after it.
         ///
         /// Panics rather than returning on timeout: a launch that never reports
         /// back is a bug in the code under test, not a slow machine.
         pub(crate) async fn await_launch(&self) {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                if self.launching_session_ids().await.is_empty() {
-                    return;
-                }
+            while self
+                .launches_in_flight
+                .load(std::sync::atomic::Ordering::SeqCst)
+                > 0
+            {
                 assert!(
                     std::time::Instant::now() < deadline,
                     "timed out waiting for a launch preparation to finish"
                 );
                 tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+            }
+            for id in self.sessions.ids() {
+                self.with_runtime_existing(&id, |_| ()).await;
             }
         }
 
@@ -936,10 +947,10 @@ mod test_seams {
         /// mint ordinal (`delta-<n>`), since the pending entries now live one
         /// per actor.
         ///
-        /// A spawn only becomes *pending* once its background launch has come
-        /// up, so this awaits the launch first — a test reading ids back here
-        /// wants the spawn the hooks will address, not the accept-time state.
-        /// A test that deliberately holds a launch open reads
+        /// A spawn only becomes *pending* partway through its background launch,
+        /// so this awaits that launch first — a test reading ids back here wants
+        /// the spawn the hooks will address, not the accept-time state. A test
+        /// that deliberately holds a launch open reads
         /// [`Self::launching_session_ids`] instead.
         pub(crate) async fn pending_session_ids(&self) -> Vec<SessionId> {
             self.await_launch().await;
@@ -965,8 +976,9 @@ mod test_seams {
         /// tests.
         ///
         /// The production `created_at` is `Instant::now()` at the instant the
-        /// background launch reported the pane up (not at acceptance — see
-        /// `finish_launch`), which a test cannot wind backwards. Reaper tests
+        /// background launch is about to create the pane (not at acceptance —
+        /// see `record_launched_pane`), which a test cannot wind backwards.
+        /// Reaper tests
         /// instead push a spawn stamped at a chosen instant (e.g. `now - 31s`)
         /// and then call `reap_stale_spawns(now)` so the deadline check is
         /// fully deterministic.

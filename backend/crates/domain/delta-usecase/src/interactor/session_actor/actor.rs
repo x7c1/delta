@@ -186,6 +186,9 @@ where
             };
             let _ = reply.send(result);
         }
+        SessionInput::LaunchPrepared { token, reply } => {
+            let _ = reply.send(Ok(ctx.record_launched_pane(&token)));
+        }
         SessionInput::LaunchFinished { token, outcome } => {
             ctx.finish_launch(&token, outcome).await;
         }

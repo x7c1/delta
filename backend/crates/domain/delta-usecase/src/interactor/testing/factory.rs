@@ -139,13 +139,13 @@ pub(crate) fn interactor_with_codex_factory_and_event_sink(
     )
 }
 
-/// An interactor whose tmux dispatch always fails.
-pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
+/// Build a test interactor with a specific [`FakeTmux`], for the tests that
+/// script the pane driver — a launch that fails, or one held open on a
+/// [`TmuxGate`](super::TmuxGate) so the window before the pane exists can be
+/// observed. Everything else is the default fake set.
+pub(crate) fn interactor_with_tmux(tmux: FakeTmux) -> TestInteractor {
     Interactor::new(
-        FakeTmux {
-            fail: true,
-            ..Default::default()
-        },
+        tmux,
         FakeTranscript::default(),
         FakeStore::default(),
         FakeWorkspace::default(),
@@ -157,22 +157,20 @@ pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
     )
 }
 
+/// An interactor whose tmux dispatch always fails.
+pub(crate) fn interactor_with_failing_tmux() -> TestInteractor {
+    interactor_with_tmux(FakeTmux {
+        fail: true,
+        ..Default::default()
+    })
+}
+
 /// An interactor whose tmux session launch (`create_session`) always fails.
 pub(crate) fn interactor_with_failing_create_session() -> TestInteractor {
-    Interactor::new(
-        FakeTmux {
-            fail_create: true,
-            ..Default::default()
-        },
-        FakeTranscript::default(),
-        FakeStore::default(),
-        FakeWorkspace::default(),
-        FakeGitWorktree::default(),
-        TEST_WORKDIR_BASE,
-        TEST_WORKTREE_BASE,
-        TEST_SETTINGS_JSON,
-        TEST_SETTINGS_PATH,
-    )
+    interactor_with_tmux(FakeTmux {
+        fail_create: true,
+        ..Default::default()
+    })
 }
 
 /// Build a test interactor with a specific [`FakeGitWorktree`] **and** the

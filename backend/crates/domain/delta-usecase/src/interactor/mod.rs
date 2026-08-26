@@ -233,6 +233,17 @@ pub struct InteractorCore<T, X, S, W, G> {
     /// a restart simply forgets the job (see the `clone_repository` module for
     /// what that costs and how the leftovers are cleaned up).
     pub(in crate::interactor) clone_jobs: repository::CloneJobs,
+    /// Test seam: how many background launch preparations are still running.
+    ///
+    /// A new-session send is answered before its launch has done anything, and
+    /// the launch's progress is not legible from session state alone — the
+    /// pending spawn is recorded partway through (just before the pane is
+    /// created), and the launch's first hook may consume it before the task even
+    /// reports back. So a test that asserts on what the launch *did* waits on
+    /// this counter instead: incremented as each task is spawned, decremented
+    /// once it has posted its `LaunchFinished`. See `Interactor::await_launch`.
+    #[cfg(test)]
+    pub(in crate::interactor) launches_in_flight: std::sync::atomic::AtomicUsize,
 }
 
 /// The public entry point: wraps the shared [`InteractorCore`] and routes
@@ -317,6 +328,8 @@ where
             pr_search_cache: tokio::sync::Mutex::new(std::collections::HashMap::new()),
             permission_index: std::sync::Mutex::new(HashMap::new()),
             clone_jobs: repository::CloneJobs::default(),
+            #[cfg(test)]
+            launches_in_flight: std::sync::atomic::AtomicUsize::new(0),
         });
         let sessions = SessionRegistry::new(&core);
         Self { core, sessions }

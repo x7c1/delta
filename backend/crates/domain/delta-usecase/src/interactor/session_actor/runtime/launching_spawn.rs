@@ -15,10 +15,16 @@ use super::{PlannedWorktree, SessionRuntime};
 /// recorded, and the response carries real ids. Everything expensive — the
 /// worktree build, the trust seed, writing the settings file, and launching
 /// `claude` in a tmux pane — happens afterwards on a background task, which
-/// reports back through this actor's own mailbox
-/// ([`SessionInput::LaunchFinished`]). This entry is what the actor holds in
-/// between: no pane exists yet, so nothing can bind, but the session is
-/// emphatically not idle.
+/// reports back through this actor's own mailbox. This entry is what the actor
+/// holds in between: no pane exists yet, so nothing can bind, but the session
+/// is emphatically not idle.
+///
+/// It lasts until the launch's last step: the task checks in with
+/// [`SessionInput::LaunchPrepared`] once everything but the pane is in place,
+/// and the handler swaps this entry for the [`PendingSpawn`] the launch's first
+/// hook binds — *before* the pane is created, so no hook can arrive ahead of
+/// that record. A preparation that fails before then never reaches the swap and
+/// is rolled back from here instead, on `LaunchFinished`.
 ///
 /// Its presence makes [`SessionRuntime::has_live_pane`] true (a cold start must
 /// not spawn a second session alongside it), keeps
@@ -28,9 +34,9 @@ use super::{PlannedWorktree, SessionRuntime};
 /// refused with `session_spawning`, exactly as one arriving against a
 /// [`PendingSpawn`] is). The watchdog drains deliberately do NOT see it: a
 /// launch preparation has its own deadline on the task, and the bind deadline
-/// only starts once a pane actually exists.
+/// only starts when the pane is about to exist.
 ///
-/// [`SessionInput::LaunchFinished`]: crate::interactor::session_actor::input::SessionInput::LaunchFinished
+/// [`SessionInput::LaunchPrepared`]: crate::interactor::session_actor::input::SessionInput::LaunchPrepared
 /// [`PendingSpawn`]: super::PendingSpawn
 #[derive(Debug, Clone)]
 pub struct LaunchingSpawn {
@@ -73,13 +79,14 @@ impl SessionRuntime {
         self.launching_spawn = Some(launching);
     }
 
-    /// Take the in-flight launch back out if it carries this token — the
-    /// launch task reporting its outcome.
+    /// Take the in-flight launch back out if it carries this token — the launch
+    /// task reaching its `LaunchPrepared` checkpoint, or reporting a failure it
+    /// hit before that.
     ///
     /// Keyed by token so a late report from a launch that was already rolled
     /// back (or, defensively, from some other launch) cannot consume an
-    /// unrelated entry. `None` means there is nothing left to finish, and the
-    /// caller treats the report as stale.
+    /// unrelated entry. `None` means there is nothing left to finish: the caller
+    /// abandons the launch (at the checkpoint) or treats the report as stale.
     pub fn take_launching_for_token(&mut self, token: &PaneToken) -> Option<LaunchingSpawn> {
         if self
             .launching_spawn

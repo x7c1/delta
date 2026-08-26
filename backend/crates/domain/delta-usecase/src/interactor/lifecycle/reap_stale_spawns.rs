@@ -34,10 +34,11 @@ where
     /// A third shape — a session that has only been *accepted*, with its launch
     /// preparation still running — is deliberately outside this sweep: it holds
     /// a `LaunchingSpawn`, not a pending one, so neither drain sees it. It has
-    /// no pane to kill, and its bind deadline only starts once the launch has
-    /// produced one; a slow `git fetch` must not eat that deadline. Its backstop
-    /// is the launch task's own [`LAUNCH_PREP_DEADLINE`], after which the launch
-    /// fails itself and reports the same `SpawnFailed` (with a `reason`).
+    /// no pane to kill, and its bind deadline only starts when the preparation
+    /// checks in (`LaunchPrepared`) a beat before the pane is created; a slow
+    /// `git fetch` must not eat that deadline. Its backstop is the launch task's
+    /// own [`LAUNCH_PREP_DEADLINE`], after which the launch fails itself and
+    /// reports the same `SpawnFailed` (with a `reason`).
     ///
     /// For each stale launch it kills the tmux pane (best-effort, guarded by
     /// `has_session`) and produces a [`SessionEvent::SpawnFailed`] so the browser

@@ -78,11 +78,13 @@ pub struct SessionRuntime {
     /// The accepted session whose launch preparation (worktree build, trust
     /// seed, settings write, tmux launch) is still running on a background
     /// task. Present from the moment the first send is accepted until that
-    /// task reports back; it then becomes a [`Self::pending_spawn`] (on
-    /// success) or is rolled back with the eager row (on failure).
+    /// task checks in from its `LaunchPrepared` checkpoint, where it becomes a
+    /// [`Self::pending_spawn`]; a preparation that fails before that checkpoint
+    /// is rolled back from here, with the eager row.
     launching_spawn: Option<LaunchingSpawn>,
-    /// The fresh spawn awaiting its first `UserPromptSubmit`/`SessionStart`.
-    /// At most one exists per session: each spawn mints a fresh session id.
+    /// The fresh spawn awaiting its first `UserPromptSubmit`/`SessionStart`,
+    /// recorded just before its pane is created. At most one exists per
+    /// session: each spawn mints a fresh session id.
     pending_spawn: Option<PendingSpawn>,
     /// The resumed-but-not-yet-dispatched launch state, present from
     /// `open_session` until the held prompt dispatches (or the resume fails).
